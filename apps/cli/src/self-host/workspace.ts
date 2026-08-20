@@ -41,14 +41,8 @@ export const PLATFORM_DIRECTORY = ".egma-platform";
  * be editing somebody's notes. This one is egma's to write and is read back on
  * every `self-host` command.
  *
- * **It stopped being where this deployment's settings live.** It used to hold
- * the carrier, the persona's model and the speech providers as well, and a
- * platform started any way but through this CLI had none of them — every
- * container started, every health check passed, and the failure arrived minutes
- * later as a provider or carrier refusal naming nothing about configuration.
- * Those are the platform's own settings now: sealed in its store, put there by
- * `egma self-host setup` or by the environment, and handed to each simulator on
- * the work order it claims. What is left here is `BOOTSTRAP_VARIABLES`.
+ * It holds only `BOOTSTRAP_VARIABLES`. The carrier route lives in the platform
+ * store. Provider keys live in the deployment environment.
  */
 export const PLATFORM_CONFIG_FILE = "platform.env";
 
@@ -56,21 +50,7 @@ export const PLATFORM_CONFIG_FILE = "platform.env";
  * The variables this file may carry into a container, and therefore the only
  * ones anything reads out of it.
  *
- * **A closed list rather than "whatever the file says", because the file
- * outlives the release that wrote it.** A workspace upgraded from the release
- * that kept settings here still has a carrier password and a provider key
- * sitting in it. Handing those to Compose would seed the platform from the file
- * all over again — a compatibility reader nobody decided to build, arriving by
- * accident, and quietly contradicting the upgrade note that tells an operator
- * their settings are gone and setup runs once more.
- *
- * So a line egma no longer writes reaches nothing. It is **left on the disk**
- * rather than deleted: an operator upgrading may need to read their own key out
- * of it once, and a provider that shows a key exactly once is a provider whose
- * key egma must not throw away on their behalf. It is inert, and the upgrade
- * note says to clear it.
- *
- * Each of the three is here because a container reads it when it is *created*.
+ * The list is closed because each value is read when a container is created.
  * The media pair is a password between egma's own parts, held from birth by its
  * media server, its SIP gateway and its simulator; the address is what the
  * platform reports itself as, which every agent repository then binds to.
@@ -101,14 +81,9 @@ export const PLATFORM_CONFIG_HEADER = [
   "containers that authenticate each other with them hold whatever they were",
   "created with. Nobody chooses them and nobody types them.",
   "",
-  "This deployment's settings are deliberately not here — not the carrier,",
-  "not the persona's model, not a provider key. The platform keeps those in",
-  "its own store, sealed, so that they survive a restart, an upgrade and a",
-  "move to another machine. `egma self-host setup` puts them there.",
-  "",
-  "A line below naming anything but the variables above was left by an older",
-  "Egma version. Nothing reads it any more. Clear it once you have run",
-  "`egma self-host setup`.",
+  "The carrier route and provider keys are deliberately not here.",
+  "`egma self-host setup` writes the carrier route to the platform store.",
+  "Provider keys stay in the deployment environment.",
 ] as const;
 
 /** Owner read and write, and nothing for anybody else. */
@@ -152,12 +127,8 @@ export function platformConfigPath(workspace: string): string {
  * one per line, with no quoting and no expansion, because anything cleverer
  * would be a shell dialect to get subtly wrong.
  *
- * **This answers the whole file, including lines egma no longer writes**, and
- * it has exactly one caller who is entitled to them: the writer, which carries
- * a line it does not recognise forward untouched rather than deleting somebody's
- * only copy of a key. Everything that hands values to a container asks
- * `bootstrapVariables` instead, which is the narrow door and the one that keeps
- * a settings line an older egma left behind from reaching anything.
+ * Callers pass the result through `bootstrapVariables` before it reaches a
+ * container or a later write.
  */
 export function readPlatformConfig(workspace: string): Record<string, string> {
   const file = platformConfigPath(workspace);
@@ -177,10 +148,8 @@ export function readPlatformConfig(workspace: string): Record<string, string> {
  * The bootstrap variables this workspace holds, and nothing else it happens to
  * carry.
  *
- * The one door between the file and a container. See `BOOTSTRAP_VARIABLES` for
- * why the list is closed: a settings line an older egma wrote is inert, and
- * that has to be a property of the reader rather than a promise each caller
- * keeps.
+ * The one door between the file and a container. The closed list is enforced
+ * here instead of repeated by every caller.
  */
 export function bootstrapVariables(
   stored: Readonly<Record<string, string>>,
@@ -219,9 +188,8 @@ export function platformDirectory(workspace: string): string {
  * loosened is tightened again the next time setup runs. The directory it sits
  * in is held the same way.
  *
- * It writes exactly what it is handed, which is how a line an older egma left
- * behind survives: the caller reads the whole file, puts its own values on top
- * and hands the result back. Nothing is deleted on somebody's behalf.
+ * The writer applies the same closed bootstrap list as the reader. No carrier
+ * route or provider key can enter this file through a caller.
  */
 export function writePlatformConfig(
   workspace: string,
@@ -229,10 +197,11 @@ export function writePlatformConfig(
 ): string {
   platformDirectory(workspace);
   const file = platformConfigPath(workspace);
+  const bootstrap = bootstrapVariables(values);
   const body = [
     ...PLATFORM_CONFIG_HEADER.map((line) => (line === "" ? "#" : `# ${line}`)),
     "",
-    ...Object.entries(values).map(([name, value]) => `${name}=${value}`),
+    ...Object.entries(bootstrap).map(([name, value]) => `${name}=${value}`),
     "",
   ].join("\n");
   // **Written beside the file and renamed over it, never into it.**

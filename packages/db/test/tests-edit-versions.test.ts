@@ -15,12 +15,12 @@ import {
   acme,
   actingAsAcme,
   actingAsGlobex,
-  neutralTraits,
   rescheduling,
   rowCounts,
   seedPersona,
   seedTestFactory,
   STARTER_PERSONA,
+  neutralTraits,
 } from "./support/test-factory.ts";
 
 /**
@@ -439,7 +439,10 @@ describe("one frozen version", () => {
     });
 
     const moved = await editPersona(actingAsAcme(), nadia, {
-      traits: { ...neutralTraits, language: "en-GB" },
+      traits: {
+        ...neutralTraits,
+        personality: "Now speaks with deliberate precision.",
+      },
     });
     expect(moved?.version).toBe(2);
 

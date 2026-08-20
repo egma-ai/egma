@@ -1,5 +1,6 @@
 import {
   claimGradingJobs,
+  deleteGrader,
   listGradingJobsForSimulation,
   readVerdicts,
   reopenGradingJob,
@@ -15,6 +16,7 @@ import {
   runService,
   seedGrader,
   testConfig,
+  theSeededGrader,
   type World,
 } from "./support/world.ts";
 import type { Service } from "../src/service.ts";
@@ -77,6 +79,7 @@ async function rowsStoredFor(simulationId: string): Promise<number> {
 
 beforeAll(async () => {
   world = await makeWorld("grader_two_copies");
+  await deleteGrader(world.auth, await theSeededGrader(world));
   await seedGrader(world, aLatencyCopy());
 });
 

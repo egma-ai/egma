@@ -9,10 +9,23 @@ import {
   isNull,
   lt,
   or,
+  sql,
   type SQL,
 } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import {
+  PERSONA_LIBRARY_CATALOG,
+  type PersonaTraits,
+  type EgmaProvidedPersona,
+} from "../persona-library/catalog.ts";
+import {
+  RECOMMENDED_PERSONA_MODELS,
+  personaModelsFromRow,
+  samePersonaModels,
+  validPersonaModels,
+  type PersonaModels,
+} from "../models/selections.ts";
 import { newRevision } from "../revisions.ts";
 import {
   persona,
@@ -23,6 +36,7 @@ import type { AuthContext } from "./context.ts";
 import {
   DefaultPersonaReplacementError,
   IdentityConflictError,
+  EgmaProvidedPersonaError,
   PersonaNamedByTestsError,
   ProjectOutsideOrganizationError,
   PersonaNameAmbiguousError,
@@ -33,6 +47,10 @@ import {
 } from "./errors.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
+import {
+  personaAvailableToProject,
+  readablePersona,
+} from "./persona-availability.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { liveTestsNamingPersona } from "./tests.ts";
 import { within } from "./within.ts";
@@ -58,54 +76,9 @@ import { within } from "./within.ts";
  * one of these verbs.
  */
 
-/** The mouths egma knows how to ask for. Grows one entry at a time. */
-export const VOICE_PROVIDERS = ["elevenlabs", "cartesia", "openai"] as const;
-export type VoiceProvider = (typeof VOICE_PROVIDERS)[number];
+export type { PersonaTraits };
 
-/**
- * Who the persona is. The voice is concrete — provider, that provider's
- * catalog id, and pace — so the same persona sounds identical on every
- * future simulation; a described voice would let two runs cast two people.
- *
- * **Every field here answers *who they are*, and none of them answers *what
- * they want*.** What the caller wants on a given occasion is the test's
- * scenario, and the whole worth of a persona is that the same one can call
- * about forty different things. A trait that said "asks to reschedule" would
- * quietly turn a reusable person into a second copy of one test.
- *
- * The five described traits are optional and the two written ones are not.
- * A persona authored before they existed is still a persona, and an author
- * who has nothing to say about background noise should not have to invent
- * something — an absent trait is *unstated*, which is honest, where an
- * invented one is a fact the simulator would act on.
- *
- * **Speech rate is `voice.speed` and is deliberately not a sixth string.** It
- * is a number the simulator hands the voice provider, so a described one would
- * have to be interpreted, and two runs interpreting "quite fast" differently is
- * exactly the drift the concrete voice exists to rule out.
- */
-export type PersonaTraits = {
-  readonly personality: string;
-  readonly language: string;
-  readonly voice: {
-    readonly provider: VoiceProvider;
-    readonly voiceId: string;
-    /** Speech rate, as a multiple of the provider's natural pace. */
-    readonly speed: number;
-  };
-  /** How they come across: warm, brisk, formal, distracted. */
-  readonly manner?: string | undefined;
-  /** How long they will stay with something before they push. */
-  readonly patience?: string | undefined;
-  /** Where they sound like they are from. */
-  readonly accent?: string | undefined;
-  /** What is going on around them while they talk. */
-  readonly backgroundNoise?: string | undefined;
-  /** What they do when the agent gets it wrong, or will not budge. */
-  readonly underFriction?: string | undefined;
-};
-
-/** The described traits, which are optional and are stored trimmed or not at all. */
+/** Human traits that can be described but are not required. */
 const DESCRIBED_TRAITS = [
   "manner",
   "patience",
@@ -132,9 +105,8 @@ function normalizedTraits(traits: PersonaTraits): PersonaTraits {
     if (written !== "") described[field] = written;
   }
   return {
-    personality: traits.personality,
-    language: traits.language,
-    voice: traits.voice,
+    personality: traits.personality.trim(),
+    language: traits.language.trim(),
     ...described,
   };
 }
@@ -143,17 +115,23 @@ export type NewPersona = {
   readonly name: string;
   readonly description?: string | undefined;
   readonly traits: PersonaTraits;
+  /** Absent means the release's complete recommended selection. */
+  readonly models?: PersonaModels | undefined;
 };
+
+export type PersonaOwner = "egma" | "organization";
 
 export type Persona = {
   readonly id: string;
-  readonly projectId: string;
+  readonly owner: PersonaOwner;
+  readonly projectId: string | null;
   readonly name: string;
   readonly description: string | null;
   readonly version: number;
   /** The current version's own `prsv_` id — what a run pins. */
   readonly versionId: string;
   readonly traits: PersonaTraits;
+  readonly models: PersonaModels;
   /**
    * The opaque token an identity write or a lifecycle change has to name.
    * It changes on every one of them and means nothing on its own.
@@ -163,8 +141,8 @@ export type Persona = {
   readonly archivedAt: Date | null;
   /**
    * Whether the project points at them as the persona a test naming nobody
-   * gets. **A pointer, not a kind**: the default persona is an ordinary row
-   * that can be renamed, rewritten and replaced like any other.
+   * gets. **A pointer, not a kind**: it may point at a read-only Egma-provided
+   * persona or at a Custom persona.
    */
   readonly isDefault: boolean;
   readonly createdAt: Date;
@@ -173,20 +151,22 @@ export type Persona = {
 
 /**
  * What an edit may touch. Name and description are identity and version
- * nothing; traits are behavior and version on any change. Absent means keep.
+ * nothing; traits are human behavior and version on a change. Absent means
+ * keep.
  *
  * **The two expectations are separate because they answer separate
- * questions.** `expectedRevision` says *this persona has not moved* and
- * guards the identity fields and the lifecycle; `expectedVersionId` says
- * *this content has not moved* and guards the traits. An edit that changes
- * both names both. Either may be left out, and then that half is written
- * without a check — which is what the scripts and the seeding paths do, and
- * what no browser write is ever allowed to do.
+ * questions.** `expectedRevision` says *this persona has not moved* and guards
+ * the identity fields and the lifecycle; `expectedVersionId` says *this
+ * human behavior has not moved* and guards the authored behavior. An edit that
+ * changes both names both. Either may be left out, and then that half is
+ * written without a check — which is what the scripts do, and what no browser
+ * write is ever allowed to do.
  */
 export type PersonaChanges = {
   readonly name?: string;
   readonly description?: string | null;
   readonly traits?: PersonaTraits;
+  readonly models?: PersonaModels;
   readonly expectedRevision?: string | undefined;
   readonly expectedVersionId?: string | undefined;
 };
@@ -197,6 +177,7 @@ export type PersonaVersion = {
   readonly personaId: string;
   readonly version: number;
   readonly traits: PersonaTraits;
+  readonly models: PersonaModels;
   readonly createdAt: Date;
 };
 
@@ -205,6 +186,7 @@ const notArchived: SQL = isNull(persona.archivedAt);
 /** An answer's columns, and no more — the hash-free, tenant-free view. */
 const COLUMNS = {
   id: persona.id,
+  organizationId: persona.organizationId,
   projectId: persona.projectId,
   name: persona.name,
   description: persona.description,
@@ -213,9 +195,6 @@ const COLUMNS = {
   createdAt: persona.createdAt,
   updatedAt: persona.updatedAt,
 } as const;
-
-/** Speech only stays intelligible so far from natural pace. */
-const SPEED_RANGE = { slowest: 0.5, fastest: 2 } as const;
 
 /**
  * What the factory will not write, refused as the caller's mistake rather than
@@ -227,54 +206,95 @@ const SPEED_RANGE = { slowest: 0.5, fastest: 2 } as const;
  * plain errors while nothing but a script called this; the browser's door is
  * the caller that has to relay them.
  */
-function validateName(name: string): void {
-  if (name.trim() === "") {
+function validateName(name: unknown): asserts name is string {
+  if (typeof name !== "string" || name.trim() === "") {
     throw new UnprocessableInputError("a persona needs a name");
   }
 }
 
-function validateTraits(traits: PersonaTraits): void {
-  if (traits.personality.trim() === "") {
+function validateTraits(traits: unknown): asserts traits is PersonaTraits {
+  if (typeof traits !== "object" || traits === null || Array.isArray(traits)) {
+    throw new UnprocessableInputError("persona traits must be an object");
+  }
+  const held = traits as Record<string, unknown>;
+  if (
+    typeof held.personality !== "string" ||
+    held.personality.trim() === ""
+  ) {
     throw new UnprocessableInputError("a persona needs a personality");
   }
-  if (traits.language.trim() === "") {
+  if (typeof held.language !== "string" || held.language.trim() === "") {
     throw new UnprocessableInputError("a persona needs a language");
   }
-  const { provider, voiceId, speed } = traits.voice;
-  if (!VOICE_PROVIDERS.includes(provider)) {
+  const accepted = new Set<string>([
+    "personality",
+    "language",
+    ...DESCRIBED_TRAITS,
+  ]);
+  const unsupported = Object.keys(held).filter((key) => !accepted.has(key));
+  if (unsupported.length > 0) {
     throw new UnprocessableInputError(
-      `"${provider}" is not a voice provider Egma knows; expected one of ${VOICE_PROVIDERS.join(", ")}`,
+      `persona traits have unsupported fields ${unsupported.join(", ")}`,
     );
   }
-  if (voiceId.trim() === "") {
+  for (const field of DESCRIBED_TRAITS) {
+    const value = held[field];
+    if (value !== undefined && typeof value !== "string") {
+      throw new UnprocessableInputError(`persona trait ${field} must be text`);
+    }
+  }
+}
+
+const CREATE_FIELDS = ["name", "description", "traits", "models"] as const;
+const EDIT_FIELDS = [
+  "name",
+  "description",
+  "traits",
+  "models",
+  "expectedRevision",
+  "expectedVersionId",
+] as const;
+
+/**
+ * Reject stale or misspelled authoring fields before reading a required one.
+ *
+ * TypeScript keeps current in-repo callers honest, but this boundary is also
+ * called by built JavaScript and can receive an object written against an
+ * older release. Ignoring an old `traits` field on edit would report success
+ * while changing nothing; reading its absent replacement on create would
+ * throw a TypeError. Both are caller mistakes, so both get one stable input
+ * refusal that names the accepted fields.
+ */
+function validateAuthoringFields(
+  operation: "create" | "edit",
+  input: unknown,
+  accepted: readonly string[],
+): void {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new UnprocessableInputError(
-      "a persona needs a voice id from its provider",
+      `persona ${operation} input must be an object`,
     );
   }
-  if (
-    !Number.isFinite(speed) ||
-    speed < SPEED_RANGE.slowest ||
-    speed > SPEED_RANGE.fastest
-  ) {
-    throw new UnprocessableInputError(
-      `speaking speed must be between ${SPEED_RANGE.slowest} and ${SPEED_RANGE.fastest}`,
-    );
-  }
+  const acceptedSet = new Set(accepted);
+  const unsupported = Object.getOwnPropertyNames(input)
+    .filter((field) => !acceptedSet.has(field))
+    .sort();
+  if (unsupported.length === 0) return;
+
+  const quoted = (fields: readonly string[]) =>
+    fields.map((field) => `"${field}"`).join(", ");
+  throw new UnprocessableInputError(
+    `persona ${operation} received unsupported fields ${quoted(unsupported)}; accepted fields are ${quoted(accepted)}`,
+  );
 }
 
 function validateNewPersona(input: NewPersona): void {
+  validateAuthoringFields("create", input, CREATE_FIELDS);
   validateName(input.name);
   validateTraits(input.traits);
+  if (input.models !== undefined) validPersonaModels(input.models);
 }
 
-/**
- * The traits as stored, read back.
- *
- * Optional described traits are read only when the row holds a non-empty
- * string for them. A row carrying something else in one of those keys is not
- * repaired quietly: the shape guard below refuses the whole version, for the
- * reason it refuses a malformed personality.
- */
 function describedTraitsFromRow(
   value: Record<string, unknown>,
   malformed: () => Error,
@@ -282,9 +302,9 @@ function describedTraitsFromRow(
   const described: { [K in DescribedTrait]?: string } = {};
   for (const field of DESCRIBED_TRAITS) {
     const held = value[field];
-    if (held === undefined || held === null) continue;
-    if (typeof held !== "string") throw malformed();
-    if (held.trim() !== "") described[field] = held;
+    if (held === undefined) continue;
+    if (typeof held !== "string" || held.trim() === "") throw malformed();
+    described[field] = held;
   }
   return described;
 }
@@ -303,27 +323,24 @@ function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
       `version ${versionId} holds traits in a shape Egma never writes; the row needs repairing before anybody can read it`,
     );
 
-  if (typeof value !== "object" || value === null) throw malformed();
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw malformed();
+  }
   const held = value as Record<string, unknown>;
-  const { personality, language, voice } = held;
+  const { personality, language } = held;
   if (typeof personality !== "string" || personality.trim() === "") {
     throw malformed();
   }
   if (typeof language !== "string" || language.trim() === "") throw malformed();
-  if (typeof voice !== "object" || voice === null) throw malformed();
-  const { provider, voiceId, speed } = voice as Record<string, unknown>;
-  if (
-    typeof provider !== "string" ||
-    typeof voiceId !== "string" ||
-    typeof speed !== "number"
-  ) {
-    throw malformed();
-  }
-
+  const accepted = new Set<string>([
+    "personality",
+    "language",
+    ...DESCRIBED_TRAITS,
+  ]);
+  if (Object.keys(held).some((key) => !accepted.has(key))) throw malformed();
   return {
     personality,
     language,
-    voice: { provider: provider as VoiceProvider, voiceId, speed },
     ...describedTraitsFromRow(held, malformed),
   };
 }
@@ -339,24 +356,6 @@ function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
  * field would call two different traits identical, and an edit would vanish
  * without a version — the one loss this whole file exists to rule out.
  */
-const sameVoiceField: {
-  readonly [K in keyof PersonaTraits["voice"]]: (
-    a: PersonaTraits["voice"],
-    b: PersonaTraits["voice"],
-  ) => boolean;
-} = {
-  provider: (a, b) => a.provider === b.provider,
-  voiceId: (a, b) => a.voiceId === b.voiceId,
-  speed: (a, b) => a.speed === b.speed,
-};
-
-/**
- * `-?` rather than the bare mapped type, because the described traits are
- * optional: without it, an optional field's comparator would be optional too,
- * and the compiler would stop insisting that a field added to the traits is
- * also told how to compare. That insistence is the only reason this table is
- * written out at all.
- */
 const sameTraitsField: {
   readonly [K in keyof PersonaTraits]-?: (
     a: PersonaTraits,
@@ -365,8 +364,6 @@ const sameTraitsField: {
 } = {
   personality: (a, b) => a.personality === b.personality,
   language: (a, b) => a.language === b.language,
-  voice: (a, b) =>
-    Object.values(sameVoiceField).every((same) => same(a.voice, b.voice)),
   manner: (a, b) => a.manner === b.manner,
   patience: (a, b) => a.patience === b.patience,
   accent: (a, b) => a.accent === b.accent,
@@ -386,11 +383,43 @@ function sameTraits(a: PersonaTraits, b: PersonaTraits): boolean {
   return Object.values(sameTraitsField).every((same) => same(left, right));
 }
 
-/** Acting in a project narrows to it; acting in none reaches the customer. */
-function inActingProject(auth: AuthContext): SQL | undefined {
-  return auth.projectId === undefined
-    ? undefined
-    : eq(persona.projectId, auth.projectId);
+/**
+ * Full JSON equality for a fixed catalog version. Unlike `sameTraits`, this
+ * must not parse through today's trait shape: doing so would drop an unknown
+ * key and let a corrupted immutable row pass as catalog content. Object key
+ * order is not content; every key and nested value is.
+ */
+function sameJson(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => sameJson(value, right[index]))
+    );
+  }
+  if (
+    typeof left !== "object" ||
+    left === null ||
+    typeof right !== "object" ||
+    right === null
+  ) {
+    return false;
+  }
+
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.hasOwn(rightRecord, key) &&
+        sameJson(leftRecord[key], rightRecord[key]),
+    )
+  );
 }
 
 /**
@@ -404,37 +433,184 @@ function inActingProject(auth: AuthContext): SQL | undefined {
  * unreachable by the one operation that exists to bring them back.
  */
 function thePersona(auth: AuthContext, id: string): SQL {
-  return within(auth, persona, and(eq(persona.id, id), inActingProject(auth)));
+  return readablePersona(auth, eq(persona.id, id));
 }
 
-export async function createPersona(
-  auth: AuthContext,
-  input: NewPersona,
-): Promise<Persona> {
-  authorize(auth, "author_definitions", here(auth));
+export type SeededPersona = {
+  readonly id: string;
+  readonly name: string;
+  readonly version: number;
+  readonly versionId: string;
+};
 
-  const { projectId } = auth;
+function currentCatalogVersion(entry: EgmaProvidedPersona) {
+  const current = entry.versions.at(-1);
+  if (current === undefined) {
+    throw new Error(`Egma-provided persona ${entry.id} has no version`);
+  }
+  entry.versions.forEach((version, index) => {
+    if (version.version !== index + 1) {
+      throw new Error(
+        `Egma-provided persona ${entry.id} version ${version.id} must be number ${index + 1}`,
+      );
+    }
+    validateTraits(version.traits);
+    validPersonaModels(version.models);
+  });
+  return current;
+}
+
+/**
+ * Put the personas Egma provides in the database without rewriting a version.
+ * Identity metadata and the current pointer may move; version rows are insert
+ * only and are checked byte for byte when their fixed id already exists.
+ */
+/** @internal Called only by the deployment seeder outside the access surface. */
+export async function seedPersonaLibraryInternal(
+  catalog: readonly EgmaProvidedPersona[] = PERSONA_LIBRARY_CATALOG,
+): Promise<readonly SeededPersona[]> {
+  if (catalog.length === 0) return [];
+
+  return db().transaction(async (tx) => {
+    const seeded: SeededPersona[] = [];
+    for (const entry of catalog) {
+      const current = currentCatalogVersion(entry);
+      const now = new Date();
+      const identityInsertions = await tx
+        .insert(persona)
+        .values({
+          id: entry.id,
+          organizationId: null,
+          projectId: null,
+          name: entry.name,
+          description: entry.description,
+          currentVersionId: current.id,
+          createdBy: null,
+          createdAt: entry.versions[0]?.createdAt ?? current.createdAt,
+          updatedAt: entry.versions[0]?.createdAt ?? current.createdAt,
+        })
+        .onConflictDoNothing({ target: persona.id })
+        .returning({ id: persona.id });
+      const identityUpdates =
+        identityInsertions.length > 0
+          ? []
+          : await tx
+              .update(persona)
+              .set({
+                name: entry.name,
+                description: entry.description,
+                currentVersionId: current.id,
+                revision: newRevision(),
+                updatedAt: now,
+              })
+              .where(
+                and(
+                  eq(persona.id, entry.id),
+                  isNull(persona.organizationId),
+                  sql`(${persona.name}, ${persona.description}, ${persona.currentVersionId}) is distinct from (${entry.name}, ${entry.description}, ${current.id})`,
+                ),
+              )
+              .returning({ id: persona.id });
+      const identityChanges = [...identityInsertions, ...identityUpdates];
+      const versionInsertions = await tx
+        .insert(personaVersion)
+        .values(
+          entry.versions.map((version) => ({
+            id: version.id,
+            personaId: entry.id,
+            version: version.version,
+            traits: normalizedTraits(version.traits),
+            models: validPersonaModels(version.models),
+            createdBy: null,
+            createdAt: version.createdAt,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning({ id: personaVersion.id });
+
+      const [storedIdentity] = await tx
+        .select({
+          organizationId: persona.organizationId,
+          projectId: persona.projectId,
+          name: persona.name,
+          description: persona.description,
+          currentVersionId: persona.currentVersionId,
+        })
+        .from(persona)
+        .where(eq(persona.id, entry.id))
+        .limit(1);
+      if (
+        storedIdentity === undefined ||
+        storedIdentity.organizationId !== null ||
+        storedIdentity.projectId !== null ||
+        storedIdentity.name !== entry.name ||
+        storedIdentity.description !== entry.description ||
+        storedIdentity.currentVersionId !== current.id
+      ) {
+        throw new Error(
+          `fixed Egma-provided persona id ${entry.id} already holds a different identity`,
+        );
+      }
+
+      const storedVersions = await tx
+        .select({
+          id: personaVersion.id,
+          version: personaVersion.version,
+          traits: personaVersion.traits,
+          models: personaVersion.models,
+        })
+        .from(personaVersion)
+        .where(eq(personaVersion.personaId, entry.id));
+      for (const expected of entry.versions) {
+        const stored = storedVersions.find((one) => one.id === expected.id);
+        if (
+          stored === undefined ||
+          stored.version !== expected.version ||
+          !sameJson(stored.traits, normalizedTraits(expected.traits)) ||
+          !sameJson(stored.models, validPersonaModels(expected.models))
+        ) {
+          throw new Error(
+            `fixed Egma-provided persona version ${expected.id} already holds different content`,
+          );
+        }
+      }
+
+      if (identityChanges.length > 0 || versionInsertions.length > 0) {
+        seeded.push({
+          id: entry.id,
+          name: entry.name,
+          version: current.version,
+          versionId: current.id,
+        });
+      }
+    }
+    return seeded;
+  });
+}
+
+async function createPersonaWithTraits(
+  auth: AuthContext,
+  input: Pick<NewPersona, "name" | "description">,
+  traits: PersonaTraits,
+  models: PersonaModels,
+): Promise<Persona> {
+  const projectId = auth.projectId;
   if (projectId === undefined) {
     throw new Error(
       "a persona belongs to a project, and this credential is for the whole organization and acting in none",
     );
   }
-
-  // Everything answerable without the database is answered first; only an
-  // input worth writing costs the project-membership read below.
-  validateNewPersona(input);
-
+  validateName(input.name);
+  validateTraits(traits);
+  const storedModels = validPersonaModels(models);
   if (!(await isProjectOfOrganization(auth, projectId))) {
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
   const id = newId("prs");
   const versionId = newId("prsv");
-  const traits = normalizedTraits(input.traits);
-
+  const storedTraits = normalizedTraits(traits);
   const inserted = await db().transaction(async (tx) => {
-    // The identity row goes first, naming a version that does not exist yet;
-    // the pointer's constraint is deferred, so Postgres checks it at commit.
     const [identity] = await tx
       .insert(persona)
       .values({
@@ -447,29 +623,42 @@ export async function createPersona(
         createdBy: auth.userId,
       })
       .returning(COLUMNS);
-
     await tx.insert(personaVersion).values({
       id: versionId,
       personaId: id,
       version: 1,
-      traits,
+      traits: storedTraits,
+      models: storedModels,
       createdBy: auth.userId,
     });
-
     return identity;
   });
-
   if (inserted === undefined) throw new Error("the persona was not written");
-
+  const { organizationId: _organizationId, ...identity } = inserted;
   return {
-    ...inserted,
+    ...identity,
+    owner: "organization",
     version: 1,
     versionId,
-    traits,
-    // A project's pointer is moved deliberately, and never by a create. A
-    // brand-new persona is nobody's default until somebody says so.
+    traits: storedTraits,
+    models: storedModels,
     isDefault: false,
   };
+}
+
+export async function createPersona(
+  auth: AuthContext,
+  input: NewPersona,
+): Promise<Persona> {
+  authorize(auth, "author_definitions", here(auth));
+
+  validateNewPersona(input);
+  return createPersonaWithTraits(
+    auth,
+    input,
+    input.traits,
+    input.models ?? RECOMMENDED_PERSONA_MODELS,
+  );
 }
 
 /**
@@ -480,13 +669,18 @@ export async function createPersona(
  * The project join is what makes "is this the default?" a fact of the read
  * rather than a second question every caller would have to remember to ask.
  */
-function selectWithCurrentVersion(on: Queryable = db()) {
+function selectWithCurrentVersion(auth: AuthContext, on: Queryable = db()) {
+  const defaultProject =
+    auth.projectId === undefined
+      ? sql`false`
+      : eq(project.id, auth.projectId);
   return on
     .select({
       ...COLUMNS,
       version: personaVersion.version,
       versionId: personaVersion.id,
       traits: personaVersion.traits,
+      models: personaVersion.models,
       defaultPersonaId: project.defaultPersonaId,
     })
     .from(persona)
@@ -494,20 +688,30 @@ function selectWithCurrentVersion(on: Queryable = db()) {
       personaVersion,
       eq(persona.currentVersionId, personaVersion.id),
     )
-    .innerJoin(project, eq(persona.projectId, project.id));
+    .leftJoin(
+      project,
+      and(defaultProject, eq(project.defaultPersonaId, persona.id)),
+    );
 }
 
 /** One row of that select, as a `Persona`. */
 function personaFrom(row: {
   readonly id: string;
+  readonly organizationId: string | null;
   readonly versionId: string;
   readonly traits: unknown;
+  readonly models: unknown;
   readonly defaultPersonaId: string | null;
 }): Persona {
-  const { defaultPersonaId, ...rest } = row;
+  const { defaultPersonaId, organizationId, ...rest } = row;
   return {
-    ...(rest as unknown as Omit<Persona, "traits" | "isDefault">),
+    ...(rest as unknown as Omit<
+      Persona,
+      "owner" | "traits" | "models" | "isDefault"
+    >),
+    owner: organizationId === null ? "egma" : "organization",
     traits: traitsFromRow(row.traits, row.versionId),
+    models: personaModelsFromRow(row.models, row.versionId),
     isDefault: defaultPersonaId === row.id,
   };
 }
@@ -526,7 +730,7 @@ async function readPersonaOn(
   auth: AuthContext,
   id: string,
 ): Promise<Persona | undefined> {
-  const [row] = await selectWithCurrentVersion(on)
+  const [row] = await selectWithCurrentVersion(auth, on)
     .where(thePersona(auth, id))
     .limit(1);
 
@@ -544,14 +748,74 @@ export async function getPersona(
 }
 
 /**
+ * Make one active, available persona the project's default.
+ *
+ * This moves only the project's pointer. It does not change the persona's
+ * type, identity, traits, models, or version. The project is locked first,
+ * then the persona, which is the same order Archive uses. That makes Archive
+ * and a default change serialize instead of leaving the project pointed at an
+ * archived persona, without creating a lock cycle between the two actions.
+ */
+export async function setDefaultPersona(
+  auth: AuthContext,
+  id: string,
+): Promise<Persona | undefined> {
+  authorize(auth, "author_definitions", here(auth));
+
+  const projectId = auth.projectId;
+  if (projectId === undefined) {
+    throw new Error(
+      "a project default belongs to a project, and this credential is for the whole organization and acting in none",
+    );
+  }
+
+  return writing(() =>
+    db().transaction(async (tx) => {
+      const [target] = await tx
+        .select({ id: project.id, defaultPersonaId: project.defaultPersonaId })
+        .from(project)
+        .where(within(auth, project, eq(project.id, projectId)))
+        .limit(1)
+        .for("update", { of: project });
+      if (target === undefined) {
+        throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
+      }
+
+      const [available] = await tx
+        .select({ id: persona.id })
+        .from(persona)
+        .where(
+          personaAvailableToProject(
+            auth,
+            target.id,
+            and(eq(persona.id, id), notArchived),
+          ),
+        )
+        .limit(1)
+        .for("share", { of: persona });
+      if (available === undefined) return undefined;
+
+      if (target.defaultPersonaId !== available.id) {
+        await tx
+          .update(project)
+          .set({ defaultPersonaId: available.id, updatedAt: new Date() })
+          .where(eq(project.id, target.id));
+      }
+
+      return readPersonaOn(tx, auth, available.id);
+    }),
+  );
+}
+
+/**
  * One door for every change, so no caller needs the version rules to pick a
  * function — the rules live here. Name and description write in place and
- * version nothing. Traits that differ from the current version insert the
- * next version and move the pointer, in one transaction with the identity row
- * locked, so two concurrent edits number one after the other rather than
- * fighting over the same version number. Traits byte-identical to the current
- * version are not an edit at all: nothing is written, not even `updated_at`,
- * and the current version comes back.
+ * version nothing. Human traits that differ from the current version insert
+ * the next version and moves the pointer, in one transaction with the identity
+ * row locked, so two concurrent edits number one after the other rather than
+ * fighting over the same version number. Byte-identical traits are not
+ * an edit at all: nothing is written, not even `updated_at`, and the current
+ * version comes back.
  *
  * Editing what the caller cannot see returns what reading it would have:
  * `undefined`, with nothing disturbed.
@@ -563,8 +827,14 @@ export async function editPersona(
 ): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
+  validateAuthoringFields("edit", changes, EDIT_FIELDS);
   if (changes.name !== undefined) validateName(changes.name);
-  if (changes.traits !== undefined) validateTraits(changes.traits);
+  const { traits: askedTraits } = changes;
+  if (askedTraits !== undefined) validateTraits(askedTraits);
+  const askedModels =
+    changes.models === undefined
+      ? undefined
+      : validPersonaModels(changes.models);
 
   return writing(() =>
     db().transaction(async (tx) => {
@@ -572,17 +842,28 @@ export async function editPersona(
         .select({
           ...COLUMNS,
           currentVersionId: persona.currentVersionId,
-          defaultPersonaId: project.defaultPersonaId,
         })
         .from(persona)
-        .innerJoin(project, eq(persona.projectId, project.id))
         .where(thePersona(auth, id))
         .limit(1)
         .for("update", { of: persona });
 
       if (locked === undefined) return undefined;
-      const { currentVersionId, defaultPersonaId, ...current } = locked;
-      const isDefault = defaultPersonaId === current.id;
+      if (locked.organizationId === null) {
+        throw new EgmaProvidedPersonaError(locked.id, locked.name);
+      }
+      if (locked.projectId === null) {
+        throw new Error(`customer-owned persona ${locked.id} has no project`);
+      }
+      const currentProjectId = locked.projectId;
+      const { currentVersionId, organizationId: _organizationId, ...current } =
+        locked;
+      const [pointing] = await tx
+        .select({ defaultPersonaId: project.defaultPersonaId })
+        .from(project)
+        .where(eq(project.id, currentProjectId))
+        .limit(1);
+      const isDefault = pointing?.defaultPersonaId === current.id;
 
       // Both expectations are checked against the row this transaction has
       // locked, so nothing can move between the check and the write.
@@ -597,6 +878,7 @@ export async function editPersona(
           id: personaVersion.id,
           version: personaVersion.version,
           traits: personaVersion.traits,
+          models: personaVersion.models,
         })
         .from(personaVersion)
         .where(eq(personaVersion.id, currentVersionId))
@@ -608,14 +890,18 @@ export async function editPersona(
       /**
        * The content expectation, and where it is deliberately **not** applied.
        *
-       * A trait write names the version it was written against. A save whose
-       * traits are byte-identical to what is stored is not a write at all — it
-       * mints nothing, so there is nothing for a stale expectation to overwrite
-       * — but a stale one is still a caller working from an old read, and
-       * telling them so is what stops the next save silently landing on top of
-       * somebody else's. So it is checked whenever traits were sent.
+       * A traits write names the version it was written against. A save whose
+       * traits are byte-identical to what is stored is not a write
+       * at all — it mints nothing, so there is nothing for a stale expectation
+       * to overwrite — but a stale one is still a caller working from an old
+       * read, and telling them so is what stops the next save silently landing
+       * on top of somebody else's. So it is checked whenever traits were
+       * sent.
        */
-      if (changes.traits !== undefined && changes.expectedVersionId !== undefined) {
+      if (
+        (askedTraits !== undefined || askedModels !== undefined) &&
+        changes.expectedVersionId !== undefined
+      ) {
         if (changes.expectedVersionId !== currentVersion.id) {
           throw new VersionConflictError(
             "persona",
@@ -626,33 +912,49 @@ export async function editPersona(
       }
 
       const storedTraits = traitsFromRow(currentVersion.traits, currentVersion.id);
+      const storedModels = personaModelsFromRow(
+        currentVersion.models,
+        currentVersion.id,
+      );
       const nextTraits =
-        changes.traits !== undefined && !sameTraits(storedTraits, changes.traits)
-          ? normalizedTraits(changes.traits)
+        askedTraits !== undefined && !sameTraits(storedTraits, askedTraits)
+          ? normalizedTraits(askedTraits)
+          : undefined;
+      const nextModels =
+        askedModels !== undefined &&
+        !samePersonaModels(storedModels, askedModels)
+          ? askedModels
           : undefined;
       const identityChanged =
         changes.name !== undefined || changes.description !== undefined;
 
-      if (nextTraits === undefined && !identityChanged) {
+      if (
+        nextTraits === undefined &&
+        nextModels === undefined &&
+        !identityChanged
+      ) {
         return {
           ...current,
+          owner: "organization" as const,
           version: currentVersion.version,
           versionId: currentVersion.id,
           traits: storedTraits,
+          models: storedModels,
           isDefault,
         };
       }
 
       let versionId = currentVersion.id;
       let version = currentVersion.version;
-      if (nextTraits !== undefined) {
+      if (nextTraits !== undefined || nextModels !== undefined) {
         versionId = newId("prsv");
         version = currentVersion.version + 1;
         await tx.insert(personaVersion).values({
           id: versionId,
           personaId: current.id,
           version,
-          traits: nextTraits,
+          traits: nextTraits ?? storedTraits,
+          models: nextModels ?? storedModels,
           createdBy: auth.userId,
         });
       }
@@ -664,7 +966,9 @@ export async function editPersona(
           ...(changes.description === undefined
             ? {}
             : { description: changes.description }),
-          ...(nextTraits === undefined ? {} : { currentVersionId: versionId }),
+          ...(nextTraits === undefined && nextModels === undefined
+            ? {}
+            : { currentVersionId: versionId }),
           // The identity moved, so the token that names it moves too — whichever
           // half of the edit moved it. A caller holding the old one is holding a
           // read taken before this write, and that is exactly what it is for.
@@ -678,10 +982,15 @@ export async function editPersona(
         throw new Error("the persona was not written");
       }
       return {
-        ...updated,
+        ...(() => {
+          const { organizationId: _organizationId, ...identity } = updated;
+          return identity;
+        })(),
+        owner: "organization" as const,
         version,
         versionId,
         traits: nextTraits ?? storedTraits,
+        models: nextModels ?? storedModels,
         isDefault,
       };
     }),
@@ -707,6 +1016,7 @@ export async function getPersonaVersion(
       personaId: personaVersion.personaId,
       version: personaVersion.version,
       traits: personaVersion.traits,
+      models: personaVersion.models,
       createdAt: personaVersion.createdAt,
     })
     .from(personaVersion)
@@ -715,16 +1025,16 @@ export async function getPersonaVersion(
       eq(personaVersion.personaId, persona.id),
     )
     .where(
-      within(
-        auth,
-        persona,
-        and(eq(personaVersion.id, versionId), inActingProject(auth)),
-      ),
+      readablePersona(auth, eq(personaVersion.id, versionId)),
     )
     .limit(1);
 
   if (row === undefined) return undefined;
-  return { ...row, traits: traitsFromRow(row.traits, row.id) };
+  return {
+    ...row,
+    traits: traitsFromRow(row.traits, row.id),
+    models: personaModelsFromRow(row.models, row.id),
+  };
 }
 
 /**
@@ -777,13 +1087,9 @@ export async function listPersonas(
       ? undefined
       : ilike(persona.name, `%${wanted.replace(/([\\%_])/g, "\\$1")}%`);
 
-  const rows = await selectWithCurrentVersion()
+  const rows = await selectWithCurrentVersion(auth)
     .where(
-      within(
-        auth,
-        persona,
-        and(lifecycle, named, inActingProject(auth), olderThanCursor),
-      ),
+      readablePersona(auth, and(lifecycle, named, olderThanCursor)),
     )
     .orderBy(desc(persona.id))
     .limit(limit + 1);
@@ -858,13 +1164,10 @@ export async function resolvePersonaNames(
     })
     .from(persona)
     .where(
-      within(
+      personaAvailableToProject(
         auth,
-        persona,
-        and(
-          eq(persona.projectId, projectId),
-          or(inArray(persona.id, wanted), inArray(persona.name, wanted)),
-        ),
+        projectId,
+        or(inArray(persona.id, wanted), inArray(persona.name, wanted)),
       ),
     );
 
@@ -922,30 +1225,30 @@ export async function resolvePersonaNames(
 /**
  * A new persona whose version 1 carries the source's current traits.
  *
- * A clone is a create with the retyping saved: fresh `prs_` and `prsv_` ids,
+ * A fork is a create with the retyping saved: fresh `prs_` and `prsv_` ids,
  * version numbering starting over at 1, and no link back — the source's
  * history is the source's, and nothing of it comes along. The source is read
- * through the same seam as `getPersona`, so a clone can only be taken of
- * what the caller could have fetched: same customer, same acting project.
+ * through the same seam as `getPersona`, so a fork can only be taken from a
+ * Egma-provided persona or a persona available in the acting project.
  *
  * Authorization is layered on purpose, not by accident of delegation. The
  * leading check refuses a viewer before anything is read, and a credential
  * acting in no project is refused right after it, still before the read —
- * the same stance as create and delete, and it keeps `undefined` meaning
+ * the same stance as create and archive, and it keeps `undefined` meaning
  * invisible rather than refused. `getPersona`'s `read` applies because
- * the clone hands the source's traits back, which is a read;
- * `createPersona`'s check applies because a clone is a create. If
+ * the fork hands the source's traits back, which is a read;
+ * `createPersonaWithTraits` writes the independent project-owned copy. If
  * reading ever gains a gate of its own, a caller who may not read the source
  * must be refused out loud here — never handed an `undefined` that pretends
- * the source does not exist, which would make clone the one path that reads
+ * the source does not exist, which would make Fork the one path that reads
  * without the read permission.
  *
- * **An archived source clones to an active persona, deliberately.** Reaching
+ * **An archived source forks to an active persona, deliberately.** Reaching
  * back into the archive for a starting point is a reasonable thing to want,
- * and the clone is a new identity with its own lifecycle — nothing about the
+ * and the fork is a new identity with its own lifecycle — nothing about the
  * source is disturbed, and nothing archived comes back by the back door.
  */
-export async function clonePersona(
+export async function forkPersona(
   auth: AuthContext,
   id: string,
 ): Promise<Persona | undefined> {
@@ -953,19 +1256,26 @@ export async function clonePersona(
 
   if (auth.projectId === undefined) {
     throw new Error(
-      "a clone lands in the acting project, and this credential is for the whole organization and acting in none",
+      "a fork lands in the acting project, and this credential is for the whole organization and acting in none",
     );
   }
 
   const source = await getPersona(auth, id);
   if (source === undefined) return undefined;
 
-  return createPersona(auth, {
-    name: source.name,
-    description: source.description ?? undefined,
-    traits: source.traits,
-  });
+  return createPersonaWithTraits(
+    auth,
+    {
+      name: source.name,
+      description: source.description ?? undefined,
+    },
+    source.traits,
+    source.models,
+  );
 }
+
+/** @deprecated Use the product word `forkPersona`. */
+export const clonePersona = forkPersona;
 
 /**
  * What a lifecycle change takes, beyond the persona it names.
@@ -1134,7 +1444,9 @@ export async function archivePersona(
       const [locked] = await tx
         .select({
           id: persona.id,
+          organizationId: persona.organizationId,
           projectId: persona.projectId,
+          name: persona.name,
           revision: persona.revision,
           archivedAt: persona.archivedAt,
         })
@@ -1144,10 +1456,22 @@ export async function archivePersona(
         .for("update");
 
       if (locked === undefined) return undefined;
+      if (locked.organizationId === null) {
+        throw new EgmaProvidedPersonaError(locked.id, locked.name);
+      }
+      if (locked.projectId === null) {
+        throw new Error(`customer-owned persona ${locked.id} has no project`);
+      }
+      const lockedProjectId = locked.projectId;
       expectRevision(locked, request.expectedRevision);
       if (locked.archivedAt !== null) return readPersonaOn(tx, auth, locked.id);
 
-      const blocking = await liveTestsNamingPersona(tx, locked.id);
+      const blocking = await liveTestsNamingPersona(
+        tx,
+        auth,
+        lockedProjectId,
+        locked.id,
+      );
       if (blocking.length > 0) {
         throw new PersonaNamedByTestsError(locked.id, blocking);
       }
@@ -1162,10 +1486,10 @@ export async function archivePersona(
           .select({ id: persona.id })
           .from(persona)
           .where(
-            and(
-              eq(persona.id, replacement),
-              eq(persona.projectId, locked.projectId),
-              notArchived,
+            personaAvailableToProject(
+              auth,
+              lockedProjectId,
+              and(eq(persona.id, replacement), notArchived),
             ),
           )
           .limit(1)
@@ -1178,7 +1502,7 @@ export async function archivePersona(
         await tx
           .update(project)
           .set({ defaultPersonaId: taking.id })
-          .where(eq(project.id, locked.projectId));
+          .where(eq(project.id, lockedProjectId));
       }
 
       // A bare `eq` on an id that just came off the tenancy-checked row locked
@@ -1231,6 +1555,8 @@ export async function restorePersona(
       const [locked] = await tx
         .select({
           id: persona.id,
+          organizationId: persona.organizationId,
+          name: persona.name,
           revision: persona.revision,
           archivedAt: persona.archivedAt,
         })
@@ -1240,6 +1566,9 @@ export async function restorePersona(
         .for("update");
 
       if (locked === undefined) return undefined;
+      if (locked.organizationId === null) {
+        throw new EgmaProvidedPersonaError(locked.id, locked.name);
+      }
       expectRevision(locked, request.expectedRevision);
       if (locked.archivedAt === null) return readPersonaOn(tx, auth, locked.id);
 
@@ -1284,6 +1613,7 @@ export async function listPersonaVersions(
       personaId: personaVersion.personaId,
       version: personaVersion.version,
       traits: personaVersion.traits,
+      models: personaVersion.models,
       createdAt: personaVersion.createdAt,
     })
     .from(personaVersion)
@@ -1302,6 +1632,7 @@ export async function listPersonaVersions(
     items: items.map((row) => ({
       ...row,
       traits: traitsFromRow(row.traits, row.id),
+      models: personaModelsFromRow(row.models, row.id),
     })),
     nextCursor,
   };
@@ -1328,11 +1659,17 @@ export async function testsUsingPersona(
   authorize(auth, "read", here(auth));
 
   const [found] = await db()
-    .select({ id: persona.id })
+    .select({ id: persona.id, projectId: persona.projectId })
     .from(persona)
     .where(thePersona(auth, personaId))
     .limit(1);
 
   if (found === undefined) return undefined;
-  return liveTestsNamingPersona(db(), found.id);
+  const usageProjectId = found.projectId ?? auth.projectId;
+  if (usageProjectId === undefined) {
+    throw new Error(
+      "usage of an Egma-provided persona is relative to a project, and this credential is acting in none",
+    );
+  }
+  return liveTestsNamingPersona(db(), auth, usageProjectId, found.id);
 }

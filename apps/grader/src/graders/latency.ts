@@ -9,8 +9,8 @@ import type { Execution, Judgment } from "./contract.ts";
  * **Computed, and there is no model anywhere in this file.** It is the `code`
  * half of the shelf: egma's own engine reads the numbers the shared measure
  * module worked out and compares each with the bound its copy holds. Nothing
- * here resolves a judge, so a project whose only running graders are computed
- * never unseals its judge key at all — which is a property of the shape rather
+ * here asks a provider, so a project whose only running graders are computed
+ * never uses a provider credential — which is a property of the shape rather
  * than of this file behaving well.
  *
  * **Its assertions are its config entries, one each.** A copy holds one filled-in

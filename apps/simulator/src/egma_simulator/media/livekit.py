@@ -192,14 +192,11 @@ class LiveKitBackend:
             wait_until_answered=True,
             play_dialtone=False,
         )
-        if self._settings.trunk_id is not None:
-            request.sip_trunk_id = self._settings.trunk_id
-        else:
-            request.trunk.hostname = self._settings.trunk_address
-            if self._settings.trunk_username is not None:
-                request.trunk.auth_username = self._settings.trunk_username
-            if self._settings.trunk_password is not None:
-                request.trunk.auth_password = self._settings.trunk_password
+        request.trunk.hostname = self._settings.trunk_address
+        if self._settings.trunk_username is not None:
+            request.trunk.auth_username = self._settings.trunk_username
+        if self._settings.trunk_password is not None:
+            request.trunk.auth_password = self._settings.trunk_password
         if self._caller_id is not None:
             request.sip_number = self._caller_id
 

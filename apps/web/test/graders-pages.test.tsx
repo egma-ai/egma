@@ -1400,7 +1400,7 @@ describe("what the two forms are drawn from", () => {
  * page that did its own fetching, and on this shell a refusal keeps the API's
  * own sentence and neither could ever be shown.
  *
- * Only the objects a screen addresses by name. `SCOPES`, `TYPES` and `OWNERS`
+ * Only the objects a screen addresses by name. `SCOPES` and `TYPES`
  * are lookup tables read with a stored word as the key — `SCOPES[copy.scope]` —
  * so no source file names their keys and none ever will. They are declared
  * `Readonly<Record<string, string>>` rather than `as const`, which is exactly

@@ -26,6 +26,7 @@ import {
   listSimulations,
   listRunHistory,
   markSimulationCanceled,
+  EGMA_PROVIDED_PERSONAS,
   readRunFold,
   restoreTest,
   rerunSimulation,
@@ -51,7 +52,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * Reading a project's run history, and retrying one run under today's
@@ -102,7 +103,6 @@ const auth = actingAsAcme();
 const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
 } as const;
 
 let agentId: string;
@@ -119,7 +119,12 @@ let cancelsVersion: string;
 let needsAudioVersion: string;
 
 async function seedPersona(name: string): Promise<string> {
-  return (await createPersona(auth, { name, traits: neutralTraits })).id;
+  return (
+    await createPersona(auth, {
+      name,
+      traits: neutralTraits,
+    })
+  ).id;
 }
 
 async function seedTest(
@@ -188,8 +193,6 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
-  await seedJudge(actingAsAcme("admin"));
-  await seedJudge({ ...actingAsGlobex(), role: "admin" });
   // **No running graders here, and this file genuinely does not want any.**
   // Every verdict below is appended by hand under an invented grader id, which
   // is what lets one test write a passed row and a failed row and read the fold
@@ -647,6 +650,42 @@ describe("retrying a run", () => {
     expect(before?.retryOfRunId).toBeNull();
   });
 
+  it("retries a frozen test that received the Egma-provided default persona", async () => {
+    await database.sql(
+      "update project set default_persona_id = $1 where id = $2",
+      [EGMA_PROVIDED_PERSONAS.defaultPersona, acme.project],
+    );
+    try {
+      const shared = await createTest(auth, {
+        name: `Uses the Egma-provided default ${newId("tst")}`,
+        scenario: "The caller needs to move an appointment.",
+        expectedBehaviors: ["offers another time"],
+      });
+      expect(shared.personas.map((one) => one.id)).toEqual([
+        EGMA_PROVIDED_PERSONAS.defaultPersona,
+      ]);
+      const earlier = await startRun(auth, {
+        agentId,
+        connectionId,
+        testVersionIds: [shared.versionId],
+        idempotencyKey: newId("run"),
+      });
+
+      const again = await retryRun(auth, earlier.id, {
+        idempotencyKey: newId("run"),
+      });
+      expect(again?.retryOfRunId).toBe(earlier.id);
+      expect(again?.simulations.map((one) => one.personaId)).toEqual([
+        EGMA_PROVIDED_PERSONAS.defaultPersona,
+      ]);
+    } finally {
+      await database.sql(
+        "update project set default_persona_id = null where id = $1",
+        [acme.project],
+      );
+    }
+  });
+
   it("answers the same run twice under one key rather than dialing twice", async () => {
     const earlier = await anEarlierRun();
     const key = newId("run");
@@ -1054,7 +1093,7 @@ describe("running one simulation again", () => {
     const moved = await editPersona(auth, person.id, {
       traits: {
         ...neutralTraits,
-        voice: { ...neutralTraits.voice, speed: 0.9 },
+        personality: "Moves after the source edit.",
       },
     });
     if (moved === undefined) throw new Error("the persona edit should land");

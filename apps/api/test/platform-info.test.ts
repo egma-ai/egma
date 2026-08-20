@@ -2,7 +2,6 @@ import { connect, disconnect } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 import { expect, it } from "vitest";
 
-
 import { REPOSITORY_CONTRACT } from "../src/routes/platform.ts";
 import { buildApi } from "../src/server.ts";
 import {
@@ -17,33 +16,17 @@ import { testConfig } from "./support/api.ts";
  */
 const NOTHING_SET_UP = {
   state: "setup_required",
-  missing: [
-    "the persona's model provider",
-    "the persona's model",
-    "the persona's model key",
-    "the speech-to-text provider",
-    "the speech-to-text key",
-    "the text-to-speech provider",
-    "the text-to-speech key",
-    "the voice-activity provider",
-    "the media backend",
-    "the carrier trunk",
-    "the source number",
-  ],
+  missing: ["the carrier trunk", "the source number"],
 };
 
 /**
- * And what its phone half answers: the three non-secret facts the carrier
- * stands on, named separately because a platform with no carrier still runs
+ * And what its phone half answers: the two facts the carrier route
+ * needs, named separately because a platform with no carrier still runs
  * text and chat simulations perfectly well.
  */
 const NO_CARRIER = {
   state: "setup_required",
-  missing: [
-    "the carrier trunk",
-    "the source number",
-    "the text-to-speech provider",
-  ],
+  missing: ["the carrier trunk", "the source number"],
 };
 
 /**
@@ -84,10 +67,8 @@ it("keeps one public platform identity across an API restart", async () => {
       // store rather than from this process's environment — which is why it
       // survives a restart with nothing carried across but the database.
       setup: NOTHING_SET_UP,
-      // Phone readiness is a second fact and never a component of the first.
-      // A platform with no carrier is ready — it runs text simulations
-      // perfectly well — and saying otherwise would make the first-run story
-      // impossible to tell. What it says instead is what setup still needs.
+      // Phone readiness is a separate public fact. A platform with no carrier
+      // still runs chat simulations even while setup names the missing route.
       phone: NO_CARRIER,
     });
 
@@ -147,9 +128,8 @@ it("reads its identity rather than writing on every public request", async () =>
         // answer including the ones served entirely from memory.
         repository_contract: REPOSITORY_CONTRACT,
         setup: NOTHING_SET_UP,
-        // A platform nobody has set a carrier up on says so here rather than
-        // anywhere a developer has to go looking, and says it separately from
-        // being ready — it runs text simulations perfectly well.
+        // A platform with no carrier says so here rather than making a
+        // developer discover it during a phone run. Chat still works.
         phone: NO_CARRIER,
       });
     }

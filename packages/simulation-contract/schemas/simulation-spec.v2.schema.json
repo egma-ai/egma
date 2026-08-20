@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:spec:v2",
+  "title": "Simulation spec (v2)",
+  "description": "The only simulation work-order contract. The pinned persona version supplies one complete LLM, STT, and TTS selection. The control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "simulation_id",
+    "modality",
+    "connection",
+    "persona",
+    "scenario",
+    "limits",
+    "models"
+  ],
+  "properties": {
+    "contract_version": {
+      "description": "The one spec version this simulator implements.",
+      "type": "integer",
+      "const": 2
+    },
+    "simulation_id": {
+      "description": "The simulation this spec conducts. Opaque to the simulator.",
+      "type": "string",
+      "minLength": 1
+    },
+    "modality": {
+      "description": "Chat exercises the agent harness. Voice adds the speech stack.",
+      "type": "string",
+      "enum": ["chat", "voice"]
+    },
+    "connection": {
+      "description": "How the simulator reaches the agent under test. The type selects the plug.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "config", "credentials"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "type": "object"
+        },
+        "credentials": {
+          "oneOf": [{ "type": "object" }, { "type": "null" }]
+        }
+      }
+    },
+    "persona": {
+      "description": "Who talks on the human side of the transcript.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traits"],
+      "properties": {
+        "traits": {
+          "description": "Authored behavior only. Technical voice settings live only in models.tts.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["personality", "language"],
+          "properties": {
+            "personality": {
+              "type": "string",
+              "minLength": 1
+            },
+            "language": {
+              "type": "string",
+              "minLength": 1
+            },
+            "manner": {
+              "type": "string",
+              "minLength": 1
+            },
+            "patience": {
+              "type": "string",
+              "minLength": 1
+            },
+            "accent": {
+              "type": "string",
+              "minLength": 1
+            },
+            "backgroundNoise": {
+              "type": "string",
+              "minLength": 1
+            },
+            "underFriction": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "scenario": {
+      "description": "What the persona wants in this test.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instructions"],
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "limits": {
+      "description": "The walls around one simulation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_duration_seconds", "max_turns"],
+      "properties": {
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "mock_tools": {
+      "description": "Resolved mock-tool answers for this simulation.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/mock_tool" }
+    },
+    "platform": {
+      "description": "Deployment carrier data. It contains the SIP trunk only. The media backend remains deployment configuration.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "carrier": { "$ref": "#/$defs/platform_carrier" }
+      }
+    },
+    "models": {
+      "$ref": "#/$defs/models"
+    }
+  },
+  "$defs": {
+    "platform_carrier": {
+      "description": "The SIP trunk used for a phone simulation.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trunk_address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_number": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_password": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "models": {
+      "description": "The complete model selection from the pinned persona version, with direct credentials resolved for this claim.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["llm", "stt", "tts"],
+      "properties": {
+        "llm": { "$ref": "#/$defs/llm_selection" },
+        "stt": { "$ref": "#/$defs/stt_selection" },
+        "tts": { "$ref": "#/$defs/tts_selection" }
+      }
+    },
+    "llm_selection": {
+      "description": "The persona brain. This release has one proved direct LLM adapter.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "key"],
+      "properties": {
+        "provider": { "type": "string", "const": "openai" },
+        "model": { "type": "string", "const": "gpt-4o-mini" },
+        "key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stt_selection": {
+      "description": "The persona ears. The provider and model form one closed pair. OpenAI always uses the realtime adapter.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["deepgram", "openai"]
+        },
+        "model": { "type": "string" },
+        "key": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "provider": { "const": "deepgram" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "properties": { "model": { "const": "nova-3-general" } }
+          },
+          "else": {
+            "properties": { "model": { "const": "gpt-live-transcribe" } }
+          }
+        }
+      ]
+    },
+    "tts_selection": {
+      "description": "The persona mouth. Voice and speed live with the provider and model that interpret them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "voice_id", "speed"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["cartesia", "openai"]
+        },
+        "model": { "type": "string" },
+        "voice_id": { "type": "string", "minLength": 1 },
+        "speed": { "type": "number", "minimum": 0.5, "maximum": 2 },
+        "key": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "provider": { "const": "cartesia" } },
+            "required": ["provider"]
+          },
+          "then": {
+            "properties": { "model": { "const": "sonic-3.5" } }
+          },
+          "else": {
+            "properties": { "model": { "const": "gpt-4o-mini-tts" } }
+          }
+        }
+      ]
+    },
+    "mock_tool": {
+      "description": "One mock tool name and its resolved answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_name", "answer", "delay_milliseconds"],
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "answer": { "$ref": "#/$defs/mock_tool_answer" },
+        "delay_milliseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000
+        }
+      }
+    },
+    "mock_tool_answer": {
+      "description": "A returned value or a failure, never both.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["answer"],
+          "properties": {
+            "answer": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "modality": { "const": "voice" } },
+        "required": ["modality"]
+      },
+      "then": {
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "properties": { "key": {} },
+                "required": ["key"]
+              },
+              "tts": {
+                "type": "object",
+                "properties": { "key": {} },
+                "required": ["key"]
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "not": {
+                  "properties": { "key": {} },
+                  "required": ["key"]
+                }
+              },
+              "tts": {
+                "type": "object",
+                "not": {
+                  "properties": { "key": {} },
+                  "required": ["key"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

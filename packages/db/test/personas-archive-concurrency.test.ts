@@ -8,7 +8,6 @@ import {
   getPersona,
   WriteAbortedError,
   type AuthContext,
-  type PersonaTraits,
 } from "@egma/db";
 
 import {
@@ -57,11 +56,8 @@ const auth: AuthContext = {
   via: "session",
 };
 
-const TRAITS: PersonaTraits = {
-  personality: "Speaks plainly and asks one question at a time.",
-  language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
-};
+const PERSONALITY = "Speaks plainly and asks one question at a time.";
+const TRAITS = { personality: PERSONALITY, language: "en-US" } as const;
 
 /** How many times the pair is raced. Enough for an ordering bug to show. */
 const ROUNDS = 40;

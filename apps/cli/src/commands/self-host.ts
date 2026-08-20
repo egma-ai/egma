@@ -5,7 +5,7 @@
  * `run` operate an *agent repository* — tests, and the address of the platform
  * that owns their identifiers. Everything under `self-host` operates a
  * *platform workspace* — the deployment itself, its containers, and the carrier
- * and provider credentials that belong to whoever runs it. On one laptop that
+ * route that belongs to whoever runs it. On one laptop that
  * is often the same person, and the product still keeps the two apart, because
  * one platform serves many repositories and platform secrets must not spread
  * into any of them.
@@ -19,20 +19,14 @@
  *   prepares the workspace: a workspace with no media-server credential is
  *   given one, generated here and written beside the other bootstrap
  *   variables, so that no deployment runs on a pair anyone can read.
- * - **`setup`** configures that deployment. One command for the whole platform
- *   rather than two with different state: it asks the platform what it is
- *   missing, asks the operator for each of those in a fixed order, copies the
- *   carrier bundle where the phone half is among them, and **writes every
- *   answer through the platform's own API**. It never receives account-wide
- *   Twilio credentials or changes Twilio. There is no second setup command and
- *   no file of settings beside the deployment.
+ * - **`setup`** configures the deployment's carrier route. It asks what route
+ *   the platform holds, collects one complete bundle when needed, and writes
+ *   it through the platform's own API. It never receives account-wide Twilio
+ *   credentials or changes Twilio.
  *
- * **Nothing here seals anything, and nothing here keeps a setting.** The
- * platform owns its settings: they live sealed in its store, they survive a
- * restart and an upgrade and a move to another machine, and each simulator is
- * handed them on the work order it claims. What this CLI still writes to the
- * workspace is the bootstrap variables a container reads when it is created —
- * see `BOOTSTRAP_VARIABLES` — and nothing else.
+ * **Nothing here seals anything.** The platform owns the carrier route and
+ * seals it in its store. This CLI writes only the bootstrap variables a
+ * container reads when it is created. See `BOOTSTRAP_VARIABLES`.
  *
  * **The address `up` prints is the address the platform reports.** They are one
  * value, not two that happen to agree: the CLI refuses to send a repository's
@@ -64,7 +58,6 @@ import {
   askOptionally,
   askPlainly,
   askSecret,
-  keyHint,
   CARRIER_VARIABLES,
   NoAnswerError,
   StoppedError,
@@ -79,7 +72,6 @@ import {
   type Receipt,
 } from "../self-host/receipt.ts";
 import {
-  inputFor,
   NotSignedInError,
   PlatformRefusedError,
   readSettings,
@@ -297,18 +289,6 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
   try {
     if (verb === "up") return await runUp(options, invocation);
     if (verb === "setup") return await runSetup(options, invocation);
-    // The command this one replaced, answered by name rather than by the
-    // general "does not know" below. Somebody typing it is following
-    // documentation or a shell history from before the settings moved into the
-    // platform, and the one useful thing to say is which words do it now.
-    if (verb === "phone setup") {
-      options.fail(
-        "egma self-host phone setup is gone. There is one setup command now, and it " +
-          "covers the whole platform rather than the phone alone:\n" +
-          "  egma self-host setup",
-      );
-      return SELF_HOST_EXIT.noWorkspace;
-    }
   } catch (error) {
     // Three ways this command cannot start at all: the directory is not a
     // platform workspace, there is no docker, or the address it was given is
@@ -367,7 +347,7 @@ export async function runSelfHostCommand(options: SelfHostOptions): Promise<numb
   options.fail(
     `egma self-host does not know ${verb === "" ? "that" : `"${verb}"`}. It knows:\n` +
       "  egma self-host up      Start the whole platform.\n" +
-      "  egma self-host setup   Configure it: the persona's providers and the carrier.",
+      "  egma self-host setup   Configure its carrier route.",
   );
   return SELF_HOST_EXIT.noWorkspace;
 }
@@ -380,9 +360,7 @@ async function runUp(
 ): Promise<number> {
   const workspace = findWorkspace(invocation.cwd ?? options.cwd);
   const stored = readPlatformConfig(workspace);
-  // Everything that reaches a container comes through this one door, so a
-  // settings line an older egma left in that file is inert by construction
-  // rather than by anybody remembering. See `BOOTSTRAP_VARIABLES`.
+  // Only the closed bootstrap list reaches a container.
   const boot = bootstrapVariables(stored);
 
   // One address, decided here. The environment wins because a deployment
@@ -527,11 +505,8 @@ async function runUp(
 
   options.out(`platform: ${platform.instanceId}`);
   options.out(`services: ${STARTED.join(" ")}`);
-  // Two facts about one deployment. The platform answers for its whole
-  // configuration now — the persona's providers as much as the carrier — and it
-  // answers for the phone separately, because a platform with no carrier runs
-  // chat and text simulations perfectly well and calling that unhealthy would
-  // be a lie that stops a first run dead.
+  // Two views of one deployment fact. Platform setup is the carrier route, and
+  // phone readiness says whether that route can place a call.
   options.out(`setup: ${platform.setupState}`);
   if (platform.setupMissing.length > 0) {
     options.out(`setup_missing: ${platform.setupMissing.join(", ")}`);
@@ -758,21 +733,15 @@ function exportedCarrierBundleIn(
 }
 
 /**
- * `egma self-host setup`: one command for the whole platform's configuration.
+ * `egma self-host setup`: the carrier-route setup command.
  *
- * **It asks the platform what it is missing, and asks the operator for exactly
- * that.** Which settings exist, what each is called and what order they come in
- * are the platform's answers, not this command's opinion — so a setting added
- * to the platform's catalog is a setting the interview asks for with nothing
- * kept in step by hand. A setting the platform already holds is never asked for
- * again, which is what makes running this twice cost nothing.
+ * **It asks the platform what carrier route it holds.** A complete route is
+ * left alone. A missing route is written as one complete bundle.
  *
  * **Every answer is written through the API.** Nothing here seals, nothing here
  * holds an encryption key, and nothing here writes a setting to a file. That is
- * the reversal this whole effort is: the settings used to live in a file only
- * this CLI read, so a platform started any other way had none of them, every
- * health check still passed, and the failure arrived minutes later as a carrier
- * or provider refusal naming nothing about configuration.
+ * the reversal this work makes: the route lives in the platform store, not in
+ * a file only this CLI reads.
  *
  * **Everything is asked before anything is written.** An operator can gather
  * what they need before they start — `--plan` prints exactly that list — and a
@@ -821,9 +790,8 @@ async function runSetup(
     options.out(`url: ${address}`);
   }
 
-  // Who is asking. The settings door opens for an organization owner and for
-  // nobody else — they are the deployment's own provider credentials, which is
-  // a decision of the same kind as billing — so setup is a signed-in command.
+  // Who is asking. The carrier-route door opens for an organization owner and
+  // nobody else, so setup is a signed-in command.
   // It says which command mints that key rather than failing on a 401 nobody
   // can act on.
   const signedIn = await signedInAt({
@@ -834,8 +802,6 @@ async function runSetup(
   const access: PlatformSettingsAccess = { url: address, key: signedIn.key };
 
   const held = await readSettings(access);
-  const missing = held.filter((setting) => !setting.held);
-  const toAsk = missing.filter((setting) => inputFor(setting.name)?.supply === "asked");
   const exportedCarrier = exportedCarrierBundleIn(options.env);
   const heldCarrierNames = new Set(
     held
@@ -858,23 +824,8 @@ async function runSetup(
     mode.replaceCarrier ||
     (!heldIpRoute && !heldCredentialRoute);
 
-  /**
-   * Whether there is anything left for setup to do at all.
-   *
-   * **Decided on one complete carrier route and the required provider
-   * settings.** The model and voice names remain optional because each leg has
-   * a working default. A source-IP route is complete with address and number.
-   * The guided Twilio flow writes all four credential-authenticated values as
-   * one unit.
-   *
-   * They are still offered — while there is anything else to ask, the interview
-   * walks every setting the platform does not hold, so somebody setting up gets
-   * the chance to name a voice. Changing one afterwards is the settings form's
-   * job, not a reason to reopen the interview.
-   */
-  const configured =
-    !carrierWanted &&
-    !toAsk.some((setting) => inputFor(setting.name)?.required === true);
+  /** A source-IP route has two values. A credential route has all four. */
+  const configured = !carrierWanted;
 
   if (mode.planOnly) {
     // What setup would ask for, in the order it would ask, and nothing else. No
@@ -885,14 +836,11 @@ async function runSetup(
       command: "self-host setup",
       mode: "plan",
       status: configured ? "ready" : "planned",
-      asks: [
-        ...toAsk.map((setting) => setting.label),
-        ...(carrierWanted
-          ? [
-              "the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
-            ]
-          : []),
-      ],
+      asks: carrierWanted
+        ? [
+            "the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
+          ]
+        : [],
       holds: held.filter((setting) => setting.held).map((setting) => setting.name),
       platform_url: address,
       changed: "nothing",
@@ -918,11 +866,9 @@ async function runSetup(
     // setting is written — and that is said rather than left to be inferred
     // from a command that appeared to do something.
     //
-    // The media credential is still seen to, because it is the workspace's
-    // rather than the platform's: a deployment upgraded from before egma
-    // generated the pair at all can be perfectly configured and still be
-    // running on a credential published in this repository.
-    const media = await settleMediaCredential(options, workspace, stored, boot, address);
+    // The media credential is still seen to because it belongs to the
+    // workspace, not to the carrier route in the platform store.
+    const media = await settleMediaCredential(options, workspace, boot, address);
     answer(options, mode, {
       command: "self-host setup",
       mode: "apply",
@@ -943,45 +889,10 @@ async function runSetup(
 
   // -- the interview ----------------------------------------------------------
   //
-  // Everything, before anything is written. What each answer may arrive in is
-  // the same environment variable the platform seeds that setting from, so a
-  // script that already exports them drives this with nobody watching.
+  // Everything, before anything is written. The route can arrive from the
+  // documented environment variables, so a script can drive this unattended.
   const answers: Record<string, string> = {};
-  const keySources: Record<string, string> = {};
   const secrets: string[] = [];
-
-  for (const setting of toAsk) {
-    const input = inputFor(setting.name);
-    if (input === null || input.supply !== "asked") continue;
-
-    if (input.secret) {
-      const exported = options.env[input.variable]?.trim() ?? "";
-      // A secret egma can do without is never demanded of a run with nobody
-      // watching: there is nothing to type and no default worth inventing.
-      if (exported === "" && options.stdin.isTTY !== true && !input.required) continue;
-      const answered = await askSecret(
-        input.variable,
-        `${setting.label} (not shown as you type)`,
-        ask,
-      );
-      answers[setting.name] = answered.value;
-      // Where a key came from, said out loud. A variable most developers
-      // already export makes a run that reads one look exactly like a run that
-      // was told, and a stale exported key surfaces an hour later as a provider
-      // refusing every turn rather than as a mistake anybody saw being made.
-      keySources[`${setting.name}_from`] = answered.from;
-      keySources[`${setting.name}_hint`] = keyHint(answered.value);
-      secrets.push(answered.value);
-      continue;
-    }
-
-    const typed = await askOptionally(input.variable, setting.label, ask, input.suggested);
-    if (typed === null || typed === "") {
-      if (input.required) throw new NoAnswerError(setting.label, input.variable);
-      continue;
-    }
-    answers[setting.name] = typed;
-  }
 
   // -- the carrier ------------------------------------------------------------
   let carrierBundle: CarrierBundleValues | null = null;
@@ -1001,9 +912,8 @@ async function runSetup(
           CARRIER_VARIABLES.trunkAddress,
         );
       }
-      // A platform without a carrier can still run text simulations. A
-      // headless setup with no carrier values configures the provider half and
-      // reports the four phone values as still missing.
+      // A platform without a carrier can still run non-phone simulations. A
+      // headless setup with no carrier values reports the route as missing.
     } else {
       const trunkAddress = await askOptionally(
         CARRIER_VARIABLES.trunkAddress,
@@ -1065,11 +975,9 @@ async function runSetup(
   // so that pressing Ctrl-C part way through leaves this machine exactly as it
   // was.
   //
-  // A setting needs no restart at all any more: the platform reads its settings
-  // from its own store for each simulation, so a key supplied here applies to
-  // the next simulation with nothing recreated. Only a freshly minted media
-  // pair replaces a container.
-  const media = await settleMediaCredential(options, workspace, stored, boot, address);
+  // The route needs no restart. Only a freshly minted media pair replaces a
+  // container.
+  const media = await settleMediaCredential(options, workspace, boot, address);
 
   // Read once rather than waited for. Readiness is built from the store on
   // every request, so the answer is already true the moment the write lands.
@@ -1121,7 +1029,6 @@ async function runSetup(
   const done = {
     command: "self-host setup",
     mode: "apply",
-    ...keySources,
     // Names only, never values. What was written is the fact; what it was
     // written as is the platform's, sealed, and never comes back out here.
     settings_written: names,
@@ -1142,11 +1049,7 @@ async function runSetup(
   } as const;
 
   // **Two things can be wrong at once, and the answer says both.** A single
-  // sentence chosen by whichever condition was tested first masks the other,
-  // and either masking is a bad trade: an operator told only about missing
-  // settings runs setup again and never learns their media containers hold a
-  // credential nothing recorded, and one told only about the media never learns
-  // the platform is still unconfigured.
+  // sentence chosen by whichever condition was tested first masks the other.
   //
   // The media sentence goes first because it is the silent one. A missing
   // setting is named by the readiness answer on every request and by every
@@ -1187,7 +1090,7 @@ async function runSetup(
   options.fail("");
   options.fail("This Egma instance is configured.");
   options.fail(
-    "Its settings live in the platform's own store, sealed, so they survive a restart, an upgrade and a move to another machine — and every simulator is handed them on the work order it claims.",
+    "Its carrier route lives in the platform store, sealed, so it survives a restart and a move to another machine.",
   );
   if (carrierBundle !== null) {
     options.fail(
@@ -1231,17 +1134,9 @@ function platformAddress(given: string, from: string): string {
  * See to this workspace's media-server credential: decide it, write it down,
  * and replace the three containers that hold it when this run is what made it.
  *
- * **In the ordinary order `up` has already done all of this.** Setup talks to a
- * running platform, and a running platform was started by `up`. What this
- * covers is a deployment brought up before egma generated the pair at all,
- * whose first act after upgrading is setup — and it goes through the same
- * one-winner step `up` does, so a setup racing a start cannot leave the two of
- * them running on different pairs.
- *
- * **The whole file is carried forward.** A workspace upgraded from the release
- * that kept settings there still holds a provider key in it; nothing reads that
- * line any more, and deleting it would throw away somebody's only copy of a key
- * a provider shows exactly once. See `BOOTSTRAP_VARIABLES`.
+ * **In the ordinary order `up` has already done all of this.** Setup still uses
+ * the same one-winner step, so a setup racing a start cannot leave the two
+ * commands with different pairs.
  *
  * The three are recreated together rather than restarted, because a container
  * keeps the environment it was created with — and replacing one of them and not
@@ -1252,13 +1147,12 @@ function platformAddress(given: string, from: string): string {
 async function settleMediaCredential(
   options: SelfHostOptions,
   workspace: string,
-  stored: Readonly<Record<string, string>>,
   boot: Readonly<Record<string, string>>,
   address: string,
 ): Promise<SettledMedia> {
   const media = await recordMediaCredential(workspace, options.env);
   writePlatformConfig(workspace, {
-    ...stored,
+    ...boot,
     ...media.values,
     EGMA_BASE_URL: address,
   });

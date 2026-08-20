@@ -115,6 +115,7 @@ const USE_KEYS = [
   "required",
   "scope",
   "production_sample_rate",
+  "judge_model",
   "project",
 ] as const;
 
@@ -184,6 +185,7 @@ function described(one: Grader): Record<string, unknown> {
     version: one.version,
     version_id: one.versionId,
     config: one.config,
+    judge_model: one.judgeModel,
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
   };
@@ -223,6 +225,48 @@ function paramsIn(body: Body): WrittenParams {
     };
   }
   return { params: params as FilledInForm };
+}
+
+type WrittenJudgeModel =
+  | { readonly value: NonNullable<Grader["judgeModel"]> | null | undefined }
+  | { readonly refusal: string };
+
+/** A grader version's exact non-secret model selection. */
+function judgeModelIn(body: Body): WrittenJudgeModel {
+  if (!("judge_model" in body) || body.judge_model === undefined) {
+    return { value: undefined };
+  }
+  if (body.judge_model === null) return { value: null };
+  if (
+    typeof body.judge_model !== "object" ||
+    Array.isArray(body.judge_model)
+  ) {
+    return {
+      refusal:
+        'judge_model is an object with exactly "provider" and "model" text fields',
+    };
+  }
+
+  const held = body.judge_model as Record<string, unknown>;
+  const keys = Object.keys(held);
+  if (
+    keys.length !== 2 ||
+    !keys.includes("provider") ||
+    !keys.includes("model") ||
+    typeof held.provider !== "string" ||
+    typeof held.model !== "string"
+  ) {
+    return {
+      refusal:
+        'judge_model is an object with exactly "provider" and "model" text fields',
+    };
+  }
+  return {
+    value: {
+      provider: held.provider,
+      model: held.model,
+    } as NonNullable<Grader["judgeModel"]>,
+  };
 }
 
 /** A flag a body sent, refused rather than coerced: `"false"` is not false. */
@@ -451,6 +495,15 @@ export async function graderRoutes(
     const params = paramsIn(body);
     if ("refusal" in params) return unprocessable(reply, params.refusal);
 
+    const judgeModel = judgeModelIn(body);
+    if ("refusal" in judgeModel) return unprocessable(reply, judgeModel.refusal);
+    if (judgeModel.value === null) {
+      return unprocessable(
+        reply,
+        "judge_model cannot be null when using a library entry; omit it to use the supported default",
+      );
+    }
+
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
@@ -479,6 +532,9 @@ export async function graderRoutes(
     const created = await useLibraryEntry(acting.auth, {
       libraryId,
       ...(params.params === undefined ? {} : { params: params.params }),
+      ...(judgeModel.value === undefined
+        ? {}
+        : { judgeModel: judgeModel.value }),
       // Absent leaves the copy named after the entry it is a copy of; an empty
       // one is the factory's refusal to make, in the factory's own words.
       ...(name.value === undefined ? {} : { name: name.value }),
@@ -550,6 +606,9 @@ export async function graderRoutes(
     const params = paramsIn(body);
     if ("refusal" in params) return unprocessable(reply, params.refusal);
 
+    const judgeModel = judgeModelIn(body);
+    if ("refusal" in judgeModel) return unprocessable(reply, judgeModel.refusal);
+
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
@@ -575,6 +634,9 @@ export async function graderRoutes(
 
     const edited = await editGrader(acting.auth, graderId, {
       ...(params.params === undefined ? {} : { params: params.params }),
+      ...(judgeModel.value === undefined
+        ? {}
+        : { judgeModel: judgeModel.value }),
       // An empty name is not a rename this door drops — a copy has to be
       // called something, and the factory says so in its own words.
       ...(name.value === undefined ? {} : { name: name.value }),

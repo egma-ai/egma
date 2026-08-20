@@ -1,12 +1,12 @@
 import type {
   AuthContext,
-  Grader,
+  ExecutableGrader,
   LibraryEntry,
   Verdict,
 } from "@egma/db";
 
 import type { Conversation } from "../conversation.ts";
-import type { JudgeMakers, JudgeResolution } from "../judge/index.ts";
+import type { AskableJudge } from "../judge/index.ts";
 
 /**
  * What every grader is handed and what every one of them answers with.
@@ -62,43 +62,14 @@ export type Judgment = {
 };
 
 /**
- * How a library entry that judges with a model reaches one.
- *
- * **A capability rather than a fact about the grader.** It is handed to every
- * executor, including the ones egma computes, and those simply never call it —
- * resolving a judge is what unseals a project's key, so a conversation whose
- * graders are all computed never opens the envelope however many of them were
- * handed this. That is what keeps "asked for only if something judges" a
- * property of the shape rather than of the roster.
- *
- * **The key is deliberately absent, and cannot be reached from here.** What
- * `judging` answers with is a way to ask and a `provider/model` name to record,
- * so no executor — today's or tomorrow's — can put a secret in a rationale, a
- * verdict row or a log line.
+ * How a library entry that judges with a model reaches one. The selected
+ * provider key is already closed inside this capability and cannot be reached
+ * from an executor, verdict row, or log.
  */
 export type Judging = {
-  /**
-   * The project's judge, resolved at most once per conversation and shared by
-   * everything on it that judges — so five judged checks cost one read of the
-   * configuration rather than five, and all of them speak with one account.
-   */
-  readonly judge: JudgeResolution;
-  /** How each provider is spoken to. A test hands over a scripted one. */
-  readonly makers: JudgeMakers;
-  /**
-   * This grader version's own judge, or `null` for the project's default.
-   *
-   * The override is judged content: it lives on the immutable version beside the
-   * config, so a verdict written under it stays readable as "decided by this
-   * model" long after the project's default moved on. It names a provider and a
-   * model and never a key, so a grader cannot move a project's judging onto an
-   * account nobody configured.
-   */
-  readonly model: JudgeModelOverride;
+  /** Null only for a code grader, which never calls it. */
+  readonly judge: AskableJudge | null;
 };
-
-/** What a version may insist on: a provider and a model, or the project's. */
-type JudgeModelOverride = Grader["judgeModel"];
 
 /**
  * What egma knows about *this* conversation besides its spans — what an entry
@@ -136,7 +107,7 @@ export type Reading = {
  */
 export type Execution = {
   readonly definition: LibraryEntry;
-  readonly config: Grader["config"];
+  readonly config: ExecutableGrader["config"];
   readonly conversation: Conversation;
   readonly judging: Judging;
   readonly reading: Reading;

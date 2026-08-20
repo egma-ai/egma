@@ -109,10 +109,9 @@ class PhoneCall:
 
         if settings is None:
             raise PlugError(
-                "this deployment places no phone calls: give the platform a "
-                f"media backend — one of {sorted(BACKENDS)} — with the carrier "
-                f"trunk that backend needs, or set {BACKEND_VARIABLE} on this "
-                "container"
+                "this deployment places no phone calls: set "
+                f"{BACKEND_VARIABLE} on this container to one of "
+                f"{sorted(BACKENDS)}"
             )
         # **The moment a carrier's own refusals belong.** The settings are
         # assembled for every simulation and most of them never dial, so a

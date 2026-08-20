@@ -15,7 +15,6 @@ import {
   makeWorld,
   oneServiceAtATime,
   seedGrader,
-  seedJudge,
   seedTest,
   theSeededGrader,
   verdictsOn,
@@ -113,7 +112,6 @@ async function judgedWith(
 
 beforeAll(async () => {
   world = await makeWorld("grader_expected_behaviors");
-  await seedJudge(world);
 });
 
 afterAll(async () => {

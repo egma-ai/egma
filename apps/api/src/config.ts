@@ -1,15 +1,12 @@
 import type { PlatformSettingValues } from "@egma/db";
+import {
+  providerCredentialSource,
+  type ProviderCredentialSource,
+} from "@egma/provider-credentials";
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
 import type { BlobStore } from "./recordings/signed-link.ts";
-
-/** A judge the platform hands to projects that have configured none. */
-export type DefaultJudge = {
-  readonly provider: string;
-  readonly model: string;
-  readonly key: string;
-};
 
 /** Which source owns the carrier route after the platform has started. */
 export type CarrierSettingsSource = "platform" | "environment";
@@ -37,12 +34,11 @@ export type Config = {
   /** What sessions are signed with. Absent means the service will not start. */
   readonly authSecret: string;
   /**
-   * What connection credentials are sealed under before they touch a row —
+   * What carrier and connection credentials are sealed under before they touch a row —
    * 32 random bytes as 64 hex characters (`openssl rand -hex 32`). Malformed
-   * or absent means the service will not start: a deployment that stored
-   * customers' provider keys under a weak or missing key would be quietly
-   * under-encrypted, which is the one failure nobody notices until the
-   * database leaks.
+   * or absent means the service will not start. Model-provider keys do not use
+   * this path: they stay in the deployment credential source and are read only
+   * when model work starts.
    */
   readonly encryptionKey: string;
   /**
@@ -85,19 +81,13 @@ export type Config = {
    */
   readonly simulatorServiceToken: string;
   /**
-   * The judge a project is given when it has configured none, from the one
-   * model key a self-hoster supplied at setup.
+   * Where a claimed simulation reads the current provider-key bundle.
    *
-   * A judge still belongs to a project — this is written into each project's
-   * own sealed configuration, exactly as a project that configured its own
-   * would be, rather than handed to the grader as a container-wide key. What
-   * changes is only who filled the form in: on a self-host the person running
-   * the platform and the person owning the project are the same person, and
-   * asking them for the same key twice buys nothing. `undefined` where none
-   * was configured, and then a project with no judge of its own errors its
-   * verdicts and says so, exactly as before.
+   * Cloud reads AWS Secrets Manager for every unit of work. Self-host reads
+   * the operator's provider variables. Neither path writes a model key to
+   * Postgres, and neither keeps a cross-work key cache.
    */
-  readonly defaultJudge: DefaultJudge | undefined;
+  readonly providerCredentials: ProviderCredentialSource;
   /**
    * Which source owns the carrier route.
    *
@@ -114,23 +104,17 @@ export type Config = {
    */
   readonly carrierSettingsSource: CarrierSettingsSource;
   /**
-   * The settings this environment offers the platform on start. Most values
-   * are written only where the platform does not already hold one.
+   * The carrier route this environment offers the platform on start.
    *
-   * **This is the second of the two ways a setting gets in, and the operator
-   * chooses which.** One is an interview — `egma self-host setup` asks for each
-   * setting and writes it through the API. The other is this: an automated
-   * deployment answers no questions, so it puts the settings in its environment
-   * and the platform seeds itself from them at start. It is the behaviour the
-   * default judge already has, extended rather than reinvented.
+   * A self-host operator can write the route through `egma self-host setup`.
+   * An automated deployment can provide the same complete route through its
+   * environment. Model, speech, voice, VAD and media choices are not platform
+   * settings and cannot enter through this value.
    *
-   * Empty is the ordinary case and is never an error. A setting absent here is
-   * one somebody supplies through the interface or the setup command, and the
-   * platform says so in its readiness answer until they do.
+   * Empty is ordinary and means this deployment has no shared phone route.
    *
-   * See `carrierSettingsSource` for the one explicit choice that can make the
-   * environment replace or remove the carrier route. It never changes the
-   * seed-only rule for any other setting.
+   * See `carrierSettingsSource` for the explicit choice that lets environment
+   * input replace or remove an existing route.
    */
   readonly platformSettings: PlatformSettingValues;
   /**
@@ -370,62 +354,25 @@ export function loadConfig(
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
-    defaultJudge: defaultJudge(environment),
+    providerCredentials: providerCredentialSource(environment),
     platformSettings: platformSettings(environment),
     blob: blobStore(environment, parsedBaseUrl),
   };
 }
 
 /**
- * The settings this environment offers the platform, by the name the platform
- * stores each one under.
+ * The one live platform choice: how a phone call reaches the carrier.
  *
- * **The carrier is in here now, and that is the point of the whole effort.**
- * This process used to hold three non-secret phone facts as its own
- * configuration and hold nothing else about the deployment, so a platform
- * started without them reported `setup required` with no way to fix it but a
- * restart. They are settings like the rest now: seeded from here once, stored
- * sealed, changed through the settings form, and read from the store on every
- * answer that depends on them. This process therefore does hold the trunk
- * password long enough to seal it — the same way it already holds a judge's key
- * and a connection's credentials long enough to seal those — and it never
- * dials, speaks or listens with any of them.
- *
- * **Each variable is read here, literally and by name, on purpose.** A loop
- * over the settings catalog would be shorter and would defeat the check that
- * every variable the API reads is passed to the api container and documented
- * in `.env.example` — which is a check that exists because that exact gap
- * happened once already: phone readiness was written, documented and tested,
- * and then reported `setup required` against a real carrier because the compose
- * entry never passed the variables through.
- *
- * **Most settings remain independent, but the four phone variables are one
- * bundle.** A platform may be halfway through its model or speech setup and
- * finish it through the settings form. A Twilio credential is different: a
- * trunk from one bundle beside a username or password from another makes every
- * phone simulation fail. A carrier authenticated by source IP supplies the
- * trunk address and source number. A credential-authenticated carrier supplies
- * all four.
- * Every other subset is refused before it can become a mixed route.
+ * Model, speech, voice, VAD and media choices are deliberately absent. Model
+ * and voice choices are immutable persona content; provider keys come from the
+ * source above; VAD and media are simulator deployment details. Putting any of
+ * them back into independent platform rows would recreate the mixed STT state
+ * that failed before the first turn in production.
  */
 function platformSettings(
   environment: NodeJS.ProcessEnv,
 ): PlatformSettingValues {
   const offered = {
-    persona_model_provider: environment.EGMA_PERSONA_MODEL_PROVIDER?.trim(),
-    persona_model: environment.EGMA_PERSONA_MODEL?.trim(),
-    persona_model_key: environment.EGMA_PERSONA_MODEL_API_KEY?.trim(),
-    persona_model_reasoning_effort:
-      environment.EGMA_PERSONA_MODEL_REASONING_EFFORT?.trim(),
-    speech_to_text_provider: environment.EGMA_PERSONA_STT_PROVIDER?.trim(),
-    speech_to_text_key: environment.EGMA_PERSONA_STT_API_KEY?.trim(),
-    speech_to_text_model: environment.EGMA_PERSONA_STT_MODEL?.trim(),
-    text_to_speech_provider: environment.EGMA_PERSONA_TTS_PROVIDER?.trim(),
-    text_to_speech_key: environment.EGMA_PERSONA_TTS_API_KEY?.trim(),
-    text_to_speech_model: environment.EGMA_PERSONA_TTS_MODEL?.trim(),
-    text_to_speech_voice: environment.EGMA_PERSONA_TTS_VOICE?.trim(),
-    voice_activity_provider: environment.EGMA_PERSONA_VAD_PROVIDER?.trim(),
-    media_backend: environment.EGMA_MEDIA_BACKEND?.trim(),
     // The carrier keeps the variable names the old phone setup already wrote,
     // so an operator upgrading meets the same words they were given before.
     carrier_trunk_address: environment.EGMA_PHONE_TRUNK_ADDRESS?.trim(),
@@ -471,9 +418,7 @@ function platformSettings(
   }
 
   // Compose passes an unset optional through as an empty string rather than
-  // leaving it out, so "" and "never set" have to mean the same thing: a blank
-  // model name seeded as a model name would be a platform reporting itself
-  // configured with nothing to ask.
+  // leaving it out, so "" and "never set" have to mean the same thing.
   return Object.fromEntries(
     Object.entries(offered).filter(([, value]) => (value ?? "") !== ""),
   ) as PlatformSettingValues;
@@ -670,31 +615,3 @@ const DEFAULT_BLOB_BUCKET = "egma-recordings";
 
 /** What a store that ignores regions is signed for. See `blobRegion`. */
 const DEFAULT_BLOB_REGION = "us-east-1";
-
-/**
- * The platform's default judge, or `undefined` where it has none.
- *
- * All three or nothing: a key with no model names nothing to ask, and a model
- * with no key is a judge that errors every verdict it is given. Half a judge is
- * refused at startup rather than discovered one failed run later.
- */
-function defaultJudge(environment: NodeJS.ProcessEnv): DefaultJudge | undefined {
-  const provider = environment.EGMA_JUDGE_PROVIDER?.trim() || "";
-  const model = environment.EGMA_JUDGE_MODEL?.trim() || "";
-  const key = environment.EGMA_JUDGE_API_KEY?.trim() || "";
-  if (provider === "" && model === "" && key === "") return undefined;
-
-  const missing = [
-    provider === "" ? "EGMA_JUDGE_PROVIDER" : "",
-    model === "" ? "EGMA_JUDGE_MODEL" : "",
-    key === "" ? "EGMA_JUDGE_API_KEY" : "",
-  ].filter((name) => name !== "");
-  if (missing.length > 0) {
-    throw new Error(
-      `a default judge needs a provider, a model and a key, and this ` +
-        `deployment is missing ${missing.join(" and ")}. Set all three or ` +
-        "none: half a judge is a judge that errors every verdict it is given.",
-    );
-  }
-  return { provider, model, key };
-}

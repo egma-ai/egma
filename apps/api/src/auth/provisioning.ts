@@ -4,7 +4,6 @@ import {
   provisionOrganization,
   readInvitation,
   type Acceptance,
-  type NewPlatformJudge,
 } from "@egma/db";
 
 import {
@@ -196,22 +195,16 @@ function constraintViolated(error: unknown): string | undefined {
 /**
  * The hook the provider fires once an identity is written.
  *
- * It is given the platform's default judge because this is where a project
- * comes into existence, and a project has to be born gradable: a self-hoster's
- * ordinary first run starts a platform with no projects at all and then signs
- * up, so the first project is created while the API is already running. Waiting
- * for the next restart to give it a judge would mean every model-based verdict
- * in between came back `errored` — an operational failure that reads like
- * nothing at all, after real calls have been paid for.
+ * A new project receives its shared default persona and seeded grader in the
+ * same database transaction. Provider credentials belong to the deployment,
+ * so there is no project judge configuration to copy here.
  */
-export function onIdentityCreated(
-  defaultJudge?: NewPlatformJudge | undefined,
-): IdentityHooks["onIdentityCreated"] {
+export function onIdentityCreated(): IdentityHooks["onIdentityCreated"] {
   return async (identity, intent) => {
     recordLanding(
       intent?.kind === "invitation"
         ? await join(identity, intent.token)
-        : await provision(identity, intent, defaultJudge),
+        : await provision(identity, intent),
     );
   };
 }
@@ -265,7 +258,6 @@ async function join(
 async function provision(
   identity: ExternalIdentity,
   intent: ProvisioningIntent | undefined,
-  defaultJudge: NewPlatformJudge | undefined,
 ): Promise<Landing> {
   const named = intent?.kind === "new_organization" ? intent : undefined;
   const organizationName =
@@ -281,9 +273,6 @@ async function provision(
         organizationSlug: attempt === 1 ? base : `${base}-${attempt}`,
         projectName,
         projectSlug: slugify(projectName),
-        // In the same transaction as the project, so there is no moment in
-        // which this project exists and cannot be graded.
-        defaultJudge,
       });
 
       return {
@@ -297,9 +286,8 @@ async function provision(
     } catch (cause) {
       const constraint = constraintViolated(cause);
       // One organization per person in v1. The membership is written last, so
-      // this refusal takes the organization, the project and its starter
-      // persona down with it and the retry below would only make a second
-      // orphan.
+      // this refusal takes the organization, the project and its seeded grader
+      // down with it and the retry below would only make a second orphan.
       if (constraint === "membership_user_id_unique") {
         throw new AlreadyInAnOrganizationError();
       }

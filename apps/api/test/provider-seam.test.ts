@@ -107,8 +107,6 @@ describe("the provider's footprint on the schema", () => {
     "grading_plan",
     "idempotent_operation",
     "invitation",
-    "judge_configuration",
-    "judge_credential",
     "membership",
     "mock_tool",
     "mock_tool_agent",

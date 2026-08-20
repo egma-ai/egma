@@ -1,6 +1,6 @@
 /**
- * The interview's list of settings, held against the two lists it has to agree
- * with: the platform's catalog, and the variables the API seeds from.
+ * The carrier interview, held against the platform catalog and the variables
+ * the API seeds from.
  *
  * **These three cannot import each other.** The catalog and the seeder live in
  * the database package and the API; this CLI is a published npm package and must
@@ -14,16 +14,11 @@
  * What a drift would cost, in the order it would hurt:
  *
  * 1. **A setting the catalog requires and nothing supplies** leaves an operator
- *    who followed the whole documented setup still reading `setup required`,
- *    with nothing sensible to type. That is this effort's own failure — a
- *    platform that looks configured and is not — wearing the opposite face, and
- *    it is the agreement ticket 03 asked to keep: readiness waits only for what
- *    setup writes. *Declaring* a way in is not supplying one, so the checks
- *    below follow each of the two ways to something that really writes a value.
+ *    who followed the setup interview still reading `setup required`.
  * 2. **A variable renamed on one side** is an interview and a seeder that
  *    disagree about which word feeds a setting, so an operator's exported value
  *    silently answers nothing.
- * 3. **A secret the interview thinks is not one** is a provider key echoed on
+ * 3. **A secret the interview thinks is not one** is a SIP password echoed on
  *    somebody's screen and left in their scrollback.
  */
 
@@ -129,7 +124,6 @@ describe("what setup asks for", () => {
   it("agrees with the catalog about which settings are secret", () => {
     for (const setting of PLATFORM_SETTINGS) {
       const input = inputOf(setting.name);
-      if (input.supply !== "asked") continue;
       expect(
         input.secret,
         `the interview would ${setting.secret ? "echo" : "hide"} ${setting.name} as it ` +
@@ -155,33 +149,20 @@ describe("what setup asks for", () => {
     }
   });
 
-  it("supplies every required setting through something that writes a value", () => {
+  it("supplies every required setting as part of the carrier bundle", () => {
     for (const setting of PLATFORM_SETTINGS) {
       if (!setting.required) continue;
       const input = inputOf(setting.name);
-      if (input.supply === "carrier") {
-        expect(
-          Object.hasOwn(PHONE_INPUTS, setting.name),
-          `${setting.name} is required but is not part of the grouped phone interview`,
-        ).toBe(true);
-        continue;
-      }
-      expect(input.supply, `${setting.name} is required but setup does not ask for it`).toBe(
-        "asked",
-      );
-      if (input.supply !== "asked") continue;
       expect(
-        input.variable,
-        `${setting.name} is required and the interview has no variable to take it from`,
-      ).not.toBe("");
+        Object.hasOwn(PHONE_INPUTS, setting.name),
+        `${setting.name} is required but is not part of the grouped carrier interview`,
+      ).toBe(true);
+      expect(input.supply).toBe("carrier");
     }
   });
 
   it("takes every answer from the variable the API seeds that setting from", () => {
-    // One word for one setting, whichever of the two ways in an operator uses.
-    // Pinned against the API's own reads rather than against a copy typed into
-    // this file: a third copy of one list is a third thing to drift, and this
-    // drift would be silent — an exported value that answers nothing.
+    // Pinned against the API's own reads rather than against another copy.
     const seeded = seededFrom();
     expect(
       Object.keys(seeded).sort(),
@@ -190,7 +171,6 @@ describe("what setup asks for", () => {
 
     for (const setting of PLATFORM_SETTINGS) {
       const input = inputOf(setting.name);
-      if (input.supply !== "asked") continue;
       expect(
         input.variable,
         `setup reads ${setting.name} from ${input.variable} and the API seeds it from ` +
@@ -198,24 +178,10 @@ describe("what setup asks for", () => {
       ).toBe(seeded[setting.name]);
     }
 
-    // The same four variables also seed a fresh database at API startup. A
-    // developer can therefore rebuild locally without getting a new SIP user.
+    // The same four variables seed a fresh database at API startup.
     for (const [name, expected] of Object.entries(PHONE_INPUTS)) {
       expect(expected.variable).toBe(seeded[name]);
     }
   });
 
-  it("never suggests a value for a secret", () => {
-    // A default provider name is a convenience. A default key would be a
-    // credential written into a public repository, which is the exact class of
-    // mistake the media-server credential was.
-    for (const setting of PLATFORM_SETTINGS) {
-      const input = inputOf(setting.name);
-      if (input.supply !== "asked" || !input.secret) continue;
-      expect(
-        input.suggested,
-        `${setting.name} is a secret and the interview offers a value for it`,
-      ).toBeNull();
-    }
-  });
 });

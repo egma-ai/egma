@@ -73,9 +73,7 @@ function readinessOf(holds: Readonly<Record<string, string>>): {
   const missing = PLATFORM_SETTINGS.filter(
     (setting) => setting.required && holds[setting.name] === undefined,
   ).map((setting) => setting.label);
-  const phoneMissing = (
-    ["carrier_trunk_address", "carrier_trunk_number", "text_to_speech_provider"] as const
-  )
+  const phoneMissing = (["carrier_trunk_address", "carrier_trunk_number"] as const)
     .filter((name) => holds[name] === undefined)
     .map(
       (name) =>
@@ -192,12 +190,9 @@ const RECORDED_VARIABLES = [
   "EGMA_BASE_URL",
   "EGMA_LIVEKIT_API_KEY",
   "EGMA_LIVEKIT_API_SECRET",
-  // Two settings, recorded so that a check can prove the *absence* of one. A
-  // workspace upgraded from the release that kept settings beside the
-  // deployment still has these lines in its file, and handing them to Compose
-  // would seed the platform from that file all over again.
+  // Recorded so a check can prove the carrier route does not enter the
+  // bootstrap file or a media-container recreation.
   "EGMA_PHONE_SOURCE_NUMBER",
-  "EGMA_PERSONA_MODEL_API_KEY",
 ] as const;
 
 export type PlatformWorkspace = {

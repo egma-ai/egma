@@ -1,14 +1,12 @@
-import type { JudgeModel } from "@egma/db";
-
 import type { Judging } from "../../src/graders/index.ts";
 import type {
   Judge,
   JudgeAnswer,
   JudgeMakers,
   JudgeQuestion,
-  JudgeResolution,
   ResolvedJudge,
 } from "../../src/judge/index.ts";
+import { judgeFor } from "../../src/judge/index.ts";
 
 /**
  * The scripted judge: deterministic answers, no key, no network.
@@ -86,27 +84,18 @@ export function scriptedJudge(options: ScriptedJudgeOptions): ScriptedJudge {
  * question and the answer became this row" is testable without a database.
  */
 export function scriptedJudging(
-  options: ScriptedJudgeOptions & { readonly model?: JudgeModel | undefined },
+  options: ScriptedJudgeOptions,
 ): { readonly judging: Judging; readonly judge: ScriptedJudge } {
   const judge = scriptedJudge(options);
-
-  const resolution: JudgeResolution = async () => ({
-    judging(override, makers) {
-      const resolved: ResolvedJudge = {
-        provider: override?.provider ?? "openai",
-        model: override?.model ?? "gpt-4.1-mini",
-        key: "sk-egma-unit-judge-NEVERLEAKME",
-      };
-      return { ask: makers[resolved.provider](resolved) };
-    },
-  });
 
   return {
     judge,
     judging: {
-      judge: resolution,
-      makers: judge.makers,
-      model: options.model ?? null,
+      judge: judgeFor(
+        { provider: "openai", model: "gpt-4o-mini" },
+        { openai: "sk-egma-unit-judge-NEVERLEAKME" },
+        judge.makers,
+      ),
     },
   };
 }
@@ -120,10 +109,7 @@ export function scriptedJudging(
  * suite makes rather than a claim the doc comment makes.
  */
 export function noJudgeWanted(): Judging {
-  const refuse = (): never => {
-    throw new Error("a deterministic grader reached for a judge");
-  };
-  return { judge: refuse, makers: { openai: refuse }, model: null };
+  return { judge: null };
 }
 
 /** An answer in one line, for the ordinary case. */

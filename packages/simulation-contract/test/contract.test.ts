@@ -66,7 +66,7 @@ async function fixturesUnder(
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
-const specSchema = await readJson("schemas", "simulation-spec.v1.schema.json");
+const specSchema = await readJson("schemas", "simulation-spec.v2.schema.json");
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -97,12 +97,29 @@ type Rejection = {
 };
 
 const EXPECTED_REJECTION: Record<string, Rejection> = {
+  "spec/chat-carrying-speech-key.json": {
+    at: "/models/stt",
+    keyword: "not",
+  },
   "spec/limits-missing.json": {
     at: "",
     keyword: "required",
     property: "limits",
   },
   "spec/modality-unknown.json": { at: "/modality", keyword: "enum" },
+  // A model id belongs to the provider that owns it. This is the production
+  // failure shape: a field-by-field merge made a Deepgram provider and an
+  // OpenAI realtime model look configured until the first request. The
+  // contract refuses the pair before a simulator can claim it.
+  "spec/model-provider-mismatch.json": {
+    at: "/models/stt/model",
+    keyword: "const",
+  },
+  "spec/models-missing.json": {
+    at: "",
+    keyword: "required",
+    property: "models",
+  },
   // An answer is a value *or* a failure, and the tagged shape is what keeps
   // an authored `null` tellable from no answer at all. One that claims both
   // is refused inside the branch that would have taken the value: the
@@ -118,19 +135,31 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     keyword: "additionalProperties",
     property: "agent_id",
   },
-  // The platform's own settings are a closed list on both sides — the catalog
-  // the control plane stores them under, and the block the simulator reads. A
-  // field nobody writes is a setting nobody reads, and a spec carrying one has
-  // a deployment believing something is configured that is not, so it is
-  // refused rather than carried and dropped.
+  // Platform settings may carry the carrier only. Model and speech choices
+  // belong to the pinned persona version and are refused here.
   "spec/platform-setting-unknown.json": {
-    at: "/platform/model",
+    at: "/platform",
     keyword: "additionalProperties",
-    property: "base_url",
+    property: "model",
+  },
+  "spec/persona-missing-language.json": {
+    at: "/persona/traits",
+    keyword: "required",
+    property: "language",
+  },
+  "spec/persona-technical-voice.json": {
+    at: "/persona/traits",
+    keyword: "additionalProperties",
+    property: "voice",
   },
   "spec/wrong-contract-version.json": {
     at: "/contract_version",
     keyword: "const",
+  },
+  "spec/voice-missing-stt-key.json": {
+    at: "/models/stt",
+    keyword: "required",
+    property: "key",
   },
   "report/completed-claiming-never-ran.json": {
     at: "/events/0/facts/ending",
@@ -184,12 +213,12 @@ describe("the two schemas, as one contract", () => {
         (schema.properties as Record<string, Record<string, unknown>>)
           .contract_version as Record<string, unknown>
       ).const;
-    expect(versionOf(specSchema)).toBe(1);
+    expect(versionOf(specSchema)).toBe(2);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v1");
+    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v2");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 

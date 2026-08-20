@@ -47,9 +47,6 @@ import {
  * found this test's own input and not a coincidence.
  */
 const IGNORED_AUTH_TOKEN = "SENTINEL-twilio-auth-token-0f1c8a2e4b6d";
-const MODEL_KEY = "sk-SENTINEL-model-key-9a7c3e5f1b2d4680";
-const LISTENING_KEY = "sk-SENTINEL-listening-key-1122334455667788";
-const SPEAKING_KEY = "sk-SENTINEL-speaking-key-99887766554433221";
 const IGNORED_ACCOUNT_SID = "AC00000000000000000000000000000001";
 const SOURCE_NUMBER = "+15550100100";
 const NUMBER_SID = "PN00000000000000000000000000000001";
@@ -97,27 +94,11 @@ const WORKSPACE_PREFIX = "egma-platform-setup-";
 
 /** Everything a platform holding nothing needs before it reports ready. */
 const EVERY_ANSWER: NodeJS.ProcessEnv = {
-  EGMA_PERSONA_MODEL_API_KEY: MODEL_KEY,
-  EGMA_PERSONA_STT_API_KEY: LISTENING_KEY,
-  EGMA_PERSONA_TTS_API_KEY: SPEAKING_KEY,
   ...SHARED_CARRIER,
 };
 
 /** What a platform holds once setup has finished against a working carrier. */
 const EVERYTHING_HELD = {
-  persona_model_provider: "openai",
-  persona_model: "gpt-5.6-terra",
-  persona_model_key: MODEL_KEY,
-  // A caller on a live line does not pause to reason, so the interview's own
-  // suggestion turns it off — the one model setting egma does suggest a value
-  // for, because it is a behavior rather than a provider's model name.
-  persona_model_reasoning_effort: "none",
-  speech_to_text_provider: "openai_realtime",
-  speech_to_text_key: LISTENING_KEY,
-  text_to_speech_provider: "cartesia",
-  text_to_speech_key: SPEAKING_KEY,
-  voice_activity_provider: "silero",
-  media_backend: "livekit",
   carrier_trunk_address: EXISTING_TRUNK.domain,
   carrier_trunk_number: SOURCE_NUMBER,
   carrier_trunk_username: SIP_USERNAME,
@@ -138,17 +119,6 @@ async function runSetup(
     EGMA_BASE_URL: platform.url,
     // Nothing pre-answered unless a check says so, so a variable exported by
     // whoever is running the suite cannot answer a question for it.
-    EGMA_PERSONA_MODEL_PROVIDER: "",
-    EGMA_PERSONA_MODEL: "",
-    EGMA_PERSONA_MODEL_API_KEY: "",
-    EGMA_PERSONA_STT_PROVIDER: "",
-    EGMA_PERSONA_STT_API_KEY: "",
-    EGMA_PERSONA_TTS_PROVIDER: "",
-    EGMA_PERSONA_TTS_API_KEY: "",
-    EGMA_PERSONA_TTS_MODEL: "",
-    EGMA_PERSONA_TTS_VOICE: "",
-    EGMA_PERSONA_VAD_PROVIDER: "",
-    EGMA_MEDIA_BACKEND: "",
     EGMA_PHONE_TRUNK_ADDRESS: "",
     EGMA_PHONE_TRUNK_USERNAME: "",
     EGMA_PHONE_TRUNK_PASSWORD: "",
@@ -225,14 +195,6 @@ describe("egma self-host setup", () => {
     expect(platform.held()).toEqual(EVERYTHING_HELD);
     expectNoTwilioAccess();
 
-    // The three the simulator has a working default for are not demanded of a
-    // run with nobody watching, and readiness does not wait for them either.
-    // Each leg answers with its own provider's default, which is the whole
-    // reason egma does not store a second opinion about a model's name here.
-    expect(answered.settings_written).not.toContain("speech_to_text_model");
-    expect(answered.settings_written).not.toContain("text_to_speech_model");
-    expect(answered.settings_written).not.toContain("text_to_speech_voice");
-
     // **And nothing of this is in the workspace.** The file that used to hold
     // every one of these still exists — it carries the media-server credential,
     // which a container reads when it is created — and it carries no setting.
@@ -243,9 +205,7 @@ describe("egma self-host setup", () => {
       "EGMA_LIVEKIT_API_SECRET",
     ]);
     const written = await everythingWritten(workspace.dir);
-    for (const secret of [MODEL_KEY, LISTENING_KEY, SPEAKING_KEY, SIP_PASSWORD]) {
-      expect(written).not.toContain(secret);
-    }
+    expect(written).not.toContain(SIP_PASSWORD);
   });
 
   it("copies exactly four runtime phone values into a fresh database", async () => {
@@ -338,28 +298,6 @@ describe("egma self-host setup", () => {
     expect(run.code, run.stderr).toBe(0);
     expect(`${run.stdout}\n${run.stderr}`).not.toContain(IGNORED_AUTH_TOKEN);
     expectNoTwilioAccess();
-  });
-
-  it("asks for nothing the platform already holds", async () => {
-    // The property that makes running this twice cost nothing, and the one that
-    // makes an operator's second run about the one key they were missing.
-    platform = await startPlatform({
-      holds: Object.fromEntries(
-        Object.entries(EVERYTHING_HELD).filter(([name]) => name !== "persona_model_key"),
-      ),
-    });
-    await workspace.signIn(platform);
-
-    const run = await runSetup(["--apply", "--yes", "--json"], {
-      EGMA_PERSONA_MODEL_API_KEY: MODEL_KEY,
-      ...EVERY_ANSWER,
-    });
-
-    expect(run.code, run.stderr).toBe(0);
-    expect(platform.written).toEqual([{ persona_model_key: MODEL_KEY }]);
-    // The carrier is held, so nobody's Twilio account was read at all — no
-    // trunk listed, no credential rotated, nothing.
-    expect(twilio.requests).toEqual([]);
   });
 
   it("changes nothing on a platform that is already configured, and says so", async () => {
@@ -476,10 +414,8 @@ describe("egma self-host setup", () => {
     expect(run.code, run.stderr).toBe(0);
     expect(run.stdout).toContain("status: planned");
     expect(run.stdout).toContain("changed: nothing");
-    // The point of the mode: an operator gathers what they need *before* they
-    // start, rather than discovering a missing key one setting at a time.
-    expect(run.stdout).toContain("asks: the persona's model key");
-    expect(run.stdout).toContain("asks: the speech-to-text key");
+    // The point of the mode: an operator gathers the complete carrier route
+    // before setup writes any part of it.
     expect(run.stdout).toContain(
       "asks: the SIP trunk address and source number, plus SIP username and password when the carrier requires them",
     );
@@ -617,27 +553,12 @@ describe("egma self-host setup", () => {
     expect(run.code, run.stderr).toBe(0);
 
     const answered = JSON.parse(run.stdout) as Record<string, unknown>;
-    // Which key each leg was configured with, and where it came from. Both
-    // matter because these are variables a developer may already export: a run
-    // that reads one asks nothing and looks exactly like a run that was told,
-    // and a stale exported key surfaces an hour later as a provider refusing
-    // every turn.
-    expect(answered.persona_model_key_from).toBe("EGMA_PERSONA_MODEL_API_KEY");
-    expect(answered.persona_model_key_hint).toBe(`…${MODEL_KEY.slice(-4)}`);
-    // A hint names a key; it is not most of one.
-    expect(String(answered.persona_model_key_hint).length).toBe(5);
     expect(answered.receipt).toMatch(/^\.egma-platform\/receipts\//u);
     expect(platform.held().carrier_trunk_password).toBe(SIP_PASSWORD);
     expectNoTwilioAccess();
 
     const said = `${run.stdout}\n${run.stderr}`;
-    for (const secret of [
-      IGNORED_AUTH_TOKEN,
-      MODEL_KEY,
-      LISTENING_KEY,
-      SPEAKING_KEY,
-      SIP_PASSWORD,
-    ]) {
+    for (const secret of [IGNORED_AUTH_TOKEN, SIP_PASSWORD]) {
       expect(said).not.toContain(secret);
     }
 
@@ -649,28 +570,16 @@ describe("egma self-host setup", () => {
       path.join(workspace.dir, ".egma-platform", "receipts", receipts[0] as string),
       "utf8",
     );
-    for (const secret of [
-      IGNORED_AUTH_TOKEN,
-      MODEL_KEY,
-      LISTENING_KEY,
-      SPEAKING_KEY,
-      SIP_PASSWORD,
-    ]) {
+    for (const secret of [IGNORED_AUTH_TOKEN, SIP_PASSWORD]) {
       expect(receipt).not.toContain(secret);
     }
     expect(receipt).not.toContain("minted, not recorded");
 
-    // And the one file egma still writes here holds no provider key at all,
-    // because no provider key is this command's to keep.
+    // The bootstrap file does not hold the carrier password. The API owns and
+    // seals the carrier route.
     const bootstrap = path.join(workspace.dir, ".egma-platform", "platform.env");
     const text = await readFile(bootstrap, "utf8");
-    for (const secret of [
-      IGNORED_AUTH_TOKEN,
-      MODEL_KEY,
-      LISTENING_KEY,
-      SPEAKING_KEY,
-      SIP_PASSWORD,
-    ]) {
+    for (const secret of [IGNORED_AUTH_TOKEN, SIP_PASSWORD]) {
       expect(text).not.toContain(secret);
     }
     expect((await stat(bootstrap)).mode & 0o777).toBe(0o600);
@@ -701,21 +610,6 @@ describe("egma self-host setup", () => {
     expect(run.stderr).toContain("egma self-host setup");
     expect(run.stderr).not.toContain("egma connect");
     expectNoTwilioAccess();
-  });
-
-  it("says which command replaced the one somebody typed", async () => {
-    // Whoever types `phone setup` is following documentation or a shell history
-    // from before the settings moved into the platform, and the one useful
-    // thing to say is which words do it now.
-    platform = await startPlatform();
-
-    const run = await runSelfHost(workspace, ["phone", "setup"], {
-      EGMA_BASE_URL: platform.url,
-    });
-
-    expect(run.code).not.toBe(0);
-    expect(run.stderr).toContain("egma self-host phone setup is gone");
-    expect(run.stderr).toContain("egma self-host setup");
   });
 
   it("works in a workspace named with --cwd, in both spellings", async () => {

@@ -5,30 +5,19 @@ import {
 } from "@egma/db";
 
 /**
- * Whether this platform has been set up, and what it is still missing.
+ * Whether this platform holds its optional carrier route, and what is missing.
  *
- * **Readiness stopped being a fact about the phone alone.** The settings a
- * deployment needs used to live in a file beside it that only the CLI read, and
- * a platform started any other way had none of them — the phone, the persona's
- * model, the speech providers, all absent at once, and each absence surfacing
- * minutes later as a failure naming nothing about configuration. So the
- * platform answers for its whole configuration here, reading what it holds from
- * its own store rather than from this process's environment.
+ * The platform store owns only the phone carrier route. Persona and grader
+ * versions own model choices, and the deployment credential source owns
+ * provider keys, so neither can appear in this answer.
  *
- * **Everything in the answer is non-secret, and that is what lets it be
- * answered at the one door that asks for no credential.** It names which
- * settings are absent, in the words a person would use — "the persona's model
- * key" rather than a column name — and it never carries a value that any
- * setting marked secret holds. The one door to a stored secret is the work
- * order a simulator claims, and it is nowhere near this.
+ * Everything in the answer is non-secret. It names missing carrier fields in
+ * the words a person uses and never carries a secret value. The one door to the
+ * stored SIP password is the phone work order a simulator claims.
  *
- * **This and phone readiness are two facts, not one.** A platform with no
- * carrier still runs chat and text simulations perfectly well, so `phone` keeps
- * answering separately and the run door keeps gating on it alone. What this
- * adds is the whole-platform answer beside it: `setup required` while anything
- * at all is missing, the carrier included. Both now read the same store, so
- * they can no longer be a fact about the deployment and a fact about one
- * container that quietly disagree.
+ * `setup` and `phone` remain separate fields in the public platform response.
+ * Both read the same carrier store, so they cannot drift between Postgres and
+ * one container's environment.
  */
 
 export type PlatformSetupState = "ready" | "setup_required";
@@ -65,7 +54,7 @@ export function labelOf(name: PlatformSettingName): string {
  * *presence*, and `platformFacts` answers `null` for every setting the catalog
  * marks secret — so a reader that tested the value instead would read every
  * secret as absent forever, and would start doing it to a phone fact the day
- * one of those three becomes a secret. Asking about the key rather than the
+ * one becomes a secret. Asking about the key rather than the
  * value is what makes that impossible rather than merely unlikely.
  */
 export function holds(held: PlatformFacts, name: PlatformSettingName): boolean {
@@ -75,17 +64,8 @@ export function holds(held: PlatformFacts, name: PlatformSettingName): boolean {
 /**
  * The platform's answer, from what its store holds.
  *
- * The carrier is among the settings now, so this is one list over one source
- * rather than a composition of two. That is what closes the gap the effort
- * started from: there is no half of this answer left that a container could
- * hold and lose.
- *
- * **Only the settings setup has to supply are waited for.** The catalog says
- * which, and two of them are not: the simulator has a working default for the
- * text-to-speech model and voice, so a platform that has never named one still
- * speaks. Demanding them would tell an operator who finished the whole
- * documented setup that they had not, which is this effort's own failure
- * wearing the opposite face.
+ * The carrier catalog is the complete list. No model, voice or provider-key
+ * setting can become a second readiness requirement here.
  */
 export function platformReadiness(held: PlatformFacts): PlatformReadiness {
   const missing = PLATFORM_SETTINGS.filter(

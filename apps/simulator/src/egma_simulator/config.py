@@ -26,8 +26,6 @@ from pathlib import Path
 from .reporting import DELIVERY_DEADLINE_SECONDS
 from .spec import PlatformCarrier
 
-MODEL_PROVIDERS = ("scripted", "openai")
-DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1"
 LOG_LEVELS = ("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG")
 
 DEFAULT_CAPACITY = 2
@@ -38,69 +36,20 @@ bare simulator and a container use the same limit unless an operator supplies
 ``EGMA_SIMULATOR_CAPACITY`` explicitly.
 """
 
-STT_PROVIDERS = ("scripted", "deepgram", "openai", "openai_realtime")
+STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime")
 """What the persona hears with. ``scripted`` needs no account and no network.
 
-``openai`` and ``openai_realtime`` are one account and two transports, and
-they are two names here because the transport is what differs and a model
-name cannot be trusted to imply it. ``openai`` posts a finished recording
-of each turn and waits for the answer; ``openai_realtime`` holds a socket
-open and transcribes while the agent is still talking. On a phone line the
-second is the one worth having — the first adds the length of every turn
-to that turn's own latency, and hears nothing until the turn is over."""
+``openai_realtime`` holds a socket open and transcribes while the agent is
+still talking. The segmented OpenAI adapter was removed: an OpenAI STT
+selection has one meaning and cannot reach ``/audio/transcriptions``."""
 
-TTS_PROVIDERS = ("scripted", "elevenlabs", "openai", "cartesia")
+TTS_PROVIDERS = ("scripted", "openai", "cartesia")
 """What the persona speaks with. ``scripted`` needs no account and no network."""
 
 VAD_PROVIDERS = ("scripted", "silero")
 """How the persona hears the agent start and stop speaking. Neither needs
 an account or a network: ``silero`` ships inside the pinned pipecat wheel
 and downloads nothing, and ``scripted`` reads the test codec exactly."""
-
-SPEECH_PROVIDER_KEYS = {
-    "deepgram": "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
-    "elevenlabs": "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
-    "openai": "EGMA_SIMULATOR_OPENAI_API_KEY",
-    "openai_realtime": "EGMA_SIMULATOR_OPENAI_API_KEY",
-    "cartesia": "EGMA_SIMULATOR_CARTESIA_API_KEY",
-}
-"""The variable each real speech provider's key arrives in. Naming a
-provider is what makes its key required, and the refusal names this.
-
-``openai`` is one entry for both legs on purpose: one account speaks and
-listens, so a self-hoster who set up the phone path supplied one key and
-must not be asked for a second under another name. ``openai_realtime``
-reads that same variable for the same reason — it is the same account
-reached over a different transport, and asking for the key twice under
-two names would be egma inventing a second account nobody has."""
-
-DEFAULT_STT_MODEL = "gpt-4o-transcribe"
-"""What the segmented openai listening leg asks for when nobody names one."""
-
-DEFAULT_REALTIME_STT_MODEL = "gpt-live-transcribe"
-"""What the streaming openai listening leg asks for when nobody names one."""
-
-DEFAULT_TTS_MODEL = "gpt-4o-mini-tts"
-DEFAULT_TTS_VOICE = "alloy"
-"""What the openai speaking leg asks for when nobody names one.
-
-Models are configuration rather than a constant of the product: the
-provider retires and adds them on its own schedule, and a deployment must
-be able to move without waiting for a release."""
-
-DEFAULT_CARTESIA_TTS_MODEL = "sonic-3.5"
-"""What the cartesia speaking leg asks for when nobody names one."""
-
-# **A model name belongs to the provider that coined it, and every default
-# above is therefore one provider's.** They are separate constants rather
-# than one, because one shared default is a name that is right for exactly
-# one leg and wrong for every other: a deployment that switched its mouth
-# to cartesia and named no model would otherwise ask cartesia for an
-# openai model and fail at the first word. So each leg carries its own
-# fallback, and what a deployment *says* is the only thing that crosses
-# between providers — which is also why the three fields on the config
-# below are optional rather than pre-filled. `None` there means nobody
-# named one, and the leg that is actually built answers with its own.
 
 MEDIA_BACKENDS = ("scripted", "livekit")
 """How a phone call's audio may travel. Naming one is what makes a
@@ -171,9 +120,7 @@ def _seconds(name: str, fallback: float, *, allow_zero: bool = False) -> float:
     try:
         value = float(raw)
     except ValueError:
-        raise ValueError(
-            f"{name} must be a number of seconds, got {raw!r}"
-        ) from None
+        raise ValueError(f"{name} must be a number of seconds, got {raw!r}") from None
     if not math.isfinite(value):
         # `float()` reads "nan", "inf" and "-inf", and the range check
         # below cannot catch the first two: every comparison against nan
@@ -184,9 +131,7 @@ def _seconds(name: str, fallback: float, *, allow_zero: bool = False) -> float:
         # and an infinite report deadline retries one report until the
         # process ends, holding a capacity slot nothing will free. Both
         # are worse than not starting.
-        raise ValueError(
-            f"{name} must be a finite number of seconds, got {raw!r}"
-        )
+        raise ValueError(f"{name} must be a finite number of seconds, got {raw!r}")
     if value < 0 or (value == 0 and not allow_zero):
         wanted = "zero or more" if allow_zero else "more than zero"
         raise ValueError(f"{name} must be {wanted}, got {raw}")
@@ -212,27 +157,8 @@ def _one_of(name: str, allowed: tuple[str, ...], fallback: str) -> str:
     """A variable naming one of a short list, refused by name when it does not."""
     chosen = _text(name, fallback)
     if chosen not in allowed:
-        raise ValueError(
-            f"{name} must be one of {', '.join(allowed)}; got {chosen!r}"
-        )
+        raise ValueError(f"{name} must be one of {', '.join(allowed)}; got {chosen!r}")
     return chosen
-
-
-def _speech_key(provider: str) -> str:
-    """The key a chosen speech provider needs, or a refusal naming its variable.
-
-    Choosing a provider is the whole of what makes its key required. A
-    simulator started with a provider it has no key for would conduct
-    nothing: every voice simulation it claimed would fail at the first
-    turn, one after another, with the provider's refusal rather than with
-    the one sentence that says which variable to set. So it says it here,
-    before it claims anything.
-    """
-    variable = SPEECH_PROVIDER_KEYS[provider]
-    key = _text(variable)
-    if key is None:
-        raise ValueError(f"{variable} is required when the {provider} leg is chosen")
-    return key
 
 
 def _writable_directory(name: str, path: Path) -> Path:
@@ -256,27 +182,19 @@ def _writable_directory(name: str, path: Path) -> Path:
         probe.unlink()
     except OSError as refusal:
         raise ValueError(
-            f"{name}={path} is not a directory the simulator can write to: "
-            f"{refusal}"
+            f"{name}={path} is not a directory the simulator can write to: {refusal}"
         ) from refusal
     return path
 
 
 @dataclass(frozen=True)
 class MediaSettings:
-    """How this deployment places a phone call.
+    """How one claimed phone simulation places its call.
 
-    A phone call needs a bridge and — for a real one — a SIP trunk, and
-    both belong to the deployment rather than to any one simulation.
-
-    **The two halves now arrive from two places, and that is the point.**
-    The bridge is the media server this container talks to: a third-party
-    binary that reads its own key and secret when it is created, so those
-    stay in this environment and are checked at startup as they always
-    were. The trunk is the carrier paperwork somebody did once with
-    Twilio, which belongs to the whole platform — so it rides each work
-    order, and a second simulator on another machine needs no file copied
-    to it. :meth:`for_simulation` is where the two meet.
+    The bridge is deployment configuration. The SIP trunk belongs to the
+    platform and arrives on the work order. :meth:`from_env` reads only the
+    bridge. :meth:`for_simulation` joins it to that work order's carrier.
+    There is no container-level trunk to fall back to.
 
     A deployment that names no backend and is handed none gets no settings
     at all and places no calls: dialling is opt-in, and a simulator that
@@ -289,9 +207,6 @@ class MediaSettings:
     livekit_url: str | None = None
     livekit_api_key: str | None = None
     livekit_api_secret: str | None = field(default=None, repr=False)
-
-    trunk_id: str | None = None
-    """A SIP trunk already stored in LiveKit. Wins over the inline fields."""
 
     trunk_address: str | None = None
     trunk_number: str | None = None
@@ -312,17 +227,8 @@ class MediaSettings:
     def from_env(cls) -> MediaSettings | None:
         """This deployment's bridge, or ``None`` where it names none.
 
-        **The trunk is read here and no longer required here.** It used to
-        be: a simulator that named a backend and no trunk refused to start,
-        because the trunk was this container's to have and half a
-        deployment was nobody's. It is the platform's now, and a simulator
-        waiting for a work order to bring it one is an ordinary and
-        supported deployment — so the sentence that used to stop the
-        container has moved to :meth:`checked`, which runs when a call is
-        actually about to be placed and can see both halves at once. What
-        a self-hoster with no carrier reads instead is the platform's own
-        readiness answer, which names the carrier as a setting it is
-        missing. That answer is the whole reason this effort exists.
+        A trunk is not deployment configuration. It arrives with each
+        claimed simulation and is checked only when the phone plug dials.
         """
         named = _text("EGMA_SIMULATOR_MEDIA_BACKEND")
         if named is None:
@@ -333,11 +239,8 @@ class MediaSettings:
     def for_backend(cls, named: str, *, because: str) -> MediaSettings:
         """One backend's settings out of this container's environment.
 
-        ``because`` is what made the backend required, said the way a
-        refusal says it — the variable that named it, or the platform
-        setting that did. Which one it was is the whole of the difference,
-        and a self-hoster reading the refusal needs to know which of the
-        two to go and change.
+        ``because`` is the deployment variable that made the backend
+        required, repeated in any refusal so an operator knows what to fix.
         """
         if named not in MEDIA_BACKENDS:
             raise ValueError(
@@ -347,47 +250,14 @@ class MediaSettings:
         if named != "livekit":
             return cls(backend=named)
 
-        settings = cls(
+        return cls(
             backend=named,
             livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", because=because),
-            livekit_api_key=_needed(
-                "EGMA_SIMULATOR_LIVEKIT_API_KEY", because=because
-            ),
+            livekit_api_key=_needed("EGMA_SIMULATOR_LIVEKIT_API_KEY", because=because),
             livekit_api_secret=_needed(
                 "EGMA_SIMULATOR_LIVEKIT_API_SECRET", because=because
             ),
-            trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
-            trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
-            trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
-            trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
-            trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
         )
-        # Half a trunk *in this environment* is still refused here, by name
-        # and at startup, even though the whole trunk is no longer required
-        # here. Which trunk a call goes over may now come from the platform,
-        # but a container holding one of these two variables and not the
-        # other is a mistake somebody made in this file, and the sentence
-        # that fixes it is the one naming both variables.
-        if settings.trunk_id is None and (settings.trunk_username is None) != (
-            settings.trunk_password is None
-        ):
-            # Both names written out whole, never assembled from parts: a
-            # variable somebody has to search for has to be searchable, in
-            # this file as much as in the sentence it prints.
-            username = "EGMA_SIMULATOR_SIP_TRUNK_USERNAME"
-            password = "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"
-            missing, given = (
-                (password, username)
-                if settings.trunk_password is None
-                else (username, password)
-            )
-            raise ValueError(
-                f"{missing} is required alongside {given}: a trunk "
-                "authenticated by credentials needs both halves, and a "
-                "carrier refuses half of one exactly the way it refuses a "
-                "wrong one"
-            )
-        return settings
 
     @classmethod
     def for_simulation(
@@ -395,10 +265,9 @@ class MediaSettings:
     ) -> MediaSettings | None:
         """The bridge and trunk one simulation is dialled over.
 
-        This container's own settings with the platform's carrier laid
-        over them, and it is the one place the two meet. ``None`` where
-        neither names a backend, which is every deployment that has never
-        been given a carrier and is the ordinary case.
+        This container's backend with the platform's carrier laid over it,
+        and it is the one place the two meet. ``None`` means this deployment
+        has no media backend. A work order cannot create one.
 
         **It never refuses.** This runs for every simulation, and most
         simulations never dial: a platform whose carrier is half configured
@@ -409,71 +278,25 @@ class MediaSettings:
         every refusal lives in :meth:`checked`, which the phone plug calls
         when a call is really about to be placed.
 
-        **The platform's inline trunk replaces the container's whole
-        trunk, stored reference and all.** A container that still held
-        ``EGMA_SIMULATOR_SIP_TRUNK_ID`` would otherwise keep dialling its
-        own trunk while the platform's settings page showed another — the
-        exact shape of silent disagreement this effort exists to end. The
-        replacement is whole for the same reason: address, number,
-        username and password move together, so a platform trunk can never
-        be dialled with a leftover caller identity from this container.
+        Address, number, username and password always move together from
+        the work order. No field can come from an older container setting.
         """
-        backend = carrier.media_backend or (
-            None if standing is None else standing.backend
-        )
-        if backend is None:
+        if standing is None:
             return None
-
-        bridge = (
-            standing
-            if standing is not None and standing.backend == backend
-            # The platform names a backend this container did not, so the
-            # bridge it needs has not been read yet. Reading it here rather
-            # than at startup is what lets a simulator be given a carrier
-            # after it was started, which is the whole of "adding capacity
-            # is starting a container and nothing else". Read without
-            # demanding: a missing one is the phone's problem to report,
-            # and it is reported by `checked` at the moment of dialling.
-            else cls._bridge_this_container_offers(backend)
-        )
+        backend = standing.backend
+        bridge = standing
         if backend != "livekit":
             return cls(backend=backend)
 
-        platform_named_a_trunk = carrier.trunk_address is not None
-        trunk = carrier if platform_named_a_trunk else bridge
         return cls(
             backend=backend,
             livekit_url=bridge.livekit_url,
             livekit_api_key=bridge.livekit_api_key,
             livekit_api_secret=bridge.livekit_api_secret,
-            trunk_id=None if platform_named_a_trunk else bridge.trunk_id,
-            trunk_address=trunk.trunk_address,
-            trunk_number=trunk.trunk_number,
-            trunk_username=trunk.trunk_username,
-            trunk_password=trunk.trunk_password,
-        )
-
-    @classmethod
-    def _bridge_this_container_offers(cls, backend: str) -> MediaSettings:
-        """The media server this container reaches, read without demanding.
-
-        The bridge is bootstrap configuration — a third-party binary reads
-        its own key and secret when it is created — so it is this
-        container's whatever the platform says. What is different from
-        :meth:`for_backend` is only the silence: an absent variable is left
-        absent rather than refused, because this is read for every
-        simulation and most of them never dial.
-        """
-        return cls(
-            backend=backend,
-            livekit_url=_text("EGMA_SIMULATOR_LIVEKIT_URL"),
-            livekit_api_key=_text("EGMA_SIMULATOR_LIVEKIT_API_KEY"),
-            livekit_api_secret=_text("EGMA_SIMULATOR_LIVEKIT_API_SECRET"),
-            trunk_id=_text("EGMA_SIMULATOR_SIP_TRUNK_ID"),
-            trunk_address=_text("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"),
-            trunk_number=_text("EGMA_SIMULATOR_SIP_TRUNK_NUMBER"),
-            trunk_username=_text("EGMA_SIMULATOR_SIP_TRUNK_USERNAME"),
-            trunk_password=_text("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"),
+            trunk_address=carrier.trunk_address,
+            trunk_number=carrier.trunk_number,
+            trunk_username=carrier.trunk_username,
+            trunk_password=carrier.trunk_password,
         )
 
     def checked(self) -> MediaSettings:
@@ -511,36 +334,26 @@ class MediaSettings:
                 f"this deployment dials through livekit and this container is "
                 f"missing {' and '.join(absent)}"
             )
-        if self.trunk_id is None and self.trunk_address is None:
+        if self.trunk_address is None:
             raise ValueError(
-                "a phone call needs a trunk, and this deployment has none. "
-                "Give the platform a carrier trunk — the setting is on its "
-                "settings page and `egma self-host setup` writes it — "
-                "or set EGMA_SIMULATOR_SIP_TRUNK_ID on this container for a "
-                "trunk already stored in LiveKit"
+                "a phone call needs platform.carrier.trunk_address, but this "
+                "work order has none"
             )
         # Credential auth is a pair. Neither half is a trunk the carrier
         # authenticates some other way — by the address it came from — and
         # that is a real deployment. One half is nobody's deployment: every
         # call it places comes back 403, which reads as *wrong* credentials
         # rather than as half of one, and it reads that way once per
-        # simulation until somebody looks here. The rule binds the inline
-        # trunk only: with a stored trunk selected the inline fields are
-        # never read, and refusing a working deployment over a leftover
-        # half would be the louder wrong.
-        if self.trunk_id is None and (self.trunk_username is None) != (
-            self.trunk_password is None
-        ):
+        # simulation until somebody looks here.
+        if (self.trunk_username is None) != (self.trunk_password is None):
             missing, given = (
                 ("password", "username")
                 if self.trunk_password is None
                 else ("username", "password")
             )
             raise ValueError(
-                f"this deployment's carrier trunk has a {given} and no "
-                f"{missing}: a trunk authenticated by credentials needs both "
-                "halves, and a carrier refuses half of one exactly the way it "
-                "refuses a wrong one"
+                f"platform.carrier has a trunk_{given} and no trunk_{missing}: "
+                "a trunk authenticated by credentials needs both halves"
             )
         return self
 
@@ -696,83 +509,11 @@ class SimulatorConfig:
     work asks for it. Kept out of the dataclass repr — it is a credential
     and travels like one."""
 
-    model_provider: str = "scripted"
-    """Where the persona's words come from: ``scripted`` (deterministic,
-    what CI and the local workbench story run on) or ``openai`` (any
-    provider speaking the OpenAI chat-completions shape)."""
-
-    model_base_url: str = DEFAULT_MODEL_BASE_URL
-    """The provider's base URL, for the ``openai`` provider."""
-
-    model_name: str | None = None
-    """Which model to ask for. Required for the ``openai`` provider."""
-
-    model_api_key: str | None = field(default=None, repr=False)
-    """The provider key. Required for the ``openai`` provider; kept out of
-    the dataclass repr so no log line can carry it by accident."""
-
-    model_reasoning_effort: str | None = None
-    """How hard the model should think before the persona speaks, passed to
-    the provider verbatim, or ``None`` to send nothing at all.
-
-    **Verbatim and unchecked, on purpose.** The vocabulary is the
-    provider's — it has grown more than once and it differs between
-    providers speaking the same chat-completions shape — so a list here
-    would be egma holding a second opinion about somebody else's API and
-    refusing a value that works. Sending nothing when nobody asked is what
-    keeps a model that has never heard of the field working exactly as it
-    did.
-
-    A persona is a caller in a hurry, not a puzzle-solver: the thing being
-    tested is the agent's reasoning, and every millisecond the persona
-    spends thinking is silence on a live line that no real caller would
-    leave. So a deployment that turns reasoning off here is the ordinary
-    one."""
-
-    stt_provider: str = "scripted"
-    """The persona's ears, for a voice simulation: ``scripted`` (the exactly
-    invertible test codec, what CI and the free local demo run on) or
-    ``deepgram``. Read at pipeline assembly and nowhere else."""
-
-    tts_provider: str = "scripted"
-    """The persona's mouth, for a voice simulation: ``scripted`` or
-    ``elevenlabs``. Chosen apart from the ears on purpose — a real mouth
-    with scripted ears is a configuration somebody will want."""
-
     vad_provider: str = "scripted"
     """What tells the persona the agent has started or stopped speaking:
     ``scripted`` (the test codec read exactly, so every boundary is a
     sample position) or ``silero``. Chosen apart from the other two for
     the same reason, and needing no key either way."""
-
-    deepgram_api_key: str | None = field(default=None, repr=False)
-    """The Deepgram key. Required when the ``deepgram`` ears are chosen;
-    kept out of the dataclass repr, and registered for redaction."""
-
-    elevenlabs_api_key: str | None = field(default=None, repr=False)
-    """The ElevenLabs key. Required when the ``elevenlabs`` mouth is chosen;
-    kept out of the dataclass repr, and registered for redaction."""
-
-    openai_api_key: str | None = field(default=None, repr=False)
-    """The OpenAI key, for whichever of the two legs names ``openai``. The
-    same key the persona's brain uses when the model provider is ``openai``
-    too — one account, one key, which is what a self-hoster supplies once at
-    `egma self-host setup` when both legs are on the same account."""
-
-    cartesia_api_key: str | None = field(default=None, repr=False)
-    """The Cartesia key. Required when the ``cartesia`` mouth is chosen;
-    kept out of the dataclass repr, and registered for redaction."""
-
-    stt_model: str | None = None
-    tts_model: str | None = None
-    tts_voice: str | None = None
-    """Which models and which voice the legs ask for, or ``None`` where
-    nobody named one and the built leg answers with its own provider's
-    default. Read at pipeline assembly and nowhere else.
-
-    ``None`` rather than a pre-filled name, because these three cross
-    providers and a name does not: see the note beside the defaults at the
-    top of this file."""
 
     media: MediaSettings | None = None
     """How a phone call's audio travels, for a deployment that dials at
@@ -803,44 +544,6 @@ class SimulatorConfig:
                 "EGMA_SIMULATOR_S3_ENDPOINT, or a directory in "
                 "EGMA_SIMULATOR_BLOB_DIR — never both and never neither"
             )
-
-    @property
-    def speech_secrets(self) -> tuple[str, ...]:
-        """Every provider key this configuration holds.
-
-        One place to ask, so registering them for redaction cannot fall
-        behind the day a third provider arrives. The persona brain's key is
-        in here beside the speech legs' because redaction is about what a
-        log line must never carry, not about which leg reads it.
-        """
-        return tuple(
-            key
-            for key in (
-                self.deepgram_api_key,
-                self.elevenlabs_api_key,
-                self.openai_api_key,
-                self.cartesia_api_key,
-                self.model_api_key,
-            )
-            if key is not None
-        )
-
-    def key_for(self, provider: str) -> str | None:
-        """The key this container holds for one speech provider, if any.
-
-        The environment names its speech keys after providers — one openai
-        key for both legs, because one account really does serve both — and
-        the legs are what a work order names its keys after. This is the
-        one translation between the two, so a reader of either shape never
-        has to know about the other.
-        """
-        return {
-            "deepgram": self.deepgram_api_key,
-            "elevenlabs": self.elevenlabs_api_key,
-            "openai": self.openai_api_key,
-            "openai_realtime": self.openai_api_key,
-            "cartesia": self.cartesia_api_key,
-        }.get(provider)
 
     @property
     def media_secrets(self) -> tuple[str, ...]:
@@ -878,37 +581,7 @@ class SimulatorConfig:
                 f"EGMA_SIMULATOR_CAPACITY must be at least 1, got {capacity}"
             )
 
-        provider = _one_of(
-            "EGMA_SIMULATOR_MODEL_PROVIDER", MODEL_PROVIDERS, "scripted"
-        )
-        model_name = _text("EGMA_SIMULATOR_MODEL_NAME")
-        model_api_key = _text("EGMA_SIMULATOR_MODEL_API_KEY")
-        if provider == "openai":
-            if model_name is None:
-                raise ValueError(
-                    "EGMA_SIMULATOR_MODEL_NAME is required when "
-                    "EGMA_SIMULATOR_MODEL_PROVIDER=openai"
-                )
-            if model_api_key is None:
-                raise ValueError(
-                    "EGMA_SIMULATOR_MODEL_API_KEY is required when "
-                    "EGMA_SIMULATOR_MODEL_PROVIDER=openai"
-                )
-
-        stt_provider = _one_of(
-            "EGMA_SIMULATOR_STT_PROVIDER", STT_PROVIDERS, "scripted"
-        )
-        tts_provider = _one_of(
-            "EGMA_SIMULATOR_TTS_PROVIDER", TTS_PROVIDERS, "scripted"
-        )
-        vad_provider = _one_of(
-            "EGMA_SIMULATOR_VAD_PROVIDER", VAD_PROVIDERS, "scripted"
-        )
-        speech_keys = {
-            provider: _speech_key(provider)
-            for provider in (stt_provider, tts_provider)
-            if provider != "scripted"
-        }
+        vad_provider = _one_of("EGMA_SIMULATOR_VAD_PROVIDER", VAD_PROVIDERS, "scripted")
 
         # Read before the directories below, because it decides whether one
         # of them is a directory at all.
@@ -935,33 +608,12 @@ class SimulatorConfig:
                 if object_store is not None
                 else _writable_directory(
                     "EGMA_SIMULATOR_BLOB_DIR",
-                    Path(
-                        _text("EGMA_SIMULATOR_BLOB_DIR", ".egma-simulator/blobs")
-                    ),
+                    Path(_text("EGMA_SIMULATOR_BLOB_DIR", ".egma-simulator/blobs")),
                 )
             ),
             log_level=_level("EGMA_SIMULATOR_LOG_LEVEL", "INFO"),
             service_token=_text("EGMA_SIMULATOR_SERVICE_TOKEN"),
-            model_provider=provider,
-            model_base_url=_text(
-                "EGMA_SIMULATOR_MODEL_BASE_URL", DEFAULT_MODEL_BASE_URL
-            ).rstrip("/"),
-            model_name=model_name,
-            model_api_key=model_api_key,
-            model_reasoning_effort=_text("EGMA_SIMULATOR_MODEL_REASONING_EFFORT"),
-            stt_provider=stt_provider,
-            tts_provider=tts_provider,
             vad_provider=vad_provider,
-            deepgram_api_key=speech_keys.get("deepgram"),
-            elevenlabs_api_key=speech_keys.get("elevenlabs"),
-            # One variable, whichever of the two openai transports asked
-            # for it — `key_for` reads this same value under both names.
-            openai_api_key=speech_keys.get("openai")
-            or speech_keys.get("openai_realtime"),
-            cartesia_api_key=speech_keys.get("cartesia"),
-            stt_model=_text("EGMA_SIMULATOR_STT_MODEL"),
-            tts_model=_text("EGMA_SIMULATOR_TTS_MODEL"),
-            tts_voice=_text("EGMA_SIMULATOR_TTS_VOICE"),
             media=MediaSettings.from_env(),
             object_store=object_store,
         )

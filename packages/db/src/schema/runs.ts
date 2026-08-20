@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { agent, connection, MODALITIES } from "./agents.ts";
-import { persona, personaVersion } from "./personas.ts";
+import { personaVersion } from "./personas.ts";
 import { test, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
@@ -368,8 +368,9 @@ export const simulation = pgTable(
      * Who called, and the pin. The version can never change, so this row says
      * exactly who called for as long as the simulation is kept — and the
      * version is refused deletion while it does. The identity rides beside it
-     * because it is what the composite keys below pair on: the version is
-     * this persona's, and the persona is this project's.
+     * because it is what the composite key below pairs on: the version is
+     * this persona's. A migration trigger separately proves that the persona
+     * is provided by Egma or owned by this project.
      */
     personaId: idText("persona_id").notNull(),
     personaVersionId: idText("persona_version_id").notNull(),
@@ -623,11 +624,11 @@ export const simulation = pgTable(
     // The tenancy triangle, edge by edge, exactly as the run's: project of
     // the organization, agent of the project, connection of the agent — and
     // the run of the same project, so a simulation cannot sit in a run that
-    // cannot see it. The persona pin closes the same way: the version is the
-    // named persona's, and the persona is this project's, so a raw write
-    // cannot pin another customer's persona. The test pin closes it once more,
-    // on the same two edges, so a cross-project pin is unrepresentable rather
-    // than merely unwritten by the application.
+    // cannot see it. The persona/version key proves that the frozen version is
+    // the named persona's; the availability trigger proves that identity is
+    // provided by Egma or owned by this project. The test pin closes its own
+    // two edges, so a cross-project pin is unrepresentable rather than merely
+    // unwritten by the application.
     foreignKey({
       name: "simulation_project_organization_fk",
       columns: [table.projectId, table.organizationId],
@@ -653,11 +654,8 @@ export const simulation = pgTable(
       columns: [table.personaVersionId, table.personaId],
       foreignColumns: [personaVersion.id, personaVersion.personaId],
     }),
-    foreignKey({
-      name: "simulation_persona_project_fk",
-      columns: [table.personaId, table.projectId],
-      foreignColumns: [persona.id, persona.projectId],
-    }),
+    // A normal composite key cannot express "this project or Egma". Migration
+    // 0037 installs the database trigger that enforces that availability rule.
     // And the test pin closes the same way the persona pin does: the version
     // is the named test's, and the test is this project's, so a raw write
     // cannot pin another customer's test. Nullable both, and Postgres lets a

@@ -29,7 +29,7 @@ import {
   openSingleConnection,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * Asking for a conversation to be judged again.
@@ -172,7 +172,6 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
-  await seedJudge(actingAsAcme("admin"));
   // No seeded expected-behaviors copy: every grader a test here names is made
   // by `aGrader` above, because a re-grade is asked for by naming graders and a
   // copy nobody named would be a row the asks never mention.
@@ -192,15 +191,7 @@ beforeAll(async () => {
   personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: {
-        personality: "Speaks plainly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      traits: { personality: "Speaks plainly.", language: "en-US" },
     })
   ).id;
 
@@ -408,15 +399,7 @@ describe("re-grading one conversation", () => {
           (
             await createPersona(auth, {
               name,
-              traits: {
-                personality: "Speaks plainly.",
-                language: "en-US",
-                voice: {
-                  provider: "elevenlabs",
-                  voiceId: "EXAVITQu4vr4xnSDxMaL",
-                  speed: 1,
-                },
-              },
+              traits: { personality: "Speaks plainly.", language: "en-US" },
             })
           ).id,
       ),

@@ -52,11 +52,6 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // nullable pair is asserted on its own below.
   grader_library: "grl",
   grader_version: "grv",
-  // The project's default judge, keyed by the project it is the judge for.
-  judge_configuration: "prj",
-  // The organization's judge credentials: the keys egma judges with, and the
-  // one place any of them is stored.
-  judge_credential: "jcr",
   mock_tool: "mck",
   // The scope's junction, pinning the mock tool it narrows — the shape the
   // persona junction has, for the same reason.
@@ -71,8 +66,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run: "run",
   run_event: "run",
   simulation: "sim",
-  // One run's frozen grading plan: what will judge each pinned test version,
-  // and whose account pays for the judging.
+  // One run's frozen grading plan: which versions and non-secret models judge
+  // each pinned test version.
   grading_plan: "gpl",
   // The operations a client may safely send twice. Its identity is the whole
   // five-column key rather than an id of its own, so it pins its leading
@@ -186,13 +181,17 @@ describe("every identifier column", () => {
     }
   });
 
-  it("has no database default, because identifiers are minted in application code", () => {
+  it("has no database default except the required shared persona pointer", () => {
     for (const { table, column } of declaredIdentifierColumns) {
       const live = columns.find(
         (candidate) =>
           candidate.table_name === table && candidate.column_name === column,
       );
-      expect(live?.has_default, `${table}.${column} default`).toBe(false);
+      const isRequiredPersonaPointer =
+        table === "project" && column === "default_persona_id";
+      expect(live?.has_default, `${table}.${column} default`).toBe(
+        isRequiredPersonaPointer,
+      );
     }
   });
 });
@@ -240,7 +239,6 @@ describe("every table", () => {
     // migration as the judge credentials, and the grader half of that migration
     // went with the redesign. A copy is made by pressing **Use** and deleted
     // whole; there is no live edit for a revision to guard.
-    judge_credential: 1,
     project: 1,
     // Two, because a test carries two live tokens that guard two different
     // losses: the identity revision an edit to the name is written against, and
@@ -346,13 +344,13 @@ describe("the simulation's test pin", () => {
 });
 
 /**
- * The schema's one deliberate exception to hard-required tenancy.
+ * The schema's deliberate exceptions to hard-required tenancy.
  *
  * Every other table below the tenancy tables carries a `not null`
  * `organization_id`, because a row belonging to nobody is a row no permission
- * can describe. On the grader library, belonging to nobody is a real state:
- * **null tenancy means egma owns the entry**, which is what a predefined grader
- * is, and it is where the Owner label is derived from. It is asserted here
+ * can describe. On the grader library and persona shelf, belonging to nobody
+ * is a real state: **null tenancy means egma owns the definition**, which is
+ * where the Owner label is derived from. It is asserted here
  * rather than only in that table's own tests because it is a structural claim
  * about the whole schema — and because an exception nothing watches is an
  * exception that spreads.
@@ -375,16 +373,16 @@ describe("the grader library's nullable tenancy", () => {
   });
 
   /**
-   * Two tables leave the customer null, and they mean opposite things by it.
+   * Three tables leave the customer null, with two meanings.
    *
    * A device code's null is **not yet**: a terminal that has not been aimed at
    * anything, filled in the moment somebody approves it. The library's is
-   * **never**, and permanently — the entry belongs to egma, and that is the
-   * state the Owner column reads. A third table appearing in this list is
+   * **never**, and permanently — the grader or persona belongs to egma, and
+   * that is the state the Owner column reads. Another table appearing here is
    * somebody choosing one of those two meanings, which is a decision worth
    * making on purpose rather than by leaving a `notNull` off.
    */
-  it("joins the one pending-authorization table and no others", () => {
+  it("joins the persona shelf and the one pending-authorization table", () => {
     const nullable = columns.filter(
       (column) =>
         column.column_name === "organization_id" && !column.not_null,
@@ -392,6 +390,7 @@ describe("the grader library's nullable tenancy", () => {
     expect(nullable.map((column) => column.table_name).sort()).toEqual([
       "device_code",
       "grader_library",
+      "persona",
     ]);
   });
 
@@ -424,6 +423,34 @@ describe("the grader library's nullable tenancy", () => {
   });
 });
 
+describe("the persona library's nullable tenancy", () => {
+  it("keeps the owner pair whole and Egma-provided rows active", async () => {
+    const { rows } = await database.sql<{ conname: string; definition: string }>(
+      `select conname, pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conname in ('persona_tenancy_is_whole_or_egmas', 'persona_egma_provided_is_active')
+        order by conname`,
+    );
+    expect(rows.map((row) => row.conname)).toEqual([
+      "persona_egma_provided_is_active",
+      "persona_tenancy_is_whole_or_egmas",
+    ]);
+    expect(rows.map((row) => row.definition).join(" ")).toContain(
+      "organization_id IS NULL",
+    );
+  });
+
+  it("gives each Egma-provided name one identity", async () => {
+    const { rows } = await database.sql<{ indexdef: string }>(
+      `select indexdef from pg_indexes
+        where indexname = 'persona_egma_provided_name_unique'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.indexdef).toContain("UNIQUE INDEX");
+    expect(rows[0]?.indexdef).toContain("WHERE (organization_id IS NULL)");
+  });
+});
+
 describe("every timestamp", () => {
   it("is timezone-aware, because a simulation can cross midnight in two zones", () => {
     const naive = columns.filter((column) => column.type_name === "timestamp");
@@ -447,6 +474,43 @@ describe("a persona version is executable by itself", () => {
     expect(models?.not_null).toBe(true);
     expect(models?.has_default).toBe(false);
   });
+
+  it("holds human traits and model selections to closed database checks", async () => {
+    const { rows } = await database.sql<{ conname: string }>(
+      `select conname from pg_constraint
+        where conrelid = 'persona_version'::regclass
+          and conname in ('persona_version_traits_valid', 'persona_version_models_valid')
+        order by conname`,
+    );
+    expect(rows.map((row) => row.conname)).toEqual([
+      "persona_version_models_valid",
+      "persona_version_traits_valid",
+    ]);
+  });
+});
+
+describe("grader execution ownership", () => {
+  it("stores the non-secret model only on the immutable grader version", () => {
+    const model = columns.find(
+      (column) =>
+        column.table_name === "grader_version" &&
+        column.column_name === "judge_model",
+    );
+    expect(model?.type_name).toBe("jsonb");
+    expect(model?.has_default).toBe(false);
+    expect(columns.some((column) => column.table_name === "judge_configuration")).toBe(false);
+    expect(columns.some((column) => column.table_name === "judge_credential")).toBe(false);
+  });
+
+  it("keeps no credential reference on a grading plan", () => {
+    expect(
+      columns.some(
+        (column) =>
+          column.table_name === "grading_plan" &&
+          column.column_name === "judge_credential_ids",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("every enumerated value", () => {
@@ -462,6 +526,7 @@ describe("every enumerated value", () => {
 
   it("names its allowed values in a check constraint", async () => {
     const enumerated = [
+      { table: "platform_setting", column: "name" },
       { table: "membership", column: "role" },
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
@@ -472,9 +537,6 @@ describe("every enumerated value", () => {
       { table: "grader", column: "type" },
       { table: "grader_library", column: "type" },
       { table: "grader", column: "scope" },
-      { table: "judge_configuration", column: "provider" },
-      { table: "judge_configuration", column: "source" },
-      { table: "judge_credential", column: "provider" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },

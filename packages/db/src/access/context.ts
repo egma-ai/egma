@@ -55,9 +55,9 @@ export type AuthContext = {
  * exactly the same terms: `claimSimulations` builds one per claimed row, from
  * the row's own tenancy and from nothing the service said. It exists as its
  * own word rather than reusing `engine` because the two services are answered
- * different secrets — a connection's credentials open only to `simulator`, a
- * judge key only to `engine` — and a door that gated on one word for both
- * would hand each service the other's.
+ * different capabilities — connection credentials open only to `simulator`,
+ * while `engine` may write grading results — and one shared service identity
+ * would make either boundary wider than its work.
  *
  * `watch` is the third of them, for the two transports that carry somebody
  * else's production traffic into egma — the poller beside the simulation sweep
@@ -67,8 +67,8 @@ export type AuthContext = {
  *
  * It is its own word so that a context which came from a watched connection
  * says so wherever it is read, and so that it opens neither of the other two
- * services' secrets: `resolveJudgeKey` admits `engine` and
- * `resolveSimulationConnection` admits `simulator`, and this is neither.
+ * services' capabilities: `resolveSimulationConnection` admits `simulator`,
+ * and this is not it.
  *
  * **What it is not is the thing that guards the credential this path uses.**
  * The watched connection's own key is unsealed by `resolveRetellWatch`, which

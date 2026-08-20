@@ -2503,8 +2503,7 @@ export type SimulationConnection = {
  * The one door to a connection's plaintext on the dispatch path, and **egma's
  * own simulator is the only thing that may knock.**
  *
- * The gate is narrower than a role, on the terms `resolveJudgeKey` drew for
- * the other secret egma holds: the only thing egma ever does with a
+ * The gate is narrower than a role: the only thing egma ever does with a
  * connection's credentials at this seam is conduct a simulation over them,
  * and the only thing that conducts is the simulator. So the check is on how
  * the caller came to exist rather than on what their role permits — a context

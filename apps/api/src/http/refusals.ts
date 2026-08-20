@@ -53,6 +53,9 @@ export const CODES = {
   // the fix for each is somewhere else.
   persona_in_use: 409,
   default_persona_required: 409,
+  // Egma owns this shared persona definition. A project can use it as-is or
+  // fork it, but cannot change its definition or lifecycle for every customer.
+  egma_provided_persona: 422,
   // The store rolled a write back because another one got in its way. Its own
   // code because it is the one refusal that is about nothing the caller did:
   // the request was valid on the way in, nothing was written, and sending it
@@ -116,25 +119,6 @@ export const CODES = {
   // A cursor this list never issued. Its own code so a client can drop it and
   // start again rather than showing somebody a broken page forever.
   invalid_cursor: 422,
-  /**
-   * A project's judge pointed at a credential issued by a different provider.
-   * Nothing about the request is malformed and nothing is missing — the two
-   * settings simply cannot both be true — so it is its own answer.
-   */
-  judge_credential_provider_mismatch: 422,
-  /**
-   * A run refused because its project has no LLM judge. Its own code beside
-   * the run refusals because nothing about the selection is wrong: the fix is
-   * one page away, and a run builder shows it as a state rather than as a
-   * mistake somebody made.
-   */
-  judge_not_configured: 409,
-  /**
-   * A judge credential that something still needs. Its own code so a settings
-   * page can list the blocking projects, runs and jobs rather than showing one
-   * general sentence about a key.
-   */
-  judge_credential_in_use: 409,
   /**
    * A start action that named no idempotency key. 422 rather than 409: nothing
    * conflicts, something required is missing, and the fix is to send one.
@@ -355,16 +339,6 @@ export const REFUSALS = {
     `Project slug ${slug} is already in use in this organization. Choose a ` +
     "different slug and save the project again.",
 
-  judgeNotConfigured: (projectId: string): string =>
-    `This run needs an LLM judge, but project ${projectId} has no judge ` +
-    "configured. Open project Settings, configure the judge, and start the " +
-    "run again.",
-
-  judgeCredentialInUse: (credentialId: string, uses: string): string =>
-    `Judge credential ${credentialId} is used by ${uses}. Point those ` +
-    "projects at another credential and let pending grading finish, then " +
-    "archive this credential.",
-
   idempotencyKeyRequired:
     "Starting a run requires an idempotency key. Send one stable key for " +
     "this start action and try again.",
@@ -373,14 +347,6 @@ export const REFUSALS = {
     `Idempotency key ${key} already started a different run. Reuse the ` +
     "original request, or send a new key for this run.",
 
-  judgeCredentialProviderMismatch: (
-    credentialId: string,
-    credentialProvider: string,
-    judgeProvider: string,
-  ): string =>
-    `Judge credential ${credentialId} is for ${credentialProvider}, but this ` +
-    `project judge uses ${judgeProvider}. Choose a credential for ` +
-    `${judgeProvider} and save the judge setting again.`,
 } as const;
 
 /** The body could never be written, whatever is there. */

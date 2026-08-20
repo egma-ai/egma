@@ -3,10 +3,11 @@ import {
   getGrader,
   getGraderLibraryEntry,
   getSimulation,
+  pinnedSimulationGraders,
   readTrace,
   MAXIMUM_WINDOW_MILLISECONDS,
   type AuthContext,
-  type Grader,
+  type ExecutableGrader,
   type GradingClaim,
   type GradingSource,
   type LibraryEntry,
@@ -15,6 +16,7 @@ import {
   type TimeWindow,
   type TraceDetail,
 } from "@egma/db";
+import type { ProviderCredentialBundle } from "@egma/provider-credentials";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
@@ -29,8 +31,13 @@ import {
   type Judgment,
   type Reading,
 } from "./graders/index.ts";
-import { JUDGE_MAKERS, judgeOnce, type JudgeMakers } from "./judge/index.ts";
-import { applicableGraders, applicableProductionGraders } from "./resolve.ts";
+import {
+  JUDGE_MAKERS,
+  judgeFor,
+  type AskableJudge,
+  type JudgeMakers,
+} from "./judge/index.ts";
+import { applicableProductionGraders } from "./resolve.ts";
 
 /**
  * One claimed job, judged end to end: read the conversation, resolve the graders
@@ -92,6 +99,8 @@ export type Graded = {
 export class NotGradable extends Error {}
 
 export type GradeOptions = {
+  /** The current deployment bundle, loaded once for this claimed job. */
+  readonly credentials: ProviderCredentialBundle;
   /**
    * How each judge provider is spoken to. The default speaks to the real ones;
    * a test hands over a scripted judge, which is what lets the whole engine
@@ -103,7 +112,7 @@ export type GradeOptions = {
 /** A conversation and the graders that judge it: what a source resolves to. */
 type Resolved = {
   readonly conversation: Conversation;
-  readonly graders: readonly Grader[];
+  readonly graders: readonly ExecutableGrader[];
   /**
    * The simulation the conversation came from, when it came from one — what a
    * grader whose assertions live on the test goes and reads. A production trace
@@ -113,8 +122,8 @@ type Resolved = {
 };
 
 /**
- * The graders this claim judges with: the one it was reopened for, or everything
- * that applies to the conversation.
+ * The graders this production claim judges with: the one it was reopened for,
+ * or everything that applies to the conversation.
  *
  * **A narrowed claim never asks what applies**, which is why the ordinary
  * resolution is passed as something to call rather than as a list. Resolving a
@@ -133,10 +142,10 @@ type Resolved = {
  * to every grader, which would spend exactly what the narrowing was asked to
  * save.
  */
-async function judgingGraders(
+async function productionGraders(
   claim: GradingClaim,
-  whatApplies: () => Promise<readonly Grader[]>,
-): Promise<readonly Grader[]> {
+  whatApplies: () => Promise<readonly ExecutableGrader[]>,
+): Promise<readonly ExecutableGrader[]> {
   const { regradeGraderId } = claim;
   if (regradeGraderId === null) return whatApplies();
 
@@ -146,7 +155,7 @@ async function judgingGraders(
 
 export async function gradeClaim(
   claim: GradingClaim,
-  options: GradeOptions = {},
+  options: GradeOptions,
 ): Promise<Graded> {
   const { conversation, graders, simulationId } =
     claim.source === "production"
@@ -154,12 +163,7 @@ export async function gradeClaim(
       : await theSimulation(claim);
 
   const makers = options.makers ?? JUDGE_MAKERS;
-
-  // The project's judge, shared by everything on this conversation that judges
-  // and resolved only if something does. Nothing here decides whether it is
-  // needed — the things that judge ask, and a conversation where none of them
-  // does never opens the envelope.
-  const judge = judgeOnce(claim.auth);
+  const judges = judgesFor(graders, options.credentials, makers);
 
   // The definitions, read through the copies' pointers and remembered for the
   // length of this conversation. Two copies of one entry cost one read; nothing
@@ -183,13 +187,7 @@ export async function gradeClaim(
           await judgmentsOf(grader, await definitionOf(grader), {
             conversation,
             judging: {
-              judge,
-              makers,
-              // This version's own judge, or null for the project's default. It
-              // is judged content, frozen on the version beside the config, so
-              // a verdict decided by it stays readable as "decided by this
-              // model" long after the project's default moved on.
-              model: grader.judgeModel,
+              judge: judges.get(grader.versionId) ?? null,
             },
             reading,
           })
@@ -206,6 +204,32 @@ export async function gradeClaim(
     graders: graders.length,
     verdicts: rows.length,
   };
+}
+
+/**
+ * Resolve every selected model before any executor runs or verdict is written.
+ * A missing provider key therefore fails the claimed job as one unit instead
+ * of turning a deployment fault into durable `errored` verdicts.
+ */
+function judgesFor(
+  graders: readonly ExecutableGrader[],
+  credentials: ProviderCredentialBundle,
+  makers: JudgeMakers,
+): ReadonlyMap<string, AskableJudge> {
+  const resolved = new Map<string, AskableJudge>();
+  for (const grader of graders) {
+    if (grader.type === "code") continue;
+    if (grader.judgeModel === null) {
+      throw new Error(
+        `model-judged grader version ${grader.versionId} has no judge model`,
+      );
+    }
+    resolved.set(
+      grader.versionId,
+      judgeFor(grader.judgeModel, credentials, makers),
+    );
+  }
+  return resolved;
 }
 
 /**
@@ -227,7 +251,7 @@ export async function gradeClaim(
  */
 function definitionsOnce(
   auth: AuthContext,
-): (grader: Grader) => Promise<LibraryEntry | undefined> {
+): (grader: ExecutableGrader) => Promise<LibraryEntry | undefined> {
   const reading = new Map<string, Promise<LibraryEntry | undefined>>();
   return (grader) => {
     const held = reading.get(grader.libraryId);
@@ -274,7 +298,20 @@ async function theSimulation(claim: GradingClaim): Promise<Resolved> {
       simulation,
       await theSimulationsTrace(claim.auth, simulation),
     ),
-    graders: await judgingGraders(claim, () => applicableGraders(claim.auth)),
+    graders: await (async () => {
+      const pinned = await pinnedSimulationGraders(claim.auth, simulation.id);
+      if (pinned === undefined) {
+        throw new NotGradable(
+          `simulation ${simulation.id} has no reachable grading plan`,
+        );
+      }
+      // A narrowed re-grade chooses one identity from the run's own frozen
+      // list. It never follows that identity's current-version pointer: the
+      // plan's immutable version id is the only semantic source for this run.
+      return claim.regradeGraderId === null
+        ? pinned
+        : pinned.filter((grader) => grader.id === claim.regradeGraderId);
+    })(),
     simulationId: simulation.id,
   };
 }
@@ -377,7 +414,7 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
 
   return {
     conversation: conversationOfTrace(trace),
-    graders: await judgingGraders(claim, () =>
+    graders: await productionGraders(claim, () =>
       applicableProductionGraders(claim.auth),
     ),
     simulationId: undefined,
@@ -422,7 +459,7 @@ async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
  * beginning, which is what the attempt count is for.
  */
 export async function judgmentsOf(
-  grader: Grader,
+  grader: ExecutableGrader,
   definition: LibraryEntry | undefined,
   execution: {
     readonly conversation: Conversation;
@@ -483,7 +520,7 @@ export async function judgmentsOf(
  * version writes beside rather than over.
  */
 function verdictRow(
-  grader: Grader,
+  grader: ExecutableGrader,
   conversation: Conversation,
   judgment: Judgment,
 ): NewVerdict {

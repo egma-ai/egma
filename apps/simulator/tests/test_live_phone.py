@@ -15,19 +15,16 @@ line::
 
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_SIP_TRUNK_ID=ST_... \\
+    TEST_SIP_TRUNK_ADDRESS=... \\
+    TEST_SIP_TRUNK_USERNAME=... TEST_SIP_TRUNK_PASSWORD=... \\
     TEST_PHONE_NUMBER=+1... \\
-    TEST_DEEPGRAM_API_KEY=... TEST_ELEVENLABS_API_KEY=... \\
+    TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     uv run pytest tests/test_live_phone.py -v
 
-A trunk arrives either as ``TEST_SIP_TRUNK_ID`` — one already stored in
-LiveKit — or inline as ``TEST_SIP_TRUNK_ADDRESS`` with
-``TEST_SIP_TRUNK_USERNAME`` and ``TEST_SIP_TRUNK_PASSWORD``, which is the
-credential auth LiveKit documents for outbound. ``TEST_SIP_TRUNK_NUMBER``
-is the number the call appears to come from. Each name falls back to the
-``EGMA_SIMULATOR_*`` one a deployment already sets, so a machine that can
-run the simulator for real can run this without a second copy of its
-configuration.
+The test writes ``TEST_SIP_TRUNK_ADDRESS``, optional
+``TEST_SIP_TRUNK_NUMBER``, and the username/password pair into the work
+order's platform carrier. They never enter deployment configuration. The
+number is the caller ID the call appears to come from.
 
 What is asserted is *structure*, not content: a live agent says different
 words every time and a carrier's latency is nobody's to pin. So this
@@ -45,6 +42,7 @@ import pytest
 from conftest import (
     assert_kept_secret,
     credential,
+    direct_models,
     has_terminal,
     measures_for,
     milliseconds_of,
@@ -57,34 +55,22 @@ from conftest import (
 from egma_simulator.recording import channels_of
 
 LIVEKIT_URL = credential("TEST_LIVEKIT_URL", "EGMA_SIMULATOR_LIVEKIT_URL")
-LIVEKIT_API_KEY = credential(
-    "TEST_LIVEKIT_API_KEY", "EGMA_SIMULATOR_LIVEKIT_API_KEY"
-)
+LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "EGMA_SIMULATOR_LIVEKIT_API_KEY")
 LIVEKIT_API_SECRET = credential(
     "TEST_LIVEKIT_API_SECRET", "EGMA_SIMULATOR_LIVEKIT_API_SECRET"
 )
-TRUNK_ID = credential("TEST_SIP_TRUNK_ID", "EGMA_SIMULATOR_SIP_TRUNK_ID")
-TRUNK_ADDRESS = credential(
-    "TEST_SIP_TRUNK_ADDRESS", "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS"
-)
-TRUNK_NUMBER = credential(
-    "TEST_SIP_TRUNK_NUMBER", "EGMA_SIMULATOR_SIP_TRUNK_NUMBER"
-)
-TRUNK_USERNAME = credential(
-    "TEST_SIP_TRUNK_USERNAME", "EGMA_SIMULATOR_SIP_TRUNK_USERNAME"
-)
-TRUNK_PASSWORD = credential(
-    "TEST_SIP_TRUNK_PASSWORD", "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD"
-)
+TRUNK_ADDRESS = credential("TEST_SIP_TRUNK_ADDRESS")
+TRUNK_NUMBER = credential("TEST_SIP_TRUNK_NUMBER")
+TRUNK_USERNAME = credential("TEST_SIP_TRUNK_USERNAME")
+TRUNK_PASSWORD = credential("TEST_SIP_TRUNK_PASSWORD")
 PHONE_NUMBER = credential("TEST_PHONE_NUMBER")
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
-ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
+CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
 # The persona's own brain, required rather than optional — the same reason it
 # is required of the room suite. Left unset the simulator takes its scripted
 # default, whose turns are one sentence each, and a live call conducted that
 # way proves the carrier and the wire while saying nothing about speech.
 MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
-MODEL_NAME = credential("TEST_MODEL_NAME") or "gpt-4o-mini"
 
 REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
@@ -92,11 +78,13 @@ REQUIRED = {
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_PHONE_NUMBER": PHONE_NUMBER,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-    "TEST_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
-    "TEST_SIP_TRUNK_ID (or TEST_SIP_TRUNK_ADDRESS)": TRUNK_ID or TRUNK_ADDRESS,
+    "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
+    "TEST_SIP_TRUNK_ADDRESS": TRUNK_ADDRESS,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
+if bool(TRUNK_USERNAME) != bool(TRUNK_PASSWORD):
+    MISSING.append("both TEST_SIP_TRUNK_USERNAME and TEST_SIP_TRUNK_PASSWORD")
 
 
 def _corpus_root() -> str:
@@ -139,7 +127,7 @@ SECRETS = tuple(
         LIVEKIT_API_SECRET,
         TRUNK_PASSWORD,
         DEEPGRAM_API_KEY,
-        ELEVENLABS_API_KEY,
+        CARTESIA_API_KEY,
     )
     if secret
 )
@@ -152,13 +140,11 @@ MAX_DURATION_SECONDS = 90
 
 
 def deployment() -> dict[str, str]:
-    """The simulator's environment for one real call.
+    """The bridge environment for one real call.
 
-    Every variable a live phone deployment sets, in the shape the
-    simulator reads them, built from the ``TEST_*`` names so that a
-    machine keeps its test credentials apart from its working ones.
+    It has no carrier fields. Those ride the work order below.
     """
-    env = {
+    return {
         # The backend selector first, and it is not a formality: without it
         # the simulator places no calls at all and refuses this spec at
         # claim time naming the variable — which is the correct behavior
@@ -168,25 +154,22 @@ def deployment() -> dict[str, str]:
         "EGMA_SIMULATOR_LIVEKIT_URL": LIVEKIT_URL,
         "EGMA_SIMULATOR_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
         "EGMA_SIMULATOR_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
-        "EGMA_SIMULATOR_STT_PROVIDER": "deepgram",
-        "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-        "EGMA_SIMULATOR_TTS_PROVIDER": "elevenlabs",
-        "EGMA_SIMULATOR_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
-        "EGMA_SIMULATOR_MODEL_PROVIDER": "openai",
-        "EGMA_SIMULATOR_MODEL_NAME": MODEL_NAME,
-        "EGMA_SIMULATOR_MODEL_API_KEY": MODEL_API_KEY,
+        "EGMA_SIMULATOR_VAD_PROVIDER": "silero",
         "NLTK_DATA": CORPUS_ROOT,
     }
+
+
+def platform() -> dict:
+    """The only carrier source: the platform block on the work order."""
+    carrier = {"trunk_address": TRUNK_ADDRESS}
     for name, value in (
-        ("EGMA_SIMULATOR_SIP_TRUNK_ID", TRUNK_ID),
-        ("EGMA_SIMULATOR_SIP_TRUNK_ADDRESS", TRUNK_ADDRESS),
-        ("EGMA_SIMULATOR_SIP_TRUNK_NUMBER", TRUNK_NUMBER),
-        ("EGMA_SIMULATOR_SIP_TRUNK_USERNAME", TRUNK_USERNAME),
-        ("EGMA_SIMULATOR_SIP_TRUNK_PASSWORD", TRUNK_PASSWORD),
+        ("trunk_number", TRUNK_NUMBER),
+        ("trunk_username", TRUNK_USERNAME),
+        ("trunk_password", TRUNK_PASSWORD),
     ):
         if value:
-            env[name] = value
-    return env
+            carrier[name] = value
+    return {"carrier": carrier}
 
 
 async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
@@ -203,9 +186,26 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
         personality="Polite and brief; asks one thing at a time.",
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
+        platform=platform(),
+        models=direct_models(
+            modality="voice",
+            voice={
+                "provider": "cartesia",
+                "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
+                "speed": 1.0,
+            },
+            llm_key=MODEL_API_KEY,
+            stt_key=DEEPGRAM_API_KEY,
+            tts_key=CARTESIA_API_KEY,
+        ),
     )
     await workbench.offer(spec)
-    simulator = start_simulator(workbench, extra_env=deployment())
+    simulator = start_simulator(
+        workbench,
+        extra_env=deployment(),
+        direct_model=True,
+        direct_speech=True,
+    )
 
     records = await workbench.wait_for(
         has_terminal("sim-phone-live-001"), within_seconds=180
@@ -260,9 +260,7 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     # The fourth place a credential could be, and the one nothing else
     # scans: the bytes this simulation wrote itself.
     for secret in SECRETS:
-        assert secret.encode() not in recording, (
-            "the recording carried a credential"
-        )
+        assert secret.encode() not in recording, "the recording carried a credential"
 
     # Per-turn timings, measured off the real call, and never backwards.
     measures = measures_for(records, "sim-phone-live-001")

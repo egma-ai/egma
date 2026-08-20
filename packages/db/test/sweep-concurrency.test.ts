@@ -18,7 +18,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * Two sweeps, one set of orphans — racing on a real Postgres, because replica
@@ -71,7 +71,6 @@ beforeAll(async () => {
     { id: projectId, slug: "default" },
   ]);
   await seedUser(database, ada, "ada@acme.example");
-  await seedJudge({ ...auth, role: "admin" });
   // No running graders: what races here is two sweeps over one set of orphans,
   // and the guarantee under test is Postgres's. The grading jobs the sweep
   // leaves behind are counted, never read for what would judge them.
@@ -91,15 +90,7 @@ beforeAll(async () => {
   const personaId = (
     await createPersona(auth, {
       name: "Impatient Rita",
-      traits: {
-        personality: "Speaks plainly.",
-        language: "en-US",
-        voice: {
-          provider: "elevenlabs",
-          voiceId: "EXAVITQu4vr4xnSDxMaL",
-          speed: 1,
-        },
-      },
+      traits: { personality: "Speaks plainly.", language: "en-US" },
     })
   ).id;
 

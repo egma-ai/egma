@@ -13,20 +13,16 @@ import { holds, labelOf } from "./platform-readiness.ts";
  * *ready*, and this says separately whether the phone half has been set up.
  *
  * **It is read from the platform's own store rather than from this process's
- * environment**, and that move is what makes the answer recoverable. The three
- * facts used to arrive as environment variables of this container, so a
+ * environment**, and that move is what makes the answer recoverable. The route
+ * used to arrive as environment variables of this container, so a
  * platform started any other way than through the CLI reported `setup required`
  * with the carrier paperwork already done — and the only way back was to find
  * the file and restart. They are ordinary settings now: an operator who supplies
  * a missing one is ready on the next request, with nothing restarted.
  *
- * **Everything here is non-secret, and that is deliberate.** The facts are the
- * carrier's own hostname, the number a call appears to come from, and which
- * speech provider was configured — three things a caller sees on their handset
- * or an invoice, and none of which opens anything. The trunk password and the
- * provider keys are sealed in the same store and reach only the work order a
- * simulator claims; `platformFacts` answers `null` for every one of them, so no
- * answer built here can carry one even by accident.
+ * **Everything returned here is non-secret.** The facts are the carrier's
+ * hostname and the number a call appears to come from. Speech readiness comes
+ * from the pinned persona version plus the deployment credential source.
  */
 
 /** What a platform's phone half can be. */
@@ -44,19 +40,16 @@ export type PhoneReadiness = {
   readonly trunkAddress: string | null;
   /** The number a call appears to come from, E.164. Non-secret. */
   readonly sourceNumber: string | null;
-  /** Which speech provider the persona speaks and listens with. Non-secret. */
-  readonly speechProvider: string | null;
 };
 
 /**
- * The three things the phone half stands on, as the platform stores them and
- * as a refusal names them.
+ * The two public facts the phone half stands on, as the platform stores them
+ * and as a refusal names them.
  *
- * A trunk with no source number places a call the carrier refuses; a carrier
- * with no speech provider places a call nobody can talk on. Neither is *nearly*
- * ready, so a partial answer is still `setup_required` — and it says which
- * half, because the one thing worse than "not ready" is "not ready" with no
- * indication of what to do.
+ * A trunk with no source number places a call the carrier refuses. The store
+ * accepts only a complete two-value source-IP route or a complete four-value
+ * credential route, so readiness does not preserve or diagnose older partial
+ * SIP shapes.
  *
  * The label is not restated here: the settings catalog already carries the
  * words each setting is named in, and a second copy of them is a second copy to
@@ -66,10 +59,6 @@ export type PhoneReadiness = {
 export const PHONE_SETUP_FACTS = {
   trunkAddress: "carrier_trunk_address",
   sourceNumber: "carrier_trunk_number",
-  // The persona's mouth, which is also its ears on every deployment that
-  // configured one account for both. It is the one of the two legs a caller
-  // would notice, which is what makes it the fact worth reporting.
-  speechProvider: "text_to_speech_provider",
 } as const satisfies Record<string, PlatformSettingName>;
 
 export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
@@ -87,26 +76,11 @@ export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
     .filter((which) => !holds(held, PHONE_SETUP_FACTS[which]))
     .map((which) => labelOf(PHONE_SETUP_FACTS[which]));
 
-  // Old releases allowed the SIP username and password to be written one at a
-  // time. Neither is required for a source-IP route, but one without the other
-  // is not a route the simulator can use. Keep that legacy row visible and
-  // name its missing half instead of reporting the phone path ready.
-  const hasUsername = holds(held, "carrier_trunk_username");
-  const hasPassword = holds(held, "carrier_trunk_password");
-  if (hasUsername !== hasPassword) {
-    missing.push(
-      labelOf(
-        hasUsername ? "carrier_trunk_password" : "carrier_trunk_username",
-      ),
-    );
-  }
-
   return {
     state: missing.length === 0 ? "ready" : "setup_required",
     missing,
     trunkAddress: fact("trunkAddress"),
     sourceNumber: fact("sourceNumber"),
-    speechProvider: fact("speechProvider"),
   };
 }
 

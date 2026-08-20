@@ -44,6 +44,7 @@ from egma_simulator.plugs.phone import BACKEND_VARIABLE, PhoneCall
 from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.spec import SimulationSpec
+from egma_simulator.speech import SCRIPTED_PAIR
 from egma_simulator.walk import Conducted, WalkControls
 
 A_NUMBER = "+15551234567"
@@ -158,6 +159,7 @@ async def _conduct_phone(tmp_path: Path, **overrides: object) -> _PhoneRun:
         spec,
         blobs=FilesystemBlobStore(tmp_path),
         media=SCRIPTED,
+        speech=SCRIPTED_PAIR,
     )
     conductor = assembled.conductor
     assert conductor is not None
@@ -366,7 +368,7 @@ def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
         livekit_url="ws://127.0.0.1:1",
         livekit_api_key="key",
         livekit_api_secret="secret",
-        trunk_id="ST_trunk",
+        trunk_address="test.pstn.twilio.com",
     )
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
@@ -432,7 +434,10 @@ def test_a_deployment_handed_no_backend_does_not_read_the_environment(
             credentials=None,
             media=None,
         )
-    assert "places no phone calls" in str(refusal.value)
+    told = str(refusal.value)
+    assert "places no phone calls" in told
+    assert "EGMA_SIMULATOR_MEDIA_BACKEND" in told
+    assert "platform" not in told
 
 
 def taken_by(method) -> list[tuple[str, object]]:
@@ -484,7 +489,7 @@ def livekit_settings(**overrides) -> MediaSettings:
             "livekit_url": "ws://127.0.0.1:1",
             "livekit_api_key": "key",
             "livekit_api_secret": "test-livekit-secret-at-least-32-bytes",
-            "trunk_id": "ST_trunk",
+            "trunk_address": "test.pstn.twilio.com",
         }
         | overrides
     )

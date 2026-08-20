@@ -548,13 +548,7 @@ export function VerdictEvidence({
   );
 }
 
-/**
- * The plan this conversation was judged under, item by item.
- *
- * The judge is named on every row and never carries a key — a configured choice
- * is a provider, a model and a *reference*, and there is no field here a secret
- * could travel in.
- */
+/** The pinned grader versions this conversation was judged under. */
 export function PlanItems({
   items,
 }: {
@@ -579,12 +573,6 @@ export function PlanItems({
           <strong>{graderDisplayName(item.name)}</strong>
           <span className={styles.planNote}>
             {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id}`}
-            {" · "}
-            {item.judge.tag === "configured"
-              ? `${item.judge.provider}/${item.judge.model} · ${item.judge.source === "platform" ? "platform key" : `credential ${item.judge.source}`}`
-              : item.judge.tag === "not_required"
-                ? "no judge needed"
-                : "no judge recorded at capture"}
           </span>
         </li>
       ))}

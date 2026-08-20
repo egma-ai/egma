@@ -16,13 +16,18 @@ import {
   type PredefinedGrader,
 } from "../grader-library/catalog.ts";
 import {
+  RECOMMENDED_GRADER_MODEL,
+  graderModelFromRow,
+  sameGraderModel,
+  validGraderModel,
+  type GraderModel,
+} from "../models/selections.ts";
+import {
   grader,
   graderLibrary,
   graderVersion,
   GRADER_SCOPES,
-  JUDGE_PROVIDERS,
   type GraderScope,
-  type JudgeProvider,
   type LibraryType,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
@@ -75,22 +80,11 @@ import { inActingProject, within } from "./within.ts";
  */
 
 /**
- * The judges egma can ask live beside the other closed vocabularies, in the
- * schema, because the project's default judge is a table of its own and the two
- * must name the same list.
+ * The exact model this grader version executes. The provider/model pair comes
+ * from the shared executable catalog. Its key is operational deployment data
+ * and never part of this authored version.
  */
-export type { JudgeProvider };
-
-/**
- * The judge this grader insists on, instead of the project's default. Provider
- * and model only: the key lives in the encrypted credential store and is named
- * by the project's judge configuration, so nothing here can carry a secret into
- * a report or a log.
- */
-export type JudgeModel = {
-  readonly provider: JudgeProvider;
-  readonly model: string;
-};
+export type JudgeModel = GraderModel;
 
 /**
  * One **assertion's** filled-in values: the answers to what the library entry's
@@ -186,6 +180,18 @@ export type Grader = {
 };
 
 /**
+ * The immutable part of a grader needed to execute one grading job.
+ *
+ * Current production grading can supply a full `Grader`. An initial simulation
+ * supplies the version frozen in its run plan. Keeping the engine on this
+ * smaller shape prevents it from reading today's pointer by accident.
+ */
+export type ExecutableGrader = Pick<
+  Grader,
+  "id" | "libraryId" | "type" | "versionId" | "config" | "judgeModel"
+>;
+
+/**
  * What an edit may touch. The live settings write in place and version nothing;
  * the filled-in values and the judge model are what a verdict was decided by,
  * and version on any change. Absent means keep.
@@ -220,6 +226,7 @@ export type GraderChanges = {
 export type GraderVersion = {
   readonly id: string;
   readonly graderId: string;
+  readonly libraryId: string;
   readonly version: number;
   readonly type: LibraryType;
   readonly config: GraderConfig;
@@ -296,18 +303,7 @@ function validProductionSampleRate(rate: number): number {
 }
 
 function validJudgeModel(judgeModel: JudgeModel): JudgeModel {
-  const provider = knownWord(
-    JUDGE_PROVIDERS,
-    judgeModel.provider,
-    "judge provider",
-  );
-  const model = judgeModel.model.trim();
-  if (model === "") {
-    throw new UnprocessableInputError(
-      "a judge model override needs a model to name",
-    );
-  }
-  return { provider, model };
+  return validGraderModel(judgeModel);
 }
 
 /**
@@ -737,19 +733,15 @@ function configFromRow(value: unknown, versionId: string): GraderConfig {
 function judgeModelFromRow(
   value: unknown,
   versionId: string,
+  type: LibraryType,
 ): JudgeModel | null {
-  if (value === null || value === undefined) return null;
-  const malformed = (): Error =>
-    new Error(
-      `version ${versionId} holds a judge model in a shape Egma never writes; the row needs repairing before anybody can read it`,
+  if (type === "code") {
+    if (value === null || value === undefined) return null;
+    throw new Error(
+      `version ${versionId} is a code grader and holds a judge model it can never use; the row needs repairing before anybody can read it`,
     );
-
-  if (typeof value !== "object" || Array.isArray(value)) throw malformed();
-  const { provider, model } = value as Record<string, unknown>;
-  if (typeof provider !== "string" || typeof model !== "string") {
-    throw malformed();
   }
-  return { provider: provider as JudgeProvider, model };
+  return graderModelFromRow(value, versionId);
 }
 
 /**
@@ -780,7 +772,7 @@ function sameConfig(stored: GraderConfig, next: GraderConfig): boolean {
 
 function sameJudgeModel(a: JudgeModel | null, b: JudgeModel | null): boolean {
   if (a === null || b === null) return a === b;
-  return a.provider === b.provider && a.model === b.model;
+  return sameGraderModel(a, b);
 }
 
 /** The named grader, alive, within the caller's tenancy and scope. */
@@ -818,7 +810,11 @@ function answer(row: {
     type: type as LibraryType,
     scope: scope as GraderScope,
     config: configFromRow(config, row.versionId),
-    judgeModel: judgeModelFromRow(judgeModel, row.versionId),
+    judgeModel: judgeModelFromRow(
+      judgeModel,
+      row.versionId,
+      type as LibraryType,
+    ),
   };
 }
 
@@ -852,8 +848,8 @@ export async function useLibraryEntry(
   // Everything answerable without the database is answered first; only an input
   // worth writing costs the reads below.
   const name = input.name === undefined ? undefined : validName(input.name);
-  const judgeModel =
-    input.judgeModel === undefined ? null : validJudgeModel(input.judgeModel);
+  const askedJudgeModel =
+    input.judgeModel === undefined ? undefined : validJudgeModel(input.judgeModel);
   const required = input.required ?? DEFAULT_REQUIRED;
   const scope = input.scope === undefined ? "simulations" : validScope(input.scope);
   const productionSampleRate =
@@ -870,6 +866,15 @@ export async function useLibraryEntry(
 
   const written = await db().transaction(async (tx) => {
     const definition = await definitionOf(tx, auth, input.libraryId);
+    const judgeModel =
+      definition.type === "llm_as_judge"
+        ? (askedJudgeModel ?? RECOMMENDED_GRADER_MODEL)
+        : null;
+    if (definition.type === "code" && askedJudgeModel !== undefined) {
+      throw new UnprocessableInputError(
+        "a code grader makes no model call, so it cannot carry a judge model",
+      );
+    }
     const config = validConfig(
       definition,
       input.params === undefined
@@ -908,7 +913,7 @@ export async function useLibraryEntry(
       createdBy: auth.userId,
     });
 
-    return { identity, config };
+    return { identity, config, judgeModel };
   });
 
   // Through the same shaper every other read goes through, so what Use hands
@@ -919,7 +924,7 @@ export async function useLibraryEntry(
     version: 1,
     versionId,
     config: written.config,
-    judgeModel,
+    judgeModel: written.judgeModel,
   });
 }
 
@@ -1041,6 +1046,7 @@ export async function editGrader(
     const storedJudgeModel = judgeModelFromRow(
       currentVersion.judgeModel,
       currentVersion.id,
+      current.type as LibraryType,
     );
 
     // The one refusal that needs the stored config in front of it: whether the
@@ -1058,8 +1064,22 @@ export async function editGrader(
             await definitionOf(tx, auth, current.libraryId),
             asked.values,
           );
+    if (current.type === "llm_as_judge" && judgeModel === null) {
+      throw new UnprocessableInputError(
+        "a model-judged grader needs one supported judge model; it cannot be cleared",
+      );
+    }
+    if (current.type === "code" && judgeModel !== undefined && judgeModel !== null) {
+      throw new UnprocessableInputError(
+        "a code grader makes no model call, so it cannot carry a judge model",
+      );
+    }
     const nextJudgeModel =
-      judgeModel === undefined ? storedJudgeModel : judgeModel;
+      current.type === "code"
+        ? null
+        : judgeModel === undefined
+          ? storedJudgeModel
+          : judgeModel;
 
     const mintsVersion =
       !sameConfig(stored, config) ||
@@ -1149,6 +1169,7 @@ export async function getGraderVersion(
     .select({
       id: graderVersion.id,
       graderId: graderVersion.graderId,
+      libraryId: grader.libraryId,
       version: graderVersion.version,
       type: grader.type,
       config: graderVersion.config,
@@ -1173,7 +1194,7 @@ export async function getGraderVersion(
     ...rest,
     type: type as LibraryType,
     config: configFromRow(config, row.id),
-    judgeModel: judgeModelFromRow(judgeModel, row.id),
+    judgeModel: judgeModelFromRow(judgeModel, row.id, type as LibraryType),
   };
 }
 

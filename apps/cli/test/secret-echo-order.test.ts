@@ -67,8 +67,8 @@ function terminalRecording(steps: Step[]): AskOptions {
 it("turns the echo off before it prints the prompt that promises no echo", async () => {
   const steps: Step[] = [];
   const answered = await askSecret(
-    "EGMA_PERSONA_MODEL_API_KEY",
-    "the persona's model key (not shown as you type)",
+    "EGMA_PHONE_TRUNK_PASSWORD",
+    "SIP password (not shown as you type)",
     terminalRecording(steps),
   );
 
@@ -88,7 +88,7 @@ it("turns the echo off before it prints the prompt that promises no echo", async
 
 it("puts the echo back, so the next command is not typed into blind", async () => {
   const steps: Step[] = [];
-  await askSecret("EGMA_PERSONA_MODEL_API_KEY", "a key", terminalRecording(steps));
+  await askSecret("EGMA_PHONE_TRUNK_PASSWORD", "SIP password", terminalRecording(steps));
 
   expect(steps.at(-1)).toBe("write:\n");
   expect(steps).toContain("raw-off");
@@ -98,13 +98,13 @@ it("puts the echo back, so the next command is not typed into blind", async () =
 it("asks nothing at all when the variable already holds the secret", async () => {
   const steps: Step[] = [];
   const options = terminalRecording(steps);
-  const answered = await askSecret("EGMA_PERSONA_MODEL_API_KEY", "a key", {
+  const answered = await askSecret("EGMA_PHONE_TRUNK_PASSWORD", "SIP password", {
     ...options,
-    env: { EGMA_PERSONA_MODEL_API_KEY: "  sk-from-the-environment  " },
+    env: { EGMA_PHONE_TRUNK_PASSWORD: "  sip-from-the-environment  " },
   });
 
-  expect(answered.value).toBe("sk-from-the-environment");
-  expect(answered.from).toBe("EGMA_PERSONA_MODEL_API_KEY");
+  expect(answered.value).toBe("sip-from-the-environment");
+  expect(answered.from).toBe("EGMA_PHONE_TRUNK_PASSWORD");
   // Nothing was printed and the terminal was never touched, so there is no
   // window to get wrong on this path.
   expect(steps).toEqual([]);

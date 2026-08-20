@@ -136,16 +136,15 @@ const PHONE = {
 
 /**
  * A deployment `egma self-host setup` has finished with: a carrier
- * trunk, a number its calls come from, and a voice to speak with.
+ * trunk and a number its calls come from.
  *
- * Non-secret, all three of it — see `phone-readiness.ts`. What it stands for
+ * See `phone-readiness.ts`. What it stands for
  * here is the difference between an egma that can dial and one that has never
  * been given a carrier, which is the only thing the run door asks about.
  */
 const PHONE_IS_SET_UP = {
   carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
   carrier_trunk_number: "+18885550123",
-  text_to_speech_provider: "openai",
 } as const;
 
 /** Somebody with a key, an agent to check, and a test to check it against. */
@@ -179,7 +178,10 @@ async function aCustomerReadyToRun(
   // route ships for a persona. One test then names both, which is what makes
   // "one simulation per test per person" something this file can observe.
   for (const name of ["Impatient Rita", "Deliberate Sam"]) {
-    await createPersona(contextFor(ada, "member"), { name, traits: NEUTRAL_TRAITS });
+    await createPersona(contextFor(ada, "member"), {
+      name,
+      traits: NEUTRAL_TRAITS,
+    });
   }
 
   const { versionId: oneCaller } = await pushTest(key, "Reschedules", [
@@ -614,7 +616,7 @@ describe("starting a run", () => {
         "this Egma instance has not been set up to place phone calls, so " +
         "nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
-        "and the source number and the text-to-speech provider. Whoever runs " +
+        "and the source number. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
         "workspace: " +
         "egma self-host setup.",

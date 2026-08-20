@@ -116,15 +116,13 @@ export {
   GraderLibraryEntryInUseError,
   IdempotencyConflictError,
   IdentityConflictError,
-  JudgeCredentialInUseError,
-  JudgeNotConfiguredError,
-  JudgeProviderMismatchError,
   LastAdminError,
   MockToolTakenError,
   NoCapabilityAdapterError,
   NotPermittedError,
   PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
+  EgmaProvidedPersonaError,
   PredefinedGraderError,
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
@@ -145,7 +143,6 @@ export {
   type ArchivedDependency,
   type ConnectionRestoreRefusal,
   type GraderUsingLibraryEntry,
-  type JudgeCredentialUse,
   type RetryBlocker,
   type RunWriteRefusal,
   type SimulationRerunRefusal,
@@ -187,17 +184,16 @@ export {
 } from "./invitations.ts";
 export {
   provisionOrganization,
-  type NewPlatformJudge,
   type NewOrganization,
   type ProvisionedOrganization,
 } from "./provisioning.ts";
 export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
 
 /**
- * The settings this deployment holds — the judge configuration's idiom, one
- * scope up. Sealed with the deployment's own key, hinted rather than handed
- * back, seeded from the environment at start and never over a value somebody
- * chose. `platformFacts` is the third instance-scoped export: it takes nothing,
+ * The non-model settings this deployment holds. Carrier credentials are sealed
+ * with the deployment's own key, hinted rather than handed back, seeded from
+ * the environment at start and never over a value somebody chose.
+ * `platformFacts` is the third instance-scoped export: it takes nothing,
  * so there is no customer to name, and it answers only what is not secret,
  * because the readiness answer it feeds is read before anybody has logged in.
  *
@@ -391,25 +387,26 @@ export {
   clonePersona,
   createPersona,
   editPersona,
+  forkPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
   listPersonaVersions,
   resolvePersonaNames,
   restorePersona,
+  setDefaultPersona,
   testsUsingPersona,
-  VOICE_PROVIDERS,
   type ArchiveRequest,
   type NewPersona,
   type Persona,
   type PersonaChanges,
   type PersonaListRequest,
   type PersonaPage,
+  type PersonaOwner,
   type PersonaTraits,
   type PersonaVersion,
   type PersonaVersionPage,
   type RestoreRequest,
-  type VoiceProvider,
 } from "./personas.ts";
 
 /**
@@ -533,6 +530,7 @@ export {
   listGraders,
   useLibraryEntry,
   type DeletedGrader,
+  type ExecutableGrader,
   type FilledInForm,
   type Grader,
   type GraderAssertion,
@@ -542,7 +540,6 @@ export {
   type GraderPage,
   type GraderVersion,
   type JudgeModel,
-  type JudgeProvider,
   type UseLibraryEntry,
 } from "./graders.ts";
 export {
@@ -552,47 +549,7 @@ export {
 export type { GraderScope } from "../schema/graders.ts";
 export {
   GRADER_SCOPES,
-  JUDGE_PROVIDERS,
-  JUDGE_SOURCES,
 } from "../schema/graders.ts";
-
-/**
- * The project's default judge. `resolveJudgeKey` is the one door to the
- * plaintext of a judge key and it takes the context like everything else — and
- * then refuses every context that did not come from a grading claim, because
- * judging is the only thing egma does with one.
- */
-export {
-  getJudgeConfiguration,
-  getProjectJudge,
-  resolveJudgeKey,
-  seedDefaultJudge,
-  setJudgeConfiguration,
-  setProjectJudge,
-  PLATFORM_JUDGE,
-  type JudgeConfiguration,
-  type NewJudgeConfiguration,
-  type ProjectJudge,
-  type ProjectJudgeChoice,
-} from "./judges.ts";
-
-/**
- * The organization's judge credentials. Write-only by construction: nothing
- * exported here can answer with a stored key, and the one door to a plaintext
- * one lives behind the grading engine's own context.
- */
-export {
-  archiveJudgeCredential,
-  createJudgeCredential,
-  editJudgeCredential,
-  getJudgeCredential,
-  judgeCredentialUses,
-  listJudgeCredentials,
-  type JudgeCredential,
-  type JudgeCredentialChanges,
-  type NewJudgeCredential,
-} from "./judge-credentials.ts";
-export type { JudgeSource } from "../schema/graders.ts";
 
 export {
   cancelRun,
@@ -686,13 +643,12 @@ export type { RunFilter } from "./runs.ts";
  */
 export {
   getGradingPlan,
+  pinnedSimulationGraders,
   planRun,
   type CapabilityDecision,
   type GradingPlan,
-  type JudgeChoice,
   type PlanGroup,
   type PlanItem,
-  type PlanJudge,
   type PlannedSimulationGroup,
   type RunPlan,
   type RunPlanRequest,

@@ -5,6 +5,7 @@ import {
   listRunEvents,
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
+import { ProviderCredentialSourceUnavailableError } from "@egma/provider-credentials";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -60,6 +61,22 @@ const RETELL = {
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
+const LIVEKIT = {
+  type: "livekit",
+  modality: "voice",
+  config: { url: "wss://acme.livekit.cloud" },
+  credentials: {
+    apiKey: "livekit-key-A1B2C3D4WXYZ",
+    apiSecret: "livekit-secret-E5F6G7H8QRST",
+  },
+} as const;
+
+const PHONE = {
+  type: "phone",
+  modality: "voice",
+  config: { phoneNumber: "+15551234567" },
+} as const;
+
 /** The ordinary direct Retell target in these route tests is a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
@@ -89,7 +106,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: body,
+    payload: { contract_versions: [2], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -139,6 +156,56 @@ async function aCustomerReadyToRun(
     ada,
     key,
     agentId,
+    connectionId,
+    versionId: String(pushed.body.version_id),
+  };
+}
+
+/** A voice run whose persona listens through OpenAI's realtime adapter. */
+async function aRealtimeVoiceCustomerReadyToRun(
+  label: string,
+  options: TestApiOptions = {},
+  connection: typeof LIVEKIT | typeof PHONE = LIVEKIT,
+): Promise<{
+  ada: Customer;
+  key: string;
+  connectionId: string;
+  versionId: string;
+}> {
+  api = await createApi(label, options);
+  const ada = await signUp(api.app, "ada@acme.example", "Acme");
+  const key = await projectKeyFor(api.app, ada);
+
+  const registered = await ask(api.app, "POST", "/api/agents", key, {
+    name: "Live voice desk",
+    connection,
+  });
+  expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+  const connectionId = (registered.body.connection as { id: string }).id;
+
+  await createPersona(contextFor(ada, "member"), {
+    name: "Realtime Rita",
+    traits: NEUTRAL_TRAITS,
+    models: {
+      llm: { provider: "openai", model: "gpt-4o-mini" },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: {
+        provider: "cartesia",
+        model: "sonic-3.5",
+        voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+        speed: 1,
+      },
+    },
+  });
+  const pushed = await ask(api.app, "POST", "/api/tests", key, {
+    ...RESCHEDULING,
+    personas: ["Realtime Rita"],
+  });
+  expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
+
+  return {
+    ada,
+    key,
     connectionId,
     versionId: String(pushed.body.version_id),
   };
@@ -264,7 +331,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(1);
+    expect(spec.contract_version).toBe(2);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -283,7 +350,23 @@ describe("claiming work", () => {
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
-    expect(spec.persona).toEqual({ traits: NEUTRAL_TRAITS });
+    expect(spec.persona).toEqual({
+      traits: NEUTRAL_TRAITS,
+    });
+    expect(spec.models).toEqual({
+      llm: {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        key: "openai-key-held-by-this-test-suite",
+      },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: {
+        provider: "cartesia",
+        model: "sonic-3.5",
+        voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+        speed: 1,
+      },
+    });
     expect(spec.scenario).toEqual({ instructions: RESCHEDULING.scenario });
     expect(spec.limits).toEqual({ max_duration_seconds: 600, max_turns: 60 });
     // A run that mocks nothing hands over the work order it always did.
@@ -924,157 +1007,214 @@ describe("a simulation the platform cannot hand over", () => {
   });
 });
 
-describe("the platform's own settings, on the work order", () => {
-  /**
-   * What a configured deployment holds, seeded the way an automated one
-   * seeds it — through the real door, sealed into the real table. Every
-   * value here is distinct and recognisable, so what comes back on the work
-   * order can be told from what any other setting holds.
-   */
-  const A_CONFIGURED_PLATFORM = {
-    persona_model_provider: "openai",
-    persona_model: "gpt-4o",
-    persona_model_key: "sk-the-persona-thinks-with-this-one",
-    speech_to_text_provider: "deepgram",
-    speech_to_text_key: "the-listening-leg-uses-this-one",
-    text_to_speech_provider: "elevenlabs",
-    text_to_speech_key: "the-speaking-leg-uses-this-one",
-    text_to_speech_model: "eleven_turbo_v2_5",
-    text_to_speech_voice: "brisk-tenor-7",
-    voice_activity_provider: "silero",
-    media_backend: "livekit",
-    carrier_trunk_address: "acme.pstn.twilio.com",
-    carrier_trunk_number: "+15550100",
-    carrier_trunk_username: "acme-trunk",
-    carrier_trunk_password: "the-carrier-issued-this-one",
-  } as const;
-
-  /** The one claimed spec of a run, whatever this platform holds. */
-  async function theWorkOrderFor(label: string, settings: object) {
-    const { key, connectionId, versionId } = await aCustomerReadyToRun(label, {
-      platformSettings: settings,
-    });
+describe("one source of execution truth", () => {
+  it("keeps OpenAI realtime STT paired with its model and OpenAI account key", async () => {
+    const { key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun("claims_realtime_stt_pair", {
+        providerCredentials: {
+          load: async () => ({
+            openai: "one-openai-account-key",
+            cartesia: "one-cartesia-account-key",
+          }),
+        },
+      });
     await aQueuedRun(key, connectionId, versionId);
 
     const answered = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
-      capacity: 4,
+      capacity: 1,
       wait_seconds: 0,
     });
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    const specs = answered.body.specs as Record<string, unknown>[];
-    const spec = specs[0];
-    if (spec === undefined) throw new Error("no spec came back");
-    return spec;
-  }
-
-  it("carries the unsealed values, grouped the way the simulator reads them", async () => {
-    const spec = await theWorkOrderFor(
-      "claims_platform_settings",
-      A_CONFIGURED_PLATFORM,
-    );
-
-    // Held to the contract on the way out, like everything else this door
-    // sends: what leaves here is what the simulator's own check accepts.
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
     expect(specComplaints(spec)).toEqual([]);
-
-    expect(spec.platform).toEqual({
-      model: {
+    expect(spec?.models).toEqual({
+      llm: {
         provider: "openai",
-        model: "gpt-4o",
-        key: "sk-the-persona-thinks-with-this-one",
+        model: "gpt-4o-mini",
+        key: "one-openai-account-key",
       },
-      speech: {
-        stt_provider: "deepgram",
-        stt_key: "the-listening-leg-uses-this-one",
-        tts_provider: "elevenlabs",
-        tts_key: "the-speaking-leg-uses-this-one",
-        tts_model: "eleven_turbo_v2_5",
-        tts_voice: "brisk-tenor-7",
-        vad_provider: "silero",
+      stt: {
+        provider: "openai",
+        model: "gpt-live-transcribe",
+        key: "one-openai-account-key",
       },
+      tts: {
+        provider: "cartesia",
+        model: "sonic-3.5",
+        voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+        speed: 1,
+        key: "one-cartesia-account-key",
+      },
+    });
+    expect(spec?.platform).toBeUndefined();
+  });
+
+  it("keeps the carrier credential out of a connection that cannot use it", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_carrier_only",
+      {
+        platformSettings: {
+          carrier_trunk_address: "acme.pstn.twilio.com",
+          carrier_trunk_number: "+15550100",
+          carrier_trunk_username: "acme-trunk",
+          carrier_trunk_password: "the-carrier-issued-this-one",
+        },
+      },
+    );
+    await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    expect(specComplaints(spec)).toEqual([]);
+    expect(spec?.platform).toBeUndefined();
+    expect(spec?.models).toBeDefined();
+  });
+
+  it("puts only the carrier on a phone claim", async () => {
+    const { key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_phone_carrier_only",
+        {
+          platformSettings: {
+            carrier_trunk_address: "acme.pstn.twilio.com",
+            carrier_trunk_number: "+15550100",
+            carrier_trunk_username: "acme-trunk",
+            carrier_trunk_password: "the-carrier-issued-this-one",
+          },
+        },
+        PHONE,
+      );
+    await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+    const spec = (answered.body.specs as Record<string, unknown>[])[0];
+    expect(specComplaints(spec)).toEqual([]);
+    expect(spec?.platform).toEqual({
       carrier: {
-        media_backend: "livekit",
         trunk_address: "acme.pstn.twilio.com",
         trunk_number: "+15550100",
         trunk_username: "acme-trunk",
         trunk_password: "the-carrier-issued-this-one",
       },
     });
-
-    // In the clear, and never the sealed envelope or the hint kept for
-    // display: a simulator handed either would speak to a provider with
-    // four characters of a key.
-    const stored = await api.database.sql<{ value: string; hint: string }>(
-      "select value, hint from platform_setting where name = 'persona_model_key'",
-    );
-    expect(stored.rows[0]?.value).not.toContain(
-      "sk-the-persona-thinks-with-this-one",
-    );
-    expect(stored.rows[0]?.hint).toBe("-one");
+    expect(spec?.models).toBeDefined();
   });
 
-  it("leaves out the half of the platform that has no carrier", async () => {
-    // Every deployment before somebody does the Twilio paperwork, which is
-    // most of them and all of them on a first morning. The block is absent
-    // rather than empty, because an empty one would be a claim that this
-    // deployment has a carrier made of nothing.
-    const spec = await theWorkOrderFor("claims_platform_no_carrier", {
-      persona_model_provider: "openai",
-      persona_model: "gpt-4o",
-      persona_model_key: "sk-the-persona-thinks-with-this-one",
-    });
+  it("reads a fresh credential bundle for each simulation and sends only the chat leg's key", async () => {
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce({
+        openai: "openai-first",
+        deepgram: "deepgram-first",
+        cartesia: "cartesia-first",
+      })
+      .mockResolvedValueOnce({
+        openai: "openai-rotated",
+        deepgram: "deepgram-rotated",
+        cartesia: "cartesia-rotated",
+      });
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_credentials_rotate",
+      { providerCredentials: { load } },
+    );
 
-    expect(specComplaints(spec)).toEqual([]);
-    expect(spec.platform).toEqual({
-      model: {
-        provider: "openai",
-        model: "gpt-4o",
-        key: "sk-the-persona-thinks-with-this-one",
-      },
+    const claimedKey = async (): Promise<Record<string, unknown>> => {
+      await aQueuedRun(key, connectionId, versionId);
+      const answered = await claim(api.config.simulatorServiceToken, {
+        claimant: "sim-under-test",
+        capacity: 1,
+        wait_seconds: 0,
+      });
+      const spec = (answered.body.specs as Record<string, unknown>[])[0];
+      if (spec === undefined) throw new Error("no spec came back");
+      return spec.models as Record<string, unknown>;
+    };
+
+    const first = await claimedKey();
+    const second = await claimedKey();
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(first).toMatchObject({ llm: { key: "openai-first" } });
+    expect(second).toMatchObject({ llm: { key: "openai-rotated" } });
+    expect(first).toMatchObject({
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: { provider: "cartesia", model: "sonic-3.5" },
     });
+    expect((first.stt as Record<string, unknown>).key).toBeUndefined();
+    expect((first.tts as Record<string, unknown>).key).toBeUndefined();
+    expect(JSON.stringify(first)).not.toContain("deepgram-first");
+    expect(JSON.stringify(first)).not.toContain("cartesia-first");
   });
 
-  it("hands the next simulation a changed setting, with nothing restarted", async () => {
-    // The freshness promise, and the reason there is no cache here: the
-    // settings are read for each simulation, so replacing a spent key is
-    // a write and then the next conversation, rather than a write and a
-    // deploy.
+  it("releases work when the current AWS bundle cannot be read", async () => {
+    const load = vi
+      .fn()
+      .mockRejectedValueOnce(new ProviderCredentialSourceUnavailableError())
+      .mockResolvedValueOnce({ openai: "openai-after-retry" });
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
-      "claims_platform_settings_change",
-      { singleOrganization: true, platformSettings: A_CONFIGURED_PLATFORM },
+      "claims_credentials_unavailable",
+      { providerCredentials: { load } },
     );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
 
-    await aQueuedRun(key, connectionId, versionId);
-    const before = await claim(api.config.simulatorServiceToken, {
+    const deferred = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
-      capacity: 4,
+      capacity: 1,
       wait_seconds: 0,
     });
-    const first = (before.body.specs as Record<string, unknown>[])[0];
-    expect((first?.platform as { model: { key: string } }).model.key).toBe(
-      "sk-the-persona-thinks-with-this-one",
-    );
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
 
-    // Written the way an owner writes one, through the API, on the running
-    // instance. No restart, no redeploy, no second process.
-    const changed = await api.app.inject({
-      method: "PATCH",
-      url: "/api/platform/settings",
-      headers: { authorization: `Bearer ${ada.secret}` },
-      payload: { persona_model_key: "sk-and-the-operator-replaced-it-WXYZ" },
-    });
-    expect(changed.statusCode, changed.body).toBe(200);
-
-    await aQueuedRun(key, connectionId, versionId);
-    const after = await claim(api.config.simulatorServiceToken, {
+    const retried = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
-      capacity: 4,
+      capacity: 1,
       wait_seconds: 0,
     });
-    const second = (after.body.specs as Record<string, unknown>[])[0];
-    expect((second?.platform as { model: { key: string } }).model.key).toBe(
-      "sk-and-the-operator-replaced-it-WXYZ",
+    expect(retried.body.specs as unknown[]).toHaveLength(1);
+  });
+
+  it("fails before dispatch when the selected provider has no current key", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_credentials_missing",
+      { providerCredentials: { load: async () => ({}) } },
     );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+    });
+    expect(answered.body.specs).toEqual([]);
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("failed");
+    expect(row?.endingReason).toBe("dispatch_failed");
+  });
+
+  it("does not claim work for a worker that cannot read contract version 2", async () => {
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_contract_cutover",
+    );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const refused = await claim(api.config.simulatorServiceToken, {
+      claimant: "old-simulator",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [1],
+    });
+    expect(refused.statusCode).toBe(400);
+    expect(String(refused.body.message)).toContain("version 2");
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("queued");
   });
 });

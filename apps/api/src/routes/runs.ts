@@ -10,7 +10,6 @@ import {
   getRun,
   getSimulation,
   IdempotencyConflictError,
-  JudgeNotConfiguredError,
   listRunHistory,
   planRun,
   listRunEvents,
@@ -43,7 +42,6 @@ import {
   type RecordedVerdict,
   type RunEvent,
   type RunStatus,
-  type JudgeChoice,
   type RunPlan,
   type RunVerdicts,
   type SimulationFold,
@@ -394,13 +392,9 @@ function describedMockTools(
  * items that would judge it — grader by grader, at the version each would be
  * frozen at.
  *
- * **The judge is a state rather than a refusal here**, because a page has to
- * draw it. `needs_setup` is what a project with no judge reads as, and starting
- * from that state is what the run door refuses.
- *
- * **No secret travels.** A configured judge choice carries the provider, the
- * model and the *reference* — a `jcr_` credential of this organization, or the
- * `platform` sentinel — and there is no field here a key could ride in.
+ * The immutable grader version id is the only model-execution pin. The model
+ * is not copied into this response or durable plan, and deployment credentials
+ * never enter either one.
  */
 function describedPlan(plan: RunPlan): Record<string, unknown> {
   return {
@@ -423,15 +417,6 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
               source: plan.connection.capabilities.source,
             },
     },
-    judge:
-      plan.judge.state === "needs_setup"
-        ? { state: "needs_setup" }
-        : {
-            state: "configured",
-            provider: plan.judge.provider,
-            model: plan.judge.model,
-            source: plan.judge.source,
-          },
     runnable_simulation_count: plan.runnableSimulationCount,
     skipped_simulation_count: plan.skippedSimulationCount,
     tests: plan.groups.map((group) => ({
@@ -456,20 +441,6 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
       graders: group.items.map(describedPlanItem),
     })),
   };
-}
-
-/** A judge choice on the wire: tagged, and never carrying a secret. */
-function describedJudgeChoice(
-  choice: JudgeChoice,
-): Record<string, unknown> {
-  return choice.tag === "configured"
-    ? {
-        tag: "configured",
-        provider: choice.provider,
-        model: choice.model,
-        source: choice.source,
-      }
-    : { tag: choice.tag };
 }
 
 /**
@@ -670,7 +641,6 @@ function describedPlanItem(
       library_id: item.libraryId,
       required: item.required,
       scope: item.scope,
-      judge: describedJudgeChoice(item.judge),
   };
 }
 
@@ -1527,17 +1497,6 @@ export async function runRoutes(
         default:
           return unprocessable(reply, error.message);
       }
-    }
-
-    // A project with no judge, refused before any conversation is dialed. Its
-    // own code and its own sentence, because the fix is one page away and
-    // nothing about the selection is wrong.
-    if (error instanceof JudgeNotConfiguredError) {
-      return sendRefusal(
-        reply,
-        "judge_not_configured",
-        REFUSALS.judgeNotConfigured(error.projectId),
-      );
     }
 
     // A key reused over a different request. Answering the original run would

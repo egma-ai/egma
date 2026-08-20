@@ -6,7 +6,6 @@ import {
 
 import {
   judgeInputOf,
-  NoJudge,
   type JudgeQuestion,
 } from "../judge/index.ts";
 import type { Execution, Judgment } from "./contract.ts";
@@ -125,15 +124,10 @@ export async function executeExpectedBehaviors(
     );
   }
 
-  // Only now, with behaviors to judge, a conversation that happened and words
-  // to ask with, is the project's key worth unsealing.
-  const configured = await execution.judging.judge();
-  if (configured instanceof NoJudge) {
-    const why = configured.message;
-    return behaviors.map((_, at) => couldNotJudge(at, why));
+  const judge = execution.judging.judge;
+  if (judge === null) {
+    throw new Error("a model-judged grader reached execution without its judge");
   }
-
-  const judge = configured.judging(execution.judging.model, execution.judging.makers);
 
   // Assembled once and shared by every call, which is what makes N judgments of
   // one conversation one read rather than N.

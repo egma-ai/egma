@@ -1,5 +1,3 @@
-import type { JudgeProvider } from "@egma/db";
-
 import type { JudgeInput } from "./input.ts";
 
 /**
@@ -90,7 +88,7 @@ export type Judge = (question: JudgeQuestion) => Promise<JudgeAnswer>;
  * this directory is ever handed one of these.
  */
 export type ResolvedJudge = {
-  readonly provider: JudgeProvider;
+  readonly provider: "openai";
   readonly model: string;
   readonly key: string;
 };

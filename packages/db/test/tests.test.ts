@@ -337,25 +337,11 @@ describe("a test naming no persona", () => {
     await pointProjectAt(globex.project, null);
   });
 
-  it("says the default is not this project's, not that it is archived, when it points elsewhere", async () => {
-    // The column's foreign key only says the row exists, so a pointer at a
-    // living persona of another project is a state the database allows and the
-    // developer has to be told the truth about.
-    await pointProjectAt(acme.outbound, rita);
-
-    const before = await rowCounts();
-
-    const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
-    await expect(createTest(inOutbound, rescheduling)).rejects.toThrow(
-      /no persona .* in this project/,
+  it("refuses a default owned by another project at the stored pointer", async () => {
+    await expect(pointProjectAt(acme.outbound, rita)).rejects.toSatisfy(
+      (error: unknown) =>
+        errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );
-    await expect(createTest(inOutbound, rescheduling)).rejects.not.toThrow(
-      /is archived/,
-    );
-
-    expect(await rowCounts()).toEqual(before);
-
-    await pointProjectAt(acme.outbound, null);
   });
 });
 

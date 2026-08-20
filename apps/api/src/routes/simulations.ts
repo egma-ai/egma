@@ -257,25 +257,10 @@ function describedPlanForThisConversation(
           library_id: item.libraryId,
           required: item.required,
           scope: item.scope,
-          judge: describedJudgeChoice(item.judge),
         }),
       ),
     ),
   };
-}
-
-/** A judge choice: tagged, and never carrying a secret. There is no field for one. */
-function describedJudgeChoice(
-  choice: GradingPlan["groups"][number]["items"][number]["judge"],
-): Record<string, unknown> {
-  return choice.tag === "configured"
-    ? {
-        tag: "configured",
-        provider: choice.provider,
-        model: choice.model,
-        source: choice.source,
-      }
-    : { tag: choice.tag };
 }
 
 /**
@@ -470,9 +455,9 @@ export async function simulationRoutes(
         // version below is exactly who called.
         name: persona?.name ?? null,
         version_id: one.personaVersionId,
-        // Exactly who called, as they were on the day. The traits are the pin
-        // and are what makes a transcript re-readable after somebody edits the
-        // persona; the name is joined off the run's own read.
+        // Every authored human fact from the exact version that called. The
+        // technical voice is not among these traits; it has one owner in the
+        // persona version's model selection.
         traits: personaVersion?.traits ?? null,
       },
       agent:

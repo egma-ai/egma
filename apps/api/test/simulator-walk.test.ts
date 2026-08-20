@@ -10,7 +10,6 @@ import {
   createPersona,
   listGraders,
   readVerdicts,
-  setJudgeConfiguration,
   type AuthContext,
   type RecordedVerdict,
 } from "@egma/db";
@@ -573,8 +572,7 @@ describe("the shipped simulator against the real API", () => {
         ],
       );
 
-      // The persona, the project's grader and its judge are authored at the
-      // seam — no route ships for any of them — and this process shares the
+      // The persona is authored at the seam and this process shares the
       // instance's database connection.
       const auth: AuthContext = {
         userId,
@@ -587,18 +585,9 @@ describe("the shipped simulator against the real API", () => {
         name: "Impatient Rita",
         traits: NEUTRAL_TRAITS,
       });
-      // No grader is authored here, and that is the point of the change this
-      // walk now covers: the project was created with an active copy of egma's
-      // `expected_behaviors` grader, so a first run is judged with nothing set
-      // up at all. What is authored is the judge it speaks with.
-      await setJudgeConfiguration(
-        { ...auth, role: "admin" },
-        {
-          provider: "openai",
-          model: "gpt-4.1-mini",
-          key: "sk-walk-judge-never-called-over-a-network",
-        },
-      );
+      // No grader is authored here. The project was created with an active
+      // expected-behaviors copy; its immutable version owns the model and the
+      // worker resolves the deployment credential at claim time.
 
       const pushed = await call("POST", "/api/tests", {
         key,
@@ -675,8 +664,7 @@ describe("the shipped simulator against the real API", () => {
           databaseUrl: "",
           clickhouseUrl: "",
           // Both stores are already connected by the instance this process
-          // shares, and the master key with them.
-          encryptionKey: undefined,
+          // shares.
           claimant: "walking-grader-1",
           capacity: 4,
           heartbeatSeconds: 1,
@@ -687,6 +675,11 @@ describe("the shipped simulator against the real API", () => {
         },
         log: makeLog("ERROR", "walking-grader-1"),
         makers: judge.makers,
+        providerCredentials: {
+          async load() {
+            return { openai: "walking-grader-provider-key" };
+          },
+        },
       });
 
       // The conversation watched as it happens, in both stores at once.

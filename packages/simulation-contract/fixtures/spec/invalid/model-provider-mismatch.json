@@ -1,0 +1,41 @@
+{
+  "contract_version": 2,
+  "simulation_id": "sim_fixture_model_provider_mismatch",
+  "modality": "voice",
+  "connection": {
+    "type": "phone",
+    "config": { "phoneNumber": "+15550000000" },
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Patient and direct.", "language": "en-US"
+    }
+  },
+  "scenario": {
+    "instructions": "Ask for the next available appointment."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 20
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "deepgram",
+      "model": "gpt-live-transcribe",
+      "key": "fixture-not-a-real-secret-stt"
+    },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "fixture-cartesia-voice",
+      "speed": 1,
+      "key": "fixture-not-a-real-secret-tts"
+    }
+  }
+}

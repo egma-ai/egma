@@ -1,18 +1,12 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
 import { connection, type Modality } from "../schema/agents.ts";
-import {
-  grader,
-  graderVersion,
-  judgeConfiguration,
-  type GraderScope,
-  type LibraryType,
-} from "../schema/graders.ts";
+import { grader, type GraderScope } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { gradingPlan, type GradingPlanState } from "../schema/plans.ts";
-import type { SimulationSkipReason } from "../schema/runs.ts";
+import { simulation, type SimulationSkipReason } from "../schema/runs.ts";
 import { test, testPersona, testVersion } from "../schema/tests.ts";
 import {
   capabilityStanding,
@@ -20,12 +14,12 @@ import {
   type ConnectionCapabilities,
 } from "./capabilities.ts";
 import type { AuthContext } from "./context.ts";
+import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
 import {
-  JudgeNotConfiguredError,
-  RunWriteRefusedError,
-  type RunWriteRefusal,
-} from "./errors.ts";
-import { PLATFORM_JUDGE } from "./judges.ts";
+  getGraderVersion,
+  type ExecutableGrader,
+} from "./graders.ts";
+import { personaAvailableToProject } from "./persona-availability.ts";
 import { archivedTests, testsApplyingToAgent } from "./tests.ts";
 import { within } from "./within.ts";
 
@@ -57,11 +51,11 @@ import { within } from "./within.ts";
  * and a group holding nothing is a run that judges nothing, which is a project's
  * decision to take.
  *
- * **Who pays for the judging.** Every judge choice is tagged, and a configured
- * one stores the provider, the model, and the *reference* to a credential —
- * never a secret. The grader service resolves the current secret for that
- * reference when it claims, which is what makes rotation reach pending work and
- * what makes a credential's Archive have to refuse while a plan still names it.
+ * **Which model judges.** Every model-judged grader version owns one exact model
+ * selection. The plan pins only that immutable version id; copying its model
+ * beside it would create two durable answers that could drift. The grader reads
+ * the version when it claims work. Provider credentials belong to the
+ * deployment and no key or key reference enters this plan.
  */
 
 /* ------------------------------------------------------------------- *
@@ -312,13 +306,10 @@ export async function resolvePersonaVersions(
         })
         .from(persona)
         .where(
-          within(
+          personaAvailableToProject(
             auth,
-            persona,
-            and(
-              inArray(persona.id, [...ids]),
-              eq(persona.projectId, projectId),
-            ),
+            projectId,
+            inArray(persona.id, [...ids]),
           ),
         )
         .for("share")
@@ -450,39 +441,6 @@ export function capabilitiesFromRow(row: {
  * ------------------------------------------------------------------- */
 
 /**
- * Which model judges, whose account pays, and the honest answer when neither
- * question has one.
- *
- * `not_required` is a deterministic grader: a threshold, a tool-call check, a
- * phrase check. Nothing is asked of a model, so naming one would be a bill
- * nobody incurs.
- *
- * `configured` names the provider, the model and the **reference** to the key —
- * an organization's `jcr_` credential, or the deployment's `platform` sentinel.
- * Never a secret, at any point: the grader service resolves the current one
- * when it claims, which is what makes a rotation reach work already frozen.
- *
- * `unavailable_at_capture` records the honest no-judge state rather than
- * inventing a credential reference that would resolve to somebody else's key.
- * It is written for work upgraded across the migration that added plans, whose
- * project had no judge when the plan was captured — and it is also what a
- * *review* shows a project with no judge, before anything is started, which is
- * how `demandJudge` recognises a plan that would ask a model and has nobody to
- * ask. **New work never starts in it**: a run whose plan holds one of these is
- * refused before the run is written.
- */
-export type JudgeChoice =
-  | { readonly tag: "not_required" }
-  | {
-      readonly tag: "configured";
-      readonly provider: string;
-      readonly model: string;
-      /** A `jcr_` credential of this organization, or `platform`. */
-      readonly source: string;
-    }
-  | { readonly tag: "unavailable_at_capture" };
-
-/**
  * One running copy, as the plan freezes it.
  *
  * Keyed by `(test reference, grader_id)` — so the same copy judging two test
@@ -516,7 +474,6 @@ export type PlanItem = {
   /** `false` makes it a diagnostic: judged, shown, never able to fail a test. */
   readonly required: boolean;
   readonly scope: GraderScope;
-  readonly judge: JudgeChoice;
 };
 
 /**
@@ -557,8 +514,6 @@ type ApplicableGrader = {
   readonly libraryId: string;
   readonly required: boolean;
   readonly scope: GraderScope;
-  readonly judged: boolean;
-  readonly judgeModel: { readonly provider: string; readonly model: string } | null;
 };
 
 /**
@@ -567,8 +522,8 @@ type ApplicableGrader = {
  *
  * Deleted copies are left out entirely: switching one off means "stop entering
  * new grading plans", and a run frozen before it stays on its own plan. The
- * library type decides `judged` rather than the row, because whether a kind of
- * judgment asks a model is a fact about the kind.
+ * A plan needs only the running-copy facts and the exact version id. Execution
+ * resolves the version's type, config, and model through that one pin.
  */
 async function applicableGraders(
   on: Queryable,
@@ -579,15 +534,12 @@ async function applicableGraders(
     .select({
       id: grader.id,
       name: grader.name,
-      type: grader.type,
       libraryId: grader.libraryId,
       required: grader.required,
       scope: grader.scope,
       currentVersionId: grader.currentVersionId,
-      judgeModel: graderVersion.judgeModel,
     })
     .from(grader)
-    .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id))
     .where(
       within(
         auth,
@@ -598,12 +550,8 @@ async function applicableGraders(
     .orderBy(asc(grader.id));
 
   return new Map(
-    rows.map((row) => {
-      const override = row.judgeModel as {
-        provider?: unknown;
-        model?: unknown;
-      } | null;
-      return [
+    rows.map((row) =>
+      [
         row.id,
         {
           id: row.id,
@@ -612,114 +560,10 @@ async function applicableGraders(
           libraryId: row.libraryId,
           required: row.required,
           scope: row.scope as GraderScope,
-          judged: judgedTypes.has(row.type),
-          judgeModel:
-            override === null ||
-            typeof override.provider !== "string" ||
-            typeof override.model !== "string"
-              ? null
-              : { provider: override.provider, model: override.model },
         },
-      ] as const;
-    }),
+      ] as const,
+    ),
   );
-}
-
-/**
- * Which library types ask a model, off the closed vocabulary the schema keeps
- * rather than a second list here — `llm_as_judge` is executed by asking a
- * model, `code` by egma's own engine, and a list written twice would be a
- * second opinion about whose account pays.
- */
-const JUDGED_TYPES: ReadonlySet<LibraryType> = new Set<LibraryType>([
-  "llm_as_judge",
-]);
-
-const judgedTypes: ReadonlySet<string> = JUDGED_TYPES;
-
-/** The project's judge as a plan freezes it, or the refusal that stops a run. */
-export type PlanJudge =
-  | { readonly state: "configured"; readonly provider: string; readonly model: string; readonly source: string }
-  | { readonly state: "needs_setup" };
-
-/**
- * The judge the plan will name, read off the project's own setting.
- *
- * A `platform` source keeps the sentinel word rather than a credential id,
- * because the deployment's own judge is not the customer's to point at, rotate
- * or archive — and a plan that named an id for it would be naming a row nobody
- * can reach.
- *
- * **It takes the queryable it is to read on, and that is load-bearing.** Run
- * creation asks this from inside its own transaction, and a read that reached
- * for a second pool connection while the first was held would take two
- * connections per run — so a handful of runs starting at once would empty the
- * pool and wait on each other forever. It is the same rule every other read on
- * this path already follows; the shape here just makes it impossible to
- * forget.
- *
- * Nothing sealed is selected. The columns are the provider, the model and where
- * the key comes from — never the envelope, which has exactly one door and it is
- * not this one.
- */
-export async function planJudgeOn(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-): Promise<PlanJudge> {
-  const [row] = await on
-    .select({
-      provider: judgeConfiguration.provider,
-      model: judgeConfiguration.model,
-      source: judgeConfiguration.source,
-      credentialId: judgeConfiguration.credentialId,
-    })
-    .from(judgeConfiguration)
-    .where(
-      within(
-        auth,
-        judgeConfiguration,
-        eq(judgeConfiguration.projectId, projectId),
-      ),
-    )
-    .limit(1);
-
-  if (row === undefined) return { state: "needs_setup" };
-  return {
-    state: "configured",
-    provider: row.provider,
-    model: row.model,
-    // A project spending the deployment's own judge holds no credential row to
-    // point at, so the plan stores the sentinel word instead.
-    source: row.credentialId ?? PLATFORM_JUDGE,
-  };
-}
-
-/** One authored grader's judge choice, under a configured project judge. */
-function judgeFor(one: ApplicableGrader, judge: PlanJudge): JudgeChoice {
-  if (!one.judged) return { tag: "not_required" };
-  if (judge.state === "needs_setup") return { tag: "unavailable_at_capture" };
-  return {
-    tag: "configured",
-    // A grader may insist on its own provider and model; the account behind it
-    // is still the project's, because a grader has no credential of its own and
-    // inventing one here would be egma choosing whose key to spend.
-    provider: one.judgeModel?.provider ?? judge.provider,
-    model: one.judgeModel?.model ?? judge.model,
-    source: judge.source,
-  };
-}
-
-/** The built-in's judge choice. It always asks a model, so it always needs one. */
-function builtInJudge(judge: PlanJudge): JudgeChoice {
-  return judge.state === "needs_setup"
-    ? { tag: "unavailable_at_capture" }
-    : {
-        tag: "configured",
-        provider: judge.provider,
-        model: judge.model,
-        source: judge.source,
-      };
 }
 
 /**
@@ -744,7 +588,6 @@ function builtInJudge(judge: PlanJudge): JudgeChoice {
 export function planGroupsFor(
   versions: readonly PinnedVersion[],
   graders: ReadonlyMap<string, ApplicableGrader>,
-  judge: PlanJudge,
 ): readonly PlanGroup[] {
   const applying = [...graders.values()].filter(
     (one) => one.scope === "simulations" || one.scope === "both",
@@ -755,12 +598,12 @@ export function planGroupsFor(
     testId: version.testId,
     testVersionId: version.versionId,
     testName: version.testName,
-    items: applying.map((one) => planItemFor(one, judge)),
+    items: applying.map(planItemFor),
   }));
 }
 
-/** One running copy frozen as a plan item, under a project judge. */
-function planItemFor(one: ApplicableGrader, judge: PlanJudge): PlanItem {
+/** One running copy frozen as a plan item. */
+function planItemFor(one: ApplicableGrader): PlanItem {
   return {
     kind: "authored",
     graderId: one.id,
@@ -769,7 +612,6 @@ function planItemFor(one: ApplicableGrader, judge: PlanJudge): PlanItem {
     libraryId: one.libraryId,
     required: one.required,
     scope: one.scope,
-    judge: judgeFor(one, judge),
   };
 }
 
@@ -785,27 +627,8 @@ function planItemFor(one: ApplicableGrader, judge: PlanJudge): PlanItem {
  * resource it rechecks already means.
  */
 
-/** Every `jcr_` credential a plan names, deduplicated, in the order first met. */
-export function judgeCredentialsIn(
-  groups: readonly PlanGroup[],
-): readonly string[] {
-  const named: string[] = [];
-  for (const group of groups) {
-    for (const item of group.items) {
-      if (item.judge.tag !== "configured") continue;
-      if (item.judge.source === PLATFORM_JUDGE) continue;
-      if (!named.includes(item.judge.source)) named.push(item.judge.source);
-    }
-  }
-  return named;
-}
-
 /**
  * The plan row, written in the same transaction as the run it belongs to.
- *
- * The credential list is derived here rather than by a caller, so a plan and
- * the index of what it needs can never come apart — which is the whole basis of
- * a credential Archive's refusal.
  */
 export async function writeGradingPlan(
   on: Queryable,
@@ -826,7 +649,6 @@ export async function writeGradingPlan(
     state: input.state,
     capturedAt: input.capturedAt,
     groups: input.groups,
-    judgeCredentialIds: judgeCredentialsIn(input.groups),
   });
 }
 
@@ -860,6 +682,63 @@ export async function getGradingPlan(
     capturedAt: row.capturedAt,
     groups: (row.groups ?? []) as readonly PlanGroup[],
   };
+}
+
+/**
+ * The exact grader versions frozen for one simulation's initial grading.
+ *
+ * This is the only simulation execution read. It follows the simulation to its
+ * run plan, selects the group for the simulation's pinned test version, then
+ * reads every named grader version by id. It never consults a grader's current
+ * pointer, so editing a grader after a run starts cannot change that run.
+ */
+export async function pinnedSimulationGraders(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<readonly ExecutableGrader[] | undefined> {
+  const [row] = await db()
+    .select({
+      testVersionId: simulation.testVersionId,
+      groups: gradingPlan.groups,
+    })
+    .from(simulation)
+    .innerJoin(gradingPlan, eq(gradingPlan.runId, simulation.runId))
+    .where(within(auth, simulation, eq(simulation.id, simulationId)))
+    .limit(1);
+
+  if (row === undefined) return undefined;
+
+  const groups = (row.groups ?? []) as readonly PlanGroup[];
+  const group = groups.find((candidate) =>
+    row.testVersionId === null
+      ? candidate.tag === "legacy_testless"
+      : candidate.tag === "version" &&
+        candidate.testVersionId === row.testVersionId,
+  );
+  if (group === undefined) {
+    throw new Error(
+      `simulation ${simulationId} has no grading-plan group for its pinned test version`,
+    );
+  }
+
+  return Promise.all(
+    group.items.map(async (item): Promise<ExecutableGrader> => {
+      const version = await getGraderVersion(auth, item.graderVersionId);
+      if (version === undefined || version.graderId !== item.graderId) {
+        throw new Error(
+          `grading plan for simulation ${simulationId} names an unreadable grader version ${item.graderVersionId}`,
+        );
+      }
+      return {
+        id: version.graderId,
+        libraryId: version.libraryId,
+        type: version.type,
+        versionId: version.id,
+        config: version.config,
+        judgeModel: version.judgeModel,
+      };
+    }),
+  );
 }
 
 /* ------------------------------------------------------------------- *
@@ -896,13 +775,11 @@ export type PlannedSimulationGroup = {
 /**
  * Everything a review step shows, and the same resolution `startRun` will do.
  *
- * **It answers rather than refuses, wherever the answer is a state a page has to
- * draw.** A project with no judge is a `needs_setup` field here and a refusal at
- * start; a test that would be skipped is a group carrying its reason here and a
+ * A test that would be skipped is a group carrying its reason here and a
  * terminal skipped row at start. What it still refuses outright is a selection
- * that could never be written at all — an unknown version, a doubled one, a test
- * that does not apply to this agent — because those are mistakes to fix rather
- * than states to render.
+ * that could never be written at all — an unknown version, a doubled one, or a
+ * test that does not apply to this agent — because those are mistakes to fix
+ * rather than states to render.
  */
 export type RunPlan = {
   readonly agentId: string;
@@ -913,7 +790,6 @@ export type RunPlan = {
     readonly environment: string | null;
     readonly capabilities: ConnectionCapabilities;
   };
-  readonly judge: PlanJudge;
   readonly groups: readonly PlannedSimulationGroup[];
   /** How many conversations would actually be conducted. */
   readonly runnableSimulationCount: number;
@@ -1003,9 +879,8 @@ export async function planRun(
     ).map((row) => [row.id, row.name] as const),
   );
 
-  const judge = await planJudgeOn(on, auth, projectId);
   const graders = await applicableGraders(on, auth, projectId);
-  const plan = planGroupsFor(versions, graders, judge);
+  const plan = planGroupsFor(versions, graders);
   const capabilities = capabilitiesFromRow(reached);
 
   let runnable = 0;
@@ -1042,51 +917,10 @@ export async function planRun(
       environment: reached.environment,
       capabilities,
     },
-    judge,
     groups,
     runnableSimulationCount: runnable,
     skippedSimulationCount: skipped,
   };
-}
-
-/**
- * The refusal a run start owes a project with no judge — **and only when
- * something in the plan would actually ask a model.**
- *
- * It used to refuse every run in a project with no judge, on the reasoning that
- * *every run carries the expected-behaviors built-in, and the built-in asks a
- * model*. That sentence was true while the built-in was a rowless implicit
- * grader nobody could remove. ADR-0009 made it an ordinary seeded copy, and
- * deleting a copy is how a grader is switched off — there is no other switch.
- * So a project may honestly run nothing that asks a model: only `latency`,
- * which is computed from spans, or nothing at all. The old rule refused those
- * runs for missing a key they would never have spent.
- *
- * **The plan is what answers, rather than a second count taken here.** Every
- * item already carries its judge choice, and `judgeFor` marks exactly the items
- * that need a model and cannot have one — `unavailable_at_capture`. A grader
- * that is `code` reads `not_required` and is unaffected by any of this. Asking
- * the plan means the refusal and the frozen record can never disagree about
- * which items needed a judge.
- *
- * What is *not* refused is the other half of the same decision: a project whose
- * plan holds no items at all starts its run, conducts every simulation, and
- * comes back with nothing judged. That is a state the product now allows, said
- * plainly on the running-graders screen, rather than a refusal invented here to
- * protect somebody from a decision they took.
- */
-export function demandJudge(
-  judge: PlanJudge,
-  projectId: string,
-  groups: readonly PlanGroup[],
-): void {
-  if (judge.state !== "needs_setup") return;
-  const asksAModel = groups.some((group) =>
-    group.items.some((item) => item.judge.tag === "unavailable_at_capture"),
-  );
-  if (asksAModel) {
-    throw new JudgeNotConfiguredError(projectId);
-  }
 }
 
 /**
@@ -1099,34 +933,8 @@ export async function resolveRunPlan(
   projectId: string,
   versions: readonly PinnedVersion[],
 ): Promise<{
-  readonly judge: PlanJudge;
   readonly groups: readonly PlanGroup[];
 }> {
-  const judge = await planJudgeOn(on, auth, projectId);
   const graders = await applicableGraders(on, auth, projectId);
-  const groups = planGroupsFor(versions, graders, judge);
-  // After the plan rather than before it: what decides the refusal is whether
-  // anything in this plan would ask a model, and only the plan knows.
-  demandJudge(judge, projectId, groups);
-  return { judge, groups };
-}
-
-/* ------------------------------------------------------------------- *
- * What a credential's Archive has to ask.
- * ------------------------------------------------------------------- */
-
-/**
- * Whether any run's frozen plan still needs this credential, and which.
- *
- * Two questions, one query each, because they are two different reasons and a
- * refusal names them separately: a run with a conversation still moving will
- * be graded against this plan when it lands, and a grading job that is
- * `pending` or `claimed` is about to resolve this credential's secret.
- *
- * It is deliberately not scoped by project: a credential belongs to the
- * organization and one is archived once, so the question is about everything
- * the organization has ever frozen.
- */
-export function plansNeedingCredential(credentialId: string): SQL {
-  return sql`${gradingPlan.judgeCredentialIds} @> ${JSON.stringify([credentialId])}::jsonb`;
+  return { groups: planGroupsFor(versions, graders) };
 }

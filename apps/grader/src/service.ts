@@ -7,6 +7,7 @@ import {
   type GradingClaim,
   type Listening,
 } from "@egma/db";
+import type { ProviderCredentialSource } from "@egma/provider-credentials";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 import type { Config } from "./config.ts";
@@ -74,6 +75,8 @@ export type Service = {
 export type ServiceOptions = {
   readonly config: Config;
   readonly log: Log;
+  /** Read fresh exactly once for each claimed grading job. */
+  readonly providerCredentials: ProviderCredentialSource;
   /**
    * Told after each pass, so a test can watch the service work instead of
    * sleeping. Never used in a deployment, and the service does not read it.
@@ -237,7 +240,11 @@ async function gradeHeldClaim(
   beating.unref();
 
   try {
-    const graded = await gradeClaim(claim, { makers: options.makers });
+    const credentials = await options.providerCredentials.load();
+    const graded = await gradeClaim(claim, {
+      credentials,
+      ...(options.makers === undefined ? {} : { makers: options.makers }),
+    });
     // The verdicts are written before the job is finished, in that order and
     // not the other way round. Between the two this copy could lose the job to
     // an expired lease, and another copy would judge the same conversation

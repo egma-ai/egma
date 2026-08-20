@@ -17,13 +17,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pytest
 from conftest import (
+    A_PERSONALITY,
     assert_one_speaker_to_a_channel,
     loopback_spec,
     scripted_spec,
@@ -52,8 +51,6 @@ from egma_simulator.recording import (
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import (
     CONVERSATION_VAD,
-    DEFAULT_ENGLISH_VOICE_ID,
-    DEFAULT_VOICE_ID,
     SAMPLES_PER_BYTE,
     SCRIPTED_PAIR,
     ScriptedSTT,
@@ -70,7 +67,7 @@ from egma_simulator.speech import (
     leading_silence_seconds,
     silence,
     spoken_seconds,
-    voice_from_traits,
+    voice_from_models,
 )
 from egma_simulator.walk import Conducted, WalkControls
 
@@ -104,11 +101,7 @@ class Observed:
         return [measure for measure, _milliseconds in self.measures]
 
     def milliseconds_of(self, measure: str) -> list[float]:
-        return [
-            milliseconds
-            for name, milliseconds in self.measures
-            if name == measure
-        ]
+        return [milliseconds for name, milliseconds in self.measures if name == measure]
 
 
 async def voice_simulation(
@@ -148,15 +141,11 @@ async def observe(
     spans: list[tuple[str, str, int, int]] = []
     measures: list[tuple[str, float]] = []
 
-    async def on_utterance(
-        speaker: str, text: str, began: int, ended: int
-    ) -> None:
+    async def on_utterance(speaker: str, text: str, began: int, ended: int) -> None:
         spans.append((speaker, text, began, ended))
 
     async def on_measured(measure: str, began: int, ended: int) -> None:
-        measures.append(
-            (measure, (ended - began) / NANOSECONDS_PER_MILLISECOND)
-        )
+        measures.append((measure, (ended - began) / NANOSECONDS_PER_MILLISECOND))
 
     conducted = await conductor.conduct(
         persona=Persona(
@@ -201,20 +190,19 @@ def test_quiet_and_length_are_measured_from_the_audio():
     assert spoken_seconds(spoken, 16000) == pytest.approx(four_bytes_spoken)
 
 
-def test_the_persona_voice_comes_from_the_authored_traits():
-    voice = voice_from_traits({"personality": "…", "voice": TRAITS_VOICE})
+def test_the_persona_voice_comes_from_the_pinned_tts_selection():
+    spec = spec_for(voice=TRAITS_VOICE)
+    voice = voice_from_models(spec.models)
     assert (voice.voice_id, voice.provider, voice.speed) == (
         "warm-alto-2",
         "cartesia",
         0.9,
     )
 
-
-@pytest.mark.parametrize(
-    "traits", [{}, {"voice": "warm-alto-2"}, {"voice": {"speed": 1.1}}]
-)
-def test_a_persona_authored_with_no_usable_voice_still_speaks(traits: dict):
-    assert voice_from_traits(traits).voice_id == DEFAULT_VOICE_ID
+    assert spec.persona_traits == {
+        "personality": A_PERSONALITY,
+        "language": "en-US",
+    }
 
 
 # -- The voice activity detector ---------------------------------------------
@@ -343,7 +331,9 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
     spec = spec_for(
         scenario="One point.", greeting="Front desk, hello.", replies=["Noted."]
     )
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     conductor = assembled.conductor
     assert conductor is not None
     transport = conductor._connection.transport
@@ -359,9 +349,7 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
         return await reply_to(persona, messages)
 
     monkeypatch.setattr(Persona, "reply_to", delayed)
-    observed = await observe(
-        conductor, assembled, spec, controls=WalkControls()
-    )
+    observed = await observe(conductor, assembled, spec, controls=WalkControls())
     assert observed.conducted.status == "completed"
 
 
@@ -382,8 +370,7 @@ async def test_both_ends_of_every_turn_are_read_off_the_audio(tmp_path: Path):
     assert closed == sorted(closed)
     # Nobody interrupted anybody, so no two turns cross.
     assert all(
-        closed[position] <= opened[position + 1]
-        for position in range(len(opened) - 1)
+        closed[position] <= opened[position + 1] for position in range(len(opened) - 1)
     )
 
 
@@ -430,7 +417,9 @@ async def test_every_span_points_at_the_audio_it_names(
         replies=["Certainly.", "Done."],
         answer_delay_seconds=0.3,
     )
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     conductor = assembled.conductor
     assert conductor is not None
     transport = conductor._connection.transport
@@ -499,9 +488,7 @@ async def test_every_span_points_at_the_audio_it_names(
             await push_frame(frame, direction)
 
     monkeypatch.setattr(input_processor, "push_frame", carry_one_transport_gap)
-    observed = await observe(
-        conductor, assembled, spec, controls=WalkControls()
-    )
+    observed = await observe(conductor, assembled, spec, controls=WalkControls())
     assert inserted_gap
     audio = observed.assembled.audio
     assert audio is not None
@@ -510,9 +497,7 @@ async def test_every_span_points_at_the_audio_it_names(
     )
     assert len(persona_audio) == len(agent_audio)
 
-    heard = speech_in_the_recording(
-        (tmp_path / audio["recording"]).read_bytes()
-    )
+    heard = speech_in_the_recording((tmp_path / audio["recording"]).read_bytes())
     spoken = observed.spans
     assert [speaker for speaker, _began, _ended in heard] == [
         speaker for speaker, _text, _began, _ended in spoken
@@ -526,18 +511,12 @@ async def test_every_span_points_at_the_audio_it_names(
 
     media_frame = round(0.02 * band)
     recorded_begins = [began for _speaker, began, _ended in heard]
-    transcript_begins = in_samples(
-        [began for _speaker, _text, began, _ended in spoken]
-    )
+    transcript_begins = in_samples([began for _speaker, _text, began, _ended in spoken])
     recorded_ends = [ended for _speaker, _began, ended in heard]
-    transcript_ends = in_samples(
-        [ended for _speaker, _text, _began, ended in spoken]
-    )
+    transcript_ends = in_samples([ended for _speaker, _text, _began, ended in spoken])
     begin_offsets = [
         recorded - transcript
-        for recorded, transcript in zip(
-            recorded_begins, transcript_begins, strict=True
-        )
+        for recorded, transcript in zip(recorded_begins, transcript_begins, strict=True)
     ]
     end_offsets = [
         recorded - transcript
@@ -545,9 +524,7 @@ async def test_every_span_points_at_the_audio_it_names(
     ]
     first_offsets = (begin_offsets[0], end_offsets[0])
     final_offsets = (begin_offsets[-1], end_offsets[-1])
-    assert all(
-        abs(offset) <= media_frame for offset in begin_offsets + end_offsets
-    )
+    assert all(abs(offset) <= media_frame for offset in begin_offsets + end_offsets)
     assert all(
         abs(final - first) <= media_frame
         for first, final in zip(first_offsets, final_offsets, strict=True)
@@ -607,7 +584,9 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
         replies=["All sorted, goodbye now."],
         ends_after_replies=False,
     )
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     conductor = assembled.conductor
     assert conductor is not None
     transport = conductor._connection.transport
@@ -626,9 +605,7 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
         "persona_stopped",
         agent_departs_as_the_concluding_tts_stops,
     )
-    observed = await observe(
-        conductor, assembled, spec, controls=WalkControls()
-    )
+    observed = await observe(conductor, assembled, spec, controls=WalkControls())
 
     assert observed.conducted.ending == "agent_ended"
     assert observed.conducted.reason == "the agent ended the exchange"
@@ -647,11 +624,8 @@ class _ProductionStopScriptedVAD(ScriptedVAD):
     def set_sample_rate(self, sample_rate: int) -> None:
         super().set_sample_rate(sample_rate)
         self.set_params(
-            self.params.model_copy(
-                update={"stop_secs": CONVERSATION_VAD.stop_secs}
-            )
+            self.params.model_copy(update={"stop_secs": CONVERSATION_VAD.stop_secs})
         )
-
 
 
 async def test_production_stop_window_needs_the_full_declared_quiet_period():
@@ -666,13 +640,9 @@ async def test_production_stop_window_needs_the_full_declared_quiet_period():
         CONVERSATION_VAD.stop_secs * band / detector.num_frames_required()
     )
     for _ in range(quiet_windows - 1):
-        state = await detector.analyze_audio(
-            bytes(detector.num_frames_required() * 2)
-        )
+        state = await detector.analyze_audio(bytes(detector.num_frames_required() * 2))
     assert state is not VADState.QUIET
-    state = await detector.analyze_audio(
-        bytes(detector.num_frames_required() * 2)
-    )
+    state = await detector.analyze_audio(bytes(detector.num_frames_required() * 2))
     assert state is VADState.QUIET
 
 
@@ -724,7 +694,7 @@ async def test_departure_finalizes_the_active_agent_utterance(
     connection = _AbruptDeparture()
     conductor = VoiceConductor(
         connection=connection,
-        voice=voice_from_traits(spec.persona_traits),
+        voice=voice_from_models(spec.models),
         blobs=FilesystemBlobStore(tmp_path),
         recording_key=f"{spec.simulation_id}/dual-channel.wav",
     )
@@ -796,7 +766,7 @@ async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
     connection = _TransportLost()
     conductor = VoiceConductor(
         connection=connection,
-        voice=voice_from_traits(spec.persona_traits),
+        voice=voice_from_models(spec.models),
         blobs=FilesystemBlobStore(tmp_path),
         recording_key=f"{spec.simulation_id}/dual-channel.wav",
     )
@@ -917,7 +887,7 @@ async def stopped_while_opening(
         monkeypatch.setattr(conductor_module, "build_legs", legs(stop))
     conductor = VoiceConductor(
         connection=line,
-        voice=voice_from_traits(spec.persona_traits),
+        voice=voice_from_models(spec.models),
         blobs=FilesystemBlobStore(tmp_path),
         recording_key=f"{spec.simulation_id}/dual-channel.wav",
     )
@@ -1082,7 +1052,7 @@ async def test_genuine_overlap_stays_in_the_transcript_and_recording(
     )
     conductor = VoiceConductor(
         connection=connection,
-        voice=voice_from_traits(spec.persona_traits),
+        voice=voice_from_models(spec.models),
         blobs=FilesystemBlobStore(tmp_path),
         recording_key=f"{spec.simulation_id}/dual-channel.wav",
         parameters=ConductParameters(agent_opening_seconds=0.2),
@@ -1160,9 +1130,7 @@ async def test_the_speech_legs_need_no_corpus_and_no_download(
     assert nltk.download("punkt_tab", quiet=True) is False
 
     spoken = "First sentence. Second sentence. And a third one after that."
-    observed = await voice_simulation(
-        tmp_path, scenario=spoken, replies=["Noted."]
-    )
+    observed = await voice_simulation(tmp_path, scenario=spoken, replies=["Noted."])
     audio = observed.assembled.audio
     assert audio is not None
     assert_one_speaker_to_a_channel(
@@ -1171,7 +1139,7 @@ async def test_the_speech_legs_need_no_corpus_and_no_download(
     )
 
 
-async def test_the_speaking_leg_is_built_with_the_authored_voice(
+async def test_the_speaking_leg_is_built_with_the_pinned_tts_voice(
     tmp_path: Path,
 ):
     """The pipeline is assembled from this simulation's own spec, and the
@@ -1181,22 +1149,20 @@ async def test_the_speaking_leg_is_built_with_the_authored_voice(
         tmp_path,
         scenario="One point.",
         replies=["Noted."],
-        voice={"provider": "elevenlabs", "voiceId": "brisk-tenor-7", "speed": 1.15},
+        voice={"provider": "cartesia", "voiceId": "brisk-tenor-7", "speed": 1.15},
     )
     conductor = observed.assembled.conductor
     assert conductor is not None
     spoke_with = conductor.speaking_voice
     assert (spoke_with.voice_id, spoke_with.provider, spoke_with.speed) == (
         "brisk-tenor-7",
-        "elevenlabs",
+        "cartesia",
         1.15,
     )
 
-    # A persona authored with no voice still speaks, with the default one.
-    plain = await voice_simulation(
-        tmp_path, scenario="One point.", replies=["Noted."]
-    )
-    assert plain.assembled.conductor.speaking_voice.voice_id == DEFAULT_VOICE_ID
+    # The helper's complete TTS selection is also explicit.
+    plain = await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
+    assert plain.assembled.conductor.speaking_voice.voice_id == "warm-alto-2"
 
 
 async def test_a_counterpart_that_echoes_hands_back_what_it_heard(
@@ -1236,151 +1202,29 @@ def test_a_counterpart_cannot_both_echo_and_read_a_script(tmp_path: Path):
         assemble(
             spec_for(echoes_what_it_hears=True, replies=["Certainly."]),
             blobs=FilesystemBlobStore(tmp_path),
+            speech=SCRIPTED_PAIR,
         )
 
 
 # -- Which legs, and whose voice ---------------------------------------------
 
 
-REAL_PAIR = SpeechProviders(
-    stt="deepgram",
-    tts="elevenlabs",
-    stt_key="deepgram-key-for-assembly-only",
-    tts_key="elevenlabs-key-for-assembly-only",
-)
-"""Both providers named. Building legs is not connecting to them, so an
-assembled pipeline can be inspected here without a network or an account."""
-
-
-def capture_construction(
-    monkeypatch: pytest.MonkeyPatch, service: type
-) -> list[dict[str, Any]]:
-    """Remember the public arguments Egma hands a provider service."""
-    calls: list[dict[str, Any]] = []
-    original = service.__init__
-
-    def remember(instance: object, *args: object, **kwargs: Any) -> None:
-        calls.append(kwargs)
-        original(instance, *args, **kwargs)
-
-    monkeypatch.setattr(service, "__init__", remember)
-    return calls
-
-
-@asynccontextmanager
-async def assembled_with(providers: SpeechProviders, tmp_path: Path, **overrides):
-    """One assembled voice pipeline, given back after it has been read.
-
-    Nothing is opened: a leg is built here and reaches its provider only
-    when a simulation starts, which is what lets the whole of this section
-    run with no network and no account.
-    """
+async def test_the_unit_speech_pair_uses_the_voice_from_models(tmp_path: Path):
+    """The deterministic pair is a test injection, not a runtime fallback."""
+    spec = spec_for(voice=TRAITS_VOICE)
     assembled = assemble(
-        spec_for(**overrides), blobs=FilesystemBlobStore(tmp_path), speech=providers
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )
+    conductor = assembled.conductor
+    assert conductor is not None
     try:
-        yield assembled
-    finally:
-        await assembled.conductor.close()
-
-
-async def test_a_deployment_that_configures_nothing_gets_the_scripted_pair(
-    tmp_path: Path,
-):
-    """The default everywhere: CI, the free local demo, and any deployment
-    that sets no provider variable."""
-    async with assembled_with(
-        SCRIPTED_PAIR, tmp_path, voice={"voiceId": "warm-alto-2"}
-    ) as assembled:
-        legs = assembled.conductor.legs
+        legs = conductor.legs
         assert isinstance(legs.tts, ScriptedTTS)
         assert isinstance(legs.stt, ScriptedSTT)
-        assert isinstance(assembled.conductor.vad, ScriptedVAD)
-        assert legs.tts.voice.voice_id == "warm-alto-2"
-
-
-async def test_naming_the_providers_puts_their_stock_services_in_the_slots(
-    tmp_path: Path,
-):
-    """Configuration alone selects them — the spec is the same one the
-    scripted pair conducts, and no code above assembly changed."""
-    from pipecat.services.deepgram.stt import DeepgramSTTService
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-
-    async with assembled_with(REAL_PAIR, tmp_path) as assembled:
-        legs = assembled.conductor.legs
-        assert isinstance(legs.tts, ElevenLabsHttpTTSService)
-        assert isinstance(legs.stt, DeepgramSTTService)
-
-
-async def test_each_leg_is_chosen_on_its_own(tmp_path: Path):
-    """A real mouth with scripted ears is a configuration somebody will
-    want, and it costs one key rather than two."""
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-
-    providers = SpeechProviders(
-        tts="elevenlabs", tts_key="elevenlabs-key-for-assembly-only"
-    )
-    async with assembled_with(providers, tmp_path) as assembled:
-        legs = assembled.conductor.legs
-        assert isinstance(legs.tts, ElevenLabsHttpTTSService)
-        assert isinstance(legs.stt, ScriptedSTT)
-
-
-async def test_a_real_voice_named_in_the_traits_is_the_one_that_speaks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-
-    calls = capture_construction(monkeypatch, ElevenLabsHttpTTSService)
-    async with assembled_with(
-        REAL_PAIR,
-        tmp_path,
-        voice={"provider": "elevenlabs", "voiceId": "brisk-tenor-7", "speed": 1.15},
-    ) as assembled:
-        assert calls[0]["settings"].voice == "brisk-tenor-7"
-        assert calls[0]["settings"].speed == pytest.approx(1.15)
-        spoke_with = assembled.conductor.speaking_voice
-        assert (spoke_with.voice_id, spoke_with.speed) == ("brisk-tenor-7", 1.15)
-
-
-async def test_a_voice_authored_for_nobody_in_particular_is_still_honored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Traits naming a voice and no provider are authoring for whichever
-    deployment runs them, so the id is used as written."""
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-
-    calls = capture_construction(monkeypatch, ElevenLabsHttpTTSService)
-    async with assembled_with(
-        REAL_PAIR, tmp_path, voice={"voiceId": "brisk-tenor-7"}
-    ) as assembled:
-        assert calls[0]["settings"].voice == "brisk-tenor-7"
-        assert assembled.conductor.speaking_voice.voice_id == "brisk-tenor-7"
-
-
-@pytest.mark.parametrize(
-    ("traits_voice", "why"),
-    [
-        (None, "a persona authored with no voice at all"),
-        ({"speed": 1.1}, "a voice block naming no voice"),
-        (TRAITS_VOICE, "a voice belonging to a provider this is not"),
-    ],
-)
-async def test_a_persona_with_no_voice_of_this_providers_gets_the_default_english(
-    tmp_path: Path,
-    traits_voice: dict | None,
-    why: str,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Speaking with a sensible default beats failing on a timbre."""
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-
-    calls = capture_construction(monkeypatch, ElevenLabsHttpTTSService)
-    overrides = {} if traits_voice is None else {"voice": traits_voice}
-    async with assembled_with(REAL_PAIR, tmp_path, **overrides) as assembled:
-        assert calls[0]["settings"].voice == DEFAULT_ENGLISH_VOICE_ID, why
-        assert assembled.conductor.speaking_voice.voice_id == DEFAULT_ENGLISH_VOICE_ID
+        assert isinstance(conductor.vad, ScriptedVAD)
+        assert legs.tts.voice == voice_from_models(spec.models)
+    finally:
+        await conductor.close()
 
 
 async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
@@ -1512,7 +1356,9 @@ def test_a_chat_spec_assembles_no_speech_legs_and_no_audio(tmp_path: Path):
     """Modality selects the legs and nothing else: a chat simulation is the
     plug on its own, walked, and its report has no audio to carry."""
     spec = SimulationSpec.from_document(scripted_spec("sim-chat"))
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     assert assembled.conductor is None
     assert assembled.plug is not None
     assert assembled.audio is None
@@ -1528,4 +1374,5 @@ def test_assembling_a_spec_with_no_plug_refuses_before_anything_happens(
         assemble(
             SimulationSpec.from_document(document),
             blobs=FilesystemBlobStore(tmp_path),
+            speech=SCRIPTED_PAIR,
         )

@@ -25,7 +25,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 CONTRACT_DIR_ENV = "EGMA_SIMULATION_CONTRACT_DIR"
 
-SPEC_SCHEMA_FILENAME = "simulation-spec.v1.schema.json"
+SPEC_SCHEMA_FILENAME = "simulation-spec.v2.schema.json"
 REPORT_SCHEMA_FILENAME = "simulation-report.v1.schema.json"
 
 # The endings a failed simulation may carry, spelled here because this is
@@ -86,6 +86,27 @@ def contract_dir() -> Path:
 def _load_schema(filename: str) -> dict:
     with open(contract_dir() / "schemas" / filename, encoding="utf-8") as handle:
         return json.load(handle)
+
+
+@cache
+def spec_contract_version() -> int:
+    """The one spec version this simulator can read.
+
+    Read it from the schema the simulator validates with. The claim client must
+    not keep a second version number that can drift from the document parser.
+    """
+    schema = _load_schema(SPEC_SCHEMA_FILENAME)
+    try:
+        version = schema["properties"]["contract_version"]["const"]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            f"{SPEC_SCHEMA_FILENAME} does not declare one contract version"
+        ) from error
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ValueError(
+            f"{SPEC_SCHEMA_FILENAME} declares a non-integer contract version"
+        )
+    return version
 
 
 SCHEMA_OF = {

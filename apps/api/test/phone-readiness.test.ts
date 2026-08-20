@@ -1,30 +1,10 @@
-/**
- * Phone readiness: a second fact about a platform, never a component of the
- * first.
- *
- * Read from the platform's own store now, rather than from this container's
- * environment. That is the whole recoverability of it: the facts survive a
- * restart, a rebuild and a move to another machine, and an operator who
- * supplies a missing one is ready on the next request with nothing restarted.
- *
- * A deployment with no carrier runs text and chat simulations perfectly well.
- * Folding that into one `ready` would either call a working platform broken or
- * call a platform that cannot dial ready — and the first makes the first-run
- * story impossible to tell while the second charges somebody for a call that
- * was never going to connect.
- *
- * So the two are separate, and this file holds the separation and the honesty:
- * the state is `setup_required` until a carrier and a speech provider are both
- * there, it names what is missing rather than leaving a person to guess, and
- * nothing in the answer is a secret — this is the one door on the API that asks
- * for no credential at all.
- */
+/** Phone readiness is the carrier-route fact beside platform health. */
 
 import { describe, expect, it } from "vitest";
 
-import { phoneReadiness, phoneSetupRequiredMessage } from "../src/phone-readiness.ts";
-import { loadConfig } from "../src/config.ts";
 import { TEST_ENCRYPTION_KEY } from "../../../packages/db/test/support/database.ts";
+import { loadConfig } from "../src/config.ts";
+import { phoneReadiness, phoneSetupRequiredMessage } from "../src/phone-readiness.ts";
 
 const BASE = {
   DATABASE_URL: "postgres://unused/unused",
@@ -35,106 +15,53 @@ const BASE = {
 } as const;
 
 describe("phone readiness", () => {
-  it("is setup_required on a platform nobody has given a carrier, and names all three", () => {
+  it("names both missing carrier facts", () => {
     const readiness = phoneReadiness({});
 
     expect(readiness.state).toBe("setup_required");
-    expect(readiness.missing).toEqual([
-      "the carrier trunk",
-      "the source number",
-      "the text-to-speech provider",
-    ]);
-  });
-
-  it("is still setup_required with a carrier and no speech, and says which half", () => {
-    // Not nearly ready. A carrier with no speech provider places a call nobody
-    // can talk on, and charges for it — so half a setup is a refusal, and the
-    // refusal has to say which half so somebody can act on it.
-    const readiness = phoneReadiness({
-      carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
-      carrier_trunk_number: "+15550100100",
-    });
-
-    expect(readiness.state).toBe("setup_required");
-    expect(readiness.missing).toEqual(["the text-to-speech provider"]);
-    expect(phoneSetupRequiredMessage(readiness)).toContain(
-      "the text-to-speech provider",
-    );
-    expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host setup");
-    // Said plainly, because a developer reading it is not the person who runs
-    // the platform on a hosted deployment and needs to know nothing was spent.
+    expect(readiness.missing).toEqual(["the carrier trunk", "the source number"]);
     expect(phoneSetupRequiredMessage(readiness)).toContain("nothing was charged");
+    expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host setup");
   });
 
-  it("is ready once all three are there", () => {
+  it("is ready for a complete source-IP route", () => {
     const readiness = phoneReadiness({
       carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
       carrier_trunk_number: "+15550100100",
-      text_to_speech_provider: "openai",
     });
 
-    expect(readiness.state).toBe("ready");
-    expect(readiness.missing).toEqual([]);
-    expect(readiness.trunkAddress).toBe("egma-simulator-abc.pstn.twilio.com");
-    expect(readiness.sourceNumber).toBe("+15550100100");
-    expect(readiness.speechProvider).toBe("openai");
+    expect(readiness).toEqual({
+      state: "ready",
+      missing: [],
+      trunkAddress: "egma-simulator-abc.pstn.twilio.com",
+      sourceNumber: "+15550100100",
+    });
   });
 
-  it.each([
-    ["carrier_trunk_username", "egma-legacy", "the carrier trunk password"],
-    ["carrier_trunk_password", null, "the carrier trunk username"],
-  ] as const)(
-    "keeps a legacy one-sided SIP credential out of ready when it holds only %s",
-    (name, value, absentLabel) => {
-      const readiness = phoneReadiness({
-        carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
-        carrier_trunk_number: "+15550100100",
-        text_to_speech_provider: "openai",
-        [name]: value,
-      });
-
-      expect(readiness.state).toBe("setup_required");
-      expect(readiness.missing).toEqual([absentLabel]);
-    },
-  );
-
-  it("answers from what a secret-free view of the store can say, and no more", () => {
-    // `platformFacts` is the only thing this reads, and it answers `null` for
-    // every setting the catalog marks secret. So a carrier that is fully
-    // configured — trunk password and all — still reports itself missing
-    // nothing more than these three, and there is no argument by which a key
-    // could reach this answer.
+  it("returns no SIP credential from a complete credential route", () => {
     const readiness = phoneReadiness({
       carrier_trunk_address: "egma-simulator-abc.pstn.twilio.com",
       carrier_trunk_number: "+15550100100",
       carrier_trunk_username: "egma-trunk",
       carrier_trunk_password: null,
-      text_to_speech_provider: "openai",
-      text_to_speech_key: null,
     });
 
     expect(readiness.state).toBe("ready");
-    expect(JSON.stringify(readiness)).not.toContain("null,");
     expect(Object.keys(readiness).sort()).toEqual([
       "missing",
       "sourceNumber",
-      "speechProvider",
       "state",
       "trunkAddress",
     ]);
   });
 
-  it("seeds the carrier out of the environment, and never holds it after", () => {
-    // The variables the old phone setup wrote, read once at start as settings
-    // to seed rather than as this process's own configuration. What the API
-    // then holds about the carrier is nothing at all: the store holds it.
+  it("seeds exactly the carrier route from the environment", () => {
     const config = loadConfig({
       ...BASE,
       EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
       EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
       EGMA_PHONE_TRUNK_USERNAME: "egma-trunk",
       EGMA_PHONE_TRUNK_PASSWORD: "the-carrier-issued-this-one",
-      EGMA_PERSONA_TTS_PROVIDER: "openai",
     });
 
     expect(config.platformSettings).toEqual({
@@ -142,7 +69,6 @@ describe("phone readiness", () => {
       carrier_trunk_number: "+15550100100",
       carrier_trunk_username: "egma-trunk",
       carrier_trunk_password: "the-carrier-issued-this-one",
-      text_to_speech_provider: "openai",
     });
     expect(Object.keys(config)).not.toContain("phone");
   });
@@ -171,7 +97,7 @@ describe("phone readiness", () => {
     );
   });
 
-  it("refuses a partial phone bundle before it can seed a mixed credential", () => {
+  it("refuses every partial credential route", () => {
     const complete = {
       EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
       EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
@@ -182,12 +108,11 @@ describe("phone readiness", () => {
     for (const missing of Object.keys(complete) as (keyof typeof complete)[]) {
       const partial: Record<string, string> = { ...complete };
       delete partial[missing];
-
       expect(() => loadConfig({ ...BASE, ...partial })).toThrow(missing);
     }
   });
 
-  it("keeps the valid two-value form for a carrier authenticated by source IP", () => {
+  it("accepts the two-value source-IP route", () => {
     expect(
       loadConfig({
         ...BASE,
@@ -197,40 +122,6 @@ describe("phone readiness", () => {
     ).toEqual({
       carrier_trunk_address: "carrier.example.com",
       carrier_trunk_number: "+15550100100",
-    });
-  });
-});
-
-describe("the platform's default judge", () => {
-  it("is absent when nothing configured one, and grading says so rather than passing", () => {
-    expect(loadConfig({ ...BASE }).defaultJudge).toBeUndefined();
-  });
-
-  it("is all three or none, and refuses to start on half", () => {
-    // A model with no key is a judge that errors every verdict it is given, one
-    // run at a time, and a key with no model names nothing to ask. Neither is
-    // worth discovering after a suite has run.
-    expect(() =>
-      loadConfig({ ...BASE, EGMA_JUDGE_PROVIDER: "openai", EGMA_JUDGE_MODEL: "gpt-4o" }),
-    ).toThrow(/EGMA_JUDGE_API_KEY/u);
-
-    expect(() => loadConfig({ ...BASE, EGMA_JUDGE_API_KEY: "sk-whatever" })).toThrow(
-      /EGMA_JUDGE_PROVIDER and EGMA_JUDGE_MODEL/u,
-    );
-  });
-
-  it("is read whole when all three are there", () => {
-    const config = loadConfig({
-      ...BASE,
-      EGMA_JUDGE_PROVIDER: "openai",
-      EGMA_JUDGE_MODEL: "gpt-4o",
-      EGMA_JUDGE_API_KEY: "sk-only-this-test-holds-this",
-    });
-
-    expect(config.defaultJudge).toEqual({
-      provider: "openai",
-      model: "gpt-4o",
-      key: "sk-only-this-test-holds-this",
     });
   });
 });

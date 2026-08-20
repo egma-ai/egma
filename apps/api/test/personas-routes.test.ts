@@ -4,6 +4,8 @@ import {
   createTest,
   archiveTest,
   editTest,
+  RECOMMENDED_PERSONA_MODELS,
+  type PersonaModels,
   type PersonaTraits,
 } from "@egma/db";
 import { newId } from "@egma/ids";
@@ -43,7 +45,11 @@ afterEach(async () => {
 const TRAITS: PersonaTraits = {
   personality: "Calls about a bill and wants it settled today.",
   language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
+  manner: "Clear and direct.",
+  patience: "Waits once before asking again.",
+  accent: "Neutral American English.",
+  backgroundNoise: "A quiet room.",
+  underFriction: "Asks for a manager without becoming rude.",
 };
 
 /** One browser request: a session cookie, and the project in the address. */
@@ -74,7 +80,9 @@ type WirePersona = {
   revision: string;
   archived_at: string | null;
   is_default: boolean;
+  owner: "egma" | "organization";
   traits: Record<string, unknown>;
+  models: PersonaModels;
 };
 
 function personaIn(answer: Answer): WirePersona {
@@ -91,6 +99,7 @@ async function createPersonaThrough(
     project: projectId,
     name,
     traits,
+    models: RECOMMENDED_PERSONA_MODELS,
   });
   expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
   return personaIn(made);
@@ -108,30 +117,49 @@ async function defaultPersonaOf(projectId: string): Promise<string> {
 }
 
 describe("creating and reading a persona", () => {
+  it("exports the closed model catalog and the release recommendations", async () => {
+    api = await createApi("personas_model_catalog");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const form = await browse(
+      "GET",
+      `/api/persona-form?project=${ada.projectId}`,
+      ada,
+    );
+
+    expect(form.statusCode).toBe(200);
+    expect(form.body.recommended_models).toEqual(RECOMMENDED_PERSONA_MODELS);
+    expect(form.body.model_catalog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          job: "stt",
+          provider: "openai",
+          model: "gpt-live-transcribe",
+        }),
+        expect.objectContaining({
+          job: "stt",
+          provider: "deepgram",
+          model: "nova-3-general",
+        }),
+      ]),
+    );
+  });
+
   it("answers the whole persona, with both expectations a write will name", async () => {
     api = await createApi("personas_create");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const made = await createPersonaThrough(ada, "Impatient Rita", {
-      ...TRAITS,
-      manner: "Brisk, and talks over the end of a sentence.",
-      patience: "Gives it a minute before asking for somebody else.",
-      accent: "Glaswegian.",
-      backgroundNoise: "A busy kitchen.",
-      underFriction: "Repeats the question louder, then asks to escalate.",
-    });
+    const made = await createPersonaThrough(ada, "Impatient Rita");
 
     expect(made.name).toBe("Impatient Rita");
     expect(made.version).toBe(1);
     expect(made.archived_at).toBeNull();
     expect(made.is_default).toBe(false);
+    expect(made.owner).toBe("organization");
     expect(made.revision).toEqual(expect.any(String));
     expect(made.version_id).toEqual(expect.any(String));
-    expect(made.traits.manner).toBe("Brisk, and talks over the end of a sentence.");
-    expect(made.traits.backgroundNoise).toBe("A busy kitchen.");
-    expect(made.traits.underFriction).toBe(
-      "Repeats the question louder, then asks to escalate.",
-    );
+    expect(made.traits).toEqual(TRAITS);
+    expect(made.models).toEqual(RECOMMENDED_PERSONA_MODELS);
 
     const read = await browse(
       "GET",
@@ -150,6 +178,7 @@ describe("creating and reading a persona", () => {
       project: ada.projectId,
       name: "   ",
       traits: TRAITS,
+      models: RECOMMENDED_PERSONA_MODELS,
     });
     expect(nameless.statusCode).toBe(422);
     expect(nameless.body).toEqual({
@@ -157,15 +186,85 @@ describe("creating and reading a persona", () => {
       message: "a persona needs a name",
     });
 
-    const tooFast = await browse("POST", "/api/personas", ada, {
+    const blankPersonality = await browse("POST", "/api/personas", ada, {
       project: ada.projectId,
       name: "Fast Freddie",
-      traits: { ...TRAITS, voice: { ...TRAITS.voice, speed: 9 } },
+      traits: { ...TRAITS, personality: "   " },
+      models: RECOMMENDED_PERSONA_MODELS,
     });
-    expect(tooFast.statusCode).toBe(422);
-    expect(tooFast.body.error).toBe("unprocessable");
-    expect(tooFast.body.message).toBe(
-      "speaking speed must be between 0.5 and 2",
+    expect(blankPersonality.statusCode).toBe(422);
+    expect(blankPersonality.body).toEqual({
+      error: "unprocessable",
+      message: "a persona needs a personality",
+    });
+
+    const missingLanguage = await browse("POST", "/api/personas", ada, {
+      project: ada.projectId,
+      name: "No silent language default",
+      traits: { personality: TRAITS.personality },
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    expect(missingLanguage.statusCode).toBe(422);
+    expect(missingLanguage.body).toEqual({
+      error: "unprocessable",
+      message: "a persona needs a language",
+    });
+
+    const removedControl = await browse("POST", "/api/personas", ada, {
+      project: ada.projectId,
+      name: "No dummy controls",
+      traits: {
+        ...TRAITS,
+        voice: { provider: "cartesia", voiceId: "wrong-owner", speed: 1 },
+      },
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    expect(removedControl.statusCode).toBe(422);
+    expect(removedControl.body).toEqual({
+      error: "unprocessable",
+      message:
+        "persona traits have unsupported fields voice. " +
+        "Provider, model, voice id, and speed belong in models.",
+    });
+
+    const unknownControl = await browse("POST", "/api/personas", ada, {
+      project: ada.projectId,
+      name: "No silent controls",
+      traits: { ...TRAITS, background_noise: "A busy kitchen." },
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    expect(unknownControl.statusCode).toBe(422);
+    expect(unknownControl.body).toEqual({
+      error: "unprocessable",
+      message:
+        "persona traits have unsupported fields background_noise. " +
+        "Provider, model, voice id, and speed belong in models.",
+    });
+
+    const missingModels = await browse("POST", "/api/personas", ada, {
+      project: ada.projectId,
+      name: "No implicit execution",
+      traits: TRAITS,
+    });
+    expect(missingModels.statusCode).toBe(422);
+    expect(missingModels.body).toEqual({
+      error: "unprocessable",
+      message:
+        "a persona needs one complete models value with llm, stt and tts",
+    });
+
+    const mismatchedStt = await browse("POST", "/api/personas", ada, {
+      project: ada.projectId,
+      name: "No mismatched adapter",
+      traits: TRAITS,
+      models: {
+        ...RECOMMENDED_PERSONA_MODELS,
+        stt: { provider: "openai", model: "nova-3-general" },
+      },
+    });
+    expect(mismatchedStt.statusCode).toBe(422);
+    expect(String(mismatchedStt.body.message)).toContain(
+      "openai/nova-3-general",
     );
   });
 
@@ -174,11 +273,10 @@ describe("creating and reading a persona", () => {
    *
    * The whole worth of a persona is that one of them calls about forty
    * different situations, and a caller carrying a goal would quietly become a
-   * second copy of one test. That is a claim about behaviour, so it is shown
-   * by asking the system for it: a create that smuggles a scenario in comes
-   * back without one, and the stored version holds none either.
+   * second copy of one test. Refusing those keys is safer than silently
+   * dropping them, because a successful write would claim the control worked.
    */
-  it("keeps a test's goal out of a persona, at the door and in the row", async () => {
+  it("refuses a test's scenario and goal at the persona door", async () => {
     api = await createApi("personas_no_scenario");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -191,38 +289,22 @@ describe("creating and reading a persona", () => {
         goal: "Reschedule the appointment.",
         wants: "An afternoon slot.",
       },
+      models: RECOMMENDED_PERSONA_MODELS,
     });
 
-    expect(made.statusCode).toBe(201);
-    for (const smuggled of ["scenario", "goal", "wants"]) {
-      expect(made.body.traits, smuggled).not.toHaveProperty(smuggled);
-    }
-
-    const read = await browse(
-      "GET",
-      `/api/personas/${personaIn(made).id}?project=${ada.projectId}`,
-      ada,
-    );
-    expect(personaIn(read).traits).toEqual(TRAITS);
-
-    // And not merely hidden by the read: the stored version holds none of it,
-    // so nothing downstream — a simulator building a caller, a run pinning a
-    // version — can ever find one there.
-    const { rows } = await api.database.sql<{ traits: Record<string, unknown> }>(
-      "select traits from persona_version where persona_id = $1",
-      [personaIn(made).id],
-    );
-    expect(Object.keys(rows[0]?.traits ?? {}).sort()).toEqual([
-      "language",
-      "personality",
-      "voice",
-    ]);
+    expect(made.statusCode).toBe(422);
+    expect(made.body).toEqual({
+      error: "unprocessable",
+      message:
+        "persona traits have unsupported fields scenario, goal, wants. " +
+        "Provider, model, voice id, and speed belong in models.",
+    });
   });
 
-  it("shows the project's default persona as an ordinary persona of the list", async () => {
+  it("shows the project's Egma-provided default in the list", async () => {
     api = await createApi("personas_default_visible");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const starter = await defaultPersonaOf(ada.projectId);
+    const defaultPersonaId = await defaultPersonaOf(ada.projectId);
 
     const listed = await browse(
       "GET",
@@ -230,20 +312,94 @@ describe("creating and reading a persona", () => {
       ada,
     );
     const items = listed.body.items as WirePersona[];
-    const found = items.find((one) => one.id === starter);
+    const found = items.find((one) => one.id === defaultPersonaId);
 
-    expect(found?.is_default).toBe(true);
+    expect(found).toMatchObject({
+      name: "Default Persona",
+      description: "Regular conversationalist persona",
+      version: 1,
+      is_default: true,
+      owner: "egma",
+      traits: {
+        personality:
+          "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        language: "en-US",
+        manner: "Clear, natural, and conversational.",
+        patience: "Starts patient and gives the agent time to explain.",
+        accent: "Neutral American English.",
+        backgroundNoise: "None.",
+        underFriction:
+          "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
+      },
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    expect(Object.keys(found?.traits ?? {}).sort()).toEqual(
+      [
+        "accent",
+        "backgroundNoise",
+        "language",
+        "manner",
+        "patience",
+        "personality",
+        "underFriction",
+      ].sort(),
+    );
     expect(items.filter((one) => one.is_default)).toHaveLength(1);
 
-    // Ordinary means editable: a rename lands on it like any other.
-    const renamed = await browse("PATCH", `/api/personas/${starter}`, ada, {
-      project: ada.projectId,
-      expected_revision: found?.revision,
-      name: "The one everybody starts with",
+    const refused = await browse(
+      "PATCH",
+      `/api/personas/${defaultPersonaId}`,
+      ada,
+      {
+        project: ada.projectId,
+        expected_revision: found?.revision,
+        name: "The one everybody starts with",
+      },
+    );
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toEqual({
+      error: "egma_provided_persona",
+      message:
+        `Persona ${defaultPersonaId} is Egma-provided and cannot be changed. ` +
+        "Fork it to make a Custom persona you can edit.",
     });
-    expect(renamed.statusCode).toBe(200);
-    expect(personaIn(renamed).name).toBe("The one everybody starts with");
-    expect(personaIn(renamed).is_default).toBe(true);
+  });
+});
+
+describe("choosing the project default", () => {
+  it("moves the project choice between a Custom and Egma-provided persona", async () => {
+    api = await createApi("personas_choose_default");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const egmaProvidedId = await defaultPersonaOf(ada.projectId);
+    const custom = await createPersonaThrough(ada, "Default Dana");
+
+    const selectedCustom = await browse(
+      "POST",
+      `/api/personas/${custom.id}/default`,
+      ada,
+      { project: ada.projectId },
+    );
+    expect(selectedCustom.statusCode).toBe(200);
+    expect(personaIn(selectedCustom)).toMatchObject({
+      id: custom.id,
+      owner: "organization",
+      is_default: true,
+    });
+    expect(await defaultPersonaOf(ada.projectId)).toBe(custom.id);
+
+    const selectedEgma = await browse(
+      "POST",
+      `/api/personas/${egmaProvidedId}/default`,
+      ada,
+      { project: ada.projectId },
+    );
+    expect(selectedEgma.statusCode).toBe(200);
+    expect(personaIn(selectedEgma)).toMatchObject({
+      id: egmaProvidedId,
+      owner: "egma",
+      is_default: true,
+    });
+    expect(await defaultPersonaOf(ada.projectId)).toBe(egmaProvidedId);
   });
 });
 
@@ -279,7 +435,7 @@ describe("the list", () => {
     );
     expect(
       (searched.body.items as WirePersona[]).map((one) => one.name),
-    ).toEqual(["Four", "One"]);
+    ).toEqual(["Four", "One", "Default Persona"]);
 
     const archive = await browse(
       "GET",
@@ -369,6 +525,8 @@ describe("the list", () => {
     api = await createApi("personas_isolation");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    const shared = await defaultPersonaOf(ada.projectId);
+    expect(await defaultPersonaOf(grace.projectId)).toBe(shared);
     const outbound = await createProject(contextFor(ada, "admin"), {
       name: "Outbound",
       slug: "outbound",
@@ -388,6 +546,10 @@ describe("the list", () => {
       ada,
     );
     const defaultIds = (inDefault.body.items as WirePersona[]).map((o) => o.id);
+    const sharedPersona = (inDefault.body.items as WirePersona[]).find(
+      (one) => one.id === shared,
+    );
+    expect(sharedPersona?.owner).toBe("egma");
     expect(defaultIds).toContain(here.id);
     expect(defaultIds).not.toContain(there.id);
 
@@ -468,8 +630,44 @@ describe("editing a persona", () => {
       `/api/personas/${made.id}/versions?project=${ada.projectId}`,
       ada,
     );
-    expect((history.body.items as { version: number }[]).map((v) => v.version))
-      .toEqual([2, 1]);
+    expect(
+      (history.body.items as { version: number }[]).map((v) => v.version),
+    ).toEqual([2, 1]);
+  });
+
+  it("mints one version for one complete models change", async () => {
+    api = await createApi("personas_models_version");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const made = await createPersonaThrough(ada, "Modelled Maya");
+    const models: PersonaModels = {
+      ...made.models,
+      tts: {
+        provider: "openai",
+        model: "gpt-4o-mini-tts",
+        voiceId: "alloy",
+        speed: 1.25,
+      },
+    };
+
+    const changed = await browse("PATCH", `/api/personas/${made.id}`, ada, {
+      project: ada.projectId,
+      expected_revision: made.revision,
+      expected_version_id: made.version_id,
+      models,
+    });
+
+    expect(changed.statusCode).toBe(200);
+    expect(personaIn(changed)).toMatchObject({ version: 2, models });
+
+    const history = await browse(
+      "GET",
+      `/api/personas/${made.id}/versions?project=${ada.projectId}`,
+      ada,
+    );
+    expect(history.body.items).toMatchObject([
+      { version: 2, traits: TRAITS, models },
+      { version: 1, traits: TRAITS, models: RECOMMENDED_PERSONA_MODELS },
+    ]);
   });
 
   it("refuses an identity write against a revision the persona has moved past", async () => {
@@ -516,14 +714,20 @@ describe("editing a persona", () => {
       project: ada.projectId,
       expected_revision: made.revision,
       expected_version_id: made.version_id,
-      traits: { ...TRAITS, language: "en-GB" },
+      traits: {
+        ...TRAITS,
+        personality: "Cyrus waits once, then asks for a manager.",
+      },
     });
 
     const refused = await browse("PATCH", `/api/personas/${made.id}`, ada, {
       project: ada.projectId,
       expected_revision: personaIn(second).revision,
       expected_version_id: made.version_id,
-      traits: { ...TRAITS, language: "en-AU" },
+      traits: {
+        ...TRAITS,
+        personality: "Cyrus asks for a manager immediately.",
+      },
     });
 
     expect(refused.statusCode).toBe(409);
@@ -552,44 +756,58 @@ describe("editing a persona", () => {
     const noVersion = await browse("PATCH", `/api/personas/${made.id}`, ada, {
       project: ada.projectId,
       expected_revision: made.revision,
-      traits: { ...TRAITS, language: "en-GB" },
+      traits: { ...TRAITS, personality: "Gail is still waiting." },
     });
     expect(noVersion.statusCode).toBe(422);
     expect(String(noVersion.body.message)).toContain("expected_version_id");
+
+    const noModelsVersion = await browse(
+      "PATCH",
+      `/api/personas/${made.id}`,
+      ada,
+      {
+        project: ada.projectId,
+        expected_revision: made.revision,
+        models: RECOMMENDED_PERSONA_MODELS,
+      },
+    );
+    expect(noModelsVersion.statusCode).toBe(422);
+    expect(String(noModelsVersion.body.message)).toContain(
+      "expected_version_id",
+    );
   });
 });
 
-describe("cloning a persona", () => {
-  it("makes a new identity with the current fields and traits, and no history", async () => {
-    api = await createApi("personas_clone");
+describe("forking a persona", () => {
+  it("makes an editable project persona from the current definition, with no history", async () => {
+    api = await createApi("personas_fork");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const made = await createPersonaThrough(ada, "Original Olive");
-    await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
-      expected_version_id: made.version_id,
-      traits: { ...TRAITS, language: "en-GB" },
-    });
-
-    const cloned = await browse(
-      "POST",
-      `/api/personas/${made.id}/clone`,
-      ada,
-      { project: ada.projectId },
+    const made = personaIn(
+      await browse(
+        "GET",
+        `/api/personas/${await defaultPersonaOf(ada.projectId)}?project=${ada.projectId}`,
+        ada,
+      ),
     );
 
-    expect(cloned.statusCode).toBe(201);
-    const clone = personaIn(cloned);
-    expect(clone.id).not.toBe(made.id);
-    expect(clone.name).toBe("Original Olive");
-    expect(clone.traits.language).toBe("en-GB");
+    const forked = await browse("POST", `/api/personas/${made.id}/fork`, ada, {
+      project: ada.projectId,
+    });
+
+    expect(forked.statusCode).toBe(201);
+    const fork = personaIn(forked);
+    expect(fork.id).not.toBe(made.id);
+    expect(fork.name).toBe(made.name);
+    expect(fork.traits).toEqual(made.traits);
+    expect(fork.models).toEqual(made.models);
+    expect(fork.owner).toBe("organization");
     // Its own history, starting over: the source's versions are the source's.
-    expect(clone.version).toBe(1);
-    expect(clone.version_id).not.toBe(made.version_id);
+    expect(fork.version).toBe(1);
+    expect(fork.version_id).not.toBe(made.version_id);
 
     const history = await browse(
       "GET",
-      `/api/personas/${clone.id}/versions?project=${ada.projectId}`,
+      `/api/personas/${fork.id}/versions?project=${ada.projectId}`,
       ada,
     );
     expect(history.body.items).toHaveLength(1);
@@ -638,61 +856,32 @@ describe("archiving a persona", () => {
     expect(personaIn(still).archived_at).toBeNull();
   });
 
-  it("is refused for the project's default until an active replacement is named", async () => {
-    api = await createApi("personas_default_replacement");
+  it("refuses every lifecycle write to an Egma-provided persona", async () => {
+    api = await createApi("personas_egma_provided_lifecycle");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const starter = await defaultPersonaOf(ada.projectId);
+    const defaultPersonaId = await defaultPersonaOf(ada.projectId);
     const read = await browse(
       "GET",
-      `/api/personas/${starter}?project=${ada.projectId}`,
+      `/api/personas/${defaultPersonaId}?project=${ada.projectId}`,
       ada,
     );
     const holding = personaIn(read);
 
-    const refused = await browse(
-      "POST",
-      `/api/personas/${starter}/archive`,
-      ada,
-      { project: ada.projectId, expected_revision: holding.revision },
-    );
-    expect(refused.statusCode).toBe(409);
-    expect(refused.body).toEqual({
-      error: "default_persona_required",
-      message:
-        `Persona ${starter} is this project's default. Select an active ` +
-        "replacement persona in the Archive action and try again.",
-    });
-
-    const taking = await createPersonaThrough(ada, "Taking-Over Tam");
-    const archived = await browse(
-      "POST",
-      `/api/personas/${starter}/archive`,
-      ada,
-      {
-        project: ada.projectId,
-        expected_revision: holding.revision,
-        replacement_persona_id: taking.id,
-      },
-    );
-
-    expect(archived.statusCode).toBe(200);
-    expect(personaIn(archived).archived_at).toEqual(expect.any(String));
-    expect(personaIn(archived).is_default).toBe(false);
-    expect(await defaultPersonaOf(ada.projectId)).toBe(taking.id);
-
-    // And the new default is what a test naming nobody is given.
-    // A test always applies to at least one active agent, so a project that
-    // holds none can hold no test.
-    await createAgent(contextFor(ada, "member"), {
-      name: `Front desk ${newId("agt").slice(-6)}`,
-    });
-    const written = await createTest(contextFor(ada, "member"), {
-      name: "Takes the default",
-      scenario: "Anything at all.",
-      expectedBehaviors: ["answers"],
-      personaIds: [],
-    });
-    expect(written.personas.map((one) => one.id)).toEqual([taking.id]);
+    for (const action of ["archive", "restore"] as const) {
+      const refused = await browse(
+        "POST",
+        `/api/personas/${defaultPersonaId}/${action}`,
+        ada,
+        { project: ada.projectId, expected_revision: holding.revision },
+      );
+      expect(refused.statusCode, action).toBe(422);
+      expect(refused.body, action).toEqual({
+        error: "egma_provided_persona",
+        message:
+          `Persona ${defaultPersonaId} is Egma-provided and cannot be changed. ` +
+          "Fork it to make a Custom persona you can edit.",
+      });
+    }
   });
 
   it("archives an eligible persona and restores them again", async () => {
@@ -813,7 +1002,12 @@ describe("what a viewer is refused", () => {
   it("reads everything and is refused every write, in the role's own words", async () => {
     api = await createApi("personas_viewer");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const reader = await colleagueOf(api.app, ada, "reader@acme.example", "viewer");
+    const reader = await colleagueOf(
+      api.app,
+      ada,
+      "reader@acme.example",
+      "viewer",
+    );
     const made = await createPersonaThrough(ada, "Readable Rae");
 
     const read = await browse(
@@ -830,42 +1024,49 @@ describe("what a viewer is refused", () => {
     );
     expect(history.statusCode).toBe(200);
 
-    const writes: readonly [string, string, Record<string, unknown>, string][] = [
+    const writes: readonly [string, string, Record<string, unknown>, string][] =
       [
-        "POST",
-        "/api/personas",
-        { project: ada.projectId, name: "Nope", traits: TRAITS },
-        "create personas",
-      ],
-      [
-        "PATCH",
-        `/api/personas/${made.id}`,
-        {
-          project: ada.projectId,
-          expected_revision: made.revision,
-          name: "Nope",
-        },
-        "edit personas",
-      ],
-      [
-        "POST",
-        `/api/personas/${made.id}/clone`,
-        { project: ada.projectId },
-        "clone personas",
-      ],
-      [
-        "POST",
-        `/api/personas/${made.id}/archive`,
-        { project: ada.projectId, expected_revision: made.revision },
-        "archive personas",
-      ],
-      [
-        "POST",
-        `/api/personas/${made.id}/restore`,
-        { project: ada.projectId, expected_revision: made.revision },
-        "restore personas",
-      ],
-    ];
+        [
+          "POST",
+          "/api/personas",
+          { project: ada.projectId, name: "Nope", traits: TRAITS },
+          "create personas",
+        ],
+        [
+          "PATCH",
+          `/api/personas/${made.id}`,
+          {
+            project: ada.projectId,
+            expected_revision: made.revision,
+            name: "Nope",
+          },
+          "edit personas",
+        ],
+        [
+          "POST",
+          `/api/personas/${made.id}/fork`,
+          { project: ada.projectId },
+          "fork personas",
+        ],
+        [
+          "POST",
+          `/api/personas/${made.id}/default`,
+          { project: ada.projectId },
+          "change the project default persona",
+        ],
+        [
+          "POST",
+          `/api/personas/${made.id}/archive`,
+          { project: ada.projectId, expected_revision: made.revision },
+          "archive personas",
+        ],
+        [
+          "POST",
+          `/api/personas/${made.id}/restore`,
+          { project: ada.projectId, expected_revision: made.revision },
+          "restore personas",
+        ],
+      ];
 
     for (const [method, url, payload, action] of writes) {
       const refused = await browse(
@@ -890,10 +1091,9 @@ describe("what a viewer is refused", () => {
       `/api/personas?project=${ada.projectId}`,
       ada,
     );
-    expect((listed.body.items as WirePersona[]).map((one) => one.name)).toEqual([
-      "Readable Rae",
-      "Starter",
-    ]);
+    expect(
+      (listed.body.items as WirePersona[]).map((one) => one.name),
+    ).toContain("Readable Rae");
   });
 });
 
@@ -907,7 +1107,10 @@ describe("history and usage", () => {
       project: ada.projectId,
       expected_revision: made.revision,
       expected_version_id: made.version_id,
-      traits: { ...TRAITS, language: "en-GB" },
+      traits: {
+        ...TRAITS,
+        personality: "Hana has waited too long and is now blunt.",
+      },
     });
 
     const older = await browse(
@@ -917,7 +1120,9 @@ describe("history and usage", () => {
     );
     expect(older.statusCode).toBe(200);
     expect(older.body.version).toBe(1);
-    expect((older.body.traits as Record<string, unknown>).language).toBe("en-US");
+    expect((older.body.traits as Record<string, unknown>).personality).toBe(
+      TRAITS.personality,
+    );
 
     const before = await browse(
       "GET",

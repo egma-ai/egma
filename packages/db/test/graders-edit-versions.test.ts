@@ -176,30 +176,28 @@ describe("editing what a grader judges by", () => {
     expect(swapped?.version).toBe(3);
   });
 
-  it("versions on the judge model, and on clearing it again", async () => {
-    const created = await useLibraryEntry(actingAsAcme(), latency);
-
-    const overridden = await editGrader(actingAsAcme(), created.id, {
-      judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
+  it("requires the exact cataloged model on model-judged versions", async () => {
+    const created = await useLibraryEntry(actingAsAcme(), {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
     });
-    expect(overridden?.version).toBe(2);
-    expect(overridden?.judgeModel).toEqual({
+
+    const same = await editGrader(actingAsAcme(), created.id, {
+      judgeModel: { provider: "openai", model: "gpt-4o-mini" },
+    });
+    expect(same?.version).toBe(1);
+    expect(same?.judgeModel).toEqual({
       provider: "openai",
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
     });
 
-    const again = await editGrader(actingAsAcme(), created.id, {
-      judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
-    });
-    expect(again?.version).toBe(2);
-
-    // Null is not "leave it alone" — it is "go back to the project's judge",
-    // which is a different judgment and mints a version like any other.
-    const cleared = await editGrader(actingAsAcme(), created.id, {
-      judgeModel: null,
-    });
-    expect(cleared?.version).toBe(3);
-    expect(cleared?.judgeModel).toBeNull();
+    await expect(
+      editGrader(actingAsAcme(), created.id, { judgeModel: null }),
+    ).rejects.toThrow(/cannot be cleared/u);
+    await expect(
+      editGrader(actingAsAcme(), created.id, {
+        judgeModel: { provider: "openai", model: "gpt-4.1-mini" },
+      }),
+    ).rejects.toThrow(/supported openai llm model/u);
   });
 
   it("numbers each edit after the last, and keeps every version fetchable by its grv_ id", async () => {

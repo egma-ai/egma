@@ -54,43 +54,11 @@ DOCUMENTED_ELSEWHERE = {
 stated reason. Everything else must reach the container, because a
 variable a compose entry leaves out never arrives however it is set."""
 
-OWNED_BY_THE_PLATFORM = {
-    "EGMA_SIMULATOR_MODEL_PROVIDER",
-    "EGMA_SIMULATOR_MODEL_NAME",
-    "EGMA_SIMULATOR_MODEL_API_KEY",
-    "EGMA_SIMULATOR_STT_PROVIDER",
-    "EGMA_SIMULATOR_TTS_PROVIDER",
-    "EGMA_SIMULATOR_VAD_PROVIDER",
-    "EGMA_SIMULATOR_DEEPGRAM_API_KEY",
-    "EGMA_SIMULATOR_ELEVENLABS_API_KEY",
-    "EGMA_SIMULATOR_OPENAI_API_KEY",
-    "EGMA_SIMULATOR_TTS_MODEL",
-    "EGMA_SIMULATOR_TTS_VOICE",
+FIXED_BY_SHIPPED_DEPLOYMENT = {
     "EGMA_SIMULATOR_MEDIA_BACKEND",
-    "EGMA_SIMULATOR_SIP_TRUNK_ID",
-    "EGMA_SIMULATOR_SIP_TRUNK_ADDRESS",
-    "EGMA_SIMULATOR_SIP_TRUNK_NUMBER",
-    "EGMA_SIMULATOR_SIP_TRUNK_USERNAME",
-    "EGMA_SIMULATOR_SIP_TRUNK_PASSWORD",
+    "EGMA_SIMULATOR_VAD_PROVIDER",
 }
-"""Settings that belong to the platform, not to any container.
-
-Each of these is stored by the API, sealed, and handed to every simulator
-on the work order it claims — so no compose file passes one and
-`.env.example` names none of them. A compose entry for any of them would be
-a **second place the same setting is written down**, and the two would
-disagree the first time somebody changed one: the whole failure this effort
-exists to remove, arriving by a new route. It would also leave every one of
-them in the silent-empty `${VAR:-}` form that the bootstrap work has to be
-able to say no deployment variable uses.
-
-The code still reads them, and that is deliberate rather than left over: a
-bare `egma-simulator` process — the workbench story and every contributor's
-checkout — has no platform behind it and configures itself from its own
-environment. A work-order value replaces whatever it found. They stay in
-this app's README table for that reader, which is the reason
-`EGMA_SIMULATOR_BLOB_DIR` above is there too.
-"""
+"""Internal adapter choices fixed in Compose, not operator settings."""
 
 
 def repository_root() -> Path:
@@ -125,7 +93,7 @@ def test_every_variable_the_code_reads_is_in_the_env_example():
         variables_read_by_the_code()
         - documented
         - DOCUMENTED_ELSEWHERE
-        - OWNED_BY_THE_PLATFORM
+        - FIXED_BY_SHIPPED_DEPLOYMENT
     )
     assert not missing, (
         f".env.example does not name {sorted(missing)}, which the simulator "
@@ -140,12 +108,7 @@ def test_every_variable_the_code_reads_is_passed_through_by_compose():
     passed: set[str] = set()
     for compose in COMPOSE_FILES:
         passed |= set(VARIABLE.findall(compose.read_text(encoding="utf-8")))
-    missing = (
-        variables_read_by_the_code()
-        - passed
-        - DOCUMENTED_ELSEWHERE
-        - OWNED_BY_THE_PLATFORM
-    )
+    missing = variables_read_by_the_code() - passed - DOCUMENTED_ELSEWHERE
     assert not missing, (
         f"no compose file passes {sorted(missing)} to the simulator, so a "
         "container never sees it however it is set"
@@ -172,9 +135,7 @@ def test_every_variable_the_code_reads_is_in_the_readme_table():
     )
     documented = set(VARIABLE.findall(readme))
     missing = variables_read_by_the_code() - documented
-    assert not missing, (
-        f"the configuration table does not list {sorted(missing)}"
-    )
+    assert not missing, f"the configuration table does not list {sorted(missing)}"
 
 
 def test_nothing_is_documented_that_nothing_reads():
@@ -194,9 +155,7 @@ def test_nothing_is_documented_that_nothing_reads():
     )
     for named in named_files:
         stale = set(VARIABLE.findall(named.read_text(encoding="utf-8"))) - read
-        assert not stale, (
-            f"{named} names {sorted(stale)}, which nothing reads"
-        )
+        assert not stale, f"{named} names {sorted(stale)}, which nothing reads"
 
 
 def service_block(compose: Path, service: str) -> str | None:
@@ -260,29 +219,6 @@ def test_no_phone_overlay_is_left_to_ask_for_by_name():
     assert not (ROOT / "docker-compose.phone.yml").exists(), (
         "docker-compose.phone.yml is back; the phone stack is in the default "
         "compose file and there is no overlay to ask for"
-    )
-
-
-@pytest.mark.parametrize("compose", COMPOSE_FILES, ids=lambda path: path.name)
-def test_no_compose_file_hands_a_simulator_a_setting_the_platform_owns(compose):
-    """Platform readiness does not wait on carrier setup, and a setting has
-    exactly one home.
-
-    Both properties fall out of the same absence. Nothing in any compose file
-    tells a simulator which providers to use or whether it may dial: the
-    platform holds all of it and hands it over on the work order, so
-    `docker compose up` on a machine that has never seen a carrier starts
-    exactly as it always did, and there is no second copy of a setting for
-    the store's copy to disagree with.
-    """
-    block = service_block(compose, "simulator")
-    if block is None:
-        return
-    handed = sorted(name for name in OWNED_BY_THE_PLATFORM if name in block)
-    assert not handed, (
-        f"{compose.name} hands the simulator {handed}, which the platform "
-        "stores and delivers on the work order — a second home for a setting "
-        "is two answers that disagree the first time one of them changes"
     )
 
 
@@ -420,34 +356,21 @@ configuration tests.
 """
 
 MAY_BE_ABSENT = {
-    # The platform's own settings. They are seeded into the platform's store
-    # on boot for anything it does not already hold, and a platform holding
-    # none of them starts and reports `setup required` naming each one —
-    # which is the whole difference this effort made. Requiring them here
-    # would put readiness back behind carrier paperwork.
-    "EGMA_PERSONA_MODEL_PROVIDER": "seeded",
-    "EGMA_PERSONA_MODEL": "seeded",
-    "EGMA_PERSONA_MODEL_API_KEY": "seeded",
-    "EGMA_PERSONA_MODEL_REASONING_EFFORT": "seeded",
-    "EGMA_PERSONA_STT_PROVIDER": "seeded",
-    "EGMA_PERSONA_STT_MODEL": "seeded",
-    "EGMA_PERSONA_STT_API_KEY": "seeded",
-    "EGMA_PERSONA_TTS_PROVIDER": "seeded",
-    "EGMA_PERSONA_TTS_API_KEY": "seeded",
-    "EGMA_PERSONA_TTS_MODEL": "seeded",
-    "EGMA_PERSONA_TTS_VOICE": "seeded",
-    "EGMA_PERSONA_VAD_PROVIDER": "seeded",
-    "EGMA_MEDIA_BACKEND": "seeded",
+    # Two credential-source modes share this Compose file. A self-host supplies
+    # any provider keys it needs directly. Egma Cloud supplies the Secrets
+    # Manager pair instead. The source selector refuses half of the cloud pair,
+    # and execution refuses a missing key only when a selected model needs it.
+    "EGMA_OPENAI_API_KEY": "optional direct provider credential",
+    "EGMA_DEEPGRAM_API_KEY": "optional direct provider credential",
+    "EGMA_CARTESIA_API_KEY": "optional direct provider credential",
+    "EGMA_PROVIDER_CREDENTIALS_SECRET_ID": "the self-host source uses direct keys",
+    "EGMA_PROVIDER_CREDENTIALS_REGION": "the self-host source uses direct keys",
+    # The platform owns only its phone route. A complete credential route has
+    # four fields; source-IP authentication intentionally uses the first two.
     "EGMA_PHONE_TRUNK_ADDRESS": "seeded",
     "EGMA_PHONE_SOURCE_NUMBER": "seeded",
     "EGMA_PHONE_TRUNK_USERNAME": "seeded",
     "EGMA_PHONE_TRUNK_PASSWORD": "seeded",
-    # The default judge, which is a project's rather than the deployment's.
-    # All three or none, and none is an ordinary deployment: the
-    # deterministic graders judge for free either way.
-    "EGMA_JUDGE_PROVIDER": "a judge belongs to the project that chose it",
-    "EGMA_JUDGE_MODEL": "a judge belongs to the project that chose it",
-    "EGMA_JUDGE_API_KEY": "a judge belongs to the project that chose it",
     # Mail, which is optional and load-bearing in being optional: with none,
     # an invitation hands its link back to whoever sent it.
     "EGMA_SMTP_URL": "optional by design",
@@ -476,21 +399,7 @@ MAY_BE_ABSENT = {
     "EGMA_GRADER_SWEEP_SECONDS": "per-container tuning",
     "EGMA_GRADER_TRACE_IDLE_SECONDS": "per-container tuning",
     # Facts about the network a container sits on rather than about the
-    # deployment, and each one's empty value is a real answer: egma's own
-    # default endpoint, egma's own default model, an address the server works
-    # out for itself.
-    "EGMA_SIMULATOR_MODEL_BASE_URL": "a property of this container's network",
-    "EGMA_SIMULATOR_STT_MODEL": "empty means egma's own default",
-    # These two are the platform's settings first — it seeds and holds
-    # `speech_to_text_model` and `persona_model_reasoning_effort`, and what it
-    # holds wins over anything written here. Empty is also a real answer on
-    # its own: the listening leg asks for its own provider's default, and the
-    # model call carries no reasoning field at all, which is what a model that
-    # has never heard of one needs. The cartesia key is empty for the reason
-    # every other provider key is absent from this container: the platform
-    # holds it and hands it over on the work order.
-    "EGMA_SIMULATOR_MODEL_REASONING_EFFORT": "empty sends no reasoning field",
-    "EGMA_SIMULATOR_CARTESIA_API_KEY": "seeded",
+    # deployment, and each one's empty value is a real answer.
     "EGMA_LIVEKIT_ADVERTISE_IP": "empty is right for every ordinary deployment",
     "EGMA_LIVEKIT_SIP_EXTERNAL_IP": "empty means ask a STUN server",
     # Empty is right for the MinIO this file runs, which ignores regions; the
@@ -518,6 +427,19 @@ So an empty default is now a decision somebody records here rather than a
 shape somebody reaches for. Each name above is one the platform, a project or
 the host answers for instead — never one a deployment needs in order to run.
 """
+
+
+def test_shipped_simulator_fixes_its_internal_voice_choices():
+    """A live container uses the real bridge and detector, not test adapters."""
+    block = service_block(ROOT / "docker-compose.yml", "simulator")
+    assert block is not None
+    for variable, choice in (
+        ("EGMA_SIMULATOR_MEDIA_BACKEND", "livekit"),
+        ("EGMA_SIMULATOR_VAD_PROVIDER", "silero"),
+    ):
+        assert re.search(rf"^\s+{variable}:\s+{choice}\s*$", block, re.MULTILINE), (
+            f"the shipped simulator must fix {variable}={choice}"
+        )
 
 
 SHIPPED_COMPOSE_FILES = ("docker-compose.yml", "docker-compose.workbench.yml")
@@ -629,9 +551,7 @@ def shipped_interpolations() -> list[Interpolation]:
     """Every `${…}` in every compose file this repository ships."""
     found: list[Interpolation] = []
     for name in SHIPPED_COMPOSE_FILES:
-        found.extend(
-            interpolations((ROOT / name).read_text(encoding="utf-8"), name)
-        )
+        found.extend(interpolations((ROOT / name).read_text(encoding="utf-8"), name))
     return found
 
 

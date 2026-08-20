@@ -101,19 +101,7 @@ export type EvidencePlanItem = {
   /** `false` makes it a diagnostic: judged, shown, never able to fail a test. */
   readonly required: boolean;
   readonly scope: string;
-  readonly judge: EvidenceJudge;
 };
-
-export type EvidenceJudge =
-  | { readonly tag: "not_required" }
-  | { readonly tag: "unavailable_at_capture" }
-  | {
-      readonly tag: "configured";
-      readonly provider: string;
-      readonly model: string;
-      /** A credential reference or the `platform` sentinel. Never a key. */
-      readonly source: string;
-    };
 
 /**
  * When this run's grading plan was decided, and whether one was decided at all.
@@ -422,7 +410,7 @@ export function citedTurnPositions(
  */
 export function planExplanation(state: EvidencePlan["state"]): string {
   if (state === "run_start") {
-    return "Frozen when this run started. These are the exact grader versions and judge choices this simulation was judged against.";
+    return "Frozen when this run started. These are the exact grader versions this simulation was judged against.";
   }
   if (state === "migration_snapshot") {
     return "Captured while Egma was upgraded, not when this run started. This run predates frozen plans and still had work outstanding, so the plan as it stood at the upgrade is what its grading used.";

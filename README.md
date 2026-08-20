@@ -53,11 +53,11 @@ deployment must not run on a credential every reader of this repository holds.
 
 `docker compose up` starts the same containers, and is not the same thing.
 
-**Your settings survive either way**, and that is the difference this release
-made. The carrier, the persona's model and the speech providers live in the
-platform's own database rather than in a file beside it, so a plain
-`docker compose up`, a machine restart in another directory or a colleague's
-clone all bring the platform back configured. Nothing has to be set up again.
+**Your carrier route survives either way.** It lives in the platform database,
+so a restart brings it back. Persona versions own model and speech choices;
+grader versions own judge models. Provider credentials come from
+`EGMA_OPENAI_API_KEY`, `EGMA_DEEPGRAM_API_KEY`, and
+`EGMA_CARTESIA_API_KEY` in the deployment environment.
 
 **What a bare `docker compose up` does still lose is the media server's key and
 secret, and the address this platform answers as.** The first two are in
@@ -101,23 +101,18 @@ after that arrives by invitation.
 
 ### Configuring it
 
-A started platform is not yet a configured one. It says so: `self-host up`
-reports `setup: setup_required` and names what is absent. One command in this
-directory asks for all of it, in one sitting:
+A started platform may not have a phone carrier route. `self-host up` reports
+that separately. First put the provider keys your persona and grader versions
+use in `.env`. Then configure the optional carrier route:
 
 ```bash
 npx @egma/cli login --url http://localhost:3101   # once, as the owner
 npx @egma/cli self-host setup
 ```
 
-It asks the platform what it is missing and then asks you for exactly that, in a
-fixed order — who the persona thinks with, what it speaks and hears with, and
-how a call reaches the telephone network — so you can gather one provider's
-paperwork at a time rather than discovering a missing key one setting at a time.
-**A setting the platform already holds is never asked for again**, so running it
-after supplying one more key is a single question, and running it on a
-configured platform changes nothing and says so. `--plan` prints the list of
-what it would ask for and stops.
+Setup asks only how a phone call reaches the telephone network. A complete
+route is never asked for again. `--plan` prints the carrier input it would ask
+for and stops.
 
 For the phone half, keep one Twilio account, trunk, source number, and attached
 credential list. Create one SIP username/password in that list per developer,
@@ -130,14 +125,14 @@ four into the platform store. A fresh database copies the same values again
 from that developer's environment. Setup never asks for the Twilio Account SID
 or Auth Token and never contacts or changes Twilio. Press Enter at the trunk
 address question to leave the phone for later. `--json` is the same work with
-nobody watching; the older `--apply --yes` spelling remains accepted.
+nobody watching.
 
-**Every answer is written through the platform's own API, and the platform is
-the only thing that seals.** The settings live in Postgres, sealed with
-`EGMA_ENCRYPTION_KEY`, so they survive a restart, an upgrade and a move to
-another machine — and every simulator is handed them on the work order it
-claims, so a second simulator on another host needs nothing copied to it. The
-CLI keeps none of them.
+**Every carrier answer is written through the platform's own API, and the
+platform is the only thing that seals.** The route lives in Postgres, with its
+SIP password sealed by `EGMA_ENCRYPTION_KEY`, so it survives a restart, an
+upgrade and a move to another machine. Every simulator receives the route on
+the phone work order it claims, so a second simulator on another host needs no
+carrier credential copied to it. The CLI keeps none of it.
 
 **Phone readiness is reported separately from platform readiness, and that is
 honest rather than fussy.** A platform with no carrier runs text simulations
@@ -147,25 +142,6 @@ perfectly well, so it is reported as its own fact beside the whole-platform one.
 only one developer or production SIP credential. That credential can
 authenticate SIP requests on the shared trunk; it cannot manage the Twilio
 account.
-
-*Upgrading from a release that used `egma self-host phone setup`:* do not reuse
-its global `egma-simulator` SIP credential for every machine. Ask a Twilio
-administrator to add one named credential per developer and one for production
-to the existing credential list. Save each four-value bundle in that
-deployment's ignored `.env`, password manager, or secret store. On each existing
-local platform, run `egma self-host setup --replace-carrier --yes`; normal setup
-preserves the held bundle. For hosted production, update the deployment secret
-and deploy. Confirm the recovery copy and run one phone simulation on every
-platform. Only then ask the Twilio administrator to revoke the old shared
-`egma-simulator` credential. The old file itself stays because it also holds the
-media server's key and secret, which a container reads when it is created.
-
-Two of those lines are **not** settings and want different treatment.
-`EGMA_BASE_URL` stays where it is and is still read from that file. The three
-`EGMA_JUDGE_*` variables are not read from it any more, and setup does not ask
-for them either — a judge belongs to the project that chose it rather than to
-the deployment, so it was never among the platform's settings. Move them to
-`.env`, which is the file Compose reads on its own.
 
 `GET /health` on the API and `GET /api/health` on the web application are what
 the container health checks poll.
@@ -361,24 +337,21 @@ which is the only record of a report that never got through. Both survive the
 container being restarted, replaced or rebuilt; only `docker compose down -v`
 removes them, and that is what it is for.
 
-Everything else is environment, and `.env.example` names each one with its
-default. Three are worth knowing about before anything else:
+Every production simulation carries one contract-v2 work order. Its pinned
+persona version supplies the required LLM, STT and TTS selections, and the API
+adds only the provider keys those selections need. Chat carries only the LLM
+key; voice carries all three. There is no container model or key fallback.
 
-- **`EGMA_SIMULATOR_MODEL_PROVIDER` decides where the persona's words come
-  from.** The default, `scripted`, walks the scenario deterministically and
-  needs no account at all. Set it to `openai` — with `EGMA_SIMULATOR_MODEL_NAME`
-  and `EGMA_SIMULATOR_MODEL_API_KEY`, and `EGMA_SIMULATOR_MODEL_BASE_URL` for
-  anything OpenAI-compatible — and the persona improvises instead.
-- **`EGMA_SIMULATOR_TTS_PROVIDER` and `EGMA_SIMULATOR_STT_PROVIDER` decide
-  whether a voice simulation is really spoken.** Both default to `scripted`,
-  which carries a deterministic test tone and needs no account, so a first
-  voice simulation costs nothing. Set them to `elevenlabs` and `deepgram` —
-  with `EGMA_SIMULATOR_ELEVENLABS_API_KEY` and
-  `EGMA_SIMULATOR_DEEPGRAM_API_KEY` — and the persona speaks with a human
-  voice and hears real words. Each leg is chosen on its own, and
-  `EGMA_SIMULATOR_VAD_PROVIDER=silero` is the third: what hears a real
-  agent start and stop speaking, keyless and bundled.
-- **`EGMA_SIMULATOR_CAPACITY` is how many simulations happen at once.** The
+The supported pairs are OpenAI `gpt-4o-mini` for the LLM; Deepgram
+`nova-3-general` or OpenAI `gpt-live-transcribe` for STT; and Cartesia
+`sonic-3.5` or OpenAI `gpt-4o-mini-tts` for TTS. The TTS selection also owns
+the voice id and speed. Persona traits contain behavior only.
+
+Two deployment controls remain:
+
+- **`EGMA_SIMULATOR_VAD_PROVIDER=silero`** hears when a real agent starts and
+  stops speaking. It is keyless and bundled.
+- **`EGMA_SIMULATOR_CAPACITY`** is how many simulations happen at once. The
   default is two. The simulator claims only what it can hold, so a big run
   degrades into a queue rather than into overload. Compose passes this setting
   through without keeping a second default of its own.
@@ -411,10 +384,10 @@ conversation happened inside arriving is the conversation being over.
 closes one, and `EGMA_GRADER_SWEEP_SECONDS` is the backstop under all of it, for
 the notification raised while every copy happened to be restarting.
 
-It is handed the deployment's encryption key, because a judged grader runs on
-the project's own judge model and the sealed key has to be replayed to that
-provider — and never a model key of its own, because the judge is always the
-customer's choice, not Egma's. `apps/grader/README.md` is the whole table.
+Each grader version owns the model used for its judgment. The worker resolves
+that version, then reads the current deployment provider credential when it
+claims the work. The run stores the grader-version pin, not a copied model or
+credential. `apps/grader/README.md` is the whole table.
 
 ### Watching a simulator without a control plane
 
@@ -604,14 +577,11 @@ docker compose exec minio sh -c \
    mc cat "egma/egma-recordings/<reference>"' > call.wav
 ```
 
-The persona speaks in a deterministic test tone unless you name real speech
-providers, and a real agent hears that as noise. `egma self-host setup` asks for
-all of it — the persona's words, its voice, its ears, and `silero` for hearing a
-real agent start and stop speaking — and stores it on the platform, from where
-every simulator is handed it. The workbench overlay runs a bare simulator with
-no platform to be handed anything by, so there set `EGMA_SIMULATOR_TTS_PROVIDER`,
-`EGMA_SIMULATOR_STT_PROVIDER`, their key and `EGMA_SIMULATOR_VAD_PROVIDER=silero`
-before you expect a conversation.
+The workbench fixture must carry a complete contract-v2 `models` block and its
+direct provider keys. It has no model, key, or voice fallback from the
+simulator container. The checked-in fixtures use sentinel keys, so production
+adapters refuse them; deterministic model and speech implementations are test
+injections only.
 
 Pipecat and the transport own any media conversion. Egma does not force or
 report a processing rate. The WAV header is the only sample-rate fact Egma

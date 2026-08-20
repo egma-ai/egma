@@ -24,6 +24,7 @@ import pytest
 from conftest import A_PERSONALITY, a_spec
 from room_stub import RoomStub
 
+from egma_simulator import service as service_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.contract import ContractViolation
@@ -38,11 +39,13 @@ from egma_simulator.mock_tools import (
     UNSUPPORTED_PROTOCOL_VERSION,
     MockToolSeam,
 )
+from egma_simulator.model import ScriptedModel
 from egma_simulator.pipeline import assemble
 from egma_simulator.plugs import livekit as livekit_plug
 from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import RunningSimulation
 from egma_simulator.spec import MockTool, SimulationSpec
+from egma_simulator.speech import SCRIPTED_PAIR
 
 A_URL = "wss://lakeside-dental.livekit.cloud"
 A_KEY = "APIlakeside0000"
@@ -158,6 +161,16 @@ async def conducted_record(
     the room while the conversation runs.
     """
     monkeypatch.setattr(livekit_plug, "LiveKitRoomBackend", stub.driver)
+    monkeypatch.setattr(
+        service_module,
+        "build_model_client",
+        lambda _config, spec: ScriptedModel(spec.scenario_instructions),
+    )
+    monkeypatch.setattr(
+        service_module.SpeechProviders,
+        "from_models",
+        classmethod(lambda _cls, _models, *, vad: SCRIPTED_PAIR),
+    )
     client = RecordingControlPlane()
     simulation = RunningSimulation(
         SimulationSpec.from_document(document),
@@ -199,9 +212,7 @@ def attributes_of(span: dict) -> dict:
 
 
 def milliseconds_of(span: dict) -> float:
-    return (
-        int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])
-    ) / 1_000_000
+    return (int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])) / 1_000_000
 
 
 def golden_result_for(tool_name: str) -> str:
@@ -354,6 +365,16 @@ async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
     the agent what tools it has, so its record says nothing rather than
     saying nothing was found."""
     monkeypatch.setattr(livekit_plug, "LiveKitRoomBackend", RoomStub().driver)
+    monkeypatch.setattr(
+        service_module,
+        "build_model_client",
+        lambda _config, spec: ScriptedModel(spec.scenario_instructions),
+    )
+    monkeypatch.setattr(
+        service_module.SpeechProviders,
+        "from_models",
+        classmethod(lambda _cls, _models, *, vad: SCRIPTED_PAIR),
+    )
     client = RecordingControlPlane()
     document = a_spec(
         A_SIMULATION,
@@ -767,8 +788,7 @@ async def test_no_credential_and_no_test_content_ever_rides_an_answer(
         mocked_spec(
             mock_tools=[answers("check_calendar", {"slots": []})],
             scenario=(
-                "Ask to move the Tuesday cleaning to Thursday. "
-                "Say you are Margaret."
+                "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
             ),
         ),
         keeps_what_it_was_told,
@@ -898,8 +918,10 @@ def test_the_golden_fixture_is_a_spec_the_simulator_reads_whole(tmp_path: Path):
     assert not spec.mock_tools[2].fails
     assert spec.mock_tools[2].answer == {"answer": None}
 
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     assert assembled.conductor is not None
-    assert (
-        assembled.mock_tool_coverage is None
-    ), "no room was joined, so nothing is claimed"
+    assert assembled.mock_tool_coverage is None, (
+        "no room was joined, so nothing is claimed"
+    )

@@ -8,6 +8,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     { "path": "../../packages/ids" },
+    { "path": "../../packages/provider-credentials" },
     { "path": "../../packages/retell" },
     { "path": "../../packages/db" },
     { "path": "../../packages/simulation-contract" }

@@ -16,7 +16,12 @@ import {
   runMigrations,
 } from "../src/migrate.ts";
 import * as schema from "../src/schema/index.ts";
-import { createEmptyDatabase, type EmptyDatabase } from "./support/database.ts";
+import {
+  createEmptyDatabase,
+  errorCodeOf,
+  POSTGRES_ERROR,
+  type EmptyDatabase,
+} from "./support/database.ts";
 import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
 
 describe("the migration files", () => {
@@ -479,7 +484,7 @@ describe("the persona rename (0005)", () => {
     );
     await client.query(
       `insert into digital_human_version (id, digital_human_id, version, traits)
-       values ($1, $2, 1, '{}'::jsonb)`,
+       values ($1, $2, 1, '{"personality":"Plain"}'::jsonb)`,
       [`dhv_${versionBody}`, `dh_${identityBody}`],
     );
     await client.query("commit");
@@ -500,11 +505,13 @@ describe("the persona rename (0005)", () => {
     expect(result.applied.every((name) => name >= "0005")).toBe(true);
   });
 
-  it("carries the rows across: dh_ becomes prs_, dhv_ becomes prsv_, same bodies", async () => {
+  it("carries the rows across and completes the newly required language", async () => {
     const personas = await client.query<{
       id: string;
       current_version_id: string;
-    }>("select id, current_version_id from persona");
+    }>("select id, current_version_id from persona where id = $1", [
+      `prs_${identityBody}`,
+    ]);
     expect(personas.rows).toEqual([
       {
         id: `prs_${identityBody}`,
@@ -512,11 +519,20 @@ describe("the persona rename (0005)", () => {
       },
     ]);
 
-    const versions = await client.query<{ id: string; persona_id: string }>(
-      "select id, persona_id from persona_version",
+    const versions = await client.query<{
+      id: string;
+      persona_id: string;
+      traits: unknown;
+    }>(
+      "select id, persona_id, traits from persona_version where id = $1",
+      [`prsv_${versionBody}`],
     );
     expect(versions.rows).toEqual([
-      { id: `prsv_${versionBody}`, persona_id: `prs_${identityBody}` },
+      {
+        id: `prsv_${versionBody}`,
+        persona_id: `prs_${identityBody}`,
+        traits: { personality: "Plain", language: "en-US" },
+      },
     ]);
   });
 
@@ -596,7 +612,7 @@ describe("the persona junction's rename (0008)", () => {
     );
     await client.query(
       `insert into persona_version (id, persona_id, version, traits)
-       values ($1, $2, 1, '{}'::jsonb)`,
+       values ($1, $2, 1, '{"personality":"Plain"}'::jsonb)`,
       [personaVersionId, personaId],
     );
     await client.query(
@@ -742,7 +758,7 @@ describe("the simulation's test pin (0009)", () => {
       [personaId, organizationId, projectId, personaVersionId],
     );
     await client.query(
-      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{\"personality\":\"Plain\"}'::jsonb)",
       [personaVersionId, personaId],
     );
     await client.query(
@@ -1010,7 +1026,7 @@ describe("the run-events record and the run's pin (0014)", () => {
       [personaId, organization, project, personaVersion],
     );
     await client.query(
-      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{\"personality\":\"Plain\"}'::jsonb)",
       [personaVersion, personaId],
     );
     await client.query("commit");
@@ -1158,7 +1174,7 @@ describe("the dispatch-failure vocabulary (0015)", () => {
       [personaId, organization, project, personaVersion],
     );
     await client.query(
-      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+      "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{\"personality\":\"Plain\"}'::jsonb)",
       [personaVersion, personaId],
     );
     await client.query("commit");
@@ -1354,7 +1370,7 @@ async function seedACustomersWork(
     [work.personaId, work.organization, work.project, work.personaVersion],
   );
   await client.query(
-    "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
+    "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{\"personality\":\"Plain\"}'::jsonb)",
     [work.personaVersion, work.personaId],
   );
   await client.query("commit");
@@ -2785,5 +2801,728 @@ describe("grading plans over installed runs (0033)", () => {
       [settledRun],
     );
     expect(rows[0]?.skipped_count).toBe(0);
+  });
+});
+
+describe("persona availability over installed references (0037)", () => {
+  type Fixture = {
+    readonly organizationId: string;
+    readonly firstProjectId: string;
+    readonly secondProjectId: string;
+    readonly firstPersonaId: string;
+    readonly secondPersonaId: string;
+    readonly firstTestId: string;
+    readonly secondTestId: string;
+    readonly firstTestVersionId: string;
+  };
+
+  async function beforePersonaLibrary(label: string): Promise<{
+    readonly database: EmptyDatabase;
+    readonly directory: string;
+    readonly client: pg.Client;
+    readonly upgrade: { readonly name: string; readonly sql: string };
+  }> {
+    const database = await createEmptyDatabase(label);
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), "egma-before-0037-"),
+    );
+    const migrations = await readMigrations();
+    for (const migration of migrations) {
+      if (migration.name < "0037") {
+        await writeFile(path.join(directory, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, directory);
+    const upgrade = migrations.find((migration) =>
+      migration.name.startsWith("0037_"),
+    );
+    if (upgrade === undefined) throw new Error("0037 is missing");
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    return { database, directory, client, upgrade };
+  }
+
+  async function installedTestLink(
+    client: pg.Client,
+    foreignPersona: boolean,
+  ): Promise<Fixture> {
+    const organizationId = newId("org");
+    const firstProjectId = newId("prj");
+    const secondProjectId = newId("prj");
+    const firstPersonaId = newId("prs");
+    const firstPersonaVersionId = newId("prsv");
+    const secondPersonaId = newId("prs");
+    const secondPersonaVersionId = newId("prsv");
+    const firstTestId = newId("tst");
+    const firstTestVersionId = newId("tstv");
+    const secondTestId = newId("tst");
+    const secondTestVersionId = newId("tstv");
+
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', $2)",
+      [organizationId, `acme-${organizationId}`],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $3, 'First', 'first', $5),
+              ($2, $3, 'Second', 'second', $4)`,
+      [
+        firstProjectId,
+        secondProjectId,
+        organizationId,
+        newId("rev"),
+        newId("rev"),
+      ],
+    );
+
+    await client.query("begin");
+    await client.query(
+      `insert into persona
+         (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $5, $3, 'First persona', $6, $8),
+              ($2, $5, $4, 'Second persona', $7, $9)`,
+      [
+        firstPersonaId,
+        secondPersonaId,
+        firstProjectId,
+        secondProjectId,
+        organizationId,
+        firstPersonaVersionId,
+        secondPersonaVersionId,
+        newId("rev"),
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits)
+       values
+         ($1, $3, 1, '{"personality":"Plain","language":"en-US","manner":"Warm","patience":"Waits once","accent":"Glaswegian","backgroundNoise":"A busy kitchen","underFriction":"Asks to escalate","voice":{"provider":"elevenlabs","voiceId":"old-voice","speed":1}}'::jsonb),
+         ($2, $4, 1, '{"personality":"Plain","language":"en-US","manner":"Warm","patience":"Waits once","accent":"Glaswegian","backgroundNoise":"A busy kitchen","underFriction":"Asks to escalate","voice":{"provider":"elevenlabs","voiceId":"old-voice","speed":1}}'::jsonb)`,
+      [
+        firstPersonaVersionId,
+        secondPersonaVersionId,
+        firstPersonaId,
+        secondPersonaId,
+      ],
+    );
+    await client.query("commit");
+
+    await client.query("begin");
+    await client.query(
+      `insert into test
+         (id, organization_id, project_id, name, current_version_id,
+          revision, applicability_revision)
+       values ($1, $5, $3, 'First test', $6, $8, $10),
+              ($2, $5, $4, 'Second test', $7, $9, $11)`,
+      [
+        firstTestId,
+        secondTestId,
+        firstProjectId,
+        secondProjectId,
+        organizationId,
+        firstTestVersionId,
+        secondTestVersionId,
+        newId("rev"),
+        newId("rev"),
+        newId("rev"),
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into test_version (id, test_id, version, content)
+       values ($1, $3, 1, '{}'::jsonb), ($2, $4, 1, '{}'::jsonb)`,
+      [
+        firstTestVersionId,
+        secondTestVersionId,
+        firstTestId,
+        secondTestId,
+      ],
+    );
+    await client.query(
+      `insert into test_persona (test_version_id, persona_id, position)
+       values ($1, $2, 1)`,
+      [
+        firstTestVersionId,
+        foreignPersona ? secondPersonaId : firstPersonaId,
+      ],
+    );
+    await client.query("commit");
+
+    return {
+      organizationId,
+      firstProjectId,
+      secondProjectId,
+      firstPersonaId,
+      secondPersonaId,
+      firstTestId,
+      secondTestId,
+      firstTestVersionId,
+    };
+  }
+
+  function postgresCause(error: unknown): {
+    readonly code?: unknown;
+    readonly constraint?: unknown;
+  } {
+    let current = error;
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (typeof current !== "object" || current === null) return {};
+      if ("code" in current) {
+        return current as { readonly code?: unknown; readonly constraint?: unknown };
+      }
+      current = "cause" in current ? current.cause : undefined;
+    }
+    return {};
+  }
+
+  it("refuses an installed link to a persona outside the test project", async () => {
+    const prepared = await beforePersonaLibrary("persona_link_validation");
+    try {
+      await installedTestLink(prepared.client, true);
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      let failure: unknown;
+      try {
+        await runMigrations(prepared.database.url, prepared.directory);
+      } catch (error) {
+        failure = error;
+      }
+      expect(postgresCause(failure)).toMatchObject({
+        code: "23503",
+        constraint: "test_persona_availability",
+      });
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("refuses an installed default persona owned by another project", async () => {
+    const prepared = await beforePersonaLibrary("persona_default_validation");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.secondPersonaId, fixture.firstProjectId],
+      );
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      let failure: unknown;
+      try {
+        await runMigrations(prepared.database.url, prepared.directory);
+      } catch (error) {
+        failure = error;
+      }
+      expect(postgresCause(failure)).toMatchObject({
+        code: "23503",
+        constraint: "project_default_persona_availability",
+      });
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("accepts project-owned and Egma-owned default personas", async () => {
+    const prepared = await beforePersonaLibrary("persona_default_valid");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.firstPersonaId, fixture.firstProjectId],
+      );
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      const globalPersonaId = newId("prs");
+      const globalVersionId = newId("prsv");
+      await prepared.client.query("begin");
+      await prepared.client.query(
+        `insert into persona
+           (id, organization_id, project_id, name, current_version_id, revision)
+         values ($1, null, null, 'Egma persona', $2, $3)`,
+        [globalPersonaId, globalVersionId, newId("rev")],
+      );
+      await prepared.client.query(
+        `insert into persona_version (id, persona_id, version, traits, models)
+         values (
+           $1,
+           $2,
+           1,
+           '{"personality":"Plain","language":"en-US"}'::jsonb,
+           '{"llm":{"provider":"openai","model":"gpt-4o-mini"},"stt":{"provider":"deepgram","model":"nova-3-general"},"tts":{"provider":"cartesia","model":"sonic-3.5","voiceId":"5ee9feff-1265-424a-9d7f-8e4d431a12c7","speed":1}}'::jsonb
+         )`,
+        [globalVersionId, globalPersonaId],
+      );
+      await prepared.client.query("commit");
+
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [globalPersonaId, fixture.firstProjectId],
+      );
+      await prepared.client.query(
+        "update project set default_persona_id = $1 where id = $2",
+        [fixture.firstPersonaId, fixture.firstProjectId],
+      );
+      const { rows } = await prepared.client.query<{
+        default_persona_id: string | null;
+      }>("select default_persona_id from project where id = $1", [
+        fixture.firstProjectId,
+      ]);
+      expect(rows[0]?.default_persona_id).toBe(fixture.firstPersonaId);
+    } finally {
+      await prepared.client.query("rollback").catch(() => undefined);
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("does not let later ownership moves invalidate a valid link", async () => {
+    const prepared = await beforePersonaLibrary("persona_link_immutability");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      await expect(
+        prepared.client.query(
+          "update test_version set test_id = $1 where id = $2",
+          [fixture.secondTestId, fixture.firstTestVersionId],
+        ),
+      ).rejects.toThrow(/test version cannot move between tests/);
+      await expect(
+        prepared.client.query(
+          "update test set project_id = $1 where id = $2",
+          [fixture.secondProjectId, fixture.firstTestId],
+        ),
+      ).rejects.toThrow(/test ownership cannot change/);
+      await expect(
+        prepared.client.query(
+          "update test set organization_id = $1 where id = $2",
+          [newId("org"), fixture.firstTestId],
+        ),
+      ).rejects.toThrow(/test ownership cannot change/);
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("moves technical voice into required models and removes old platform owners", async () => {
+    const prepared = await beforePersonaLibrary("persona_model_cutover");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      for (const name of [
+        "persona_model_provider",
+        "speech_to_text_model",
+        "text_to_speech_voice",
+        "voice_activity_provider",
+        "media_backend",
+        "carrier_trunk_address",
+      ]) {
+        await prepared.client.query(
+          `insert into platform_setting (id, name, value, hint)
+           values ($1, $2, 'sealed', 'hint')`,
+          [newId("pfs"), name],
+        );
+      }
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      const versions = await prepared.client.query<{
+        traits: unknown;
+        models: unknown;
+      }>(
+        `select traits, models from persona_version
+          where persona_id in ($1, $2)
+          order by persona_id`,
+        [fixture.firstPersonaId, fixture.secondPersonaId],
+      );
+      expect(versions.rows).toHaveLength(2);
+      for (const row of versions.rows) {
+        expect(row.traits).toEqual({
+          personality: "Plain",
+          language: "en-US",
+          manner: "Warm",
+          patience: "Waits once",
+          accent: "Glaswegian",
+          backgroundNoise: "A busy kitchen",
+          underFriction: "Asks to escalate",
+        });
+        expect(row.models).toEqual({
+          llm: { provider: "openai", model: "gpt-4o-mini" },
+          stt: { provider: "openai", model: "gpt-live-transcribe" },
+          tts: {
+            provider: "cartesia",
+            model: "sonic-3.5",
+            voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+            speed: 1,
+          },
+        });
+      }
+
+      const remaining = await prepared.client.query<{ name: string }>(
+        "select name from platform_setting order by name",
+      );
+      expect(remaining.rows).toEqual([{ name: "carrier_trunk_address" }]);
+
+      await expect(
+        prepared.client.query(
+          `insert into platform_setting (id, name, value, hint)
+           values ($1, 'speech_to_text_model', 'sealed', 'hint')`,
+          [newId("pfs")],
+        ),
+      ).rejects.toMatchObject({
+        code: "23514",
+        constraint: "platform_setting_name_allowed",
+      });
+
+      const validModels = {
+        llm: { provider: "openai", model: "gpt-4o-mini" },
+        stt: { provider: "openai", model: "gpt-live-transcribe" },
+        tts: {
+          provider: "cartesia",
+          model: "sonic-3.5",
+          voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+          speed: 1,
+        },
+      };
+      await expect(
+        prepared.client.query(
+          `insert into persona_version (id, persona_id, version, traits, models)
+           values ($1, $2, 2, $3::jsonb, $4::jsonb)`,
+          [
+            newId("prsv"),
+            fixture.firstPersonaId,
+            JSON.stringify({ personality: "Plain", language: "en-US" }),
+            JSON.stringify({
+              ...validModels,
+              stt: { provider: "openai", model: "nova-3-general" },
+            }),
+          ],
+        ),
+      ).rejects.toMatchObject({
+        code: "23514",
+        constraint: "persona_version_models_valid",
+      });
+      await expect(
+        prepared.client.query(
+          `insert into persona_version (id, persona_id, version, traits, models)
+           values ($1, $2, 2, $3::jsonb, $4::jsonb)`,
+          [
+            newId("prsv"),
+            fixture.firstPersonaId,
+            JSON.stringify({
+              personality: "Plain",
+              language: "en-US",
+              voice: { provider: "cartesia", voiceId: "second-owner", speed: 1 },
+            }),
+            JSON.stringify(validModels),
+          ],
+        ),
+      ).rejects.toMatchObject({
+        code: "23514",
+        constraint: "persona_version_traits_valid",
+      });
+
+      await expect(
+        prepared.client.query(
+          `update persona_version
+              set models = jsonb_set(
+                models,
+                '{stt}',
+                '{"provider":"deepgram","model":"nova-3-general"}'::jsonb
+              )
+            where persona_id = $1`,
+          [fixture.firstPersonaId],
+        ),
+      ).rejects.toMatchObject({
+        code: "23514",
+        constraint: "persona_version_semantics_immutable",
+      });
+
+      const authorId = newId("usr");
+      await prepared.client.query(
+        `insert into "user" (id, email) values ($1, $2)`,
+        [authorId, `${authorId}@example.com`],
+      );
+      await prepared.client.query(
+        "update persona_version set created_by = $1 where persona_id = $2",
+        [authorId, fixture.firstPersonaId],
+      );
+      await prepared.client.query(`delete from "user" where id = $1`, [authorId]);
+      const authors = await prepared.client.query<{ created_by: string | null }>(
+        "select created_by from persona_version where persona_id = $1",
+        [fixture.firstPersonaId],
+      );
+      expect(authors.rows).toEqual([{ created_by: null }]);
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("installs the Egma-provided default and makes every project pointer required", async () => {
+    const prepared = await beforePersonaLibrary("persona_required_default");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      const defaultPersonaId = "prs_01M0E4EVJ6ECGVJEA4NSBTC0CC";
+      const projects = await prepared.client.query<{
+        default_persona_id: string;
+      }>(
+        `select default_persona_id from project
+          where id in ($1, $2)
+          order by id`,
+        [fixture.firstProjectId, fixture.secondProjectId],
+      );
+      expect(projects.rows).toEqual([
+        { default_persona_id: defaultPersonaId },
+        { default_persona_id: defaultPersonaId },
+      ]);
+
+      const installed = await prepared.client.query<{
+        traits: unknown;
+      }>(
+        `select pv.traits
+           from persona p
+           join persona_version pv on pv.id = p.current_version_id
+          where p.id = $1
+            and p.organization_id is null
+            and p.project_id is null`,
+        [defaultPersonaId],
+      );
+      expect(installed.rows[0]?.traits).toEqual({
+        personality:
+          "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        language: "en-US",
+        manner: "Clear, natural, and conversational.",
+        patience: "Starts patient and gives the agent time to explain.",
+        accent: "Neutral American English.",
+        backgroundNoise: "None.",
+        underFriction:
+          "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
+      });
+
+      const column = await prepared.client.query<{
+        is_nullable: string;
+        column_default: string | null;
+      }>(
+        `select is_nullable, column_default
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'project'
+            and column_name = 'default_persona_id'`,
+      );
+      expect(column.rows[0]).toMatchObject({
+        is_nullable: "NO",
+      });
+      expect(column.rows[0]?.column_default).toContain(defaultPersonaId);
+
+      await expect(
+        prepared.client.query("delete from persona where id = $1", [
+          defaultPersonaId,
+        ]),
+      ).rejects.toSatisfy(
+        (error) => errorCodeOf(error) === POSTGRES_ERROR.restrictViolation,
+      );
+    } finally {
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
+  });
+
+  it("moves grader execution to pinned version models and removes project judge storage", async () => {
+    const prepared = await beforePersonaLibrary("grader_model_cutover");
+    try {
+      const fixture = await installedTestLink(prepared.client, false);
+      const modelLibraryId = newId("grl");
+      const codeLibraryId = newId("grl");
+      const modelGraderId = newId("grd");
+      const codeGraderId = newId("grd");
+      const modelVersionId = newId("grv");
+      const codeVersionId = newId("grv");
+      const planId = newId("gpl");
+
+      await prepared.client.query("begin");
+      await prepared.client.query(
+        `insert into grader_library
+           (id, name, type, prompt, params, output_definition)
+         values
+           ($1, 'Migration model judge', 'llm_as_judge', 'Judge it', '{}'::jsonb, '{}'::jsonb),
+           ($2, 'Migration code judge', 'code', null, '{}'::jsonb, null)`,
+        [modelLibraryId, codeLibraryId],
+      );
+      await prepared.client.query(
+        `insert into grader
+           (id, organization_id, project_id, library_id, name, type, current_version_id)
+         values
+           ($1, $5, $6, $3, 'Model judge', 'llm_as_judge', $7),
+           ($2, $5, $6, $4, 'Code judge', 'code', $8)`,
+        [
+          modelGraderId,
+          codeGraderId,
+          modelLibraryId,
+          codeLibraryId,
+          fixture.organizationId,
+          fixture.firstProjectId,
+          modelVersionId,
+          codeVersionId,
+        ],
+      );
+      // Both shapes were legal before 0037: model-judged versions could hold
+      // no choice, and code versions could hold a model they would never use.
+      await prepared.client.query(
+        `insert into grader_version
+           (id, grader_id, version, config, judge_model)
+         values
+           ($1, $3, 1, '{"assertions":[]}'::jsonb, null),
+           ($2, $4, 1, '{"assertions":[]}'::jsonb,
+             '{"provider":"openai","model":"legacy-model"}'::jsonb)`,
+        [modelVersionId, codeVersionId, modelGraderId, codeGraderId],
+      );
+      await prepared.client.query("commit");
+
+      const installedGroups = [
+        {
+          tag: "version",
+          items: [
+            {
+              graderId: modelGraderId,
+              graderVersionId: modelVersionId,
+              judge: {
+                tag: "configured",
+                source: "credential",
+                provider: "openai",
+                model: "legacy-model",
+              },
+            },
+            {
+              graderId: codeGraderId,
+              graderVersionId: codeVersionId,
+              judge: { tag: "unavailable", reason: "judge_not_configured" },
+            },
+          ],
+        },
+      ];
+      // The plan's JSON has no database foreign key to a version, but its run
+      // id does. An orphan run is enough for this migration-only fixture and
+      // avoids recreating the whole run graph that this test does not inspect.
+      await prepared.client.query("set session_replication_role = replica");
+      try {
+        await prepared.client.query(
+          `insert into grading_plan
+             (id, run_id, organization_id, project_id, state, captured_at,
+              groups, judge_credential_ids)
+           values ($1, $2, $3, $4, 'run_start', now(), $5::jsonb, '[]'::jsonb)`,
+          [
+            planId,
+            newId("run"),
+            fixture.organizationId,
+            fixture.firstProjectId,
+            JSON.stringify(installedGroups),
+          ],
+        );
+      } finally {
+        await prepared.client.query("set session_replication_role = origin");
+      }
+
+      await writeFile(
+        path.join(prepared.directory, prepared.upgrade.name),
+        prepared.upgrade.sql,
+      );
+      await runMigrations(prepared.database.url, prepared.directory);
+
+      const versions = await prepared.client.query<{
+        id: string;
+        judge_model: unknown;
+      }>(
+        `select id, judge_model from grader_version
+          where id in ($1, $2) order by id`,
+        [modelVersionId, codeVersionId],
+      );
+      expect(
+        Object.fromEntries(
+          versions.rows.map((row) => [row.id, row.judge_model]),
+        ),
+      ).toEqual({
+        [modelVersionId]: { provider: "openai", model: "gpt-4o-mini" },
+        [codeVersionId]: null,
+      });
+
+      const plan = await prepared.client.query<{ groups: unknown }>(
+        "select groups from grading_plan where id = $1",
+        [planId],
+      );
+      const groups = plan.rows[0]?.groups as Array<{
+        items: Array<Record<string, unknown>>;
+      }>;
+      expect(groups[0]?.items.every((item) => !("judge" in item))).toBe(true);
+      expect(JSON.stringify(groups)).not.toMatch(
+        /credential|source|unavailable|legacy-model/u,
+      );
+
+      const removedTables = await prepared.client.query<{ table_name: string }>(
+        `select table_name from information_schema.tables
+          where table_schema = 'public'
+            and table_name in ('judge_configuration', 'judge_credential')`,
+      );
+      expect(removedTables.rows).toEqual([]);
+      const planColumns = await prepared.client.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+          where table_schema = 'public' and table_name = 'grading_plan'
+            and column_name = 'judge_credential_ids'`,
+      );
+      expect(planColumns.rows).toEqual([]);
+
+      await expect(
+        prepared.client.query(
+          "update grader_version set judge_model = null where id = $1",
+          [modelVersionId],
+        ),
+      ).rejects.toThrow(/needs one model/u);
+      await expect(
+        prepared.client.query(
+          `update grader_version
+              set judge_model = '{"provider":"openai","model":"not-cataloged"}'::jsonb
+            where id = $1`,
+          [modelVersionId],
+        ),
+      ).rejects.toThrow(/grader_version_judge_model_allowed/u);
+    } finally {
+      await prepared.client.query("rollback").catch(() => undefined);
+      await prepared.client.end();
+      await rm(prepared.directory, { recursive: true, force: true });
+      await prepared.database.drop();
+    }
   });
 });

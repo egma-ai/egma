@@ -6,8 +6,8 @@ import {
   reconcileDeploymentCarrierSettings,
   runClickHouseMigrations,
   runMigrations,
-  seedDefaultJudge,
   seedGraderLibrary,
+  seedPersonaLibrary,
   seedPlatformSettings,
   seedRunningGraders,
 } from "@egma/db";
@@ -32,29 +32,30 @@ connect({
 });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
 
-// The platform's own judge, given to every project that has configured none.
-// After the migrations because it writes a row, and before the first request
-// because a run started a second later has to be gradable. It never overwrites
-// a project's own choice, so running it on every boot is what makes a project
-// created later get one too.
-const judged =
-  config.defaultJudge === undefined ? [] : await seedDefaultJudge(config.defaultJudge);
-
-// The settings this environment offers, written for anything the platform does
-// not already hold. This is how an automated deployment configures itself with
-// no interview. In the default `platform` carrier mode, this is the whole rule:
-// a restart never replaces a complete carrier route somebody changed.
+// The carrier route this environment offers, written when the platform does
+// not already hold one. This is how an automated deployment configures phone
+// routing with no interview. In the default `platform` mode, a restart never
+// replaces a complete route somebody changed.
 const seeded = await seedPlatformSettings(config.platformSettings);
 
 // An operator can instead say that the deployment environment owns the carrier
 // route. Reconcile it on every start in that mode, after seeding. A changed
 // route replaces the stored route, and an absent route removes it. This choice
 // is explicit and independent of how many organizations the platform serves.
-// All other settings remain seed-only.
 const reconciled =
   config.carrierSettingsSource === "environment"
     ? await reconcileDeploymentCarrierSettings(config.platformSettings)
     : [];
+
+// Egma-provided personas, written from the fixed-id catalog before any
+// project can be created or read. A new project points its default directly at
+// one of these rows, so provisioning must fail at start-up rather than create a
+// project with a missing default if the catalog cannot be written.
+//
+// Catalog edits add immutable versions and move the shared current pointer.
+// Old simulations keep their pinned version. A no-op boot returns no rows and
+// writes no log entry.
+const personaShelf = await seedPersonaLibrary();
 
 // egma's own graders, written onto the shelf from egma's own catalog. After the
 // migrations because it writes rows, and before the first request because a
@@ -96,13 +97,21 @@ if (reconciled.length > 0) {
     "the deployment reconciled its carrier settings from the environment",
   );
 }
+if (personaShelf.length > 0) {
+  // Names, ids and immutable version ids are product catalog facts. Persona
+  // content and provider credentials are not logged.
+  app.log.info(
+    { personas: personaShelf },
+    "Egma-provided personas were written to the library",
+  );
+}
 if (shelved.length > 0) {
   // The names and the versions: what is worth saying is which of egma's own
   // graders this release put on the shelf or moved, and a version of 1 is one
   // that arrived while anything higher is one whose definition changed.
   app.log.info(
     { graders: shelved },
-    "Egma's predefined graders were written to the library",
+    "Egma-provided graders were written to the library",
   );
 }
 if (judging.length > 0) {
@@ -112,12 +121,6 @@ if (judging.length > 0) {
     { projects: judging.map((copy) => copy.projectId) },
     "Egma's expected-behaviors grader was switched on in projects that had never had it",
   );
-}
-if (judged.length > 0) {
-  // The project ids, never the key and never its hint: what is worth saying is
-  // that somebody's grading just started working, and which projects it is
-  // about.
-  app.log.info({ projects: judged }, "the platform's default judge was given to projects that had none");
 }
 app.log.info(
   { applied: migrations.applied, traceStore: traceMigrations.applied },

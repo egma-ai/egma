@@ -81,7 +81,6 @@ describe("using a library entry", () => {
       required: false,
       scope: "both",
       productionSampleRate: 10,
-      judgeModel: { provider: "openai", model: "gpt-4.1" },
     });
 
     expect(isId("grd", created.id)).toBe(true);
@@ -96,10 +95,7 @@ describe("using a library entry", () => {
     expect(fetched?.required).toBe(false);
     expect(fetched?.scope).toBe("both");
     expect(fetched?.productionSampleRate).toBe(10);
-    expect(fetched?.judgeModel).toEqual({
-      provider: "openai",
-      model: "gpt-4.1",
-    });
+    expect(fetched?.judgeModel).toBeNull();
     expect(fetched?.projectId).toBe(acme.project);
   });
 
@@ -571,7 +567,7 @@ describe("a copy whose settings are not settings", () => {
         ...aBehaviorsCopy,
         judgeModel: { provider: "acme-labs" as never, model: "big" },
       }),
-    ).rejects.toThrow(/judge provider/);
+    ).rejects.toThrow(/supported acme-labs llm model/);
     await expect(
       useLibraryEntry(actingAsAcme(), {
         ...aBehaviorsCopy,

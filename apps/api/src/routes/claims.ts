@@ -11,10 +11,16 @@ import {
   resolveMockTools,
   resolvePlatformSettings,
   resolveSimulationConnection,
+  type PersonaModels,
   type PlatformSettingValues,
   type Run,
   type SimulationClaim,
 } from "@egma/db";
+import {
+  ProviderCredentialSourceUnavailableError,
+  credentialFor,
+  type ProviderCredentialSource,
+} from "@egma/provider-credentials";
 import { specComplaints } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
@@ -59,28 +65,23 @@ import {
  * nothing the simulator sees would change.
  *
  * What goes back is the whole work order: for each claimed simulation, a
- * fully assembled spec — persona traits as the pinned version saved them,
- * the pinned test version's scenario, the connection's config with its
- * credentials unsealed, the answers this simulation's mock tools serve, the
- * deployment's own settings unsealed beside them, and the platform's limits
- * — validated against the contract schema before a byte of it is sent. This
- * is the only place credential material ever travels; the report direction
- * structurally has nowhere to put it.
+ * fully assembled spec — the pinned persona traits and model choices, current
+ * keys for only those model providers, the pinned test scenario, connection
+ * config and credentials, mock answers, the current carrier route, and limits
+ * — validated against the contract before a byte is sent. This is the only
+ * place runtime credential material travels; reports have no field for it.
  *
- * **The platform's settings ride this same answer on purpose.** They used to
- * live in each simulator's environment, which meant a second simulator on
- * another machine needed a file copied to it and a container started
- * without one dialled nothing while reporting itself healthy. Sending them
- * here opens no new door: it is the door a connection's credentials already
- * come through, with the same authority behind it and the same protection
- * over it — and it keeps the property that every arrow points outward from
- * the simulator, which talks to this API and to nothing else, and never to
- * Postgres.
+ * Model choices have one source: the pinned persona version. Provider keys
+ * have one source: this deployment's credential source. The platform settings
+ * store contributes only the carrier route. These boundaries prevent a model
+ * from one provider being combined with another adapter or credential.
  */
 
 export type ClaimRoutesOptions = {
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
+  /** Current provider keys, read once for each simulation work order. */
+  readonly providerCredentials: ProviderCredentialSource;
   /** Test seam for Retell's read-only dispatch preflight. */
   readonly retellFetch?: typeof fetch | undefined;
 };
@@ -126,67 +127,74 @@ const SIMULATION_LIMITS = {
   voice: { max_duration_seconds: 300, max_turns: 40 },
 } as const;
 
-/** The one contract version this control plane speaks. */
-const CONTRACT_VERSION = 1;
+/** The one clean-cut contract this control plane and simulator speak. */
+const CONTRACT_VERSION = 2;
 
 type Body = Record<string, unknown>;
 
 /**
- * The deployment's own settings, in the three groups the contract carries
- * them in and the simulator already has seams for: what the persona thinks
- * with, what it speaks and hears with, and how a call reaches the telephone
- * network.
- *
- * **Grouped rather than flat, because the groups are what can be absent.** A
- * deployment that has never been given a carrier is the ordinary deployment,
- * and it is exactly the one the fixtures cover — so "the phone half is
- * absent" has to be one missing object rather than five missing keys that
- * nothing holds together. The three groups also land one-for-one on the
- * simulator's own records, which is what makes taking a value from here a
- * substitution rather than a translation.
- *
- * A field the platform does not hold is left out entirely rather than sent
- * as `null` or `""`. The contract's rule is that what is here replaces what
- * the simulator has and what is absent leaves it standing, and an empty
- * string sent as a model name would be a name the simulator was told to use.
+ * The current carrier route, or no platform block when this deployment has no
+ * phone route. Model, speech, voice, VAD and media facts cannot enter here.
  */
 function platformBlock(
   held: PlatformSettingValues,
 ): Record<string, unknown> | undefined {
-  // Written out setting by setting rather than folded over the catalog, for
-  // the reason `config.ts` reads each variable by name: this is where a
-  // stored setting becomes a field the simulator reads, and a loop would
-  // make an unread setting look exactly like a read one.
-  const model = onlyWhatIsHeld({
-    provider: held.persona_model_provider,
-    model: held.persona_model,
-    key: held.persona_model_key,
-    reasoning_effort: held.persona_model_reasoning_effort,
-  });
-  const speech = onlyWhatIsHeld({
-    stt_provider: held.speech_to_text_provider,
-    stt_key: held.speech_to_text_key,
-    stt_model: held.speech_to_text_model,
-    tts_provider: held.text_to_speech_provider,
-    tts_key: held.text_to_speech_key,
-    tts_model: held.text_to_speech_model,
-    tts_voice: held.text_to_speech_voice,
-    vad_provider: held.voice_activity_provider,
-  });
+  // Model and speech fields cannot enter this document from the platform
+  // store. The persona version owns those choices and the credential source
+  // below authorizes them. The platform owns only the shared phone route.
   const carrier = onlyWhatIsHeld({
-    media_backend: held.media_backend,
     trunk_address: held.carrier_trunk_address,
     trunk_number: held.carrier_trunk_number,
     trunk_username: held.carrier_trunk_username,
     trunk_password: held.carrier_trunk_password,
   });
 
-  const platform = onlyWhatIsHeld({ model, speech, carrier });
-  // A platform that has configured nothing sends no block at all, so a spec
-  // it assembles is byte for byte the spec it was before these settings
-  // existed — which is what makes every fixture written before today still
-  // the document this door really produces.
+  const platform = onlyWhatIsHeld({ carrier });
+  // No carrier means no platform block, not a carrier made of empty fields.
   return platform === undefined ? undefined : platform;
+}
+
+/**
+ * The pinned persona selections with only the credentials this simulation
+ * can use.
+ *
+ * The source is loaded exactly once in this function. A voice simulation gets
+ * keys for all three legs; a chat simulation gets only its LLM key. The whole
+ * current bundle never crosses the claim door.
+ */
+async function modelsBlock(
+  modality: SimulationClaim["modality"],
+  models: PersonaModels,
+  source: ProviderCredentialSource,
+): Promise<Record<string, unknown>> {
+  const credentials = await source.load();
+  const keyFor = (
+    provider: PersonaModels["llm"]["provider"],
+  ): string => credentialFor(credentials, provider);
+  const speechKey = (
+    provider: PersonaModels["llm"]["provider"],
+  ): Record<string, string> =>
+    modality === "voice" ? { key: keyFor(provider) } : {};
+
+  return {
+    llm: {
+      provider: models.llm.provider,
+      model: models.llm.model,
+      key: keyFor(models.llm.provider),
+    },
+    stt: {
+      provider: models.stt.provider,
+      model: models.stt.model,
+      ...speechKey(models.stt.provider),
+    },
+    tts: {
+      provider: models.tts.provider,
+      model: models.tts.model,
+      voice_id: models.tts.voiceId,
+      speed: models.tts.speed,
+      ...speechKey(models.tts.provider),
+    },
+  };
 }
 
 /** One block with its absent fields dropped, or nothing where none is held. */
@@ -254,6 +262,29 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     };
   }
 
+  const contractVersions = body.contract_versions;
+  if (
+    !Array.isArray(contractVersions) ||
+    contractVersions.length === 0 ||
+    !contractVersions.every(
+      (version) => typeof version === "number" && Number.isInteger(version),
+    )
+  ) {
+    return {
+      refusal:
+        "contract_versions is the simulation-contract versions this worker " +
+        `implements. Send a non-empty list that includes ${CONTRACT_VERSION}.`,
+    };
+  }
+  if (!contractVersions.includes(CONTRACT_VERSION)) {
+    return {
+      refusal:
+        `this control plane sends simulation contract version ${CONTRACT_VERSION}, ` +
+        "and this worker does not say it can read it. Deploy the matching " +
+        "simulator before it claims work.",
+    };
+  }
+
   return {
     claimant: claimant.trim(),
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
@@ -295,6 +326,7 @@ async function assembledSpec(
    */
   runs: Map<string, Run | undefined>,
   retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
+  providerCredentials: ProviderCredentialSource,
   retellFetch?: typeof fetch,
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
 ): Promise<
@@ -344,13 +376,12 @@ async function assembledSpec(
     }
   }
 
-  // Read for **each** simulation and never cached, which is the whole point
-  // of the settings living in the store: an operator who replaces a spent key
-  // has it in effect on the next simulation, with no container restarted and
-  // nothing to remember to do. One more small select is nothing beside
-  // conducting a conversation over a telephone connection, and a measurement
-  // may ask for caching later — nothing has yet.
-  const platform = platformBlock(await resolvePlatformSettings(claim.auth));
+  // Read the live carrier route only for the plug that dials it. A Retell or
+  // LiveKit claim must not carry a SIP password it cannot use.
+  const platform =
+    connection.type === "phone"
+      ? platformBlock(await resolvePlatformSettings(claim.auth))
+      : undefined;
 
   if (!runs.has(claim.runId)) {
     runs.set(claim.runId, await getRun(claim.auth, claim.runId));
@@ -376,6 +407,27 @@ async function assembledSpec(
     delay_milliseconds: mock.delayMilliseconds,
   }));
 
+  let models: Record<string, unknown>;
+  try {
+    // The source loads here, once per simulation work order. Persona choices
+    // are pinned; credentials are current. A rotated AWS bundle therefore
+    // reaches the next claimed simulation without changing the persona or
+    // restarting either service.
+    models = await modelsBlock(
+      claim.modality,
+      personaVersion.models,
+      providerCredentials,
+    );
+  } catch (fault) {
+    if (fault instanceof ProviderCredentialSourceUnavailableError) {
+      return {
+        retryable:
+          "the current model-provider credential bundle could not be read",
+      };
+    }
+    throw fault;
+  }
+
   const spec = {
     contract_version: CONTRACT_VERSION,
     simulation_id: claim.id,
@@ -386,6 +438,7 @@ async function assembledSpec(
       credentials: connection.credentials,
     },
     persona: { traits: personaVersion.traits },
+    models,
     scenario: { instructions: testVersion.scenario },
     limits: SIMULATION_LIMITS[claim.modality],
     // Left out entirely where the run mocks nothing, which is what most
@@ -393,9 +446,7 @@ async function assembledSpec(
     // work order it was before mock tools existed, and an empty list
     // would be a claim about tools where there is nothing to claim.
     ...(mockTools.length === 0 ? {} : { mock_tools: mockTools }),
-    // And left out entirely where the platform holds nothing, on the same
-    // reasoning one line up: a deployment that has configured no settings of
-    // its own hands the simulator the document it always handed it.
+    // No phone route means no platform block.
     ...(platform === undefined ? {} : { platform }),
   };
   // `mockToolId` is deliberately not among the fields sent. The simulator
@@ -490,6 +541,7 @@ export async function claimRoutes(
             claim,
             runs,
             retellTargets,
+            options.providerCredentials,
             options.retellFetch,
             responseDeadline,
           ).catch(

@@ -12,8 +12,8 @@
  *
  * **The whole point of this module is that the browser decides nothing.** Which
  * versions would be pinned, which conversations would be skipped and why, which
- * graders would judge and at which versions, and whether the project even has a
- * judge — every one of those is answered by `GET /api/run-plan`, which is the
+ * graders would judge and at which versions — every one of those is answered
+ * by `GET /api/run-plan`, which is the
  * same resolution `POST /api/runs` performs. A page that worked any of it out
  * for itself would be a second opinion, and the moment the two disagreed
  * somebody would approve one run and start another.
@@ -40,24 +40,6 @@ export type PlanCapabilities =
     };
 
 /**
- * Which model would judge, whose account would pay, and the honest answer when
- * neither question has one.
- *
- * `configured` carries the provider, the model and the **reference** to a key —
- * an organization credential or the deployment's `platform` sentinel. There is
- * no field here a secret could travel in, and there never will be.
- */
-export type JudgeChoice =
-  | { readonly tag: "not_required" }
-  | {
-      readonly tag: "configured";
-      readonly provider: string;
-      readonly model: string;
-      readonly source: string;
-    }
-  | { readonly tag: "unavailable_at_capture" };
-
-/**
  * One running copy a run would freeze, or has frozen.
  *
  * **One shape, where there used to be two.** The second was the
@@ -79,7 +61,6 @@ export type PlanGrader = {
   readonly library_id: string;
   readonly required: boolean;
   readonly scope: string;
-  readonly judge: JudgeChoice;
 };
 
 /**
@@ -122,14 +103,6 @@ export type RunPlan = {
     readonly environment: string | null;
     readonly capabilities: PlanCapabilities;
   };
-  readonly judge:
-    | { readonly state: "needs_setup" }
-    | {
-        readonly state: "configured";
-        readonly provider: string;
-        readonly model: string;
-        readonly source: string;
-      };
   readonly runnable_simulation_count: number;
   readonly skipped_simulation_count: number;
   readonly tests: readonly PlannedTest[];
@@ -173,8 +146,8 @@ export const RUN_BUILDER_STEP = "new";
  * The agent a builder should open with, taken from the address.
  *
  * **It preselects and never bypasses.** Arriving from an agent's page fills the
- * first step in; every later check — the connection is that agent's, the test
- * applies to it, the project has a judge — still runs, on the server, exactly
+ * first step in; every later check — the connection is that agent's and the
+ * test applies to it — still runs, on the server, exactly
  * as it does for somebody who chose the agent from the list.
  */
 export function preselectedAgent(search: string): string | null {
@@ -203,36 +176,9 @@ export function plannedSimulationCount(plan: RunPlan): number {
 }
 
 /**
- * Whether any grader in this plan would ask a model and find none configured.
- *
- * **The plan says so itself, on every item.** A grader that asks a model in a
- * project holding none is frozen `unavailable_at_capture`; one that never asks
- * — `latency`, computed from spans — is `not_required` whatever the project's
- * judge setting says. So this is a read of what the server already decided
- * rather than a second rule about which graders need a judge, which is the
- * shape everything in this module takes.
- */
-function asksAModelWithNone(plan: RunPlan): boolean {
-  return plan.tests.some((test) =>
-    test.graders.some((grader) => grader.judge.tag === "unavailable_at_capture"),
-  );
-}
-
-/**
  * Whether this plan could be started at all, and what to say when it could not.
  *
- * **Two blockers, and only two, and both are states rather than mistakes.**
- *
- * The first is a plan that would ask a model this project has not configured.
- * It used to be *any* run in a project with no judge, because every run carried
- * the judge-backed expected-behaviors built-in — and that grader is an ordinary
- * deletable copy now, so the sentence stopped being true. A project judging
- * only with `latency`, or with nothing at all, asks no model and starts
- * perfectly well; what it must not do is dial real simulations for a judgment
- * nobody can pay for. The server refuses on exactly the same reading, so this
- * is the page saying so early rather than the page being the check.
- *
- * The second is a plan in which every simulation would be skipped: a run with
+ * A plan in which every simulation would be skipped is a run with
  * nothing to conduct, completing immediately having judged nothing. Offering
  * Start for it would be offering somebody a green tick nobody earned.
  *
@@ -243,9 +189,6 @@ function asksAModelWithNone(plan: RunPlan): boolean {
  * builder to overrule.
  */
 export function whyNotStartable(plan: RunPlan): string | null {
-  if (plan.judge.state === "needs_setup" && asksAModelWithNone(plan)) {
-    return "This project has no LLM judge configured, and a grader in this plan judges by asking a model. An organization admin can set the judge in project Settings, or you can delete that grader in Graders.";
-  }
   if (plan.runnable_simulation_count === 0) {
     return "Every simulation in this selection would be skipped, so this run would conduct nothing. Choose a connection that supports what these tests require, or choose tests that require less.";
   }
@@ -400,17 +343,6 @@ export type RunSimulation = {
   readonly has_recording: boolean;
 };
 
-/** One judge choice a frozen plan holds. Never a key, and there is no field for one. */
-export type PlanJudgeChoice =
-  | { readonly tag: "not_required" }
-  | {
-      readonly tag: "configured";
-      readonly provider: string;
-      readonly model: string;
-      readonly source: string;
-    }
-  | { readonly tag: "unavailable_at_capture" };
-
 /** One item of a frozen plan. See `PlanGrader` for why there is one shape. */
 export type FrozenPlanItem = {
   readonly kind: "authored";
@@ -420,7 +352,6 @@ export type FrozenPlanItem = {
   readonly library_id: string;
   readonly required: boolean;
   readonly scope: string;
-  readonly judge: PlanJudgeChoice;
 };
 
 export type FrozenPlanGroup =
@@ -603,7 +534,7 @@ export function retryKeyFor(runId: string): string {
  */
 export function planExplanation(state: FrozenPlan["state"]): string {
   if (state === "run_start") {
-    return "Frozen when this run started. These are the exact grader versions and judge choices it was judged against.";
+    return "Frozen when this run started. These are the exact grader versions it was judged against.";
   }
   if (state === "migration_snapshot") {
     return "Captured while Egma was upgraded, not when this run started. This run predates frozen plans and still had work outstanding, so the plan as it stood at the upgrade is what its grading used.";
@@ -616,10 +547,10 @@ export function planExplanation(state: FrozenPlan["state"]): string {
  *
  * **It is never described as a replay, and the wording is the reason.** Retry
  * copies the earlier selection and then resolves everything else as it stands
- * now — persona and grader versions, the project's default graders, the judge
- * setting, the connection's configuration, and the mocked world. Somebody who
+ * now — persona and grader versions, the project's running graders, the
+ * connection's configuration, and the mocked world. Somebody who
  * read "run it again" and got different results would think egma was
  * inconsistent, when what actually changed is what they changed.
  */
 export const RETRY_IS_NOT_A_REPLAY =
-  "Retry starts a new run with this run's agent, connection and exact test versions. Everything else is resolved as it stands now — current persona and grader versions, the project's default graders, the judge setting, the connection, and Mock Tools. It is not an exact replay of the original conditions, and this run is not changed.";
+  "Retry starts a new run with this run's agent, connection and exact test versions. Everything else is resolved as it stands now — current persona and grader versions, the project's running graders, the connection, and Mock Tools. It is not an exact replay of the original conditions, and this run is not changed.";

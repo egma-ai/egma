@@ -20,7 +20,7 @@ it skips — visibly, never failing, never waiting on anybody::
 
     TEST_LIVEKIT_URL=wss://... \\
     TEST_LIVEKIT_API_KEY=... TEST_LIVEKIT_API_SECRET=... \\
-    TEST_DEEPGRAM_API_KEY=... TEST_ELEVENLABS_API_KEY=... \\
+    TEST_DEEPGRAM_API_KEY=... TEST_CARTESIA_API_KEY=... \\
     TEST_MODEL_API_KEY=... \\
     uv run pytest tests/test_live_livekit_room.py -v
 
@@ -90,6 +90,7 @@ from conftest import (
     a_spec,
     assert_kept_secret,
     credential,
+    direct_models,
     has_terminal,
     measures_for,
     milliseconds_of,
@@ -107,21 +108,20 @@ LIVEKIT_API_KEY = credential("TEST_LIVEKIT_API_KEY", "LIVEKIT_API_KEY")
 LIVEKIT_API_SECRET = credential("TEST_LIVEKIT_API_SECRET", "LIVEKIT_API_SECRET")
 AGENT_NAME = credential("TEST_LIVEKIT_AGENT_NAME", "EGMA_DUMB_AGENT_NAME")
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
-ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
+CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
 # The persona's own brain, and it is required rather than optional on
 # purpose. Left unset, the simulator takes its scripted default, whose
 # turns are one sentence each — and a live test conducted that way proves
 # the room and the wire while saying nothing about speech, which is how a
 # corpus the speaking leg genuinely needed stayed missing for three days.
 MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
-MODEL_NAME = credential("TEST_MODEL_NAME") or "gpt-4o-mini"
 
 REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
     "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-    "TEST_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+    "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
     "TEST_MODEL_API_KEY": MODEL_API_KEY,
 }
 MISSING = sorted(name for name, value in REQUIRED.items() if not value)
@@ -168,7 +168,7 @@ SECRETS = tuple(
     for secret in (
         LIVEKIT_API_SECRET,
         DEEPGRAM_API_KEY,
-        ELEVENLABS_API_KEY,
+        CARTESIA_API_KEY,
         MODEL_API_KEY,
     )
     if secret
@@ -225,6 +225,17 @@ def room_spec() -> dict:
         ),
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
+        models=direct_models(
+            modality="voice",
+            voice={
+                "provider": "cartesia",
+                "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
+                "speed": 1.0,
+            },
+            llm_key=MODEL_API_KEY,
+            stt_key=DEEPGRAM_API_KEY,
+            tts_key=CARTESIA_API_KEY,
+        ),
     )
 
 
@@ -247,13 +258,7 @@ def deployment() -> dict[str, str]:
     own cache cannot quietly stand in for what the image ships.
     """
     return {
-        "EGMA_SIMULATOR_MODEL_PROVIDER": "openai",
-        "EGMA_SIMULATOR_MODEL_NAME": MODEL_NAME,
-        "EGMA_SIMULATOR_MODEL_API_KEY": MODEL_API_KEY,
-        "EGMA_SIMULATOR_STT_PROVIDER": "deepgram",
-        "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-        "EGMA_SIMULATOR_TTS_PROVIDER": "elevenlabs",
-        "EGMA_SIMULATOR_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
+        "EGMA_SIMULATOR_VAD_PROVIDER": "silero",
         "NLTK_DATA": CORPUS_ROOT,
     }
 
@@ -278,7 +283,12 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     workbench, start_simulator
 ):
     await workbench.offer(room_spec())
-    simulator = start_simulator(workbench, extra_env=deployment())
+    simulator = start_simulator(
+        workbench,
+        extra_env=deployment(),
+        direct_model=True,
+        direct_speech=True,
+    )
 
     records = await workbench.wait_for(
         has_terminal(SIMULATION), within_seconds=WITHIN_SECONDS
@@ -355,9 +365,7 @@ async def test_the_simulator_holds_a_real_conversation_in_a_real_room(
     # The fourth place a credential could be, and the one nothing else
     # scans: the bytes this simulation wrote itself.
     for secret in SECRETS:
-        assert secret.encode() not in recording, (
-            "the recording carried a credential"
-        )
+        assert secret.encode() not in recording, "the recording carried a credential"
 
     # Per-turn timings, measured off the real exchange, and never
     # backwards. A timing span is named for the measure it takes and its

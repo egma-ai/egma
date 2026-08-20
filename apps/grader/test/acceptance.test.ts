@@ -14,7 +14,6 @@ import {
   makeWorld,
   oneServiceAtATime,
   seedGrader,
-  seedJudge,
   seedTest,
   testConfig,
   theSeededGrader,
@@ -63,7 +62,6 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
 
 beforeAll(async () => {
   world = await makeWorld("grader_acceptance");
-  await seedJudge(world);
 });
 
 afterAll(async () => {

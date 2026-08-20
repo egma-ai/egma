@@ -1,7 +1,7 @@
 import { newId } from "@egma/ids";
-import { eq, inArray, sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 
-import { db, type Transaction } from "../client.ts";
+import { db } from "../client.ts";
 import {
   platformSetting,
   PLATFORM_SETTINGS,
@@ -15,18 +15,12 @@ import { NotPermittedError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 
 /**
- * The settings this deployment holds: what it was configured with, sealed, and
- * owned by the platform rather than by any customer on it.
+ * The one live route this deployment owns: how a phone simulation reaches its
+ * carrier. Model choices belong to immutable persona and grader versions, and
+ * provider keys belong to deployment credential custody. Neither is accepted
+ * by this module or by the four-name catalog behind it.
  *
- * **This is the judge configuration's idiom, one scope up.** A judge's
- * provider, model and key live in a table owned by a project, sealed with the
- * deployment's encryption key, with a hint kept for display; environment
- * variables seed it once at start and never replace a judge a project has
- * chosen. Everything here is that arrangement applied to the settings that
- * belong to the whole deployment, and nothing about it is new — which is the
- * point. A second idiom for the same job is the thing worth avoiding.
- *
- * Three doors, and the split between them is the design:
+ * Four doors, and the split between them is the design:
  *
  * - **Writing** takes each value in the clear, seals it, and keeps a hint
  *   beside it — the whole value for a setting that is not a secret, the last
@@ -35,20 +29,17 @@ import { authorize, here } from "./permissions.ts";
  *   with its label and its hint. It never answers a stored secret, and there is
  *   no argument by which it could be asked to: the sealed column is not among
  *   the ones it selects.
- * - **Seeding** is the deployment configuring itself at start, from its own
- *   environment. It writes only where the platform holds nothing.
+ * - **Seeding** is the deployment configuring itself at start. It writes a
+ *   complete route only where the platform holds no valid route.
  * - **Resolving** is the one door to the plaintext, and it opens for the work
- *   order a simulator claims and for nothing else. See
- *   `resolvePlatformSettings`, which is where that argument is written out.
+ *   order a simulator claims and for nothing else.
  */
 
 /**
- * The floor under a secret, so the stored last-four stays a hint rather than
- * most of the secret it hints at. Real provider keys are tens of characters, so
- * anything this short is a paste gone wrong. The judge's floor, for the judge's
- * reason.
+ * The floor under the SIP password, so its last four stay a hint rather than
+ * most of the secret. Anything shorter is a paste error.
  */
-const SHORTEST_SECRET = 8;
+const SHORTEST_PASSWORD = 8;
 
 /** How much of a secret a hint may be. */
 const HINT_CHARACTERS = 4;
@@ -101,10 +92,9 @@ export type PlatformFacts = Readonly<Partial<Record<PlatformSettingName, string 
 /**
  * What kind of deployment this is, for the one decision that turns on it.
  *
- * It is the existing `EGMA_SINGLE_ORGANIZATION` flag, which already means "this
- * deployment is one team", handed in rather than read here: the flag belongs to
- * the process's configuration and this module reads no environment. The judge
- * gates on the same flag in the same way, one scope down.
+ * It is the existing `EGMA_SINGLE_ORGANIZATION` flag, which means "this
+ * deployment is one team", handed in rather than read here. The flag belongs to
+ * process configuration and this module reads no environment.
  */
 export type DeploymentTenancy = {
   /** Whether this deployment serves exactly one organization. */
@@ -115,10 +105,8 @@ export type DeploymentTenancy = {
  * Who may read and change the settings of this whole platform.
  *
  * **Two conditions, and both are refusals of the same kind.** An organization
- * owner may, on the row of the permission table that already names provider
- * credentials — these are the deployment's own accounts, and which provider it
- * speaks with and whose key it spends is the same kind of decision as retention
- * and billing rather than the same kind as writing a test.
+ * owner may. A phone route is deployment configuration, not test or persona
+ * content.
  *
  * **And only while this deployment serves one organization.** That mode is what
  * makes an owner and the platform's operator the same person; without it, every
@@ -128,9 +116,6 @@ export type DeploymentTenancy = {
  * whose settings these are, and who is allowed to answer for the deployment —
  * and that question is deliberately not answered here. Until it is, egma
  * refuses everybody rather than picking one of them.
- *
- * The judge's guard is the same guard: the platform's own model credential is
- * given away only on a single-organization deployment, and for the same reason.
  */
 function onlyASingleOrganizationsOwner(
   auth: AuthContext,
@@ -156,9 +141,8 @@ function definitionOf(name: string): PlatformSettingDefinition {
 }
 
 /**
- * Trimmed before it is sealed, like every credential this codebase stores: a
- * key pasted with whitespace would pass every check, seal the padding, and fail
- * at the provider with nothing to say the stored value was the problem.
+ * Trim before sealing. A trunk or SIP password pasted with whitespace can pass
+ * shape checks and still fail at the carrier.
  */
 function validValue(
   definition: PlatformSettingDefinition,
@@ -173,13 +157,12 @@ function validValue(
   if (trimmed === "") {
     throw new UnprocessableInputError(
       `${definition.label} needs a value. Clearing a setting is not something ` +
-        "Egma does here: a platform that held one and then held none would " +
-        "report itself as never having been set up.",
+        "Egma does here: replace it with one complete route instead.",
     );
   }
-  if (definition.secret && trimmed.length < SHORTEST_SECRET) {
+  if (definition.secret && trimmed.length < SHORTEST_PASSWORD) {
     throw new UnprocessableInputError(
-      `${definition.label} is at least ${SHORTEST_SECRET} characters, and ` +
+      `${definition.label} is at least ${SHORTEST_PASSWORD} characters, and ` +
         "this one is shorter than any provider issues",
     );
   }
@@ -331,14 +314,9 @@ export async function readPlatformSettings(
 }
 
 /**
- * A setting written, or several. What a write does not name, the platform
- * keeps.
- *
- * One row per setting is what makes that true without an argument for it: a
- * write touches the rows it names and no others, so changing the model on a
- * settings form cannot drop the key beside it. A value replaces whole or is
- * left alone; there is no shape in which one could be edited in place, because
- * the envelope is sealed over the whole value.
+ * Write one complete source-IP or credential-authenticated carrier route.
+ * Validation finishes before any row changes. The SIP password replaces whole
+ * or stays sealed; there is no partial edit of its envelope.
  */
 export async function writePlatformSettings(
   auth: AuthContext,
@@ -348,11 +326,6 @@ export async function writePlatformSettings(
   onlyASingleOrganizationsOwner(auth, deployment);
 
   await db().transaction(async (tx) => {
-    // What the provider being replaced takes with it, before anything is
-    // written — read inside the transaction so the comparison is against the
-    // row this write is really replacing.
-    const stale = await staleUnder(tx, values);
-
     // One statement for however many settings were named, so a form that
     // changes three of them cannot land one and then fail: each row carries
     // its own new value, and `excluded` is how the conflicting row's own
@@ -386,82 +359,9 @@ export async function writePlatformSettings(
         ]),
       );
     }
-
-    // In the same transaction as the change that stranded them, so there is
-    // no moment where the new provider is stored beside the old provider's
-    // model.
-    if (stale.length > 0) {
-      await tx
-        .delete(platformSetting)
-        .where(inArray(platformSetting.name, stale));
-    }
   });
 
   return answer(await heldSettings());
-}
-
-/**
- * Which settings a provider change has just stranded, and why they go.
- *
- * **A model name and a voice id belong to the provider that coined them.**
- * `sonic-3.5` means nothing to OpenAI and `alloy` means nothing to Cartesia,
- * and a reasoning effort a model accepts is refused outright by one that has
- * never heard of the field. So the moment the provider beside them changes,
- * those values stop being configuration and become a trap: the simulator asks
- * the newly chosen provider for the old one's model and is refused at the
- * first word — which reads as a broken deployment rather than as a setting
- * nobody updated.
- *
- * Nothing else could clear them. Writing a setting is writing a *value*, and
- * an empty one is refused precisely so that a half-filled form cannot wipe a
- * key — so without this an operator who changed provider had no way back to
- * the working state through the API at all.
- *
- * **Only ever a narrowing, and only on a real change.** A write that does not
- * name a provider strands nothing; a write that names the provider already
- * stored strands nothing; and a write that names the dependent value itself
- * strands nothing, because supplying the new provider's model in the same
- * breath is exactly the careful thing to do and must not then delete it.
- */
-const DEPENDS_ON: Readonly<
-  Partial<Record<PlatformSettingName, readonly PlatformSettingName[]>>
-> = {
-  persona_model: ["persona_model_reasoning_effort"],
-  speech_to_text_provider: ["speech_to_text_model"],
-  text_to_speech_provider: ["text_to_speech_model", "text_to_speech_voice"],
-};
-
-async function staleUnder(
-  tx: Transaction,
-  values: PlatformSettingValues,
-): Promise<PlatformSettingName[]> {
-  const stale: PlatformSettingName[] = [];
-
-  for (const [chosen, dependents] of Object.entries(DEPENDS_ON) as [
-    PlatformSettingName,
-    readonly PlatformSettingName[],
-  ][]) {
-    const wanted = values[chosen];
-    if (wanted === undefined) continue;
-
-    const [held] = await tx
-      .select({ value: platformSetting.value })
-      .from(platformSetting)
-      .where(eq(platformSetting.name, chosen));
-    // Nothing stored is a first write rather than a change, and there is no
-    // older provider for anything to be stale under.
-    if (held === undefined) continue;
-    if (openCredentials(held.value) === wanted) continue;
-
-    for (const dependent of dependents) {
-      // Named in this same write, so it is the new provider's own value and
-      // the whole point of it is that it survives.
-      if (values[dependent] !== undefined) continue;
-      stale.push(dependent);
-    }
-  }
-
-  return stale;
 }
 
 /**
@@ -488,10 +388,8 @@ async function staleUnder(
  * context is what says *who is asking*, and that is the whole question this door
  * has to answer.
  *
- * Read for each simulation, deliberately, and not cached. A key an operator
- * changes applies to the next simulation with no restart, and one more small
- * select is nothing beside conducting a conversation over a telephone
- * connection. A measurement may ask for caching later; nothing has yet.
+ * Read for each simulation, deliberately, and not cached. A route an operator
+ * changes applies to the next simulation with no restart.
  */
 export async function resolvePlatformSettings(
   auth: AuthContext,
@@ -532,8 +430,8 @@ export async function resolvePlatformSettings(
  * anybody has logged in.
  *
  * It takes nothing, so there is no customer it could be asked about, and it
- * returns non-secret facts only — a provider's name, a model's name, and `null`
- * standing in for every secret it holds. That is what lets it skip the
+ * returns non-secret carrier facts only, with `null` standing in for the SIP
+ * password. That is what lets it skip the
  * `AuthContext` every read of a customer's data requires: the readiness answer
  * is read by the CLI in front of every command, before login and before a
  * repository identifier is ever sent, exactly as the platform's own identity
@@ -551,27 +449,20 @@ export async function platformFacts(): Promise<PlatformFacts> {
 }
 
 /**
- * Give the platform every setting its environment names and it does not
- * already hold.
+ * Give the platform the complete carrier route its environment names.
  *
- * **This is the second way in, and the operator chooses which.** One is an
- * interview: `egma self-host setup` asks for each setting in turn and writes it
- * through the API. The other is this — an automated deployment answers no
- * questions, so it puts the settings in its environment and the platform reads
- * them on start.
+ * **This is the second way in.** `egma self-host setup` writes a route through
+ * the API. An automated deployment supplies the same route in its environment.
  *
  * **It never overwrites a complete configuration.** A setting somebody has
  * changed has been changed, and a restart is not an occasion to put a script's
- * copy of the old key back. The one repair is a complete two-value IP route or
+ * old copy back. The one repair is a complete two-value IP route or
  * four-value credential route offered to a platform that holds only an invalid
  * part of one. The old part is removed and the new route is written together.
- * Once either complete shape exists, every later boot leaves it alone like
- * every other setting.
+ * Once either complete shape exists, every later ordinary boot leaves it alone.
  *
- * Not authorized against an `AuthContext` on purpose, exactly as the default
- * judge's seeding is not: there is no user here. This is the deployment acting
- * on its own configuration, in the same breath as applying its migrations, and
- * there is no session it could be doing it under.
+ * It has no `AuthContext` because there is no user here. This is the deployment
+ * acting on its own configuration while it starts.
  */
 export async function seedPlatformSettings(
   values: PlatformSettingValues,
@@ -584,86 +475,40 @@ export async function seedPlatformSettings(
   const rows = named
     .filter((name) => values[name] !== undefined)
     .map((name) => rowFor(name, values[name], now));
-  if (rows.length === 0) return [];
+  return db().transaction(async (tx) => {
+    // A carrier route has either two rows or four. Hold this small table while
+    // deciding whether the stored route is absent, valid or a legacy partial,
+    // so two API starts and a settings write cannot interleave the rows.
+    await tx.execute(
+      sql`lock table ${platformSetting} in share row exclusive mode`,
+    );
 
-  const offeredCarrier = CARRIER_BUNDLE.filter(
-    (name) => values[name] !== undefined,
-  );
+    const held = await tx
+      .select({ name: platformSetting.name })
+      .from(platformSetting)
+      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    const heldNames = new Set(held.map((row) => row.name));
+    const heldIpRoute =
+      heldNames.has("carrier_trunk_address") &&
+      heldNames.has("carrier_trunk_number") &&
+      !heldNames.has("carrier_trunk_username") &&
+      !heldNames.has("carrier_trunk_password");
+    const heldCredentialRoute = CARRIER_BUNDLE.every((name) =>
+      heldNames.has(name),
+    );
+    if (heldIpRoute || heldCredentialRoute) return [];
 
-  if (offeredCarrier.length > 0) {
-    return db().transaction(async (tx) => {
-      // A carrier route has either two rows or four. Hold this small settings
-      // table while deciding whether the stored route is absent, valid or a
-      // legacy partial, so two API starts and a settings write cannot
-      // interleave the rows.
-      await tx.execute(
-        sql`lock table ${platformSetting} in share row exclusive mode`,
-      );
-
-      const heldCarrier = await tx
-        .select({ name: platformSetting.name })
-        .from(platformSetting)
-        .where(inArray(platformSetting.name, CARRIER_BUNDLE));
-      const carrierNames = new Set<PlatformSettingName>(CARRIER_BUNDLE);
-      const otherRows = rows.filter(
-        (row) => !carrierNames.has(row.name as PlatformSettingName),
-      );
-      const written: { name: string }[] = [];
-
-      if (otherRows.length > 0) {
-        written.push(
-          ...(await tx
-            .insert(platformSetting)
-            .values(otherRows)
-            .onConflictDoNothing({ target: platformSetting.name })
-            .returning({ name: platformSetting.name })),
-        );
-      }
-
-      const heldCarrierNames = new Set(heldCarrier.map((row) => row.name));
-      const heldIpRoute =
-        heldCarrierNames.has("carrier_trunk_address") &&
-        heldCarrierNames.has("carrier_trunk_number") &&
-        !heldCarrierNames.has("carrier_trunk_username") &&
-        !heldCarrierNames.has("carrier_trunk_password");
-      const heldCredentialRoute = CARRIER_BUNDLE.every((name) =>
-        heldCarrierNames.has(name),
-      );
-
-      if (!heldIpRoute && !heldCredentialRoute) {
-        // An empty platform and an invalid legacy partial take the same path:
-        // remove every old member, then insert exactly the complete two- or
-        // four-value route this environment supplied. This also removes an
-        // orphan credential when the environment selects source-IP auth.
-        await tx
-          .delete(platformSetting)
-          .where(inArray(platformSetting.name, CARRIER_BUNDLE));
-        const carrierRows = rows.filter((row) =>
-          carrierNames.has(row.name as PlatformSettingName),
-        );
-        written.push(
-          ...(await tx
-            .insert(platformSetting)
-            .values(carrierRows)
-            .returning({ name: platformSetting.name })),
-        );
-      }
-
-      return written.map((row) => row.name as PlatformSettingName);
-    });
-  }
-
-  const written = await db()
-    .insert(platformSetting)
-    .values(rows)
-    // The setting a person had already written stays exactly as they wrote it,
-    // and this is the whole safety of running on every boot. Nothing here is a
-    // race worth locking for either: the losing side is the environment's copy,
-    // which is exactly the side that should lose.
-    .onConflictDoNothing({ target: platformSetting.name })
-    .returning({ name: platformSetting.name });
-
-  return written.map((row) => row.name as PlatformSettingName);
+    // An empty platform and an invalid legacy partial take the same path:
+    // remove every old member, then insert exactly the offered complete route.
+    await tx
+      .delete(platformSetting)
+      .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+    const written = await tx
+      .insert(platformSetting)
+      .values(rows)
+      .returning({ name: platformSetting.name });
+    return written.map((row) => row.name as PlatformSettingName);
+  });
 }
 
 /**
@@ -684,8 +529,8 @@ export async function seedPlatformSettings(
  * an envelope that cannot be opened, or a failed insert therefore leaves the
  * old complete route untouched.
  *
- * Non-carrier environment settings are ignored. Their existing seed and
- * operator-write behavior stays exactly where it is.
+ * The four carrier names are the complete catalog. Model choices and provider
+ * credentials have no path into this store.
  */
 export async function reconcileDeploymentCarrierSettings(
   values: PlatformSettingValues,

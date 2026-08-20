@@ -722,27 +722,23 @@ simulator, the grader, and the LiveKit server, SIP gateway and Redis a phone
 call needs — and prints the address to point an agent repository at. Open it and
 sign up: you become the admin of your own instance.
 
-It also prints what the platform is still **missing**, because a started platform
-is not a configured one — and it prints the phone half separately, since a
-platform with no carrier runs text simulations perfectly well. One more command
-in the same directory configures all of it:
+Put the deployment's current provider keys in `.env` as
+`EGMA_OPENAI_API_KEY`, `EGMA_DEEPGRAM_API_KEY`, and
+`EGMA_CARTESIA_API_KEY`. Persona and grader versions choose the models; these
+variables supply credentials only.
+
+The command also prints phone readiness separately. Configure that optional
+carrier route in the same directory:
 
 ```
 npx @egma/cli login --url http://localhost:3101
 npx @egma/cli self-host setup
 ```
 
-It asks the platform what it does not hold and then asks you for exactly that,
-in a fixed order: who the persona thinks with, what it speaks and hears with,
-and how a call reaches the telephone network. A setting the platform already
-holds is never asked for again, so a second run is about the one key you were
-missing — and on a fully configured platform it changes nothing and says so.
-
-Every answer is written through the platform's own API, which is why you log in
-first: these are the deployment's own provider credentials, and an organization
-owner is who may set them. The platform seals them into its own store, so they
-survive a restart, an upgrade and a move to another machine, and each simulator
-is handed them on the work order it claims.
+It asks only how a call reaches the telephone network. The carrier route is
+written through the platform's own API, which is why you log in first. The SIP
+password is sealed in Postgres and is handed to a simulator only on a claimed
+phone work order.
 
 For the phone half, a Twilio administrator creates one SIP credential per
 developer and one for production in the credential list already attached to the
