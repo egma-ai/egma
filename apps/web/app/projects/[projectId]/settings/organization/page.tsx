@@ -96,11 +96,8 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
    */
   const mayAdminister = settled?.may_manage_organization === true;
 
-  /* The hint, and the sentence saying why Save is not available. The base
-     input and the base button both read nothing they are not given, so this
-     page names both and cannot leave either unpointed-at. */
+  /* The field's hint, named so the input can point at it. */
   const nameHint = useId();
-  const whyNotSave = useId();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -264,20 +261,12 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               <FormActions>
                 <Button
                   type="submit"
-                  disabled={!mayAdminister || !named || !changed || saving}
-                  title={whyNot}
-                  aria-describedby={whyNot === undefined ? undefined : whyNotSave}
+                  disabled={!mayAdminister || !named || !changed}
+                  busy={saving}
+                  {...(whyNot === undefined ? {} : { why: whyNot })}
                 >
                   {saving ? "Saving…" : "Save organization"}
                 </Button>
-                {whyNot === undefined ? null : (
-                  <span
-                    className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
-                    id={whyNotSave}
-                  >
-                    {whyNot}
-                  </span>
-                )}
               </FormActions>
             </Form>
           </Section>

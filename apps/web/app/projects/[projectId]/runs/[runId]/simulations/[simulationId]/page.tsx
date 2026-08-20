@@ -359,12 +359,7 @@ function EvidenceView({
                 <Button type="button" variant="secondary" onClick={() => dismiss()}>
                   Not now
                 </Button>
-                <Button
-                  type="button"
-                  disabled={working}
-                  aria-busy={working ? "true" : undefined}
-                  onClick={() => void regrade()}
-                >
+                <Button type="button" busy={working} onClick={() => void regrade()}>
                   {working ? "Asking…" : "Judge it again"}
                 </Button>
               </Actions>

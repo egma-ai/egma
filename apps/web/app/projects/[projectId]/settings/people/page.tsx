@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   readJson,
@@ -98,8 +98,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayManage = settled?.may_manage_members === true;
 
-  /* Why the membership controls are not available, for whoever asks. */
-  const whyNotManage = useId();
   const [tab, setTab] = useState<Tab>("people");
   const tabRef = useRef<Tab>("people");
   const [invitations, setInvitations] =
@@ -321,25 +319,13 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           <Button
             type="button"
             variant="secondary"
-            disabled={!mayManage || busy}
-            title={whyNot}
-            aria-describedby={
-              whyNot === undefined
-                ? undefined
-                : `${whyNotManage}-${member.user_id}`
-            }
+            disabled={!mayManage}
+            busy={busy}
+            {...(whyNot === undefined ? {} : { why: whyNot })}
             onClick={() => setConfirming({ action: "deactivate", member })}
           >
             Deactivate
-          </Button>
-          {whyNot === undefined ? null : (
-            <span
-              className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
-              id={`${whyNotManage}-${member.user_id}`}
-            >
-              {whyNot}
-            </span>
-          )}{" "}
+          </Button>{" "}
           <Button
             type="button"
             variant="secondary"

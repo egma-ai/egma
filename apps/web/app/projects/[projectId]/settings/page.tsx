@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { IDENTITY_CONFLICT, writeJson, type Refusal } from "../../../../lib/api.ts";
 import { roleOf } from "../../../../lib/me.ts";
@@ -92,15 +92,6 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
    */
   const mayAdminister = settled?.may_manage_projects ?? false;
 
-  /*
-   * The id of the sentence saying why Save is not available.
-   *
-   * The base button is a `<button>` and draws nothing beside itself, so the
-   * page writes the sentence and names it. A disabled control cannot take
-   * focus, which is exactly why the reason may not live in a `title` alone:
-   * that is a reason only a pointer can reach.
-   */
-  const whyNotSave = useId();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
@@ -316,20 +307,12 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
               <FormActions>
                 <Button
                   type="submit"
-                  disabled={!mayAdminister || !named || !changed || saving}
-                  title={whyNot}
-                  aria-describedby={whyNot === undefined ? undefined : whyNotSave}
+                  disabled={!mayAdminister || !named || !changed}
+                  busy={saving}
+                  {...(whyNot === undefined ? {} : { why: whyNot })}
                 >
                   {saving ? "Saving…" : "Save project"}
                 </Button>
-                {whyNot === undefined ? null : (
-                  <span
-                    className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
-                    id={whyNotSave}
-                  >
-                    {whyNot}
-                  </span>
-                )}
               </FormActions>
             </Form>
           </Section>

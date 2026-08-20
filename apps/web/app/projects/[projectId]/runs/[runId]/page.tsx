@@ -687,17 +687,10 @@ function RunDetailView({
                 >
                   Cancel
                 </Button>
-                {/*
-                  `busy` was one prop on the control set: inert while the write
-                  is in flight, and announced as busy. The base button has no
-                  such prop, so both halves are said here — dropping either
-                  would let a second run be started by a double press, or leave
-                  a screen reader with no word for the wait.
-                */}
                 <Button
                   type="submit"
-                  aria-busy={rerunWorking ? "true" : undefined}
-                  disabled={rerunWorking || rerunName.trim() === ""}
+                  busy={rerunWorking}
+                  disabled={rerunName.trim() === ""}
                 >
                   {rerunWorking ? "Starting…" : "Run again"}
                 </Button>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
@@ -603,12 +603,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="button"
-                  disabled={starting}
-                  aria-busy={starting ? "true" : undefined}
-                  onClick={() => void start()}
-                >
+                <Button type="button" busy={starting} onClick={() => void start()}>
                   Start run
                 </Button>
               </div>
@@ -695,29 +690,17 @@ function StartWaiting({
   readonly reason: string;
   readonly busy?: boolean;
 }) {
-  const said = useId();
-
   return (
     <div className={START_ACTION}>
       {/*
         Disabled rather than hidden, and the reason said where anybody can
-        reach it: the control set this replaces wrote `why` onto the page
-        beside the control and pointed at it with `aria-describedby`, so a
-        keyboard and a screen reader got the sentence and not only a pointer.
-        That is kept here rather than collapsed into a `title`.
+        reach it. `why` writes the sentence onto the page beside the control
+        and points at it with `aria-describedby`, so a keyboard and a screen
+        reader get it and not only a pointer.
       */}
-      <Button
-        type="button"
-        disabled
-        aria-busy={busy ? "true" : undefined}
-        aria-describedby={said}
-        title={reason}
-      >
+      <Button type="button" disabled busy={busy} why={reason}>
         Start run
       </Button>
-      <span className="max-w-[56ch] text-sm text-muted-foreground" id={said}>
-        {reason}
-      </span>
     </div>
   );
 }
@@ -738,11 +721,10 @@ function StartControls({
   readonly refused: Refusal | null;
   readonly onStart: () => void;
 }) {
-  const said = useId();
   /*
-   * Why Start is not available, worked out once. The control set this
-   * replaces showed the sentence only while the control was inert, so it is
-   * computed from the same condition rather than from a second one.
+   * Why Start is not available, worked out once. `Button` shows the sentence
+   * only while the control is inert, so it is computed from the same condition
+   * that disables it rather than from a second one.
    */
   const why = !mayStart
     ? "Your role cannot start a run."
@@ -787,19 +769,13 @@ function StartControls({
       <div className={START_ACTION}>
         <Button
           type="button"
-          disabled={!mayStart || blocked !== null || starting}
-          aria-busy={starting ? "true" : undefined}
-          aria-describedby={why === undefined ? undefined : said}
-          title={why}
+          disabled={!mayStart || blocked !== null}
+          busy={starting}
+          {...(why === undefined ? {} : { why })}
           onClick={onStart}
         >
           {starting ? "Starting…" : "Start run"}
         </Button>
-        {why === undefined ? null : (
-          <span className="max-w-[56ch] text-sm text-muted-foreground" id={said}>
-            {why}
-          </span>
-        )}
       </div>
     </>
   );
