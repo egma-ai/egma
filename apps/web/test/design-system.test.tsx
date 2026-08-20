@@ -59,6 +59,55 @@ describe("the development design proof", () => {
     expect(screen.queryByText("Agent saved")).toBeNull();
   });
 
+  /**
+   * The numeric field's three shapes, on the one surface that draws them.
+   *
+   * The control exists because a bound and a unit belong on the field rather
+   * than in a sentence beside it, and the unit-less shape is the one the grader
+   * threshold uses — so a proof holding only the percentage would leave the
+   * layout that ships unproven. All three are asserted through what a reader is
+   * actually given: the described words, and the keypad the field asks for.
+   */
+  it("proves the numeric field with a unit, with a decimal step, and with neither", () => {
+    render(<DesignSystemProof />);
+
+    /** What the field is described by, resolved to the words a reader gets. */
+    const describedWords = (field: HTMLElement): string =>
+      (field.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .filter((one) => one !== "")
+        .map((one) => document.getElementById(one)?.textContent ?? "")
+        .join(" ");
+
+    const percent = screen.getByRole("spinbutton", {
+      name: "Share of live traffic judged",
+    });
+    expect((percent as HTMLInputElement).value).toBe("20");
+    expect(percent.getAttribute("min")).toBe("0");
+    expect(percent.getAttribute("max")).toBe("100");
+    expect(percent.getAttribute("inputmode")).toBe("numeric");
+    expect(describedWords(percent)).toContain("%");
+
+    const seconds = screen.getByRole("spinbutton", { name: "Answer within" });
+    // A step that is not whole needs the separator, so the phone keypad has to
+    // be the one that has it.
+    expect(seconds.getAttribute("step")).toBe("0.1");
+    expect(seconds.getAttribute("inputmode")).toBe("decimal");
+    expect(describedWords(seconds)).toContain("seconds");
+
+    const count = screen.getByRole("spinbutton", {
+      name: "Turns before the caller gives up",
+    });
+    expect(count.getAttribute("inputmode")).toBe("numeric");
+    expect(describedWords(count)).toContain("a count and nothing else");
+    // No unit at all, rather than an empty one: the words a reader is given
+    // must not gain a stray separator where a unit would have been.
+    expect(describedWords(count)).not.toContain("%");
+
+    fireEvent.change(percent, { target: { value: "35" } });
+    expect((percent as HTMLInputElement).value).toBe("35");
+  });
+
   it("draws the shadcn base wearing egma's theme", () => {
     render(<DesignSystemProof />);
 

@@ -64,6 +64,7 @@ import { Dialog } from "../../ui/dialog.tsx";
 import { Transcript } from "../../ui/evidence.tsx";
 import { Toast, Tooltip, type FeedbackInput } from "../../ui/feedback.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "../../ui/menu.tsx";
+import { NumberField } from "../../ui/number-field.tsx";
 import { Empty, Failure, Loading } from "../../ui/page-state.tsx";
 import { ProjectSelector } from "../../ui/project-selector.tsx";
 import { RunProgress, VerdictBadge } from "../../ui/run-status.tsx";
@@ -172,6 +173,9 @@ export function DesignSystemProof() {
   const [environment, setEnvironment] = useState<"staging" | "production">("production");
   const [list, setList] = useState<"active" | "archived">("active");
   const [onlyFailed, setOnlyFailed] = useState(true);
+  const [sampleRate, setSampleRate] = useState("20");
+  const [answerWithin, setAnswerWithin] = useState("2.5");
+  const [turnBudget, setTurnBudget] = useState("12");
   const nextFeedbackInput = useRef<FeedbackInput>("keyboard");
 
   return (
@@ -280,6 +284,63 @@ export function DesignSystemProof() {
                   <div className="h-10 rounded-input border border-border bg-brand" title="Ember" />
                   <div className="h-10 rounded-input border border-border bg-failure" title="Failure" />
                 </div>
+              </div>
+            </div>
+
+            {/*
+              * The numeric field, which the shared control set never had.
+              *
+              * Its whole reason for existing is that a bound and a unit belong
+              * on the control rather than in a sentence beside it, so the proof
+              * has to show all three shapes at once: a percentage, a value in
+              * seconds whose step is not a whole number, and a plain count with
+              * no unit at all. A field that only ever appeared with a unit
+              * would leave the unit-less layout unproven, and that is the one
+              * the grader threshold uses.
+              */}
+            <div className="flex flex-col gap-4">
+              <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                Numeric fields
+              </h3>
+              <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
+                The bounds are the browser&apos;s own validation and its own
+                arrow-key stepping; the unit is read out with the value rather
+                than drawn beside it; the digits are tabular. The spin buttons
+                are hidden because every browser draws them differently and each
+                one is a target smaller than this product allows anywhere else.
+              </p>
+              <div className="grid gap-6 md:grid-cols-3">
+                <NumberField
+                  id="proof-sample-rate"
+                  label="Share of live traffic judged"
+                  value={sampleRate}
+                  onChange={setSampleRate}
+                  unit="%"
+                  min={0}
+                  max={100}
+                  step={1}
+                  hint="A whole percentage. The field refuses 900 rather than a sentence asking it not to."
+                />
+                <NumberField
+                  id="proof-answer-within"
+                  label="Answer within"
+                  value={answerWithin}
+                  onChange={setAnswerWithin}
+                  unit="seconds"
+                  min={0}
+                  max={30}
+                  step={0.1}
+                  hint="A step that is not whole asks a phone for the decimal keypad."
+                />
+                <NumberField
+                  id="proof-turn-budget"
+                  label="Turns before the caller gives up"
+                  value={turnBudget}
+                  onChange={setTurnBudget}
+                  min={1}
+                  max={40}
+                  hint="No unit: some numbers are a count and nothing else."
+                />
               </div>
             </div>
 

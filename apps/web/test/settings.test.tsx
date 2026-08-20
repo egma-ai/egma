@@ -626,6 +626,30 @@ describe("project settings", () => {
   );
 
   /**
+   * The half of "disable, do not hide" that a pointer never needed.
+   *
+   * A disabled control cannot take focus, so a reason reachable only through a
+   * `title` is a reason only a mouse gets. The CSS Modules button drew the
+   * sentence itself and pointed the control at it; the base button is a bare
+   * `<button>` and draws nothing beside itself, so the page now does both.
+   *
+   * **This asserts the link and not the sentence.** The sentence is already
+   * asserted above, and it went on passing while the link did not exist — which
+   * is exactly the failure worth a test of its own.
+   */
+  it("points a disabled Save at the sentence that says why", async () => {
+    open("viewer", { ...PROJECT, may_manage_projects: false });
+
+    // Waited for rather than read: the reason needs the session to have
+    // settled, and a control with no reason yet is not a control with none.
+    const said = await screen.findByText(/cannot change project settings/);
+    const save = screen.getByRole("button", { name: "Save project" });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    expect(save.getAttribute("aria-describedby")).toBe(said.id);
+    expect(said.id).not.toBe("");
+  });
+
+  /**
    * The server says who may edit, and this page believes it.
    *
    * The two tests above cannot tell the difference, and that is the point: for
@@ -1072,6 +1096,32 @@ describe("organization settings", () => {
       ).toBeTruthy();
     },
   );
+
+  /**
+   * A hint nothing points at is a hint only a sighted reader ever gets.
+   *
+   * `Field` hands its hint id through React context and only the CSS Modules
+   * input read it. The base input reads nothing it is not given, so these two
+   * fields write the sentence and the `aria-describedby` in one place. Both are
+   * asserted because they are wired separately and either could be dropped
+   * without the page looking any different.
+   */
+  it("names the hint under each field that has one", async () => {
+    open("admin", ORGANIZATION, [CREDENTIAL]);
+
+    const nameHint = await screen.findByText(/breaks no link and no invitation/);
+    expect(screen.getByLabelText("Name").getAttribute("aria-describedby")).toBe(
+      nameHint.id,
+    );
+
+    const keys = await screen.findByRole("table", { name: "Organization keys" });
+    fireEvent.click(within(keys).getByRole("button", { name: "Replace key" }));
+    const replacementHint = screen.getByText(/Egma will not show it to you/);
+    expect(
+      screen.getByLabelText("New key").getAttribute("aria-describedby"),
+    ).toBe(replacementHint.id);
+    expect(replacementHint.id).not.toBe("");
+  });
 
   /**
    * The whole point of the credential design, asserted from the page: what is
@@ -1903,6 +1953,30 @@ describe("people and invitations", () => {
    * Removing somebody is not a click. The dialog says what happens and to whom,
    * and closing it leaves the page exactly as it was.
    */
+  /**
+   * The reason sits in the row it is about, and every row names its own copy.
+   *
+   * A table is where one sentence hoisted above it would be cheapest and
+   * wrongest: the control a person is looking at would describe something
+   * somewhere else on the page. So there is one per row, and the ids are per
+   * row too — the same shape as the field and the retry that had to be cleared
+   * when a different row opened.
+   */
+  it("gives each row's disabled control its own reason", async () => {
+    open("member", false);
+
+    const said = await screen.findAllByText(/cannot manage members/);
+    const controls = screen.getAllByRole("button", { name: "Deactivate" });
+    expect(controls).toHaveLength(said.length);
+    expect(controls.length).toBeGreaterThan(1);
+    for (const [at, control] of controls.entries()) {
+      expect(control.hasAttribute("disabled")).toBe(true);
+      expect(control.getAttribute("aria-describedby")).toBe(said[at]!.id);
+    }
+    // Distinct, because two elements of one id is one element to a browser.
+    expect(new Set(said.map((one) => one.id)).size).toBe(said.length);
+  });
+
   it("asks before removing somebody, and posts only once it is answered", async () => {
     open();
 
