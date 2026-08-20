@@ -6,8 +6,6 @@
 .linkLine a { display: inline-block; color: var(--foreground); text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 4px; }
 
 .mono { font-family: var(--mono); }
-.muted { color: var(--muted); }
-.wrong { color: var(--bad); }
 
 .detailFacts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: clip; }
 .contextFact { display: flex; flex-direction: column; gap: var(--space-1); }

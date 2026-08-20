@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { cn } from "@/lib/utils";
 import { readJson, writeJson, type Refusal } from "../../../../lib/api.ts";
 import {
   agentsQuery,
@@ -23,13 +24,12 @@ import {
   type RunStatusWord,
   type VerdictWord,
 } from "../../../../lib/runs.ts";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Actions,
-  Button,
-  ButtonLink,
   Refused,
   Select,
-  TextInput,
   Toolbar,
 } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
@@ -51,7 +51,6 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
-import styles from "./history.module.css";
 
 /**
  * Every run this project has executed, newest first.
@@ -139,6 +138,17 @@ function columnsFor(
     {
       key: "stop",
       header: "",
+      /*
+       * A row control, said to the table rather than only drawn like one.
+       *
+       * The run's own page already marks its *Run again* column this way and
+       * this one did not, so the same concept was drawn two ways: the shared
+       * table keeps an `action` cell at the trailing edge, lets it out of the
+       * one-line ellipsis every other cell gets, and drops the cell entirely
+       * on a narrow layout when the row has no control — which is every
+       * finished run in a healthy history.
+       */
+      action: true,
       width: "100px",
       /*
        * Stopping a run without opening it.
@@ -156,7 +166,13 @@ function columnsFor(
         mayControl !== true || (run.status !== "pending" && run.status !== "running")
           ? ""
           : (
-              <Button onClick={() => onCancel(run.id)}>Cancel</Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => onCancel(run.id)}
+              >
+                Cancel
+              </Button>
             ),
     },
   ];
@@ -313,9 +329,9 @@ function Runs({ projectId }: { readonly projectId: string }) {
 
   function plan() {
     return mayStart ? (
-      <ButtonLink weight="strong" href={projectPath(projectId, "runs", "new")}>
-        Create a run
-      </ButtonLink>
+      <Button asChild>
+        <Link href={projectPath(projectId, "runs", "new")}>Create a run</Link>
+      </Button>
     ) : undefined;
   }
 
@@ -331,9 +347,11 @@ function Runs({ projectId }: { readonly projectId: string }) {
           message={answer.refusal.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -409,7 +427,12 @@ function Runs({ projectId }: { readonly projectId: string }) {
                   // answers what matched. An empty page with a cursor on it
                   // means it swept and found none *here* — not that there are
                   // none — and the control says which.
-                  <Button disabled={loadingMore} onClick={() => void showMore()}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={loadingMore}
+                    onClick={() => void showMore()}
+                  >
                     {loadingMore ? "Looking…" : "Keep looking"}
                   </Button>
                 )
@@ -454,11 +477,26 @@ function Runs({ projectId }: { readonly projectId: string }) {
               })}
         />
         {opened === undefined ? null : (
-          <section className={styles.stopPanel} aria-label="Cancel this run">
-            <h3 className={styles.stopTitle}>
+          /*
+           * The panel drawn under the table for whichever row is open.
+           *
+           * Once, and never squeezed into a cell. The table keeps each row to
+           * one line of reading; the panel needs the full width and owns the
+           * only expanded state. The Ember edge is the "open" mark — the one
+           * `DESIGN.md` reserves the brand colour for — and never a verdict.
+           */
+          <section
+            className={cn(
+              "flex flex-col gap-3 rounded-card border border-border bg-surface p-5",
+              "border-s-[3px] border-s-brand",
+            )}
+            aria-label="Cancel this run"
+          >
+            {/* A heading carries no size of its own; the class is the size. */}
+            <h3 className="m-0 text-sm font-medium text-foreground">
               Cancel {opened.label ?? "this run"}?
             </h3>
-            <p className={styles.stopLead}>
+            <p className="m-0 max-w-[72ch] text-sm text-muted-foreground">
               Simulations still waiting stop here and now. Simulations
               already with a simulator are told to stop and land as canceled
               when they do, and whatever they produced stays on the record. A
@@ -475,6 +513,8 @@ function Runs({ projectId }: { readonly projectId: string }) {
             {retryCancel === null ? null : (
               <Actions>
                 <Button
+                  type="button"
+                  variant="secondary"
                   disabled={stopping}
                   onClick={() => void stop(retryCancel.runId)}
                 >
@@ -483,9 +523,16 @@ function Runs({ projectId }: { readonly projectId: string }) {
               </Actions>
             )}
             <Actions>
-              <Button onClick={() => setOpenRun(null)}>Keep running</Button>
               <Button
-                tone="destructive"
+                type="button"
+                variant="secondary"
+                onClick={() => setOpenRun(null)}
+              >
+                Keep running
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
                 disabled={stopping}
                 onClick={() => void stop(opened.id)}
               >
@@ -565,12 +612,22 @@ function Runs({ projectId }: { readonly projectId: string }) {
             ]}
             onChange={(one) => setVerdict(one as "" | VerdictWord)}
           />
-          <TextInput
+          {/*
+            The field carries its own name rather than a visible label, the
+            same way the four filters beside it do. `autoComplete` is said out
+            loud because the control set this replaces defaulted it to `off`,
+            and a browser offering to remember a date filter is a menu over
+            the toolbar every time somebody focuses it.
+          */}
+          <Input
             id="runs-since"
+            type="text"
             value={typedSince}
-            label="Show only runs started on or after a day"
+            aria-label="Show only runs started on or after a day"
             placeholder="YYYY-MM-DD"
-            onChange={setTypedSince}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => setTypedSince(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") setSince(typedSince);
               if (event.key === "Escape") {

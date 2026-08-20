@@ -36,7 +36,9 @@ import {
   type ListPage,
   type Quiet,
 } from "../../../../../lib/transcripts.ts";
-import { ButtonLink, Select } from "../../../../../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Select } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
@@ -52,9 +54,7 @@ import {
   PageHeader,
   ProductPage,
 } from "../../../../../ui/shell.tsx";
-import styles from "../../../../ui.module.css";
 import { Notice } from "../../../../ui.tsx";
-import setup from "./setup.module.css";
 
 /**
  * **Monitoring**: what this project's agents did in production, newest first.
@@ -95,6 +95,26 @@ import setup from "./setup.module.css";
  * the page was served from. There is no API key in a browser and there never
  * will be.
  */
+
+/**
+ * The export setup's two kinds of line: what to do, and what to copy.
+ *
+ * This is the one place in the product that shows something to be copied
+ * rather than something to be read, so the block borrows the transcript's
+ * monospace treatment and nothing else. No new colour: it sits on the ordinary
+ * canvas with the ordinary hairline, because it is instruction and not a state.
+ *
+ * It wraps rather than scrolling sideways. A long deployment address on a
+ * narrow screen is a variable somebody has to copy whole, and a line that runs
+ * out of view is a line half of them will copy half of.
+ */
+const MACHINE_TEXT = cn(
+  "m-0 w-full overflow-x-auto rounded-input border border-border bg-background",
+  "px-4 py-3 font-mono text-sm",
+  "[overflow-wrap:anywhere] whitespace-pre-wrap",
+);
+
+const NOTE = "m-0 text-sm text-muted-foreground";
 
 type State =
   | { status: "loading" }
@@ -412,9 +432,11 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
             title={QUIET.organizationKey.title}
             lead={QUIET.organizationKey.lead}
             action={
-              <ButtonLink weight="strong" href={settingsPath(projectId, "keys")}>
-                {QUIET.organizationKey.key}
-              </ButtonLink>
+              <Button asChild>
+                <Link href={settingsPath(projectId, "keys")}>
+                  {QUIET.organizationKey.key}
+                </Link>
+              </Button>
             }
           />
         ) : null}
@@ -471,15 +493,15 @@ function SetUp({ projectId }: { readonly projectId: string }) {
       title={QUIET.setUp.title}
       lead={QUIET.setUp.lead}
       action={
-        <div className={setup.setUp}>
-          <p className={setup.note}>{QUIET.setUp.endpoint}</p>
-          <pre className={setup.address}>{origin}</pre>
-          <p className={setup.note}>{QUIET.setUp.variables}</p>
-          <pre className={setup.exports}>{QUIET.setUp.exports(origin)}</pre>
-          <p className={setup.note}>{QUIET.setUp.keyLead}</p>
-          <ButtonLink weight="strong" href={settingsPath(projectId, "keys")}>
-            {QUIET.setUp.key}
-          </ButtonLink>
+        <div className="grid w-full justify-items-start gap-3 text-left">
+          <p className={NOTE}>{QUIET.setUp.endpoint}</p>
+          <pre className={MACHINE_TEXT}>{origin}</pre>
+          <p className={NOTE}>{QUIET.setUp.variables}</p>
+          <pre className={MACHINE_TEXT}>{QUIET.setUp.exports(origin)}</pre>
+          <p className={NOTE}>{QUIET.setUp.keyLead}</p>
+          <Button asChild>
+            <Link href={settingsPath(projectId, "keys")}>{QUIET.setUp.key}</Link>
+          </Button>
           {/*
             The caution, which the state below says louder and to fewer people:
             the key list answers for an admin and for whoever minted the key,
@@ -487,7 +509,7 @@ function SetUp({ projectId }: { readonly projectId: string }) {
             organization-wide key would otherwise never be told what to look
             at. It is one line here and the whole answer there.
           */}
-          <p className={setup.note}>{QUIET.setUp.caution}</p>
+          <p className={NOTE}>{QUIET.setUp.caution}</p>
         </div>
       }
     />
@@ -496,7 +518,7 @@ function SetUp({ projectId }: { readonly projectId: string }) {
 
 /** Nothing recorded for this column, which is a different thing from a zero. */
 function Nothing() {
-  return <span className={styles.muted}>{LIST.nothing}</span>;
+  return <span className="text-muted-foreground">{LIST.nothing}</span>;
 }
 
 /**
@@ -556,7 +578,7 @@ function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
         row.errored_span_count === 0 ? (
           <Nothing />
         ) : (
-          <strong className={styles.wrong}>{row.errored_span_count}</strong>
+          <strong className="text-failure">{row.errored_span_count}</strong>
         ),
     ],
     [COLUMNS.environment, (row) => row.environment],
