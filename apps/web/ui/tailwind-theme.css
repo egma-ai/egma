@@ -15,10 +15,10 @@
  * They used to be two files — `tokens.css` beside this one — because a CSS
  * Modules surface read the first and a Tailwind surface read the second, and
  * the split was what stopped the two halves of the product drifting apart.
- * There is no CSS Modules surface left to serve except the one named survivor,
- * `app/ui.module.css`, which reads these declarations exactly as it always
- * did: they are still `:root`, still unlayered, still loaded by `globals.css`
- * before anything else. Two files for one idea outlived the reason for it.
+ * There is no CSS Modules surface left to serve — the last one,
+ * `app/ui.module.css`, retired with the transcript detail migration. The
+ * declarations stay as they are: still `:root`, still unlayered, still loaded
+ * by `globals.css` first. Two files for one idea outlived the reason for it.
  *
  * Two mechanisms carry the handoff, and both are worth knowing:
  *
@@ -962,197 +962,6 @@
   }
 
   /*
-   * Where an anchored panel sits, keyed on the placement it was given.
-   *
-   * This is in the theme rather than in a class list because the attribute has
-   * to be the mechanism. A lookup in the component that turned `below-end` into
-   * a string of utilities left `data-placement` as a label nothing read: a test
-   * asserting it was asserting the prop it had just passed in, and deleting the
-   * lookup broke the product without failing anything. Now the attribute *is*
-   * the placement, and a test that reads it is reading what positions the panel.
-   *
-   * The max-height is here too, and not as a utility, for the same reason it
-   * bit the dialog's backdrop: a utility outranks `@layer components`, so a
-   * `max-h-*` class on the panel would beat the tighter limit the two downward
-   * placements need.
-   */
-  [data-slot="menu-panel"] {
-    max-height: calc(100svh - var(--space-8));
-  }
-
-  [data-slot="menu-panel"][data-placement="below-start"] {
-    top: calc(100% + var(--space-2));
-    left: 0;
-    transform-origin: top left;
-  }
-
-  [data-slot="menu-panel"][data-placement="below-end"] {
-    top: calc(100% + var(--space-2));
-    right: 0;
-    transform-origin: top right;
-  }
-
-  /*
-   * A panel hanging below its trigger keeps a touch target's worth of room off
-   * the bottom of the screen. That is the one direction a panel can be opened
-   * into and then not be scrolled to.
-   */
-  [data-slot="menu-panel"][data-placement="below-start"],
-  [data-slot="menu-panel"][data-placement="below-end"] {
-    max-height: calc(100svh - var(--tap-target) - var(--space-8));
-  }
-
-  [data-slot="menu-panel"][data-placement="above-start"] {
-    bottom: calc(100% + var(--space-2));
-    left: 0;
-    transform-origin: bottom left;
-  }
-
-  [data-slot="menu-panel"][data-placement="above-end"] {
-    right: 0;
-    bottom: calc(100% + var(--space-2));
-    transform-origin: bottom right;
-  }
-
-  [data-slot="menu-panel"][data-placement="right-start"] {
-    top: 0;
-    left: calc(100% + var(--space-2));
-    transform-origin: top left;
-  }
-
-  [data-slot="menu-panel"][data-placement="right-end"] {
-    bottom: 0;
-    left: calc(100% + var(--space-2));
-    transform-origin: bottom left;
-  }
-
-  /*
-   * The product's own anchored panel, beside the Radix one and for the same
-   * reasons: `@starting-style` for the entrance, `data-closing` for an exit
-   * that finishes before React removes the panel, and a pointer-only rule
-   * because a keyboard dismissal is immediate.
-   *
-   * The corner it grows from is `transform-origin` on the panel, set by the
-   * placement it was given. Radix measures that from the trigger; this one
-   * knows it, because a caller has said which edge anchors the panel.
-   *
-   * These rules leave with the hand-written menu when it is retired.
-   */
-  [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-    transition:
-      opacity var(--duration-popover-in) var(--ease-out),
-      transform var(--duration-popover-in) var(--ease-out);
-  }
-
-  [data-slot="menu"][data-input="pointer"][data-closing="true"]
-    [data-slot="menu-panel"] {
-    opacity: 0;
-    transform: scale(0.97);
-    transition-duration: var(--duration-popover-out);
-  }
-
-  @starting-style {
-    [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-      opacity: 0;
-      transform: scale(0.97);
-    }
-  }
-
-  /*
-   * The product's own dialog, which is a native `<dialog>` rather than Radix.
-   *
-   * It is here for the same reason the Radix motion above is here: an entrance
-   * written with `@starting-style`, an exit that has to finish before React
-   * removes the element, three kinds that leave in three directions, a
-   * pointer-only rule, and a reduced-motion form of all of it. A class list
-   * can say each of those and cannot say them together without becoming the
-   * longest thing in the component.
-   *
-   * Only a *pointer* dismissal animates. A keyboard dismissal is immediate,
-   * because "no motion delays input" and somebody driving by keyboard has
-   * already moved on. That is why every selector below asks for
-   * `data-input="pointer"` — the component writes it, and rewrites it if the
-   * way out differs from the way in.
-   *
-   * These rules leave with the native dialog when it is retired.
-   */
-  [data-slot="dialog-scrim"][data-input="pointer"]::backdrop {
-    transition: opacity var(--duration-dialog-in) var(--ease-out);
-  }
-
-  [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]::backdrop {
-    opacity: 0;
-    transition-duration: var(--duration-dialog-out);
-  }
-
-  [data-slot="dialog-scrim"][data-input="pointer"] [data-slot="dialog-panel"] {
-    transition:
-      opacity var(--duration-dialog-in) var(--ease-out),
-      transform var(--duration-dialog-in) var(--ease-out);
-  }
-
-  [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]
-    [data-slot="dialog-panel"] {
-    opacity: 0;
-    transform: scale(0.98);
-    transition-duration: var(--duration-dialog-out);
-  }
-
-  /* A drawer and a sheet travel from the edge they are attached to. */
-  [data-slot="dialog-scrim"]:is([data-kind="drawer"], [data-kind="sheet"])[data-input="pointer"]
-    [data-slot="dialog-panel"] {
-    transition:
-      opacity var(--duration-drawer-in) var(--ease-drawer),
-      transform var(--duration-drawer-in) var(--ease-drawer);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"]::backdrop {
-    transition-duration: var(--duration-drawer-in);
-    transition-timing-function: var(--ease-drawer);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]::backdrop {
-    transition-duration: var(--duration-drawer-out);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="drawer"][data-input="pointer"][data-closing="true"]
-    [data-slot="dialog-panel"] {
-    transform: translateX(-100%);
-    transition-duration: var(--duration-drawer-out);
-  }
-
-  [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]
-    [data-slot="dialog-panel"] {
-    transform: translateX(100%);
-    transition-duration: var(--duration-drawer-out);
-  }
-
-  @starting-style {
-    [data-slot="dialog-scrim"][data-input="pointer"][open]
-      [data-slot="dialog-panel"] {
-      opacity: 0;
-      transform: scale(0.98);
-    }
-
-    /* The drawer arrives by moving. Fading it as well reads as two events. */
-    [data-slot="dialog-scrim"][data-kind="drawer"][data-input="pointer"][open]
-      [data-slot="dialog-panel"] {
-      opacity: 1;
-      transform: translateX(-100%);
-    }
-
-    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][open]
-      [data-slot="dialog-panel"] {
-      opacity: 0;
-      transform: translateX(100%);
-    }
-
-    [data-slot="dialog-scrim"][data-input="pointer"][open]::backdrop {
-      opacity: 0;
-    }
-  }
-
-  /*
    * "Every movement has a reduced-motion form." Nothing scales and nothing
    * travels: what is left is opacity, which still says a surface arrived or
    * left. `globals.css` already caps every animation at a single frame under
@@ -1161,10 +970,12 @@
    * what Radix waits for before unmounting.
    */
   @media (prefers-reduced-motion: reduce) {
-    [data-slot="button"] {
-      transition: none;
-    }
-
+    /*
+     * A press answers in colour under reduced motion: the transform above is
+     * the movement and is what dies; the colour transitions from the class
+     * list are the reduced-motion form DESIGN.md asks every movement to keep,
+     * so no rule turns them off.
+     */
     [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
       transform: none;
     }
@@ -1201,11 +1012,6 @@
       animation: egma-fade-out var(--duration-hover) linear;
     }
 
-    [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-      transform: none;
-      transition: opacity var(--duration-popover-out) linear;
-    }
-
     [data-slot="toast"][data-input="pointer"],
     [data-slot="toast"][data-input="pointer"][data-closing="true"] {
       translate: none;
@@ -1216,45 +1022,11 @@
     }
 
     @starting-style {
-      [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
-        opacity: 0;
-        transform: none;
-      }
-
       [data-slot="toast"][data-input="pointer"] {
         opacity: 0;
         translate: none;
       }
     }
 
-    /*
-     * The native dialog again. Nothing travels and nothing scales; opacity
-     * alone still says the layer arrived or left, and the exit still ends in a
-     * `transitionend` on opacity, which is what the component waits for before
-     * it lets React remove the element.
-     */
-    [data-slot="dialog-scrim"][data-input="pointer"] [data-slot="dialog-panel"] {
-      transform: none;
-      transition: opacity var(--duration-popover-out) linear;
-    }
-
-    [data-slot="dialog-scrim"][data-input="pointer"][data-closing="true"]
-      [data-slot="dialog-panel"] {
-      transform: none;
-    }
-
-    [data-slot="dialog-scrim"][data-input="pointer"]::backdrop,
-    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"]::backdrop,
-    [data-slot="dialog-scrim"][data-kind="sheet"][data-input="pointer"][data-closing="true"]::backdrop {
-      transition: opacity var(--duration-popover-out) linear;
-    }
-
-    @starting-style {
-      [data-slot="dialog-scrim"][data-input="pointer"][open]
-        [data-slot="dialog-panel"] {
-        opacity: 0;
-        transform: none;
-      }
-    }
   }
 }
