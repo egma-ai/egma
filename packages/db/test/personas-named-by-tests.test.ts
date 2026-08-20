@@ -71,6 +71,16 @@ async function refusalFrom(
   return error as PersonaNamedByTestsError;
 }
 
+/** Observe an expected rejection now, even when the test releases its lock later. */
+function rejectionFrom(work: Promise<unknown>, ifResolved: string): Promise<unknown> {
+  return work.then(
+    () => {
+      throw new Error(ifResolved);
+    },
+    (thrown: unknown) => thrown,
+  );
+}
+
 describe("archiving a persona an active test names", () => {
   it("is refused, and the refusal names the test", async () => {
     const cass = await seedPersona(actingAsAcme(), "Called-On Cass");
@@ -286,10 +296,13 @@ describe("the race between archiving a persona and naming them", () => {
       );
 
       const before = await rowCounts();
-      const creating = createTest(actingAsAcme(), {
-        ...rescheduling,
-        personaIds: [cora],
-      });
+      const creating = rejectionFrom(
+        createTest(actingAsAcme(), {
+          ...rescheduling,
+          personaIds: [cora],
+        }),
+        "the concurrent create was expected to be refused",
+      );
 
       // The create cannot decide yet: checking that Cora is alive takes the
       // shared lock, and the Archive is holding the row exclusively.
@@ -302,7 +315,9 @@ describe("the race between archiving a persona and naming them", () => {
       // marker and refuses — rather than writing an active test naming an archived
       // persona, which is what a create deciding on its own snapshot would have
       // done.
-      await expect(creating).rejects.toThrow(/is archived/);
+      expect(await creating).toMatchObject({
+        message: expect.stringMatching(/is archived/),
+      });
       expect(await rowCounts()).toEqual(before);
     } finally {
       await connection.close();
@@ -328,7 +343,7 @@ describe("the race between archiving a persona and naming them", () => {
         name: "Races the Archive",
       });
 
-      const archiving = archivePersona(actingAsAcme(), cyrus);
+      const archiving = refusalFrom(archivePersona(actingAsAcme(), cyrus));
 
       // The Archive cannot decide yet: it takes the row exclusively before it
       // counts anything, and the create is holding it shared.
@@ -337,7 +352,7 @@ describe("the race between archiving a persona and naming them", () => {
       await connection.sql("commit");
 
       // It counts the rows the create committed while it waited, and refuses.
-      const refusal = await refusalFrom(archiving);
+      const refusal = await archiving;
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Races the Archive" },
       ]);
@@ -452,14 +467,17 @@ describe("the persona a project points at by default", () => {
         [newDefault, acme.outbound],
       );
 
-      const concurrentArchive = archiving.sql(
-        "update persona set archived_at = now() where id = $1",
-        [newDefault],
+      const concurrentArchive = rejectionFrom(
+        archiving.sql(
+          "update persona set archived_at = now() where id = $1",
+          [newDefault],
+        ),
+        "the concurrent Archive was expected to be refused",
       );
       await waitUntilBlockedBy(blockerPid);
 
       await choosing.sql("commit");
-      await expect(concurrentArchive).rejects.toMatchObject({
+      expect(await concurrentArchive).toMatchObject({
         code: "23503",
         constraint: "project_default_persona_availability",
       });
@@ -499,14 +517,17 @@ describe("the persona a project points at by default", () => {
         [candidate],
       );
 
-      const concurrentChoice = choosing.sql(
-        "update project set default_persona_id = $1 where id = $2",
-        [candidate, acme.outbound],
+      const concurrentChoice = rejectionFrom(
+        choosing.sql(
+          "update project set default_persona_id = $1 where id = $2",
+          [candidate, acme.outbound],
+        ),
+        "the concurrent default choice was expected to be refused",
       );
       await waitUntilBlockedBy(blockerPid);
 
       await archiving.sql("commit");
-      await expect(concurrentChoice).rejects.toMatchObject({
+      expect(await concurrentChoice).toMatchObject({
         code: "23503",
         constraint: "project_default_persona_availability",
       });
@@ -558,14 +579,14 @@ describe("the persona a project points at by default", () => {
         name: "Takes the default",
       });
 
-      const archiving = archivePersona(inOutbound, dixon);
+      const archiving = refusalFrom(archivePersona(inOutbound, dixon));
 
       await waitUntilBlockedBy(blockerPid);
 
       await connection.sql("commit");
 
       // The test that took the default is a test naming them like any other.
-      const refusal = await refusalFrom(archiving);
+      const refusal = await archiving;
       expect(refusal.tests).toEqual([
         { id: written.testId, name: "Takes the default" },
       ]);
