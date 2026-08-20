@@ -86,6 +86,8 @@ function DialogContent({
             className={cn(
               "absolute top-4 right-4 inline-flex size-8 cursor-pointer items-center justify-center",
               "rounded-button border border-transparent text-muted-foreground",
+              /* "Pointer targets are at least 44px on coarse pointers." */
+              "pointer-coarse:size-(--tap-target)",
               /*
                * Named, so the focus ring is not among them. See `button.tsx`.
                * Only the two this hover actually changes: the border stays

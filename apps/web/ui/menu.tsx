@@ -1,36 +1,47 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 /**
  * A button that opens a small panel, and everything that has to be true of one
  * before somebody without a pointer can use it.
  *
- * There are two of these in the shell — the organization and project selector,
- * and the account menu — and there will be more. Writing the behaviour once is
- * what stops the second one being the first one with the keyboard left out:
+ * There are three of these in the product — the organization and project
+ * selector, the account menu, and the test editor's choosers — and there will
+ * be more. Writing the behaviour once is what stops the second one being the
+ * first one with the keyboard left out.
  *
- * - **Escape closes it and puts focus back on the button**, so a menu opened
- *   by accident is not a trap.
+ * **The panel is the kit's anchored surface.** `components/ui/popover.tsx` is
+ * Radix, so it owns what a hand-written panel keeps getting wrong: it opens
+ * against the trigger and stays on screen when there is no room below it,
+ * Escape closes it and puts focus back on the button, a press outside or a
+ * focus that leaves closes it, and the exit finishes before the panel is
+ * removed. Radix also publishes the corner it grew from, which is how
+ * `tailwind-theme.css` scales it from the trigger without this file saying so.
+ *
+ * **The list of items is still this file's, and that is the reason for
+ * `Popover` rather than the kit's `DropdownMenu`.** A dropdown menu keeps its
+ * own register of items: only what it was handed as an item takes the arrow
+ * keys, and it reads every printable key as a jump to a matching item. Two
+ * panels here hold a field to type in, which that would take the keys away
+ * from, and the account menu's dark-theme switch is a `role="switch"` rather
+ * than an item, which that would leave reachable by pointer alone. So the
+ * items are found in the DOM by `data-menu-item` — a panel that grows a row
+ * gets the arrow keys for free, whatever that row is.
+ *
  * - **The arrow keys move between items**, Home and End reach the ends, and
- *   opening moves focus into the panel. Items are found in the DOM rather than
- *   registered by hand, so a panel that grows an item gets it for free.
- * - **A click anywhere else closes it**, and so does moving focus out of it —
- *   tabbing away is a way of leaving, not a way of leaving a panel behind.
- *
- * An item marked `data-menu-focus-first` takes focus when the panel opens. The
- * selector's search field uses it, which is what makes typing to filter work
- * without anybody reaching for the field first.
+ *   opening moves focus into the panel.
+ * - An item marked `data-menu-focus-first` takes focus when the panel opens.
+ *   The selector's search field uses it, which is what makes typing to filter
+ *   work without anybody reaching for the field first.
  *
  * **A panel holding a text field is not a `menu`.** `role="menu"` promises a
  * list of commands, and neither ARIA nor a screen reader's menu mode expects a
@@ -41,12 +52,6 @@ import { cn } from "@/lib/utils";
  * **Home and End belong to the caret while somebody is typing.** Stealing them
  * to jump to the ends of the list means the ends of the *text* cannot be
  * reached, which is a worse trade than the one it buys.
- *
- * The root carries `data-slot="menu"` and the panel carries `data-placement`.
- * The motion — an entrance from the trigger's corner, an exit that finishes
- * before the panel is removed, and the reduced-motion form of both — is in
- * `tailwind-theme.css` keyed on those, beside the same rules for the Radix
- * surfaces.
  */
 
 export type MenuProps = {
@@ -68,6 +73,23 @@ export type MenuProps = {
   readonly panelClassName?: string;
   readonly children: (close: () => void) => ReactNode;
 };
+
+/**
+ * Where each placement puts the panel, as the two things Radix positions by.
+ *
+ * This is the mechanism rather than a label beside one: change a line here and
+ * the panel moves. Radix then writes the side it actually landed on back onto
+ * the panel as `data-side`, which is the side after any collision, so a test
+ * reading it is reading where the panel is rather than what it was asked for.
+ */
+const ANCHOR = {
+  "below-start": { side: "bottom", align: "start" },
+  "below-end": { side: "bottom", align: "end" },
+  "above-start": { side: "top", align: "start" },
+  "above-end": { side: "top", align: "end" },
+  "right-start": { side: "right", align: "start" },
+  "right-end": { side: "right", align: "end" },
+} as const;
 
 /**
  * One row in a panel, as a class list.
@@ -113,95 +135,37 @@ export function Menu({
   children,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [input, setInput] = useState<"keyboard" | "pointer">("keyboard");
-  const panelId = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const closingRef = useRef(false);
-  const closeTimerRef = useRef<number | null>(null);
-  const returnFocusRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const anchor = ANCHOR[placement];
 
-  const finishClose = useCallback(() => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-    closingRef.current = false;
-    setClosing(false);
+  /**
+   * Handing the keyboard back, now rather than after the panel has gone.
+   *
+   * Radix restores focus itself, one task after the panel is removed. That is
+   * right for a panel somebody clicked away from and wrong for the two ways of
+   * *finishing* with one — Escape, and choosing something — because
+   * `DESIGN.md` says a control answers on press and never after an animation.
+   * So those two paths put focus back on the button first and let the panel
+   * leave behind them. Radix then sees focus has moved out, stops restoring it
+   * a second time, and the panel's exit runs to its end regardless.
+   *
+   * It is also what keeps the project selector's unsaved-work dialog pointing
+   * at the right control. That page walks up from whatever has focus to
+   * `[data-slot="menu"]` to find its own trigger — a walk that now finds
+   * nothing, because the panel is drawn at the end of the page rather than
+   * inside that root, so the walk starts outside it and its answer is always
+   * null. What saves it is the fallback: the dialog it opens takes whatever
+   * has focus, and by then this has already put that back on the trigger.
+   */
+  const returnFocus = useCallback(() => triggerRef.current?.focus(), []);
+
+  const close = useCallback(() => {
+    returnFocus();
     setOpen(false);
-    if (returnFocusRef.current) buttonRef.current?.focus();
-    returnFocusRef.current = false;
-  }, []);
-
-  const close = useCallback((returnFocus = false, animate = input === "pointer") => {
-    returnFocusRef.current = returnFocus;
-    if (!animate) {
-      finishClose();
-      return;
-    }
-    // The way out can differ from the way in. A keyboard-opened panel that is
-    // later dismissed by a pointer must switch to the pointer exit selectors.
-    setInput("pointer");
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
-    // `transitionend` normally finishes this. The timer prevents a hidden menu
-    // if a browser, test environment, or injected stylesheet drops the event.
-    closeTimerRef.current = window.setTimeout(finishClose, 200);
-  }, [finishClose, input]);
-
-  const openPanel = useCallback(() => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-    closingRef.current = false;
-    setClosing(false);
-    setOpen(true);
-  }, []);
-
-  useEffect(() => () => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return undefined;
-
-    const elsewhere = (event: Event) => {
-      const root = rootRef.current;
-      if (
-        root !== null &&
-        !root.contains(event.target as Node) &&
-        !closingRef.current
-      ) {
-        close(false, event.type === "pointerdown");
-      }
-    };
-
-    document.addEventListener("pointerdown", elsewhere);
-    document.addEventListener("focusin", elsewhere);
-    return () => {
-      document.removeEventListener("pointerdown", elsewhere);
-      document.removeEventListener("focusin", elsewhere);
-    };
-  }, [close, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const panel = panelRef.current;
-    const first =
-      panel?.querySelector<HTMLElement>("[data-menu-focus-first]") ??
-      itemsIn(panel)[0];
-    first?.focus();
-  }, [open]);
+  }, [returnFocus]);
 
   function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
-    setInput("keyboard");
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      close(true, false);
-      return;
-    }
-
-    if (!open) return;
     const items = itemsIn(panelRef.current);
     if (items.length === 0) return;
 
@@ -219,68 +183,60 @@ export function Menu({
   }
 
   return (
-    <div
-      className="relative"
-      data-slot="menu"
-      ref={rootRef}
-      onPointerDownCapture={() => setInput("pointer")}
-      onKeyDown={onKeyDown}
-      data-open={open ? "true" : "false"}
-      data-closing={closing ? "true" : "false"}
-      data-input={input}
-    >
-      <button
-        className={cn(
-          triggerClassName ?? MENU_ITEM,
-          open ? (openClassName ?? "") : "",
-        )}
-        ref={buttonRef}
-        type="button"
-        aria-haspopup={panelRole}
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        aria-label={label}
-        onClick={() => {
-          if (closing) openPanel();
-          else if (open) close(false);
-          else openPanel();
-        }}
-      >
-        {trigger}
-      </button>
-      {open ? (
-        <div
+    <Popover open={open} onOpenChange={setOpen}>
+      {/*
+       * The root stays, and it is not decoration: the project selector finds
+       * its own trigger by walking up from whatever has focus to
+       * `[data-slot="menu"]`, which is how the unsaved-work dialog it opens
+       * knows where to put focus back.
+       */}
+      <div className="relative" data-slot="menu" data-open={open ? "true" : "false"}>
+        <PopoverTrigger
           className={cn(
-            /*
-             * Where this panel sits is not here. `data-placement` below is the
-             * whole of it: `tailwind-theme.css` reads that attribute for the
-             * offsets, the corner it grows from, and the extra room the two
-             * that hang below the trigger keep off the bottom of the screen.
-             * The attribute is the mechanism rather than a label beside one, so
-             * removing it moves the panel to the corner of its trigger.
-             */
-            "absolute z-20 w-max overflow-y-auto p-2",
+            triggerClassName ?? MENU_ITEM,
+            open ? (openClassName ?? "") : "",
+          )}
+          ref={triggerRef}
+          aria-haspopup={panelRole}
+          aria-label={label}
+        >
+          {trigger}
+        </PopoverTrigger>
+        <PopoverContent
+          className={cn(
+            "w-max p-2",
             "min-w-[min(240px,calc(100vw-var(--space-8)))]",
             "max-w-[min(320px,calc(100vw-var(--space-8)))]",
-            "rounded-card border border-border bg-surface shadow-popover",
+            /*
+             * A panel keeps a gap off the edge it was pushed against, and
+             * scrolls rather than running past it. Radix measures the room it
+             * has and publishes it; the gap is the theme's smallest step.
+             */
+            "max-h-[calc(var(--radix-popover-content-available-height)-var(--space-2))]",
+            "overflow-y-auto",
             panelClassName,
           )}
-          data-slot="menu-panel"
-          data-placement={placement}
-          id={panelId}
-          ref={panelRef}
+          side={anchor.side}
+          align={anchor.align}
           role={panelRole}
           aria-label={label}
-          onTransitionEnd={(event) => {
-            if (closing && event.target === event.currentTarget && event.propertyName === "opacity") {
-              finishClose();
-            }
+          ref={panelRef}
+          onEscapeKeyDown={returnFocus}
+          onOpenAutoFocus={(event) => {
+            const panel = panelRef.current;
+            const first =
+              panel?.querySelector<HTMLElement>("[data-menu-focus-first]") ??
+              itemsIn(panel)[0];
+            if (first === undefined) return;
+            event.preventDefault();
+            first.focus();
           }}
+          onKeyDown={onKeyDown}
         >
-          {children(() => close(true))}
-        </div>
-      ) : null}
-    </div>
+          {children(close)}
+        </PopoverContent>
+      </div>
+    </Popover>
   );
 }
 

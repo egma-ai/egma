@@ -218,12 +218,13 @@ describe("the development design proof", () => {
     expect(confirm.className).toContain("bg-destructive");
     expect(confirm.className).not.toContain("bg-primary");
 
+    /*
+     * The exit itself is proven where the dialog lives, in
+     * `components.test.tsx`: the panel is marked closed, stays on screen for
+     * its animation, and is removed when the animation ends. Here the point is
+     * only that the proof page's Cancel is wired to the same way out.
+     */
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }), { detail: 1 });
-    expect(screen.getByRole("dialog", { name: "Archive Support agent?" })).toBe(dialog);
-    expect(dialog.getAttribute("data-closing")).toBe("true");
-
-    const panel = dialog.firstElementChild as HTMLElement;
-    fireEvent.transitionEnd(panel, { propertyName: "opacity" });
     expect(screen.queryByRole("dialog", { name: "Archive Support agent?" })).toBeNull();
   });
 

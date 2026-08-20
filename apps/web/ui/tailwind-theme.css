@@ -625,6 +625,32 @@
   to { opacity: 0; scale: 0.98; }
 }
 
+/*
+ * The drawer, which travels and does not fade.
+ *
+ * `DESIGN.md` gives a mobile drawer its own line: "translate from its attached
+ * edge", and its own pair of tokens. Fading or scaling it as well reads as two
+ * events rather than one movement, so these keyframes write `translate` and
+ * nothing else. `translate` is a property of its own, so the panel's resting
+ * position is still whatever its class list says and this only moves it.
+ *
+ * **The length of the exit is load-bearing rather than decoration.** Radix
+ * removes the panel on `animationend`, so whatever animation is running is
+ * what holds the drawer on screen while it leaves. Writing the travel as a
+ * transition instead left it racing the centred dialog's 180ms `scale`, which
+ * is why the drawer used to be cut off at its own edge; an animation of its
+ * own means the drawer waits for the drawer.
+ */
+@keyframes egma-drawer-in {
+  from { translate: -100% 0; }
+  to { translate: 0 0; }
+}
+
+@keyframes egma-drawer-out {
+  from { translate: 0 0; }
+  to { translate: -100% 0; }
+}
+
 @layer components {
   /*
    * "Pointer press feedback uses a subtle scale. Keyboard activation is
@@ -778,6 +804,20 @@
 
   [data-slot="dialog-content"][data-state="closed"] {
     animation: egma-dialog-out var(--duration-dialog-out) var(--ease-out);
+  }
+
+  /*
+   * A drawer is the one kind that is not centred, so it is the one kind that
+   * moves. It is named after the centred rules above and carries `data-kind`
+   * as well, so it outranks them and replaces the fade and the scale rather
+   * than running beside them.
+   */
+  [data-slot="dialog-content"][data-kind="drawer"][data-state="open"] {
+    animation: egma-drawer-in var(--duration-drawer-in) var(--ease-drawer);
+  }
+
+  [data-slot="dialog-content"][data-kind="drawer"][data-state="closed"] {
+    animation: egma-drawer-out var(--duration-drawer-out) var(--ease-drawer);
   }
 
   /*
@@ -1133,6 +1173,7 @@
     [data-slot="dropdown-menu-content"][data-state="open"],
     [data-slot="dropdown-menu-sub-content"][data-state="open"],
     [data-slot="dialog-content"][data-state="open"],
+    [data-slot="dialog-content"][data-kind="drawer"][data-state="open"],
     [data-slot="dialog-overlay"][data-state="open"] {
       animation: egma-fade-in var(--duration-hover) linear;
     }
@@ -1141,6 +1182,7 @@
     [data-slot="dropdown-menu-content"][data-state="closed"],
     [data-slot="dropdown-menu-sub-content"][data-state="closed"],
     [data-slot="dialog-content"][data-state="closed"],
+    [data-slot="dialog-content"][data-kind="drawer"][data-state="closed"],
     [data-slot="dialog-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;
     }
