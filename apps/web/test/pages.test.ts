@@ -678,6 +678,14 @@ describe("the pages", () => {
    *
    * Both lanes go through one formatter, so the day the required score learns to
    * round differently the diagnostic's cannot be left behind.
+   *
+   * **And it is the product's formatter rather than this page's.** The page
+   * used to declare a `shownScore` of its own beside the one in
+   * `ui/run-status.tsx`, which made "one formatter" true of these two lanes
+   * and false of the product: a run's verdict and a production transcript's
+   * could have come to round a score differently. So the assertion is now that
+   * the page *imports* it and declares none — a local copy reappearing fails
+   * here, which is the only thing that stops it reappearing.
    */
   it("reports the diagnostic fraction, not only its counts", async () => {
     const transcript = await readFile(
@@ -689,7 +697,10 @@ describe("the pages", () => {
     expect(transcript).toContain("GRADING.diagnosticScore");
     // One formatter, both lanes: a proportion of nothing is a dash in each.
     expect(transcript).toContain("shownScore(outcome.score)");
-    expect(transcript).toMatch(/function shownScore\(/u);
+    expect(transcript).toMatch(
+      /import \{ shownScore \} from "[^"]*ui\/run-status\.tsx"/u,
+    );
+    expect(transcript).not.toMatch(/function shownScore\(/u);
   });
 
   it("reach the API for the device flow at paths this instance rewrites", async () => {
