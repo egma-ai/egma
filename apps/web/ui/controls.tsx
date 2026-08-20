@@ -1,15 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import {
-  createContext,
-  useContext,
-  useId,
-  useRef,
-  type Ref,
-  type ReactNode,
-} from "react";
+import { useId, useRef, type Ref, type ReactNode } from "react";
 
+import { FieldHintContext, useFieldHint } from "./field-hint.ts";
 import styles from "./system.module.css";
 
 /**
@@ -162,20 +156,16 @@ export function ButtonLink({
 }
 
 /**
- * The id of the hint a field is wearing, offered to whatever control it wraps.
+ * The hint this control is inside, for the controls that describe themselves.
  *
- * **A hint nothing points at is a hint only a sighted reader ever gets.** It
- * travels through context rather than through a prop because the alternative
- * is every caller remembering to wire `aria-describedby` on every control —
- * and the ones they forget are exactly the ones nobody notices, because the
- * page still looks right.
+ * The context itself is in `field-hint.ts`, because the controls that read it
+ * are being migrated onto the shadcn base one at a time and a shadcn primitive
+ * must not import from this file to find it. What it means and why it is a
+ * context rather than a prop is written there.
  */
-const FieldHintContext = createContext<string | undefined>(undefined);
-
-/** The hint this control is inside, for the controls that describe themselves. */
 function describedByHint(): string | undefined {
   // eslint-disable-next-line react-hooks/rules-of-hooks -- called from components only
-  return useContext(FieldHintContext);
+  return useFieldHint();
 }
 
 export function Field({

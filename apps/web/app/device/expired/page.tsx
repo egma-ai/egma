@@ -1,4 +1,4 @@
-import { StatePage, styles } from "../../ui.tsx";
+import { LinkLine, StatePage } from "../../ui.tsx";
 
 /**
  * The code timed out, and saying so specifically is the whole job of this page.
@@ -13,10 +13,10 @@ export default function DeviceExpiredPage() {
       title="That code expired"
       lead="Codes are short-lived, so one left sitting for a while stops working. Nothing went wrong and nothing was granted."
     >
-      <p className={styles.linkLine}>
+      <LinkLine>
         Run <code>egma login</code> in your terminal again for a fresh code, or{" "}
         <a href="/device">enter a code</a> if you already have a new one.
-      </p>
+      </LinkLine>
     </StatePage>
   );
 }

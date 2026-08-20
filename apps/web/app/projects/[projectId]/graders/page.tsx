@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import {
   COLUMNS,
   LIBRARY,
@@ -23,7 +24,7 @@ import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { graderDisplayName } from "../../../../lib/presentation.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { Button, ButtonLink, Section } from "../../../../ui/controls.tsx";
+import { Section } from "../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -34,8 +35,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
-import styles from "./graders.module.css";
-import { GraderTabs } from "./tabs.tsx";
+import { GraderTabs, VIEW_CONTENT } from "./tabs.tsx";
 import { UseForm } from "./use-form.tsx";
 
 /**
@@ -136,6 +136,8 @@ function columnsFor(
       width: "110px",
       cell: (entry) => (
         <Button
+          type="button"
+          variant="secondary"
           disabled={!mayUse}
           {...(mayUse || whyNot === undefined ? {} : { why: whyNot })}
           onClick={() => use(entry)}
@@ -178,9 +180,11 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
           message={answer.refusal.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -221,7 +225,7 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
       <PageHeader eyebrow="Project" title={LIBRARY.title} lead={LIBRARY.lead} />
       <PageBody>
         <GraderTabs projectId={projectId} active="library" />
-        <div className={styles.viewContent}>
+        <div className={VIEW_CONTENT}>
           {/*
             What the last press came to, and it stays until the next one. A copy
             is judging from the moment it exists, so the sentence says that and

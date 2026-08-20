@@ -1,16 +1,13 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   providerOptions,
   type TraitsDraft,
 } from "../../../../lib/personas.ts";
-import {
-  Field,
-  FormRow,
-  Select,
-  TextArea,
-  TextInput,
-} from "../../../../ui/controls.tsx";
+import { Field, FormRow } from "../../../../ui/controls.tsx";
 
 /**
  * The fields that describe who a persona is, written once and used by both the
@@ -44,8 +41,19 @@ export function TraitFields({
   readonly disabled?: boolean;
   readonly onChange: (draft: TraitsDraft) => void;
 }) {
-  const set = <Key extends keyof TraitsDraft>(key: Key) =>
-    (value: string) => onChange({ ...draft, [key]: value });
+  /**
+   * One trait, written back into the draft.
+   *
+   * It takes the event rather than the value because every control here is now
+   * the browser's own — an input, a textarea and a select all report a change
+   * the same way, and unwrapping it once here keeps ten call sites reading as
+   * ten traits rather than as ten copies of `event.target.value`.
+   */
+  const set =
+    <Key extends keyof TraitsDraft>(key: Key) =>
+    (event: {
+      readonly target: { readonly value: string };
+    }): void => onChange({ ...draft, [key]: event.target.value });
 
   return (
     <>
@@ -54,7 +62,7 @@ export function TraitFields({
         htmlFor="persona-personality"
         hint="Who they are, in their own right. Not what they are calling about — that belongs to the test."
       >
-        <TextArea
+        <Textarea
           id="persona-personality"
           value={draft.personality}
           rows={3}
@@ -66,7 +74,7 @@ export function TraitFields({
 
       <FormRow>
         <Field label="Manner" htmlFor="persona-manner" hint="Optional.">
-          <TextArea
+          <Textarea
             id="persona-manner"
             value={draft.manner}
             rows={2}
@@ -76,7 +84,7 @@ export function TraitFields({
           />
         </Field>
         <Field label="Patience" htmlFor="persona-patience" hint="Optional.">
-          <TextArea
+          <Textarea
             id="persona-patience"
             value={draft.patience}
             rows={2}
@@ -89,11 +97,13 @@ export function TraitFields({
 
       <FormRow>
         <Field label="Accent" htmlFor="persona-accent" hint="Optional.">
-          <TextInput
+          <Input
             id="persona-accent"
             value={draft.accent}
             disabled={disabled}
             placeholder="Glaswegian"
+            autoComplete="off"
+            spellCheck={false}
             onChange={set("accent")}
           />
         </Field>
@@ -102,11 +112,13 @@ export function TraitFields({
           htmlFor="persona-background-noise"
           hint="Optional."
         >
-          <TextInput
+          <Input
             id="persona-background-noise"
             value={draft.backgroundNoise}
             disabled={disabled}
             placeholder="A busy kitchen"
+            autoComplete="off"
+            spellCheck={false}
             onChange={set("backgroundNoise")}
           />
         </Field>
@@ -117,7 +129,7 @@ export function TraitFields({
         htmlFor="persona-under-friction"
         hint="Optional. What they do when the agent gets it wrong, or will not budge."
       >
-        <TextArea
+        <Textarea
           id="persona-under-friction"
           value={draft.underFriction}
           rows={2}
@@ -133,11 +145,13 @@ export function TraitFields({
           htmlFor="persona-language"
           hint="A BCP 47 tag, like en-US."
         >
-          <TextInput
+          <Input
             id="persona-language"
             value={draft.language}
             disabled={disabled}
             placeholder="en-US"
+            autoComplete="off"
+            spellCheck={false}
             onChange={set("language")}
           />
         </Field>
@@ -154,11 +168,14 @@ export function TraitFields({
             id="persona-provider"
             value={draft.provider}
             disabled={disabled || voiceProviders === null}
-            options={providerOptions(voiceProviders, draft.provider).map(
-              (provider) => ({ value: provider, label: provider }),
-            )}
             onChange={set("provider")}
-          />
+          >
+            {providerOptions(voiceProviders, draft.provider).map((provider) => (
+              <option key={provider} value={provider}>
+                {provider}
+              </option>
+            ))}
+          </Select>
         </Field>
       </FormRow>
 
@@ -168,11 +185,13 @@ export function TraitFields({
           htmlFor="persona-voice-id"
           hint="The provider's own id for the voice, so every simulation casts the same person."
         >
-          <TextInput
+          <Input
             id="persona-voice-id"
             value={draft.voiceId}
             disabled={disabled}
             placeholder="EXAVITQu4vr4xnSDxMaL"
+            autoComplete="off"
+            spellCheck={false}
             onChange={set("voiceId")}
           />
         </Field>
@@ -181,11 +200,13 @@ export function TraitFields({
           htmlFor="persona-speed"
           hint="A multiple of the provider's natural pace."
         >
-          <TextInput
+          <Input
             id="persona-speed"
             value={draft.speed}
             disabled={disabled}
             placeholder="1"
+            autoComplete="off"
+            spellCheck={false}
             onChange={set("speed")}
           />
         </Field>
