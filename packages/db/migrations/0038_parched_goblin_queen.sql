@@ -145,6 +145,20 @@ SET
 -- Runs freeze the non-secret connection facts as camelCase JSON. Read the
 -- access variant from the historical snapshot, because the connection may
 -- have been edited after the run started.
+--
+-- **And around the guard, which is doing exactly its job.** A finished run's
+-- header is written once — `guard_run_lifecycle` has refused every update to
+-- one since 0007, and that refusal is what stops a straggling report reopening
+-- a run that already reported its numbers. This backfill is the one write that
+-- legitimately has to reach those rows, because it changes the vocabulary the
+-- snapshot is written in — `type` and `variant_id` become platform, kind, and
+-- access variant — and not one answer the run reported. So the guard is lifted
+-- for this statement and put back immediately, exactly as 0033 lifted it for
+-- its own backfill. It is lifted rather than taught an exception on purpose:
+-- an exception would live in the trigger forever and would be a hole in the
+-- rule for every write afterwards, while this is one statement in one
+-- migration.
+ALTER TABLE "run" DISABLE TRIGGER "run_lifecycle_guard";--> statement-breakpoint
 UPDATE "run"
 SET "connection_snapshot" = jsonb_build_object(
 	'agentPlatform', CASE "connection_snapshot" ->> 'type'
@@ -173,6 +187,7 @@ SET "connection_snapshot" = jsonb_build_object(
 )
 WHERE "connection_snapshot" ->> 'type' IN ('retell', 'phone', 'livekit');
 --> statement-breakpoint
+ALTER TABLE "run" ENABLE TRIGGER "run_lifecycle_guard";--> statement-breakpoint
 
 ALTER TABLE "connection" ALTER COLUMN "connection_kind" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "connection" ALTER COLUMN "access_variant" SET NOT NULL;--> statement-breakpoint
