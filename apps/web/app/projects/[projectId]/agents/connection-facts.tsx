@@ -74,7 +74,14 @@ export function ConnectionFacts({
   readonly now: number;
 }) {
   return (
-    <span className="flex min-w-0 items-center gap-3">
+    /*
+     * It wraps rather than clips. On a narrow screen the table restyles into
+     * labelled rows and this cell gets about seventy per cent of a phone, which
+     * is not enough for four facts on one line — and the one that would fall
+     * off the end is the capability state, which is the fact somebody came for.
+     * On a wide screen there is room and it never wraps.
+     */
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
       <span className="truncate text-sm font-medium text-foreground">
         {connection.environment ?? NO_ENVIRONMENT}
       </span>

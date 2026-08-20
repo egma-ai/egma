@@ -176,7 +176,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
    * either way, which is where the boundary actually is.
    *
    * It is disabled for the same reason on a project this organization does not
-   * hold: there is nothing to register an agent in.
+   * hold: there is no project here to connect an agent to.
    *
    * **While the role is unknown there is no control at all.** A disabled one
    * would have to say why, and every sentence it could say would be a claim
@@ -364,8 +364,17 @@ function Agents({ projectId }: { readonly projectId: string }) {
              * toolbar is one line. Wrapping the pair lets the sentence fall
              * under its own control rather than squeezing the search box
              * across the row.
+             *
+             * No `min-w-0` here, and that is the difference between a gap and
+             * no gap. The search box is `width: 100%` and shrinks to fit, so
+             * everything beside it is under shrinking pressure; a flex item
+             * told its minimum is zero gives way past its own contents, and
+             * this one did — measured at 105.5px around a 119.9px button,
+             * which put the button 2.3px over the search box and swallowed the
+             * toolbar's 12px gap whole. Left at `auto`, the minimum is the
+             * button, the sentence wraps under it, and the gap survives.
              */}
-            <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               {connect()}
             </div>
             <TextInput

@@ -390,18 +390,18 @@ describe("adding a colleague, with no mail configured", () => {
       // forced click goes nowhere. A control that looked disabled and still
       // fired would promise a refusal it does not deliver — and the refusal
       // that does hold is the server's, proved in `agents.test.ts`.
-      const register = bob.getByRole("button", { name: "Register agent" });
-      await register.first().waitFor();
+      const connect = bob.getByRole("button", { name: "Connect agent" });
+      await connect.first().waitFor();
       expect(
-        await register.evaluateAll((controls) =>
+        await connect.evaluateAll((controls) =>
           controls.map((control) => (control as { disabled?: boolean }).disabled),
         ),
       ).not.toContain(false);
       expect(
-        await bob.getByRole("link", { name: "Register agent" }).count(),
+        await bob.getByRole("link", { name: "Connect agent" }).count(),
       ).toBe(0);
       const before = bob.url();
-      await register.first().click({ force: true }).catch(() => undefined);
+      await connect.first().click({ force: true }).catch(() => undefined);
       await bob.waitForTimeout(300);
       expect(bob.url()).toBe(before);
 
@@ -2588,7 +2588,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("agents"));
       await saysWithin(walk, "No agents in this project yet");
 
-      await walk.getByRole("link", { name: "Register agent" }).first().click();
+      await walk.getByRole("link", { name: "Connect agent" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
       await reactHasTakenOver(walk, "form");
 
@@ -2645,7 +2645,41 @@ describe("the complete product, walked in order in a second project", () => {
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
       await walk.getByRole("link", { name: "Finish setup" }).click();
       await walk.waitForURL(agentAddress);
-      await saysWithin(walk, "Recent runs");
+
+      /*
+       * The agent's page is its identity and its connections, and nothing else.
+       *
+       * The absences are asserted only after the connection's own name has
+       * landed. A page still loading says none of these words either, so
+       * checking them first would pass for the wrong reason — and go on
+       * passing after the connections it is meant to guard stopped being drawn.
+       */
+      await saysWithin(walk, "Retell staging");
+      const agentPage = await walk.innerText("main");
+      expect(agentPage).toContain("Connections");
+      expect(agentPage).not.toContain("Recent runs");
+      expect(agentPage).not.toContain("Attached tests");
+
+      /*
+       * And the list says egma can reach it, without anybody opening it. This
+       * is the whole point of the widened read: the row carries the platform,
+       * the channel, the environment label — written out, because this
+       * connection has none — and whether the target has been measured.
+       */
+      await walk.goto(at("agents"));
+      await saysWithin(walk, "The Support line");
+      const row = walk
+        .locator('table[aria-label="Agents in this project"] tbody tr')
+        .first();
+      await expect
+        .poll(() => row.innerText(), { timeout: 30_000 })
+        .toContain("phone · voice");
+      const said = await row.innerText();
+      expect(said).toContain("Unlabelled");
+      // Read without regard to case: a chip is drawn in capitals, and the word
+      // is the fact rather than the letterform it is set in.
+      expect(said.toLowerCase()).toContain("not checked");
+      expect(said.toLowerCase()).not.toContain("no connections");
     },
     SETTLE,
   );
