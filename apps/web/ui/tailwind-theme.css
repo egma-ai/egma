@@ -71,6 +71,31 @@
 }
 
 /*
+ * "Mobile may restyle the same DOM as rows." When a table does that is two
+ * questions rather than one, and both have to be asked of every rule.
+ *
+ * A table normally stacks when the *browser* is too narrow — the same 900px at
+ * which the shell stops being two columns. A table inside a narrow content area
+ * can run out of room long before that, so a page may opt in by naming its
+ * wrapper a `data-table` container, and then the table's own width decides.
+ *
+ * A container query against a container that does not exist is false, so the
+ * second half costs nothing on a table that did not opt in, and both halves
+ * apply to one that did. Writing it as one variant is what keeps the two
+ * layouts from drifting: a rule added to `stacked:` cannot be added to one
+ * question and forgotten in the other.
+ */
+@custom-variant stacked {
+  @media (max-width: 900px) {
+    @slot;
+  }
+
+  @container data-table (max-width: 60rem) {
+    @slot;
+  }
+}
+
+/*
  * What Tailwind ships and egma does not have. A deleted namespace produces no
  * utility, so `font-bold`, `shadow-lg`, `rounded-3xl` and `text-7xl` are not
  * classes a component can be given.

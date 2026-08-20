@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
 import type { Me } from "../lib/me.ts";
-import tableStyles from "../ui/system.module.css";
 
 /**
  * The run history and one run's page, rendered and driven.
@@ -602,9 +601,7 @@ describe("one run's page", () => {
       name: "Simulations in this run",
     });
     const rowAction = within(table).getByRole("button", { name: "Run again" });
-    expect(rowAction.closest("td")?.classList).toContain(
-      tableStyles.tableCellAction,
-    );
+    expect(rowAction.closest("td")?.dataset.action).toBe("true");
     fireEvent.click(rowAction);
 
     const dialog = await screen.findByRole("dialog", {

@@ -2,8 +2,8 @@
 
 import type { ReactNode } from "react";
 
-import { Button } from "./controls.tsx";
-import styles from "./system.module.css";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * A page of rows, described once and drawn once.
@@ -22,6 +22,13 @@ import styles from "./system.module.css";
  * Paging is keyset, so "more" means *carry on from where that page stopped*
  * rather than *skip a number of rows*. The control is here rather than in each
  * page so that every list in the product asks for the next page the same way.
+ *
+ * **What each cell is, is on the cell.** The narrow layout has to reach the
+ * primary cell and the action cell from a stylesheet, and the wide layout has
+ * to reach real controls inside a row whose primary link has been stretched
+ * over it. Those hooks are `data-primary` and `data-action` rather than class
+ * names, because a page composing this table can read them, a test can assert
+ * them, and neither depends on what the styling is written in.
  */
 
 export type Column<Row> = {
@@ -77,35 +84,36 @@ export function DataTable<Row>({
     return column !== primary && column.hideOnMobile === true ? "true" : undefined;
   }
 
-  function cellClass(column: Column<Row>): string {
-    return [
-      styles.cell,
-      column === primary ? styles.cellPrimary : "",
-      column.mono === true ? styles.cellMono : "",
-    ]
-      .filter((one) => one !== "")
-      .join(" ");
-  }
-
-  function tableCellClass(column: Column<Row>): string | undefined {
-    const classes = [
-      column === primary ? styles.tableCellPrimary : "",
-      column.action === true ? styles.tableCellAction : "",
-    ].filter((one) => one !== "");
-    return classes.length === 0 ? undefined : classes.join(" ");
-  }
-
   return (
-    <div className={stackWhenConstrained ? styles.tableConstrained : undefined}>
-      <div className={styles.tableWrap}>
-        <table className={styles.table} aria-label={label}>
-          <thead>
+    <div className={stackWhenConstrained ? "@container/data-table" : undefined}>
+      <div
+        className={cn(
+          "overflow-x-auto rounded-card border border-border bg-surface",
+          /* Stacked rows are not a scrolling region; they are the page. */
+          "stacked:overflow-visible",
+        )}
+      >
+        <table
+          className="w-full border-collapse stacked:block"
+          aria-label={label}
+        >
+          {/*
+           * The headers are read out in both layouts and drawn in one. Stacked
+           * rows carry their own label on each cell, so a visible header row
+           * would be the same word twice.
+           */}
+          <thead className="stacked:sr-only">
             <tr>
               {columns.map((column) => (
                 <th
-                  className={
-                    column.action === true ? styles.tableHeaderAction : undefined
-                  }
+                  className={cn(
+                    "border-b border-border px-(--row-padding-x) py-2",
+                    "text-left text-sm font-normal tracking-normal whitespace-nowrap text-faint",
+                    column.action === true && "text-right",
+                    column.hideOnMobile === true &&
+                      column !== primary &&
+                      "max-[900px]:hidden",
+                  )}
                   data-mobile-hidden={mobileHidden(column)}
                   key={column.key}
                   scope="col"
@@ -116,22 +124,97 @@ export function DataTable<Row>({
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="stacked:block">
             {rows.map((row) => (
               <tr
-                className={
-                  stretchPrimaryLink ? styles.tableRowInteractive : undefined
+                className={cn(
+                  "[&:first-child>td]:border-t-0",
+                  "stacked:flex stacked:flex-col stacked:gap-1",
+                  "stacked:border-t stacked:border-border stacked:px-(--row-padding-x) stacked:py-3",
+                  "stacked:first:border-t-0",
+                  stretchPrimaryLink && [
+                    "relative",
+                    /*
+                     * The stretched link covers the row with an `::after`,
+                     * which would otherwise swallow the press meant for an
+                     * Edit button four columns along. Every kind of control a
+                     * cell may hold is lifted back above it. The selector is
+                     * written out twice rather than built from a constant:
+                     * Tailwind finds classes by reading this file as text, and
+                     * a name assembled at runtime produces no CSS at all.
+                     */
+                    "[&_td_:is(a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=checkbox],[role=switch])]:relative",
+                    "[&_td_:is(a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=checkbox],[role=switch])]:z-2",
+                    "[&_[data-primary=true]_a:first-of-type]:static",
+                    "[&_[data-primary=true]_a:first-of-type]:transition-colors",
+                    "[&_[data-primary=true]_a:first-of-type]:duration-(--duration-hover)",
+                    "[&_[data-primary=true]_a:first-of-type]:ease-out",
+                    "[&_[data-primary=true]_a:first-of-type]:after:absolute",
+                    "[&_[data-primary=true]_a:first-of-type]:after:inset-0",
+                    "[&_[data-primary=true]_a:first-of-type]:after:z-1",
+                    "[&_[data-primary=true]_a:first-of-type]:after:cursor-pointer",
+                    "[&_[data-primary=true]_a:first-of-type]:after:content-['']",
+                    /* Hovering the row says which link the whole row is. */
+                    "pointer-hover:[&_[data-primary=true]_a:first-of-type]:text-brand",
+                  ],
+                )}
+                data-slot="data-table-row"
+                data-stretch-primary-link={
+                  stretchPrimaryLink ? "true" : undefined
                 }
                 key={keyOf(row)}
               >
                 {columns.map((column) => (
                   <td
-                    className={tableCellClass(column)}
+                    className={cn(
+                      "h-(--row-height) border-t border-border align-middle",
+                      "px-(--row-padding-x) py-(--row-padding-y) text-sm text-muted-foreground",
+                      column.action === true && "text-right",
+                      "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-baseline",
+                      "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
+                      column === primary
+                        ? "stacked:mb-1"
+                        : [
+                            /* The header is the label, said again beside the fact. */
+                            "stacked:before:flex-none stacked:before:text-xs",
+                            "stacked:before:tracking-(--tracking-label) stacked:before:text-faint",
+                            "stacked:before:uppercase",
+                            "stacked:before:content-[attr(data-label)]",
+                          ],
+                      column.action === true &&
+                        "stacked:mt-2 stacked:items-center",
+                      /* A row control that drew nothing leaves no empty line. */
+                      column.action === true &&
+                        "max-[900px]:has-[[data-slot=cell]:empty]:hidden",
+                      column.header === "" && [
+                        "@max-[60rem]/data-table:justify-end",
+                        "@max-[60rem]/data-table:has-[[data-slot=cell]:empty]:hidden",
+                      ],
+                      column.hideOnMobile === true &&
+                        column !== primary &&
+                        "max-[900px]:hidden",
+                    )}
+                    data-action={column.action === true ? "true" : undefined}
                     data-label={column.header}
                     data-mobile-hidden={mobileHidden(column)}
+                    data-primary={column === primary ? "true" : undefined}
                     key={column.key}
                   >
-                    <span className={cellClass(column)}>{column.cell(row)}</span>
+                    <span
+                      className={cn(
+                        "block overflow-hidden text-ellipsis whitespace-nowrap",
+                        column === primary && "font-medium text-foreground",
+                        column.mono === true && "font-mono text-sm",
+                        column.action === true &&
+                          "flex items-center justify-end overflow-visible text-clip",
+                        column !== primary &&
+                          "stacked:min-w-0 stacked:max-w-[70%] stacked:text-right",
+                        column.action === true && "stacked:max-w-none",
+                      )}
+                      data-slot="cell"
+                    >
+                      {column.cell(row)}
+                    </span>
                   </td>
                 ))}
               </tr>
@@ -141,9 +224,14 @@ export function DataTable<Row>({
       </div>
 
       {more === undefined ? null : (
-        <div className={styles.more}>
+        <div className="mt-4 flex items-center justify-between gap-4 text-xs text-muted-foreground">
           <span>{more.note}</span>
-          <Button disabled={more.loading} onClick={more.onMore}>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={more.loading}
+            onClick={more.onMore}
+          >
             {more.loading ? "Loading…" : "Show more"}
           </Button>
         </div>
