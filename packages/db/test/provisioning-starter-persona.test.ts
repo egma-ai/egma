@@ -1,79 +1,62 @@
 import { newId } from "@egma/ids";
 import {
-  createAgent,
+  archivePersona,
   createPersona,
-  createTest,
   editPersona,
+  forkPersona,
   getPersona,
+  getPersonaVersion,
   listPersonas,
+  PERSONA_LIBRARY_CATALOG,
+  EGMA_PROVIDED_PERSONAS,
+  EgmaProvidedPersonaError,
   provisionOrganization,
+  RECOMMENDED_PERSONA_MODELS,
+  restorePersona,
+  seedPersonaLibrary,
+  setDefaultPersona,
   type AuthContext,
+  type PersonaTraits,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createConnectedDatabase,
+  openSingleConnection,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedUser } from "./support/tenancy.ts";
-
-/**
- * Signup provisions a customer, and the project it creates already holds a
- * persona for a test that names none.
- *
- * Everything here goes through the front door signup itself uses: one call to
- * `provisionOrganization`, and then the ordinary factory reads. Raw SQL appears
- * three times and never to set anything up — to read the pointer column, which
- * no exported call answers; to compare the seeded rows against ones the persona
- * factory wrote itself; and to count what a refused provisioning left behind,
- * absence being the one thing no seam can show.
- *
- * Who the starter is is deliberately not asserted. Their personality and their
- * voice are a placeholder waiting on a product decision, so a test spelling
- * either out would fail the day that decision is made, and would be checking a
- * wording rather than the guarantee. What is asserted is that a starter is
- * there, that they are a persona the factory itself would have accepted, and
- * that a first test naming nobody receives them.
- */
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 let database: MigratedDatabase;
 
 type Provisioned = {
   readonly auth: AuthContext;
-  readonly organizationId: string;
   readonly projectId: string;
-  readonly userId: string;
 };
 
-/** A customer arriving the way signup brings one in, and acting as its owner. */
-async function signUp(slug: string, email: string): Promise<Provisioned> {
+async function signUp(slug: string): Promise<Provisioned> {
   const userId = newId("usr");
-  await seedUser(database, userId, email);
-
-  const provisioned = await provisionOrganization({
+  await seedUser(database, userId, `${slug}@example.test`);
+  const made = await provisionOrganization({
     ownerUserId: userId,
     organizationName: slug,
     organizationSlug: slug,
     projectName: "Default",
     projectSlug: "default",
   });
-
   return {
-    userId,
-    organizationId: provisioned.organizationId,
-    projectId: provisioned.projectId,
+    projectId: made.projectId,
     auth: {
       userId,
-      organizationId: provisioned.organizationId,
-      projectId: provisioned.projectId,
-      role: provisioned.membership.role,
+      organizationId: made.organizationId,
+      projectId: made.projectId,
+      role: made.membership.role,
       via: "session",
     },
   };
 }
 
-/** The pointer column itself, which no exported read answers. */
-async function pointerOf(projectId: string): Promise<string | null> {
+async function defaultOf(projectId: string): Promise<string | null> {
   const { rows } = await database.sql<{ default_persona_id: string | null }>(
     "select default_persona_id from project where id = $1",
     [projectId],
@@ -81,239 +64,372 @@ async function pointerOf(projectId: string): Promise<string | null> {
   return rows[0]?.default_persona_id ?? null;
 }
 
-/** The same, where a test has already shown the pointer is set. */
-async function starterOf(projectId: string): Promise<string> {
-  const id = await pointerOf(projectId);
-  if (id === null) throw new Error(`project ${projectId} points at nobody`);
-  return id;
-}
-
-async function countOf(query: string): Promise<string | undefined> {
-  const { rows } = await database.sql<{ count: string }>(query);
-  return rows[0]?.count;
-}
-
-/** One whole row, `select *`, so a column added later arrives without being named. */
-async function rowOf(
-  table: string,
-  id: string,
-): Promise<Record<string, unknown>> {
-  const { rows } = await database.sql(`select * from ${table} where id = $1`, [
-    id,
-  ]);
-  const row = rows[0];
-  if (row === undefined) throw new Error(`no ${table} ${id}`);
-  return row;
-}
-
-/**
- * Two rows of one table, compared column by column.
- *
- * `ownWords` names the columns each row is entitled to differ on — its id, what
- * it points at, when it was written, and what it was called — and nothing else
- * is excused from the comparison of values.
- *
- * Which columns are *filled* is then compared over every column, `ownWords`
- * included, and that is the half that catches drift in both directions: a
- * column one write fills and the other leaves null fails here whichever of the
- * two started it.
- */
-async function expectSameWriteShape(
-  table: string,
-  starterId: string,
-  factoryId: string,
-  ownWords: readonly string[],
-): Promise<void> {
-  const starter = await rowOf(table, starterId);
-  const factory = await rowOf(table, factoryId);
-
-  const filled = (row: Record<string, unknown>): string[] =>
-    Object.keys(row)
-      .filter((column) => row[column] !== null)
-      .sort();
-  expect(filled(starter), `${table}: which columns are filled`).toEqual(
-    filled(factory),
-  );
-
-  const said = (row: Record<string, unknown>): Record<string, unknown> =>
-    Object.fromEntries(
-      Object.entries(row).filter(([column]) => !ownWords.includes(column)),
+/** Wait for a real Postgres lock edge, not an elapsed-time guess. */
+async function waitUntilBlockedBy(blockerPid: number): Promise<void> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const { rows } = await database.sql<{ blocked: boolean }>(
+      `select exists (
+         select 1
+           from pg_stat_activity
+          where $1::integer = any(pg_blocking_pids(pid))
+       ) as blocked`,
+      [blockerPid],
     );
-  expect(said(starter), `${table}: what the two rows say`).toEqual(said(factory));
+    if (rows[0]?.blocked === true) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("the fork never waited for the source version change");
 }
 
 let acme: Provisioned;
+let globex: Provisioned;
+let legacy: { readonly auth: AuthContext; readonly personaId: string };
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("provisioning_starter");
-  acme = await signUp("acme", "ada@acme.example");
-  // A second customer, seeded before anything is read, so that a read missing
-  // its tenancy predicate has another customer's starter to wrongly return.
-  await signUp("globex", "grace@globex.example");
+  database = await createConnectedDatabase("egma_provided_personas", {
+    seedPersonas: false,
+  });
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const userId = newId("usr");
+  await seedOrganization(database, organizationId, [
+    { id: projectId, slug: "existing" },
+  ]);
+  await seedUser(database, userId, "existing@example.test");
+  const auth: AuthContext = {
+    userId,
+    organizationId,
+    projectId,
+    role: "admin",
+    via: "session",
+  };
+  const local = await createPersona(auth, {
+    name: "Existing default",
+    traits: {
+      personality: "Already belongs to this project.",
+      language: "en-US",
+    },
+  });
+  await database.sql(
+    "update project set default_persona_id = $1 where id = $2",
+    [local.id, projectId],
+  );
+  legacy = { auth, personaId: local.id };
+
+  await seedPersonaLibrary();
+  acme = await signUp("acme-persona-library");
+  globex = await signUp("globex-persona-library");
 });
 
 afterAll(async () => {
   await database.drop();
 });
 
-describe("the project provisioning creates", () => {
-  it("points at a persona seeded into it", async () => {
-    const pointer = await pointerOf(acme.projectId);
-    expect(pointer).not.toBeNull();
+describe("the shared default persona", () => {
+  it("is one Egma-provided identity used by every new project", async () => {
+    expect(await defaultOf(acme.projectId)).toBe(
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
+    expect(await defaultOf(globex.projectId)).toBe(
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
 
-    const starter = await getPersona(
+    const persona = await getPersona(
       acme.auth,
-      await starterOf(acme.projectId),
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
     );
-    expect(starter).toBeDefined();
-    expect(starter?.projectId).toBe(acme.projectId);
-    expect(starter?.version).toBe(1);
-  });
-
-  it("holds that persona and nobody else", async () => {
-    const page = await listPersonas(acme.auth);
-    expect(page.items.map((named) => named.id)).toEqual([
-      await starterOf(acme.projectId),
-    ]);
-  });
-
-  it("seeded one the factory itself would have accepted", async () => {
-    const pointer = await starterOf(acme.projectId);
-    const starter = await getPersona(acme.auth, pointer);
-    if (starter === undefined) throw new Error("the starter was not seeded");
-
-    // Handing the seeded traits straight back to the factory puts them through
-    // the validation a hand-authored persona passes, and through the no-op
-    // comparison beside it. Invalid traits are refused here; traits the module
-    // reads back differently from how they were written would mint a second
-    // version. Neither happens, so the seeded row is one the factory could have
-    // written itself.
-    const edited = await editPersona(acme.auth, pointer, {
-      traits: starter.traits,
-    });
-    expect(edited?.version).toBe(1);
-    expect(edited?.versionId).toBe(starter.versionId);
-  });
-
-  it("seeded rows the factory would have written the same way", async () => {
-    // Its own customer, because this test puts a second persona in the project
-    // it reads.
-    const initech = await signUp("initech", "hedy@initech.example");
-    const pointer = await starterOf(initech.projectId);
-    const starter = await getPersona(initech.auth, pointer);
-    if (starter === undefined) throw new Error("the starter was not seeded");
-
-    // Provisioning writes these rows itself, because `createPersona` cannot run
-    // inside its transaction, so nothing but this keeps the two writes saying
-    // the same thing.
-    //
-    // The name and the description are typed here rather than copied off the
-    // starter, deliberately. Copying them would let the starter stop writing a
-    // description and this test hand the same emptiness to the factory, and the
-    // two rows would agree all the way to the day nobody could explain why a
-    // new project's persona had none. What is asserted about them is that both
-    // writes fill them; what they say is each write's own business. The traits
-    // are the one thing copied, because comparing the stored jsonb is what
-    // shows provisioning writes traits the way the factory does.
-    const made = await createPersona(initech.auth, {
-      name: "Authored by hand",
-      description: "Whatever the developer typed",
-      traits: starter.traits,
-    });
-
-    // `created_by` is compared rather than excused: provisioning knows who it
-    // is provisioning for, and records them exactly as the factory records the
-    // credential that called it.
-    await expectSameWriteShape("persona", pointer, made.id, [
-      "id",
-      "current_version_id",
-      "name",
-      "description",
-      // Two rows are two identities, so their revisions are two opaque tokens
-      // and are never equal. That both are *filled* is the claim worth making,
-      // and the filled-columns half above makes it.
-      "revision",
-      "created_at",
-      "updated_at",
-    ]);
-    await expectSameWriteShape(
-      "persona_version",
-      starter.versionId,
-      made.versionId,
-      ["id", "persona_id", "created_at"],
-    );
-  });
-
-  it("seeded an ordinary row, renamed and rewritten like any other", async () => {
-    const umbrella = await signUp("umbrella", "ada@umbrella.example");
-    const pointer = await starterOf(umbrella.projectId);
-
-    const renamed = await editPersona(umbrella.auth, pointer, {
-      name: "Impatient Rita",
-    });
-    expect(renamed?.name).toBe("Impatient Rita");
-    expect(renamed?.version).toBe(1);
-
-    const rewritten = await editPersona(umbrella.auth, pointer, {
+    expect(persona).toMatchObject({
+      owner: "egma",
+      projectId: null,
+      isDefault: true,
+      version: 1,
       traits: {
-        personality: "Interrupts, and will not be put on hold.",
-        language: "en-GB",
-        voice: { provider: "cartesia", voiceId: "a-catalog-id", speed: 1.15 },
+        personality:
+          "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        language: "en-US",
+        manner: "Clear, natural, and conversational.",
+        patience: "Starts patient and gives the agent time to explain.",
+        accent: "Neutral American English.",
+        backgroundNoise: "None.",
+        underFriction:
+          "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
+      },
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+  });
+
+  it("is seeded idempotently without a boot-time legacy adoption path", async () => {
+    expect(await seedPersonaLibrary()).toEqual([]);
+    expect(await seedPersonaLibrary()).toEqual([]);
+    expect(await defaultOf(legacy.auth.projectId ?? "")).toBe(legacy.personaId);
+  });
+
+  it("appears once in each project's library", async () => {
+    expect((await listPersonas(acme.auth)).items.map((one) => one.id)).toEqual([
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    ]);
+  });
+
+  it("cannot be edited, archived, or restored", async () => {
+    await expect(
+      editPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona, {
+        traits: {
+          ...PERSONA_LIBRARY_CATALOG[0]!.versions[0]!.traits,
+          personality: "Different",
+        },
+      }),
+    ).rejects.toBeInstanceOf(EgmaProvidedPersonaError);
+    await expect(
+      archivePersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona),
+    ).rejects.toBeInstanceOf(EgmaProvidedPersonaError);
+    await expect(
+      restorePersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona),
+    ).rejects.toBeInstanceOf(EgmaProvidedPersonaError);
+  });
+});
+
+describe("forking a persona", () => {
+  it("copies traits and models atomically into an independent version", async () => {
+    const source = await getPersona(
+      acme.auth,
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
+    const fork = await forkPersona(
+      acme.auth,
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
+    if (source === undefined || fork === undefined) {
+      throw new Error("the source or fork is missing");
+    }
+
+    expect(fork).toMatchObject({
+      owner: "organization",
+      projectId: acme.projectId,
+      version: 1,
+      isDefault: false,
+      traits: source.traits,
+      models: source.models,
+    });
+    const { rows } = await database.sql<{ traits: unknown; models: unknown }>(
+      "select traits, models from persona_version where id = $1",
+      [fork.versionId],
+    );
+    expect(rows[0]).toEqual({ traits: source.traits, models: source.models });
+
+    const edited = await editPersona(acme.auth, fork.id, {
+      traits: {
+        ...source.traits,
+        personality: "Pushes back once when the agent is wrong.",
       },
     });
-    expect(rewritten?.version).toBe(2);
+    expect(edited?.version).toBe(2);
+    expect(edited?.models).toEqual(source.models);
+    expect(
+      (await getPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona))?.version,
+    ).toBe(1);
+  });
 
-    // Still the project's default: editing them is not replacing them.
-    expect(await pointerOf(umbrella.projectId)).toBe(pointer);
+  it("copies the source version that wins the source-row lock", async () => {
+    const source = await createPersona(acme.auth, {
+      name: "Concurrent source",
+      traits: {
+        personality: "Starts as the first version.",
+        language: "en-US",
+      },
+    });
+    const nextVersionId = newId("prsv");
+    const nextTraits = {
+      personality: "Is the committed current version.",
+      language: "en-US",
+      patience: "Waits for a complete answer.",
+    } as const;
+    const holder = await openSingleConnection(database.url);
+    let forking: ReturnType<typeof forkPersona> | undefined;
+
+    try {
+      await holder.sql("begin");
+      const { rows: sessions } = await holder.sql<{ pid: number }>(
+        "select pg_backend_pid() as pid",
+      );
+      const blockerPid = sessions[0]?.pid;
+      if (blockerPid === undefined) throw new Error("the holder has no pid");
+
+      await holder.sql(
+        `insert into persona_version
+           (id, persona_id, version, traits, models, created_by)
+         values ($1, $2, 2, $3::jsonb, $4::jsonb, $5)`,
+        [
+          nextVersionId,
+          source.id,
+          JSON.stringify(nextTraits),
+          JSON.stringify(source.models),
+          acme.auth.userId,
+        ],
+      );
+      await holder.sql(
+        `update persona
+            set current_version_id = $1,
+                revision = 'source-version-moved',
+                updated_at = now()
+          where id = $2`,
+        [nextVersionId, source.id],
+      );
+
+      // The old implementation read version 1 without a lock and created its
+      // copy while this transaction was still open. Fork must instead wait on
+      // this source row, then copy the version that commits.
+      forking = forkPersona(acme.auth, source.id);
+      await waitUntilBlockedBy(blockerPid);
+      const { rows: copiesBeforeCommit } = await database.sql<{ count: number }>(
+        `select count(*)::integer as count
+           from persona
+          where project_id = $1 and name = $2`,
+        [acme.projectId, source.name],
+      );
+      expect(copiesBeforeCommit[0]?.count).toBe(1);
+      await holder.sql("commit");
+
+      const fork = await forking;
+      expect(fork).toMatchObject({
+        owner: "organization",
+        projectId: acme.projectId,
+        version: 1,
+        traits: nextTraits,
+        models: source.models,
+        isDefault: false,
+      });
+      const { rows: copiesAfterCommit } = await database.sql<{ count: number }>(
+        `select count(*)::integer as count
+           from persona
+          where project_id = $1 and name = $2`,
+        [acme.projectId, source.name],
+      );
+      expect(copiesAfterCommit[0]?.count).toBe(2);
+    } finally {
+      await holder.sql("rollback").catch(() => undefined);
+      await forking?.catch(() => undefined);
+      await holder.close();
+    }
   });
 });
 
-describe("a first test in a freshly provisioned project", () => {
-  it("is created naming no persona, and receives the starter", async () => {
-    const wayne = await signUp("wayne", "lucius@wayne.example");
-    // A new project has a starter persona and no agent, so registering one is
-    // the step before authoring a test: a test always applies to a target.
-    await createAgent(wayne.auth, { name: "Front desk" });
+describe("catalog integrity", () => {
+  it("carries traits and one complete models value in every fixed version", () => {
+    expect(PERSONA_LIBRARY_CATALOG).toHaveLength(1);
+    const version = PERSONA_LIBRARY_CATALOG[0]?.versions[0];
+    expect(version).toMatchObject({
+      id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
+      version: 1,
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+  });
 
-    const created = await createTest(wayne.auth, {
-      name: "Reschedules a booked appointment",
-      scenario:
-        "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-      expectedBehaviors: ["offers at least one afternoon slot next week"],
+  it("refuses changed content under a fixed catalog version id at the database", async () => {
+    const versionId = PERSONA_LIBRARY_CATALOG[0]?.versions[0]?.id;
+    if (versionId === undefined) throw new Error("the fixed v1 is missing");
+    await expect(
+      database.sql(
+        `update persona_version
+            set models = jsonb_set(models, '{stt,model}', '"gpt-4o-transcribe"')
+          where id = $1`,
+        [versionId],
+      ),
+    ).rejects.toThrow(/persona version.*authored content cannot change/u);
+
+    await expect(seedPersonaLibrary()).resolves.toEqual([]);
+  });
+
+  it("adds a new immutable catalog version without changing an existing fork", async () => {
+    const entry = PERSONA_LIBRARY_CATALOG[0];
+    const v1 = entry?.versions[0];
+    if (entry === undefined || v1 === undefined) {
+      throw new Error("the default persona catalog entry is incomplete");
+    }
+    const fork = await forkPersona(
+      acme.auth,
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
+    if (fork === undefined) throw new Error("the fork is missing");
+
+    const v2 = {
+      ...v1,
+      id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C98",
+      version: 2,
+      traits: {
+        ...v1.traits,
+        personality: "Stays calm and asks one clear question.",
+      },
+      models: {
+        ...v1.models,
+        stt: { provider: "openai", model: "gpt-live-transcribe" },
+      },
+      createdAt: new Date("2026-08-20T00:00:00.000Z"),
+    } as const;
+
+    expect(
+      await seedPersonaLibrary([
+        { ...entry, versions: [...entry.versions, v2] },
+      ]),
+    ).toEqual([
+      {
+        id: entry.id,
+        name: entry.name,
+        version: 2,
+        versionId: v2.id,
+      },
+    ]);
+    expect(await getPersonaVersion(acme.auth, v1.id)).toMatchObject(v1);
+    expect(await getPersona(acme.auth, fork.id)).toMatchObject({
+      version: 1,
+      versionId: fork.versionId,
+      traits: fork.traits,
+      models: fork.models,
+    });
+  });
+});
+
+describe("choosing a project's default persona", () => {
+  const authoredTraits: PersonaTraits = {
+    personality: "Stays calm and confirms the final answer.",
+    language: "en-US",
+  };
+
+  it("moves the project choice between an active Custom and Egma-provided persona", async () => {
+    const custom = await createPersona(acme.auth, {
+      name: "Calm caller",
+      traits: authoredTraits,
     });
 
-    expect(created.personas.map((named) => named.id)).toEqual([
-      await starterOf(wayne.projectId),
-    ]);
-    expect(created.personas[0]?.archivedAt).toBeNull();
-  });
-});
+    const selectedCustom = await setDefaultPersona(acme.auth, custom.id);
+    expect(selectedCustom).toMatchObject({ id: custom.id, isDefault: true });
+    expect(await defaultOf(acme.projectId)).toBe(custom.id);
 
-describe("provisioning that cannot finish", () => {
-  it("leaves no starter behind either", async () => {
-    const before = await countOf("select count(*) as count from persona");
-
-    // A person already belongs to an organization, so the membership at the end
-    // of the transaction is refused, and the starter written before it goes
-    // down with the organization and the project.
-    await expect(
-      provisionOrganization({
-        ownerUserId: acme.userId,
-        organizationName: "Second",
-        organizationSlug: "second",
-        projectName: "Default",
-        projectSlug: "default",
-      }),
-    ).rejects.toThrow();
-
-    expect(await countOf("select count(*) as count from persona")).toBe(
-      before,
+    const selectedEgma = await setDefaultPersona(
+      acme.auth,
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
     );
-    expect(
-      await countOf(
-        `select count(*) as count from persona_version v
-          where not exists (select 1 from persona h where h.id = v.persona_id)`,
-      ),
-    ).toBe("0");
+    expect(selectedEgma).toMatchObject({
+      id: EGMA_PROVIDED_PERSONAS.defaultPersona,
+      isDefault: true,
+    });
+    expect(await defaultOf(acme.projectId)).toBe(
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
+  });
+
+  it("refuses an archived or unavailable Custom persona", async () => {
+    const archived = await createPersona(acme.auth, {
+      name: "Archived caller",
+      traits: authoredTraits,
+    });
+    await archivePersona(acme.auth, archived.id);
+    expect(await setDefaultPersona(acme.auth, archived.id)).toBeUndefined();
+
+    const otherProject = await createPersona(globex.auth, {
+      name: "Other customer caller",
+      traits: authoredTraits,
+    });
+    expect(await setDefaultPersona(acme.auth, otherProject.id)).toBeUndefined();
   });
 });

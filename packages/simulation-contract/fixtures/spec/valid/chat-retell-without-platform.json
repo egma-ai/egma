@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "simulation_id": "sim_01K4QW7M4E8YB2FVN0H9TZQWET",
   "modality": "chat",
   "connection": {
@@ -13,8 +13,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
-      "language": "en-US"
+      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.", "language": "en-US"
     }
   },
   "scenario": {
@@ -24,20 +23,21 @@
     "max_duration_seconds": 600,
     "max_turns": 60
   },
-  "platform": {
-    "model": {
+  "models": {
+    "llm": {
       "provider": "openai",
       "model": "gpt-4o-mini",
       "key": "fixture-not-a-real-secret-persona-model-0001"
     },
-    "speech": {
-      "stt_provider": "openai",
-      "stt_key": "fixture-not-a-real-secret-listening-0002",
-      "tts_provider": "openai",
-      "tts_key": "fixture-not-a-real-secret-speaking-0003",
-      "tts_model": "gpt-4o-mini-tts",
-      "tts_voice": "alloy",
-      "vad_provider": "silero"
+    "stt": {
+      "provider": "openai",
+      "model": "gpt-live-transcribe"
+    },
+    "tts": {
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "voice_id": "alloy",
+      "speed": 1
     }
   }
 }

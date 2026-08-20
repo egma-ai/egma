@@ -348,7 +348,10 @@ export async function aConductedRun(
   // wanting a second run has no reason to meet.
   const callers = [`Impatient Rita ${runs}`, `Deliberate Sam ${runs}`];
   for (const name of callers) {
-    await createPersona(who.auth, { name, traits: NEUTRAL_TRAITS });
+    await createPersona(who.auth, {
+      name,
+      traits: NEUTRAL_TRAITS,
+    });
   }
 
   const pushed = await ask(app, "POST", "/api/tests", who.key, {

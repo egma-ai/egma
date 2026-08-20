@@ -249,9 +249,7 @@ class RunningSimulation:
                 # The beat is already over and its own loop logged why.
                 # Raising here would skip closing the reporter, which is
                 # what gets the terminal event onto the wire.
-                logger.exception(
-                    "the heartbeat for %s ended badly", self.simulation_id
-                )
+                logger.exception("the heartbeat for %s ended badly", self.simulation_id)
             try:
                 await self._reporter.close()
             finally:
@@ -272,10 +270,10 @@ class RunningSimulation:
         try:
             # The model first, because the pipeline below holds things that
             # have to be given back and only conducting gives them back.
-            model = build_model_client(self._config, self._spec)
+            model = build_model_client(self._spec)
             # One pipeline per simulation, built from its own spec: the
             # plug that knows the platform, and — for voice — the speech
-            # legs around it, whichever set this deployment configured.
+            # legs around it, selected by this work order's models block.
             # Assembling also decides which of the two conductors this
             # simulation gets. It is validation, so a connection config
             # the plug does not understand is an honest failure rather
@@ -283,14 +281,10 @@ class RunningSimulation:
             assembled = assemble(
                 self._spec,
                 blobs=self._blobs,
-                # This container's configuration with the platform's own
-                # settings laid over it, resolved here — once, for this
-                # simulation, from the work order that claimed it. Which is
-                # what makes a key an operator replaced apply to the next
-                # simulation with nothing restarted, and what lets a second
-                # simulator on another machine hold no settings at all.
-                speech=SpeechProviders.for_simulation(
-                    self._config, self._spec.platform.speech
+                # The pinned persona version is the only model and voice
+                # source. The current direct keys arrived on this claim.
+                speech=SpeechProviders.from_models(
+                    self._spec.models, vad=self._config.vad_provider
                 ),
                 media=MediaSettings.for_simulation(
                     self._config.media, self._spec.platform.carrier
@@ -311,9 +305,7 @@ class RunningSimulation:
                     conducted = await assembled.conductor.conduct(
                         persona=persona,
                         max_turns=self._spec.limits.max_turns,
-                        max_duration_seconds=(
-                            self._spec.limits.max_duration_seconds
-                        ),
+                        max_duration_seconds=(self._spec.limits.max_duration_seconds),
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                         on_utterance=self._on_utterance,
@@ -326,9 +318,7 @@ class RunningSimulation:
                         persona=persona,
                         plug=assembled.plug,
                         max_turns=self._spec.limits.max_turns,
-                        max_duration_seconds=(
-                            self._spec.limits.max_duration_seconds
-                        ),
+                        max_duration_seconds=(self._spec.limits.max_duration_seconds),
                         on_turn=self._on_turn,
                         on_timing=self._on_timing,
                         on_tool_call=self._on_tool_call,
@@ -613,9 +603,7 @@ class SimulatorService:
                 "simulator started",
                 attributes={"egma.capacity": config.capacity},
             )
-            claiming = asyncio.ensure_future(
-                self._claim_forever(client, executor)
-            )
+            claiming = asyncio.ensure_future(self._claim_forever(client, executor))
             stop = asyncio.ensure_future(self._stop.wait())
             try:
                 await asyncio.wait(
@@ -819,13 +807,10 @@ class SimulatorService:
                 )
                 continue
 
-            # The connection's credentials and the platform's own keys, both
-            # registered before anything is conducted with either. A key that
-            # arrived on a work order is exactly as much a secret as one that
-            # arrived in this container's environment, and the filter that
-            # keeps it out of the log has to know about it either way.
+            # Register every work-order credential before conducting.
             self._secrets.register(spec.credentials)
             self._secrets.register(list(spec.platform.secrets))
+            self._secrets.register(list(spec.models.secrets))
             executor.submit(spec)
             log_event(
                 logger,

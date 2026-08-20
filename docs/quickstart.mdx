@@ -76,13 +76,13 @@ The wizard handles agent registration as part of its flow, but you can run it se
 egma connect
 ```
 
-The CLI asks for your Retell API key (or LiveKit credentials) and then asks how Egma should reach the agent:
+The CLI asks for your Retell API key (or LiveKit credentials), reads the selected Retell agent's modality, and asks you to confirm the matching connection:
 
-- **Text** — Egma exchanges messages with your agent. No phone call, nothing dialled. Exercises the prompt, reasoning, and tools.
-- **Phone** — Egma dials one of your agent's numbers over the telephone network. Exercises the full speech stack and the carrier path as well.
+- A Retell **chat agent** gets a Retell connection with the **Chat** modality. Egma exchanges messages with it directly.
+- A Retell **voice agent** gets a Phone connection with the **Voice** modality. Egma dials one of the numbers routed to it.
 
 <Note>
-  Egma creates the one connection type you choose and never both. If you want both, run `egma connect` twice and choose a different reach each time. The second run reuses the same agent registration and adds the new connection to it.
+  Egma does not offer both choices for one Retell agent. A voice agent requires `--reach phone`; a chat agent requires `--reach text`. A mismatch stops before Egma writes anything.
 </Note>
 
 Pass credentials through environment variables rather than as arguments — arguments are visible to every process on your machine and are saved in shell history:
@@ -104,7 +104,8 @@ agent_id: agt_01K…
 agent_name: order-line
 connection_id: con_01K…
 connection_name: text-1
-connection_type: text
+connection_type: retell
+connection_modality: chat
 registration: created
 agent_registration: created
 connection_registration: created

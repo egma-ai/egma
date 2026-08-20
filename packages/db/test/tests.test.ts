@@ -302,60 +302,29 @@ describe("a test naming no persona", () => {
     expect(created.personas.map((named) => named.id)).toEqual([rita]);
   });
 
-  it("errors clearly when the project has no default, and creates nothing", async () => {
-    const before = await rowCounts();
+  it("cannot clear the project's required default at the database boundary", async () => {
+    const { rows: before } = await database.sql<{
+      default_persona_id: string;
+    }>("select default_persona_id from project where id = $1", [globex.project]);
+    const defaultPersonaId = before[0]?.default_persona_id;
+    if (defaultPersonaId === undefined) throw new Error("Globex has no project");
 
-    // Globex's project was never pointed at anything, which is where a project
-    // sits before provisioning seeds its starter persona.
-    await expect(createTest(actingAsGlobex(), rescheduling)).rejects.toThrow(
-      /no default persona/,
-    );
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it("errors clearly when the default has been archived, and creates nothing", async () => {
-    const stale = await seedPersona(actingAsGlobex(), "Stale Default");
-    const replacing = await seedPersona(actingAsGlobex(), "Replacing Them");
-    await pointProjectAt(globex.project, stale);
-    // Archiving the persona a project points at moves the pointer, so the
-    // pointer is put back at the archived row by hand: the state this proves
-    // is one the product refuses to create and the database still allows.
-    await archivePersona(actingAsGlobex(), stale, {
-      replacementPersonaId: replacing,
+    await expect(pointProjectAt(globex.project, null)).rejects.toMatchObject({
+      code: "23502",
+      column: "default_persona_id",
     });
-    await pointProjectAt(globex.project, stale);
 
-    const before = await rowCounts();
-
-    await expect(createTest(actingAsGlobex(), rescheduling)).rejects.toThrow(
-      /is archived/,
-    );
-
-    expect(await rowCounts()).toEqual(before);
-
-    await pointProjectAt(globex.project, null);
+    const created = await createTest(actingAsGlobex(), rescheduling);
+    expect(created.personas.map((named) => named.id)).toEqual([
+      defaultPersonaId,
+    ]);
   });
 
-  it("says the default is not this project's, not that it is archived, when it points elsewhere", async () => {
-    // The column's foreign key only says the row exists, so a pointer at a
-    // living persona of another project is a state the database allows and the
-    // developer has to be told the truth about.
-    await pointProjectAt(acme.outbound, rita);
-
-    const before = await rowCounts();
-
-    const inOutbound = { ...actingAsAcme(), projectId: acme.outbound };
-    await expect(createTest(inOutbound, rescheduling)).rejects.toThrow(
-      /no persona .* in this project/,
+  it("refuses a default owned by another project at the stored pointer", async () => {
+    await expect(pointProjectAt(acme.outbound, rita)).rejects.toSatisfy(
+      (error: unknown) =>
+        errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );
-    await expect(createTest(inOutbound, rescheduling)).rejects.not.toThrow(
-      /is archived/,
-    );
-
-    expect(await rowCounts()).toEqual(before);
-
-    await pointProjectAt(acme.outbound, null);
   });
 });
 

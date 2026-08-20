@@ -9,8 +9,6 @@ scripted client or a recording fake.
 
 from __future__ import annotations
 
-import json
-
 from egma_simulator.model import CONCLUDE_MARKER, PersonaReply, ScriptedModel
 from egma_simulator.persona import (
     OPENING_NUDGE,
@@ -23,21 +21,31 @@ from egma_simulator.persona import (
 TRAITS = {
     "personality": "Margaret, 68, retired schoolteacher. Polite but flustered.",
     "language": "en-US",
-    "voice": {"provider": "cartesia", "voiceId": "warm-alto-2", "speed": 0.9},
+    "manner": "Warm and direct.",
+    "patience": "Waits once before asking again.",
+    "accent": "Neutral American English.",
+    "backgroundNoise": "A quiet waiting room.",
+    "underFriction": "Becomes firmer without becoming rude.",
 }
 
 SCENARIO = "Move my cleaning to Thursday. Conclude once it is read back."
 
 
-def test_the_system_prompt_carries_traits_and_scenario_verbatim():
+def test_the_system_prompt_carries_all_human_traits_and_scenario():
     prompt = compose_system_prompt(TRAITS, SCENARIO)
 
-    # The traits ride whole — what a persona is made of is authoring's
-    # business, and the composition must not pick favourites among keys.
-    assert json.dumps(TRAITS, indent=2, sort_keys=True) in prompt
+    for value in TRAITS.values():
+        assert value in prompt
     assert SCENARIO in prompt
     assert CONCLUDE_MARKER in prompt
     assert "stay in character" in prompt.lower()
+
+
+def test_the_system_prompt_has_no_technical_voice_or_model_fallback():
+    prompt = compose_system_prompt(TRAITS, SCENARIO)
+
+    assert '"voice"' not in prompt
+    assert '"models"' not in prompt
 
 
 def test_the_system_prompt_is_deterministic():

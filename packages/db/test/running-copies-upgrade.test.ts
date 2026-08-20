@@ -278,7 +278,8 @@ async function seedAProjectAsItWas(
   );
   await legacy.sql(
     `insert into persona_version (id, persona_id, version, traits)
-     values ($1, $2, 1, '{}'::jsonb)`,
+     values ($1, $2, 1,
+       '{"personality":"Impatient but clear.","language":"en-US","voice":{"provider":"cartesia","voiceId":"legacy-cartesia-voice","speed":1}}'::jsonb)`,
     [project.personaVersion, project.personaId],
   );
   await legacy.sql(
@@ -480,8 +481,10 @@ async function activeCopiesIn(projectId: string): Promise<
     scope: string;
     type: string;
   }>(
-    `select id, library_id, required, scope, type from grader
-      where project_id = $1 and deleted_at is null order by id`,
+    `select g.id, g.library_id, g.required, g.scope, gl.type
+       from grader g
+       join grader_library gl on gl.id = g.library_id
+      where g.project_id = $1 and g.deleted_at is null order by g.id`,
     [projectId],
   );
   return rows;
@@ -599,8 +602,12 @@ describe("the release that turns graders into running copies (0026)", () => {
     ).toEqual(everyProject.map(() => "pending"));
   });
 
-  it("loses nothing else on its way past", async () => {
-    expect(await countThese(KEPT_TABLES)).toEqual(whatWasThere);
+  it("loses nothing else and installs the one shared persona library entry", async () => {
+    expect(await countThese(KEPT_TABLES)).toEqual({
+      ...whatWasThere,
+      persona: (whatWasThere.persona ?? 0) + 1,
+      persona_version: (whatWasThere.persona_version ?? 0) + 1,
+    });
   });
 });
 

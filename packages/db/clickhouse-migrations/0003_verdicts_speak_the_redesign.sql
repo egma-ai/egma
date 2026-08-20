@@ -98,9 +98,9 @@ CREATE TABLE IF NOT EXISTS verdicts
 --
 -- The sorting key **is** the identity, and every part of it earns its place:
 --
---   grader version — re-grading at a tightened grader writes rows beside the old
---     ones instead of over them, which is what makes "v3 said pass, v4 says
---     fail" a comparison rather than a loss;
+--   grader version — production grading at a newer current version writes beside
+--     the old row, which makes "v3 said pass, v4 says fail" a comparison rather
+--     than a loss; simulation re-grades reuse their pinned version;
 --   assertion      — one assertion's verdict is not another's;
 --   source         — the same grader judges simulations and production traffic,
 --     and those are two answers about two different conversations.

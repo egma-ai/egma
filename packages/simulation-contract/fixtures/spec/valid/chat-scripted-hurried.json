@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEU",
   "modality": "chat",
   "connection": {
@@ -18,13 +18,7 @@
   },
   "persona": {
     "traits": {
-      "personality": "Dev, 34, messaging from a train platform. In a hurry, fires off short messages, expects quick answers.",
-      "language": "en-GB",
-      "voice": {
-        "provider": "elevenlabs",
-        "voiceId": "brisk-tenor-7",
-        "speed": 1.15
-      }
+      "personality": "Dev, 34, messaging from a train platform. In a hurry, fires off short messages, expects quick answers.", "language": "en-US"
     }
   },
   "scenario": {
@@ -33,5 +27,22 @@
   "limits": {
     "max_duration_seconds": 300,
     "max_turns": 40
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": {
+      "provider": "openai",
+      "model": "gpt-live-transcribe"
+    },
+    "tts": {
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "voice_id": "alloy",
+      "speed": 1.15
+    }
   }
 }

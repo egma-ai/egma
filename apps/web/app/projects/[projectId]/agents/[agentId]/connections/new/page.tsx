@@ -461,7 +461,7 @@ function NewConnection({
                     value={modality}
                     options={described.modalities.map((item) => ({
                       value: item,
-                      label: item === "voice" ? "Voice" : "Text",
+                      label: item === "voice" ? "Voice" : "Chat",
                     }))}
                     onChange={setModality}
                   />

@@ -98,13 +98,11 @@ async function signedInAs(person: Customer): Promise<SignedIn> {
 
 /**
  * A deployment `egma self-host setup` has finished with: somewhere to
- * route a call, a number it comes from, and a voice to speak with. Non-secret,
- * all three — see `phone-readiness.ts`.
+ * route a call and a number it comes from. See `phone-readiness.ts`.
  */
 const PHONE_IS_SET_UP = {
   carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
   carrier_trunk_number: "+18885550123",
-  text_to_speech_provider: "openai",
 } as const;
 
 /** A number egma dials, registered the way the wizard registers one. */
@@ -347,7 +345,7 @@ describe("starting a run from the terminal's own code", () => {
       "this Egma instance has not been set up to place phone calls, so " +
         "nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
-        "and the source number and the text-to-speech provider. Whoever runs " +
+        "and the source number. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
         "workspace: " +
         "egma self-host setup.",

@@ -1,15 +1,19 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   BLANK_TRAITS,
+  modelsDraftOf,
+  modelsFrom,
   PERSONA_FORM_PATH,
   PERSONAS_PATH,
+  sameModelsDraft,
   traitsFrom,
+  type ModelsDraft,
   type Persona,
   type PersonaForm,
   type TraitsDraft,
@@ -24,8 +28,9 @@ import {
   Refused,
   TextInput,
 } from "../../../../../ui/controls.tsx";
-import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
+import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
+import { useProjectRead } from "../../../../../ui/resource.ts";
 import {
   AppShell,
   PageBody,
@@ -34,21 +39,19 @@ import {
   useShellSession,
 } from "../../../../../ui/shell.tsx";
 import { TraitFields } from "../traits-editor.tsx";
+import { ModelFields } from "../models-editor.tsx";
 
 /**
  * Authoring a persona.
  *
  * **The form is arranged around one sentence: who they are, never what they
  * want.** The identity fields name them for the people who will pick them off
- * a list; the traits describe the person the simulator brings to life. A
+ * a list; personality describes the person the simulator brings to life. A
  * scenario belongs to a test, and a persona carrying one would stop being
  * reusable the moment somebody wrote it down.
  *
- * Nothing here holds a second copy of what egma will accept. Which voice
- * providers exist and what a speaking speed may be are the server's rules, and
- * a validator here that disagreed would either refuse something egma would
- * have taken or take something egma will refuse. So a refusal is shown as it
- * arrived, above a form that still holds everything typed into it.
+ * A refusal is shown as it arrived, above a form that still holds everything
+ * typed into it.
  */
 export default function NewPersonaPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -68,31 +71,50 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [traits, setTraits] = useState<TraitsDraft>(BLANK_TRAITS);
-  const { answer: form } = useProjectRead<PersonaForm>(
+  const [models, setModels] = useState<ModelsDraft | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const { answer: form, reload: reloadForm } = useProjectRead<PersonaForm>(
     PERSONA_FORM_PATH,
     projectId,
   );
-  const voiceProviders =
-    form?.status === "ready" ? form.value.voice_providers : null;
-  const [saving, setSaving] = useState(false);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
+
+  useEffect(() => {
+    setModels(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (form?.status !== "ready") return;
+    setModels((held) => held ?? modelsDraftOf(form.value.recommended_models));
+  }, [form]);
+
+  useEffect(() => {
+    if (form?.status === "signed-out") window.location.replace("/sign-in");
+  }, [form]);
 
   const changed =
     name !== "" ||
     description !== "" ||
     Object.entries(traits).some(
       ([key, value]) => value !== BLANK_TRAITS[key as keyof TraitsDraft],
-    );
+    ) ||
+    (models !== null &&
+      form?.status === "ready" &&
+      !sameModelsDraft(models, modelsDraftOf(form.value.recommended_models)));
   useUnsavedChanges(changed && !saving, saving);
 
-  const mayAuthor = role !== null && canAuthor(role);
+  const mayAuthor =
+    role !== null &&
+    canAuthor(role) &&
+    form?.status === "ready" &&
+    models !== null;
   const whyNot =
     role === null
       ? undefined
       : `Your ${role} role cannot author personas. Ask an organization admin to change your role.`;
 
   async function save(): Promise<void> {
-    if (!mayAuthor || saving) return;
+    if (!mayAuthor || saving || models === null) return;
     setSaving(true);
     setRefusal(null);
 
@@ -103,6 +125,7 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
         name,
         description,
         traits: traitsFrom(traits),
+        models: modelsFrom(models),
       },
     });
 
@@ -123,25 +146,29 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
     router.push(projectPath(projectId, "personas", answer.value.id));
   }
 
-  return (
-    <ProductPage>
-      <PageHeader
-        eyebrow="Personas"
-        title="New persona"
-        breadcrumbs={[
-          { label: "Personas", href: projectPath(projectId, "personas") },
-          { label: "New persona" },
-        ]}
-        lead="Who calls, and how they behave — never what they want on a given occasion, which is the test's."
-      />
-      <PageBody>
+  function content() {
+    if (form === null || form.status === "signed-out") {
+      return <Loading what="the supported persona models" />;
+    }
+    if (form.status === "missing") {
+      return <NotFound message={form.refusal.message} />;
+    }
+    if (form.status === "failed") {
+      return <Failure message={form.refusal.message} onRetry={reloadForm} />;
+    }
+    if (models === null) {
+      return <Loading what="the supported persona models" />;
+    }
+
+    return (
+      <>
         {refusal === null ? null : <Refused message={refusal.message} />}
 
         <Form onSubmit={() => void save()}>
           <Field
             label="Name"
             htmlFor="persona-name"
-            hint="What your team will call them in a list. Names are not unique, so two callers can share one."
+            hint="What your team will call them in a list. Names are not unique."
           >
             <TextInput
               id="persona-name"
@@ -154,21 +181,18 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
           <Field
             label="Description"
             htmlFor="persona-description"
-            hint="Optional. One line, for whoever is picking a persona off a list."
+            hint="Optional. One line for the people who select this persona."
           >
             <TextInput
               id="persona-description"
               value={description}
-              placeholder="Somebody in a hurry, calling from a busy place"
+              placeholder="A recurring support persona"
               onChange={setDescription}
             />
           </Field>
 
-          <TraitFields
-            draft={traits}
-            voiceProviders={voiceProviders}
-            onChange={setTraits}
-          />
+          <TraitFields draft={traits} onChange={setTraits} />
+          <ModelFields draft={models} form={form.value} onChange={setModels} />
 
           <FormActions>
             <Button
@@ -181,7 +205,22 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             </Button>
           </FormActions>
         </Form>
-      </PageBody>
+      </>
+    );
+  }
+
+  return (
+    <ProductPage>
+      <PageHeader
+        eyebrow="Personas"
+        title="New persona"
+        breadcrumbs={[
+          { label: "Personas", href: projectPath(projectId, "personas") },
+          { label: "New persona" },
+        ]}
+        lead="Who speaks with the agent, and how they behave. What they want in one simulation belongs to the test."
+      />
+      <PageBody>{content()}</PageBody>
     </ProductPage>
   );
 }

@@ -14,7 +14,6 @@ import {
   makeWorld,
   oneServiceAtATime,
   seedGrader,
-  seedJudge,
   seedTest,
   testConfig,
   theSeededGrader,
@@ -63,7 +62,6 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
 
 beforeAll(async () => {
   world = await makeWorld("grader_acceptance");
-  await seedJudge(world);
 });
 
 afterAll(async () => {
@@ -206,9 +204,8 @@ describe("a latency copy", () => {
 
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({
-      // The config entry's position, one-based. Never the measure and never the
-      // bound: a re-grade at a tightened bound has to write *over* this row
-      // rather than beside it, and a key made of what somebody typed would not.
+      // Never the bound: grader versions may change it, but the assertion is
+      // still the same measured fact across that version history.
       assertion: "turn_response_latency",
       verdict: "passed",
       score: 1,

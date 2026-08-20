@@ -466,9 +466,9 @@ export function MockToolEvidence({
 /**
  * One judged assertion: what counts now, why, and the judgments underneath it.
  *
- * **An earlier judgment is preserved and shown, never replaced.** A re-grade
- * writes a new row beside the old one, and a page that hid the old one would
- * make "this grader was tightened and now disagrees" invisible.
+ * **Different grader-version judgments are preserved and shown.** A re-grade
+ * replaces the row for this simulation's same pinned version. Any row already
+ * stored under another version remains visible as superseded evidence.
  *
  * The page groups rows under their grader and marks that whole grader as
  * required or reports-only once. Repeating a storage id and lane on every
@@ -548,13 +548,7 @@ export function VerdictEvidence({
   );
 }
 
-/**
- * The plan this conversation was judged under, item by item.
- *
- * The judge is named on every row and never carries a key — a configured choice
- * is a provider, a model and a *reference*, and there is no field here a secret
- * could travel in.
- */
+/** The pinned grader versions this conversation was judged under. */
 export function PlanItems({
   items,
 }: {
@@ -579,12 +573,6 @@ export function PlanItems({
           <strong>{graderDisplayName(item.name)}</strong>
           <span className={styles.planNote}>
             {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id}`}
-            {" · "}
-            {item.judge.tag === "configured"
-              ? `${item.judge.provider}/${item.judge.model} · ${item.judge.source === "platform" ? "platform key" : `credential ${item.judge.source}`}`
-              : item.judge.tag === "not_required"
-                ? "no judge needed"
-                : "no judge recorded at capture"}
           </span>
         </li>
       ))}

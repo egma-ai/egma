@@ -19,8 +19,7 @@ import {
 } from "./support/traces.ts";
 
 /**
- * Planning a run, starting it safely, and taking a judge credential out of use
- * — over real HTTP against a real Postgres.
+ * Planning and starting a run safely over real HTTP against real Postgres.
  *
  * What is asserted here is what a client observes: the shape of the plan, every
  * refusal sentence word for word, and the three promises the surface rests on.
@@ -35,9 +34,8 @@ import {
  * body is refused out loud, because telling somebody their new selection had
  * started when it had not is the one failure the key exists to prevent.
  *
- * **A credential nothing needs is archivable, and one something needs is not.**
- * The refusal names every blocking use, because the fix for each is somewhere
- * different.
+ * A plan pins one immutable grader version. It never copies that version's
+ * model or any provider credential into durable run data.
  */
 
 let api: TestApi;
@@ -65,7 +63,6 @@ const RETELL = {
 /** Somebody with an agent to check and two tests to check it with. */
 async function aCustomerReadyToPlan(
   label: string,
-  options: { readonly defaultJudge?: null } = {},
 ): Promise<{
   readonly ada: Customer;
   readonly key: string;
@@ -74,10 +71,7 @@ async function aCustomerReadyToPlan(
   readonly plain: string;
   readonly needsAudio: string;
 }> {
-  api = await createApi(
-    label,
-    options.defaultJudge === null ? { defaultJudge: null } : {},
-  );
+  api = await createApi(label);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
@@ -170,10 +164,10 @@ describe("reading what a run would freeze", () => {
     );
     expect(behaviors?.kind).toBe("authored");
     expect(behaviors?.required).toBe(true);
-    expect(behaviors?.judge).toMatchObject({ tag: "configured" });
+    expect(behaviors?.grader_version_id).toMatch(/^grv_/u);
+    expect("judge" in (behaviors ?? {})).toBe(false);
 
-    // A judge choice names a reference and never a secret, and the whole answer
-    // is checked as bytes rather than field by field.
+    // The whole answer is checked as bytes: no provider secret can enter it.
     expect(JSON.stringify(plan.body)).not.toContain("sk-");
   });
 
@@ -229,10 +223,9 @@ describe("reading what a run would freeze", () => {
     });
   });
 
-  it("says a project has no judge rather than refusing, so a page can draw it", async () => {
+  it("does not copy model execution settings into the plan response", async () => {
     const { key, agentId, connectionId, plain } = await aCustomerReadyToPlan(
-      "run_plan_needs_setup",
-      { defaultJudge: null },
+      "run_plan_one_version_owner",
     );
 
     const plan = await request(
@@ -242,7 +235,8 @@ describe("reading what a run would freeze", () => {
     );
 
     expect(plan.statusCode).toBe(200);
-    expect(plan.body.judge).toEqual({ state: "needs_setup" });
+    const [test] = plan.body.tests as Array<{ graders: Record<string, unknown>[] }>;
+    expect(test?.graders.every((grader) => !("judge" in grader))).toBe(true);
   });
 
   it("refuses a test that does not apply to the agent, in the contract's own sentence", async () => {
@@ -362,30 +356,6 @@ describe("starting a run safely", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("refuses a project with no judge before anything is dialed, in the contract's exact words", async () => {
-    const { ada, key, agentId, connectionId, plain } =
-      await aCustomerReadyToPlan("run_start_no_judge", { defaultJudge: null });
-
-    const refused = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain],
-      idempotency_key: newId("run"),
-    });
-
-    expect(refused.statusCode).toBe(409);
-    expect(refused.body).toEqual({
-      error: "judge_not_configured",
-      message:
-        `This run needs an LLM judge, but project ${ada.projectId} has no ` +
-        "judge configured. Open project Settings, configure the judge, and " +
-        "start the run again.",
-    });
-
-    const { rows } = await api.database.sql("select id from run");
-    expect(rows).toEqual([]);
-  });
-
   it("writes exactly the skips the review promised, and completes an all-skipped run", async () => {
     const { ada, key, agentId, connectionId, needsAudio } =
       await aCustomerReadyToPlan("run_start_all_skipped");
@@ -480,111 +450,5 @@ describe("starting a run safely", () => {
     expect(started.statusCode).toBe(201);
     const { rows } = await api.database.sql("select id from run");
     expect(rows).toHaveLength(1);
-  });
-});
-
-describe("taking a judge credential out of use", () => {
-  /** A credential, and the project pointed at it. */
-  async function aCredential(
-    ada: Customer,
-    label: string,
-    secret: string,
-  ): Promise<string> {
-    const created = await api.app.inject({
-      method: "POST",
-      url: "/api/judge-credentials",
-      headers: { cookie: ada.cookie },
-      payload: { label, provider: "openai", key: secret },
-    });
-    expect(created.statusCode, created.body).toBe(201);
-    return String((created.json() as { id: string }).id);
-  }
-
-  it("refuses while a project points at it, and names the project", async () => {
-    const { ada } = await aCustomerReadyToPlan("credential_in_use_project");
-    const credentialId = await aCredential(
-      ada,
-      "The team's key",
-      "sk-a-real-looking-openai-key-0001",
-    );
-
-    const pointed = await api.app.inject({
-      method: "PUT",
-      url: "/api/judge",
-      headers: { cookie: ada.cookie },
-      payload: {
-        project: ada.projectId,
-        provider: "openai",
-        model: "gpt-4.1-mini",
-        source: credentialId,
-      },
-    });
-    expect(pointed.statusCode, pointed.body).toBe(200);
-
-    const refused = await api.app.inject({
-      method: "POST",
-      url: `/api/judge-credentials/${credentialId}/archive`,
-      headers: { cookie: ada.cookie },
-      payload: {},
-    });
-
-    expect(refused.statusCode).toBe(409);
-    const body = refused.json() as { error: string; message: string };
-    expect(body.error).toBe("judge_credential_in_use");
-    expect(body.message).toBe(
-      `Judge credential ${credentialId} is used by project ${ada.projectId}. ` +
-        "Point those projects at another credential and let pending grading " +
-        "finish, then archive this credential.",
-    );
-  });
-
-  it("succeeds once nothing needs it, and stops offering it", async () => {
-    const { ada } = await aCustomerReadyToPlan("credential_archive");
-    const credentialId = await aCredential(
-      ada,
-      "Nothing needs it",
-      "sk-a-real-looking-openai-key-0002",
-    );
-
-    const archived = await api.app.inject({
-      method: "POST",
-      url: `/api/judge-credentials/${credentialId}/archive`,
-      headers: { cookie: ada.cookie },
-      payload: {},
-    });
-    expect(archived.statusCode, archived.body).toBe(200);
-
-    const listed = await api.app.inject({
-      method: "GET",
-      url: "/api/judge-credentials",
-      headers: { cookie: ada.cookie },
-    });
-    const items = (listed.json() as { items: { id: string }[] }).items;
-    expect(items.map((one) => one.id)).not.toContain(credentialId);
-  });
-
-  it("refuses anybody but an admin", async () => {
-    const { ada } = await aCustomerReadyToPlan("credential_archive_role");
-    const credentialId = await aCredential(
-      ada,
-      "Not a member's to remove",
-      "sk-a-real-looking-openai-key-0003",
-    );
-    const member = await colleagueOf(
-      api.app,
-      ada,
-      "quinn@acme.example",
-      "member",
-    );
-
-    const refused = await api.app.inject({
-      method: "POST",
-      url: `/api/judge-credentials/${credentialId}/archive`,
-      headers: { cookie: member.cookie },
-      payload: {},
-    });
-
-    expect(refused.statusCode).toBe(403);
-    expect((refused.json() as { error: string }).error).toBe("not_permitted");
   });
 });

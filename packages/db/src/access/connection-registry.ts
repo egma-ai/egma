@@ -267,6 +267,8 @@ export type ConnectionDescriptor = {
    * not exist. It flips to `true` in the same commit as the adapter.
    */
   readonly simulatorAdapter: boolean;
+  /** Whether conducting this type spends the deployment's shared carrier. */
+  readonly usesPlatformCarrier: boolean;
   /**
    * Which config key holds the vendor's own name for the agent, for the types
    * that have one — and absent for the types that do not.
@@ -359,6 +361,8 @@ export type ConnectionTypeMetadata = {
   readonly topology: Topology;
   /** Whether egma can conduct a simulation over this type today. */
   readonly simulatorAdapter: boolean;
+  /** Whether a claimed work order for this type needs the platform carrier. */
+  readonly usesPlatformCarrier: boolean;
   /** Whether egma ships something that can measure this type's targets. */
   readonly capabilityDiscovery: boolean;
   readonly variants: readonly VariantMetadata[];
@@ -443,6 +447,7 @@ export function connectionTypeMetadata(): readonly ConnectionTypeMetadata[] {
       modalities: descriptor.modalities,
       topology: descriptor.topology,
       simulatorAdapter: descriptor.simulatorAdapter,
+      usesPlatformCarrier: descriptor.usesPlatformCarrier,
       capabilityDiscovery: hasCapabilityDiscovery(type),
       variants: descriptor.variants.map(variantMetadata),
     };
@@ -755,6 +760,7 @@ export const CONNECTION_REGISTRY: Readonly<
     // The provider's own agent id: the first vendor to carry a reuse rule.
     reuseKey: "retellAgentId",
     simulatorAdapter: true,
+    usesPlatformCarrier: false,
   },
   phone: {
     label: "Phone number",
@@ -808,6 +814,7 @@ export const CONNECTION_REGISTRY: Readonly<
     // simulator ships with, and that one is about what one installation has
     // been configured with.
     simulatorAdapter: true,
+    usesPlatformCarrier: true,
   },
   livekit: {
     label: "LiveKit",
@@ -958,6 +965,7 @@ export const CONNECTION_REGISTRY: Readonly<
       },
     ],
     simulatorAdapter: true,
+    usesPlatformCarrier: false,
     // No reuse rule, deliberately: the url names a server rather than an
     // agent, whole teams share one, and the agent name is absent in the
     // ordinary case. There is nothing here that could honestly say two
@@ -1019,11 +1027,9 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
 /**
  * Whether this exact stored connection can be handed to a simulator.
  *
- * The modality is checked here as well as at write time. Old rows can outlive
- * a registry correction, and dispatch must not trust a row only because it was
- * accepted by an older build. That is how legacy direct Retell voice rows are
- * stopped while Retell chat rows and provider-blind phone rows keep working.
- * This check cannot know whether an id inside a chat-labelled row belongs to a
+ * The modality is checked here as well as at write time. Dispatch trusts only
+ * a type/modality pair the current registry says its adapter can conduct. This
+ * check cannot know whether an id inside a chat-labelled row belongs to a
  * provider voice agent; the Retell read in the API claim assembler owns that
  * second, provider-aware check.
  */
@@ -1037,6 +1043,11 @@ export function connectionIsConductable(
     descriptor.simulatorAdapter &&
     descriptor.modalities.includes(modality as Modality)
   );
+}
+
+/** Whether this type needs the deployment carrier on its claimed work order. */
+export function connectionUsesPlatformCarrier(type: string): boolean {
+  return CONNECTION_REGISTRY[type as ConnectionType]?.usesPlatformCarrier === true;
 }
 
 /**

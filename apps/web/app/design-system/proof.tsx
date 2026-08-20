@@ -276,9 +276,9 @@ export function DesignSystemProof() {
 
         <article className={`${styles.panel} ${styles.wide}`}>
           <p className={styles.kicker}>Settings scope and refusal</p>
-          <SettingsNav projectId="prj_proof" current="judge" />
+          <SettingsNav projectId="prj_proof" current="organization" />
           <Refused
-            message="Your viewer role cannot change the default judge. Your draft is still here."
+            message="Your viewer role cannot change organization settings. Your draft is still here."
             action={<Button>Review project access</Button>}
           />
         </article>

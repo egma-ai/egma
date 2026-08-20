@@ -1,0 +1,31 @@
+{
+  "contract_version": 2,
+  "simulation_id": "sim_fixture_persona_missing_language",
+  "modality": "chat",
+  "connection": {
+    "type": "scripted",
+    "config": {},
+    "credentials": null
+  },
+  "persona": {
+    "traits": {
+      "personality": "Patient and direct."
+    }
+  },
+  "scenario": { "instructions": "Ask for an appointment." },
+  "limits": { "max_duration_seconds": 300, "max_turns": 20 },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": { "provider": "deepgram", "model": "nova-3-general" },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "fixture-voice",
+      "speed": 1
+    }
+  }
+}

@@ -386,7 +386,7 @@ requires-dist = [
     { name = "nltk", specifier = ">=3.10.2" },
     { name = "opentelemetry-exporter-otlp-proto-common", specifier = "==1.44.0" },
     { name = "opentelemetry-sdk", specifier = "==1.44.0" },
-    { name = "pipecat-ai", extras = ["deepgram", "elevenlabs", "livekit", "tracing"], specifier = "==1.7.0" },
+    { name = "pipecat-ai", extras = ["deepgram", "livekit", "tracing"], specifier = "==1.7.0" },
     { name = "rfc3339-validator", specifier = ">=0.1.4" },
     { name = "structlog", specifier = ">=26.1.0" },
 ]

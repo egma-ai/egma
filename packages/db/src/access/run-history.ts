@@ -17,6 +17,7 @@ import {
   SimulationRerunRefusedError,
 } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
+import { personaAvailableToProject } from "./persona-availability.ts";
 import { LARGEST_PAGE_SIZE, type PageRequest } from "./pages.ts";
 import { testsApplyingToAgent } from "./tests.ts";
 import {
@@ -386,8 +387,8 @@ export async function rerunSimulation(
  * "we ran it again" about a different run, and the two results would be
  * compared as though they were about the same thing.
  *
- * **It is honestly not a replay.** Persona versions, the project's running
- * copies, the judge setting, the connection's current configuration and
+ * **It is honestly not a replay.** Persona versions, the project's current
+ * grader copies and versions, the connection's current configuration and
  * credential, and the project's mock tools are all resolved fresh by `startRun`
  * — because those are what a run under current conditions means. The earlier run
  * is never reopened and never changed. A copy switched off since is therefore
@@ -451,7 +452,13 @@ export async function retryRun(
   await demandActiveConnection(on, auth, runId, earlier.connectionId);
   const versions = await demandLiveVersions(on, auth, runId, versionIds);
   await demandApplicableTests(on, auth, runId, earlier.agentId, versions);
-  await demandActivePersonas(on, auth, runId, versionIds);
+  await demandActivePersonas(
+    on,
+    auth,
+    runId,
+    earlier.projectId,
+    versionIds,
+  );
 
   return startRun(auth, start);
 }
@@ -560,6 +567,7 @@ async function demandActivePersonas(
   on: Queryable,
   auth: AuthContext,
   runId: string,
+  projectId: string,
   versionIds: readonly string[],
 ): Promise<void> {
   const named = await on
@@ -576,9 +584,9 @@ async function demandActivePersonas(
         .select({ id: persona.id })
         .from(persona)
         .where(
-          within(
+          personaAvailableToProject(
             auth,
-            persona,
+            projectId,
             and(inArray(persona.id, personaIds), isNull(persona.archivedAt)),
           ),
         )

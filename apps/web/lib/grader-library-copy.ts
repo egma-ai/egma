@@ -121,18 +121,5 @@ export const TYPES: Readonly<Record<string, string>> = {
   code: "Computed",
 };
 
-/**
- * The two owners, as a person reads them.
- *
- * `egma` is an entry egma ships and maintains; anything else belongs to the
- * team looking at it, because the list is already narrowed to their own
- * organization. Owner is derived from who the entry belongs to and never from a
- * flag, which is why there is no third word here for anybody to set.
- */
-export const OWNERS: Readonly<Record<string, string>> = {
-  egma: "Egma",
-  organization: "Your team",
-};
-
 /** What a row says where the answer carried nothing. */
 export const NOTHING = "—";

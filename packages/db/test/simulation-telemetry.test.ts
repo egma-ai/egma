@@ -16,7 +16,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "./support/database.ts";
-import { seedJudge, seedOrganization, seedUser } from "./support/tenancy.ts";
+import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
  * The standing resolver's telemetry duty: where a simulation's arriving spans
@@ -67,11 +67,6 @@ function actingAsGlobex(): AuthContext {
 const NEUTRAL_TRAITS = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: {
-    provider: "elevenlabs",
-    voiceId: "EXAVITQu4vr4xnSDxMaL",
-    speed: 1,
-  },
 } as const;
 
 type SeededSimulation = {
@@ -144,8 +139,6 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
-  await seedJudge({ ...actingAsAcme(), role: "admin" });
-  await seedJudge({ ...actingAsGlobex(), role: "admin" });
   // No running graders: this is about where an arriving span files, which is
   // decided by the simulation's own pins long before anything judges it.
 

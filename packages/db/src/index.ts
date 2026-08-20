@@ -74,6 +74,42 @@ export {
   behaviorAssertionAt,
   behaviorAssertionKey,
 } from "./grader-library/assertion-keys.ts";
+export {
+  PERSONA_LIBRARY_CATALOG,
+  EGMA_PROVIDED_PERSONAS,
+  type EgmaProvidedPersona,
+  type EgmaProvidedPersonaVersion,
+} from "./persona-library/catalog.ts";
+export {
+  seedPersonaLibrary,
+  type SeededPersona,
+} from "./persona-library/seed.ts";
+export {
+  MODEL_JOBS,
+  MODEL_PROVIDERS,
+  PROVIDER_CATALOG,
+  PROVIDERS_BY_JOB,
+  RECOMMENDED_ENTRY,
+  isModelProvider,
+  type ModelJob,
+  type ModelProvider,
+  type ProviderCatalogEntry,
+} from "./models/catalog.ts";
+export {
+  RECOMMENDED_GRADER_MODEL,
+  RECOMMENDED_PERSONA_MODELS,
+  SPEED_RANGE,
+  graderModelFromRow,
+  personaModelsFromRow,
+  sameGraderModel,
+  samePersonaModels,
+  validGraderModel,
+  validPersonaModels,
+  type GraderModel,
+  type ModelSelection,
+  type PersonaModels,
+  type SpeechSelection,
+} from "./models/selections.ts";
 /**
  * The fold one grain up, where execution meets judgment — and where the two are
  * kept apart.
@@ -162,6 +198,7 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
+  connectionUsesPlatformCarrier,
   connectionTypeMetadata,
   credentialRuleOf,
   variantById,

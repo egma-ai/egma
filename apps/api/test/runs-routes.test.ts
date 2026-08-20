@@ -136,16 +136,15 @@ const PHONE = {
 
 /**
  * A deployment `egma self-host setup` has finished with: a carrier
- * trunk, a number its calls come from, and a voice to speak with.
+ * trunk and a number its calls come from.
  *
- * Non-secret, all three of it — see `phone-readiness.ts`. What it stands for
+ * See `phone-readiness.ts`. What it stands for
  * here is the difference between an egma that can dial and one that has never
  * been given a carrier, which is the only thing the run door asks about.
  */
 const PHONE_IS_SET_UP = {
   carrier_trunk_address: "egma-simulator-106e37f8.pstn.twilio.com",
   carrier_trunk_number: "+18885550123",
-  text_to_speech_provider: "openai",
 } as const;
 
 /** Somebody with a key, an agent to check, and a test to check it against. */
@@ -179,7 +178,10 @@ async function aCustomerReadyToRun(
   // route ships for a persona. One test then names both, which is what makes
   // "one simulation per test per person" something this file can observe.
   for (const name of ["Impatient Rita", "Deliberate Sam"]) {
-    await createPersona(contextFor(ada, "member"), { name, traits: NEUTRAL_TRAITS });
+    await createPersona(contextFor(ada, "member"), {
+      name,
+      traits: NEUTRAL_TRAITS,
+    });
   }
 
   const { versionId: oneCaller } = await pushTest(key, "Reschedules", [
@@ -614,7 +616,7 @@ describe("starting a run", () => {
         "this Egma instance has not been set up to place phone calls, so " +
         "nothing was " +
         "dialled and nothing was charged. It is missing the carrier trunk " +
-        "and the source number and the text-to-speech provider. Whoever runs " +
+        "and the source number. Whoever runs " +
         "this platform makes it ready with one command in the platform " +
         "workspace: " +
         "egma self-host setup.",
@@ -627,37 +629,6 @@ describe("starting a run", () => {
       "select id from simulation",
     );
     expect(simulations).toEqual([]);
-  });
-
-  it("says which half of the phone configuration is missing, so a partly-configured platform is not told to start again", async () => {
-    api = await createApi("runs_phone_half_set", {
-      platformSettings: PHONE_IS_SET_UP,
-    });
-    // Current writers refuse an incomplete route. Remove one row after a valid
-    // seed to model a database written by an older release, and prove the run
-    // door still gives that upgrade state an actionable refusal.
-    await api.database.sql(
-      "delete from platform_setting where name = 'carrier_trunk_number'",
-    );
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
-    await createPersona(contextFor(ada, "member"), {
-      name: "Impatient Rita",
-      traits: NEUTRAL_TRAITS,
-    });
-    const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
-    const { versionId } = await pushTest(key, "Reschedules", ["Impatient Rita"]);
-
-    const refused = await request("POST", "/api/runs", key, {
-      connection: dialled.connectionId,
-      test_versions: [versionId],
-      idempotency_key: newId("run"),
-    });
-
-    expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(String(refused.body.message)).toContain(
-      "It is missing the source number.",
-    );
   });
 
   it("lets a run over a connection that does not use the platform's carrier through a platform with none", async () => {

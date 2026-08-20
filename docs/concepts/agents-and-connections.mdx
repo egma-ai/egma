@@ -4,7 +4,7 @@ sidebarTitle: "Agents & Connections"
 description: "Learn how Egma models your voice agents and the connections it uses to reach them — via Retell or LiveKit — during simulation and testing."
 ---
 
-An **Agent** is Egma's record of one of your voice agents. It holds the agent's name, its project membership, and a history of every test run and simulation ever conducted against it. A **Connection** is how Egma actually reaches that agent when a simulation starts — it carries the provider credentials, the reach type, and everything else the simulator needs to place a call or exchange messages.
+An **Agent** is Egma's record of one of your agents. It holds the agent's name, its project membership, and a history of every test run and simulation ever conducted against it. A **Connection** is how Egma reaches that agent when a simulation starts. Its type names the transport or provider. Its modality is either Chat or Voice.
 
 ## Agents
 
@@ -22,34 +22,37 @@ This makes it safe to run from CI pipelines or after a network failure — you w
 
 ## Connections
 
-A Connection defines the path from Egma to your agent. One agent can have multiple connections, each representing a different way to reach it. This is useful when you want to test the same agent over both a text channel and a phone line.
+A Connection defines the path from Egma to your agent. One agent can have multiple connections, each representing a different path.
 
 ### Connection types
 
-<CardGroup cols={2}>
+<CardGroup cols={3}>
   <Card title="Retell" icon="phone">
-    Connects via the Retell API. Requires a Retell API key and a Retell agent ID. Egma seals the key on arrival and uses it only when placing simulation calls.
+    Exchanges messages with a Retell chat agent. It has the Chat modality and requires a Retell API key and agent ID.
+  </Card>
+  <Card title="Phone" icon="phone-volume">
+    Dials a telephone number through the platform carrier. It has the Voice modality. The connection stores the number, not a Retell credential.
   </Card>
   <Card title="LiveKit" icon="satellite-dish">
-    Connects to a LiveKit agent by joining a room in your own LiveKit project. Requires a LiveKit URL, API key, and API secret. Optionally accepts an agent name if your worker registers one.
+    Joins a room in your LiveKit project. It has the Voice modality and uses project credentials or a token endpoint.
   </Card>
 </CardGroup>
 
-### Reach types
+### Modalities
 
-Each connection has a **reach type** that determines what kind of conversation Egma simulates:
+Each connection has one modality:
 
 <CardGroup cols={2}>
-  <Card title="text" icon="message">
-    Egma exchanges messages directly with your agent. No phone call, nothing dialled. Tests your prompt, reasoning logic, and tool integrations.
+  <Card title="Chat" icon="message">
+    Egma exchanges messages with the agent. No audio or telephone call is part of this modality.
   </Card>
-  <Card title="phone" icon="phone-volume">
-    Egma places a real SIP call to one of your agent's phone numbers. Tests everything the text reach tests, *plus* your speech stack, TTS/STT providers, and the telephone network path.
+  <Card title="Voice" icon="waveform">
+    Egma speaks and listens. A Voice connection can use LiveKit or Phone. Phone is a connection type, not a modality.
   </Card>
 </CardGroup>
 
 <Tip>
-Running the same test over both a `text` connection and a `phone` connection is the sharpest diagnostic Egma offers. A test that passes on text and fails on phone tells you the prompt is fine and the speech stack is not.
+Each run names one connection. Compare runs across connections only when those connections reach the same logical agent.
 </Tip>
 
 ### Credential sealing
@@ -66,7 +69,7 @@ The fastest way to register an agent is with `egma connect`. Run it inside your 
 egma connect
 ```
 
-The wizard asks for your provider API key (input is masked), lists the agents on your account, and asks which reach type to create. For phone connections, it lists the numbers routed to the agent and asks you to pick one.
+The wizard asks for your provider API key (input is masked), lists the agents on your account, and reads the selected Retell agent's modality. A chat agent gets one Retell Chat option. A voice agent gets one Phone option and the wizard asks which routed number to dial.
 
 To run non-interactively (for CI or a coding agent), supply the key and options without a terminal:
 
@@ -87,8 +90,8 @@ You can also register directly with `POST /api/agents`. Include the connection i
   "name": "order-line",
   "connection": {
     "type": "retell",
-    "modality": "voice",
-    "config": { "retell_agent_id": "agent_abc123" },
+    "modality": "chat",
+    "config": { "retellAgentId": "agent_abc123" },
     "credentials": { "api_key": "key_..." }
   }
 }
@@ -102,12 +105,12 @@ A connection is only ever reachable through its agent. There is no `/api/connect
 
 ## One agent, multiple connections
 
-Having multiple connections on one agent keeps all run history unified. You do not need separate agents for "text testing" and "phone testing" — they are the same agent reached two different ways, and Egma tracks their results together.
+Having multiple connections on one Egma agent keeps its run history unified. Add them only when they reach the same logical agent. The Retell CLI does not invent a second modality for one Retell agent; it creates the path that matches the agent Retell returned.
 
 ```
 agent: order-line  (agt_01K…)
-  └── connection: text-1   (con_01K…)   type: retell   reach: text
-  └── connection: phone-1  (con_01K…)   type: phone    reach: phone
+  └── connection: chat-1   (con_01K…)   type: retell   modality: chat
+  └── connection: phone-1  (con_01K…)   type: phone    modality: voice
 ```
 
-Each run names a specific `connection_id`, so results from each reach type stay distinct in your history.
+Each run names a specific `connection_id`, so results from each path stay distinct in your history.

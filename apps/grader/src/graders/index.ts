@@ -78,14 +78,14 @@ const EXECUTORS: Readonly<Record<string, GraderExecutor | undefined>> = {
 export async function execute(
   execution: Execution,
 ): Promise<readonly Judgment[]> {
-  const executor = EXECUTORS[execution.definition.id];
+  const executor = EXECUTORS[execution.definition.libraryId];
 
   if (executor === undefined) {
     const nothingToJudge = execution.conversation.nothingToJudgeBecause;
     return couldNotJudge(
       execution,
       nothingToJudge ??
-        `Egma does not execute the ${execution.definition.name} grader yet, so this check was not made.`,
+        `Egma does not execute Library grader ${execution.definition.libraryId} yet, so this check was not made.`,
     );
   }
 
@@ -115,7 +115,7 @@ export async function couldNotJudge(
   execution: Execution,
   rationale: string,
 ): Promise<readonly Judgment[]> {
-  const executor = EXECUTORS[execution.definition.id];
+  const executor = EXECUTORS[execution.definition.libraryId];
   const keys =
     executor === undefined
       ? [theOneCheck(execution.definition)]

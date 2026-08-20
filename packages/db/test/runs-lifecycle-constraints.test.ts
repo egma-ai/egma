@@ -1,4 +1,5 @@
 import { newId } from "@egma/ids";
+import { RECOMMENDED_PERSONA_MODELS } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -96,8 +97,17 @@ async function seedPersona(
     [persona, organization, project, version],
   );
   await db.sql(
-    "insert into persona_version (id, persona_id, version, traits) values ($1, $2, 1, '{}'::jsonb)",
-    [version, persona],
+    `insert into persona_version (id, persona_id, version, traits, models)
+     values ($1, $2, 1, $3::jsonb, $4::jsonb)`,
+    [
+      version,
+      persona,
+      JSON.stringify({
+        personality: "Speaks plainly and stays patient.",
+        language: "en-US",
+      }),
+      JSON.stringify(RECOMMENDED_PERSONA_MODELS),
+    ],
   );
   await db.sql("commit");
 }

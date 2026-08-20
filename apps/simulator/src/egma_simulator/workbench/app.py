@@ -20,9 +20,8 @@ nothing, indexes nothing and joins nothing — the real ingest does all of
 that, and a second implementation of it here would be a second thing to
 keep true.
 
-When the real claim API lands in the control plane, the workbench retires
-from the critical path and stays what it already is: the local rig for
-whoever is working on the simulator.
+The production claim API is the only real control path. This workbench stays a
+local rig for simulator development and contract tests.
 """
 
 from __future__ import annotations
@@ -80,10 +79,7 @@ class WorkbenchState:
         """Queue one spec — the workbench's stand-in for a trigger writing rows."""
         validate_spec(spec)
         simulation_id = spec["simulation_id"]
-        if (
-            simulation_id in self._queued
-            or simulation_id in self._claimed
-        ):
+        if simulation_id in self._queued or simulation_id in self._claimed:
             raise ValueError(f"{simulation_id} is already offered")
         async with self._arrival:
             self._queued[simulation_id] = spec
@@ -168,9 +164,7 @@ class WorkbenchState:
             raise RefusedReport("simulation_id mismatch")
 
         for event in document["events"]:
-            self._record(
-                "report", simulation_id=simulation_id, event=event, raw=body
-            )
+            self._record("report", simulation_id=simulation_id, event=event, raw=body)
 
     def spans(self, raw: bytes) -> None:
         """Validate and record one OTLP span batch; refusals are records too.
@@ -332,41 +326,3 @@ def load_spec_documents(path: Path) -> list[dict]:
         with open(file, encoding="utf-8") as handle:
             documents.append(json.load(handle))
     return documents
-
-
-def dialling(documents: list[dict], number: str) -> list[dict]:
-    """The specs that dial, pointed at a real number instead of a fixture's.
-
-    A checked-in fixture cannot know anybody's phone number, so
-    ``voice-phone.json`` names an obvious placeholder. That makes the one
-    demo worth watching — a real call to a real agent — the one demo the
-    fixtures cannot give, and closing that gap by hand is copying a JSON
-    document and POSTing it, which is three steps where there should be
-    none.
-
-    So the workbench takes the number instead, and does the two things that
-    make the run about the phone call: it writes the number into every spec
-    that dials, and it queues nothing else. The second half is not tidiness
-    — the simulator claims four at a time, so the other fixtures would
-    conduct their exchanges *alongside* the call and interleave their
-    events with the ones somebody started this to read.
-
-    Dev only, like everything else in this package. The real control plane
-    is handed specs; it does not edit them.
-    """
-    dials = [
-        document
-        for document in documents
-        if document.get("connection", {}).get("type") == "phone"
-    ]
-    if not dials:
-        raise FileNotFoundError(
-            "no spec here names a phone connection, so there is nothing to "
-            f"point at {number}"
-        )
-    pointed = []
-    for document in dials:
-        connection = document["connection"]
-        config = connection["config"] | {"phoneNumber": number}
-        pointed.append(document | {"connection": connection | {"config": config}})
-    return pointed

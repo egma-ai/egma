@@ -9,6 +9,9 @@ into a spurious client-side timeout.
 
 A real server on loopback reads the body back, because what is under test
 is what actually goes on the wire.
+
+The same body declares the one spec version this simulator validates. Without
+that handshake the control plane must refuse the worker before it takes a row.
 """
 
 from __future__ import annotations
@@ -50,5 +53,10 @@ async def test_a_claim_declares_how_long_it_will_wait(recording_control_plane):
         await client.claim("sim-under-test", 3)
 
     assert bodies == [
-        {"claimant": "sim-under-test", "capacity": 3, "wait_seconds": 7.0}
+        {
+            "claimant": "sim-under-test",
+            "capacity": 3,
+            "wait_seconds": 7.0,
+            "contract_versions": [2],
+        }
     ]

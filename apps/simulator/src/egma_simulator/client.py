@@ -25,6 +25,8 @@ import logging
 
 import aiohttp
 
+from .contract import spec_contract_version
+
 logger = logging.getLogger(__name__)
 
 # What "the call did not get through" is actually made of. `TimeoutError` is
@@ -116,7 +118,7 @@ class ControlPlaneClient:
         return self._session
 
     async def claim(self, claimant: str, capacity: int) -> list[dict]:
-        """Ask for up to ``capacity`` specs; an empty list is a quiet queue."""
+        """Ask for compatible specs; an empty list is a quiet queue."""
         try:
             async with self._live_session().post(
                 f"{self._base_url}/v1/claims",
@@ -124,6 +126,7 @@ class ControlPlaneClient:
                     "claimant": claimant,
                     "capacity": capacity,
                     "wait_seconds": self._claim_wait_seconds,
+                    "contract_versions": [spec_contract_version()],
                 },
                 timeout=self._claim_timeout,
             ) as response:

@@ -61,7 +61,6 @@ ALLOWED_DEPENDENCIES = {
 
 SPEECH_PROVIDER_MODULES = (
     "pipecat.services.deepgram.stt",
-    "pipecat.services.elevenlabs.tts",
     "pipecat.services.cartesia.tts",
     "pipecat.services.openai.stt",
     "pipecat.services.openai.tts",
@@ -255,37 +254,72 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         # this process's environment.
         from egma_simulator.blob import FilesystemBlobStore
         from egma_simulator.config import MediaSettings
-        from egma_simulator.spec import PlatformCarrier
         from egma_simulator.model import ScriptedModel
         from egma_simulator.persona import Persona
         from egma_simulator.pipeline import assemble
         from egma_simulator.spec import SimulationSpec
+        from egma_simulator.speech import SCRIPTED_PAIR
         from egma_simulator.walk import WalkControls
 
-        def spec_for(connection):
-            return SimulationSpec.from_document({
-                "contract_version": 1,
+        def spec_for(connection, platform=None):
+            document = {
+                "contract_version": 2,
                 "simulation_id": "sim-unconfigured",
                 "modality": "voice",
                 "connection": connection,
-                "persona": {"traits": {"personality": "Terse."}},
+                "persona": {
+                    "traits": {
+                        "personality": "Terse.",
+                        "language": "en-US",
+                    }
+                },
                 "scenario": {"instructions": "One point."},
                 "limits": {"max_duration_seconds": 30, "max_turns": 8},
-            })
+                "models": {
+                    "llm": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "key": "sentinel-llm-key",
+                    },
+                    "stt": {
+                        "provider": "deepgram",
+                        "model": "nova-3-general",
+                        "key": "sentinel-stt-key",
+                    },
+                    "tts": {
+                        "provider": "cartesia",
+                        "model": "sonic-3.5",
+                        "voice_id": "warm-alto-2",
+                        "speed": 1.0,
+                        "key": "sentinel-tts-key",
+                    },
+                },
+            }
+            if platform is not None:
+                document["platform"] = platform
+            return SimulationSpec.from_document(document)
 
         LOOPBACK = spec_for({
             "type": "loopback",
             "config": {"replies": ["Noted."]},
             "credentials": None,
         })
-        PHONE = spec_for({
-            "type": "phone",
-            "config": {
-                "phoneNumber": "+15551234567",
-                "scripted": {"replies": ["Noted."]},
+        PHONE = spec_for(
+            {
+                "type": "phone",
+                "config": {
+                    "phoneNumber": "+15551234567",
+                    "scripted": {"replies": ["Noted."]},
+                },
+                "credentials": None,
             },
-            "credentials": None,
-        })
+            {
+                "carrier": {
+                    "trunk_address": "egma-fixture.pstn.twilio.com",
+                    "trunk_number": "+15550000000",
+                }
+            },
+        )
 
         def persona_for(spec):
             return Persona(
@@ -299,9 +333,8 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
                 assembled = assemble(
                     spec,
                     blobs=FilesystemBlobStore(Path(blobs)),
-                    media=MediaSettings.for_simulation(
-                        None, PlatformCarrier(media_backend="scripted")
-                    ),
+                    speech=SCRIPTED_PAIR,
+                    media=MediaSettings(backend="scripted"),
                 )
                 heard = []
                 if assembled.conductor is not None:
@@ -337,10 +370,9 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         print(json.dumps(sorted(
             name for name in sys.modules
             if name.split(".")[0] in (
-                "deepgram", "elevenlabs", "livekit", "boto3", "botocore"
+                "deepgram", "livekit", "boto3", "botocore"
             )
             or name.startswith("pipecat.services.deepgram")
-            or name.startswith("pipecat.services.elevenlabs")
             or name.startswith("pipecat.services.cartesia")
             or name.startswith("pipecat.services.openai.stt")
             or name.startswith("pipecat.services.openai.tts")

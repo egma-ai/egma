@@ -149,17 +149,18 @@ to confirm it:
   Egma creates this connection only after you confirm it.
 ```
 
-Retell voice agents use phone. Retell chat agents use text. An explicit choice
-that does not match the agent stops before Egma writes a connection or a local
-binding.
+Retell voice agents use a Phone connection with the Voice modality. Retell chat
+agents use a Retell connection with the Chat modality. The CLI flag for the
+chat reach is `--reach text`. An explicit choice that does not match the agent
+stops before Egma writes a connection or a local binding.
 
 For a voice agent, Egma lists the numbers Retell routes to that agent. You pick
 one, and the
 connection it writes holds that number and nothing else — no Retell identifier
 and no credential of any kind, because the public telephone network neither
-knows nor cares what answers. Choose text and it writes one Retell chat
-connection for the voice agent you selected, with your key sealed on the
-platform.
+knows nor cares what answers. For a Retell chat agent, the command writes one
+Retell Chat connection and seals its key on the platform. It never writes a
+Retell Chat connection for a voice agent.
 
 **What Retell answered is kept exactly as it answered it**, beside what Egma
 read out of it, so a field Egma has no place for today is still there tomorrow.
@@ -360,7 +361,7 @@ Then one keystroke:
     open-on-sunday          somebody-in-a-hurry
     … 9 more (↑↓ browse · e opens in $EDITOR)
 
-Run these against order-line over retell-1 (voice)?
+Run these against order-line over retell-1 (chat)?
 
 [enter] run   [e] edit first   [q] quit
 ```
@@ -676,7 +677,8 @@ Environment:
                        read too, so an environment that already has one needs
                        nothing new.
   EGMA_RETELL_AGENT_ID Which Retell agent, same as --retell-agent.
-  EGMA_REACH           text or phone, same as --reach.
+  EGMA_REACH           text for a Retell Chat connection, or phone for a
+                       Phone connection; same as --reach.
   EGMA_PHONE_NUMBER    Which number to dial, same as --phone-number.
   EGMA_RETELL_URL      The Retell to talk to. Default: https://api.retellai.com
   EGMA_EXISTING_TESTS  Your existing test cases, same as --existing-tests.
@@ -722,39 +724,36 @@ simulator, the grader, and the LiveKit server, SIP gateway and Redis a phone
 call needs — and prints the address to point an agent repository at. Open it and
 sign up: you become the admin of your own instance.
 
-It also prints what the platform is still **missing**, because a started platform
-is not a configured one — and it prints the phone half separately, since a
-platform with no carrier runs text simulations perfectly well. One more command
-in the same directory configures all of it:
+Put the deployment's current provider keys in `.env` as
+`EGMA_OPENAI_API_KEY`, `EGMA_DEEPGRAM_API_KEY`, and
+`EGMA_CARTESIA_API_KEY`. Persona and grader versions choose the models; these
+variables supply credentials only.
+
+The command also prints phone readiness separately. Configure that optional
+carrier route in the same directory:
 
 ```
 npx @egma/cli login --url http://localhost:3101
 npx @egma/cli self-host setup
 ```
 
-It asks the platform what it does not hold and then asks you for exactly that,
-in a fixed order: who the persona thinks with, what it speaks and hears with,
-and how a call reaches the telephone network. A setting the platform already
-holds is never asked for again, so a second run is about the one key you were
-missing — and on a fully configured platform it changes nothing and says so.
-
-Every answer is written through the platform's own API, which is why you log in
-first: these are the deployment's own provider credentials, and an organization
-owner is who may set them. The platform seals them into its own store, so they
-survive a restart, an upgrade and a move to another machine, and each simulator
-is handed them on the work order it claims.
+It asks only how a call reaches the telephone network. The carrier route is
+written through the platform's own API, which is why you log in first. The SIP
+password is sealed in Postgres and is handed to a simulator only on a claimed
+phone work order.
 
 For the phone half, a Twilio administrator creates one SIP credential per
 developer and one for production in the credential list already attached to the
 shared trunk. All of them use the same trunk address and source number. Each
 developer keeps their own pair outside the database.
 
-Setup asks for `EGMA_PHONE_TRUNK_ADDRESS`, `EGMA_PHONE_SOURCE_NUMBER`,
-`EGMA_PHONE_TRUNK_USERNAME`, and `EGMA_PHONE_TRUNK_PASSWORD`, then copies the
-complete bundle into the platform store. A fresh database gets the same values
-again from the developer's environment. Setup never asks for the Twilio Account
-SID or Auth Token, never contacts Twilio, and never creates or changes a SIP
-credential.
+Setup asks for the trunk address and source number, plus the SIP username and
+password when the carrier uses credential authentication. It writes the
+complete bundle into the platform store. Keep that bundle in the ignored
+`.env` file or a password manager if a fresh database must restore it later;
+the CLI does not write an environment file. Setup never asks for the Twilio
+Account SID or Auth Token, never contacts Twilio, and never creates or changes
+a SIP credential.
 
 Normal setup does not replace a held carrier bundle. To replace one developer
 credential safely, an administrator first adds the new credential beside the

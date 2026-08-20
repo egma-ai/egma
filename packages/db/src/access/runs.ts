@@ -1237,20 +1237,13 @@ async function startRunWithSelection(
       await admitTestsForAgent(tx, reached.agentId, versions);
 
       /**
-       * What will judge this run, and whose account pays — resolved before a row
-       * is written, because a run that would ask a model this project has not
-       * configured is refused here.
+       * What will judge this run, resolved before the row is written. Every
+       * selected running copy contributes its immutable grader version; a
+       * project with no running copies freezes an empty plan.
        *
-       * **A run whose plan asks a model, in a project holding none, would dial
-       * real simulations and then write `errored` against every assertion** —
-       * egma's own configuration reported as an agent's failure. Refusing before
-       * the money is spent is the whole point.
-       *
-       * It is the plan that decides, not the project: the expected-behaviors
-       * copy is an ordinary deletable row now, so a project judging only with
-       * `latency` — or with nothing at all — asks no model and is refused
-       * nothing. `demandJudge` holds that rule in one place, beside the plan it
-       * reads.
+       * Provider credentials are not part of this decision and never enter the
+       * plan. The grader resolves the deployment credential for the selected
+       * version's provider when it claims the work.
        */
       const { groups } = await resolveRunPlan(tx, auth, projectId, versions);
 
@@ -1438,7 +1431,8 @@ async function startRunWithSelection(
         .returning(SIMULATION_COLUMNS);
 
       // The plan is written in the same transaction as the run and its
-      // conversations, so a run can never exist with nothing to judge it by.
+      // conversations. A plan with no grader items is valid; the invariant is
+      // that every run records that empty decision instead of having no plan.
       await writeGradingPlan(tx, {
         runId,
         organizationId: auth.organizationId,
@@ -2503,8 +2497,7 @@ export type SimulationConnection = {
  * The one door to a connection's plaintext on the dispatch path, and **egma's
  * own simulator is the only thing that may knock.**
  *
- * The gate is narrower than a role, on the terms `resolveJudgeKey` drew for
- * the other secret egma holds: the only thing egma ever does with a
+ * The gate is narrower than a role: the only thing egma ever does with a
  * connection's credentials at this seam is conduct a simulation over them,
  * and the only thing that conducts is the simulator. So the check is on how
  * the caller came to exist rather than on what their role permits — a context

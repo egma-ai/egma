@@ -18,32 +18,25 @@ import type { RateLimit } from "../http/rate-limit.ts";
  * The settings this deployment holds, as an organization owner reads and
  * changes them.
  *
- * Four things about this group are contract rather than convenience.
+ * This door owns only the deployment carrier route. Provider credentials come
+ * from the deployment environment, while persona and grader versions own
+ * model choices.
  *
  * **No read ever answers a stored secret.** What comes back for a setting is a
- * *hint*: the whole value where the setting is not a secret — a provider's
- * name, a model's name — and the last four characters where it is, so that two
- * keys can be told apart without either being handed to a browser. There is no
- * query, no header and no role that widens that, because the sealed column is
- * not among the ones the read selects at all. A stolen browser record is
- * therefore not a stolen provider account.
+ * *hint*: the whole value where the setting is not a secret, and the last four
+ * characters of the SIP password. There is no query, header or role that
+ * returns the stored password.
  *
- * **An edit changes what it names and nothing else.** One row per setting is
- * what makes that structural: changing the model on a settings form cannot drop
- * the key beside it, and a value is replaced whole or left alone — there is no
- * shape in which one could be edited in place, because the envelope is sealed
- * over the whole value.
+ * **A route changes as one supported shape.** It is either an address and
+ * source number, or those two values plus a paired SIP username and password.
  *
  * **Only a single organization's owner may knock, on both doors.** These are
- * the deployment's own provider credentials, which is the row of the permission
- * table that already names provider credentials — so a `member` and a `viewer`
- * are refused the read as firmly as the write, because reading is how you learn
- * whose account this platform spends from. And the whole group is refused on a
- * deployment serving more than one organization, where these settings belong to
- * none of them; the factory holds both halves and says why.
+ * deployment configuration, so a `member` and a `viewer` are refused the read
+ * as firmly as the write. The whole group is also refused on a deployment that
+ * serves more than one organization, where no one organization owns the route.
  *
  * **Unknown keys are refused by name, once.** The body is small and every key
- * in it changes what the platform will speak with, so a typo quietly ignored
+ * in it changes how the platform places calls, so a typo quietly ignored
  * would be an operator believing they had set something they had not. That
  * refusal is the factory's — this door does not check the same thing a second
  * time, because one condition answered two ways is a contract with two faces.
@@ -160,14 +153,11 @@ export async function platformSettingsRoutes(
     if (error instanceof NotPermittedError) {
       return notPermitted(
         reply,
-        "the settings of this platform are read and changed by an " +
+        "the carrier route of this platform is read and changed by an " +
         "organization owner, and only while this Egma instance serves one " +
-          "organization. They are the deployment's own provider credentials — " +
-          "whose account every simulation is conducted on — which is a " +
-          "decision of the same kind as billing rather than of the same kind " +
-          "as writing a test; and where several organizations share a platform " +
-        "they belong to none of them, so Egma refuses everybody rather than " +
-          "picking one.",
+          "organization. It is deployment configuration, not project content; " +
+          "where several organizations share a platform it belongs to none of " +
+          "them, so Egma refuses everybody rather than picking one.",
       );
     }
 
