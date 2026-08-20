@@ -1,0 +1,397 @@
+/*
+ * Egma's theme, handed to Tailwind by reference.
+ *
+ * `DESIGN.md` decides the values, `tokens.css` declares them, and this file is
+ * the only place Tailwind learns them. **Every key below is a `var()` pointing
+ * back into `tokens.css`, never a copied colour, radius, or size.** That is the
+ * whole point: while the CSS Modules components and the shadcn components both
+ * exist, a page built from either reads the same declaration, so the two halves
+ * of the product cannot drift apart. Changing a value means editing
+ * `tokens.css` — editing it here is not possible, because there is nothing here
+ * to edit.
+ *
+ * Two mechanisms carry that, and both are worth knowing:
+ *
+ * 1. **`@theme inline`.** Tailwind normally emits its own custom property and
+ *    makes utilities point at that, which would be a second copy of the value.
+ *    `inline` makes the utility carry the reference instead, so `bg-primary`
+ *    compiles to `background-color: var(--action)` — egma's token, in the rule
+ *    itself.
+ * 2. **`tokens.css` outranks `@layer theme`.** Tailwind's defaults are declared
+ *    inside a cascade layer and `tokens.css` declares `:root` outside every
+ *    layer, so unlayered wins whatever the specificity. Where a Tailwind
+ *    default and an egma token share a name — `--radius-sm`, `--ease-out`,
+ *    `--ease-in-out` — the egma value is already the one that applies.
+ *
+ * A key may not reference its own name. `@theme inline { --text-sm:
+ * var(--text-sm) }` compiles, but it emits a circular declaration that only
+ * resolves because `tokens.css` happens to overrule it. So every key here
+ * references the `DESIGN.md`-named token underneath — `--text-sm` reads
+ * `--text-caption` — which says what it means and cannot go round in a circle.
+ *
+ * Where shadcn has a default and `DESIGN.md` has a rule, `DESIGN.md` wins. The
+ * weights above 500, the cool grey shadow ladder, the radius steps that belong
+ * to no component, and the type steps outside the accepted scale are deleted
+ * below rather than left available to be reached for by accident.
+ */
+
+@source "../app";
+@source "../components";
+@source "../lib";
+@source "../ui";
+
+/*
+ * `DESIGN.md`: "Pointer hover motion runs only under `(hover: hover) and
+ * (pointer: fine)`." Tailwind's own `hover:` asks only the first half, so a
+ * fine-pointer-only hover gets its own variant rather than an approximation.
+ * The `:hover` is inside the variant, so a class list says `pointer-hover:` once
+ * — `pointer-hover:bg-surface-soft` — rather than stacking two variants and
+ * inviting one of them to be forgotten.
+ */
+@custom-variant pointer-hover {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+
+/*
+ * What Tailwind ships and egma does not have. A deleted namespace produces no
+ * utility, so `font-bold`, `shadow-lg`, `rounded-3xl` and `text-7xl` are not
+ * classes a component can be given.
+ */
+@theme {
+  /* "Do not use weights 600 or 700." Only 400 and 500 survive. */
+  --font-weight-thin: initial;
+  --font-weight-extralight: initial;
+  --font-weight-light: initial;
+  --font-weight-semibold: initial;
+  --font-weight-bold: initial;
+  --font-weight-extrabold: initial;
+  --font-weight-black: initial;
+
+  /* "Do not use cool gray shadows." The orange-brown pair is added below. */
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+
+  /* "Use each radius for its named component type." The unnamed steps go. */
+  --radius-xs: initial;
+  --radius-xl: initial;
+  --radius-2xl: initial;
+  --radius-3xl: initial;
+  --radius-4xl: initial;
+
+  /* The accepted type scale stops at 82px. */
+  --text-6xl: initial;
+  --text-7xl: initial;
+  --text-8xl: initial;
+  --text-9xl: initial;
+}
+
+@theme inline {
+  /* ---------------------------------------------------------------- Colour */
+
+  /*
+   * Surfaces. Neutral Paper is the canvas; Pure Paper is what is raised off it,
+   * which `DESIGN.md` names as menus, dialogs, and form groups — so shadcn's
+   * `card` and `popover` are both that one surface.
+   */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-active: var(--surface-active);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+
+  /*
+   * The quiet neutral mix, for "quiet hover, read-only, progress, and
+   * supporting surfaces". shadcn spends three names on it — `muted`, `accent`,
+   * `secondary` — and all three are the same egma token, so a component using
+   * any of them lands in the same place.
+   */
+  --color-muted: var(--surface-soft);
+  --color-accent: var(--surface-soft);
+  --color-secondary: var(--surface-soft);
+  --color-muted-foreground: var(--muted);
+  --color-accent-foreground: var(--foreground);
+  --color-secondary-foreground: var(--foreground);
+  --color-faint: var(--faint);
+
+  /*
+   * Ember Wash, for "selected, current, open, cited, or active-attention
+   * states". shadcn has no name for this and reuses `accent`, which would put
+   * a routine hover and a selected row on one colour. They are different
+   * meanings in this product, so selection gets its own name.
+   */
+  --color-selected: var(--surface-active);
+  --color-selected-foreground: var(--foreground);
+
+  /* The primary filled action: Deep Ember with white text, and its two steps. */
+  --color-primary: var(--action);
+  --color-primary-foreground: var(--action-text);
+  --color-primary-hover: var(--action-hover);
+  --color-primary-pressed: var(--action-pressed);
+
+  /* Destructive, which is the failure colour and never the brand colour. */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-text);
+  --color-destructive-hover: var(--destructive-hover);
+  --color-destructive-pressed: var(--destructive-pressed);
+
+  /*
+   * Ember itself, for focus, icons, marks, and narrow active edges. It is
+   * `brand` rather than `accent` because shadcn already spent `accent` on a
+   * quiet surface, and one letter between "the brand orange" and "the grey
+   * hover" is not a difference anybody would keep straight.
+   */
+  --color-brand: var(--accent);
+
+  /* Lines and focus. */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--border);
+  --color-ring: var(--focus);
+
+  /*
+   * Product state. These carry verdict meaning — passed, skipped, failed — and
+   * the brand orange above never does. Keeping them named apart is what stops
+   * a filled Deep Ember button from reading as a verdict.
+   */
+  --color-success: var(--good);
+  --color-warning: var(--warn);
+  --color-failure: var(--bad);
+
+  /*
+   * The edge of a status chip: the state colour pulled most of the way back to
+   * the neutral line, so the chip reads as a chip and the colour stays
+   * supporting information. These three are derivations rather than tokens,
+   * and they are written here to the same recipe `system.module.css` already
+   * uses for `.badgeGood`, `.badgeWarn` and `.badgeBad` — so the CSS Modules
+   * chip and the shadcn chip are one chip while both exist. Migrating the CSS
+   * Modules chip removes the other copy.
+   */
+  --color-success-border: color-mix(in srgb, var(--good) 38%, var(--border));
+  --color-warning-border: color-mix(in srgb, var(--warn) 38%, var(--border));
+  --color-failure-border: color-mix(in srgb, var(--bad) 38%, var(--border));
+
+  /*
+   * The dialog scrim, to the same recipe as `.scrim::backdrop`. A dialog is
+   * the one place the page behind it has to read as inert.
+   */
+  --color-scrim: color-mix(in srgb, var(--foreground) 32%, transparent);
+
+  /* ----------------------------------------------------------------- Shape */
+
+  /*
+   * Named for the component, so the rule "do not apply one large radius to
+   * every component" is visible in the class list: `rounded-button` on a
+   * button, `rounded-card` on a card.
+   */
+  --radius-button: var(--radius-sm);
+  --radius-input: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-chip: var(--radius-pill);
+
+  /* The 4px grid, so `p-4` is 16px and `gap-3` is 12px. */
+  --spacing: var(--space-1);
+
+  /* ------------------------------------------------------------------ Type */
+
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+
+  /*
+   * The accepted scale, in Tailwind's step names so a stock shadcn component
+   * lands on it unedited: `text-sm` is the 14px table step and `text-base` is
+   * the 16px UI body. Line height and letter spacing travel with each step,
+   * which is what keeps a heading from arriving with body tracking.
+   */
+  --text-xs: var(--text-caption);
+  --text-xs--line-height: var(--line-caption);
+  --text-xs--letter-spacing: var(--tracking-caption);
+  --text-sm: var(--text-caption);
+  --text-sm--line-height: var(--line-caption);
+  --text-sm--letter-spacing: var(--tracking-caption);
+  --text-base: var(--text-body);
+  --text-base--line-height: var(--line-body);
+  --text-base--letter-spacing: var(--tracking-body);
+  --text-lg: var(--text-lead);
+  --text-lg--line-height: var(--line-lead);
+  --text-lg--letter-spacing: var(--tracking-lead);
+  --text-xl: var(--text-subheading);
+  --text-xl--line-height: var(--line-heading);
+  --text-xl--letter-spacing: var(--tracking-subheading);
+  --text-2xl: var(--text-heading-sm);
+  --text-2xl--line-height: var(--line-heading);
+  --text-2xl--letter-spacing: var(--tracking-heading-sm);
+  --text-3xl: var(--text-heading);
+  --text-3xl--line-height: var(--line-heading);
+  --text-3xl--letter-spacing: var(--tracking-heading);
+  --text-4xl: var(--text-heading-lg);
+  --text-4xl--line-height: var(--line-heading);
+  --text-4xl--letter-spacing: var(--tracking-heading-lg);
+  --text-5xl: var(--text-display);
+  --text-5xl--line-height: var(--line-heading);
+  --text-5xl--letter-spacing: var(--tracking-display);
+
+  /* -------------------------------------------------------------- Elevation */
+
+  /*
+   * "Menus and dialogs use the shared short orange-brown shadow. Large showcase
+   * panels may use the full orange-brown shadow stack." Two shadows, named for
+   * what may wear them, because the Tailwind ladder they replace is deleted
+   * above.
+   */
+  --shadow-popover: var(--shadow-menu);
+  --shadow-modal: var(--shadow-dialog);
+  --shadow-panel: var(--shadow-showcase);
+}
+
+/*
+ * Tailwind writes these two into its own reset. They are declared without
+ * `inline` so the property reaches the document and the reset can read it.
+ */
+@theme {
+  --default-font-family: var(--sans);
+  --default-mono-font-family: var(--mono);
+}
+
+/*
+ * Motion, at the theme rather than on each component.
+ *
+ * `DESIGN.md` asks for things a class list says badly: an exit that finishes
+ * before the element unmounts, a popover that grows from the control that
+ * opened it, and a reduced-motion form of every one of them. Radix already
+ * publishes what is needed — `data-state` for open and closed, and a
+ * transform-origin measured from the trigger — so the rules key off those and
+ * the component files stay stock shadcn.
+ *
+ * Exits are animations rather than transitions on purpose: Radix waits for
+ * `animationend` before unmounting, and a transition would be cut off halfway.
+ *
+ * The polish bar is "fast, modern, slick" and the floor is unchanged — every
+ * duration here is a `DESIGN.md` motion token, every one is under 300ms, only
+ * `transform` and `opacity` move, and reduced motion keeps the meaning while
+ * dropping the movement.
+ */
+
+@keyframes egma-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes egma-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes egma-anchored-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes egma-anchored-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.97); }
+}
+
+@keyframes egma-dialog-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes egma-dialog-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.98); }
+}
+
+@layer components {
+  /*
+   * "Pointer press feedback uses a subtle scale. Keyboard activation is
+   * immediate." Hence the fine-pointer media query and the `:focus-visible`
+   * exclusion: a button reached by keyboard fires without moving.
+   */
+  @media (hover: hover) and (pointer: fine) {
+    [data-slot="button"] {
+      transition: transform var(--duration-press) var(--ease-out);
+    }
+
+    [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
+      transform: scale(0.97);
+    }
+  }
+
+  /* "Menus and popovers scale from the trigger origin." Radix measures it. */
+  [data-slot="popover-content"] {
+    transform-origin: var(--radix-popover-content-transform-origin);
+  }
+
+  [data-slot="dropdown-menu-content"] {
+    transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  }
+
+  [data-slot="popover-content"][data-state="open"],
+  [data-slot="dropdown-menu-content"][data-state="open"] {
+    animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
+  }
+
+  [data-slot="popover-content"][data-state="closed"],
+  [data-slot="dropdown-menu-content"][data-state="closed"] {
+    animation: egma-anchored-out var(--duration-popover-out) var(--ease-out);
+  }
+
+  /* "Dialogs stay centered." So the dialog scales in place and never travels. */
+  [data-slot="dialog-overlay"][data-state="open"] {
+    animation: egma-fade-in var(--duration-dialog-in) var(--ease-out);
+  }
+
+  [data-slot="dialog-overlay"][data-state="closed"] {
+    animation: egma-fade-out var(--duration-dialog-out) var(--ease-out);
+  }
+
+  [data-slot="dialog-content"][data-state="open"] {
+    animation: egma-dialog-in var(--duration-dialog-in) var(--ease-out);
+  }
+
+  [data-slot="dialog-content"][data-state="closed"] {
+    animation: egma-dialog-out var(--duration-dialog-out) var(--ease-out);
+  }
+
+  /*
+   * "Every movement has a reduced-motion form." Nothing scales and nothing
+   * travels: what is left is opacity, which still says a surface arrived or
+   * left. `globals.css` already caps every animation at a single frame under
+   * this query, so these rules are what removes the *movement* rather than
+   * what sets the speed — and the exit still ends in `animationend`, which is
+   * what Radix waits for before unmounting.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="button"] {
+      transition: none;
+    }
+
+    [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
+      transform: none;
+    }
+
+    [data-slot="popover-content"][data-state="open"],
+    [data-slot="dropdown-menu-content"][data-state="open"],
+    [data-slot="dialog-content"][data-state="open"],
+    [data-slot="dialog-overlay"][data-state="open"] {
+      animation: egma-fade-in var(--duration-hover) linear;
+    }
+
+    [data-slot="popover-content"][data-state="closed"],
+    [data-slot="dropdown-menu-content"][data-state="closed"],
+    [data-slot="dialog-content"][data-state="closed"],
+    [data-slot="dialog-overlay"][data-state="closed"] {
+      animation: egma-fade-out var(--duration-hover) linear;
+    }
+  }
+}

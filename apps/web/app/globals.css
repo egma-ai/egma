@@ -1,4 +1,23 @@
+/*
+ * The one stylesheet the application loads.
+ *
+ * Order is the whole file. Tailwind arrives first and brings its layers with
+ * it; `tokens.css` declares egma's values in an unlayered `:root`, which beats
+ * anything Tailwind put in `@layer theme`; and `tailwind-theme.css` hands those
+ * same declarations to Tailwind by reference, so a utility and a CSS Module
+ * read one value rather than two copies of it.
+ *
+ * The element rules below sit in `@layer base`, beside Tailwind's own reset and
+ * after it, so they overrule the reset where the two disagree and a utility
+ * class overrules them in turn. That is the ordinary arrangement and it is what
+ * lets a shadcn component say `text-base` on a `<button>` and be obeyed. The
+ * one rule kept outside every layer is focus, and it is called out where it is
+ * written.
+ */
+
+@import "tailwindcss";
 @import "../ui/tokens.css";
+@import "../ui/tailwind-theme.css";
 
 :root {
   color-scheme: light;
@@ -10,29 +29,58 @@
   color-scheme: dark;
 }
 
-* { box-sizing: border-box; }
-html { min-width: 320px; background: var(--background); text-size-adjust: 100%; }
-body { min-height: 100svh; margin: 0; background: var(--background); color: var(--foreground); font-family: var(--sans); font-size: var(--text-body); font-synthesis: none; font-weight: 400; letter-spacing: var(--tracking-body); line-height: var(--line-body); }
-button, input, select, textarea { color: inherit; font: inherit; font-weight: 400; }
-h1, h2, h3, h4, h5, h6, strong, b { font-weight: 400; }
-a { color: inherit; }
-button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-::selection { background: var(--surface-active); color: var(--foreground); }
+@layer base {
+  * { box-sizing: border-box; }
+  html { min-width: 320px; background: var(--background); text-size-adjust: 100%; }
+  body { min-height: 100svh; margin: 0; background: var(--background); color: var(--foreground); font-family: var(--sans); font-size: var(--text-body); font-synthesis: none; font-weight: 400; letter-spacing: var(--tracking-body); line-height: var(--line-body); }
+  button, input, select, textarea { color: inherit; font: inherit; font-weight: 400; }
+  h1, h2, h3, h4, h5, h6, strong, b { font-weight: 400; }
+  a { color: inherit; }
+  button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+  ::selection { background: var(--surface-active); color: var(--foreground); }
 
-@supports (appearance: base-select) {
-  select, ::picker(select) { appearance: base-select; align-items: center; }
-  ::picker(select) {
-    margin-block: 4px;
-    padding: var(--space-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    box-shadow: var(--shadow-menu);
-    color: var(--foreground);
+  /*
+   * Tailwind's reset flattens the browser's own defaults — no list markers, no
+   * link underline, no margins anywhere. The CSS Modules pages were written
+   * against those defaults and are still the product until they are migrated,
+   * so the defaults are given back here. This is deliberately in
+   * `@layer base` and deliberately says `revert`: a utility class still wins,
+   * so a shadcn surface that asks for `list-none` or `m-0` gets it, and a page
+   * that asks for nothing keeps the rendering it shipped with.
+   */
+  a { text-decoration: revert; }
+  ul, ol, menu { list-style: revert; padding: revert; }
+  p, h1, h2, h3, h4, h5, h6, ul, ol, menu, dl, dd, figure, blockquote, pre, fieldset { margin: revert; }
+  img, svg, video, canvas, audio, iframe, embed, object { display: revert; vertical-align: revert; }
+  table { border-collapse: revert; }
+}
+
+/*
+ * Focus, outside every layer on purpose.
+ *
+ * "Focus is always visible" is not a default a component may talk its way out
+ * of, and shadcn components routinely carry `outline-none` and a ring of their
+ * own. An unlayered rule beats every utility whatever its specificity, so this
+ * is the product's focus indicator everywhere, and a pasted component cannot
+ * quietly remove it.
+ */
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+@layer base {
+  @supports (appearance: base-select) {
+    select, ::picker(select) { appearance: base-select; align-items: center; }
+    ::picker(select) {
+      margin-block: 4px;
+      padding: var(--space-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow-menu);
+      color: var(--foreground);
+    }
+    select option { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
+    select option:checked { background: var(--surface-active); }
   }
-  select option { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); }
-  select option:checked { background: var(--surface-active); }
 }
 
 @media (prefers-reduced-motion: reduce) {
