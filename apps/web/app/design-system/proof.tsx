@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/popover";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 import type { Me } from "../../lib/me.ts";
 import type { EvidenceTranscript } from "../../lib/simulations.ts";
@@ -60,7 +61,73 @@ import { Actions, Section, Toolbar } from "../../ui/section.tsx";
 import { SettingsNav } from "../../ui/settings-nav.tsx";
 import { AppShell, ProductPage } from "../../ui/shell.tsx";
 
-import styles from "./proof.module.css";
+/*
+ * This page's own layout, which was a route CSS Module until ticket 19.
+ *
+ * It stays in this file rather than moving to `ui/` because it is one route's
+ * layout rather than product behaviour, and `DESIGN.md` asks a route page to
+ * "compose shared components and add only route-specific layout". It is named
+ * once rather than written nine times because nine copies drift. Tailwind reads
+ * `.tsx` files as text, so a class named in a constant here is generated
+ * exactly as one written in the markup is.
+ */
+
+/** One proof card: a group on Pure Paper, wearing the card radius. */
+const PANEL = [
+  "min-w-0 rounded-card border border-border bg-surface p-6",
+  "max-[760px]:px-4 max-[760px]:py-5",
+];
+
+/** The same card across both columns, until the grid is one column anyway. */
+const PANEL_WIDE = [...PANEL, "col-span-full max-[760px]:col-auto"];
+
+/**
+ * The small uppercase label that heads the page and names each panel.
+ *
+ * It is weight 400, unlike the `<h3>` labels inside the base panel, which are
+ * headings and take weight 500. The stylesheet drew both from one declaration
+ * and the difference was the element; it is said out loud now.
+ */
+const KICKER =
+  "m-0 mb-3 text-sm uppercase tracking-(--tracking-label) text-muted-foreground";
+
+/** One of the two component previews, and the line that titles it. */
+const PREVIEW = "min-w-0 rounded-input border border-border bg-background p-4";
+const PREVIEW_HEAD = [
+  "mb-4 flex items-baseline justify-between gap-3 text-sm text-foreground",
+  "max-[760px]:flex-col max-[760px]:items-start max-[760px]:gap-1",
+];
+
+/**
+ * The tooltip's trigger, drawn twice on this page.
+ *
+ * It is a hand-written control rather than `BaseButton variant="secondary"`,
+ * which it otherwise matches: this page proves a tooltip on a plain `<button>`,
+ * and the two differ in weight — 400 here against the base button's 500 — so
+ * swapping it would change the page rather than the implementation. Called out
+ * in the pull request as a follow-up rather than taken here.
+ */
+const TRIGGER = [
+  "min-h-(--control-lg) cursor-pointer px-4",
+  "rounded-button border border-border-strong bg-transparent text-sm text-foreground",
+  "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
+];
+
+/** Pointer press feedback, and the reduced form of it. */
+const TRIGGER_PRESS = [
+  "transition-transform duration-(--duration-press) ease-out",
+  "[&:active:not(:focus-visible)]:scale-97",
+  "motion-reduce:transition-none",
+  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
+];
+
+/**
+ * The same trigger inside the reduced-motion frame: nothing moves, and the
+ * colour feedback stays and runs linear. See the frame itself for why this is
+ * written on the control rather than reached for from the frame around it.
+ */
+const TRIGGER_REDUCED =
+  "transition-[color,background-color,border-color] duration-(--duration-hover) ease-linear";
 
 type ProofAgent = {
   readonly id: string;
@@ -172,26 +239,39 @@ export function DesignSystemProof() {
   return (
     <AppShell initialMe={PROOF_ME}>
       <ProductPage wide>
-      <div className={styles.canvas}>
-      <header className={styles.hero}>
-        <p className={styles.eyebrow}>Development proof surface</p>
-        <h1>Egma product system</h1>
-        <p>
+      <div className="text-foreground">
+      <header className="mb-12 w-[min(760px,100%)] max-[760px]:mb-8">
+        <p className={KICKER}>Development proof surface</p>
+        {/*
+          * A heading carries no size of its own in this product, and this one
+          * takes a `clamp()` rather than a step off the scale: the page title
+          * has to hold three words on a phone as well as fill a wide monitor.
+          * The ceiling is the display step; the floor and the rate it grows at
+          * are values the scale has no name for, so they are written out.
+          */}
+        <h1 className="m-0 max-w-[12ch] text-[clamp(44px,7vw,var(--text-display))] leading-[0.95] font-normal tracking-[-0.04em]">
+          Egma product system
+        </h1>
+        <p className="mt-6 mb-0 max-w-[60ch] text-muted-foreground">
           The real product shell and shared components, shown together across
           agents, tests, runs, simulations, graders, personas, and Settings.
         </p>
       </header>
 
-      <section className={styles.grid} aria-label="Shared component proof">
-        <article className={`${styles.panel} ${styles.wide}`}>
-          <p className={styles.kicker}>Component base — shadcn on Tailwind</p>
+      <section
+        className="grid w-full grid-cols-2 gap-6 max-[760px]:grid-cols-1 max-[760px]:gap-4"
+        aria-label="Shared component proof"
+      >
+        <article className={cn(PANEL_WIDE)}>
+          <p className={KICKER}>Component base — shadcn on Tailwind</p>
           <div className="flex flex-col gap-8">
             <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
               The primitives every screen is built from. Nothing here sets a
-              colour, a radius, or a duration of its own: the Tailwind theme
-              reads <code className="font-mono text-sm">ui/tokens.css</code>, so
-              a value is changed in that one file and every surface on this page
-              changes with it.
+              colour, a radius, or a duration of its own: every one is a theme
+              key in{" "}
+              <code className="font-mono text-sm">ui/tailwind-theme.css</code>,
+              so a value is changed in that one file and every surface on this
+              page changes with it.
             </p>
 
             <div className="flex flex-col gap-4">
@@ -437,14 +517,14 @@ export function DesignSystemProof() {
           </div>
         </article>
 
-        <article className={styles.panel}>
-          <p className={styles.kicker}>Project context</p>
+        <article className={cn(PANEL)}>
+          <p className={KICKER}>Project context</p>
           <ProjectSelector
             organization={PROOF_ME.organizations[0]}
             projects={PROOF_ME.projects}
             projectId="prj_proof"
           />
-          <div className={styles.actions}>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <BaseButton type="button" onClick={() => setDialog(true)}>
               Register agent
             </BaseButton>
@@ -463,7 +543,9 @@ export function DesignSystemProof() {
               Saving agent…
             </BaseButton>
             <Tooltip label="This copies the current project identifier.">
-              <button className={styles.tooltipTrigger} type="button">Copy identifier</button>
+              <button className={cn(TRIGGER, TRIGGER_PRESS)} type="button">
+                Copy identifier
+              </button>
             </Tooltip>
             <span
               onPointerDownCapture={() => {
@@ -485,7 +567,7 @@ export function DesignSystemProof() {
               </BaseButton>
             </span>
           </div>
-          <div className={styles.badges}>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <BaseBadge>Viewer</BaseBadge>
             <BaseBadge variant="success">Passed</BaseBadge>
             <BaseBadge variant="warning">Skipped</BaseBadge>
@@ -494,8 +576,8 @@ export function DesignSystemProof() {
           </div>
         </article>
 
-        <article className={styles.panel}>
-          <p className={styles.kicker}>Menu and choice</p>
+        <article className={cn(PANEL)}>
+          <p className={KICKER}>Menu and choice</p>
           <Toolbar>
             <Choice
               label="Agent list"
@@ -517,11 +599,13 @@ export function DesignSystemProof() {
               )}
             </Menu>
           </Toolbar>
-          <p className={styles.meta}>Selected list: {list}</p>
+          <p className="mt-5 mb-3 text-base text-muted-foreground">
+            Selected list: {list}
+          </p>
           <RunProgress finished={7} expected={10} />
         </article>
 
-        <article className={`${styles.panel} ${styles.wide}`}>
+        <article className={cn(PANEL_WIDE)}>
           <Section
             title="Agent details"
             lead="Fields, actions, help text, and responsive form rows use one shared layout."
@@ -574,7 +658,7 @@ export function DesignSystemProof() {
                   onChange={(event) => setDescription(event.target.value)}
                 />
               </Field>
-              <div className={styles.checkboxRow}>
+              <div className="flex min-h-(--tap-target) items-center gap-3 text-sm text-foreground">
                 <Checkbox
                   id="proof-archived"
                   checked={includeArchived}
@@ -592,8 +676,8 @@ export function DesignSystemProof() {
           </Section>
         </article>
 
-        <article className={`${styles.panel} ${styles.wide}`}>
-          <p className={styles.kicker}>Settings scope and refusal</p>
+        <article className={cn(PANEL_WIDE)}>
+          <p className={KICKER}>Settings scope and refusal</p>
           <SettingsNav projectId="prj_proof" current="judge" />
           <Refused
             message="Your viewer role cannot change the default judge. Your draft is still here."
@@ -605,19 +689,24 @@ export function DesignSystemProof() {
           />
         </article>
 
-        <article className={`${styles.panel} ${styles.wide}`}>
-          <p className={styles.kicker}>Responsive and motion checks</p>
-          <div className={styles.previewGrid}>
+        <article className={cn(PANEL_WIDE)}>
+          <p className={KICKER}>Responsive and motion checks</p>
+          <div className="grid grid-cols-2 gap-6 max-[760px]:grid-cols-1 max-[760px]:gap-4">
             <section
-              className={styles.preview}
+              className={PREVIEW}
               aria-label="Narrow 360 pixel component preview"
               data-preview="narrow"
             >
-              <header className={styles.previewHead}>
-                <strong>Narrow preview</strong>
-                <span>360 px component frame</span>
+              <header className={cn(PREVIEW_HEAD)}>
+                <strong className="font-medium">Narrow preview</strong>
+                <span className="text-muted-foreground">
+                  360 px component frame
+                </span>
               </header>
-              <div className={styles.narrowFrame}>
+              {/* A fixed component frame makes narrow wrapping visible on a wide
+                * monitor, so 360px is a device width rather than a step off any
+                * scale. */}
+              <div className="w-[min(360px,100%)] rounded-input border border-border bg-surface p-4">
                 <SettingsNav projectId="prj_proof" current="project" />
                 <Field label="Run name" htmlFor="proof-narrow-name">
                   <Input
@@ -631,30 +720,81 @@ export function DesignSystemProof() {
               </div>
             </section>
 
+            {/*
+              * The reduced-motion frame, and the two controls that demonstrate it.
+              *
+              * The stylesheet this replaces said it in two rules that reached
+              * the shadcn base button by element name — `.reducedFrame button`
+              * for the transition, and the same selector with
+              * `:active:not(:focus-visible):not(:disabled)` to cancel the
+              * press. That reach is what ticket 19 removes.
+              *
+              * The two rules say one thing: **inside this frame a button is
+              * drawn in its reduced-motion form** — no spatial press, and the
+              * colour feedback kept and made linear, which is the "useful
+              * opacity or color feedback" `DESIGN.md` asks every movement to
+              * have.
+              *
+              * It is written on the two controls rather than kept as a
+              * `[&_button]:` variant, because that variant is the same
+              * element-selector reach in another notation: it would still catch
+              * a button a nested shared component happens to render, which is
+              * how the original rule came to dress the base button in the first
+              * place. The two also need different class lists — the base button
+              * changes only its easing, the trigger states its whole transition
+              * — so one blanket rule could not say both.
+              *
+              * The tooltip half of this frame is not here at all:
+              * `tailwind-theme.css` keys it on `data-preview="reduced-motion"`,
+              * which is why that attribute stays exactly as it is.
+              */}
             <section
-              className={`${styles.preview} ${styles.reducedFrame}`}
+              className={PREVIEW}
               aria-label="Reduced motion component preview"
               data-preview="reduced-motion"
             >
-              <header className={styles.previewHead}>
-                <strong>Reduced motion preview</strong>
-                <span>Spatial movement is removed; color and opacity stay brief</span>
+              <header className={cn(PREVIEW_HEAD)}>
+                <strong className="font-medium">Reduced motion preview</strong>
+                <span className="text-muted-foreground">
+                  Spatial movement is removed; color and opacity stay brief
+                </span>
               </header>
-              <div className={styles.reducedActions}>
-                <BaseButton type="button">Run test</BaseButton>
+              <div className="flex min-h-[120px] items-center justify-center gap-3 rounded-input border border-dashed border-border bg-surface p-6">
+                <BaseButton
+                  className={cn(
+                    "ease-linear",
+                    /*
+                     * `transform-none`, not the `scale-100` the hand-written
+                     * controls on this page use to cancel a press. The base
+                     * button's press is `transform: scale(0.97)` in
+                     * `tailwind-theme.css` — on `transform` rather than on the
+                     * `scale` property — so `scale: 100%` would leave it
+                     * standing. A utility beats `@layer components` by layer
+                     * order, whatever the specificity.
+                     */
+                    "[&:active:not(:focus-visible):not(:disabled)]:transform-none",
+                  )}
+                  type="button"
+                >
+                  Run test
+                </BaseButton>
                 <Tooltip label="Keyboard and reduced-motion feedback does not move.">
-                  <button className={styles.tooltipTrigger} type="button">Read motion rule</button>
+                  <button className={cn(TRIGGER, TRIGGER_REDUCED)} type="button">
+                    Read motion rule
+                  </button>
                 </Tooltip>
               </div>
             </section>
           </div>
         </article>
 
-        <article className={`${styles.panel} ${styles.wide}`}>
-          <div className={styles.sectionHead}>
+        <article className={cn(PANEL_WIDE)}>
+          <div className="mb-6 flex items-start justify-between gap-6 max-[760px]:flex-col max-[760px]:items-stretch">
             <div>
-              <p className={styles.kicker}>Dense data</p>
-              <h2>Agents</h2>
+              <p className={KICKER}>Dense data</p>
+              <h2 className="m-0 text-xl font-normal tracking-[-0.04em]">
+                Agents
+              </h2>
             </div>
             <Actions>
               <BaseButton type="button">Register agent</BaseButton>
@@ -663,17 +803,17 @@ export function DesignSystemProof() {
           <DataTable label="Proof agents" columns={COLUMNS} rows={AGENTS} keyOf={(agent) => agent.id} />
         </article>
 
-        <article className={styles.panel}>
-          <p className={styles.kicker}>Page states</p>
-          <div className={styles.states}>
+        <article className={cn(PANEL)}>
+          <p className={KICKER}>Page states</p>
+          <div className="grid gap-4">
             <Loading what="agents" />
             <Empty title="No agents yet" lead="Register the first agent to start testing." />
             <Failure message="Egma could not load this project." onRetry={() => undefined} />
           </div>
         </article>
 
-        <article className={styles.panel}>
-          <p className={styles.kicker}>Simulation evidence</p>
+        <article className={cn(PANEL)}>
+          <p className={KICKER}>Simulation evidence</p>
           <Transcript transcript={TRANSCRIPT} highlighted={[2]} />
         </article>
       </section>
@@ -682,10 +822,10 @@ export function DesignSystemProof() {
         <Dialog title="Archive Support agent?" onClose={() => setDialog(false)}>
           {(dismiss) => (
             <>
-              <p className={styles.dialogCopy}>
+              <p className="m-0 mb-6 text-base text-muted-foreground">
                 Existing runs and simulations stay available. New runs cannot use this agent.
               </p>
-              <div className={styles.dialogActions}>
+              <div className="flex flex-wrap items-center justify-end gap-3">
                 <BaseButton type="button" variant="secondary" onClick={dismiss}>
                   Cancel
                 </BaseButton>

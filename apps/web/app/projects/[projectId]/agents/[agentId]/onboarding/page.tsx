@@ -39,12 +39,24 @@ import {
   useShellSession,
 } from "../../../../../../ui/shell.tsx";
 import { AgentOnboardingProgress } from "../../onboarding-progress.tsx";
-import styles from "./tests-onboarding.module.css";
 
 type SelectorPage = {
   readonly tests: readonly ListedTest[];
   readonly nextCursor: string | null;
 };
+
+/**
+ * The two strips under the list of tests: the pager, and a read refusal beside
+ * the way to ask again.
+ *
+ * One declaration because the stylesheet had one rule for both, and the reason
+ * holds: they sit under the same list, they space themselves the same way, and
+ * they both stop being a row once the row runs out of width. Only how they line
+ * up across that row differs, and each says that for itself.
+ */
+const UNDER_LIST =
+  "mt-4 flex justify-between gap-4 " +
+  "max-[40rem]:flex-col max-[40rem]:items-stretch";
 
 export default function AgentOnboardingPage() {
   const { projectId, agentId } = useParams<{
@@ -392,9 +404,17 @@ function AttachTests({
                 </Actions>
               }
             >
-              <ul className={styles.tests} aria-label="Tests to attach">
+              <ul
+                className={
+                  "m-0 grid list-none p-0 " +
+                  // The rows have their own edges, so the card's radius has to
+                  // clip them or the first and last rows square off its corners.
+                  "overflow-hidden rounded-card border border-border"
+                }
+                aria-label="Tests to attach"
+              >
                 {shownTests.length === 0 ? (
-                  <li className={styles.filteredEmpty}>
+                  <li className="p-6 text-muted-foreground">
                     {busyTests
                       ? "Searching tests…"
                       : `No tests match “${search}”.`}
@@ -403,7 +423,22 @@ function AttachTests({
                   const alreadyAttached = attached.has(test.id);
                   const field = `onboarding-test-${test.id}`;
                   return (
-                    <li className={styles.test} key={test.id}>
+                    <li
+                      className={
+                        // Three columns: the checkbox's own control width, the
+                        // copy, and the link. `var(--control-lg)` is egma's
+                        // control size and there is no grid-template key for it.
+                        "grid grid-cols-[var(--control-lg)_minmax(0,1fr)_auto] " +
+                        "min-h-16 items-center bg-surface px-4 py-3 " +
+                        // What the stylesheet said as `.test + .test`. The row
+                        // that follows another carries the line between them, so
+                        // the first row leaves the card's own top edge alone.
+                        "not-first:border-t not-first:border-border " +
+                        // No room for a third column, so the link leaves it.
+                        "max-[40rem]:grid-cols-[var(--control-lg)_minmax(0,1fr)]"
+                      }
+                      key={test.id}
+                    >
                       <Checkbox
                         id={field}
                         checked={selected.has(test.id)}
@@ -419,9 +454,12 @@ function AttachTests({
                           setRefused(null);
                         }}
                       />
-                      <label className={styles.testCopy} htmlFor={field}>
-                        <span className={styles.testName}>{test.name}</span>
-                        <span className={styles.testDescription}>
+                      <label
+                        className="grid min-w-0 cursor-pointer gap-1"
+                        htmlFor={field}
+                      >
+                        <span className="text-foreground">{test.name}</span>
+                        <span className="overflow-hidden text-sm text-ellipsis whitespace-nowrap text-muted-foreground">
                           {alreadyAttached
                             ? "Already attached"
                             : test.description ??
@@ -429,7 +467,12 @@ function AttachTests({
                         </span>
                       </label>
                       <Link
-                        className={styles.testLink}
+                        className={
+                          "ms-4 text-foreground " +
+                          // Under the copy it belongs to once the row is two
+                          // columns, rather than beside it.
+                          "max-[40rem]:col-start-2 max-[40rem]:mt-2 max-[40rem]:ms-0"
+                        }
                         href={projectPath(projectId, "tests", test.id)}
                       >
                         View test
@@ -439,8 +482,10 @@ function AttachTests({
                 })}
               </ul>
 
-              <div className={styles.pager}>
-                <span>{busyTests ? "Loading…" : `Page ${String(page + 1)}`}</span>
+              <div className={`${UNDER_LIST} items-center`}>
+                <span className="text-sm text-muted-foreground">
+                  {busyTests ? "Loading…" : `Page ${String(page + 1)}`}
+                </span>
                 <Actions>
                   <Button
                     type="button"
@@ -465,7 +510,7 @@ function AttachTests({
                 </Actions>
               </div>
               {readRefused === null ? null : (
-                <div className={styles.readProblem}>
+                <div className={`${UNDER_LIST} items-start`}>
                   <Problem>{readRefused.message}</Problem>
                   <Button
                     type="button"
