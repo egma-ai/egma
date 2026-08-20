@@ -175,6 +175,26 @@ class SimulatorProcess:
             errors="replace"
         ) + self.stderr_path.read_text(errors="replace")
 
+    async def wait_for_output(
+        self,
+        predicate: Callable[[str], bool],
+        *,
+        within_seconds: float = 10.0,
+        interval: float = 0.02,
+    ) -> str:
+        """Poll process output until ``predicate`` holds."""
+        deadline = asyncio.get_running_loop().time() + within_seconds
+        output = self.output()
+        while not predicate(output):
+            if asyncio.get_running_loop().time() > deadline:
+                pytest.fail(
+                    "process output never satisfied the predicate; last output:\n"
+                    + output
+                )
+            await asyncio.sleep(interval)
+            output = self.output()
+        return output
+
     def kill_hard(self) -> None:
         """SIGKILL: no goodbye, no cleanup — the crash the orphan sweep exists for."""
         self.process.send_signal(signal.SIGKILL)
@@ -205,6 +225,7 @@ def start_simulator(
         extra_env: dict[str, str] | None = None,
         direct_model: bool = False,
         direct_speech: bool = False,
+        observe_drain: bool = False,
     ) -> SimulatorProcess:
         stdout_path = tmp_path / f"simulator-{len(started)}.out"
         stderr_path = tmp_path / f"simulator-{len(started)}.err"
@@ -258,6 +279,8 @@ def start_simulator(
                 command.append("--direct-speech")
             if direct_model:
                 command.append("--direct-model")
+            if observe_drain:
+                command.append("--observe-drain")
             process = subprocess.Popen(
                 command,
                 stdout=stdout,
@@ -567,7 +590,7 @@ def a_spec(
     really sends for a project that mocks nothing, and a spec that said
     ``[]`` would be exercising a shape nothing produces."""
     spec = {
-        "contract_version": 2,
+        "contract_version": 3,
         "simulation_id": simulation_id,
         "modality": modality,
         "connection": connection,
@@ -674,7 +697,9 @@ def scripted_spec(
     return a_spec(
         simulation_id,
         connection={
-            "type": "scripted",
+            "agent_platform": None,
+            "connection_kind": "scripted",
+            "access_variant": "scripted.in_memory",
             "config": config,
             "credentials": credentials,
         },
@@ -709,7 +734,9 @@ def retell_spec(
     return a_spec(
         simulation_id,
         connection={
-            "type": "retell",
+            "agent_platform": "retell",
+            "connection_kind": "retell_chat_api",
+            "access_variant": "retell_chat_api.api_key",
             "config": {"retellAgentId": agent_id, "baseUrl": base_url},
             "credentials": {"apiKey": api_key},
         },
@@ -768,7 +795,7 @@ def loopback_spec(
     """One voice spec against the loopback counterpart.
 
     Deliberately the same shape as :func:`scripted_spec`: the two differ by
-    modality and connection type and by nothing else, which is what makes
+    modality and connection kind and by nothing else, which is what makes
     "the same test over chat and over voice" a comparison rather than two
     unrelated stories.
     """
@@ -787,7 +814,9 @@ def loopback_spec(
         simulation_id,
         modality="voice",
         connection={
-            "type": "loopback",
+            "agent_platform": None,
+            "connection_kind": "loopback",
+            "access_variant": "loopback.in_process",
             "config": config,
             "credentials": credentials,
         },
@@ -851,7 +880,13 @@ def phone_spec(
     spec = a_spec(
         simulation_id,
         modality="voice",
-        connection={"type": "phone", "config": config, "credentials": credentials},
+        connection={
+            "agent_platform": None,
+            "connection_kind": "phone_number",
+            "access_variant": "phone_number.public_e164",
+            "config": config,
+            "credentials": credentials,
+        },
         platform=platform,
         scenario=scenario,
         personality=personality,

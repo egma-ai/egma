@@ -480,7 +480,9 @@ export async function simulationRoutes(
       // is no field here a credential could ride in: the secret lives in its own
       // sealed column and was never copied into the snapshot.
       connection_snapshot: {
-        type: run.connectionSnapshot.type,
+        agent_platform: run.connectionSnapshot.agentPlatform,
+        connection_kind: run.connectionSnapshot.connectionKind,
+        access_variant: run.connectionSnapshot.accessVariant,
         modality: run.connectionSnapshot.modality,
         topology: run.connectionSnapshot.topology,
         environment: run.connectionSnapshot.environment,

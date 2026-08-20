@@ -180,8 +180,12 @@ export type TraceFacts = {
   readonly source: string;
   readonly emitter: string;
   readonly environment: string;
-  readonly connectionType: string;
+  readonly connectionKind: string;
   readonly providerCallId: string;
+  readonly agentPlatform: string;
+  readonly platformAgentId: string;
+  readonly platformAgentName: string;
+  readonly platformAgentVersion: string;
   readonly runId: string;
   readonly agentId: string;
 };
@@ -577,7 +581,11 @@ const TRACE_FACTS = `toString(${TRACE_POSITION}) as started_at_micros,
        any(emitter) as emitter,
        any(environment) as environment,
        any(connection_type) as connection_type,
-       any(provider_call_id) as provider_call_id,
+       argMinIf(provider_call_id, tuple(parent_span_id != '', started_at), provider_call_id != '') as provider_call_id,
+       argMinIf(agent_platform, tuple(parent_span_id != '', started_at), agent_platform != '') as agent_platform,
+       argMinIf(platform_agent_id, tuple(parent_span_id != '', started_at), platform_agent_id != '') as platform_agent_id,
+       argMinIf(platform_agent_name, tuple(parent_span_id != '', started_at), platform_agent_name != '') as platform_agent_name,
+       argMinIf(platform_agent_version, tuple(parent_span_id != '', started_at), platform_agent_version != '') as platform_agent_version,
        any(run_id) as run_id,
        any(agent_id) as agent_id`;
 
@@ -595,6 +603,10 @@ type SummaryRow = {
   readonly environment: string;
   readonly connection_type: string;
   readonly provider_call_id: string;
+  readonly agent_platform: string;
+  readonly platform_agent_id: string;
+  readonly platform_agent_name: string;
+  readonly platform_agent_version: string;
   readonly run_id: string;
   readonly agent_id: string;
 };
@@ -725,9 +737,11 @@ export async function listTraces(
 /**
  * One aggregate row as the facts both endpoints report.
  *
- * The trace-level columns are denormalised onto every span precisely so that
- * reading one of them is reading the trace, which is what makes `any()` the
- * right aggregate for them rather than a guess.
+ * Most trace-level columns are denormalised onto every span, which makes
+ * `any()` the right aggregate for them. The platform agent reference is
+ * different: an emitter may put it only on the root. Those fields are selected
+ * from a parentless non-empty row first, then from any non-empty row, so an
+ * empty child can never erase the reference the root carried.
  */
 function factsOf(traceId: string, row: SummaryRow): TraceFacts {
   const startedAt = BigInt(row.started_at_micros);
@@ -746,8 +760,12 @@ function factsOf(traceId: string, row: SummaryRow): TraceFacts {
     source: row.source,
     emitter: row.emitter,
     environment: row.environment,
-    connectionType: row.connection_type,
+    connectionKind: row.connection_type,
     providerCallId: row.provider_call_id,
+    agentPlatform: row.agent_platform,
+    platformAgentId: row.platform_agent_id,
+    platformAgentName: row.platform_agent_name,
+    platformAgentVersion: row.platform_agent_version,
     runId: row.run_id,
     agentId: row.agent_id,
   };
@@ -820,10 +838,10 @@ function isTurn(kind: string): boolean {
  * what makes fetching one of them cheap, and the list that found it already
  * said.
  *
- * **The verbatim payload is not returned.** It is by a wide margin the largest
- * column on the row — every span carries its resource and its scope exactly as
- * they arrived — and a transcript that shipped it would be megabytes of JSON
- * nobody asked to render. It is neither lost nor unreachable: it is on the row,
+ * **The safe provider payload is not returned.** It is by a wide margin the
+ * largest column on the row — every span carries its resource and scope after
+ * credential redaction — and a transcript that shipped it would be megabytes
+ * of JSON nobody asked to render. It is neither lost nor unreachable: it is on the row,
  * and the way a caller will reach it is a per-span read
  * (`GET /v1/traces/:traceId/spans/:spanId`) that this ticket deliberately does
  * not build, because nothing consumes it yet and an endpoint with no caller is a

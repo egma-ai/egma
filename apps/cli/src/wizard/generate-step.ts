@@ -475,7 +475,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   const about = {
     agentName: options.registered.agent.name,
     connectionName: options.registered.connection.name,
-    connectionType: options.registered.connection.type,
+    productLabel: options.registered.connection.productLabel,
     modality: options.registered.connection.modality,
     destination: destinationOf(options.registered.connection),
     suite,

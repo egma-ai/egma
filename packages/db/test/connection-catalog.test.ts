@@ -1,17 +1,18 @@
 import {
+  type AccessVariant,
   CAPABILITY_CATALOG,
   CAPABILITY_KEYS,
   admittedCapabilities,
-  connectionTypeMetadata,
+  connectionOptionMetadata,
   credentialRuleOf,
   hasCapabilityDiscovery,
   isCapabilityKey,
   capabilityStanding,
   measuredCapabilities,
+  productLabelOf,
   registerCapabilityDiscovery,
   transportCapabilities,
-  variantById,
-  variantIdOf,
+  accessVariantById,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -26,24 +27,22 @@ import { afterEach, describe, expect, it } from "vitest";
  * rather than stored.
  */
 
-describe("what a browser is told about a connection type", () => {
+describe("what a browser is told about a simulation connection", () => {
   it("describes every key its shapes gate, and gates every key it describes", () => {
     // The projection is built by reading the registry, and it refuses to
     // describe a shape whose two lists disagree. A gated key nobody described
     // would be a box a form never draws and a create that then refuses for the
     // missing value; a described key nothing gates would be a box whose answer
     // is silently dropped.
-    expect(() => connectionTypeMetadata()).not.toThrow();
+    expect(() => connectionOptionMetadata()).not.toThrow();
 
-    for (const type of connectionTypeMetadata()) {
-      for (const variant of type.variants) {
-        expect(variant.fields.length).toBeGreaterThan(0);
-        for (const field of variant.fields) {
-          expect(field.key).not.toBe("");
-          expect(field.label).not.toBe("");
-          expect(field.help).not.toBe("");
-          expect(["text", "url", "e164", "json"]).toContain(field.kind);
-        }
+    for (const option of connectionOptionMetadata()) {
+      expect(option.fields.length).toBeGreaterThan(0);
+      for (const field of option.fields) {
+        expect(field.key).not.toBe("");
+        expect(field.label).not.toBe("");
+        expect(field.help).not.toBe("");
+        expect(["text", "url", "e164", "json"]).toContain(field.kind);
       }
     }
   });
@@ -65,45 +64,44 @@ describe("what a browser is told about a connection type", () => {
       }
     };
 
-    expect(() => walk(connectionTypeMetadata())).not.toThrow();
+    expect(() => walk(connectionOptionMetadata())).not.toThrow();
 
     // And it says nothing about how a value is refused. Refusal wording is
     // written for a terminal and names egma's own rules.
-    const written = JSON.stringify(connectionTypeMetadata());
+    const written = JSON.stringify(connectionOptionMetadata());
     expect(written).not.toContain("not_admitted");
     expect(written).not.toContain("needs_a_name");
   });
 
   it("names each shape's credential rule in the words a Restore is held to", () => {
-    const catalog = connectionTypeMetadata();
-    const ruleOf = (type: string, variantId: string) =>
-      catalog
-        .find((one) => one.type === type)
-        ?.variants.find((one) => one.id === variantId)?.credentialRule ??
-      "missing";
+    const catalog = connectionOptionMetadata();
+    const ruleOf = (accessVariant: string) =>
+      catalog.find((one) => one.accessVariant === accessVariant)
+        ?.credentialRule ?? "missing";
 
     // Three shapes, three rules, and each one is what its Restore demands: a
     // new credential, no credential, or an explicit choice between the two.
-    expect(ruleOf("retell", "retell.api_key")).toBe("required");
-    expect(ruleOf("phone", "phone.number")).toBe("forbidden");
-    expect(ruleOf("livekit", "livekit.key_pair")).toBe("required");
-    expect(ruleOf("livekit", "livekit.token_endpoint")).toBe("required");
+    expect(ruleOf("retell_chat_api.api_key")).toBe("required");
+    expect(ruleOf("phone_number.public_e164")).toBe("forbidden");
+    expect(ruleOf("livekit_room.project_credentials")).toBe("required");
+    expect(ruleOf("livekit_room.customer_token_endpoint")).toBe("required");
   });
 
   it("says a shape that takes no credential has no credential fields", () => {
-    const phone = connectionTypeMetadata().find((one) => one.type === "phone");
-    const only = phone?.variants[0];
-    expect(only?.credentialRule).toBe("forbidden");
-    expect(only?.credentialFields).toEqual([]);
+    const phone = connectionOptionMetadata().find(
+      (one) => one.accessVariant === "phone_number.public_e164",
+    );
+    expect(phone?.credentialRule).toBe("forbidden");
+    expect(phone?.credentialFields).toEqual([]);
     // And still says why, because a person looking at an empty section needs
     // to know it is empty on purpose.
-    expect(only?.credentialHelp).not.toBe("");
+    expect(phone?.credentialHelp).not.toBe("");
   });
 
   it("marks an optional config key optional and a demanded one demanded", () => {
-    const keyPair = connectionTypeMetadata()
-      .find((one) => one.type === "livekit")
-      ?.variants.find((one) => one.id === "livekit.key_pair");
+    const keyPair = connectionOptionMetadata().find(
+      (one) => one.accessVariant === "livekit_room.project_credentials",
+    );
 
     const fields = new Map(
       (keyPair?.fields ?? []).map((field) => [field.key, field]),
@@ -124,42 +122,71 @@ describe("what a browser is told about a connection type", () => {
       afterCredentials: true,
     });
 
-    const endpoint = connectionTypeMetadata()
-      .find((one) => one.type === "livekit")
-      ?.variants.find((one) => one.id === "livekit.token_endpoint");
+    const endpoint = connectionOptionMetadata().find(
+      (one) => one.accessVariant === "livekit_room.customer_token_endpoint",
+    );
     expect(endpoint?.fields.find((field) => field.key === "url")?.label).toBe(
       "LiveKit WebSocket URL",
     );
   });
 
-  it("says which shape a config lands in, and reads a stored one back", () => {
-    // A config naming the discriminating key lands on that shape; one naming
-    // none lands on the type's first.
-    expect(variantIdOf("livekit", { url: "wss://x.livekit.cloud" })).toBe(
-      "livekit.key_pair",
+  it("reads each explicit stored access variant without inferring from config", () => {
+    expect(
+      credentialRuleOf(
+        accessVariantById(
+          "livekit_room",
+          "livekit_room.customer_token_endpoint",
+        ),
+      ),
+    ).toBe(
+      "required",
     );
     expect(
-      variantIdOf("livekit", {
-        url: "wss://x.livekit.cloud",
-        tokenEndpoint: "https://x.example/token",
-      }),
-    ).toBe("livekit.token_endpoint");
-
-    // And a stored id reads back to the same shape without the config being
-    // consulted — which is the whole point of storing it.
-    expect(credentialRuleOf(variantById("livekit", "livekit.token_endpoint"))).toBe(
-      "required",
-    );
-    expect(credentialRuleOf(variantById("livekit", "livekit.key_pair"))).toBe(
-      "required",
-    );
+      credentialRuleOf(
+        accessVariantById("livekit_room", "livekit_room.project_credentials"),
+      ),
+    ).toBe("required");
   });
 
   it("refuses a stored shape this egma has never heard of, naming what it holds", () => {
     // A row written by a later release. It is a fault rather than a refusal —
     // nothing the caller sent is wrong — and it says enough to go and find it.
-    expect(() => variantById("retell", "retell.oauth")).toThrow(
-      /retell\.oauth.*retell\.api_key/s,
+    expect(() => accessVariantById("retell_chat_api", "retell.oauth")).toThrow(
+      /retell\.oauth.*retell_chat_api\.api_key/s,
+    );
+  });
+
+  it("keeps platform, connection, access, modality, and product label separate", () => {
+    expect(connectionOptionMetadata()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          agentPlatform: "retell",
+          connectionKind: "phone_number",
+          accessVariant: "phone_number.public_e164",
+          modality: "voice",
+          productLabel: "Retell phone",
+        }),
+        expect.objectContaining({
+          agentPlatform: null,
+          connectionKind: "phone_number",
+          accessVariant: "phone_number.public_e164",
+          modality: "voice",
+          productLabel: "Phone number",
+        }),
+      ]),
+    );
+  });
+
+  it("refuses a platform that is not part of an explicit supported tuple", () => {
+    expect(() =>
+      productLabelOf(
+        "vapi" as never,
+        "phone_number",
+        "phone_number.public_e164",
+        "voice",
+      ),
+    ).toThrow(
+      "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
     );
   });
 });
@@ -199,15 +226,21 @@ describe("the capability discovery seam", () => {
   const installed: string[] = [];
 
   afterEach(() => {
-    for (const type of installed.splice(0)) {
-      registerCapabilityDiscovery(type as "retell", transportCapabilities);
+    for (const kind of installed.splice(0)) {
+      registerCapabilityDiscovery(
+        kind as "retell_chat_api",
+        transportCapabilities,
+      );
     }
   });
 
-  it("carries an adapter for every type egma can reach", () => {
-    for (const type of connectionTypeMetadata()) {
-      expect(type.capabilityDiscovery, type.type).toBe(true);
-      expect(hasCapabilityDiscovery(type.type), type.type).toBe(true);
+  it("carries an adapter for every connection kind egma can reach", () => {
+    for (const option of connectionOptionMetadata()) {
+      expect(option.capabilityDiscovery, option.connectionKind).toBe(true);
+      expect(
+        hasCapabilityDiscovery(option.connectionKind),
+        option.connectionKind,
+      ).toBe(true);
     }
   });
 
@@ -217,14 +250,29 @@ describe("the capability discovery seam", () => {
     // PCM both ways and a chat simulation is text" is a sentence about egma's
     // own code, and it is true of the target as egma will reach it — which is
     // the only sense in which a capability decides whether a test can run.
-    const target = (type: "retell" | "phone" | "livekit", modality: "voice" | "chat") =>
-      ({ type, variantId: `${type}.x`, modality, config: {} }) as const;
+    const target = (
+      connectionKind: "retell_chat_api" | "phone_number" | "livekit_room",
+      accessVariant: AccessVariant,
+      modality: "voice" | "chat",
+    ) => ({ connectionKind, accessVariant, modality, config: {} }) as const;
 
     return Promise.all([
-      transportCapabilities(target("retell", "chat")),
-      transportCapabilities(target("retell", "voice")),
-      transportCapabilities(target("phone", "voice")),
-      transportCapabilities(target("livekit", "voice")),
+      transportCapabilities(
+        target("retell_chat_api", "retell_chat_api.api_key", "chat"),
+      ),
+      transportCapabilities(
+        target("retell_chat_api", "retell_chat_api.api_key", "voice"),
+      ),
+      transportCapabilities(
+        target("phone_number", "phone_number.public_e164", "voice"),
+      ),
+      transportCapabilities(
+        target(
+          "livekit_room",
+          "livekit_room.project_credentials",
+          "voice",
+        ),
+      ),
     ]).then(([chat, spokenRetell, phone, livekit]) => {
       expect(chat.supported).toEqual([]);
       // The same type answers differently by modality, which is the proof that
@@ -239,31 +287,42 @@ describe("the capability discovery seam", () => {
     // There is no way to send DTMF anywhere in the simulator, so this is
     // measured and unsupported rather than unknown — a test that needs a phone
     // menu is skipped for a reason somebody can act on.
-    for (const type of ["retell", "phone", "livekit"] as const) {
+    const targets = [
+      ["retell_chat_api", "retell_chat_api.api_key"],
+      ["phone_number", "phone_number.public_e164"],
+      ["livekit_room", "livekit_room.project_credentials"],
+    ] as const;
+    for (const [connectionKind, accessVariant] of targets) {
       for (const modality of ["voice", "chat"] as const) {
         const found = await transportCapabilities({
-          type,
-          variantId: `${type}.x`,
+          connectionKind,
+          accessVariant,
           modality,
           config: {},
         });
-        expect(found.supported, `${type}/${modality}`).not.toContain("dtmf");
+        expect(found.supported, `${connectionKind}/${modality}`).not.toContain(
+          "dtmf",
+        );
         // Measured, so its absence is a fact about egma's transport rather than
         // a question nobody asked.
-        expect(found.measured, `${type}/${modality}`).toContain("dtmf");
+        expect(found.measured, `${connectionKind}/${modality}`).toContain(
+          "dtmf",
+        );
       }
     }
   });
 
   it("answers nothing for a type whose adapter has been taken away", () => {
-    registerCapabilityDiscovery("retell", undefined);
-    installed.push("retell");
+    registerCapabilityDiscovery("retell_chat_api", undefined);
+    installed.push("retell_chat_api");
 
     // The state a type added ahead of its adapter is in. It is told plainly
     // rather than handed a plausible answer.
-    expect(hasCapabilityDiscovery("retell")).toBe(false);
+    expect(hasCapabilityDiscovery("retell_chat_api")).toBe(false);
     expect(
-      connectionTypeMetadata().find((one) => one.type === "retell")
+      connectionOptionMetadata().find(
+        (one) => one.connectionKind === "retell_chat_api",
+      )
         ?.capabilityDiscovery,
     ).toBe(false);
 
@@ -271,7 +330,9 @@ describe("the capability discovery seam", () => {
     // type and whether it can measure one of its targets are different
     // questions with different answers.
     expect(
-      connectionTypeMetadata().find((one) => one.type === "retell")
+      connectionOptionMetadata().find(
+        (one) => one.connectionKind === "retell_chat_api",
+      )
         ?.simulatorAdapter,
     ).toBe(true);
   });

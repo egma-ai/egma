@@ -59,29 +59,26 @@ export type AuthContext = {
  * while `engine` may write grading results — and one shared service identity
  * would make either boundary wider than its work.
  *
- * `watch` is the third of them, for the two transports that carry somebody
- * else's production traffic into egma — the poller beside the simulation sweep
- * and the receiving endpoint a provider delivers to. `resolveRetellWatch`
- * builds one per switched-on connection, from the connection's own tenancy and
- * from nothing a delivery claimed.
+ * `monitoring` is the third of them, for background production ingestion.
+ * `claimDueRetellMonitoringAgent` builds one from the project-owned Monitoring
+ * setup and selected Retell agent, never from a simulation connection and
+ * never from a caller-supplied customer identifier.
  *
- * It is its own word so that a context which came from a watched connection
+ * It is its own word so that a context which came from claimed Monitoring work
  * says so wherever it is read, and so that it opens neither of the other two
  * services' capabilities: `resolveSimulationConnection` admits `simulator`,
  * and this is not it.
  *
- * **What it is not is the thing that guards the credential this path uses.**
- * The watched connection's own key is unsealed by `resolveRetellWatch`, which
- * takes no `AuthContext` at all — so no context can be widened into it and none
- * can be narrowed out of it either. That door is guarded by what it cannot be
- * asked: a connection id or nothing, and never whose traffic to bring back.
+ * The Retell key is opened only while a due selected agent is claimed. That
+ * internal claim takes no customer identifier, so a caller cannot use a
+ * context to open another project's Monitoring credential.
  */
 export const VIA = [
   "session",
   "api_key",
   "engine",
   "simulator",
-  "watch",
+  "monitoring",
 ] as const;
 export type Via = (typeof VIA)[number];
 

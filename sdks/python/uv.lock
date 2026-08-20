@@ -445,10 +445,13 @@ wheels = [
 
 [[package]]
 name = "egma"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "livekit-agents" },
+    { name = "openai" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
 ]
 
 [package.dev-dependencies]
@@ -461,7 +464,12 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "livekit-agents", specifier = ">=1.6.7,<1.7" }]
+requires-dist = [
+    { name = "livekit-agents", specifier = ">=1.6.7,<1.7" },
+    { name = "openai", specifier = ">=2,<3" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.39,<2" },
+    { name = "opentelemetry-sdk", specifier = ">=1.39,<2" },
+]
 
 [package.metadata.requires-dev]
 dev = [

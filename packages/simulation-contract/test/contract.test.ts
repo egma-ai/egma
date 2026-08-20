@@ -66,7 +66,7 @@ async function fixturesUnder(
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
-const specSchema = await readJson("schemas", "simulation-spec.v2.schema.json");
+const specSchema = await readJson("schemas", "simulation-spec.v3.schema.json");
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -212,18 +212,18 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
 };
 
 describe("the two schemas, as one contract", () => {
-  it("pin the same contract version, so the directions cannot drift apart", () => {
+  it("pin each direction's current contract version", () => {
     const versionOf = (schema: Record<string, unknown>): unknown =>
       (
         (schema.properties as Record<string, Record<string, unknown>>)
           .contract_version as Record<string, unknown>
       ).const;
-    expect(versionOf(specSchema)).toBe(2);
+    expect(versionOf(specSchema)).toBe(3);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v2");
+    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v3");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 
@@ -316,7 +316,7 @@ describe("the two schemas, as one contract", () => {
       string,
       unknown
     >;
-    connection.type = "retell";
+    connection.connection_kind = "retell_chat_api";
     expect(validators.spec(nonPhoneWithCarrier)).toBe(false);
     expect(validators.spec.errors).toContainEqual(
       expect.objectContaining({

@@ -119,6 +119,8 @@ export const CODES = {
   // A cursor this list never issued. Its own code so a client can drop it and
   // start again rather than showing somebody a broken page forever.
   invalid_cursor: 422,
+  /** A provider needed for setup did not answer. The customer may retry. */
+  provider_unavailable: 503,
   /**
    * A start action that named no idempotency key. 422 rather than 409: nothing
    * conflicts, something required is missing, and the fix is to send one.
@@ -432,7 +434,7 @@ export function narrowerGradingInFlight(
 }
 
 /**
- * A run over a connection type whose simulator adapter has not shipped.
+ * A run over a connection kind whose simulator adapter has not shipped.
  *
  * Its own code rather than an `unprocessable`, because the caller's next move
  * is different in kind: nothing about the request can be fixed, and the answer

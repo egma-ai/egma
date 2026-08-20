@@ -32,7 +32,12 @@ def persona_for(scenario: str) -> Persona:
 
 
 def scripted_plug(config: dict) -> ScriptedCounterpart:
-    return ScriptedCounterpart(modality="chat", config=config, credentials=None)
+    return ScriptedCounterpart(
+        modality="chat",
+        access_variant="scripted.in_memory",
+        config=config,
+        credentials=None,
+    )
 
 
 def collect():

@@ -7,6 +7,7 @@ import * as copy from "../lib/transcript-copy.ts";
 import { SPEAKERS } from "../ui/evidence.tsx";
 import * as gradingCopy from "../lib/grading-copy.ts";
 import {
+  agentPlatformLabel,
   assertionHeading,
   everRecordedPath,
   everyStep,
@@ -59,8 +60,12 @@ const FACTS: Facts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connection_type: "livekit",
+  connection_kind: "",
   provider_call_id: "egma-fixture-capture-1",
+  agent_platform: "livekit_agents",
+  platform_agent_id: "",
+  platform_agent_name: "kelly",
+  platform_agent_version: "",
   run_id: "",
   agent_id: "",
 };
@@ -158,6 +163,14 @@ describe("the window the list asks about", () => {
     expect(Date.parse(recentWindow("24h", now).to)).toBeGreaterThan(
       now.getTime(),
     );
+  });
+});
+
+describe("agent platform labels", () => {
+  it("uses product names for known platforms and keeps an unknown name", () => {
+    expect(agentPlatformLabel("retell")).toBe("Retell");
+    expect(agentPlatformLabel("livekit_agents")).toBe("LiveKit Agents");
+    expect(agentPlatformLabel("future_platform")).toBe("Future platform");
   });
 });
 
@@ -371,12 +384,7 @@ describe("which guidance a quiet page shows", () => {
     }
   });
 
-  /**
-   * The one step of that setup that fails in silence: everything is accepted
-   * and stored, and none of it is in a project. Telling somebody who already
-   * exported to go and export is the unhelpful answer, so this replaces the
-   * teaching rather than joining it.
-   */
+  /** A visible organization key points to the exact scope that must change. */
   it("names the organization-wide key instead, when one is visible", () => {
     expect(seen({ organizationWideKeys: 1 })).toBe("key-names-the-organization");
   });

@@ -195,9 +195,11 @@ describe("choosing the phone", () => {
     // to create whatever was chosen is the bug this whole ticket exists for.
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
-    expect(connection?.type).toBe("phone");
+    expect(connection?.agentPlatform).toBe("retell");
+    expect(connection?.connectionKind).toBe("phone_number");
+    expect(connection?.accessVariant).toBe("phone_number.public_e164");
     expect(connection?.modality).toBe("voice");
-    expect(connection?.name).toBe("phone-1");
+    expect(connection?.name).toBe("phone_number-1");
 
     // The number, and not one other thing. A phone connection is
     // provider-blind: nothing in it says who answers, and nothing in it opens
@@ -248,7 +250,7 @@ describe("choosing the phone", () => {
     await run({ reach: "phone" });
 
     const asked = account.requests.map((one) => `${one.method} ${one.path}`);
-    expect(asked).toContain("GET /list-phone-numbers");
+    expect(asked).toContain("GET /v2/list-phone-numbers");
     expect(asked).toContain(`GET /get-phone-number/${encodeURIComponent(DIALLED)}`);
     // Reads only. Nothing in this flow writes to somebody's Retell account.
     expect(
@@ -312,7 +314,9 @@ describe("choosing text", () => {
 
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
-    expect(connection?.type).toBe("retell");
+    expect(connection?.agentPlatform).toBe("retell");
+    expect(connection?.connectionKind).toBe("retell_chat_api");
+    expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
     expect(connection?.modality).toBe("chat");
     // The selected chat agent's own identity is the connection target.
     expect(connection?.config).toEqual({ retellAgentId: "agent_0001" });
@@ -327,7 +331,7 @@ describe("choosing text", () => {
     await run({ reach: "text" });
 
     const asked = account.requests.map((one) => one.path);
-    expect(asked).not.toContain("/list-phone-numbers");
+    expect(asked).not.toContain("/v2/list-phone-numbers");
   });
 });
 
@@ -473,15 +477,15 @@ describe("running it twice", () => {
       connection: "reused",
     });
     expect(phone.connected?.registered.agent.id).toBe(first.connected?.registered.agent.id);
-    expect(phone.connected?.registered.connection.name).toBe("phone-2");
+    expect(phone.connected?.registered.connection.name).toBe("phone_number-2");
     expect(phone.connected?.number).toBe("+14155550333");
 
     // One agent, one connection each way, and no second phone connection left
     // behind by the write that lost.
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections.map((one) => one.name)).toEqual([
-      "phone-1",
-      "phone-2",
+      "phone_number-1",
+      "phone_number-2",
     ]);
   });
 });

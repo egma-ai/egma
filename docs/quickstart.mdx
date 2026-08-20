@@ -76,13 +76,13 @@ The wizard handles agent registration as part of its flow, but you can run it se
 egma connect
 ```
 
-The CLI asks for your Retell API key (or LiveKit credentials), reads the selected Retell agent's modality, and asks you to confirm the matching connection:
+The CLI asks for your Retell API key (or LiveKit credentials) and then asks how Egma should reach the agent. For Retell, the Retell agent decides the compatible path:
 
-- A Retell **chat agent** gets a Retell connection with the **Chat** modality. Egma exchanges messages with it directly.
-- A Retell **voice agent** gets a Phone connection with the **Voice** modality. Egma dials one of the numbers routed to it.
+- **Text** — for a Retell chat agent. Egma uses the Retell Chat API.
+- **Phone** — for a Retell voice agent. Egma dials one of the agent's public numbers over the telephone network.
 
 <Note>
-  Egma does not offer both choices for one Retell agent. A voice agent requires `--reach phone`; a chat agent requires `--reach text`. A mismatch stops before Egma writes anything.
+  Retell is the agent platform, not the connection kind. The saved connection is `retell_chat_api` for a chat agent or `phone_number` for a voice agent. A phone connection can also reach an agent on another or unknown platform.
 </Note>
 
 Pass credentials through environment variables rather than as arguments — arguments are visible to every process on your machine and are saved in shell history:
@@ -99,13 +99,16 @@ cat retell-key.txt | egma connect --reach phone --phone-number +14155550111
 url: http://localhost:3101
 retell_agents: 1
 retell_agent_id: agent_…
-reach: text
+reach: phone
 agent_id: agt_01K…
 agent_name: order-line
 connection_id: con_01K…
-connection_name: text-1
-connection_type: retell
-connection_modality: chat
+connection_name: phone_number-1
+agent_platform: retell
+connection_kind: phone_number
+access_variant: phone_number.public_e164
+product_label: Retell phone
+connection_modality: voice
 registration: created
 agent_registration: created
 connection_registration: created
@@ -198,7 +201,7 @@ egma push   # sync local files to Egma
 egma run    # start a run and follow it
 ```
 
-The simulator claims each simulation, conducts the conversation, and the grader writes one verdict per expected behavior as each call ends. The wizard follows the run live:
+The simulator claims each simulation, conducts the conversation, and the grader writes one verdict per expected behavior after each simulation ends. The wizard follows the run live:
 
 ```
 run run_01K7QXV2M8  ·  12 simulations
@@ -276,5 +279,11 @@ egma push   # upload your local changes to Egma
   </Card>
   <Card title="Self-Hosting" icon="server" href="/self-hosting">
     Run Egma on your own infrastructure with Docker Compose.
+  </Card>
+  <Card title="Retell Monitoring" icon="phone" href="/integrations/retell">
+    Select Retell voice agents and import completed production conversations.
+  </Card>
+  <Card title="LiveKit Monitoring" icon="python" href="/integrations/python-sdk">
+    Add `monitor_livekit(ctx)` to a customer-hosted or LiveKit Cloud agent.
   </Card>
 </CardGroup>

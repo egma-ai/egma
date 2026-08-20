@@ -43,6 +43,9 @@ const PERMISSIONS = {
   /** Create, edit, delete agents and connections. */
   configure_agents:       [          "member", "admin"],
 
+  /** Set up or remove production Monitoring for a project. */
+  configure_monitoring:   [          "member", "admin"],
+
   /** Start a run, cancel a run. */
   start_and_cancel_runs:  [          "member", "admin"],
 

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:egma:simulation-contract:spec:v2",
-  "title": "Simulation spec (v2)",
-  "description": "The only simulation work-order contract. The pinned persona version supplies one complete LLM, STT, and TTS selection. The control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
+  "$id": "urn:egma:simulation-contract:spec:v3",
+  "title": "Simulation spec (v3)",
+  "description": "The only simulation work-order contract. The connection kind selects the simulator adapter, the access variant selects its authority and configuration, and the agent platform records provenance only. The pinned persona version supplies one complete LLM, STT, and TTS selection. The control plane resolves current direct provider credentials when it prepares the claim. The simulator has no platform or container fallback for model or voice choices.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
     "contract_version": {
       "description": "The one spec version this simulator implements.",
       "type": "integer",
-      "const": 2
+      "const": 3
     },
     "simulation_id": {
       "description": "The simulation this spec conducts. Opaque to the simulator.",
@@ -32,19 +32,40 @@
       "enum": ["chat", "voice"]
     },
     "connection": {
-      "description": "How the simulator reaches the agent under test. The type selects the plug.",
+      "description": "How the simulator reaches the agent under test. Connection kind selects the adapter, access variant selects the authority and configuration inside it, and agent platform records what runs the target without selecting code.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "config", "credentials"],
+      "required": [
+        "agent_platform",
+        "connection_kind",
+        "access_variant",
+        "config",
+        "credentials"
+      ],
       "properties": {
-        "type": {
+        "agent_platform": {
+          "description": "The product or framework that runs or exposes the agent, or null when unknown. It records provenance and never selects simulator code.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "connection_kind": {
+          "description": "The direct path the simulator selects. It is an open vocabulary so a simulator without the named adapter can refuse it clearly at runtime.",
+          "type": "string",
+          "minLength": 1
+        },
+        "access_variant": {
+          "description": "The configuration and authority used inside the selected connection kind. It is explicit and is never inferred from config keys.",
           "type": "string",
           "minLength": 1
         },
         "config": {
+          "description": "The non-secret reach configuration, exactly as stored on the connection. Its keys belong to the selected access variant; this schema does not know them.",
           "type": "object"
         },
         "credentials": {
+          "description": "The resolved secret material for this connection, unsealed by the control plane for exactly this hand-off, or null where the access variant takes no customer secret. The simulator holds it in memory, hands it only to the adapter, and never logs, persists, or reports it.",
           "oneOf": [{ "type": "object" }, { "type": "null" }]
         }
       }
@@ -298,8 +319,10 @@
         "properties": {
           "connection": {
             "type": "object",
-            "properties": { "type": { "const": "phone" } },
-            "required": ["type"]
+            "properties": {
+              "connection_kind": { "const": "phone_number" }
+            },
+            "required": ["connection_kind"]
           }
         },
         "required": ["connection"]

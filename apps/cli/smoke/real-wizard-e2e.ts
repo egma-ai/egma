@@ -702,9 +702,12 @@ async function assertWhatLanded(options: {
     // **Only the connection that was chosen.** Creating both is the bug the
     // choice exists to kill, so the count is asserted rather than the last row.
     check(
-      connections.length === 1 && connection?.type === "phone",
+      connections.length === 1 &&
+        connection?.agent_platform === "retell" &&
+        connection?.connection_kind === "phone_number" &&
+        connection?.access_variant === "phone_number.public_e164",
       `the walk created exactly one connection and it is the phone one (${connections
-        .map((one) => String(one.type))
+        .map((one) => String(one.product_label))
         .join(", ")})`,
     );
     check(
@@ -735,9 +738,12 @@ async function assertWhatLanded(options: {
     );
   } else {
     check(
-      connections.length === 1 && connection?.type === "retell",
+      connections.length === 1 &&
+        connection?.agent_platform === "retell" &&
+        connection?.connection_kind === "retell_chat_api" &&
+        connection?.access_variant === "retell_chat_api.api_key",
       `the walk created exactly one connection and it is the retell one (${connections
-        .map((one) => String(one.type))
+        .map((one) => String(one.product_label))
         .join(", ")})`,
     );
     check(
@@ -1005,7 +1011,7 @@ async function main(): Promise<void> {
     check(gate.refused.length === 0, "nothing but reads was asked of Retell");
 
     if (walks > 1) {
-      // A second walk over the same provider agent finds the registration the
+      // A second walk over the same platform agent finds the registration the
       // first one made. Two identities for one voice agent would split a
       // team's results history in half, so a retry has to land on the first.
       const [first, second] = registered;

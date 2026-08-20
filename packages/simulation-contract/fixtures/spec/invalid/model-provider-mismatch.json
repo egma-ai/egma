@@ -1,9 +1,11 @@
 {
-  "contract_version": 2,
+  "contract_version": 3,
   "simulation_id": "sim_fixture_model_provider_mismatch",
   "modality": "voice",
   "connection": {
-    "type": "phone",
+    "agent_platform": null,
+    "connection_kind": "phone_number",
+    "access_variant": "phone_number.public_e164",
     "config": { "phoneNumber": "+15550000000" },
     "credentials": null
   },

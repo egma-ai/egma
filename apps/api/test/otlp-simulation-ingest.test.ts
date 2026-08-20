@@ -124,7 +124,9 @@ async function seedSimulationNamed(
   const created = await createAgent(auth, {
     name: `Front desk ${label}`,
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_${label}` },
       credentials: { apiKey: `retell-secret-${label}` },
@@ -967,7 +969,7 @@ describe("the customer-key path, beside it", () => {
    * for it — and it decides nothing: tenancy still comes from the key, the
    * rows are still production traffic, and no run is pinned.
    */
-  it("ignores egma.simulation_id: the key names the customer, and the rows stay production", async () => {
+  it("ignores egma.simulation_id: the project key owns the rows, which stay production", async () => {
     const traceId = "eeee5555eeee5555eeee5555eeee5555";
     const body = JSON.stringify({
       resourceSpans: [
@@ -1004,7 +1006,13 @@ describe("the customer-key path, beside it", () => {
       ],
     });
 
-    const landed = await post(body, globex.secret);
+    const projectKey = await mintKey(
+      api.app,
+      globex.cookie,
+      "Globex production telemetry",
+      globex.projectId,
+    );
+    const landed = await post(body, projectKey);
     expect(landed.statusCode, landed.body).toBe(200);
 
     const rows = await store().rows<{
@@ -1022,10 +1030,10 @@ describe("the customer-key path, beside it", () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      // Globex's key, so Globex's rows — not the Acme simulation the payload
-      // names, and not simulation traffic.
+      // Globex's project key owns these rows — not the Acme simulation the
+      // payload names, and not simulation traffic.
       organization_id: globex.organizationId,
-      project_id: "default",
+      project_id: globex.projectId,
       source: "production",
       emitter: "agent",
       run_id: "",

@@ -21,7 +21,9 @@ import { db, type Queryable, type Transaction } from "../client.ts";
 import {
   agent,
   connection,
-  type ConnectionType,
+  type AccessVariant,
+  type AgentPlatform,
+  type ConnectionKind,
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
@@ -192,7 +194,9 @@ export type SingleSimulationSelection = {
 
 /** The connection's non-secret shape as the run executed over it. */
 export type ConnectionSnapshot = {
-  readonly type: ConnectionType;
+  readonly agentPlatform: AgentPlatform | null;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly topology: Topology;
   readonly environment: string | null;
@@ -611,16 +615,32 @@ function connectionSnapshotFromRow(
     );
 
   if (typeof value !== "object" || value === null) throw malformed();
-  const { type, modality, topology, environment, config } = value as Record<
-    string,
-    unknown
-  >;
-  if (typeof type !== "string" || typeof modality !== "string") throw malformed();
+  const {
+    agentPlatform,
+    connectionKind,
+    accessVariant,
+    modality,
+    topology,
+    environment,
+    config,
+  } = value as Record<string, unknown>;
+  if (agentPlatform !== null && typeof agentPlatform !== "string") {
+    throw malformed();
+  }
+  if (
+    typeof connectionKind !== "string" ||
+    typeof accessVariant !== "string" ||
+    typeof modality !== "string"
+  ) {
+    throw malformed();
+  }
   if (typeof topology !== "string") throw malformed();
   if (environment !== null && typeof environment !== "string") throw malformed();
 
   return {
-    type: type as ConnectionType,
+    agentPlatform: agentPlatform as AgentPlatform | null,
+    connectionKind: connectionKind as ConnectionKind,
+    accessVariant: accessVariant as AccessVariant,
     modality: modality as Modality,
     topology: topology as Topology,
     environment,
@@ -1052,7 +1072,7 @@ async function freezeMockTools(
  * that quietly executed most of what somebody named would report green about a
  * suite that did not run, and that is the exact trust this product sells.
  *
- * **A connection nothing can conduct is refused here, at the door.** A type
+ * **A connection nothing can conduct is refused here, at the door.** A kind
  * whose simulator adapter has not shipped can never be executed, so leaving the
  * run queued would be a promise egma cannot keep; the refusal says so in the
  * registry's own words.
@@ -1158,7 +1178,9 @@ async function startRunWithSelection(
       const [reached] = await tx
         .select({
           agentId: connection.agentId,
-          type: connection.type,
+          agentPlatform: connection.agentPlatform,
+          connectionKind: connection.connectionKind,
+          accessVariant: connection.accessVariant,
           modality: connection.modality,
           topology: connection.topology,
           environment: connection.environment,
@@ -1202,10 +1224,16 @@ async function startRunWithSelection(
             NAME_THE_RIGHT_AGENT,
         );
       }
-      if (!connectionIsConductable(reached.type, reached.modality)) {
+      if (
+        !connectionIsConductable(
+          reached.connectionKind,
+          reached.accessVariant,
+          reached.modality,
+        )
+      ) {
         refuseRun(
           "no_adapter",
-          noSimulatorAdapterMessage(reached.type, reached.modality),
+          noSimulatorAdapterMessage(reached.connectionKind, reached.modality),
         );
       }
 
@@ -1372,7 +1400,9 @@ async function startRunWithSelection(
           pinnedTestVersions: { testVersionIds: input.testVersionIds },
           requestedPersonas: { personaIds: distinctPersonaIds },
           connectionSnapshot: {
-            type: reached.type,
+            agentPlatform: reached.agentPlatform,
+            connectionKind: reached.connectionKind,
+            accessVariant: reached.accessVariant,
             modality: reached.modality,
             topology: reached.topology,
             environment: reached.environment,
@@ -2483,12 +2513,14 @@ export type SimulationStanding = {
 
 /**
  * How the simulator reaches the agent of one claimed simulation: the
- * connection's type, its non-secret config, and the credentials unsealed — or
- * null where the customer supplies no secret for the type.
+ * connection kind, access variant, non-secret config, and unsealed credentials
+ * — or null where the access variant takes no customer secret.
  */
 export type SimulationConnection = {
   readonly connectionId: string;
-  readonly type: ConnectionType;
+  readonly agentPlatform: AgentPlatform | null;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
   readonly config: Readonly<Record<string, string>>;
   readonly credentials: Readonly<Record<string, string>> | null;
 };
@@ -2536,7 +2568,9 @@ export async function resolveSimulationConnection(
   const [row] = await db()
     .select({
       connectionId: connection.id,
-      type: connection.type,
+      agentPlatform: connection.agentPlatform,
+      connectionKind: connection.connectionKind,
+      accessVariant: connection.accessVariant,
       modality: connection.modality,
       config: connection.config,
       credentials: connection.credentials,
@@ -2559,8 +2593,16 @@ export async function resolveSimulationConnection(
 
   if (row === undefined) return undefined;
 
-  if (!connectionIsConductable(row.type, row.modality)) {
-    throw new Error(noSimulatorAdapterMessage(row.type, row.modality));
+  if (
+    !connectionIsConductable(
+      row.connectionKind,
+      row.accessVariant,
+      row.modality,
+    )
+  ) {
+    throw new Error(
+      noSimulatorAdapterMessage(row.connectionKind, row.modality),
+    );
   }
 
   const malformed = (held: string) => () =>
@@ -2571,7 +2613,9 @@ export async function resolveSimulationConnection(
 
   return {
     connectionId: row.connectionId,
-    type: row.type as ConnectionType,
+    agentPlatform: row.agentPlatform as AgentPlatform | null,
+    connectionKind: row.connectionKind as ConnectionKind,
+    accessVariant: row.accessVariant as AccessVariant,
     config: stringRecordFromRow(row.config, malformed("config")),
     credentials:
       row.credentials === null

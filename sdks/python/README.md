@@ -1,6 +1,106 @@
-# Egma
+# Egma Python SDK
 
-Your agent's tools, answered by Egma while a test runs.
+Test a LiveKit agent with mock tools and send its production spans to Egma.
+
+The two functions are separate:
+
+- `mockable(...)` lets Egma answer tools in an Egma simulation. It does
+  nothing in production.
+- `monitor_livekit(...)` sends production LiveKit Agents spans to the
+  Monitoring page. It does nothing in an Egma simulation.
+
+Calling one function never enables or changes the other.
+
+## Install
+
+```bash
+pip install egma
+```
+
+For a LiveKit agent on Python 3.11 or newer.
+
+## Production monitoring
+
+Open **Monitoring → Set up monitoring** and choose **LiveKit Agents**. The page
+shows the same SDK, key, and helper steps below.
+
+Set the Egma API origin and an existing project API key in the agent's
+environment:
+
+```bash
+export EGMA_URL=https://api.egma.ai
+export EGMA_API_KEY=egma_sk_...
+```
+
+For self-hosted Egma, prefer the published API address, such as
+`http://localhost:3100`. The web address also works because Egma forwards
+`/v1/traces` to the API, but the API is one hop shorter. The agent process must
+be able to make HTTP or HTTPS requests to the address you choose.
+
+In a customer-hosted worker, set these values through your normal deployment
+secret store. For LiveKit Cloud, place them in a gitignored secrets file and
+apply it to the agent:
+
+```bash
+lk agent update-secrets --secrets-file=.env.monitoring
+```
+
+Use the same file with `lk agent create --secrets-file=.env.monitoring` for a
+new deployment. LiveKit Cloud restarts the agent after a secret update.
+
+Call `monitor_livekit` before `AgentSession.start`:
+
+```python
+from egma import monitor_livekit
+from livekit import agents
+from livekit.agents import Agent, AgentSession
+
+
+async def entrypoint(ctx: agents.JobContext) -> None:
+    monitor_livekit(ctx)
+    await ctx.connect()
+
+    agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar])
+    session = AgentSession(stt=..., llm=..., tts=...)
+    await session.start(agent=agent, room=ctx.room)
+```
+
+You can pass the same values directly when environment variables are not the
+right configuration source:
+
+```python
+monitor_livekit(ctx, endpoint="https://api.egma.ai", api_key=project_key)
+```
+
+Use the same call for an agent hosted in your cloud and an agent hosted in
+LiveKit Cloud. The helper adds Egma to a compatible OpenTelemetry provider; it
+does not remove LiveKit Cloud observability or another existing span
+processor. It sends spans in batches and flushes the final batch when the
+LiveKit job stops.
+
+If this job was dispatched by Egma for a simulation, the helper returns
+without adding a production exporter. The simulation keeps its own trace and
+does not appear a second time in Monitoring.
+
+After deployment, confirm **I added this setup** on the Monitoring setup page.
+That records waiting state in Egma; the deployed helper is what sends spans.
+
+The caller's phone, SIP, or WebRTC entry path does not change this setup. The
+SDK does not guess that path from a LiveKit trace.
+
+### Setup status
+
+The helper stops immediately with one direct error when required settings are
+missing or malformed, or when tracer providers conflict. It does not include
+the key in that error.
+
+After setup, Monitoring shows **Waiting for first conversation** until the
+first trace reaches Egma. It then shows the last conversation received. This
+release uses one-way OTLP export. The Egma page cannot see a DNS, firewall, or
+network failure inside the worker. Check the worker's OpenTelemetry logs and
+confirm that it can reach `EGMA_URL` when the page stays in the waiting state.
+
+## Simulation mock tools
 
 A simulation that reaches your real tools has real side effects: it books
 the appointment, sends the message, charges the card. And a real backend
@@ -20,15 +120,7 @@ Tools no mock tool covers run their real implementations, untouched.
 Egma's record names which of your tools were covered and which were not,
 so you always know whether a simulation was fully isolated.
 
-## Install
-
-```bash
-pip install egma
-```
-
-For a LiveKit agent, on Python 3.11 or newer.
-
-## Use
+### Use
 
 One call, after the agent is built and before the session starts:
 
@@ -48,7 +140,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     await session.start(agent=agent, room=ctx.room)
 ```
 
-That is the whole integration.
+That is the whole simulation integration.
 
 In a simulation, `mockable` reports your agent's tools to Egma — names
 and schemas, read off the agent object, so mock authoring starts from
@@ -153,12 +245,14 @@ Use the recipe as the bridge, not as the small tier.
 ## Compatibility
 
 This package pins `livekit-agents` to one minor version
-(`>=1.6.7,<1.7`), and that is deliberate. Interception is done with
-LiveKit's own `mock_tools`, which lives in the framework's testing
-namespace and carries no stability promise. The pin plus a live smoke
-test — a real session in a real room, proving that interception really
-happened — is how this package knows the mechanism still works before
-you find out in a simulation.
+(`>=1.6.7,<1.7`), and that is deliberate. Interception uses LiveKit's
+testing API. Monitoring also reads LiveKit's current dynamic tracer
+provider because the public telemetry API has a setter but no getter.
+The fixture and live tests verify both seams before the supported range
+changes.
+
+The package also keeps the OpenAI Python package on major version 2.
+LiveKit Agents 1.6 does not support OpenAI 3.
 
 `mock_tools` writes into a side table LiveKit keeps per session. It does
 not touch your agent, your agent's class, or your tool registry, and the
@@ -183,9 +277,10 @@ uv run ruff check src tests
 uv run pytest
 ```
 
-The suite is hermetic: no LiveKit server, no project, no network. One
-test is not, and it skips visibly when the environment is silent, naming
-what it needs. To run it, point it at a LiveKit project:
+The normal suite is hermetic: no LiveKit server, no project, and no external
+network. One monitoring test uses a local HTTP collector. One live test skips
+visibly when the environment is silent, naming what it needs. To run it, point
+it at a LiveKit project:
 
 ```bash
 TEST_LIVEKIT_URL=wss://... \

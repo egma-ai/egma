@@ -101,6 +101,7 @@ class LiveKitRoom:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str,
@@ -108,10 +109,9 @@ class LiveKitRoom:
         media: object = None,
         driver: Any = None,
     ) -> None:
-        # A room is reached over the deployment's own media server, whose
-        # address and credential are this container's bootstrap
-        # configuration rather than a platform setting — so the carrier
-        # resolved for this simulation is nothing to this plug.
+        # A room is reached with this connection's URL and authority. It does
+        # not use the deployment's phone media bridge or the platform carrier
+        # resolved for a phone simulation.
         del media
 
         if modality != "voice":
@@ -130,7 +130,7 @@ class LiveKitRoom:
         # LiveKit.
         self._backend = _built(
             driver or LiveKitRoomBackend,
-            settings=_read(config, credentials),
+            settings=_read(access_variant, config, credentials),
             simulation_id=simulation_id,
             mock_tools=mock_tools,
         )
@@ -186,10 +186,12 @@ class LiveKitRoom:
         await self._backend.teardown()
 
 
-def _read(config: dict[str, Any], credentials: object) -> RoomSettings:
+def _read(
+    access_variant: str, config: dict[str, Any], credentials: object
+) -> RoomSettings:
     """The connection, read by the driver that uses it, in the plug's words."""
     try:
-        return RoomSettings.from_connection(config, credentials)
+        return RoomSettings.from_connection(access_variant, config, credentials)
     except MediaBackendError as refused:
         raise PlugError(str(refused), ending=refused.ending) from refused
 

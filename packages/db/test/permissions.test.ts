@@ -45,6 +45,7 @@ const THE_TABLE: Readonly<Record<string, readonly Role[]>> = {
   "read": ["viewer", "member", "admin"],
   "author_definitions": ["member", "admin"],
   "configure_agents": ["member", "admin"],
+  "configure_monitoring": ["member", "admin"],
   "start_and_cancel_runs": ["member", "admin"],
   // Asking for a judgment already made to be made again. A viewer is refused:
   // a re-grade can turn a red release green by re-spending the judge over
@@ -112,6 +113,7 @@ describe("the action list", () => {
     expect([...ACTIONS].sort()).toEqual(Object.keys(THE_TABLE).sort());
   });
 });
+
 
 /**
  * A row of the table that nothing calls refuses nobody, and reads like coverage
@@ -250,6 +252,7 @@ describe("a viewer", () => {
     for (const action of [
       "author_definitions",
       "configure_agents",
+      "configure_monitoring",
       "delete_run_data",
       // Including the one a key would take on their behalf: an exporter
       // holding a viewer's key writes nothing.
@@ -268,6 +271,7 @@ describe("a member", () => {
       "read",
       "author_definitions",
       "configure_agents",
+      "configure_monitoring",
       "start_and_cancel_runs",
       "ingest_traces",
       "delete_run_data",
@@ -742,4 +746,3 @@ describe("an organization's settings", () => {
     ).toBe(30);
   });
 });
-

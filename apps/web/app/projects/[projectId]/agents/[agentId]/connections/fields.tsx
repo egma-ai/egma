@@ -6,10 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, Help } from "../../../../../../ui/form.tsx";
 import type {
-  ConnectionVariant,
+  ConnectionOption,
   ConfigField,
   CredentialField,
-} from "../../../../../../lib/connection-types.ts";
+} from "../../../../../../lib/connection-options.ts";
 
 /**
  * The fields one connection shape asks for, drawn from what the server said
@@ -115,13 +115,13 @@ function CredentialControl({
 }
 
 export function ConnectionFields({
-  variant,
+  option,
   draft,
   onChange,
   credentialsEditable,
   beforeCredentialFields,
 }: {
-  readonly variant: ConnectionVariant;
+  readonly option: ConnectionOption;
   readonly draft: Draft;
   readonly onChange: (draft: Draft) => void;
   /**
@@ -141,10 +141,10 @@ export function ConnectionFields({
     onChange({ ...draft, config: { ...draft.config, [key]: value } });
   const setCredential = (field: string, value: string) =>
     onChange({ ...draft, credentials: { ...draft.credentials, [field]: value } });
-  const targetFields = variant.fields.filter(
+  const targetFields = option.fields.filter(
     (field) => field.after_credentials !== true,
   );
-  const afterCredentials = variant.fields.filter(
+  const afterCredentials = option.fields.filter(
     (field) => field.after_credentials === true,
   );
 
@@ -161,10 +161,10 @@ export function ConnectionFields({
 
       {beforeCredentialFields}
 
-      {credentialsEditable && variant.credential_rule !== "forbidden" ? (
+      {credentialsEditable && option.credential_rule !== "forbidden" ? (
         <>
-          <Help>{variant.credential_help}</Help>
-          {variant.credential_fields.map((field) => (
+          <Help>{option.credential_help}</Help>
+          {option.credential_fields.map((field) => (
             <CredentialControl
               key={field.field}
               field={field}

@@ -18,6 +18,7 @@ from __future__ import annotations
 import inspect
 
 from conftest import tools_on
+from egma import monitoring
 
 from agent import FrontDesk
 
@@ -73,3 +74,22 @@ def test_mockable_is_called_after_both_objects_exist_and_before_the_session_star
     assert built_agent < said
     assert built_session < said
     assert said < started
+
+
+def test_monitoring_is_configured_before_livekit_opens_the_room():
+    """LiveKit must receive the provider before it creates its first span."""
+
+    from agent import entrypoint
+
+    body = inspect.getsource(entrypoint)
+    configured = body.index("monitor_livekit(ctx)")
+    connected = body.index("await ctx.connect()")
+    started = body.index("await session.start(")
+
+    assert configured < connected < started
+
+
+def test_the_supported_livekit_version_exposes_its_current_provider():
+    """The SDK reuses this provider so it cannot erase Cloud observability."""
+
+    assert monitoring._livekit_provider() is not None

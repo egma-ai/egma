@@ -186,10 +186,10 @@ export {
  *
  * They are here beside the verdict fold and for the fold's reason: they reach
  * no store, take no context, and have no tenancy to stamp. The connection
- * registry decides what a connection type is made of and the capability catalog
+ * registry decides what a connection kind is made of and the capability catalog
  * decides which capability names exist; both are code rather than tables,
- * because a table could claim a type no adapter can run or a capability no test
- * could require.
+ * because a table could claim a connection kind no adapter can run or a
+ * capability no test could require.
  *
  * Exported all the same, and from this entry point, because a browser form has
  * to be drawn from them. **What crosses is labels, field shapes, the credential
@@ -198,18 +198,18 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
-  connectionUsesPlatformCarrier,
-  connectionTypeMetadata,
+  connectionKindUsesPlatformCarrier,
+  connectionOptionMetadata,
   credentialRuleOf,
-  variantById,
-  variantIdOf,
+  productLabelOf,
+  accessVariantById,
   type ConfigFieldKind,
   type ConfigFieldMetadata,
-  type ConnectionTypeMetadata,
+  type ConnectionOptionMetadata,
   type CredentialFieldKind,
   type CredentialFieldMetadata,
   type CredentialRuleName,
-  type VariantMetadata,
+  type AccessVariantMetadata,
 } from "./access/connection-registry.ts";
 export {
   admittedCapabilities,

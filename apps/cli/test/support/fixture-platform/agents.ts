@@ -8,9 +8,10 @@
  * It answers what the real instance answers, including which refusal goes with
  * which mistake, because a fixture that is kinder than the real thing is a
  * fixture that hides bugs. Everything it refuses, the access layer behind the
- * seam refuses for the same reason: a modality the type does not speak, a
- * config key the type has no place for, a credential where none belongs or none
- * where one is required, and a name a living row already holds.
+ * seam refuses for the same reason: a modality the connection kind does not
+ * speak, a config key the access variant has no place for, a credential where
+ * none belongs or none where one is required, and a name a living row already
+ * holds.
  *
  * Three shapes are load-bearing and none of them is this file's to change:
  *
@@ -27,7 +28,7 @@
  * because a client that guessed at either would fail in somebody's terminal:
  *
  * - **Registering is retry-safe by construction.** A registration carrying an
- *   inline connection goes through the per-type reuse rule, and the reply's
+ *   inline connection goes through the per-kind reuse rule, and the reply's
  *   `result` says which of the three things happened — created, reused, or the
  *   same agent reached a new way. A `reused` registration wrote no row, so it
  *   rides a 200 where the other two ride a 201.
@@ -80,35 +81,33 @@ type CredentialRule =
   | { readonly required: false; readonly refusal: string };
 
 /**
- * One whole shape a type comes in — config keys and the credential that goes
- * with them, together — mirroring the registry behind the seam. Together
- * because a shape is a fact about the pair: gating the two against separate
+ * One access variant — config keys and the credential that goes with them,
+ * together — mirroring the registry behind the seam. Together because the
+ * access variant is a fact about the pair: gating the two against separate
  * rules would admit connections that are half of each and can do neither.
  */
-type Variant = {
-  /** How a refusal names this shape. Left out: named after the type. */
+type AccessVariant = {
+  readonly id: string;
+  /** How a refusal names this access variant. Left out: named after the kind. */
   readonly named?: string;
-  /** The config key whose presence chooses this shape. */
-  readonly chosenBy?: string;
   readonly config: Readonly<Record<string, ConfigDemand>>;
   readonly credentials: CredentialRule;
-  /** What a caller sending the *other* shape's credentials is told. */
+  /** What a caller sending the *other* access variant's credentials is told. */
   readonly mixedUp?: string;
 };
 
 type Descriptor = {
   readonly modalities: readonly string[];
   readonly topology: string;
-  /** The shapes this type comes in, the first being the one a config lands in
-   * by naming none of the others' keys. */
-  readonly variants: readonly [Variant, ...Variant[]];
+  /** The access variants this connection kind supports. */
+  readonly accessVariants: readonly [AccessVariant, ...AccessVariant[]];
   /**
    * Which config key decides that two registrations are about one vendor
    * agent. A type that cannot answer that — a framework the customer runs
    * themselves has no vendor identifier — declares none and always creates.
    */
   readonly reuseKey?: string;
-  /** Whether anything can conduct a run over this type today. */
+  /** Whether anything can conduct a run over this connection kind today. */
   readonly simulatorAdapter: boolean;
 };
 
@@ -280,20 +279,21 @@ function jsonObjectText(key: string, value: unknown): string {
 }
 
 /**
- * What each connection type is made of, mirroring the registry behind the seam.
+ * What each connection kind is made of, mirroring the registry behind the seam.
  *
- * `phone` and `livekit` are here although the CLI writes neither: they are
- * what makes the checks about per-type validation real rather than a single
- * type agreeing with itself, and `livekit` is the one that carries optional
- * config keys, so the fixture cannot quietly demand what the real thing is
- * happy to do without.
+ * Phone and LiveKit are here although this Retell path writes neither. They
+ * make the checks about per-kind validation real rather than one kind agreeing
+ * with itself. LiveKit also carries optional config keys, so the fixture cannot
+ * quietly demand what the real thing is happy to do without.
  */
 const REGISTRY: Readonly<Record<string, Descriptor>> = {
-  retell: {
+  retell_chat_api: {
     modalities: ["chat"],
     topology: "hosted-broker",
-    variants: [
+    accessVariants: [
       {
+        id: "retell_chat_api.api_key",
+        named: "a Retell chat connection",
         config: { retellAgentId: nonEmptyString },
         credentials: {
           required: true,
@@ -306,11 +306,13 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     reuseKey: "retellAgentId",
     simulatorAdapter: true,
   },
-  phone: {
+  phone_number: {
     modalities: ["voice"],
     topology: "egma-dials-in",
-    variants: [
+    accessVariants: [
       {
+        id: "phone_number.public_e164",
+        named: "a phone-number connection",
         config: { phoneNumber: e164PhoneNumber },
         // No reuse rule, deliberately: a number is where egma dials, not who
         // answers, and two agents can legitimately share one.
@@ -336,20 +338,22 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     // its sentence rather than by its code, so there is nothing here to teach.
     simulatorAdapter: true,
   },
-  livekit: {
+  livekit_room: {
     // Voice only, because voice is the lane that exists.
     modalities: ["voice"],
     // egma opens the room and the customer's agent joins it.
     topology: "agent-dials-out",
     /**
-     * Two shapes, and they are two answers to one question: who mints the
+     * Two access variants answer one question: who mints the
      * token that opens the room. Nothing carries over between them — a
      * connection that names an endpoint holds no key pair, so it cannot
      * dispatch a worker or carry room metadata, and both keys are refused on
      * it by name rather than silently ignored.
      */
-    variants: [
+    accessVariants: [
       {
+        id: "livekit_room.project_credentials",
+        named: "a LiveKit room connection",
         config: {
           url: livekitServerUrl,
           // Left out means automatic dispatch: whichever worker is listening.
@@ -366,12 +370,12 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
           "a livekit connection mints its own tokens, so it needs the " +
           "project's apiKey and apiSecret. Send the pair, or name a " +
           "tokenEndpoint in the config and Egma will ask that endpoint for a " +
-          "token instead — which is the shape where the project's secret " +
+          "token instead — which is the access variant where the project's secret " +
           "never leaves the customer.",
       },
       {
+        id: "livekit_room.customer_token_endpoint",
         named: "a token-endpoint livekit connection",
-        chosenBy: "tokenEndpoint",
         config: { url: livekitServerUrl, tokenEndpoint: tokenEndpointUrl },
         credentials: {
           required: true,
@@ -393,62 +397,117 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
   },
 };
 
-const CONNECTION_TYPES = Object.keys(REGISTRY);
+const CONNECTION_KINDS = Object.keys(REGISTRY);
 
-/**
- * The public facts this offline fixture duplicates from the real registry.
- * The agreement test compares every type, so adding or changing a shipped
- * type cannot leave the CLI's fake platform accepting a different contract.
- */
-export const FIXTURE_CONNECTION_TYPE_FACTS = CONNECTION_TYPES.map((type) => {
-  const descriptor = REGISTRY[type] as Descriptor;
-  return {
-    type,
-    modalities: descriptor.modalities,
-    topology: descriptor.topology,
-    simulatorAdapter: descriptor.simulatorAdapter,
-  };
-});
+const CONNECTION_OPTIONS = [
+  {
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
+    modality: "chat",
+    productLabel: "Retell chat",
+  },
+  {
+    agentPlatform: "retell",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Retell phone",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "voice",
+    productLabel: "LiveKit project credentials",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "voice",
+    productLabel: "LiveKit token endpoint",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Phone number",
+  },
+  {
+    agentPlatform: null,
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Phone number",
+  },
+] as const;
 
-/**
- * The shape a config is in, out of the shapes it could be in: one config key
- * tells them apart, and a config naming none of them lands on the first.
- */
-function shapeChosen(
-  shapes: readonly [Variant, ...Variant[]],
-  config: unknown,
-): Variant {
-  const held =
-    typeof config === "object" && config !== null && !Array.isArray(config)
-      ? (config as Record<string, unknown>)
-      : {};
-  return (
-    shapes.find(
-      (shape) => shape.chosenBy !== undefined && held[shape.chosenBy] !== undefined,
-    ) ?? shapes[0]
+export const FIXTURE_CONNECTION_OPTION_FACTS = CONNECTION_OPTIONS.map((option) => ({
+  ...option,
+  topology: (REGISTRY[option.connectionKind] as Descriptor).topology,
+  simulatorAdapter: (REGISTRY[option.connectionKind] as Descriptor).simulatorAdapter,
+}));
+
+function productLabelOf(
+  agentPlatform: string | null,
+  connectionKind: string,
+  accessVariant: string,
+  modality: string,
+): string {
+  const option = CONNECTION_OPTIONS.find(
+    (one) =>
+      one.agentPlatform === agentPlatform &&
+      one.connectionKind === connectionKind &&
+      one.accessVariant === accessVariant &&
+      one.modality === modality,
+  );
+  if (option !== undefined) return option.productLabel;
+
+  throw new Refusal(
+    "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
   );
 }
 
-/** How a refusal names one shape: the type itself, unless the shape says. */
-function nameOf(type: string, shape: Variant): string {
-  return shape.named ?? `a ${type} connection`;
+/** How a refusal names an access variant: the kind itself, unless the variant says. */
+function nameOf(connectionKind: string, variant: AccessVariant): string {
+  return variant.named ?? `a ${connectionKind} connection`;
+}
+
+function accessVariantById(
+  connectionKind: string,
+  accessVariant: unknown,
+): AccessVariant {
+  const named = typeof accessVariant === "string" ? accessVariant : "";
+  const variant = descriptorOf(connectionKind).accessVariants.find(
+    (one) => one.id === named,
+  );
+  if (variant === undefined) {
+    throw new Refusal(
+      `access variant "${named}" does not belong to connection kind ${connectionKind}`,
+    );
+  }
+  return variant;
 }
 
 /**
- * The types something can actually conduct a run over today.
+ * The connection kinds something can actually conduct a run over today.
  *
  * Read off the registry rather than written out, so a refusal naming what works
  * can never name an adapter that has not shipped or miss one that has.
  */
-export const CONDUCTABLE_TYPES: readonly string[] = CONNECTION_TYPES.filter(
-  (type) => (REGISTRY[type] as Descriptor).simulatorAdapter,
+export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_KINDS.filter(
+  (kind) => (REGISTRY[kind] as Descriptor).simulatorAdapter,
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
 const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
-  "type",
+  "agent_platform",
+  "connection_kind",
+  "access_variant",
   "modality",
   "environment",
   "config",
@@ -498,32 +557,36 @@ function refuseUnknownKeyIn(
   }
 }
 
-function descriptorOf(type: unknown): Descriptor {
-  const named = typeof type === "string" ? type : "";
+function descriptorOf(connectionKind: unknown): Descriptor {
+  const named = typeof connectionKind === "string" ? connectionKind : "";
   const descriptor = REGISTRY[named];
   if (descriptor === undefined) {
     throw new Refusal(
-      `"${named}" is not a connection type Egma knows; expected one of ${CONNECTION_TYPES.join(", ")}`,
+      `"${named}" is not a connection kind Egma knows; expected one of ${CONNECTION_KINDS.join(", ")}`,
     );
   }
   return descriptor;
 }
 
-function validModality(type: string, modality: unknown): string {
-  const descriptor = descriptorOf(type);
+function validModality(connectionKind: string, modality: unknown): string {
+  const descriptor = descriptorOf(connectionKind);
   const named = typeof modality === "string" ? modality : "";
   if (!descriptor.modalities.includes(named)) {
     throw new Refusal(
-      `a ${type} connection speaks ${descriptor.modalities.join(" or ")}, and this one was asked for ${named}`,
+      `a ${connectionKind} connection speaks ${descriptor.modalities.join(" or ")}, and this one was asked for ${named}`,
     );
   }
   return named;
 }
 
-function validConfig(type: string, config: unknown): Record<string, string> {
-  const shape = shapeChosen(descriptorOf(type).variants, config);
-  const what = nameOf(type, shape);
-  const gates = shape.config;
+function validConfig(
+  connectionKind: string,
+  accessVariant: string,
+  config: unknown,
+): Record<string, string> {
+  const variant = accessVariantById(connectionKind, accessVariant);
+  const what = nameOf(connectionKind, variant);
+  const gates = variant.config;
   // Optional keys say so, so a caller reading a refusal is never left thinking
   // egma wants a value it is happy to do without.
   const held = Object.entries(gates)
@@ -553,12 +616,12 @@ function validConfig(type: string, config: unknown): Record<string, string> {
 }
 
 /**
- * Whether a credential block could belong to one shape at all — its keys, and
- * whether it is there when the shape needs it there. The values are nobody's
- * business here.
+ * Whether a credential block could belong to one access variant at all — its
+ * keys, and whether it is there when the access variant needs it there. The
+ * values are nobody's business here.
  */
-function couldBe(shape: Variant, credentials: unknown): boolean {
-  const rule = shape.credentials;
+function couldBe(variant: AccessVariant, credentials: unknown): boolean {
+  const rule = variant.credentials;
   if (credentials === undefined) return rule.required !== true;
   if (rule.required === false) return false;
   if (
@@ -572,31 +635,31 @@ function couldBe(shape: Variant, credentials: unknown): boolean {
 }
 
 function validCredentials(
-  type: string,
-  config: unknown,
+  connectionKind: string,
+  accessVariant: string,
   credentials: unknown,
 ): { readonly sealed: Record<string, string>; readonly hint: string } | null {
-  const variants = descriptorOf(type).variants;
-  const shape = shapeChosen(variants, config);
-  const what = nameOf(type, shape);
-  const rule = shape.credentials;
+  const variants = descriptorOf(connectionKind).accessVariants;
+  const variant = accessVariantById(connectionKind, accessVariant);
+  const what = nameOf(connectionKind, variant);
+  const rule = variant.credentials;
 
   if (
     credentials === undefined &&
     rule.required === true &&
-    shape.mixedUp !== undefined
+    variant.mixedUp !== undefined
   ) {
-    throw new Refusal(shape.mixedUp);
+    throw new Refusal(variant.mixedUp);
   }
 
-  // A caller who sent the *other* shape's credentials hears about the mix
+  // A caller who sent the *other* access variant's credentials hears about the mix
   // rather than about a key they never meant to send.
   if (
-    shape.mixedUp !== undefined &&
-    !couldBe(shape, credentials) &&
-    variants.some((other) => other !== shape && couldBe(other, credentials))
+    variant.mixedUp !== undefined &&
+    !couldBe(variant, credentials) &&
+    variants.some((other) => other !== variant && couldBe(other, credentials))
   ) {
-    throw new Refusal(shape.mixedUp);
+    throw new Refusal(variant.mixedUp);
   }
 
   if (rule.required === false) {
@@ -656,11 +719,14 @@ function validName(name: unknown, what: string): string {
  * two lists somebody keeps in step.
  */
 type Admitted = {
-  /** Absent means the smallest free numbered name for the type. */
+  /** Absent means the smallest free numbered name for the connection kind. */
   readonly name: string | undefined;
-  readonly type: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
   readonly modality: string;
-  /** Derived from the type, never caller-supplied. */
+  readonly productLabel: string;
+  /** Derived from the connection kind, never caller-supplied. */
   readonly topology: string;
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;
@@ -675,8 +741,11 @@ type StoredConnection = {
   readonly agentId: string;
   readonly projectId: string;
   readonly name: string;
-  readonly type: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
   readonly modality: string;
+  readonly productLabel: string;
   readonly topology: string;
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;
@@ -721,8 +790,11 @@ function connectionOut(connection: StoredConnection): Record<string, unknown> {
     agent_id: connection.agentId,
     project_id: connection.projectId,
     name: connection.name,
-    type: connection.type,
+    agent_platform: connection.agentPlatform,
+    connection_kind: connection.connectionKind,
+    access_variant: connection.accessVariant,
     modality: connection.modality,
+    product_label: connection.productLabel,
     topology: connection.topology,
     environment: connection.environment,
     config: connection.config,
@@ -777,8 +849,11 @@ function credentialActsElsewhere(
 export type ConnectionLookup = (connectionId: string) => {
   readonly id: string;
   readonly agentId: string;
-  readonly type: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
   readonly modality: string;
+  readonly productLabel: string;
 } | null;
 
 export function agentRoutes(options: {
@@ -858,13 +933,13 @@ export function agentRoutes(options: {
     }
   };
 
-  /** The smallest free `<type>-<n>` among an agent's living connections. */
-  const freeConnectionName = (agentId: string, type: string): string => {
+  /** The smallest free `<kind>-<n>` among an agent's living connections. */
+  const freeConnectionName = (agentId: string, connectionKind: string): string => {
     const taken = new Set(
       connections.filter((held) => held.agentId === agentId).map((held) => held.name),
     );
     for (let n = 1; ; n += 1) {
-      const candidate = `${type}-${n}`;
+      const candidate = `${connectionKind}-${n}`;
       if (!taken.has(candidate)) return candidate;
     }
   };
@@ -874,7 +949,7 @@ export function agentRoutes(options: {
    * registration and standalone on an attach. Two dialects for one thing is how
    * a client comes to work on one path and fail on the other.
    *
-   * Only the envelope: which keys exist at all. What a type's config holds and
+   * Only the envelope: which keys exist at all. What a connection kind's config holds and
    * which modalities it speaks belong to the registry, one step further in.
    */
   const connectionIn = (value: unknown): Record<string, unknown> => {
@@ -882,7 +957,7 @@ export function agentRoutes(options: {
       throw new Refusal("a connection is an object, or is left out entirely");
     }
     const body = value as Record<string, unknown>;
-    // Topology is not in the list on purpose: it is derived from the type, so a
+    // Topology is not in the list on purpose: it is derived from the connection kind, so a
     // supplied one is refused as the unknown key it is.
     refuseUnknownKeyIn(body, CONNECTION_KEYS, "a connection");
     return body;
@@ -899,23 +974,45 @@ export function agentRoutes(options: {
    * old one, and the same client would work on one machine and fail on the
    * next.
    *
-   * The order is the registry's own and it is contract: the type, then the
-   * modality it speaks, then its config, then its credentials, then the name.
+   * The order is the registry's own and it is contract: the full technical
+   * tuple, then config, credentials, and name.
    */
   const admitConnection = (input: Record<string, unknown>): Admitted => {
-    const descriptor = descriptorOf(input["type"]);
-    const type = input["type"] as string;
-    const modality = validModality(type, input["modality"]);
-    const config = validConfig(type, input["config"]);
-    // The config comes in beside the credentials because a type can come in
-    // more than one shape, and the config is what says which shape this is.
-    const credentials = validCredentials(type, input["config"], input["credentials"]);
+    const agentPlatform =
+      input["agent_platform"] === null
+        ? null
+        : typeof input["agent_platform"] === "string"
+          ? input["agent_platform"]
+          : "";
+    const connectionKind =
+      typeof input["connection_kind"] === "string"
+        ? input["connection_kind"]
+        : "";
+    const accessVariant =
+      typeof input["access_variant"] === "string" ? input["access_variant"] : "";
+    const descriptor = descriptorOf(connectionKind);
+    const modality = validModality(connectionKind, input["modality"]);
+    const productLabel = productLabelOf(
+      agentPlatform,
+      connectionKind,
+      accessVariant,
+      modality,
+    );
+    const config = validConfig(connectionKind, accessVariant, input["config"]);
+    const credentials = validCredentials(
+      connectionKind,
+      accessVariant,
+      input["credentials"],
+    );
     return {
       // A name sent blank is refused rather than dropped; absent is different
       // and means the smallest free numbered name.
       name: input["name"] === undefined ? undefined : validName(input["name"], "a connection"),
-      type,
+      agentPlatform,
+      connectionKind,
+      accessVariant,
       modality,
+      productLabel,
       topology: descriptor.topology,
       environment: typeof input["environment"] === "string" ? input["environment"] : null,
       config,
@@ -924,8 +1021,8 @@ export function agentRoutes(options: {
   };
 
   const writeConnection = (agent: StoredAgent, input: Admitted): StoredConnection => {
-    const { type, modality, config, credentials } = input;
-    const name = input.name ?? freeConnectionName(agent.id, type);
+    const { connectionKind, modality, config, credentials } = input;
+    const name = input.name ?? freeConnectionName(agent.id, connectionKind);
     if (connections.some((held) => held.agentId === agent.id && held.name === name)) {
       throw new Refusal(`a connection named "${name}" already exists on this agent`, {
         status: 409,
@@ -940,9 +1037,12 @@ export function agentRoutes(options: {
       agentId: agent.id,
       projectId: agent.projectId,
       name,
-      type,
+      agentPlatform: input.agentPlatform,
+      connectionKind,
+      accessVariant: input.accessVariant,
       modality,
-      // Derived from the type, never caller-supplied.
+      productLabel: input.productLabel,
+      // Derived from the connection kind, never caller-supplied.
       topology: input.topology,
       environment: input.environment,
       config,
@@ -966,8 +1066,8 @@ export function agentRoutes(options: {
     projectId: string,
     input: Admitted,
   ): readonly StoredConnection[] => {
-    const { type } = input;
-    const reuseKey = REGISTRY[type]?.reuseKey;
+    const { connectionKind } = input;
+    const reuseKey = REGISTRY[connectionKind]?.reuseKey;
     if (reuseKey === undefined) return [];
 
     const named = input.config[reuseKey];
@@ -979,7 +1079,9 @@ export function agentRoutes(options: {
     return connections.filter(
       (held) =>
         held.projectId === projectId &&
-        held.type === type &&
+        held.agentPlatform === input.agentPlatform &&
+        held.connectionKind === connectionKind &&
+        held.accessVariant === input.accessVariant &&
         held.config[reuseKey] === named.trim(),
     );
   };
@@ -1176,7 +1278,7 @@ export function agentRoutes(options: {
         },
       },
       {
-        // Another way of reaching an agent that already exists. Same body shape,
+        // Another way of reaching an agent that already exists. Same body,
         // and the same defaulted name one number further along.
         method: "POST",
         path: "/api/agents/:agentId/connections",
@@ -1203,8 +1305,11 @@ export function agentRoutes(options: {
     return {
       id: held.id,
       agentId: held.agentId,
-      type: held.type,
+      agentPlatform: held.agentPlatform,
+      connectionKind: held.connectionKind,
+      accessVariant: held.accessVariant,
       modality: held.modality,
+      productLabel: held.productLabel,
     };
   };
 

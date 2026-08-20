@@ -54,7 +54,7 @@ goodbye and end your reply with {marker}.
 def compose_system_prompt(traits: dict[str, Any], scenario_instructions: str) -> str:
     """Human traits and scenario, composed into the persona's instructions.
 
-    Contract v2 admits the complete human-traits value and excludes technical
+    Contract v3 admits the complete human-traits value and excludes technical
     voice. Render that complete value so every authored human fact reaches the
     model, without a model or deployment fallback.
     """

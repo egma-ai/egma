@@ -12,15 +12,15 @@ import { RelativeInstant } from "@/ui/relative-time.tsx";
  * How egma reaches an agent, said on the row rather than one click away.
  *
  * **These are the four facts somebody brings to a list of agents.** Which
- * platform, spoken how, in which environment, and whether anybody has measured
- * what that target can do. A staging chat connection and a production phone
- * number are different enough that telling them apart should not cost a page
- * load, and an agent egma cannot reach at all should be visible here rather
- * than discovered when a run refuses to start.
+ * supported setup, which modality, which environment, and whether anybody has
+ * measured what that target can do. A staging chat connection and a production
+ * phone number are different enough that telling them apart should not cost a
+ * page load, and an agent egma cannot reach at all should be visible here
+ * rather than discovered when a run refuses to start.
  *
  * Everything is drawn from what the list read already carried. There is no
- * second request behind any of it: the platform's name comes down on the
- * connection, decided by the registry that gates the connection forms, so this
+ * second request behind any of it: the product label comes down on the
+ * connection, derived by the registry that gates the connection forms, so this
  * application keeps no label table able to disagree with it.
  */
 
@@ -103,7 +103,7 @@ export function ConnectionFacts({
         {connection.environment ?? NO_ENVIRONMENT}
       </span>
       <span className="truncate text-sm text-muted-foreground">
-        {connection.type_label} · {modalityLabel(connection.modality)}
+        {connection.product_label} · {modalityLabel(connection.modality)}
       </span>
       <CapabilityState capabilities={connection.capabilities} now={now} />
     </span>

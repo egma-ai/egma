@@ -134,7 +134,7 @@ export function GateScreen({
       )}
       <Box height={1} />
       <Text>
-        {`Run these against ${gate.agentName} over ${gate.connectionName} (${gate.connectionType}, ${gate.modality})?`}
+        {`Run these against ${gate.agentName} over ${gate.connectionName} (${gate.productLabel}, ${gate.modality})?`}
       </Text>
       {gate.destination === null ? null : (
         <Text>{`Every simulation dials ${gate.destination}.`}</Text>

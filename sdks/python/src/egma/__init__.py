@@ -1,4 +1,4 @@
-"""egma inside your agent: your tools, answered by egma while a test runs.
+"""Egma inside a LiveKit agent for simulations and production monitoring.
 
 A **mock tool** answers for one of your agent's tools during a
 simulation, so a test never books the real appointment, sends the real
@@ -18,13 +18,17 @@ having touched nothing. Your tools are the same objects, called the same
 way, with no wrapper between them and the model. That is a test in this
 package, not a promise in this docstring.
 
-See ``README.md`` for the whole integration, and :func:`egma.mockable`
-for what happens on each call.
+Production monitoring is a separate explicit call made before the session
+starts::
+
+    from egma import monitor_livekit
+
+    monitor_livekit(ctx)
+
+See ``README.md`` for both integrations.
 """
 
 from .mockable import mockable
+from .monitoring import monitor_livekit
 
-# One verb, and deliberately only one. Everything else here — the wire's
-# constants, its shapes, its error codes — is this package's own business
-# and stays out of the surface a customer's agent binds itself to.
-__all__ = ["mockable"]
+__all__ = ["mockable", "monitor_livekit"]

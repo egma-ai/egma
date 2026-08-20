@@ -97,15 +97,18 @@ const browserRetellFetch: typeof fetch = async (input, init) => {
       { status: 200 },
     );
   }
-  if (url.pathname === "/list-phone-numbers") {
+  if (url.pathname === "/v2/list-phone-numbers") {
     return new Response(
-      JSON.stringify([
-        {
-          phone_number: BROWSER_RETELL_NUMBER,
-          nickname: "Support",
-          inbound_agents: [{ agent_id: BROWSER_RETELL_AGENT }],
-        },
-      ]),
+      JSON.stringify({
+        items: [
+          {
+            phone_number: BROWSER_RETELL_NUMBER,
+            nickname: "Support",
+            inbound_agents: [{ agent_id: BROWSER_RETELL_AGENT }],
+          },
+        ],
+        has_more: false,
+      }),
       { status: 200 },
     );
   }
@@ -557,12 +560,9 @@ function cookiesFrom(header: string | null): string {
  * at egma with it.
  *
  * **The key names a project, and that is load-bearing rather than
- * incidental.** A key minted for a whole organization files its spans under no
- * project at all, while a browser session always acts inside one — so an
- * organization-wide key exports telemetry the dashboard cannot then find. That
- * asymmetry is the API's rather than these pages', and it is reported with the
- * ticket; what it means here is that the exporter is configured the way the
- * README says to configure it.
+ * incidental.** Customer OTLP export rejects a key minted for the whole
+ * organization, because no project would own its Monitoring evidence. The
+ * exporter is configured with the project key the product requires.
  */
 async function keyForTheProject(cookie: string, name: string): Promise<string> {
   const me = await fetch(`${origin}/api/me`, { headers: { cookie } });
@@ -1165,7 +1165,7 @@ describe("what a project recorded in production", () => {
         `${FIXTURE_TRACE.humanTurns} human · ${FIXTURE_TRACE.agentTurns} agent`,
       );
       expect(shown).toContain(String(FIXTURE_TRACE.spans));
-      expect(shown).toContain("livekit");
+      expect(shown).toContain("LiveKit Agents");
 
       /*
        * **And no column saying `production`.** Every row on this surface is
@@ -1188,13 +1188,15 @@ describe("what a project recorded in production", () => {
       expect(shown).toContain("Hi Kelly, my name is Sam.");
       expect(shown).not.toContain("Hello! How can I assist you today?");
 
-      // And exactly one row: one exchange was recorded, and it is the last page.
-      // `DataTable` no longer repeats a count beside a complete page, so the
-      // rendered row and the absence of paging are the two facts to hold.
+      // And exactly one row: one exchange was recorded, on page one, with no
+      // next page to visit.
       expect(await page.locator("tbody tr").count()).toBe(1);
-      expect(await page.getByRole("button", { name: "Show more" }).count()).toBe(
-        0,
-      );
+      expect(await page.getByText("Page 1", { exact: true }).count()).toBe(1);
+      expect(
+        await page
+          .getByRole("button", { name: "Next", exact: true })
+          .isDisabled(),
+      ).toBe(true);
     },
     SETTLE,
   );
@@ -1591,7 +1593,7 @@ describe("more exchanges than one page holds", () => {
   const HOW_MANY = 51;
 
   it(
-    "carries on from where the last page stopped, skipping none and repeating none",
+    "moves between cursor pages, skipping none and repeating none",
     async () => {
       const theirs = await anotherCustomer("many@globex.example", "Globex");
 
@@ -1614,34 +1616,36 @@ describe("more exchanges than one page holds", () => {
       await them.waitForSelector("table");
 
       // One page is fifty, which is the contract's default. There is more, and
-      // the paging control says so rather than ending silently at the page
-      // boundary.
+      // the paging control says so rather than ending silently at the boundary.
       const rows = them.locator("tbody tr");
       expect(await rows.count()).toBe(50);
       expect(await them.innerText("main")).toContain("50 transcripts");
-      expect(
-        await them.getByRole("button", { name: "Show more" }).count(),
-      ).toBe(1);
+      expect(await them.getByText("Page 1", { exact: true }).count()).toBe(1);
 
       await reactHasTakenOver(them, "main button");
-      await them.getByRole("button", { name: "Show more" }).click();
+      await them.getByRole("button", { name: "Next", exact: true }).click();
       await expect
         .poll(async () => rows.count(), { timeout: 30_000 })
-        .toBe(HOW_MANY);
+        .toBe(1);
 
-      // Every one of them, each exactly once, newest first.
-      const shown = await them.innerText("main");
-      const numbered = [
-        ...shown.matchAll(/This is exchange number (\d+)\./gu),
-      ].map((found) => Number(found[1]));
-      expect(numbered).toEqual(
-        Array.from({ length: HOW_MANY }, (_, index) => index),
-      );
-
-      // And nothing is left to ask for.
+      // Page two contains only the one older exchange. Page one is cached and
+      // returns without mixing both pages into one table.
+      expect(await them.innerText("main")).toContain("This is exchange number 50.");
+      expect(await them.getByText("Page 2", { exact: true }).count()).toBe(1);
       expect(
-        await them.getByRole("button", { name: "Show more" }).count(),
-      ).toBe(0);
+        await them
+          .getByRole("button", { name: "Next", exact: true })
+          .isDisabled(),
+      ).toBe(true);
+
+      await them.getByRole("button", { name: "Previous" }).click();
+      await expect.poll(async () => rows.count()).toBe(50);
+      const shown = await them.innerText("main");
+      const numbered = [...shown.matchAll(/This is exchange number (\d+)\./gu)].map(
+        (found) => Number(found[1]),
+      );
+      expect(numbered).toEqual(Array.from({ length: 50 }, (_, index) => index));
+      expect(await them.getByText("Page 1", { exact: true }).count()).toBe(1);
 
       await them.context().close();
     },
@@ -2611,8 +2615,12 @@ describe("the complete product, walked in order in a second project", () => {
         .replace(/\/connections\/new\?onboarding=connection$/u, "");
       // The form is drawn from the registry rather than from a list in the
       // browser, so waiting for the first field is waiting for that read.
-      await walk.waitForSelector("#connection-type");
+      await walk.waitForSelector("#agent-platform");
 
+      await walk.getByLabel("Platform").selectOption("retell");
+      await walk
+        .getByLabel("Access")
+        .selectOption("phone_number.public_e164");
       await walk.fill("#connection-name", "Retell staging");
       await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
       await walk.getByRole("button", { name: "Load Retell agents" }).click();
@@ -2636,12 +2644,14 @@ describe("the complete product, walked in order in a second project", () => {
         config: Record<string, unknown>;
         credentials: string | null;
       }>(
-        `select id, type, modality, config, credentials
+        `select id, agent_platform, connection_kind, access_variant, modality, config, credentials
            from connection where name = 'Retell staging'`,
       );
       expect(stored.rows).toHaveLength(1);
       expect(stored.rows[0]).toMatchObject({
-        type: "phone",
+        agent_platform: "retell",
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: BROWSER_RETELL_NUMBER },
         credentials: null,
@@ -2680,7 +2690,7 @@ describe("the complete product, walked in order in a second project", () => {
         .first();
       await expect
         .poll(() => row.innerText(), { timeout: 30_000 })
-        .toContain("Phone number · Voice");
+        .toContain("Retell phone · Voice");
       const said = await row.innerText();
       expect(said).toContain("Unlabelled");
       // Read without regard to case: a chip is drawn in capitals, and the word

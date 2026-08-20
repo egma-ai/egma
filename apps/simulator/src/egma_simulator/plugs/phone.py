@@ -71,6 +71,7 @@ class PhoneCall:
         self,
         *,
         modality: str,
+        access_variant: str,
         config: dict[str, Any],
         credentials: object,
         simulation_id: str | None = None,
@@ -82,6 +83,12 @@ class PhoneCall:
         # nothing to tell the far end about the simulation and no way to
         # stand in front of its tools.
         del simulation_id, mock_tools
+
+        if access_variant != "phone_number.public_e164":
+            raise PlugError(
+                "the phone-number adapter does not support access variant "
+                f"{access_variant!r}"
+            )
 
         # Which media backend and trunk this call goes over, resolved by
         # assembly from this container's own configuration and the
@@ -114,7 +121,7 @@ class PhoneCall:
                 f"{BACKEND_VARIABLE} on this container to one of "
                 f"{sorted(BACKENDS)}"
             )
-        # **The moment a carrier's own refusals belong.** Contract v2 already
+        # **The moment a carrier's own refusals belong.** Contract v3 already
         # proved that this phone work order carries a complete route. Here a
         # call is about to be placed, so backend-specific value checks belong
         # here and a refusal names why this simulation cannot dial.
@@ -151,10 +158,10 @@ class PhoneCall:
 
         if credentials is not None:
             raise PlugError(
-                "a phone connection carries no credentials: the trunk belongs "
-                "to the deployment and arrives on the claimed phone work "
-                "order, so anything sealed onto this connection is read by "
-                "nobody"
+                "a phone connection carries no credentials: the platform's "
+                "carrier arrives on the claimed phone work order, while the "
+                "media bridge belongs to the deployment; anything sealed "
+                "onto this connection is read by nobody"
             )
 
         self._number = number.strip()

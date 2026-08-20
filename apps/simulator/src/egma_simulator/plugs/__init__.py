@@ -1,11 +1,11 @@
-"""Platform plugs: the one place that knows how to reach a platform.
+"""Connection plugs: the one place that knows how to reach an agent.
 
-A **plug** is the component behind a connection type. It alone knows how
-to open an exchange with that platform, deliver the persona's turns, hear
+A **plug** is the component behind a connection kind. It alone knows how
+to open that connection, deliver the persona's turns, hear
 the agent's answers, and end the exchange. Everything else in the
 simulator is plug-blind: the persona brain, the walk, the claim loop, and
-the reporting never learn which platform they are talking through. Adding
-a platform therefore touches exactly two things — a new module in this
+the reporting never learn how they reached the agent. Adding a connection
+kind therefore touches exactly two things — a new module in this
 package, and one line in the registry below.
 
 This docstring is the plug author's whole brief. If writing a new plug
@@ -24,7 +24,7 @@ six keyword arguments:
   Refuse keys you do not know (raise ``PlugError``) — a silently ignored
   typo would change behavior nobody asked for.
 - ``credentials`` — the resolved secret material, or ``None``. Use it to
-  reach the platform and for nothing else: **never log it, never persist
+  open the connection and for nothing else: **never log it, never persist
   it, never let it into an exception message or a returned value.** The
   report schema structurally rejects credential-shaped fields, and the
   acceptance suite plants sentinel credentials and scans every byte the
@@ -52,16 +52,16 @@ six keyword arguments:
 
 Constructors validate and hold; they never do I/O. A constructor that
 raises means the simulation fails with an honest reason before the
-platform is ever dialled.
+connection is ever opened.
 
 ## Chat or voice: same job, different currency
 
 A chat plug exchanges text. A voice plug prepares one Pipecat transport.
 The running Pipecat pipeline owns incoming audio, speech processing,
 persona output, conversion, pacing, and recording. The plug owns only the
-platform lifecycle and provider reference.
+connection lifecycle and provider reference.
 
-There are two seams: :class:`PlatformPlug` for chat and
+There are two seams: :class:`ConnectionPlug` for chat and
 :class:`VoiceConnection` for voice. A plug implements the one for its
 modality and refuses the other at construction.
 
@@ -134,8 +134,8 @@ the persona model and speech services work.
 ## Registration
 
 The registry lives in :func:`plug_for` below: one entry per connection
-type, the type string exactly as specs will name it. A simulator holding
-no plug for a claimed spec's type refuses the claim out loud and reports
+kind, the connection-kind string exactly as specs will name it. A simulator holding
+no plug for a claimed spec's kind refuses the claim out loud and reports
 nothing — the row is the control plane's to sweep.
 """
 
@@ -205,7 +205,7 @@ def failed_ending(fault: BaseException) -> str:
     return fault.ending if isinstance(fault, PlugError) else ERROR
 
 
-class PlatformPlug(Protocol):
+class ConnectionPlug(Protocol):
     """The seam the walk drives: text in, text out, whatever the modality.
 
     A chat plug implements it directly; a voice plug is reached through it,
@@ -246,17 +246,18 @@ class VoiceConnection(Protocol):
     async def close(self) -> None: ...
 
 
-PlugFactory = Callable[..., PlatformPlug | VoiceConnection]
-"""What the registry hands back: called with ``modality=``, ``config=``,
-``credentials=``, ``simulation_id=``, ``mock_tools=`` and ``media=``
+PlugFactory = Callable[..., ConnectionPlug | VoiceConnection]
+"""What the registry hands back: called with ``modality=``,
+``access_variant=``, ``config=``, ``credentials=``, ``simulation_id=``,
+``mock_tools=`` and ``media=``
 keywords, it returns one plug for one simulation — in practice, the plug
 class itself."""
 
 
-def plug_for(connection_type: str) -> PlugFactory | None:
-    """The plug factory registered for one connection type, or ``None``.
+def plug_for(connection_kind: str) -> PlugFactory | None:
+    """The plug factory registered for one connection kind, or ``None``.
 
-    The registry is deliberately a literal here: adding a platform is one
+    The registry is deliberately a literal here: adding a connection kind is one
     import and one line, and the diff that adds it touches nothing else.
     """
     from .livekit import LiveKitRoom
@@ -266,9 +267,9 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .scripted import ScriptedCounterpart
 
     return {
-        "livekit": LiveKitRoom,
+        "livekit_room": LiveKitRoom,
         "loopback": LoopbackCounterpart,
-        "phone": PhoneCall,
-        "retell": RetellChat,
+        "phone_number": PhoneCall,
+        "retell_chat_api": RetellChat,
         "scripted": ScriptedCounterpart,
-    }.get(connection_type)
+    }.get(connection_kind)

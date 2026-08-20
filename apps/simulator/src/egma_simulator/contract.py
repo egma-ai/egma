@@ -25,7 +25,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 CONTRACT_DIR_ENV = "EGMA_SIMULATION_CONTRACT_DIR"
 
-SPEC_SCHEMA_FILENAME = "simulation-spec.v2.schema.json"
+SPEC_SCHEMA_FILENAME = "simulation-spec.v3.schema.json"
 REPORT_SCHEMA_FILENAME = "simulation-report.v1.schema.json"
 
 # The endings a failed simulation may carry, spelled here because this is

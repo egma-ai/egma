@@ -41,10 +41,13 @@ export const LIST = {
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
   window: "Window",
-  showMore: "Show more",
-  loadingMore: "Loading…",
+  previousPage: "Previous",
+  nextPage: "Next",
+  page: (number: number) => `Page ${number}`,
   counted: (shown: number) =>
-    shown === 1 ? "1 transcript" : `${shown} transcripts`,
+    shown === 1
+      ? "1 transcript on this page"
+      : `${shown} transcripts on this page`,
   /** The two speakers, where a count rather than a transcript names them. */
   human: "human",
   agent: "agent",
@@ -72,7 +75,7 @@ export const COLUMNS = {
   tools: "Tools",
   errors: "Errors",
   environment: "Environment",
-  connection: "Connection",
+  platform: "Platform",
 } as const;
 
 /**
@@ -91,15 +94,13 @@ export const COLUMNS = {
  * 2. **Nothing has arrived, at any window.** The whole export setup, in the
  *    shortest form there is: the address this deployment listens on, the two
  *    variables that point an agent at it, where to mint the key they carry, and
- *    the caution about the key that fails in silence. Whichever window is
+ *    the caution about the key scope. Whichever window is
  *    selected — a developer on their first day lands on the default one, and
  *    this is the page written for them.
  * 3. **Nothing has arrived, and a key that names the whole organization is
- *    visible.** The one step of that setup that fails silently — everything is
- *    accepted and stored, and none of it is in a project, so a correct-looking
- *    export shows nothing. Telling somebody who already exported to go and
- *    export would be the unhelpful answer, so this replaces the teaching rather
- *    than joining it.
+ *    visible.** Customer OTLP rejects that scope because no project would own
+ *    the evidence. Pointing somebody back to generic export setup would miss
+ *    the specific key change they need, so this replaces the teaching.
  * 4. **Traffic is arriving and nothing judges it.** Every grader starts scoped
  *    to simulations and the seeded one can only ever judge a simulation, so an
  *    absence of verdicts here is the ordinary first state rather than a fault.
@@ -112,49 +113,14 @@ export const QUIET = {
   setUp: {
     title: "Nothing has been recorded here yet",
     lead:
-      "Point an agent's OpenTelemetry export at Egma and what it does in " +
-      "production lands on this page.",
-    endpoint: "This deployment listens for OpenTelemetry at",
-    variables:
-      "Set these two where the agent runs. The exporter adds the rest of the " +
-      "path itself, and the space in the header is percent-encoded because " +
-      "OpenTelemetry does not allow a literal one.",
-    /** The two variables, with this deployment's own address filled in. */
-    exports: (endpoint: string): string =>
-      `export OTEL_EXPORTER_OTLP_ENDPOINT=${endpoint}\n` +
-      `export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_…"`,
-    key: "Mint a key for this project",
-    keyLead:
-      "The key that export carries has to name this project. Egma shows the " +
-      "secret once.",
-    /**
-     * The caution that rides with the teaching, and the reason it rides here at
-     * all.
-     *
-     * State 3 below says the same thing louder, and it can only fire for
-     * somebody the key list answers for — the server shows an ordinary member
-     * their own keys and nobody else's, so a member looking at a project whose
-     * exporter uses an admin's organization-wide key would never meet that
-     * state. The sentence therefore lives in both places: once as a caution
-     * everybody reads, once as the whole answer for whoever can see the key.
-     */
-    caution:
-      "Already exporting and still seeing nothing? Check what the key names. " +
-      "A key minted for the whole organization files its telemetry outside " +
-      "every project, and none of it appears here.",
+      "Choose Retell or LiveKit Agents and complete its production Monitoring setup.",
+    action: "Set up monitoring",
   },
   organizationKey: {
     title: "A key here names the whole organization",
-    /**
-     * Kept word for word from the empty state it came out of. It is the
-     * sentence that saves the afternoon, and rewording it would only risk
-     * saying something slightly different about the one thing on this path
-     * that goes wrong in silence.
-     */
     lead:
-      "The key that export uses has to name this project — a key minted for " +
-      "the whole organization files its telemetry outside every project, and " +
-      "none of it appears here.",
+      "The key that export uses has to name this project. Egma rejects an " +
+      "organization-wide key for production telemetry.",
     key: "Mint a key for this project",
   },
   unwatched: {
@@ -266,7 +232,10 @@ export const FACTS = {
   /** A fact about one exchange, and never a column — see `COLUMNS` above. */
   source: "Source",
   environment: COLUMNS.environment,
-  connection: COLUMNS.connection,
+  platform: COLUMNS.platform,
+  platformAgentName: "Platform agent name",
+  platformAgentId: "Platform agent ID",
+  platformAgentVersion: "Platform agent version",
   reference: "Provider reference",
   identifier: "Identifier",
   within: "Inside",

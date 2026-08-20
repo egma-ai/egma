@@ -588,7 +588,9 @@ def livekit_spec(
         simulation_id,
         modality="voice",
         connection={
-            "type": "livekit",
+            "agent_platform": "livekit_agents",
+            "connection_kind": "livekit_room",
+            "access_variant": "livekit_room.project_credentials",
             "config": config,
             "credentials": {"apiKey": A_KEY, "apiSecret": A_SECRET},
         },
@@ -627,7 +629,9 @@ def livekit_endpoint_spec(
         simulation_id,
         modality="voice",
         connection={
-            "type": "livekit",
+            "agent_platform": "livekit_agents",
+            "connection_kind": "livekit_room",
+            "access_variant": "livekit_room.customer_token_endpoint",
             "config": {"url": url, "tokenEndpoint": token_endpoint},
             "credentials": (
                 {"headers": AN_AUTH_HEADER} if credentials is None else credentials
@@ -644,6 +648,7 @@ def room(stub: RoomStub, **config: object) -> LiveKitRoom:
     """One livekit plug against a room-shaped LiveKit."""
     return LiveKitRoom(
         modality="voice",
+        access_variant="livekit_room.project_credentials",
         config={"url": A_URL} | config,
         credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
         simulation_id=A_SIMULATION,
@@ -661,6 +666,7 @@ def endpoint_room(
     """One livekit plug that asks an endpoint for its way into the room."""
     return LiveKitRoom(
         modality="voice",
+        access_variant="livekit_room.customer_token_endpoint",
         config={"url": url, "tokenEndpoint": token_endpoint},
         credentials=(
             {"headers": AN_AUTH_HEADER} if credentials is None else credentials
@@ -727,7 +733,7 @@ async def room_walk(
 
 
 def test_the_registry_knows_the_livekit_plug():
-    assert plug_for("livekit") is LiveKitRoom
+    assert plug_for("livekit_room") is LiveKitRoom
 
 
 def test_a_room_is_one_pipecat_voice_connection():
@@ -1198,6 +1204,7 @@ async def test_a_livekit_that_answers_nowhere_fails_without_a_credential(
     """
     caplog.set_level(logging.INFO)
     settings = RoomSettings.from_connection(
+        "livekit_room.project_credentials",
         {"url": "http://127.0.0.1:1"},
         {"apiKey": A_KEY, "apiSecret": A_SECRET},
     )
@@ -1434,6 +1441,11 @@ def test_a_connection_the_plug_cannot_use_is_refused(connection: tuple):
     with pytest.raises(PlugError):
         LiveKitRoom(
             modality="voice",
+            access_variant=(
+                "livekit_room.customer_token_endpoint"
+                if "tokenEndpoint" in config
+                else "livekit_room.project_credentials"
+            ),
             config=config,
             credentials=credentials,
             simulation_id=A_SIMULATION,
@@ -1452,6 +1464,7 @@ def test_a_refusal_about_a_credential_never_quotes_one():
     with pytest.raises(PlugError) as refusal:
         LiveKitRoom(
             modality="voice",
+            access_variant="livekit_room.project_credentials",
             config={"url": A_URL},
             credentials={"apiKey": A_KEY, "apiSecret": "   "},
             simulation_id=A_SIMULATION,
@@ -1465,6 +1478,7 @@ def test_the_plug_speaks_voice_only():
     with pytest.raises(PlugError) as refusal:
         LiveKitRoom(
             modality="chat",
+            access_variant="livekit_room.project_credentials",
             config={"url": A_URL},
             credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
             simulation_id=A_SIMULATION,
@@ -1476,6 +1490,7 @@ def test_the_room_is_made_fresh_and_never_reused():
     """One room per simulation: a room that outlived its own would put two
     simulations on one line."""
     settings = RoomSettings.from_connection(
+        "livekit_room.project_credentials",
         {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
     )
     built = [
@@ -1490,6 +1505,7 @@ def test_the_settings_never_show_the_secret_when_they_are_printed():
     """A dataclass printed into a log line is the easiest way to leak
     one, so this one does not carry it."""
     settings = RoomSettings.from_connection(
+        "livekit_room.project_credentials",
         {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
     )
     assert A_SECRET not in repr(settings)
@@ -1528,6 +1544,7 @@ def test_the_fake_is_the_real_driver_with_its_network_answered():
     stub = RoomStub()
     driver = stub.driver(
         settings=RoomSettings.from_connection(
+            "livekit_room.project_credentials",
             {"url": A_URL}, {"apiKey": A_KEY, "apiSecret": A_SECRET}
         ),
         simulation_id=A_SIMULATION,
@@ -1561,10 +1578,13 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
     from conftest import load_fixture_spec
 
     spec = SimulationSpec.from_document(load_fixture_spec("voice-livekit.json"))
-    assert spec.connection_type == "livekit"
+    assert spec.agent_platform == "livekit_agents"
+    assert spec.connection_kind == "livekit_room"
+    assert spec.access_variant == "livekit_room.project_credentials"
 
-    plug = plug_for(spec.connection_type)(
+    plug = plug_for(spec.connection_kind)(
         modality=spec.modality,
+        access_variant=spec.access_variant,
         config=spec.connection_config,
         credentials=spec.credentials,
         simulation_id=spec.simulation_id,
@@ -1613,6 +1633,7 @@ async def test_an_unsafe_token_endpoint_is_refused_before_a_request_leaves_egma(
     """No stored connection can turn into an internal request."""
     plug = LiveKitRoom(
         modality="voice",
+        access_variant="livekit_room.customer_token_endpoint",
         config={"url": A_URL, "tokenEndpoint": token_endpoint},
         credentials={"headers": AN_AUTH_HEADER},
         simulation_id=A_SIMULATION,
@@ -1629,6 +1650,7 @@ def test_a_saved_http_token_endpoint_is_refused_before_auth_headers_leave_egma()
     """A malformed record cannot send a secret or token over cleartext."""
     with pytest.raises(MediaBackendError) as refused:
         RoomSettings.from_connection(
+            "livekit_room.customer_token_endpoint",
             {
                 "url": A_URL,
                 "tokenEndpoint": "http://tokens.example/egma/livekit-token",
@@ -1677,6 +1699,7 @@ async def test_a_token_endpoint_name_must_resolve_only_to_public_addresses(
             return None
 
     settings = RoomSettings.from_connection(
+        "livekit_room.customer_token_endpoint",
         {"url": A_URL, "tokenEndpoint": "https://tokens.example/token"},
         {"headers": AN_AUTH_HEADER},
     )
@@ -1716,6 +1739,7 @@ async def test_an_unexpected_endpoint_client_bug_is_not_hidden_as_customer_fault
             return None
 
     settings = RoomSettings.from_connection(
+        "livekit_room.customer_token_endpoint",
         {"url": A_URL, "tokenEndpoint": "https://tokens.example/token"},
         {"headers": AN_AUTH_HEADER},
     )
@@ -1845,6 +1869,7 @@ def test_a_token_endpoint_without_auth_headers_is_refused_before_a_request(
         with pytest.raises(PlugError) as refused:
             LiveKitRoom(
                 modality="voice",
+                access_variant="livekit_room.customer_token_endpoint",
                 config={"url": A_URL, "tokenEndpoint": endpoint.url},
                 credentials=credentials,
                 simulation_id=A_SIMULATION,
@@ -2099,6 +2124,7 @@ async def test_an_endpoint_that_answers_nowhere_is_a_fault_naming_it(
     monkeypatch.setattr(livekit_room_module.socket, "socket", closed_socket)
     endpoint = "https://tokens.example:443/egma/livekit-token"
     settings = RoomSettings.from_connection(
+        "livekit_room.customer_token_endpoint",
         {"url": A_URL, "tokenEndpoint": endpoint},
         {"headers": AN_AUTH_HEADER},
     )
@@ -2282,6 +2308,7 @@ def test_the_settings_never_show_the_endpoints_headers_when_printed():
     """A dataclass printed into a log line is the easiest way to leak a
     credential, so this one does not carry one either."""
     settings = RoomSettings.from_connection(
+        "livekit_room.customer_token_endpoint",
         {"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
         {"headers": AN_AUTH_HEADER},
     )
@@ -2348,6 +2375,11 @@ def test_a_token_endpoint_connection_the_plug_cannot_use_is_refused(
     with pytest.raises(PlugError):
         LiveKitRoom(
             modality="voice",
+            access_variant=(
+                "livekit_room.customer_token_endpoint"
+                if "tokenEndpoint" in config
+                else "livekit_room.project_credentials"
+            ),
             config=config,
             credentials=credentials,
             simulation_id=A_SIMULATION,
@@ -2358,6 +2390,7 @@ def test_a_refusal_about_the_endpoints_headers_never_quotes_one():
     with pytest.raises(PlugError) as refusal:
         LiveKitRoom(
             modality="voice",
+            access_variant="livekit_room.customer_token_endpoint",
             config={"url": A_URL, "tokenEndpoint": "https://acme.example/token"},
             credentials={"headers": f"Bearer {A_HEADER_SECRET}"},
             simulation_id=A_SIMULATION,
@@ -2376,10 +2409,13 @@ async def test_the_golden_token_endpoint_fixture_is_a_connection_the_plug_accept
     spec = SimulationSpec.from_document(
         load_fixture_spec("voice-livekit-token-endpoint.json")
     )
-    assert spec.connection_type == "livekit"
+    assert spec.agent_platform == "livekit_agents"
+    assert spec.connection_kind == "livekit_room"
+    assert spec.access_variant == "livekit_room.customer_token_endpoint"
 
-    plug = plug_for(spec.connection_type)(
+    plug = plug_for(spec.connection_kind)(
         modality=spec.modality,
+        access_variant=spec.access_variant,
         config=spec.connection_config,
         credentials=spec.credentials,
         simulation_id=spec.simulation_id,

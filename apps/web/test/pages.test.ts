@@ -420,9 +420,9 @@ describe("the pages", () => {
    * dev`, where a missing rule looks the same as a page nobody visits. It only
    * appears in a deployment, as a working page that cannot load its own data.
    *
-   * That is what happened: `/api/personas` shipped with ticket 04,
-   * `/api/graders` and `/api/grader-registry` with ticket 05, and
-   * `/api/connection-types` and `/api/capabilities` with ticket 03 — all merged,
+   * That is what happened: `/api/personas` and `/api/persona-form` shipped with
+   * ticket 04, `/api/graders` and `/api/grader-registry` with ticket 05, and
+   * `/api/connection-options` and `/api/capabilities` with ticket 03 — all merged,
    * all unreachable outside a test. This reads the paths out of `lib/` so the
    * list cannot go stale again, and so the next ticket's path is covered on the
    * day it is written rather than when somebody remembers to add a line here.

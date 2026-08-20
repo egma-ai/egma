@@ -15,8 +15,9 @@ import {
 } from "../platform/agents.ts";
 import { ConnectionCredentials } from "../platform/connection-credentials.ts";
 
-export const LIVEKIT_KEY_PAIR_VARIANT = "livekit.key_pair";
-export const LIVEKIT_TOKEN_ENDPOINT_VARIANT = "livekit.token_endpoint";
+export const LIVEKIT_KEY_PAIR_VARIANT = "livekit_room.project_credentials";
+export const LIVEKIT_TOKEN_ENDPOINT_VARIANT =
+  "livekit_room.customer_token_endpoint";
 
 type CommonRegistration = {
   /** The agent's name in Egma. */
@@ -104,7 +105,9 @@ export function connectLiveKit(
       ...(input.connectionName === undefined
         ? {}
         : { name: input.connectionName.trim() }),
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: input.variant,
       modality: "voice",
       ...(input.environment === undefined
         ? {}

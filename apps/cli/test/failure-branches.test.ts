@@ -281,16 +281,18 @@ describe("a connection egma has no adapter for", () => {
     // before it is untouched — the agent is registered, the tests are written
     // and pushed — and the wizard's whole job here is to hand that one
     // sentence on untouched.
-    platform.running.noAdapterFor("retell");
+    platform.running.noAdapterFor("retell_chat_api");
 
     const script = await workspace.script({ steps: FOUND, stepsByTask: [WRITES_ONE_TEST] });
     const { ui, report } = await walkWith({ script, answers: { "retell-key": KEY } });
 
-    const refusal = platform.running.noAdapterMessage("retell");
+    const refusal = platform.running.noAdapterMessage("retell_chat_api");
     expect(report).toEqual({ kind: "failed", reason: refusal });
     expect(buildExitLine(report)).toBe(`Egma could not finish: ${refusal}`);
     // Verbatim: not summarised, not softened, not swallowed.
-    expect(buildExitLine(report)).toContain("no simulator adapter for a retell connection yet");
+    expect(buildExitLine(report)).toContain(
+      "no simulator adapter for a retell_chat_api connection yet",
+    );
     expect(ui.record.statuses.join("\n")).toContain(refusal);
 
     // The work before the run is the developer's either way, and no run was

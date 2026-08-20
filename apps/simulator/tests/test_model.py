@@ -268,11 +268,13 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
     """The work order supplies provider, model, and current direct key."""
     model_stub.answer_with("I need the next available appointment.")
     document = {
-        "contract_version": 2,
+        "contract_version": 3,
         "simulation_id": "sim_direct_model_selection",
         "modality": "chat",
         "connection": {
-            "type": "retell",
+            "agent_platform": "retell",
+            "connection_kind": "retell_chat_api",
+            "access_variant": "retell_chat_api.api_key",
             "config": {"retellAgentId": "agent_fixture"},
             "credentials": None,
         },

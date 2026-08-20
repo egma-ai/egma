@@ -47,13 +47,15 @@ const RESCHEDULING = {
 } as const;
 
 const RETELL = {
-  type: "retell",
+  agent_platform: "retell",
+  connection_kind: "retell_chat_api",
+  access_variant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
-/** The direct Retell fixture in this file is a chat agent. */
+/** The Retell chat fixture in this file points at a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
   if (!url.includes("/v2/list-agents")) {
@@ -228,7 +230,7 @@ async function aClaimedSimulation(
       claimant: CONDUCTOR,
       capacity: 50,
       wait_seconds: 0,
-      contract_versions: [2],
+      contract_versions: [3],
     },
   });
   expect(claimed.statusCode).toBe(200);
@@ -457,7 +459,9 @@ describe("the lifecycle lands", () => {
       { platformSettings: PHONE_IS_SET_UP },
     );
     const attached = await ask(api.app, "POST", `/api/agents/${agentId}/connections`, key, {
-      type: "phone",
+      agent_platform: null,
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
     });

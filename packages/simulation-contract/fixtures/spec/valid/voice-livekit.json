@@ -1,9 +1,11 @@
 {
-  "contract_version": 2,
+  "contract_version": 3,
   "simulation_id": "sim_01K4RD9Q7X2M5NBVE8TJHC3PYW",
   "modality": "voice",
   "connection": {
-    "type": "livekit",
+    "agent_platform": "livekit_agents",
+    "connection_kind": "livekit_room",
+    "access_variant": "livekit_room.project_credentials",
     "config": {
       "url": "wss://lakeside-dental.livekit.cloud",
       "agentName": "front-desk",

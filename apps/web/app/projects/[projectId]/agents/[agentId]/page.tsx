@@ -73,11 +73,10 @@ export default function AgentDetailPage() {
 /**
  * A connection, said the same way the agents list says it.
  *
- * The platform's name comes down on the connection, decided by the registry
- * that says what a connection of that type may even hold. A label table kept in
- * this application would be a second vocabulary able to disagree with it — and
- * a row that spelled a platform differently from the page it links to is
- * exactly what that disagreement looks like.
+ * The product label comes down on the connection, derived by the registry from
+ * its platform, connection kind, access variant, and modality. A label table
+ * kept in this application would be a second vocabulary able to disagree with
+ * the registry that gates the connection forms.
  */
 function connectionColumns(
   projectId: string,
@@ -87,7 +86,7 @@ function connectionColumns(
   return [
     {
       key: "name",
-      header: "Connection",
+      header: "Name",
       primary: true,
       cell: (one) => (
         <Link
@@ -110,10 +109,10 @@ function connectionColumns(
       cell: (one) => one.environment ?? NO_ENVIRONMENT,
     },
     {
-      key: "type",
-      header: "Provider",
-      width: "140px",
-      cell: (one) => one.type_label,
+      key: "product-label",
+      header: "Connection",
+      width: "180px",
+      cell: (one) => one.product_label,
     },
     {
       key: "modality",

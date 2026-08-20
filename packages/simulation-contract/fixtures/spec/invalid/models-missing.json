@@ -1,9 +1,11 @@
 {
-  "contract_version": 2,
+  "contract_version": 3,
   "simulation_id": "sim_fixture_models_missing",
   "modality": "chat",
   "connection": {
-    "type": "retell",
+    "agent_platform": "retell",
+    "connection_kind": "retell_chat_api",
+    "access_variant": "retell_chat_api.api_key",
     "config": { "retellAgentId": "agent_fixture" },
     "credentials": null
   },

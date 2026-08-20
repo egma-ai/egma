@@ -1,62 +1,256 @@
 import { sql } from "drizzle-orm";
 import {
-  bigint,
   boolean,
   check,
   foreignKey,
   index,
+  integer,
   pgTable,
   text,
   unique,
 } from "drizzle-orm/pg-core";
 
-import { connection } from "./agents.ts";
+import { user } from "./identity.ts";
 import { organization, project } from "./tenancy.ts";
-import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
+import {
+  createdAt,
+  idText,
+  moment,
+  oneOf,
+  prefixCheck,
+  updatedAt,
+} from "./columns.ts";
 
-/**
- * What egma writes down while it is watching somebody else's platform.
- *
- * Two tables, and they answer two different questions. The claim chooses one
- * live writer when two transports carry a production trace; the refusal
- * counter is how a delivery that belonged to nobody is remembered without
- * being stored.
- */
+/** Agent platforms with a customer-facing production Monitoring setup. */
+export const MONITORING_PLATFORMS = ["retell", "livekit_agents"] as const;
+export type MonitoringPlatform = (typeof MONITORING_PLATFORMS)[number];
 
-/** How a production trace reached egma. Delivery, and nothing else. */
-export const PRODUCTION_TRANSPORTS = ["webhook", "pull"] as const;
-export type ProductionTransport = (typeof PRODUCTION_TRANSPORTS)[number];
+/** How one platform sends production evidence to Egma. */
+export const MONITORING_STRATEGIES = [
+  "retell_api_polling",
+  "livekit_otlp",
+] as const;
+export type MonitoringStrategy = (typeof MONITORING_STRATEGIES)[number];
 
-/**
- * Where a claim is in the two-store protocol.
- *
- * `claimed` is the recovery point: the row exists, the payload is on it, and
- * nothing has been appended yet — or something has and nobody got to say so.
- * `written` is the end. There is no third value, deliberately: a claim is
- * either still owed a write or it is not, and a state between them would be a
- * state the sweep would have to guess about.
- */
+/** A setup-wide Retell condition. Empty successful polls do not change it. */
+export const MONITORING_HEALTH_STATES = [
+  "healthy",
+  "invalid_credential",
+  "rate_limited",
+  "provider_unavailable",
+] as const;
+export type MonitoringHealthState = (typeof MONITORING_HEALTH_STATES)[number];
+
+/** The fixed scan a selected Retell agent is currently completing. */
+export const RETELL_SCAN_KINDS = [
+  "historical_import",
+  "regular",
+  "reconciliation",
+] as const;
+export type RetellScanKind = (typeof RETELL_SCAN_KINDS)[number];
+
+/** Customer-visible progress for one selected Retell voice agent. */
+export const RETELL_MONITORED_AGENT_STATES = [
+  "importing",
+  "active",
+  "degraded",
+] as const;
+export type RetellMonitoredAgentState =
+  (typeof RETELL_MONITORED_AGENT_STATES)[number];
+
+/** The cross-store write has either been taken or completed. */
 export const PRODUCTION_CLAIM_STATUSES = ["claimed", "written"] as const;
 export type ProductionClaimStatus = (typeof PRODUCTION_CLAIM_STATUSES)[number];
 
+/** A permanent per-call import failure can later be replayed explicitly. */
+export const RETELL_FAILURE_STATUSES = ["open", "resolved"] as const;
+export type RetellFailureStatus = (typeof RETELL_FAILURE_STATUSES)[number];
+
 /**
- * The ledger. **An atomic claim, never a check.**
+ * Project configuration for receiving production evidence from one platform.
  *
- * A transport does not ask whether a conversation is written — it inserts a
- * row whose unique key is the trace identity, carrying the vendor payload it
- * holds. First insert wins; the loser's insert conflicts and it walks away.
- * Two transports racing on one conversation are settled by the constraint
- * rather than by timing, which is the grading queue's own insert-first-wins
- * pattern reused. It prevents a live transport race; recovery across Postgres
- * and ClickHouse is separately at-least-once.
+ * This is not a simulation connection. Retell owns a sealed account key;
+ * LiveKit owns no provider secret because the customer's worker pushes OTLP
+ * with the existing Egma project key.
+ */
+export const monitoringSetup = pgTable(
+  "monitoring_setup",
+  {
+    id: idText("id").primaryKey(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: idText("project_id").notNull(),
+    agentPlatform: text("agent_platform").notNull(),
+    strategy: text("strategy").notNull(),
+    /** A sealed `{apiKey}` object for Retell; null for LiveKit OTLP. */
+    credentials: text("credentials"),
+    credentialsHint: text("credentials_hint"),
+    healthState: text("health_state").notNull().default("healthy"),
+    /** A key-wide Retell gate. No selected agent may bypass it. */
+    blockedUntil: moment("blocked_until"),
+    failureStartedAt: moment("failure_started_at"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastErrorAt: moment("last_error_at"),
+    lastRecoveredAt: moment("last_recovered_at"),
+    lastReceivedAt: moment("last_received_at"),
+    createdBy: idText("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("monitoring_setup_id_prefix", table.id, "mns"),
+    oneOf("monitoring_setup_platform_allowed", table.agentPlatform, [
+      ...MONITORING_PLATFORMS,
+    ]),
+    oneOf("monitoring_setup_strategy_allowed", table.strategy, [
+      ...MONITORING_STRATEGIES,
+    ]),
+    oneOf("monitoring_setup_health_allowed", table.healthState, [
+      ...MONITORING_HEALTH_STATES,
+    ]),
+    check(
+      "monitoring_setup_credentials_hint_agrees",
+      sql`(${table.credentials} is null) = (${table.credentialsHint} is null)`,
+    ),
+    check(
+      "monitoring_setup_platform_strategy_agrees",
+      sql`(${table.agentPlatform} = 'retell' and ${table.strategy} = 'retell_api_polling' and ${table.credentials} is not null) or (${table.agentPlatform} = 'livekit_agents' and ${table.strategy} = 'livekit_otlp' and ${table.credentials} is null)`,
+    ),
+    unique("monitoring_setup_project_platform_unique").on(
+      table.projectId,
+      table.agentPlatform,
+    ),
+    // The selected-agent row repeats the tenant facts so its composite foreign
+    // key can prove that it uses this project's setup and credential.
+    unique("monitoring_setup_id_tenant_unique").on(
+      table.id,
+      table.projectId,
+      table.organizationId,
+    ),
+    foreignKey({
+      name: "monitoring_setup_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    index("monitoring_setup_project_idx").on(table.projectId),
+  ],
+);
+
+/** One Retell voice agent selected inside a Retell Monitoring setup. */
+export const retellMonitoredAgent = pgTable(
+  "retell_monitored_agent",
+  {
+    id: idText("id").primaryKey(),
+    monitoringSetupId: idText("monitoring_setup_id").notNull(),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: idText("project_id").notNull(),
+    platformAgentId: text("platform_agent_id").notNull(),
+    platformAgentName: text("platform_agent_name").notNull(),
+    state: text("state").notNull().default("importing"),
+    /** The fixed provider window and opaque page cursor currently in flight. */
+    scanKind: text("scan_kind"),
+    scanFrom: moment("scan_from"),
+    scanThrough: moment("scan_through"),
+    paginationKey: text("pagination_key"),
+    /** Every opaque cursor already followed in this fixed scan. */
+    paginationTrail: text("pagination_trail").notNull().default("[]"),
+    /** A paused daily scan keeps its exact fixed window while regular polling runs. */
+    reconciliationFrom: moment("reconciliation_from"),
+    reconciliationThrough: moment("reconciliation_through"),
+    reconciliationPaginationKey: text("reconciliation_pagination_key"),
+    reconciliationPaginationTrail: text("reconciliation_pagination_trail")
+      .notNull()
+      .default("[]"),
+    /** A bounded reconciliation slice must yield to one current scan. */
+    reconciliationNeedsRegular: boolean("reconciliation_needs_regular")
+      .notNull()
+      .default(false),
+    /** Upper bound of the last completed import or regular scan. */
+    completedThrough: moment("completed_through"),
+    /** Regular polling has its own cadence; reconciliation cannot move it. */
+    nextRegularPollAt: moment("next_regular_poll_at").notNull(),
+    /** The next scheduler wake for either regular or reconciliation work. */
+    nextPollAt: moment("next_poll_at").notNull(),
+    nextReconciliationAt: moment("next_reconciliation_at").notNull(),
+    /** One DB-backed owner prevents duplicate Retell reads across API replicas. */
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: moment("lease_expires_at"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    lastErrorKind: text("last_error_kind"),
+    lastErrorAt: moment("last_error_at"),
+    lastSuccessAt: moment("last_success_at"),
+    lastCallReceivedAt: moment("last_call_received_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    prefixCheck("retell_monitored_agent_id_prefix", table.id, "rma"),
+    oneOf("retell_monitored_agent_state_allowed", table.state, [
+      ...RETELL_MONITORED_AGENT_STATES,
+    ]),
+    oneOf("retell_monitored_agent_scan_kind_allowed", table.scanKind, [
+      ...RETELL_SCAN_KINDS,
+    ]),
+    check(
+      "retell_monitored_agent_scan_agrees",
+      sql`(${table.scanKind} is null and ${table.scanFrom} is null and ${table.scanThrough} is null and ${table.paginationKey} is null) or (${table.scanKind} is not null and ${table.scanFrom} is not null and ${table.scanThrough} is not null)`,
+    ),
+    check(
+      "retell_monitored_agent_reconciliation_agrees",
+      sql`(${table.reconciliationFrom} is null and ${table.reconciliationThrough} is null and ${table.reconciliationPaginationKey} is null and ${table.reconciliationNeedsRegular} = false) or (${table.reconciliationFrom} is not null and ${table.reconciliationThrough} is not null)`,
+    ),
+    check(
+      "retell_monitored_agent_lease_agrees",
+      sql`(${table.leaseOwner} is null) = (${table.leaseExpiresAt} is null)`,
+    ),
+    unique("retell_monitored_agent_setup_platform_agent_unique").on(
+      table.monitoringSetupId,
+      table.platformAgentId,
+    ),
+    // Failed-call rows repeat the tenant facts, so they can prove that their
+    // selected agent belongs to the same project and organization.
+    unique("retell_monitored_agent_id_tenant_unique").on(
+      table.id,
+      table.projectId,
+      table.organizationId,
+    ),
+    foreignKey({
+      name: "retell_monitored_agent_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "retell_monitored_agent_setup_tenant_fk",
+      columns: [
+        table.monitoringSetupId,
+        table.projectId,
+        table.organizationId,
+      ],
+      foreignColumns: [
+        monitoringSetup.id,
+        monitoringSetup.projectId,
+        monitoringSetup.organizationId,
+      ],
+    }).onDelete("cascade"),
+    index("retell_monitored_agent_due_idx").on(
+      table.nextPollAt,
+      table.leaseExpiresAt,
+    ),
+    index("retell_monitored_agent_project_idx").on(table.projectId),
+  ],
+);
+
+/**
+ * Durable Retell call identity and cross-store recovery point.
  *
- * **The payload is on the claim because the claim is the recovery point.** The
- * order across the two stores is claim (here) → append (ClickHouse) → mark
- * written (here). A crash anywhere in the middle leaves a claimed-but-unwritten
- * row, and a sweep re-claims it and replays it *from this payload* — so the
- * retry normalises identical input into an identical batch. ClickHouse can
- * suppress a recent byte-identical append. A later replay may append another
- * copy. Neither store needs a transaction spanning the other.
+ * The unique product promise is one visible historical-import trace per
+ * `(project, Retell call id)`. It does not depend on a setup row, selected
+ * agent row, key, page, or simulation connection.
  */
 export const productionTraceClaim = pgTable(
   "production_trace_claim",
@@ -66,45 +260,16 @@ export const productionTraceClaim = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
-    /**
-     * Which connection filed it. Part of the identity, so the same agent
-     * watched from two projects files one copy per project rather than one
-     * copy that two projects fight over.
-     */
-    connectionId: idText("connection_id")
-      .notNull()
-      .references(() => connection.id, { onDelete: "cascade" }),
-    /**
-     * The trace identity, minted deterministically from the provider's call id
-     * and the connection. **The unique key of the whole ledger** — this is the
-     * constraint two racing transports lose to.
-     */
     traceId: text("trace_id").notNull(),
-    /** The provider's own id for the conversation, kept as the join across audio. */
     providerCallId: text("provider_call_id").notNull(),
-    transport: text("transport").notNull(),
-    /** The vendor's document, exactly as it arrived. Never normalised here. */
+    platformAgentId: text("platform_agent_id").notNull(),
+    platformAgentName: text("platform_agent_name"),
+    platformAgentVersion: text("platform_agent_version"),
+    /** Safe Retell document with bearer-like fields removed. */
     payload: text("payload").notNull(),
-    /**
-     * When the conversation ended, as the provider reported it. The poller's
-     * cursor is advanced to this and to nothing else, so the cursor is always a
-     * statement of fact about what is durably stored.
-     */
     endedAt: moment("ended_at").notNull(),
-    /**
-     * True when the normalizer could not fully read the payload and the trace
-     * was written with whatever parsed. The verbatim payload is still here, so
-     * nothing is lost — this is the flag that says a reader should not trust
-     * the normalised columns, and the count of these is the count of poison
-     * items the poller refused to be wedged by.
-     */
     degraded: boolean("degraded").notNull().default(false),
     status: text("status").notNull(),
-    /**
-     * When this claim was taken, and therefore what the lease is measured
-     * from. Re-taking a stale claim moves it, so two sweeps cannot replay one
-     * conversation at the same moment.
-     */
     claimedAt: moment("claimed_at").notNull(),
     writtenAt: moment("written_at"),
     createdAt: createdAt(),
@@ -114,10 +279,10 @@ export const productionTraceClaim = pgTable(
     oneOf("production_trace_claim_status_allowed", table.status, [
       ...PRODUCTION_CLAIM_STATUSES,
     ]),
-    oneOf("production_trace_claim_transport_allowed", table.transport, [
-      ...PRODUCTION_TRANSPORTS,
-    ]),
-    /** The whole ledger, in one line: one row per trace identity, ever. */
+    unique("production_trace_claim_project_call_unique").on(
+      table.projectId,
+      table.providerCallId,
+    ),
     unique("production_trace_claim_trace_id_unique").on(table.traceId),
     check(
       "production_trace_claim_written_agrees",
@@ -128,61 +293,73 @@ export const productionTraceClaim = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
-    /** What the lease sweep reads: the claims still owed an append, oldest first. */
     index("production_trace_claim_unwritten_idx")
       .on(table.claimedAt)
       .where(sql`${table.status} = 'claimed'`),
   ],
 );
 
-/** Why a delivery was turned away. Every one of them is counted; none is stored. */
-export const RETELL_WEBHOOK_REFUSALS = [
-  /** No switched-on connection anywhere names this agent. */
-  "unknown_agent",
-  /** A connection names it, and the switch is off. */
-  "switched_off",
-  /** A switched-on connection names it, and no candidate's key signs the body. */
-  "bad_signature",
-  /**
-   * **Retained by the constraint, and no longer written.**
-   *
-   * A `call_started` from a connection egma is watching is the provider doing
-   * exactly what it was asked to; egma acknowledges it and declines to write a
-   * conversation that has not finished. That is not a refusal, and counting it
-   * beside the three above buried them under it. The column may still hold the
-   * value — a check constraint is what a column *may* hold, not what the code
-   * writes — so no migration is owed for a word that stopped being used.
-   */
-  "other_kind",
-] as const;
-export type RetellWebhookRefusal = (typeof RETELL_WEBHOOK_REFUSALS)[number];
-
-/**
- * How many deliveries were refused, by reason.
- *
- * A counter rather than a row per delivery, and that is the whole design: the
- * endpoint is reachable by anybody, so a table that grew a row per refusal
- * would be an unauthenticated write. Four rows is the most this table can ever
- * hold, and what somebody actually needs from it is the number.
- *
- * It belongs to the deployment rather than to a customer, because a delivery
- * that matched no switched-on connection belongs to nobody — there is no
- * tenancy to file it under, which is exactly what makes it a refusal.
- */
-export const retellWebhookRefusal = pgTable(
-  "retell_webhook_refusal",
+/** A safe record of one call that bounded retries could not import. */
+export const retellIngestionFailure = pgTable(
+  "retell_ingestion_failure",
   {
     id: idText("id").primaryKey(),
-    reason: text("reason").notNull(),
-    howMany: bigint("how_many", { mode: "number" }).notNull().default(0),
+    organizationId: idText("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    projectId: idText("project_id").notNull(),
+    retellMonitoredAgentId: idText("retell_monitored_agent_id").notNull(),
+    providerCallId: text("provider_call_id").notNull(),
+    /** Stable low-cardinality class, never the provider's message or body. */
+    errorKind: text("error_kind").notNull(),
+    /** A sanitized list summary when one exists; never credentials. */
+    payload: text("payload"),
+    attempts: integer("attempts").notNull().default(1),
+    status: text("status").notNull().default("open"),
+    lastAttemptAt: moment("last_attempt_at").notNull(),
+    /** A short lease for one explicit replay request. */
+    replayLeaseOwner: text("replay_lease_owner"),
+    replayLeaseExpiresAt: moment("replay_lease_expires_at"),
+    resolvedAt: moment("resolved_at"),
     createdAt: createdAt(),
-    updatedAt: moment("updated_at").notNull().defaultNow(),
   },
   (table) => [
-    prefixCheck("retell_webhook_refusal_id_prefix", table.id, "rwr"),
-    oneOf("retell_webhook_refusal_reason_allowed", table.reason, [
-      ...RETELL_WEBHOOK_REFUSALS,
+    prefixCheck("retell_ingestion_failure_id_prefix", table.id, "rif"),
+    oneOf("retell_ingestion_failure_status_allowed", table.status, [
+      ...RETELL_FAILURE_STATUSES,
     ]),
-    unique("retell_webhook_refusal_reason_unique").on(table.reason),
+    unique("retell_ingestion_failure_project_call_unique").on(
+      table.projectId,
+      table.providerCallId,
+    ),
+    check(
+      "retell_ingestion_failure_resolved_agrees",
+      sql`(${table.status} = 'resolved') = (${table.resolvedAt} is not null)`,
+    ),
+    check(
+      "retell_ingestion_failure_replay_lease_agrees",
+      sql`(${table.replayLeaseOwner} is null) = (${table.replayLeaseExpiresAt} is null)`,
+    ),
+    foreignKey({
+      name: "retell_ingestion_failure_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "retell_ingestion_failure_agent_tenant_fk",
+      columns: [
+        table.retellMonitoredAgentId,
+        table.projectId,
+        table.organizationId,
+      ],
+      foreignColumns: [
+        retellMonitoredAgent.id,
+        retellMonitoredAgent.projectId,
+        retellMonitoredAgent.organizationId,
+      ],
+    }).onDelete("cascade"),
+    index("retell_ingestion_failure_open_idx")
+      .on(table.retellMonitoredAgentId, table.lastAttemptAt)
+      .where(sql`${table.status} = 'open'`),
   ],
 );

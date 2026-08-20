@@ -6,8 +6,8 @@ import {
   RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
   SPEED_RANGE,
-  connectionTypeMetadata,
-  connectionUsesPlatformCarrier,
+  connectionKindUsesPlatformCarrier,
+  connectionOptionMetadata,
   validPersonaModels,
   type ModelJob,
   type PersonaModels,
@@ -25,7 +25,7 @@ type JsonObject = Readonly<Record<string, unknown>>;
 const schema = JSON.parse(
   await readFile(
     new URL(
-      "../../../packages/simulation-contract/schemas/simulation-spec.v2.schema.json",
+      "../../../packages/simulation-contract/schemas/simulation-spec.v3.schema.json",
       import.meta.url,
     ),
     "utf8",
@@ -195,28 +195,28 @@ describe("one executable model catalog", () => {
     });
   });
 
-  it("agrees about which connection types receive the platform carrier", () => {
+  it("agrees about which connection kinds receive the platform carrier", () => {
     const carrierSpec = validSpecs.find((document) => {
       const connection = object(document.connection, "fixture connection");
-      return connection.type === "phone";
+      return connection.connection_kind === "phone_number";
     });
     const carrier = carrierSpec?.platform;
     if (carrier === undefined || carrier === null) {
       throw new Error("the phone fixture has no carrier");
     }
 
-    const fixtureTypes = new Set<string>();
-    const schemaCarrierTypes = new Set<string>();
+    const fixtureKinds = new Set<string>();
+    const schemaCarrierKinds = new Set<string>();
 
     for (const document of validSpecs) {
       const connection = object(document.connection, "fixture connection");
-      if (typeof connection.type !== "string") {
-        throw new Error("the fixture connection has no type");
+      if (typeof connection.connection_kind !== "string") {
+        throw new Error("the fixture connection has no kind");
       }
-      fixtureTypes.add(connection.type);
+      fixtureKinds.add(connection.connection_kind);
       const carriesPlatform =
         document.platform !== undefined && document.platform !== null;
-      if (carriesPlatform) schemaCarrierTypes.add(connection.type);
+      if (carriesPlatform) schemaCarrierKinds.add(connection.connection_kind);
       expect(specComplaints(document)).toEqual([]);
 
       const wrong = structuredClone(document);
@@ -225,16 +225,21 @@ describe("one executable model catalog", () => {
       expect(specComplaints(wrong)).not.toEqual([]);
     }
 
-    const productTypes = connectionTypeMetadata();
-    expect(productTypes.every((entry) => fixtureTypes.has(entry.type))).toBe(true);
+    const productOptions = connectionOptionMetadata();
     expect(
-      productTypes
-        .filter((entry) => entry.usesPlatformCarrier)
-        .map((entry) => entry.type)
-        .sort(),
-    ).toEqual([...schemaCarrierTypes].sort());
-    for (const entry of productTypes) {
-      expect(connectionUsesPlatformCarrier(entry.type)).toBe(
+      productOptions.every((entry) => fixtureKinds.has(entry.connectionKind)),
+    ).toBe(true);
+    expect(
+      [
+        ...new Set(
+          productOptions
+            .filter((entry) => entry.usesPlatformCarrier)
+            .map((entry) => entry.connectionKind),
+        ),
+      ].sort(),
+    ).toEqual([...schemaCarrierKinds].sort());
+    for (const entry of productOptions) {
+      expect(connectionKindUsesPlatformCarrier(entry.connectionKind)).toBe(
         entry.usesPlatformCarrier,
       );
     }

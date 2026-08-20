@@ -23,7 +23,7 @@ import type { ListedTest } from "../lib/tests.ts";
  *
  * They are here in the fast lane rather than in the one real-browser journey
  * because none of what they prove needs a browser: a form drawn from what the
- * server said the connection types are, a control a viewer may not use being
+ * server said the connection options are, a control a viewer may not use being
  * genuinely disabled, a stale save keeping the typing it was refused for, and a
  * page that says `unknown` where nothing has been measured. Each drives the real
  * component the way somebody with a keyboard would and reads what the DOM then
@@ -137,9 +137,10 @@ const CONNECTION = {
   agent_id: "agt_1",
   project_id: "prj_1",
   name: "staging",
-  type: "retell",
-  type_label: "Retell",
-  variant_id: "retell.api_key",
+  agent_platform: "retell",
+  connection_kind: "retell_chat_api",
+  access_variant: "retell_chat_api.api_key",
+  product_label: "Retell chat",
   modality: "chat",
   topology: "hosted-broker",
   environment: "staging",
@@ -176,9 +177,10 @@ const MEASURED_CONNECTION = {
   // Named apart from its environment on purpose: a fixture where the two read
   // the same would let a cell showing the wrong one pass.
   name: "phone line",
-  type: "phone",
-  type_label: "Phone number",
-  variant_id: "phone.number",
+  agent_platform: null,
+  connection_kind: "phone_number",
+  access_variant: "phone_number.public_e164",
+  product_label: "Phone number",
   modality: "voice",
   environment: "production",
   config: { phoneNumber: "+14155550100" },
@@ -242,159 +244,184 @@ function onboardingTest(
 const TYPES = {
   items: [
     {
-      type: "retell",
-      label: "Retell",
-      modalities: ["chat"],
+      agent_platform: "retell",
+      agent_platform_label: "Retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
+      access_variant_label: "Retell API key",
+      modality: "chat",
+      product_label: "Retell chat",
       topology: "hosted-broker",
       simulator_adapter: true,
       capability_discovery: false,
-      variants: [
+      fields: [
         {
-          id: "retell.api_key",
-          label: "Retell agent",
-          chosen_by: null,
-          fields: [
-            {
-              key: "retellAgentId",
-              label: "Retell agent ID",
-              kind: "text",
-              required: true,
-              help: "The agent's own identifier in Retell.",
-            },
-          ],
-          credential_rule: "required",
-          credential_help: "Egma seals your key and never shows it again.",
-          credential_fields: [
-            {
-              field: "apiKey",
-              label: "Retell API key",
-              kind: "secret",
-              required: true,
-              help: "Copied from your Retell dashboard.",
-            },
-          ],
+          key: "retellAgentId",
+          label: "Retell agent ID",
+          kind: "text",
+          required: true,
+          help: "The agent's own identifier in Retell.",
+          after_credentials: false,
+        },
+      ],
+      credential_rule: "required",
+      credential_help: "Egma seals your key and never shows it again.",
+      credential_fields: [
+        {
+          field: "apiKey",
+          label: "Retell API key",
+          kind: "secret",
+          required: true,
+          help: "Copied from your Retell dashboard.",
         },
       ],
     },
     {
-      type: "livekit",
-      label: "LiveKit",
-      modalities: ["voice"],
-      topology: "egma-dials-out",
-      simulator_adapter: true,
-      capability_discovery: false,
-      variants: [
-        {
-          id: "livekit.key_pair",
-          label: "API key and secret",
-          chosen_by: null,
-          fields: [
-            {
-              key: "url",
-              label: "LiveKit WebSocket URL",
-              kind: "url",
-              required: true,
-              help: "Your LiveKit project or self-hosted server.",
-              after_credentials: false,
-            },
-            {
-              key: "agentName",
-              label: "LiveKit agent name",
-              kind: "text",
-              required: false,
-              help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
-              after_credentials: false,
-            },
-            {
-              key: "metadata",
-              label: "Room metadata",
-              kind: "json",
-              required: false,
-              help: "JSON handed to the agent.",
-              after_credentials: true,
-            },
-          ],
-          credential_rule: "required",
-          credential_help: "Used to create the room.",
-          credential_fields: [
-            {
-              field: "apiKey",
-              label: "LiveKit API key",
-              kind: "secret",
-              required: true,
-              help: "The key id.",
-            },
-            {
-              field: "apiSecret",
-              label: "LiveKit API secret",
-              kind: "secret",
-              required: true,
-              help: "The key secret.",
-            },
-          ],
-        },
-        {
-          id: "livekit.token_endpoint",
-          label: "Token endpoint",
-          chosen_by: "tokenEndpoint",
-          fields: [
-            {
-              key: "url",
-              label: "LiveKit WebSocket URL",
-              kind: "url",
-              required: true,
-              help: "Your LiveKit project or self-hosted server.",
-              after_credentials: false,
-            },
-            {
-              key: "tokenEndpoint",
-              label: "Token endpoint",
-              kind: "url",
-              required: true,
-              help: "The service that creates room tokens.",
-              after_credentials: false,
-            },
-          ],
-          credential_rule: "optional",
-          credential_help: "Optional auth headers for the endpoint.",
-          credential_fields: [
-            {
-              field: "headers",
-              label: "Auth headers",
-              kind: "json",
-              required: false,
-              help: "Header names and secret values sent to the endpoint.",
-            },
-          ],
-        },
-      ],
-    },
-    {
-      type: "phone",
-      label: "Phone number",
-      modalities: ["voice"],
+      agent_platform: "retell",
+      agent_platform_label: "Retell",
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
+      access_variant_label: "Public E.164 number",
+      modality: "voice",
+      product_label: "Retell phone",
       topology: "egma-dials-in",
       simulator_adapter: true,
       capability_discovery: false,
-      variants: [
+      fields: [
         {
-          id: "phone.number",
-          label: "Public phone number",
-          chosen_by: null,
-          fields: [
-            {
-              key: "phoneNumber",
-              label: "Phone number",
-              kind: "e164",
-              required: true,
-              help: "In international form, like +15551234567.",
-            },
-          ],
-          credential_rule: "forbidden",
-          credential_help: "A phone connection takes no credential.",
-          credential_fields: [],
+          key: "phoneNumber",
+          label: "Phone number",
+          kind: "e164",
+          required: true,
+          help: "A phone number routed to the selected Retell agent.",
+          after_credentials: false,
         },
       ],
+      credential_rule: "forbidden",
+      credential_help: "A phone connection takes no credential.",
+      credential_fields: [],
+    },
+    {
+      agent_platform: "livekit_agents",
+      agent_platform_label: "LiveKit Agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
+      access_variant_label: "API key and secret",
+      modality: "voice",
+      product_label: "LiveKit project credentials",
+      topology: "egma-dials-out",
+      simulator_adapter: true,
+      capability_discovery: false,
+      fields: [
+        {
+          key: "url",
+          label: "LiveKit WebSocket URL",
+          kind: "url",
+          required: true,
+          help: "Your LiveKit project or self-hosted server.",
+          after_credentials: false,
+        },
+        {
+          key: "agentName",
+          label: "LiveKit agent name",
+          kind: "text",
+          required: false,
+          help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
+          after_credentials: false,
+        },
+        {
+          key: "metadata",
+          label: "Room metadata",
+          kind: "json",
+          required: false,
+          help: "JSON handed to the agent.",
+          after_credentials: true,
+        },
+      ],
+      credential_rule: "required",
+      credential_help: "Used to create the room.",
+      credential_fields: [
+        {
+          field: "apiKey",
+          label: "LiveKit API key",
+          kind: "secret",
+          required: true,
+          help: "The key id.",
+        },
+        {
+          field: "apiSecret",
+          label: "LiveKit API secret",
+          kind: "secret",
+          required: true,
+          help: "The key secret.",
+        },
+      ],
+    },
+    {
+      agent_platform: "livekit_agents",
+      agent_platform_label: "LiveKit Agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.customer_token_endpoint",
+      access_variant_label: "Token endpoint",
+      modality: "voice",
+      product_label: "LiveKit token endpoint",
+      topology: "egma-dials-out",
+      simulator_adapter: true,
+      capability_discovery: false,
+      fields: [
+        {
+          key: "url",
+          label: "LiveKit WebSocket URL",
+          kind: "url",
+          required: true,
+          help: "Your LiveKit project or self-hosted server.",
+          after_credentials: false,
+        },
+        {
+          key: "tokenEndpoint",
+          label: "Token endpoint",
+          kind: "url",
+          required: true,
+          help: "The service that creates room tokens.",
+          after_credentials: false,
+        },
+      ],
+      credential_rule: "required",
+      credential_help: "Auth headers for the endpoint.",
+      credential_fields: [
+        {
+          field: "headers",
+          label: "Auth headers",
+          kind: "json",
+          required: true,
+          help: "Header names and secret values sent to the endpoint.",
+        },
+      ],
+    },
+    {
+      agent_platform: null,
+      agent_platform_label: "Any or unknown",
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
+      access_variant_label: "Public E.164 number",
+      modality: "voice",
+      product_label: "Phone number",
+      topology: "egma-dials-in",
+      simulator_adapter: true,
+      capability_discovery: false,
+      fields: [
+        {
+          key: "phoneNumber",
+          label: "Phone number",
+          kind: "e164",
+          required: true,
+          help: "In international form, like +15551234567.",
+          after_credentials: false,
+        },
+      ],
+      credential_rule: "forbidden",
+      credential_help: "A phone connection takes no credential.",
+      credential_fields: [],
     },
   ],
 };
@@ -512,10 +539,9 @@ describe("reading an agent's reach from the list", () => {
     // The staging one, which nobody has measured. "Not checked" and "measured
     // and found wanting" are different sentences and must not share one.
     expect(screen.getByText("staging")).toBeDefined();
-    // The registry's word for the platform, not the token a client branches
-    // on: the connection page says "Retell", and a row that said "retell"
-    // would be a second vocabulary for one fact.
-    expect(screen.getByText("Retell · Chat")).toBeDefined();
+    // The registry's customer-facing product label, not a token a client
+    // branches on. The connection page and this row use the same words.
+    expect(screen.getByText("Retell chat · Chat")).toBeDefined();
     expect(screen.getByText("Not checked")).toBeDefined();
 
     // The production one, which somebody has.
@@ -740,7 +766,7 @@ describe("onboarding an agent", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
@@ -763,7 +789,7 @@ describe("onboarding an agent", () => {
     ).toBeDefined();
 
     fireEvent.change(screen.getByLabelText("Platform"), {
-      target: { value: "phone" },
+      target: { value: "unknown" },
     });
     fireEvent.change(await screen.findByLabelText("Phone number"), {
       target: { value: "+14155550100" },
@@ -932,9 +958,9 @@ describe("one agent's page", () => {
     // The environment label, which is this connection's own and not its name:
     // the phone line is named apart from the environment it points at.
     expect(screen.getByText("production")).toBeDefined();
-    // And the same words for the platform and the channel as the row shows.
+    // And the same product labels and modalities as the row shows.
     expect(screen.getByText("Phone number")).toBeDefined();
-    expect(screen.getByText("Retell")).toBeDefined();
+    expect(screen.getByText("Retell chat")).toBeDefined();
     expect(screen.getByText("Voice")).toBeDefined();
     expect(screen.getByText("Chat")).toBeDefined();
 
@@ -1048,7 +1074,7 @@ describe("adding a connection", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
     });
     render(<NewConnectionPage />);
 
@@ -1071,7 +1097,7 @@ describe("adding a connection", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
       "/api/providers/retell/voice-agents": {
         status: 200,
         body: {
@@ -1091,7 +1117,10 @@ describe("adding a connection", () => {
         body: {
           connection: {
             ...CONNECTION,
-            type: "phone",
+            agent_platform: "retell",
+            connection_kind: "phone_number",
+            access_variant: "phone_number.public_e164",
+            product_label: "Retell phone",
             modality: "voice",
             config: { phoneNumber: "+14155550100" },
           },
@@ -1100,6 +1129,9 @@ describe("adding a connection", () => {
     });
     render(<NewConnectionPage />);
 
+    fireEvent.change(await screen.findByLabelText("Access"), {
+      target: { value: "phone_number.public_e164" },
+    });
     const field = (await screen.findByLabelText(
       "Retell API key",
     )) as HTMLInputElement;
@@ -1148,7 +1180,7 @@ describe("adding a connection", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
@@ -1157,10 +1189,10 @@ describe("adding a connection", () => {
     render(<NewConnectionPage />);
 
     fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit" },
+      target: { value: "livekit_agents" },
     });
     fireEvent.change(screen.getByLabelText("Access"), {
-      target: { value: "livekit.token_endpoint" },
+      target: { value: "livekit_room.customer_token_endpoint" },
     });
     expect(screen.queryByText(/shape/i)).toBeNull();
     expect(screen.queryByText(/credential/i)).toBeNull();
@@ -1177,7 +1209,9 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://rooms.example.test",
@@ -1195,7 +1229,7 @@ describe("adding a connection", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
@@ -1204,7 +1238,7 @@ describe("adding a connection", () => {
     render(<NewConnectionPage />);
 
     fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit" },
+      target: { value: "livekit_agents" },
     });
     expect((screen.getByLabelText("Dispatch method") as HTMLSelectElement).value)
       .toBe("named");
@@ -1242,7 +1276,9 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
       modality: "voice",
       config: {
         url: "wss://rooms.example.test",
@@ -1263,7 +1299,7 @@ describe("adding a connection", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
       "/api/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
@@ -1272,7 +1308,7 @@ describe("adding a connection", () => {
     render(<NewConnectionPage />);
 
     fireEvent.change(await screen.findByLabelText("Platform"), {
-      target: { value: "livekit" },
+      target: { value: "livekit_agents" },
     });
     fireEvent.change(screen.getByLabelText("LiveKit agent name"), {
       target: { value: "must-not-be-sent" },
@@ -1299,7 +1335,9 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://rooms.example.test" },
       credentials: {
@@ -1316,7 +1354,7 @@ describe("adding a connection", () => {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-types": [
+      "/api/connection-options": [
         {
           status: 500,
           body: { error: "unreadable_answer", message: "Egma could not answer." },
@@ -1333,7 +1371,7 @@ describe("adding a connection", () => {
     // A catalog that did not arrive is a form that cannot be drawn. Showing an
     // empty type list would read as egma supporting nothing.
     expect(
-      await screen.findByText("Egma could not describe the connection types."),
+      await screen.findByText("Egma could not describe the connection options."),
     ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -1351,7 +1389,7 @@ describe("one connection's page", () => {
   ): void {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/connection-types": { status: 200, body: TYPES },
+      "/api/connection-options": { status: 200, body: TYPES },
       "/api/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
@@ -1389,15 +1427,19 @@ describe("one connection's page", () => {
     for (const connection of [
       {
         ...CONNECTION,
-        type: "phone",
-        variant_id: "phone.number",
+        agent_platform: null,
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
+        product_label: "Phone number",
         modality: "voice",
         config: { phoneNumber: "+14155550100" },
       },
       {
         ...CONNECTION,
-        type: "livekit",
-        variant_id: "livekit.token_endpoint",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.customer_token_endpoint",
+        product_label: "LiveKit token endpoint",
         modality: "voice",
         config: {
           url: "wss://example.livekit.cloud",
@@ -1465,8 +1507,10 @@ describe("one connection's page", () => {
   it("edits named and automatic LiveKit dispatch as two explicit modes", async () => {
     const named = {
       ...CONNECTION,
-      type: "livekit",
-      variant_id: "livekit.key_pair",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.project_credentials",
+      product_label: "LiveKit project credentials",
       modality: "voice",
       config: {
         url: "wss://example.livekit.cloud",
@@ -1544,7 +1588,7 @@ describe("one connection's page", () => {
   it("says so when it could not describe the type, and offers a retry", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": [
+      "/api/connection-options": [
         {
           status: 500,
           body: { error: "unreadable_answer", message: "Egma could not answer." },
@@ -1573,7 +1617,7 @@ describe("one connection's page", () => {
   it("does not open an editor when the type catalog is unavailable", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": {
+      "/api/connection-options": {
         status: 500,
         body: { error: "unreadable_answer", message: "Egma could not answer." },
       },
@@ -1599,7 +1643,7 @@ describe("one connection's page", () => {
     vi.stubGlobal("location", { replace, assign: vi.fn(), href: "" });
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-types": { status: 401, body: {} },
+      "/api/connection-options": { status: 401, body: {} },
       "/api/agents/agt_1/connections/con_1": {
         status: 200,
         body: { connection: CONNECTION },

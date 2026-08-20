@@ -79,7 +79,11 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "room-1",
-    connectionType: "livekit",
+    agentPlatform: "livekit_agents",
+    platformAgentId: "",
+    platformAgentName: "",
+    platformAgentVersion: "",
+    connectionKind: "livekit",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -134,16 +138,17 @@ describe("the customer a span belongs to", () => {
     ]);
   });
 
-  it("files under the project sentinel when the credential names no project", async () => {
+  it("refuses a span when the credential names no project", async () => {
     const traceId = "1111111111111111111111111111bbbb";
-    await appendSpans(acrossTheOrganization(acme), [
-      span({ traceId, spanId: "3333333333333333" }),
-    ]);
+    await expect(
+      appendSpans(acrossTheOrganization(acme), [
+        span({ traceId, spanId: "3333333333333333" }),
+      ]),
+    ).rejects.toThrow("project-scoped authorization context");
 
-    const [row] = await store.rows<{ project_id: string }>(
-      `select project_id from spans where trace_id = '${traceId}'`,
-    );
-    expect(row?.project_id).toBe("default");
+    expect(
+      await countOf(`select count() as n from spans where trace_id = '${traceId}'`),
+    ).toBe(0);
   });
 });
 

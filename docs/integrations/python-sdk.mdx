@@ -1,10 +1,15 @@
 ---
-title: "Egma Python SDK: Mock Tools for LiveKit Voice Agents"
+title: "Egma Python SDK for LiveKit Agents"
 sidebarTitle: "Python SDK"
-description: "Add one line to your LiveKit agent entrypoint and Egma intercepts tool calls during simulations — zero impact on production behavior, guaranteed."
+description: "Test LiveKit agents with mock tools and send production spans to Egma Monitoring."
 ---
 
-The `egma` Python package lets Egma answer your agent's tool calls during a simulation, without touching anything in production. Add one call after your agent is built and Egma intercepts the tools it has mock answers for. Every other tool — and every room with no Egma in it — runs exactly as if the package were not installed.
+The `egma` Python package has two separate jobs:
+
+- `monitor_livekit(ctx)` sends production LiveKit Agents spans to Egma Monitoring.
+- `await mockable(agent, ctx, session)` lets Egma answer selected tools during a simulation.
+
+Calling one function never enables or changes the other. `mockable` remains inert in production. `monitor_livekit` remains inert in a job that Egma dispatched for a simulation, so that simulation does not also appear as a production conversation.
 
 This solves a real problem: a simulation that reaches your real tools has real side effects. It books the appointment, sends the message, charges the card. And a real backend only ever shows you the branch its data happens to be on — "the calendar is full", "the lookup fails", "the booking API errors" are where voice agents die in production, but none of them can be ordered up on demand from a real backend.
 
@@ -23,10 +28,73 @@ uv add egma
 Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
 
 <Note>
-  The `livekit-agents` version is pinned to one minor version intentionally. The interception mechanism uses LiveKit's own `mock_tools`, which lives in the framework's testing namespace and carries no stability promise. The pin plus a live smoke test — a real session in a real room — is how this package verifies the mechanism still works before you find out in a simulation. See [Version pinning](#version-pinning) below.
+  The `livekit-agents` version is pinned to one minor version intentionally. Mock tools use LiveKit's testing API. Monitoring must also read LiveKit's current tracer provider because its public telemetry API has a setter but no getter. The fixture and live tests verify both seams before the supported range changes. See [Version pinning](#version-pinning) below.
 </Note>
 
-## The one API: `mockable`
+## Monitor production LiveKit agents
+
+Open **Monitoring → Set up monitoring** and choose **LiveKit Agents**. The page
+shows the same steps below and records waiting state after you confirm that you
+added them.
+
+Create a project API key in **Settings → API keys**. Set the API origin and key where the agent runs:
+
+```bash
+export EGMA_URL=https://api.egma.ai
+export EGMA_API_KEY=egma_sk_...
+```
+
+For self-hosted Egma, use the published API address, such as `http://localhost:3100`. The agent process must be able to make HTTP or HTTPS requests to that address.
+
+For a customer-hosted worker, set these values through your normal deployment secret store.
+
+For LiveKit Cloud, put the two values in a gitignored `.env.monitoring` file. Apply it to an existing agent with:
+
+```bash
+lk agent update-secrets --secrets-file=.env.monitoring
+```
+
+For a new LiveKit Cloud deployment, use `lk agent create --secrets-file=.env.monitoring`. LiveKit Cloud encrypts these secrets, injects them as environment variables, and restarts the agent after an update. See [LiveKit's secrets guide](https://docs.livekit.io/deploy/agents/secrets/).
+
+Call `monitor_livekit` before `AgentSession.start`:
+
+```python
+from egma import monitor_livekit
+from livekit import agents
+from livekit.agents import Agent, AgentSession
+
+
+async def entrypoint(ctx: agents.JobContext) -> None:
+    monitor_livekit(ctx)
+    await ctx.connect()
+
+    agent = Agent(instructions=INSTRUCTIONS, tools=[check_calendar])
+    session = AgentSession(stt=..., llm=..., tts=...)
+    await session.start(agent=agent, room=ctx.room)
+```
+
+You can pass configuration directly when your deployment does not use environment variables:
+
+```python
+monitor_livekit(ctx, endpoint="https://api.egma.ai", api_key=project_key)
+```
+
+Use the same function for a customer-hosted worker and a LiveKit Cloud-hosted Python agent. The helper keeps a compatible existing OpenTelemetry provider and adds Egma beside its current span processors. This preserves LiveKit Cloud observability. It exports in batches and flushes the final batch when the job stops.
+
+The caller's phone, SIP, or WebRTC entry path does not change the setup. Egma does not infer an entry path from a LiveKit trace.
+
+After you deploy this code and the two secrets, return to the setup page and
+select **I added this setup**. This records the Monitoring setup; the page stays
+in **Waiting for first conversation** until the first valid production trace
+arrives.
+
+### What the status can prove
+
+The helper stops with a direct, safe setup error when required settings are missing or malformed, or when tracer providers conflict. The error never includes the key.
+
+Monitoring shows **Waiting for first conversation** until a trace reaches Egma. It then shows the last conversation received. OTLP is one-way in this release, so the Egma page cannot see a DNS, firewall, or network failure inside the worker. If the page stays in the waiting state, check the worker's OpenTelemetry logs and confirm that it can reach `EGMA_URL`.
+
+## Use mock tools in simulations
 
 Import `mockable` and call it once in your agent's entrypoint, after the agent object exists and before `session.start`:
 
@@ -126,7 +194,9 @@ At `INFO` level, the line after the census names how many tools your agent has a
 
 The `livekit-agents` dependency is pinned to `>=1.6.7,<1.7`. This is deliberate, not an oversight.
 
-The interception mechanism uses `mock_tools` from LiveKit's testing namespace. That API carries no stability promise. The pin means an unread minor version cannot arrive by itself and silently break interception. Raising the ceiling is a deliberate act with a live smoke test as evidence — a real session in a real room, proving that interception actually happened.
+The package also keeps the OpenAI Python package on major version 2 because LiveKit Agents 1.6 does not support OpenAI 3.
+
+Mock-tool interception uses `mock_tools` from LiveKit's testing namespace. Monitoring also reads the dynamic tracer's current provider so it can add Egma without replacing LiveKit Cloud observability; LiveKit's public API currently provides a setter but no getter. The pin means an unread minor version cannot silently change either seam. Raising the ceiling is a deliberate act backed by the fixture tests and a live session in a real room.
 
 If `mock_tools` ever moves in a future version, the documented fallback is `Agent.update_tools(...)` with `function_tool(raw_schema=...)` wrappers built from the real tools' schemas. That is a heavier mechanism — it owns schema fidelity, the real implementations, and re-wrapping after handoffs — which is exactly why it is the fallback and not the current approach.
 

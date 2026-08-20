@@ -1,9 +1,11 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
   "modality": "chat",
   "connection": {
-    "type": "retell",
+    "agent_platform": "retell",
+    "connection_kind": "retell_chat_api",
+    "access_variant": "retell_chat_api.api_key",
     "config": {
       "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
     },

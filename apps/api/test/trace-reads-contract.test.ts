@@ -46,6 +46,8 @@ import {
 let api: TestApi;
 let acme: Customer;
 let globex: Customer;
+let acmeProjectSecret: string;
+let globexProjectSecret: string;
 
 /** The minute every paging trace is filed under, and the day around it. */
 const DAY = { from: "2026-06-01T00:00:00Z", to: "2026-06-02T00:00:00Z" } as const;
@@ -77,11 +79,23 @@ beforeAll(async () => {
   api = await createApi("trace_reads_contract", { traceStore: true });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   globex = await signUp(api.app, "grace@globex.example", "Globex");
+  acmeProjectSecret = await mintKey(
+    api.app,
+    acme.cookie,
+    "Acme project telemetry",
+    acme.projectId,
+  );
+  globexProjectSecret = await mintKey(
+    api.app,
+    globex.cookie,
+    "Globex project telemetry",
+    globex.projectId,
+  );
 
   for (const trace of PAGING_TRACES) {
     await ingest(
       api.app,
-      acme.secret,
+      acmeProjectSecret,
       syntheticExport({
         traceId: trace.traceId,
         startedAt: new Date(trace.at),
@@ -411,7 +425,7 @@ describe("another organization asking for a trace that is not theirs", () => {
   it("is told there is no such trace, even guessing the id exactly right", async () => {
     const response = await readTraceOverHttp(
       api.app,
-      globex.secret,
+      globexProjectSecret,
       PAGING_TRACES[0].traceId,
       DAY,
     );
@@ -432,7 +446,7 @@ describe("another organization asking for a trace that is not theirs", () => {
   it("still reads its own, so the refusal is about tenancy and not about the store", async () => {
     await ingest(
       api.app,
-      globex.secret,
+      globexProjectSecret,
       syntheticExport({
         traceId: "bb000000000000000000000000000001",
         startedAt: new Date("2026-06-01T11:00:00Z"),
@@ -485,8 +499,7 @@ describe("filtering a list to one project", () => {
       outbound.id,
     );
 
-    // One trace in Outbound, and one on the organization-scoped key, which files
-    // under the sentinel a credential naming no project means.
+    // One trace in Outbound, and one in the project signup created.
     await ingest(
       api.app,
       outboundSecret,
@@ -498,7 +511,7 @@ describe("filtering a list to one project", () => {
     );
     await ingest(
       api.app,
-      acme.secret,
+      acmeProjectSecret,
       syntheticExport({
         traceId: "cc000000000000000000000000000002",
         startedAt: new Date("2026-07-01T10:00:00Z"),
@@ -631,8 +644,8 @@ describe("filtering a list to one project", () => {
       );
       expect(inside.statusCode, inside.body).toBe(200);
 
-      // Filed by the organization-wide key, so it is under no project at all —
-      // and a read narrowed to Outbound does not reach it.
+      // Filed in Acme's signup project, so a read narrowed to Outbound does not
+      // reach it.
       const outside = await readTraceAsSignedIn(
         api.app,
         acme.cookie,
@@ -642,17 +655,16 @@ describe("filtering a list to one project", () => {
       expect(outside.statusCode).toBe(404);
     });
 
-    /**
-     * And naming none is untouched: the session still reads the project it
-     * resolved to, which in this window holds nothing.
-     */
+    /** Naming none keeps the project the session resolved to. */
     it("keeps the project it resolved to when the request names none", async () => {
       const response = await listTracesAsSignedIn(api.app, acme.cookie, {
         ...OUTBOUND_WINDOW,
         limit: 200,
       });
       expect(response.statusCode, response.body).toBe(200);
-      expect((response.json() as ListedPage).traces).toEqual([]);
+      expect(
+        (response.json() as ListedPage).traces.map((trace) => trace.trace_id),
+      ).toEqual(["cc000000000000000000000000000002"]);
     });
 
     /**
@@ -761,51 +773,25 @@ describe("a browser session rather than a key", () => {
     expect(response.statusCode).toBe(400);
   });
 
-  /**
-   * And what it cannot see, which is the asymmetry the README and the empty
-   * list both warn about.
-   *
-   * A key minted for a whole organization names no project, so what it exports
-   * files under the sentinel the schema keeps for exactly that. A session is
-   * always acting inside a real project, so it reads that project and never the
-   * sentinel — the telemetry arrived, the key was valid, and the dashboard is
-   * empty. That is documented in three places and asserted here, so a change
-   * that quietly widened either side would be caught rather than read about.
-   */
-  it("cannot see what an organization-wide key filed, because that names no project", async () => {
-    const OUTSIDE = {
-      from: "2026-09-05T00:00:00Z",
-      to: "2026-09-06T00:00:00Z",
-    } as const;
-    const FILED_WITHOUT_A_PROJECT = "dd000000000000000000000000000002";
-
-    await ingest(
-      api.app,
-      acme.secret,
-      syntheticExport({
-        traceId: FILED_WITHOUT_A_PROJECT,
+  it("refuses production telemetry from an organization-wide key", async () => {
+    const response = await api.app.inject({
+      method: "POST",
+      url: "/v1/traces",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${acme.secret}`,
+      },
+      payload: syntheticExport({
+        traceId: "dd000000000000000000000000000002",
         startedAt: new Date("2026-09-05T09:00:00Z"),
-        humanSaid: "Exported with a key for the whole organization.",
+        humanSaid: "This export has no project.",
       }),
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect((response.json() as { message: string }).message).toContain(
+      "project API key",
     );
-
-    const asSignedIn = await listTracesAsSignedIn(api.app, acme.cookie, {
-      ...OUTSIDE,
-      limit: 200,
-    });
-    expect(asSignedIn.statusCode, asSignedIn.body).toBe(200);
-    expect((asSignedIn.json() as ListedPage).traces).toEqual([]);
-
-    // It is stored, and the credential that filed it reads it back. The
-    // dashboard's blindness is about the project, not about the write.
-    const asTheKey = await listTracesOverHttp(api.app, acme.secret, {
-      ...OUTSIDE,
-      limit: 200,
-    });
-    expect(asTheKey.statusCode, asTheKey.body).toBe(200);
-    expect(
-      (asTheKey.json() as ListedPage).traces.map((trace) => trace.trace_id),
-    ).toEqual([FILED_WITHOUT_A_PROJECT]);
   });
 });
 
@@ -865,7 +851,7 @@ describe("narrowing a list to one kind of traffic", () => {
     for (const trace of PRODUCTION_TRACES) {
       await ingest(
         api.app,
-        acme.secret,
+        acmeProjectSecret,
         syntheticExport({
           traceId: trace.traceId,
           startedAt: new Date(trace.at),
@@ -881,7 +867,9 @@ describe("narrowing a list to one kind of traffic", () => {
     const agent = await createAgent(auth, {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_mixed" },
         credentials: { apiKey: "retell-secret-mixed" },
@@ -1079,7 +1067,7 @@ describe("narrowing a list to one kind of traffic", () => {
   it("shows each organization only its own, whichever kind is asked for", async () => {
     await ingest(
       api.app,
-      globex.secret,
+      globexProjectSecret,
       syntheticExport({
         traceId: GLOBEX_TRACE,
         startedAt: new Date("2026-10-01T09:30:00Z"),
@@ -1159,7 +1147,7 @@ describe("a production conversation egma judged", () => {
   beforeAll(async () => {
     await ingest(
       api.app,
-      acme.secret,
+      acmeProjectSecret,
       syntheticExport({
         traceId: JUDGED_TRACE,
         startedAt: new Date(JUDGED_AT),

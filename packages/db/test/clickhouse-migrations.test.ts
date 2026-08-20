@@ -44,6 +44,10 @@ const VERDICT_IDENTITY =
  */
 const THE_ONE_FILE_THAT_DROPS_A_TABLE = "0003_verdicts_speak_the_redesign.sql";
 
+/** The explicit synchronous pre-launch reset; later migrations stay shape-only. */
+const THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA =
+  "0006_production_platform_identity.sql";
+
 /**
  * These files have run in production. Even a comment edit changes the hash in
  * the migration ledger and makes the API refuse to boot. Corrections therefore
@@ -244,7 +248,9 @@ describe("the trace store's migration files", () => {
    * `ALTER` that could reach it and the table was rebuilt instead. What that
    * costs is the rows, which was affordable exactly once, pre-launch — so the
    * exception is a filename rather than a rule, and the next file that drops a
-   * table fails here and has to argue for itself.
+   * table fails here and has to argue for itself. The same rule names the one
+   * synchronous pre-launch trace reset instead of permitting general data
+   * movement in migrations.
    */
   it("move no rows, ever", async () => {
     for (const migration of await readMigrations(
@@ -252,7 +258,16 @@ describe("the trace store's migration files", () => {
     )) {
       for (const statement of statementsOf(migration.sql)) {
         expect(statement).not.toMatch(/^INSERT\b/i);
-        expect(statement).not.toMatch(/^ALTER TABLE .*\b(?:UPDATE|DELETE)\b/i);
+        if (
+          migration.name !==
+          THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA
+        ) {
+          expect(statement).not.toMatch(
+            /^ALTER TABLE .*\b(?:UPDATE|DELETE)\b/i,
+          );
+        } else if (/^ALTER TABLE .*\bDELETE\b/i.test(statement)) {
+          expect(statement).toMatch(/\bSETTINGS mutations_sync = 2\s*;?$/i);
+        }
         if (migration.name !== THE_ONE_FILE_THAT_DROPS_A_TABLE) {
           expect(statement, migration.name).not.toMatch(/^DROP TABLE\b/i);
         }
@@ -537,6 +552,10 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("started_at")).toBe("DateTime64(6, 'UTC')");
     expect(typeOf("provider_call_id")).toBe("String");
     expect(typeOf("connection_type")).toBe("LowCardinality(String)");
+    expect(typeOf("agent_platform")).toBe("LowCardinality(String)");
+    expect(typeOf("platform_agent_id")).toBe("String");
+    expect(typeOf("platform_agent_name")).toBe("String");
+    expect(typeOf("platform_agent_version")).toBe("String");
     expect(typeOf("audio_sample_rate_hz")).toBeUndefined();
     expect(typeOf("audio_encoding")).toBeUndefined();
   });
@@ -691,6 +710,95 @@ describe("the schema a boot leaves behind", () => {
         },
       ]),
     ).rejects.toThrow(/UNKNOWN_ELEMENT_OF_ENUM|Unknown element/);
+  });
+});
+
+describe("the pre-launch Monitoring trace reset", () => {
+  let store: MigratedTraceStore;
+
+  beforeAll(async () => {
+    store = await createMigratedTraceStore("monitoring_cutover");
+  });
+
+  afterAll(async () => {
+    await store.drop();
+  });
+
+  it("waits for production rows to be removed and keeps simulation evidence", async () => {
+    await store.append("spans", [
+      {
+        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+        span_id: "00f067aa0ba902b7",
+        organization_id: "org_01JQZ0000000000000000000AA",
+        source: "simulation",
+        emitter: "egma",
+        started_at: "2026-08-01 09:14:03.500000",
+        duration_ns: 1_000_000,
+        name: "human turn",
+        kind: "turn:human",
+        text: "hello",
+        payload: "{}",
+      },
+      {
+        trace_id: "5cf92f3577b34da6a3ce929d0e0e4737",
+        span_id: "10f067aa0ba902b8",
+        organization_id: "org_01JQZ0000000000000000000AA",
+        source: "production",
+        emitter: "agent",
+        started_at: "2026-08-01 09:15:03.500000",
+        duration_ns: 1_000_000,
+        name: "human turn",
+        kind: "turn:human",
+        text: "production hello",
+        payload: "{}",
+      },
+    ]);
+    await store.append("verdicts", [
+      {
+        organization_id: "org_01JQZ0000000000000000000AA",
+        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
+        grader_id: "grd_01JQZ0000000000000000000AA",
+        grader_version_id: "grv_01JQZ00000000000000000000AA",
+        assertion: "behavior_1",
+        source: "simulation",
+        verdict: "passed",
+        score: 1,
+        event_ts: "2026-08-01 09:15:00.000000",
+      },
+      {
+        organization_id: "org_01JQZ0000000000000000000AA",
+        trace_id: "5cf92f3577b34da6a3ce929d0e0e4737",
+        grader_id: "grd_01JQZ0000000000000000000AA",
+        grader_version_id: "grv_01JQZ00000000000000000000AA",
+        assertion: "behavior_1",
+        source: "production",
+        verdict: "passed",
+        score: 1,
+        event_ts: "2026-08-01 09:16:00.000000",
+      },
+    ]);
+
+    expect(await store.rows("select 1 from spans")).toHaveLength(2);
+    expect(await store.rows("select 1 from turns")).toHaveLength(2);
+    expect(await store.rows("select 1 from verdicts")).toHaveLength(2);
+
+    const migrations = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
+    const cutover = migrations.find(
+      (migration) =>
+        migration.name === THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA,
+    );
+    expect(cutover).toBeDefined();
+    for (const statement of statementsOf(cutover?.sql ?? "")) {
+      if (/^ALTER TABLE .*\bDELETE\b/i.test(statement)) {
+        await store.command(statement);
+      }
+    }
+
+    for (const table of ["spans", "turns", "verdicts"]) {
+      expect(
+        await store.rows<{ source: string }>(`select source from ${table}`),
+      ).toEqual([{ source: "simulation" }]);
+    }
   });
 });
 

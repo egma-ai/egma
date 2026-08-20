@@ -123,9 +123,9 @@ def place_of(error: ValidationError) -> str:
 
 
 def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 2
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 3
     assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v2"
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v3"
     assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
 
 
@@ -140,7 +140,7 @@ def test_phone_connection_stays_phone_while_models_select_voice_legs():
 
     spec = SimulationSpec.from_document(document)
 
-    assert spec.connection_type == "phone"
+    assert spec.connection_kind == "phone_number"
     assert spec.models.stt.provider == "deepgram"
     assert spec.models.tts.provider == "cartesia"
     assert spec.models.tts.voice_id == "brisk-tenor-7"

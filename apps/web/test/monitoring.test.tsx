@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
@@ -72,8 +72,12 @@ const FACTS: Facts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connection_type: "livekit",
+  connection_kind: "",
   provider_call_id: "egma-fixture-capture-1",
+  agent_platform: "livekit_agents",
+  platform_agent_id: "",
+  platform_agent_name: "kelly",
+  platform_agent_version: "",
   run_id: "",
   agent_id: "",
 };
@@ -309,6 +313,8 @@ describe("what the Monitoring list shows", () => {
 
     expect(headings).toContain(COLUMNS.started);
     expect(headings).toContain(COLUMNS.environment);
+    expect(headings).toContain(COLUMNS.platform);
+    expect(headings).not.toContain("Connection");
     expect(headings).not.toContain("Source");
     expect(Object.values(COLUMNS)).not.toContain("Source");
   });
@@ -349,6 +355,68 @@ describe("what the Monitoring list shows", () => {
     const carried = new URLSearchParams(href.slice(href.indexOf("?")));
     expect(carried.get("from")).not.toBeNull();
     expect(carried.get("to")).not.toBeNull();
+  });
+
+  it("shows one cached page at a time inside one fixed time window", async () => {
+    const second = {
+      ...ONE_ROW,
+      trace_id: "6d2f5c1a9e3b4d7f8a0b1c2d3e4f5061",
+      preview: "The older conversation",
+    };
+    const { asked } = apiAnswers({
+      "/api/me": { status: 200, body: ME },
+      "/v1/traces": (at) =>
+        at.searchParams.get("cursor") === "older"
+          ? {
+              status: 200,
+              body: {
+                traces: [second],
+                next_cursor: null,
+                window: {
+                  from: at.searchParams.get("from"),
+                  to: at.searchParams.get("to"),
+                },
+              },
+            }
+          : {
+              status: 200,
+              body: {
+                traces: [ONE_ROW],
+                next_cursor: "older",
+                window: {
+                  from: at.searchParams.get("from"),
+                  to: at.searchParams.get("to"),
+                },
+              },
+            },
+      "/api/graders": {
+        status: 200,
+        body: { items: [grader("both")], next_cursor: null },
+      },
+      "/api/keys": { status: 200, body: { keys: [key("prj_2")] } },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByText(ONE_ROW.preview);
+    expect(screen.getByText("Page 1")).toBeDefined();
+    expect(screen.queryByText(second.preview)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText(second.preview);
+    expect(screen.queryByText(ONE_ROW.preview)).toBeNull();
+    expect(screen.getByText("Page 2")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    await screen.findByText(ONE_ROW.preview);
+    expect(screen.queryByText(second.preview)).toBeNull();
+
+    const listReads = asked
+      .filter((one) => one.startsWith("/v1/traces?"))
+      .map((one) => new URLSearchParams(one.slice(one.indexOf("?"))));
+    expect(listReads).toHaveLength(2);
+    expect(listReads[1]?.get("cursor")).toBe("older");
+    expect(listReads[1]?.get("from")).toBe(listReads[0]?.get("from"));
+    expect(listReads[1]?.get("to")).toBe(listReads[0]?.get("to"));
   });
 });
 
@@ -424,7 +492,7 @@ describe("what a quiet Monitoring page says", () => {
    * them and the instructions written for them, so the page asks the wider
    * question instead.
    */
-  it("teaches the export setup on the default window when nothing has ever arrived", async () => {
+  it("opens the platform setup on the default window when nothing has ever arrived", async () => {
     const { asked } = stub({
       rows: [],
       everRecorded: [],
@@ -437,33 +505,11 @@ describe("what a quiet Monitoring page says", () => {
     expect(guidance()).toEqual(["set-up-capture"]);
     expect(probed(asked)).toHaveLength(1);
 
-    /*
-     * The two variables, carrying the address **this deployment** listens on —
-     * read off the page rather than written down anywhere, because a
-     * self-hoster's egma is wherever they put it and a printed example would be
-     * somebody else's. The origin is only knowable in a browser, so it arrives
-     * one render after the block does and this waits for it.
-     */
-    const shown = await screen.findByText(
-      (text) =>
-        text.includes("OTEL_EXPORTER_OTLP_ENDPOINT") &&
-        text.includes(globalThis.location.origin),
-      { selector: "pre" },
-    );
-    expect(shown.textContent).toContain("OTEL_EXPORTER_OTLP_HEADERS");
-    expect(shown.textContent).toContain("Bearer%20");
-    // And somewhere to mint the key it carries.
     expect(
-      screen.getByRole("link", { name: QUIET.setUp.key }).getAttribute("href"),
-    ).toBe("/projects/prj_2/settings/keys");
-    /*
-     * The caution rides with the teaching, and this is why. The key list
-     * answers for an admin and for whoever minted the key, so a member whose
-     * project is fed by somebody else's organization-wide key never reaches the
-     * state below — and that key is the one step of this setup that fails
-     * without saying anything.
-     */
-    expect(screen.getByText(QUIET.setUp.caution)).toBeDefined();
+      screen
+        .getByRole("link", { name: QUIET.setUp.action })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_2/monitoring/setup");
   });
 
   /**

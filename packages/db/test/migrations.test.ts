@@ -873,6 +873,7 @@ describe("the simulation's test pin (0009)", () => {
 describe("the re-grade's narrowing (0013)", () => {
   let database: EmptyDatabase;
   let beforeTheNarrowing: string;
+  let throughBeforeProductionReset: string;
   let client: pg.Client;
 
   const organizationId = newId("org");
@@ -898,6 +899,21 @@ describe("the re-grade's narrowing (0013)", () => {
       }
     }
     await runMigrations(database.url, beforeTheNarrowing);
+
+    // Keep this historical proof at the last release before Monitoring resets
+    // old production jobs. Applying 0038 here would erase the row before this
+    // describe could prove what 0013 itself did to it.
+    throughBeforeProductionReset = await mkdtemp(
+      path.join(os.tmpdir(), "egma-through-0037-"),
+    );
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0038") {
+        await writeFile(
+          path.join(throughBeforeProductionReset, migration.name),
+          migration.sql,
+        );
+      }
+    }
 
     client = new pg.Client({ connectionString: database.url });
     await client.connect();
@@ -927,13 +943,19 @@ describe("the re-grade's narrowing (0013)", () => {
   afterAll(async () => {
     await client.end();
     await rm(beforeTheNarrowing, { recursive: true, force: true });
+    await rm(throughBeforeProductionReset, { recursive: true, force: true });
     await database.drop();
   });
 
   it("is what is still pending on a database that already holds judged conversations", async () => {
-    const result = await runMigrations(database.url);
+    const result = await runMigrations(
+      database.url,
+      throughBeforeProductionReset,
+    );
     expect(result.applied[0]).toBe("0013_regrade_narrowing.sql");
-    expect(result.applied.every((name) => name >= "0013")).toBe(true);
+    expect(
+      result.applied.every((name) => name >= "0013" && name < "0038"),
+    ).toBe(true);
   });
 
   it("leaves the job that was already there narrowed to nothing, which is what every job starts as", async () => {
@@ -1967,26 +1989,28 @@ describe("the connection type leaving the simulation row (0019)", () => {
     ]);
   });
 
-  it("keeps the check that guards what a connection may be, which is the other one", async () => {
-    // The type is still enumerated where it is the source of truth. Dropping
-    // this one instead would leave the copy constrained and the original open,
-    // which is the mistake this asks about by name.
-    const { rows } = await client.query<{ definition: string }>(
-      `select pg_get_constraintdef(oid) as definition from pg_constraint
-        where conname = 'connection_type_allowed'`,
+  it("later replaces the legacy connection type check with the explicit axes", async () => {
+    const { rows } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conname in (
+          'connection_type_allowed',
+          'connection_agent_platform_allowed',
+          'connection_kind_allowed',
+          'connection_access_variant_allowed'
+        ) order by conname`,
     );
-    expect(rows).toHaveLength(1);
-    // Containment, not the exact list: the next transport widens this check,
-    // and that upgrade's story belongs to its own block — the exact list as
-    // 0018 left it is already pinned in 0018's.
-    expect(rows[0]?.definition).toContain("'livekit'::text");
+    expect(rows.map((row) => row.name)).toEqual([
+      "connection_access_variant_allowed",
+      "connection_agent_platform_allowed",
+      "connection_kind_allowed",
+    ]);
   });
 
-  it("keeps modality, which rides the row for a reason the type never had", async () => {
+  it("keeps modality, which remains separate from the connection kind", async () => {
     // The row's own check names it, and a CHECK cannot join — which is why
-    // this column stayed where the type went. A recording on a conversation
+    // this column stayed where the legacy type went. A recording on a conversation
     // that was not voice is still refused by the row itself, and the write
-    // that proves it names no connection type at all.
+    // that proves it names no connection kind at all.
     await expect(
       client.query(
         `insert into simulation
@@ -3766,5 +3790,373 @@ describe("persona availability over installed references (0037)", () => {
       await rm(prepared.directory, { recursive: true, force: true });
       await prepared.database.drop();
     }
+  });
+});
+
+describe("the direct Monitoring cutover (0038)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+  let applied: readonly string[];
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const agentId = newId("agt");
+
+  const reaches = [
+    {
+      name: "Retell chat",
+      connectionId: newId("con"),
+      runId: newId("run"),
+      type: "retell",
+      modality: "chat",
+      topology: "hosted-broker",
+      variantId: "retell.api_key",
+      config: { retellAgentId: "agent_retell_chat" },
+      expected: {
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+      },
+    },
+    {
+      name: "Generic phone",
+      connectionId: newId("con"),
+      runId: newId("run"),
+      type: "phone",
+      modality: "voice",
+      topology: "egma-dials-in",
+      variantId: "phone.number",
+      config: { phoneNumber: "+15551234567" },
+      expected: {
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
+      },
+    },
+    {
+      name: "LiveKit project credentials",
+      connectionId: newId("con"),
+      runId: newId("run"),
+      type: "livekit",
+      modality: "voice",
+      topology: "agent-dials-out",
+      variantId: "livekit.key_pair",
+      config: {
+        url: "wss://project.example.test",
+        metadata: '{"run":"old"}',
+      },
+      expected: {
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
+      },
+    },
+    {
+      name: "LiveKit token endpoint",
+      connectionId: newId("con"),
+      runId: newId("run"),
+      type: "livekit",
+      modality: "voice",
+      topology: "agent-dials-out",
+      variantId: "livekit.token_endpoint",
+      config: {
+        url: "wss://endpoint.example.test",
+        tokenEndpoint: "https://auth.example.test/livekit-token",
+      },
+      expected: {
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+      },
+    },
+  ] as const;
+
+  const removedRetellVoice = {
+    connectionId: newId("con"),
+    runId: newId("run"),
+  };
+  const oldProductionJob = {
+    id: newId("gjb"),
+    traceId: "a".repeat(32),
+  };
+  const oldProductionClaim = {
+    id: newId("ptc"),
+    traceId: "b".repeat(32),
+    callId: "call_before_monitoring_cutover",
+  };
+
+  async function connectionAndRun(input: {
+    readonly name: string;
+    readonly connectionId: string;
+    readonly runId: string;
+    readonly type: string;
+    readonly modality: string;
+    readonly topology: string;
+    readonly variantId: string;
+    readonly config: Readonly<Record<string, string>>;
+  }): Promise<void> {
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, type, modality,
+          topology, variant_id, config, revision)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)`,
+      [
+        input.connectionId,
+        organizationId,
+        projectId,
+        agentId,
+        input.name,
+        input.type,
+        input.modality,
+        input.topology,
+        input.variantId,
+        JSON.stringify(input.config),
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into run
+         (id, organization_id, project_id, agent_id, connection_id, status,
+          triggered_via, pinned_test_versions, requested_personas,
+          connection_snapshot, mock_tool_snapshot, expected_simulation_count)
+       values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb, $7::jsonb,
+          $8::jsonb, $9::jsonb, 1)`,
+      [
+        input.runId,
+        organizationId,
+        projectId,
+        agentId,
+        input.connectionId,
+        JSON.stringify({ testVersionIds: [] }),
+        JSON.stringify({ personaIds: [] }),
+        JSON.stringify({
+          type: input.type,
+          modality: input.modality,
+          topology: input.topology,
+          environment: null,
+          config: input.config,
+        }),
+        JSON.stringify({ defaults: [], overrides: {} }),
+      ],
+    );
+  }
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("direct_monitoring_cutover");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0038-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0038") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      `insert into organization (id, name, slug) values ($1, 'Cutover', 'cutover')`,
+      [organizationId],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Cutover', 'cutover', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name, revision)
+       values ($1, $2, $3, 'Cutover agent', $4)`,
+      [agentId, organizationId, projectId, newId("rev")],
+    );
+    await client.query(
+      `insert into grading_job
+         (id, organization_id, project_id, source, trace_id, first_span_at,
+          last_span_at, last_seen_at, root_closed_at, status)
+       values ($1, $2, $3, 'production', $4, now(), now(), now(), now(), 'pending')`,
+      [
+        oldProductionJob.id,
+        organizationId,
+        projectId,
+        oldProductionJob.traceId,
+      ],
+    );
+
+    for (const reach of reaches) await connectionAndRun(reach);
+    await connectionAndRun({
+      name: "Unrepresentable Retell voice",
+      connectionId: removedRetellVoice.connectionId,
+      runId: removedRetellVoice.runId,
+      type: "retell",
+      modality: "voice",
+      topology: "hosted-broker",
+      variantId: "retell.api_key",
+      config: { retellAgentId: "agent_retell_voice" },
+    });
+
+    await client.query(
+      `insert into production_trace_claim
+         (id, organization_id, project_id, connection_id, trace_id,
+          provider_call_id, transport, payload, ended_at, status, claimed_at)
+       values ($1, $2, $3, $4, $5, $6, 'pull', '{}', now(), 'claimed', now())`,
+      [
+        oldProductionClaim.id,
+        organizationId,
+        projectId,
+        reaches[0].connectionId,
+        oldProductionClaim.traceId,
+        oldProductionClaim.callId,
+      ],
+    );
+    await client.query(
+      `insert into retell_webhook_refusal (id, reason)
+       values ($1, 'bad_signature')`,
+      [`rwr_${"A".repeat(26)}`],
+    );
+
+    ({ applied } = await runMigrations(database.url));
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("starts with the Monitoring cutover on a populated 0037 database", () => {
+    expect(applied).toEqual(["0038_parched_goblin_queen.sql"]);
+  });
+
+  it("converts every supported connection and its frozen run snapshot", async () => {
+    const { rows: connections } = await client.query<{
+      id: string;
+      agent_platform: string | null;
+      connection_kind: string;
+      access_variant: string;
+    }>(
+      `select id, agent_platform, connection_kind, access_variant
+         from connection order by id`,
+    );
+    const connectionById = new Map(connections.map((row) => [row.id, row]));
+
+    const { rows: runs } = await client.query<{
+      id: string;
+      connection_snapshot: Record<string, unknown>;
+    }>("select id, connection_snapshot from run order by id");
+    const runById = new Map(
+      runs.map((row) => [row.id, row.connection_snapshot]),
+    );
+
+    for (const reach of reaches) {
+      expect(connectionById.get(reach.connectionId)).toEqual({
+        id: reach.connectionId,
+        agent_platform: reach.expected.agentPlatform,
+        connection_kind: reach.expected.connectionKind,
+        access_variant: reach.expected.accessVariant,
+      });
+      expect(runById.get(reach.runId)).toEqual({
+        agentPlatform: reach.expected.agentPlatform,
+        connectionKind: reach.expected.connectionKind,
+        accessVariant: reach.expected.accessVariant,
+        modality: reach.modality,
+        topology: reach.topology,
+        environment: null,
+        config: reach.config,
+      });
+    }
+  });
+
+  it("deletes the old unrepresentable Retell voice connection and its run", async () => {
+    const { rows } = await client.query<{
+      connection: string | null;
+      run: string | null;
+    }>(
+      `select
+         (select id from connection where id = $1) as connection,
+         (select id from run where id = $2) as run`,
+      [removedRetellVoice.connectionId, removedRetellVoice.runId],
+    );
+    expect(rows).toEqual([{ connection: null, run: null }]);
+  });
+
+  it("removes old production jobs and claims so their identities can be used again", async () => {
+    const { rows: jobs } = await client.query<{ id: string }>(
+      "select id from grading_job where id = $1",
+      [oldProductionJob.id],
+    );
+    const { rows: claims } = await client.query<{ id: string }>(
+      "select id from production_trace_claim where provider_call_id = $1",
+      [oldProductionClaim.callId],
+    );
+    expect(jobs).toEqual([]);
+    expect(claims).toEqual([]);
+
+    await client.query(
+      `insert into grading_job
+         (id, organization_id, project_id, source, trace_id, first_span_at,
+          last_span_at, last_seen_at, root_closed_at, status)
+       values ($1, $2, $3, 'production', $4, now(), now(), now(), now(), 'pending')`,
+      [newId("gjb"), organizationId, projectId, oldProductionJob.traceId],
+    );
+    await client.query(
+       `insert into production_trace_claim
+         (id, organization_id, project_id, trace_id, provider_call_id,
+          platform_agent_id, payload, ended_at, status, claimed_at)
+       values ($1, $2, $3, $4, $5, 'agent_retell_chat', '{}', now(), 'claimed', now())`,
+      [
+        newId("ptc"),
+        organizationId,
+        projectId,
+        oldProductionClaim.traceId,
+        oldProductionClaim.callId,
+      ],
+    );
+  });
+
+  it("removes webhook state and creates only the new Monitoring schema", async () => {
+    const { rows: tables } = await client.query<{ table_name: string }>(
+      `select table_name from information_schema.tables
+        where table_schema = 'public'
+          and table_name in (
+            'retell_webhook_refusal',
+            'monitoring_setup',
+            'retell_monitored_agent',
+            'production_trace_claim',
+            'retell_ingestion_failure'
+          ) order by table_name`,
+    );
+    expect(tables.map((row) => row.table_name)).toEqual([
+      "monitoring_setup",
+      "production_trace_claim",
+      "retell_ingestion_failure",
+      "retell_monitored_agent",
+    ]);
+
+    const { rows: leaseColumns } = await client.query<{
+      column_name: string;
+      is_nullable: string;
+    }>(
+      `select column_name, is_nullable from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'retell_ingestion_failure'
+          and column_name in ('replay_lease_owner', 'replay_lease_expires_at')
+        order by column_name`,
+    );
+    expect(leaseColumns).toEqual([
+      { column_name: "replay_lease_expires_at", is_nullable: "YES" },
+      { column_name: "replay_lease_owner", is_nullable: "YES" },
+    ]);
+
+    const { rows: legacyColumns } = await client.query<{
+      column_name: string;
+    }>(
+      `select column_name from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'connection'
+          and column_name in (
+            'type', 'variant_id', 'watch_production', 'production_cursor',
+            'webhook_registered_at', 'webhook_delivered_at'
+          )`,
+    );
+    expect(legacyColumns).toEqual([]);
   });
 });

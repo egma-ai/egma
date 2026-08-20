@@ -62,7 +62,9 @@ function registration(name: string, project: string): Record<string, unknown> {
     name,
     project,
     connection: {
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_for_${name.replace(/\W/g, "")}` },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -72,7 +74,9 @@ function registration(name: string, project: string): Record<string, unknown> {
 
 /** A voice connection that starts without carrier configuration in this API. */
 const LIVEKIT_VOICE = {
-  type: "livekit",
+  agent_platform: "livekit_agents",
+  connection_kind: "livekit_room",
+  access_variant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -314,7 +318,9 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_outbound" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -493,7 +499,9 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_unnamed" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -567,7 +575,9 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await asBrowser("POST", `/api/agents?project=${outbound}`, {
       name: "Outbound desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_by_address" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -682,7 +692,9 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_retry" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -796,7 +808,9 @@ describe("a key for the whole organization, where the organization holds two pro
         modality === "voice"
           ? LIVEKIT_VOICE
           : {
-              type: "retell",
+              agent_platform: "retell",
+              connection_kind: "retell_chat_api",
+              access_variant: "retell_chat_api.api_key",
               modality: "chat",
               config: { retellAgentId: `agent_in_retell_${label}` },
               credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },

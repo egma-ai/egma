@@ -1,4 +1,8 @@
-import type { ConnectionType, Modality } from "../schema/agents.ts";
+import type {
+  AccessVariant,
+  ConnectionKind,
+  Modality,
+} from "../schema/agents.ts";
 import { UnknownCapabilityError } from "./errors.ts";
 
 /**
@@ -179,8 +183,8 @@ export const CAPABILITIES_UNKNOWN: ConnectionCapabilities = { state: "unknown" }
  * is for what can be established from the target's own description.
  */
 export type DiscoveryTarget = {
-  readonly type: ConnectionType;
-  readonly variantId: string;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
   /**
    * Which layer this connection puts under test — and the fact that settles
    * most of what egma's own transport can do. Chat carries text and voice
@@ -224,10 +228,10 @@ export type CapabilityDiscovery = (
  * a test proving the recording path needs to stand an adapter up without
  * rewriting the registry.
  */
-const DISCOVERIES = new Map<ConnectionType, CapabilityDiscovery>();
+const DISCOVERIES = new Map<ConnectionKind, CapabilityDiscovery>();
 
 /**
- * What egma's own transport settles, for every type it can reach at all.
+ * What Egma's own transport settles, for every connection kind it can reach.
  *
  * **This is not brand inference, and the distinction is the whole reason it is
  * allowed to exist.** "Retell supports DTMF" is a sentence about a company and
@@ -260,40 +264,44 @@ export const transportCapabilities: CapabilityDiscovery = async (target) => ({
   supported: target.modality === "voice" ? ["raw_audio"] : [],
 });
 
-// Registered for every type, because the facts above hold for every transport
-// egma ships. A type added later without an adapter of its own is refused a
+// Registered for every kind, because the facts above hold for every transport
+// Egma ships. A kind added later without an adapter of its own is refused a
 // Refresh in its own words, which is what `noCapabilityAdapterMessage` is for.
-for (const type of ["retell", "phone", "livekit"] as const) {
-  DISCOVERIES.set(type, transportCapabilities);
+for (const connectionKind of [
+  "retell_chat_api",
+  "phone_number",
+  "livekit_room",
+] as const) {
+  DISCOVERIES.set(connectionKind, transportCapabilities);
 }
 
 export function capabilityDiscoveryFor(
-  type: ConnectionType,
+  connectionKind: ConnectionKind,
 ): CapabilityDiscovery | undefined {
-  return DISCOVERIES.get(type);
+  return DISCOVERIES.get(connectionKind);
 }
 
-export function hasCapabilityDiscovery(type: ConnectionType): boolean {
-  return DISCOVERIES.has(type);
+export function hasCapabilityDiscovery(connectionKind: ConnectionKind): boolean {
+  return DISCOVERIES.has(connectionKind);
 }
 
 /**
- * Installs the adapter for a type, answering the one it replaced so a caller
+ * Installs the adapter for a connection kind, answering the one it replaced so a caller
  * can put things back. Shipped adapters register at module load; a test
  * registers one and restores it afterwards.
  */
 export function registerCapabilityDiscovery(
-  type: ConnectionType,
+  connectionKind: ConnectionKind,
   discovery: CapabilityDiscovery | undefined,
 ): CapabilityDiscovery | undefined {
-  const previous = DISCOVERIES.get(type);
-  if (discovery === undefined) DISCOVERIES.delete(type);
-  else DISCOVERIES.set(type, discovery);
+  const previous = DISCOVERIES.get(connectionKind);
+  if (discovery === undefined) DISCOVERIES.delete(connectionKind);
+  else DISCOVERIES.set(connectionKind, discovery);
   return previous;
 }
 
 /**
- * What a caller is told when they ask egma to measure a type nothing can
+ * What a caller is told when they ask Egma to measure a connection kind nothing can
  * measure.
  *
  * Its own sentence rather than a general refusal, because the next move is
@@ -301,9 +309,11 @@ export function registerCapabilityDiscovery(
  * what the connection's state stays, so nobody reads the refusal as having
  * cleared a measurement.
  */
-export function noCapabilityAdapterMessage(type: ConnectionType): string {
+export function noCapabilityAdapterMessage(
+  connectionKind: ConnectionKind,
+): string {
   return (
-    `Egma has no capability adapter for a ${type} connection, so it cannot ` +
+    `Egma has no capability adapter for a ${connectionKind} connection, so it cannot ` +
     `measure what this target supports. Its capability state stays unknown, ` +
     `and a test that requires a capability is skipped with a reason rather ` +
     `than failed.`

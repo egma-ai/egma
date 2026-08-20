@@ -57,7 +57,9 @@ function registration(overrides: {
   return {
     name: overrides.name ?? "Front desk",
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -150,7 +152,7 @@ describe("a registration naming no connection", () => {
   });
 });
 
-describe("a connection type with no reuse key", () => {
+describe("a connection kind with no reuse key", () => {
   /**
    * A phone number is where egma dials, not who answers, and two agents may
    * share one — so the type declares no reuse key and registering the same
@@ -161,7 +163,9 @@ describe("a connection type with no reuse key", () => {
     const dialled = await registerAgent(actingIn(acme.project), {
       name: "Reception line",
       connection: {
-        type: "phone",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
       },
@@ -171,7 +175,9 @@ describe("a connection type with no reuse key", () => {
     const again = await registerAgent(actingIn(acme.project), {
       name: "Reception line, second team",
       connection: {
-        type: "phone",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
       },

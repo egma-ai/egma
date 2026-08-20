@@ -2,14 +2,13 @@ import { AgentWriteRefusedError } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import {
-  conductableConnectionTypes,
+  conductableConnectionKinds,
   connectionIsConductable,
   descriptorOf,
   gatedConfig,
   noSimulatorAdapterMessage,
   optional,
-  shapeChosen,
-  shapeOf,
+  accessVariantById,
   validConfig,
   validCredentials,
   validModality,
@@ -20,7 +19,7 @@ import {
  * with no database anywhere near them.
  *
  * The optional-gate machinery is exercised through a made-up type's gate map
- * rather than through whichever real connection type happens to carry an
+ * rather than through whichever real connection kind happens to carry an
  * optional key today. What is under test is the rule — absence admitted,
  * presence still checked, demanded keys still demanded — and a test written
  * against one type's shape would start measuring that type instead the moment
@@ -106,93 +105,27 @@ describe("a config gate marked optional", () => {
   });
 });
 
-/**
- * The shapes machinery, exercised through made-up shapes for the same reason
- * the optional-gate machinery is: what is under test is the rule — one config
- * key tells the shapes apart, and a config naming none of them lands on the
- * first — and a test written against whichever real type happens to carry two
- * shapes today would start measuring that type instead.
- */
-describe("choosing which shape a connection is in", () => {
-  const PLAIN = {
-    id: "made_up.plain",
-    label: "Made up",
-    named: "a made-up connection",
-    config: { room: shouted },
-    fields: [
-      { key: "room", label: "Room", kind: "text", help: "Which room." },
-    ],
-    credentials: { required: false, refusal: "no" },
-    credentialHelp: "None needed.",
-    credentialFields: [],
-  } as const;
-
-  const BY_ENDPOINT = {
-    id: "made_up.endpoint",
-    label: "Made up, with an endpoint",
-    named: "a made-up connection with an endpoint",
-    chosenBy: "endpoint",
-    config: { room: shouted, endpoint: shouted },
-    fields: [
-      { key: "room", label: "Room", kind: "text", help: "Which room." },
-      { key: "endpoint", label: "Endpoint", kind: "url", help: "Where to ask." },
-    ],
-    credentials: { required: false, refusal: "no" },
-    credentialHelp: "None needed.",
-    credentialFields: [],
-  } as const;
-
-  const SHAPES = [PLAIN, BY_ENDPOINT] as const;
-
-  it("takes the shape whose key the config names", () => {
-    expect(shapeChosen(SHAPES, { room: "lobby", endpoint: "https://x" })).toBe(
-      BY_ENDPOINT,
-    );
-  });
-
-  it("falls to the first shape when the config names none of the keys", () => {
-    expect(shapeChosen(SHAPES, { room: "lobby" })).toBe(PLAIN);
-  });
-
-  /**
-   * A key written out as `undefined` is a key the caller left out — the same
-   * reading the config gates take — so it must not choose a shape whose whole
-   * point is that the key is there.
-   */
-  it("reads a key written as undefined as a key that was left out", () => {
-    expect(shapeChosen(SHAPES, { room: "lobby", endpoint: undefined })).toBe(
-      PLAIN,
-    );
-  });
-
-  it("falls to the first shape for a config that is not an object at all", () => {
-    for (const notAnObject of [undefined, null, "room=lobby", ["lobby"]]) {
-      expect(shapeChosen(SHAPES, notAnObject)).toBe(PLAIN);
-    }
-  });
-});
-
 describe("the types that carry no optional key", () => {
   it("still demand every key they hold, retell's and phone's alike", () => {
-    expect(() => validConfig("retell", {})).toThrow(
-      "a retell connection's config needs retellAgentId",
+    expect(() => validConfig("retell_chat_api", "retell_chat_api.api_key", {})).toThrow(
+      "a Retell chat connection's config needs retellAgentId",
     );
-    expect(() => validConfig("phone", {})).toThrow(
-      "a phone connection's config needs phoneNumber",
+    expect(() => validConfig("phone_number", "phone_number.public_e164", {})).toThrow(
+      "a phone-number connection's config needs phoneNumber",
     );
   });
 
   it("still list their keys without an optional marker anywhere", () => {
-    expect(() => validConfig("retell", { retellAgentld: "typo" })).toThrow(
-      'a retell connection\'s config has no key "retellAgentld"; it holds retellAgentId',
+    expect(() => validConfig("retell_chat_api", "retell_chat_api.api_key", { retellAgentld: "typo" })).toThrow(
+      'a Retell chat connection\'s config has no key "retellAgentld"; it holds retellAgentId',
     );
   });
 
   it("still answer the stored config for a payload they take", () => {
-    expect(validConfig("retell", { retellAgentId: "  agent_abc  " })).toEqual({
+    expect(validConfig("retell_chat_api", "retell_chat_api.api_key", { retellAgentId: "  agent_abc  " })).toEqual({
       retellAgentId: "agent_abc",
     });
-    expect(validConfig("phone", { phoneNumber: "+15551234567" })).toEqual({
+    expect(validConfig("phone_number", "phone_number.public_e164", { phoneNumber: "+15551234567" })).toEqual({
       phoneNumber: "+15551234567",
     });
   });
@@ -200,16 +133,16 @@ describe("the types that carry no optional key", () => {
 
 describe("what a livekit connection is made of", () => {
   it("speaks voice, dials out, and takes two credential fields", () => {
-    const descriptor = descriptorOf("livekit");
+    const descriptor = descriptorOf("livekit_room");
 
     expect(descriptor.modalities).toEqual(["voice"]);
     // Derived from the type: a livekit agent joins the room egma opened, so
     // egma never has to reach a laptop.
     expect(descriptor.topology).toBe("agent-dials-out");
-    expect(shapeOf("livekit", { url: A_URL }).credentials).toMatchObject({
-      required: true,
-      fields: ["apiKey", "apiSecret"],
-    });
+    expect(
+      accessVariantById("livekit_room", "livekit_room.project_credentials")
+        .credentials,
+    ).toMatchObject({ required: true, fields: ["apiKey", "apiSecret"] });
   });
 
   /**
@@ -217,26 +150,33 @@ describe("what a livekit connection is made of", () => {
    * opens the room — and the config key that names an endpoint is the whole of
    * what tells them apart.
    */
-  it("comes in two shapes, told apart by a tokenEndpoint in the config", () => {
-    expect(shapeOf("livekit", { url: A_URL }).named).toBeUndefined();
+  it("comes in two explicit access variants", () => {
     expect(
-      shapeOf("livekit", { url: A_URL, tokenEndpoint: AN_ENDPOINT }).named,
+      accessVariantById("livekit_room", "livekit_room.project_credentials").named,
+    ).toBe("a LiveKit room connection");
+    expect(
+      accessVariantById(
+        "livekit_room",
+        "livekit_room.customer_token_endpoint",
+      ).named,
     ).toBe("a token-endpoint livekit connection");
   });
 
   it("holds no key pair on the shape that asks an endpoint for tokens", () => {
     expect(
-      shapeOf("livekit", { url: A_URL, tokenEndpoint: AN_ENDPOINT })
-        .credentials,
+      accessVariantById(
+        "livekit_room",
+        "livekit_room.customer_token_endpoint",
+      ).credentials,
     ).toMatchObject({ required: true, fields: ["headers"] });
   });
 
   it("has no reuse rule: nothing in the config names one agent", () => {
-    expect(descriptorOf("livekit").reuseKey).toBeUndefined();
+    expect(descriptorOf("livekit_room").reuseKey).toBeUndefined();
   });
 });
 
-describe("a livekit connection's url", () => {
+describe("a LiveKit room connection's url", () => {
   it("takes ws, wss, http and https alike, stored as it was written", () => {
     for (const url of [
       "wss://acme.livekit.cloud",
@@ -244,12 +184,12 @@ describe("a livekit connection's url", () => {
       "https://acme.livekit.cloud",
       "http://localhost:7880",
     ]) {
-      expect(validConfig("livekit", { url })).toEqual({ url });
+      expect(validConfig("livekit_room", "livekit_room.project_credentials", { url })).toEqual({ url });
     }
   });
 
   it("is stored trimmed, so a padded paste still reaches the server", () => {
-    expect(validConfig("livekit", { url: "  wss://acme.livekit.cloud  " })).toEqual(
+    expect(validConfig("livekit_room", "livekit_room.project_credentials", { url: "  wss://acme.livekit.cloud  " })).toEqual(
       { url: "wss://acme.livekit.cloud" },
     );
   });
@@ -265,39 +205,39 @@ describe("a livekit connection's url", () => {
       "",
       42,
     ]) {
-      expect(() => validConfig("livekit", { url })).toThrow(/config's url/);
+      expect(() => validConfig("livekit_room", "livekit_room.project_credentials", { url })).toThrow(/config's url/);
     }
   });
 
   it("is demanded: a livekit connection with no url is refused by name", () => {
-    expect(() => validConfig("livekit", {})).toThrow(
-      "a livekit connection's config needs url",
+    expect(() => validConfig("livekit_room", "livekit_room.project_credentials", {})).toThrow(
+      "a LiveKit room connection's config needs url",
     );
   });
 });
 
-describe("a livekit connection's agent name", () => {
+describe("a LiveKit room connection's agent name", () => {
   /**
    * Absent is not a gap to be filled in later — it is the setting every
    * quickstart agent on a laptop runs under, where LiveKit dispatches whoever
    * is listening rather than a named worker.
    */
   it("may be left out, which is what automatic dispatch is", () => {
-    expect(validConfig("livekit", { url: "wss://acme.livekit.cloud" })).toEqual({
+    expect(validConfig("livekit_room", "livekit_room.project_credentials", { url: "wss://acme.livekit.cloud" })).toEqual({
       url: "wss://acme.livekit.cloud",
     });
   });
 
   it("is still gated when it is there", () => {
     expect(
-      validConfig("livekit", {
+      validConfig("livekit_room", "livekit_room.project_credentials", {
         url: "wss://acme.livekit.cloud",
         agentName: "  front-desk  ",
       }),
     ).toEqual({ url: "wss://acme.livekit.cloud", agentName: "front-desk" });
 
     expect(() =>
-      validConfig("livekit", {
+      validConfig("livekit_room", "livekit_room.project_credentials", {
         url: "wss://acme.livekit.cloud",
         agentName: "   ",
       }),
@@ -305,7 +245,7 @@ describe("a livekit connection's agent name", () => {
   });
 });
 
-describe("a livekit connection's metadata", () => {
+describe("a LiveKit room connection's metadata", () => {
   /**
    * It rides to the agent verbatim as the room's metadata, so a typo has to
    * die here. Refused at create, a person is looking at the mistake; refused
@@ -313,9 +253,9 @@ describe("a livekit connection's metadata", () => {
    */
   it("may be left out, and is kept exactly as written when it is there", () => {
     const url = "wss://acme.livekit.cloud";
-    expect(validConfig("livekit", { url })).toEqual({ url });
+    expect(validConfig("livekit_room", "livekit_room.project_credentials", { url })).toEqual({ url });
     expect(
-      validConfig("livekit", { url, metadata: '{"tenant":"acme","tier":2}' }),
+      validConfig("livekit_room", "livekit_room.project_credentials", { url, metadata: '{"tenant":"acme","tier":2}' }),
     ).toEqual({ url, metadata: '{"tenant":"acme","tier":2}' });
   });
 
@@ -331,34 +271,33 @@ describe("a livekit connection's metadata", () => {
       { tenant: "acme" },
       "",
     ]) {
-      expect(() => validConfig("livekit", { url, metadata })).toThrow(
+      expect(() => validConfig("livekit_room", "livekit_room.project_credentials", { url, metadata })).toThrow(
         /config's metadata/,
       );
     }
   });
 });
 
-describe("a livekit connection's modality", () => {
+describe("a LiveKit room connection's modality", () => {
   it("takes voice, and refuses chat by naming what it speaks", () => {
-    expect(validModality("livekit", "voice")).toBe("voice");
-    expect(() => validModality("livekit", "chat")).toThrow(
-      "a livekit connection speaks voice, and this one was asked for chat",
+    expect(validModality("livekit_room", "voice")).toBe("voice");
+    expect(() => validModality("livekit_room", "chat")).toThrow(
+      "a livekit_room connection speaks voice, and this one was asked for chat",
     );
   });
 
   it("refuses a word that is not a modality at all as exactly that", () => {
-    expect(() => validModality("livekit", "telepathy")).toThrow(
-      '"telepathy" is not a modality; a livekit connection speaks voice',
+    expect(() => validModality("livekit_room", "telepathy")).toThrow(
+      '"telepathy" is not a modality; a livekit_room connection speaks voice',
     );
   });
 });
 
-describe("a livekit connection's credentials", () => {
+describe("a LiveKit room connection's credentials", () => {
   const KEYS = { apiKey: "APIhx4bmvHnLcWXYZ", apiSecret: "livekit-secret-9f2c1d" };
-  const MINTING = { url: A_URL };
 
   it("seal both fields, and the hint is the last four of the key", () => {
-    expect(validCredentials("livekit", MINTING, KEYS)).toEqual({
+    expect(validCredentials("livekit_room", "livekit_room.project_credentials", KEYS)).toEqual({
       sealed: KEYS,
       hint: "WXYZ",
     });
@@ -366,31 +305,31 @@ describe("a livekit connection's credentials", () => {
 
   it("refuses a pair with either half missing, naming the shape", () => {
     expect(() =>
-      validCredentials("livekit", MINTING, { apiKey: KEYS.apiKey }),
+      validCredentials("livekit_room", "livekit_room.project_credentials", { apiKey: KEYS.apiKey }),
     ).toThrow(
-      "a livekit connection's credentials need apiSecret to be a non-empty string",
+      "a LiveKit room connection's credentials need apiSecret to be a non-empty string",
     );
     expect(() =>
-      validCredentials("livekit", MINTING, { apiSecret: KEYS.apiSecret }),
+      validCredentials("livekit_room", "livekit_room.project_credentials", { apiSecret: KEYS.apiSecret }),
     ).toThrow(
-      "a livekit connection's credentials need apiKey to be a non-empty string",
+      "a LiveKit room connection's credentials need apiKey to be a non-empty string",
     );
   });
 
   it("refuses a key that does not belong, naming it and the shape", () => {
     expect(() =>
-      validCredentials("livekit", MINTING, { ...KEYS, apiToken: "extra" }),
+      validCredentials("livekit_room", "livekit_room.project_credentials", { ...KEYS, apiToken: "extra" }),
     ).toThrow(
-      'a livekit connection\'s credentials have no key "apiToken"; they are ' +
+      'a LiveKit room connection\'s credentials have no key "apiToken"; they are ' +
         "shaped { apiKey, apiSecret }",
     );
   });
 
   it("refuses either half so short its last-4 hint would give it away", () => {
     expect(() =>
-      validCredentials("livekit", MINTING, { ...KEYS, apiSecret: "abcd" }),
+      validCredentials("livekit_room", "livekit_room.project_credentials", { ...KEYS, apiSecret: "abcd" }),
     ).toThrow(
-      "a livekit connection's credentials need apiSecret to be at least 8 characters",
+      "a LiveKit room connection's credentials need apiSecret to be at least 8 characters",
     );
   });
 });
@@ -404,14 +343,14 @@ describe("a livekit connection that names a token endpoint", () => {
   const HEADERS = { headers: '{"Authorization":"Bearer sentinel-not-real"}' };
 
   it("holds a url and an endpoint, both stored as they were written", () => {
-    expect(validConfig("livekit", AT)).toEqual(AT);
+    expect(validConfig("livekit_room", "livekit_room.customer_token_endpoint", AT)).toEqual(AT);
     expect(
-      validConfig("livekit", { url: A_URL, tokenEndpoint: `  ${AN_ENDPOINT}  ` }),
+      validConfig("livekit_room", "livekit_room.customer_token_endpoint", { url: A_URL, tokenEndpoint: `  ${AN_ENDPOINT}  ` }),
     ).toEqual(AT);
   });
 
   it("takes only a public https endpoint", () => {
-    expect(validConfig("livekit", AT)).toEqual(AT);
+    expect(validConfig("livekit_room", "livekit_room.customer_token_endpoint", AT)).toEqual(AT);
 
     for (const tokenEndpoint of [
       "http://tokens.example/egma/livekit-token",
@@ -435,7 +374,7 @@ describe("a livekit connection that names a token endpoint", () => {
       "https:acme.example",
       "",
     ]) {
-      expect(() => validConfig("livekit", { url: A_URL, tokenEndpoint })).toThrow(
+      expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { url: A_URL, tokenEndpoint })).toThrow(
         "the config's tokenEndpoint must be a public https URL, which " +
           "looks like https://example.com/egma/livekit-token",
       );
@@ -450,7 +389,7 @@ describe("a livekit connection that names a token endpoint", () => {
    */
   it("has no place for an agent name or metadata, and says which keys it holds", () => {
     for (const key of ["agentName", "metadata"]) {
-      expect(() => validConfig("livekit", { ...AT, [key]: "front-desk" })).toThrow(
+      expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, [key]: "front-desk" })).toThrow(
         `a token-endpoint livekit connection's config has no key "${key}"; ` +
           "it holds url, tokenEndpoint",
       );
@@ -458,19 +397,19 @@ describe("a livekit connection that names a token endpoint", () => {
   });
 
   it("seals the headers, and hints at their names and never their values", () => {
-    expect(validCredentials("livekit", AT, HEADERS)).toEqual({
+    expect(validCredentials("livekit_room", "livekit_room.customer_token_endpoint", HEADERS)).toEqual({
       sealed: HEADERS,
       hint: "Authorization",
     });
     expect(
-      validCredentials("livekit", AT, {
+      validCredentials("livekit_room", "livekit_room.customer_token_endpoint", {
         headers: '{"Authorization":"Bearer x0","X-Tenant":"acme"}',
       })?.hint,
     ).toBe("Authorization, X-Tenant");
   });
 
   it("never lets a value into the hint, however short the header is", () => {
-    const hint = validCredentials("livekit", AT, {
+    const hint = validCredentials("livekit_room", "livekit_room.customer_token_endpoint", {
       headers: '{"X-Key":"abcdefgh"}',
     })?.hint;
     expect(hint).toBe("X-Key");
@@ -478,7 +417,7 @@ describe("a livekit connection that names a token endpoint", () => {
   });
 
   it("requires auth headers because every admitted endpoint is public", () => {
-    expect(() => validCredentials("livekit", AT, undefined)).toThrow(
+    expect(() => validCredentials("livekit_room", "livekit_room.customer_token_endpoint", undefined)).toThrow(
       "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
@@ -499,7 +438,7 @@ describe("a livekit connection that names a token endpoint", () => {
       "",
       7,
     ]) {
-      expect(() => validCredentials("livekit", AT, { headers })).toThrow(
+      expect(() => validCredentials("livekit_room", "livekit_room.customer_token_endpoint", { headers })).toThrow(
         "a token-endpoint livekit connection's credentials need headers to " +
           "be a JSON object of header name to header value, written in a " +
           'string, which looks like {"Authorization":"Bearer …"}',
@@ -511,7 +450,7 @@ describe("a livekit connection that names a token endpoint", () => {
     const secret = "SENTINEL-header-value-9f2c";
     let told = "";
     try {
-      validCredentials("livekit", AT, {
+      validCredentials("livekit_room", "livekit_room.customer_token_endpoint", {
         headers: `Authorization: ${secret}`,
       });
     } catch (refusal) {
@@ -528,13 +467,13 @@ describe("a livekit connection that names a token endpoint", () => {
  * two whole ways of working; telling them `"apiKey"` is not a field would send
  * them looking for a typo that is not there.
  */
-describe("a livekit connection that is half of each shape", () => {
+describe("a LiveKit connection that is half of each access variant", () => {
   const AT = { url: A_URL, tokenEndpoint: AN_ENDPOINT };
   const KEYS = { apiKey: "APIhx4bmvHnLcWXYZ", apiSecret: "livekit-secret-9f2c1d" };
   const HEADERS = { headers: '{"Authorization":"Bearer sentinel-not-real"}' };
 
   it("refuses a key pair sent alongside a token endpoint", () => {
-    expect(() => validCredentials("livekit", AT, KEYS)).toThrow(
+    expect(() => validCredentials("livekit_room", "livekit_room.customer_token_endpoint", KEYS)).toThrow(
       "a livekit connection whose config names a tokenEndpoint asks that " +
         "endpoint for every token, so it holds no key pair of its own: its " +
         "credentials are the endpoint's auth headers, shaped { headers }. " +
@@ -544,33 +483,33 @@ describe("a livekit connection that is half of each shape", () => {
   });
 
   it("refuses endpoint headers on a connection that names no endpoint", () => {
-    expect(() => validCredentials("livekit", { url: A_URL }, HEADERS)).toThrow(
+    expect(() => validCredentials("livekit_room", "livekit_room.project_credentials", HEADERS)).toThrow(
       "a livekit connection mints its own tokens, so it needs the project's " +
         "apiKey and apiSecret. Send the pair, or name a tokenEndpoint in the " +
         "config and Egma will ask that endpoint for a token instead — which " +
-        "is the shape where the project's secret never leaves the customer.",
+        "is the access variant where the project's secret never leaves the customer.",
     );
   });
 
-  it("refuses a connection carrying neither auth shape, naming both", () => {
+  it("refuses a connection carrying neither access variant's auth, naming both", () => {
     expect(() =>
-      validCredentials("livekit", { url: A_URL }, undefined),
+      validCredentials("livekit_room", "livekit_room.project_credentials", undefined),
     ).toThrow(
       "a livekit connection mints its own tokens, so it needs the project's " +
         "apiKey and apiSecret. Send the pair, or name a tokenEndpoint in the " +
         "config and Egma will ask that endpoint for a token instead — which " +
-        "is the shape where the project's secret never leaves the customer.",
+        "is the access variant where the project's secret never leaves the customer.",
     );
   });
 
   /**
    * A stray key is a typo, not a mix, and it has to keep reading like one:
-   * pointing somebody at the other shape would be egma guessing at an
+   * pointing somebody at the other access variant would be egma guessing at an
    * intention nothing in the payload supports.
    */
   it("still calls a stray credential key a stray key", () => {
     expect(() =>
-      validCredentials("livekit", { url: A_URL }, { ...KEYS, apiToken: "x" }),
+      validCredentials("livekit_room", "livekit_room.project_credentials", { ...KEYS, apiToken: "x" }),
     ).toThrow(/have no key "apiToken"/);
   });
 });
@@ -586,26 +525,48 @@ describe("a livekit connection that is half of each shape", () => {
  */
 describe("what the shipped simulator can conduct", () => {
   it("counts phone among them, because the phone plug ships", () => {
-    expect(descriptorOf("phone").simulatorAdapter).toBe(true);
-    expect(conductableConnectionTypes()).toContain("phone");
+    expect(descriptorOf("phone_number").simulatorAdapter).toBe(true);
+    expect(conductableConnectionKinds()).toContain("phone_number");
   });
 
-  it("checks the exact stored type and modality before dispatch", () => {
-    expect(connectionIsConductable("retell", "chat")).toBe(true);
-    expect(connectionIsConductable("retell", "voice")).toBe(false);
-    expect(connectionIsConductable("phone", "voice")).toBe(true);
+  it("checks the exact stored kind, access variant, and modality before dispatch", () => {
+    expect(
+      connectionIsConductable(
+        "retell_chat_api",
+        "retell_chat_api.api_key",
+        "chat",
+      ),
+    ).toBe(true);
+    expect(
+      connectionIsConductable(
+        "retell_chat_api",
+        "retell_chat_api.api_key",
+        "voice",
+      ),
+    ).toBe(false);
+    expect(
+      connectionIsConductable(
+        "phone_number",
+        "phone_number.public_e164",
+        "voice",
+      ),
+    ).toBe(true);
   });
 
   it("names every shipped type in the refusal, and takes the list from the registry", () => {
     // The sentence exists for a type egma has not shipped an adapter for.
-    // Every type in `CONNECTION_TYPES` has one today, so the rule is exercised
+    // Every connection kind has one today, so the rule is exercised
     // on a name the registry does not hold — which is exactly the case the
     // refusal is kept for.
     expect(noSimulatorAdapterMessage("vapi")).toBe(
       "Egma has no simulator adapter for a vapi connection yet, so it will " +
         "not start a run it cannot conduct. Run these tests over a " +
-        `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
+        `connection Egma conducts today: ${conductableConnectionKinds().join(", ")}.`,
     );
-    expect(conductableConnectionTypes()).toEqual(["retell", "phone", "livekit"]);
+    expect(conductableConnectionKinds()).toEqual([
+      "retell_chat_api",
+      "phone_number",
+      "livekit_room",
+    ]);
   });
 });

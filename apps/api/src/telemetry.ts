@@ -4,13 +4,13 @@
  * **This is not the trace store.** What customers' agents and simulations
  * send through the OTLP door is their data, in this deployment's ClickHouse.
  * What this file emits is telemetry about egma's own process — request
- * spans, crash reports, and log correlation — through the deployment's
- * telemetry pipeline. Trace spans go to the configured OTLP destination,
- * normally a deployment telemetry collector. The collector's exporter
- * chooses the span backend; PostHog is the current one. Crash reports use a
- * separate, direct PostHog adapter. The two data flows must never share a
- * pipe, which is why nothing here reads `CLICKHOUSE_URL` and nothing in the
- * OTLP door reads anything here.
+ * spans, operational metrics, crash reports, and log correlation — through
+ * the deployment's telemetry pipeline. Traces and metrics go to the
+ * configured OTLP destination, normally a deployment telemetry collector.
+ * The collector's exporter chooses the backend. Crash reports use a separate,
+ * direct PostHog adapter. The two data flows must never share a pipe, which is
+ * why nothing here reads `CLICKHOUSE_URL` and nothing in the OTLP door reads
+ * anything here.
  *
  * It is loaded before the entry module — `node --import` in the Dockerfile —
  * because instrumentation works by patching modules as they load: registered

@@ -93,6 +93,7 @@
           {
             "group": "Telemetry",
             "pages": [
+              "api/monitoring",
               "api/traces"
             ]
           },

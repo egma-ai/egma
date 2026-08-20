@@ -1,7 +1,7 @@
 [project]
 name = "egma"
-version = "0.0.0"
-description = "The Egma SDK: mock tools for LiveKit agents, answered by Egma during a simulation and inert everywhere else."
+version = "0.1.0"
+description = "Test and monitor LiveKit agents with Egma."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -19,14 +19,20 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 
-# Pinned to one minor on purpose. The substitution mechanism is LiveKit's
-# own `mock_tools`, which sits in the framework's testing namespace and
-# carries no stability promise, so an unread minor is exactly the thing
-# that must not arrive by itself. The floor is where the session-scoped
-# form of `mock_tools` exists; the ceiling is the next minor, where it may
-# move. Raising either is a deliberate act with the live smoke test as its
-# evidence — and the README names the fallback if the API ever goes.
-dependencies = ["livekit-agents>=1.6.7,<1.7"]
+# Pinned to one minor on purpose. Mock-tool substitution uses LiveKit's
+# testing namespace. Monitoring also reads LiveKit's current dynamic tracer
+# provider because the public telemetry API has a setter but no getter. An
+# unread minor must not change either seam by itself. The floor is where the
+# session-scoped form of `mock_tools` exists; the ceiling is the next minor.
+# Raising either is a deliberate act backed by the fixture and live tests.
+dependencies = [
+    "livekit-agents>=1.6.7,<1.7",
+    # LiveKit Agents 1.6 passes an httpx client into OpenAI. OpenAI 3 moved
+    # to httpx2, so this range follows LiveKit's own compatibility bound.
+    "openai>=2,<3",
+    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
+    "opentelemetry-sdk>=1.39,<2",
+]
 
 [project.urls]
 Homepage = "https://github.com/egma-ai/egma"

@@ -55,8 +55,8 @@ describe("which screen is on", () => {
       heldBack: [],
       agentName: "order-line",
       connectionName: "retell-1",
-      connectionType: "retell",
-      modality: "voice",
+      productLabel: "Retell chat",
+      modality: "chat",
       destination: null,
       suite: "first-suite",
     });
@@ -122,8 +122,8 @@ describe("which screen is on", () => {
       heldBack: [],
       agentName: "order-line",
       connectionName: "retell-1",
-      connectionType: "retell",
-      modality: "voice",
+      productLabel: "Retell chat",
+      modality: "chat",
       destination: null,
       suite: "first-suite",
     });
@@ -161,8 +161,8 @@ describe("which screen is on", () => {
       heldBack: [],
       agentName: "order-line",
       connectionName: "retell-1",
-      connectionType: "retell",
-      modality: "voice",
+      productLabel: "Retell chat",
+      modality: "chat",
       destination: null,
       suite: "first-suite",
     });

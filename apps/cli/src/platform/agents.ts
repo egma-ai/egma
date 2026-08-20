@@ -28,18 +28,14 @@ import type { ConnectionCredentials } from "./connection-credentials.ts";
 import type { Fetch } from "./device-flow.ts";
 
 export type NewConnection = {
-  /** Omit and the platform chooses the next `<type>-<number>` name. */
+  /** Omit and the platform chooses a numbered product-label name. */
   readonly name?: string | undefined;
-  /**
-   * What kind of reach this is.
-   *
-   * `phone` carries no credential at all, and the platform refuses one on it by
-   * name: a destination number is public, and egma dials it with the telephony
-   * configuration its own deployment holds. That is what makes a phone
-   * connection provider-blind — nothing in it says who answers.
-   */
-  /** The platform's connection-type registry is the source of truth. */
-  readonly type: string;
+  /** Who runs the agent, or null when Egma does not know. */
+  readonly agentPlatform: string | null;
+  /** What Egma connects to for this simulation. */
+  readonly connectionKind: string;
+  /** How Egma gets access to that connection. */
+  readonly accessVariant: string;
   readonly modality: "voice" | "chat";
   readonly environment?: string | undefined;
   readonly config: Readonly<Record<string, string>>;
@@ -63,12 +59,15 @@ export type RegisteredAgent = {
 export type RegisteredConnection = {
   readonly id: string;
   readonly name: string;
-  readonly type: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
   readonly modality: string;
+  readonly productLabel: string;
   /** The last characters of the sealed secret, which is all that comes back. */
   readonly credentialsHint: string | null;
   /**
-   * What to reach, as the platform stores it — a number, provider agent id,
+   * What to reach, as the platform stores it — a number, platform agent id,
    * server URL, or endpoint. Never a secret: config is the public half of a
    * connection by construction.
    */
@@ -147,13 +146,33 @@ function connectionFrom(value: unknown): RegisteredConnection | null {
   if (typeof value !== "object" || value === null) return null;
   const connection = value as Record<string, unknown>;
   const id = plain(connection["id"]);
-  if (id === "") return null;
+  const agentPlatform =
+    connection["agent_platform"] === null
+      ? null
+      : plain(connection["agent_platform"]);
+  const connectionKind = plain(connection["connection_kind"]);
+  const accessVariant = plain(connection["access_variant"]);
+  const modality = plain(connection["modality"]);
+  const productLabel = plain(connection["product_label"]);
+  if (
+    id === "" ||
+    (connection["agent_platform"] !== null && agentPlatform === "") ||
+    connectionKind === "" ||
+    accessVariant === "" ||
+    modality === "" ||
+    productLabel === ""
+  ) {
+    return null;
+  }
   const hint = plain(connection["credentials_hint"]);
   return {
     id,
     name: plain(connection["name"]),
-    type: plain(connection["type"]),
-    modality: plain(connection["modality"]),
+    agentPlatform,
+    connectionKind,
+    accessVariant,
+    modality,
+    productLabel,
     credentialsHint: hint === "" ? null : hint,
     config: configIn(connection["config"]),
   };
@@ -167,20 +186,12 @@ function connectionIn(body: Record<string, unknown>): RegisteredConnection | nul
  * Which of the three things egma says it did, or nothing at all when what it
  * said is not one of them.
  *
- * The two cases are different and are not folded together. **Saying nothing
- * reads as `created`**, because that is what a reply carrying an agent and a
- * connection meant before the field existed, and it is the only reading that
- * cannot describe a write egma did not make.
- *
- * **Saying a word egma has never used is a broken answer**, and it is answered
- * as one. Reading it as `created` would be this end inventing a fact: a fourth
- * outcome could only mean a platform that does something this build has never
- * heard of, and reporting that as a fresh registration is exactly how a
- * developer ends up with two identities and a terminal that said one.
+ * Both a missing outcome and a word Egma has never used are broken answers.
+ * This is a direct pre-launch contract cutover: the client does not guess how
+ * to read an older response after the server has moved to the new model.
  */
 function outcomeIn(body: Record<string, unknown>): RegisterOutcome | null {
   const said = plain(body["result"]);
-  if (said === "") return "created";
   return OUTCOMES.includes(said) ? (said as RegisterOutcome) : null;
 }
 
@@ -188,7 +199,9 @@ function outcomeIn(body: Record<string, unknown>): RegisterOutcome | null {
 function connectionBody(connection: NewConnection): Record<string, unknown> {
   return {
     ...(connection.name === undefined ? {} : { name: connection.name }),
-    type: connection.type,
+    agent_platform: connection.agentPlatform,
+    connection_kind: connection.connectionKind,
+    access_variant: connection.accessVariant,
     modality: connection.modality,
     ...(connection.environment === undefined
       ? {}

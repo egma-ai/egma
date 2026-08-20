@@ -73,16 +73,21 @@ type Registered = { readonly agentId: string; readonly connectionId: string };
  * same request `egma connect` makes, so the ids a run names are ids the
  * platform really issued.
  */
-async function register(type: "retell" | "phone" = "retell"): Promise<Registered> {
+async function register(connectionKind = "retell_chat_api"): Promise<Registered> {
   const response = await fetch(`${platform.url}/api/agents`, {
     method: "POST",
     headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
       name: "order-line",
       connection: {
-        type,
-        modality: type === "retell" ? "chat" : "voice",
-        ...(type === "retell"
+        agent_platform: connectionKind === "retell_chat_api" ? "retell" : null,
+        connection_kind: connectionKind,
+        access_variant:
+          connectionKind === "retell_chat_api"
+            ? "retell_chat_api.api_key"
+            : "phone_number.public_e164",
+        modality: connectionKind === "retell_chat_api" ? "chat" : "voice",
+        ...(connectionKind === "retell_chat_api"
           ? {
               config: { retellAgentId: "agent_0001" },
               credentials: { apiKey: "key_2e8a4c6b1d09f735a2c4" },
@@ -128,7 +133,10 @@ async function makeFolder(registered: Registered | null): Promise<void> {
         ? null
         : { origin: platform.url, instance: platform.instanceId },
     agent: registered === null ? null : { name: "order-line", id: registered.agentId },
-    connection: registered === null ? null : { name: "retell-1", id: registered.connectionId },
+    connection:
+      registered === null
+        ? null
+        : { name: "retell_chat_api-1", id: registered.connectionId },
     suite: { name: "first-suite", id: null },
   });
 }
@@ -467,17 +475,21 @@ describe("egma run", () => {
    * better way to explain it.
    */
   it("repeats egma's refusal to start the run, word for word", async () => {
-    const registered = await register("phone");
+    const registered = await register("phone_number");
     await makeFolder(registered);
     await seed(["quoted-a-price"]);
-    platform.running.noAdapterFor("phone");
+    platform.running.noAdapterFor("phone_number");
 
     const said = await egmaRun();
 
     expect(said.code).toBe(RUN_EXIT.refused);
     expect(factOf(said.lines, "status")).toBe("refused");
-    expect(factOf(said.lines, "reason")).toBe(platform.running.noAdapterMessage("phone"));
-    expect(factOf(said.lines, "stderr")).toBe(platform.running.noAdapterMessage("phone"));
+    expect(factOf(said.lines, "reason")).toBe(
+      platform.running.noAdapterMessage("phone_number"),
+    );
+    expect(factOf(said.lines, "stderr")).toBe(
+      platform.running.noAdapterMessage("phone_number"),
+    );
     // And nothing was queued that could never happen.
     expect(platform.running.runs).toHaveLength(0);
   });
@@ -796,7 +808,7 @@ describe("the cursor a follower resumes from", () => {
     status: "running",
     agentId: "agt_01",
     connectionId: "con_01",
-    connectionType: "retell",
+    productLabel: "Retell chat",
     modality: "chat",
     testVersionIds: ["tstv_1", "tstv_2"],
     expectedSimulationCount: 2,

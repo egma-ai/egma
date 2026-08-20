@@ -48,43 +48,47 @@ function catalog(): Record<string, unknown> {
   return {
     items: [
       {
-        type: "livekit",
-        label: "LiveKit",
-        modalities: ["voice"],
+        agent_platform: "livekit_agents",
+        agent_platform_label: "LiveKit Agents",
+        connection_kind: "livekit_room",
+        access_variant: LIVEKIT_KEY_PAIR_VARIANT,
+        access_variant_label: "LiveKit project credentials — Recommended",
+        modality: "voice",
+        product_label: "LiveKit project credentials",
         topology: "agent-dials-out",
         simulator_adapter: true,
         capability_discovery: false,
-        variants: [
-          {
-            id: LIVEKIT_KEY_PAIR_VARIANT,
-            label: "LiveKit project credentials — Recommended",
-            chosen_by: null,
-            fields: [
-              { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
-              { key: "agentName", label: "Agent name", kind: "text", required: false, help: "Optional dispatch name." },
-              { key: "metadata", label: "Room metadata", kind: "json", required: false, help: "Optional JSON metadata." },
-            ],
-            credential_rule: "required",
-            credential_help: "Egma stores this pair sealed.",
-            credential_fields: [
-              { field: "apiKey", label: "API key", kind: "secret", required: true, help: "The project key." },
-              { field: "apiSecret", label: "API secret", kind: "secret", required: true, help: "The project secret." },
-            ],
-          },
-          {
-            id: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-            label: "Customer token endpoint — Advanced",
-            chosen_by: "tokenEndpoint",
-            fields: [
-              { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
-              { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Where Egma requests one token." },
-            ],
-            credential_rule: "required",
-            credential_help: "Endpoint auth headers, stored sealed.",
-            credential_fields: [
-              { field: "headers", label: "Auth headers", kind: "json", required: true, help: "JSON headers." },
-            ],
-          },
+        fields: [
+          { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
+          { key: "agentName", label: "Agent name", kind: "text", required: false, help: "Optional dispatch name." },
+          { key: "metadata", label: "Room metadata", kind: "json", required: false, help: "Optional JSON metadata." },
+        ],
+        credential_rule: "required",
+        credential_help: "Egma stores this pair sealed.",
+        credential_fields: [
+          { field: "apiKey", label: "API key", kind: "secret", required: true, help: "The project key." },
+          { field: "apiSecret", label: "API secret", kind: "secret", required: true, help: "The project secret." },
+        ],
+      },
+      {
+        agent_platform: "livekit_agents",
+        agent_platform_label: "LiveKit Agents",
+        connection_kind: "livekit_room",
+        access_variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+        access_variant_label: "Customer token endpoint — Advanced",
+        modality: "voice",
+        product_label: "LiveKit token endpoint",
+        topology: "agent-dials-out",
+        simulator_adapter: true,
+        capability_discovery: false,
+        fields: [
+          { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
+          { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Where Egma requests one token." },
+        ],
+        credential_rule: "required",
+        credential_help: "Endpoint auth headers, stored sealed.",
+        credential_fields: [
+          { field: "headers", label: "Auth headers", kind: "json", required: true, help: "JSON headers." },
         ],
       },
     ],
@@ -94,7 +98,7 @@ function catalog(): Record<string, unknown> {
 function connectionFetch(): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.endsWith("/api/connection-types")) {
+    if (url.endsWith("/api/connection-options")) {
       return new Response(JSON.stringify(catalog()), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -242,7 +246,9 @@ describe("LiveKit in the wizard", () => {
     expect(platform.registered.agents.map((agent) => agent.name)).toEqual(["front-desk"]);
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]).toMatchObject({
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: shape.variant,
       modality: "voice",
       config: shape.config,
     });
@@ -318,7 +324,7 @@ describe("LiveKit correction paths", () => {
     expect(result.report).toEqual({
       kind: "connected",
       agentName: "front-desk-2",
-      connectionName: "livekit-1",
+      connectionName: "livekit_room-1",
     });
     expect(ui.record.statuses).toContain(collision);
     expect(
@@ -349,7 +355,7 @@ describe("LiveKit correction paths", () => {
     expect(result.report).toEqual({
       kind: "connected",
       agentName: "front-desk",
-      connectionName: "livekit-1",
+      connectionName: "livekit_room-1",
     });
     expect(ui.record.statuses).toContain(refusal);
     expect(

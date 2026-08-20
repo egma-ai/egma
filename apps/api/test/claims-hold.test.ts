@@ -27,7 +27,7 @@ import { startInstance, type Instance } from "./support/instance.ts";
 /** The value `startInstance` configures the API with. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 
-/** The direct Retell fixture in this socket test is a chat agent. */
+/** The Retell chat fixture in this socket test points at a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
   if (!url.includes("/v2/list-agents")) {
@@ -84,7 +84,7 @@ async function claim(
       "content-type": "application/json",
       authorization: `Bearer ${SERVICE_TOKEN}`,
     },
-    body: JSON.stringify({ contract_versions: [2], ...body }),
+    body: JSON.stringify({ contract_versions: [3], ...body }),
   });
   const answered = (await response.json()) as { specs: unknown[] };
   return {
@@ -143,7 +143,9 @@ beforeAll(async () => {
     {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_1" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },

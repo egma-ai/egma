@@ -215,7 +215,9 @@ beforeAll(async () => {
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -377,7 +379,9 @@ describe("starting a run", () => {
     const elsewhere = await createAgent(actingAsAcme(), {
       name: "Front desk, second opinion",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_unlinked_1" },
         credentials: { apiKey: "retell-secret-UNLINKED1234" },
@@ -400,7 +404,11 @@ describe("starting a run", () => {
 
   it("stamps the connection's shape at start, so editing the connection rewrites nothing", async () => {
     const started = await startRun(actingAsAcme(), aRun());
-    expect(started.connectionSnapshot.type).toBe("retell");
+    expect(started.connectionSnapshot.agentPlatform).toBe("retell");
+    expect(started.connectionSnapshot.connectionKind).toBe("retell_chat_api");
+    expect(started.connectionSnapshot.accessVariant).toBe(
+      "retell_chat_api.api_key",
+    );
     expect(started.connectionSnapshot.modality).toBe("chat");
     expect(started.connectionSnapshot.environment).toBe("staging");
     expect(started.simulations[0]?.modality).toBe("chat");
@@ -422,11 +430,13 @@ describe("starting a run", () => {
     );
     const snapshot = rows[0]?.connection_snapshot as Record<string, unknown>;
     expect(Object.keys(snapshot).sort()).toEqual([
+      "accessVariant",
+      "agentPlatform",
       "config",
+      "connectionKind",
       "environment",
       "modality",
       "topology",
-      "type",
     ]);
     expect(JSON.stringify(snapshot)).not.toContain("retell-secret");
   });
@@ -442,7 +452,9 @@ describe("starting a run", () => {
     const atEndpoint = await createAgent(actingAsAcme(), {
       name: "Front desk in production",
       connection: {
-        type: "livekit",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -474,11 +486,13 @@ describe("starting a run", () => {
     );
     const snapshot = rows[0]?.connection_snapshot as Record<string, unknown>;
     expect(Object.keys(snapshot).sort()).toEqual([
+      "accessVariant",
+      "agentPlatform",
       "config",
+      "connectionKind",
       "environment",
       "modality",
       "topology",
-      "type",
     ]);
     // The endpoint is configuration and is in there, which is the point of
     // checking: the snapshot really did carry this connection's config.
@@ -563,7 +577,9 @@ describe("starting a run", () => {
     const other = await createAgent(actingAsAcme(), {
       name: "Other desk",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_2" },
         credentials: { apiKey: "retell-secret-E5F6G7H8WXYZ" },
@@ -1232,7 +1248,9 @@ describe("the summary facts a terminal landing carries", () => {
     // The seeded connection speaks chat, and the row would refuse a recording
     // on it, so the voice landing gets a routed phone connection of its own.
     const voice = await addConnection(actingAsAcme(), agentId, {
-      type: "phone",
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
     });

@@ -2,7 +2,13 @@ import { newId } from "@egma/ids";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { connection, type Modality } from "../schema/agents.ts";
+import {
+  connection,
+  type AccessVariant,
+  type AgentPlatform,
+  type ConnectionKind,
+  type Modality,
+} from "../schema/agents.ts";
 import { grader, type GraderScope } from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { gradingPlan, type GradingPlanState } from "../schema/plans.ts";
@@ -14,6 +20,7 @@ import {
   type ConnectionCapabilities,
 } from "./capabilities.ts";
 import type { AuthContext } from "./context.ts";
+import { productLabelOf } from "./connection-registry.ts";
 import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
 import {
   getGraderVersion,
@@ -784,8 +791,11 @@ export type RunPlan = {
   readonly agentId: string;
   readonly connectionId: string;
   readonly connection: {
-    readonly type: string;
+    readonly agentPlatform: AgentPlatform | null;
+    readonly connectionKind: ConnectionKind;
+    readonly accessVariant: AccessVariant;
     readonly modality: Modality;
+    readonly productLabel: string;
     readonly environment: string | null;
     readonly capabilities: ConnectionCapabilities;
   };
@@ -814,7 +824,9 @@ export async function planRun(
     .select({
       id: connection.id,
       agentId: connection.agentId,
-      type: connection.type,
+      agentPlatform: connection.agentPlatform,
+      connectionKind: connection.connectionKind,
+      accessVariant: connection.accessVariant,
       modality: connection.modality,
       environment: connection.environment,
       capabilityState: connection.capabilityState,
@@ -911,8 +923,16 @@ export async function planRun(
     agentId: reached.agentId,
     connectionId: reached.id,
     connection: {
-      type: reached.type,
+      agentPlatform: reached.agentPlatform as AgentPlatform | null,
+      connectionKind: reached.connectionKind as ConnectionKind,
+      accessVariant: reached.accessVariant as AccessVariant,
       modality: reached.modality as Modality,
+      productLabel: productLabelOf(
+        reached.agentPlatform as AgentPlatform | null,
+        reached.connectionKind as ConnectionKind,
+        reached.accessVariant as AccessVariant,
+        reached.modality as Modality,
+      ),
       environment: reached.environment,
       capabilities,
     },

@@ -21,9 +21,9 @@ import {
   MASKED_CONNECTION_CREDENTIALS,
 } from "../src/platform/connection-credentials.ts";
 import {
-  connectionTypeNamed,
-  readConnectionTypes,
-} from "../src/platform/connection-types.ts";
+  connectionOptionsForPlatform,
+  readConnectionOptions,
+} from "../src/platform/connection-options.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 
 const API_KEY = "APIhx4bmvHnLcWXYZ";
@@ -65,9 +65,12 @@ describe("the key-pair shape", () => {
     expect(result.registered.result).toBe("created");
     expect(result.registered.agent.name).toBe("front-desk");
     expect(result.registered.connection).toMatchObject({
-      name: "livekit-1",
-      type: "livekit",
+      name: "livekit_room-1",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
       modality: "voice",
+      productLabel: "LiveKit project credentials",
       credentialsHint: API_KEY.slice(-4),
       config: {
         url: "wss://acme.livekit.cloud",
@@ -123,8 +126,11 @@ describe("the token-endpoint shape", () => {
     expect(result.kind).toBe("registered");
     if (result.kind !== "registered") return;
     expect(result.registered.connection).toMatchObject({
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
       modality: "voice",
+      productLabel: "LiveKit token endpoint",
       credentialsHint: "Authorization, x-workspace",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -190,54 +196,58 @@ describe("the server-owned connection form", () => {
         JSON.stringify({
           items: [
             {
-              type: "livekit",
-              label: "LiveKit",
-              modalities: ["voice"],
+              agent_platform: "livekit_agents",
+              agent_platform_label: "LiveKit Agents",
+              connection_kind: "livekit_room",
+              access_variant: LIVEKIT_KEY_PAIR_VARIANT,
+              access_variant_label: "LiveKit project credentials — Recommended",
+              modality: "voice",
+              product_label: "LiveKit project credentials",
               topology: "agent-dials-out",
               simulator_adapter: true,
               capability_discovery: false,
-              variants: [
+              fields: [
                 {
-                  id: LIVEKIT_KEY_PAIR_VARIANT,
-                  label: "LiveKit project credentials — Recommended",
-                  chosen_by: null,
-                  fields: [
-                    {
-                      key: "url",
-                      label: "LiveKit server URL",
-                      kind: "url",
-                      required: true,
-                      help: "The server.",
-                    },
-                  ],
-                  credential_rule: "required",
-                  credential_help: "Stored sealed.",
-                  credential_fields: [
-                    {
-                      field: "apiKey",
-                      label: "API key",
-                      kind: "secret",
-                      required: true,
-                      help: "The public half.",
-                    },
-                  ],
+                  key: "url",
+                  label: "LiveKit server URL",
+                  kind: "url",
+                  required: true,
+                  help: "The server.",
                 },
+              ],
+              credential_rule: "required",
+              credential_help: "Stored sealed.",
+              credential_fields: [
                 {
-                  id: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-                  label: "Customer token endpoint — Advanced",
-                  chosen_by: "tokenEndpoint",
-                  fields: [],
-                  credential_rule: "required",
-                  credential_help: "Required auth headers.",
-                  credential_fields: [
-                    {
-                      field: "headers",
-                      label: "Auth headers",
-                      kind: "json",
-                      required: true,
-                      help: "A JSON object of headers.",
-                    },
-                  ],
+                  field: "apiKey",
+                  label: "API key",
+                  kind: "secret",
+                  required: true,
+                  help: "The public half.",
+                },
+              ],
+            },
+            {
+              agent_platform: "livekit_agents",
+              agent_platform_label: "LiveKit Agents",
+              connection_kind: "livekit_room",
+              access_variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+              access_variant_label: "Customer token endpoint — Advanced",
+              modality: "voice",
+              product_label: "LiveKit token endpoint",
+              topology: "agent-dials-out",
+              simulator_adapter: true,
+              capability_discovery: false,
+              fields: [],
+              credential_rule: "required",
+              credential_help: "Required auth headers.",
+              credential_fields: [
+                {
+                  field: "headers",
+                  label: "Auth headers",
+                  kind: "json",
+                  required: true,
+                  help: "A JSON object of headers.",
                 },
               ],
             },
@@ -247,7 +257,7 @@ describe("the server-owned connection form", () => {
       );
     });
 
-    const result = await readConnectionTypes({
+    const result = await readConnectionOptions({
       url: "https://egma.example/",
       key: "machine-key",
       fetchImpl: fetchImpl as typeof fetch,
@@ -255,28 +265,33 @@ describe("the server-owned connection form", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
-      "https://egma.example/api/connection-types",
+      "https://egma.example/api/connection-options",
     );
     expect(result.kind).toBe("catalog");
     if (result.kind !== "catalog") return;
-    const livekit = connectionTypeNamed(result.catalog, "livekit");
-    expect(livekit).toMatchObject({
-      type: "livekit",
-      label: "LiveKit",
-      modalities: ["voice"],
+    const livekit = connectionOptionsForPlatform(
+      result.catalog,
+      "livekit_agents",
+    );
+    expect(livekit[0]).toMatchObject({
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
+      modality: "voice",
       simulatorAdapter: true,
       capabilityDiscovery: false,
     });
-    expect(livekit?.variants.map((variant) => variant.id)).toEqual([
+    expect(livekit.map((variant) => variant.accessVariant)).toEqual([
       LIVEKIT_KEY_PAIR_VARIANT,
       LIVEKIT_TOKEN_ENDPOINT_VARIANT,
     ]);
-    expect(livekit?.variants[0]?.fields[0]).toEqual({
+    expect(livekit[0]?.fields[0]).toEqual({
       key: "url",
       label: "LiveKit server URL",
       kind: "url",
       required: true,
       help: "The server.",
+      afterCredentials: false,
     });
   });
 });

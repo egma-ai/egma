@@ -41,7 +41,7 @@ Running `npx @egma/cli` with no arguments opens the full interactive wizard. It 
     Egma starts the coding agent you already have and hands it internal notes on voice-agent architecture. Your coding agent reads your repository and reports: which framework runs the agent, where its prompts live, where its tools are defined, how it reaches production, and where its identifier is stored. Every action appears on screen as it happens. Your code and prompts never leave your machine.
   </Step>
   <Step title="Connect your agent">
-    For Retell, Egma asks for your API key and an agent. It offers a Retell Chat connection for a chat agent or a Phone connection for a voice agent. For LiveKit, project credentials are the recommended quick setup; a public HTTPS token endpoint with auth headers is the advanced option. Egma sends credentials only to the Egma platform for sealed storage. Pipecat and Vapi setup are not supported yet.
+    For Retell, Egma asks for your API key and lists the agents it can read. A chat agent uses the Retell Chat API. A voice agent uses one of its public phone numbers. For LiveKit, project credentials are the recommended room setup; a public HTTPS token endpoint with auth headers is the advanced option. Egma sends credentials only to the Egma platform for sealed storage. Pipecat and Vapi setup are not supported yet.
   </Step>
   <Step title="Generate a test suite">
     The wizard asks whether you already have test cases written down. Give it a path inside your repository and the selected coding agent turns each entry into a test file first. The same coding-agent session then writes the rest. Tests arrive one file at a time in `egma/tests/`, each grounded in the agent it found.

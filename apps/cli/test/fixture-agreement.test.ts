@@ -27,13 +27,13 @@
 import {
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
   LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
-  connectionTypeMetadata,
+  connectionOptionMetadata,
 } from "@egma/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { REFUSALS } from "../../api/src/http/refusals.ts";
 import { agentNotApplicable } from "../src/sync/refusals.ts";
-import { FIXTURE_CONNECTION_TYPE_FACTS } from "./support/fixture-platform/agents.ts";
+import { FIXTURE_CONNECTION_OPTION_FACTS } from "./support/fixture-platform/agents.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 
 let platform: Platform;
@@ -93,7 +93,9 @@ function registration(
     name: overrides.name ?? "Front desk",
     connection: {
       ...(overrides.connectionName === undefined ? {} : { name: overrides.connectionName }),
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -106,7 +108,9 @@ function connectionPayload(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    type: "retell",
+    agent_platform: "retell",
+    connection_kind: "retell_chat_api",
+    access_variant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
@@ -115,12 +119,23 @@ function connectionPayload(
 }
 
 describe("the offline connection catalog", () => {
-  it("matches every public type fact in the real registry", () => {
-    expect(FIXTURE_CONNECTION_TYPE_FACTS).toEqual(
-      connectionTypeMetadata().map(
-        ({ type, modalities, topology, simulatorAdapter }) => ({
-          type,
-          modalities,
+  it("matches every public option fact in the real registry", () => {
+    expect(FIXTURE_CONNECTION_OPTION_FACTS).toEqual(
+      connectionOptionMetadata().map(
+        ({
+          agentPlatform,
+          connectionKind,
+          accessVariant,
+          modality,
+          productLabel,
+          topology,
+          simulatorAdapter,
+        }) => ({
+          agentPlatform,
+          connectionKind,
+          accessVariant,
+          modality,
+          productLabel,
           topology,
           simulatorAdapter,
         }),
@@ -877,8 +892,10 @@ describe("registering an agent", () => {
     expect(String(agentOf(registered).project_id)).toMatch(/^prj_/u);
     expect(connectionOf(registered)).toMatchObject({
       agent_id: agentOf(registered).id,
-      name: "retell-1",
-      type: "retell",
+      name: "retell_chat_api-1",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       modality: "chat",
       // Derived from the type, never caller-supplied.
       topology: "hosted-broker",
@@ -893,7 +910,9 @@ describe("registering an agent", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         // One letter wrong, which is the whole point: a typo dies at the door.
         config: { retellAgentld: "agent_in_retell_1" },
@@ -905,7 +924,7 @@ describe("registering an agent", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a retell connection\'s config has no key "retellAgentld"; it holds retellAgentId',
+        'a Retell chat connection\'s config has no key "retellAgentld"; it holds retellAgentId',
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -930,18 +949,18 @@ describe("registering an agent", () => {
   });
 });
 
-describe("a connection payload its type will not take", () => {
-  it("names a type egma has never heard of", async () => {
+describe("a connection payload its kind will not take", () => {
+  it("names a connection kind egma has never heard of", async () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Front desk",
-      connection: connectionPayload({ type: "vapi" }),
+      connection: connectionPayload({ connection_kind: "vapi" }),
     });
 
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type Egma knows; expected one of retell, phone, livekit',
+        '"vapi" is not a connection kind Egma knows; expected one of retell_chat_api, phone_number, livekit_room',
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
@@ -950,7 +969,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Old line",
       connection: {
-        type: "phone",
+        agent_platform: null,
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
       },
@@ -959,7 +980,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: "a phone connection speaks voice, and this one was asked for chat",
+      message: "a phone_number connection speaks voice, and this one was asked for chat",
     });
   });
 
@@ -967,7 +988,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Front desk",
       connection: {
-        type: "retell",
+        agent_platform: "retell",
+        connection_kind: "retell_chat_api",
+        access_variant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_2" },
       },
@@ -976,7 +999,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: "a retell connection needs credentials shaped { apiKey }",
+      message: "a Retell chat connection needs credentials shaped { apiKey }",
     });
   });
 
@@ -989,7 +1012,7 @@ describe("a connection payload its type will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: "a retell connection's credentials need apiKey to be at least 8 characters",
+      message: "a Retell chat connection's credentials need apiKey to be at least 8 characters",
     });
   });
 
@@ -1011,7 +1034,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Old line",
       connection: {
-        type: "phone",
+        agent_platform: null,
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -1038,7 +1063,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Production agent",
       connection: {
-        type: "livekit",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -1067,7 +1094,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Quickstart agent",
       connection: {
-        type: "livekit",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.project_credentials",
         modality: "voice",
         config: { url: "wss://acme.livekit.cloud" },
       },
@@ -1080,7 +1109,7 @@ describe("a connection payload its type will not take", () => {
         "a livekit connection mints its own tokens, so it needs the " +
         "project's apiKey and apiSecret. Send the pair, or name a " +
         "tokenEndpoint in the config and Egma will ask that endpoint for a " +
-        "token instead — which is the shape where the project's secret " +
+        "token instead — which is the access variant where the project's secret " +
         "never leaves the customer.",
     });
   });
@@ -1089,7 +1118,9 @@ describe("a connection payload its type will not take", () => {
     const refused = await ask("POST", "/api/agents", {
       name: "Production agent",
       connection: {
-        type: "livekit",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -1115,7 +1146,9 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     const registered = await ask("POST", "/api/agents", {
       name: "Production agent",
       connection: {
-        type: "livekit",
+        agent_platform: "livekit_agents",
+        connection_kind: "livekit_room",
+        access_variant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -1129,7 +1162,9 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
 
     expect(registered.status, JSON.stringify(registered.body)).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      type: "livekit",
+      agent_platform: "livekit_agents",
+      connection_kind: "livekit_room",
+      access_variant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       topology: "agent-dials-out",
       config: {
@@ -1172,6 +1207,39 @@ describe("registering the same vendor agent again", () => {
     expect(platform.registered.connections).toHaveLength(1);
   });
 
+  it("adds a phone connection to the same agent through the connection route", async () => {
+    const chat = await ask("POST", "/api/agents", registration());
+    const voice = await ask(
+      "POST",
+      `/api/agents/${String(agentOf(chat).id)}/connections`,
+      {
+        agent_platform: null,
+        connection_kind: "phone_number",
+        access_variant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551234567" },
+      },
+    );
+
+    expect(voice.status).toBe(201);
+    expect(connectionOf(voice).id).not.toBe(connectionOf(chat).id);
+    expect(connectionOf(voice)).toMatchObject({
+      agent_id: agentOf(chat).id,
+      name: "phone_number-1",
+      agent_platform: null,
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
+      modality: "voice",
+    });
+
+    const one = await ask("GET", `/api/agents/${String(agentOf(chat).id)}`);
+    expect((one.body.connections as { name: string }[]).map((held) => held.name)).toEqual([
+      "retell_chat_api-1",
+      "phone_number-1",
+    ]);
+    expect(platform.registered.agents).toHaveLength(1);
+  });
+
   /**
    * A registration that would be a reuse is held to exactly what a registration
    * that would be a create is held to.
@@ -1209,7 +1277,7 @@ describe("registering the same vendor agent again", () => {
         {
           error: "invalid_request",
           message:
-            "a retell connection speaks chat, and this one was asked for telepathy",
+            "a retell_chat_api connection speaks chat, and this one was asked for telepathy",
         },
       ],
     ] as const;
@@ -1240,14 +1308,14 @@ describe("registering the same vendor agent again", () => {
     expect(envelopeFirst.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, type, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agent_platform, connection_kind, access_variant, modality, environment, config, credentials',
     });
 
     // And the agent's name is answered before anything the registry checks,
     // because a name is answerable without knowing what a retell connection is.
     const nameBeforePayload = await ask("POST", "/api/agents", {
       name: "  ",
-      connection: connectionPayload({ type: "vapi" }),
+      connection: connectionPayload({ connection_kind: "vapi" }),
     });
     expect(nameBeforePayload.status).toBe(422);
     expect(nameBeforePayload.body).toEqual({
@@ -1307,8 +1375,8 @@ describe("the vendor payload egma no longer keeps", () => {
       error: "invalid_request",
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
-        'connection has no "pulled" key. Drop it and send name, type, ' +
-        "modality, environment, config, credentials; the agent's content " +
+        'connection has no "pulled" key. Drop it and send name, agent_platform, ' +
+        "connection_kind, access_variant, modality, environment, config, credentials; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1338,7 +1406,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(onTheConnection.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, type, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agent_platform, connection_kind, access_variant, modality, environment, config, credentials',
     });
   });
 });
@@ -1350,13 +1418,13 @@ describe("names, and reading an agent back", () => {
 
     const clash = await ask("POST", `/api/agents/${agentId}/connections`, {
       ...connectionPayload(),
-      name: "retell-1",
+      name: "retell_chat_api-1",
     });
 
     expect(clash.status).toBe(409);
     expect(clash.body).toEqual({
       error: "name_taken",
-      message: 'a connection named "retell-1" already exists on this agent',
+      message: 'a connection named "retell_chat_api-1" already exists on this agent',
     });
   });
 
@@ -1505,12 +1573,20 @@ describe("starting a run", () => {
       connection:
         type === "retell"
           ? {
-              type: "retell",
+              agent_platform: "retell",
+              connection_kind: "retell_chat_api",
+              access_variant: "retell_chat_api.api_key",
               modality: "chat",
               config: { retellAgentId: "agent_in_retell_1" },
               credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
             }
-          : { type: "phone", modality: "voice", config: { phoneNumber: "+15551234567" } },
+          : {
+              agent_platform: null,
+              connection_kind: "phone_number",
+              access_variant: "phone_number.public_e164",
+              modality: "voice",
+              config: { phoneNumber: "+15551234567" },
+            },
     });
     const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
     return {
@@ -1675,7 +1751,10 @@ describe("starting a run", () => {
     expect(started.status, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
       connection_id: connectionId,
-      connection_type: "phone",
+      agent_platform: null,
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
+      product_label: "Phone number",
       modality: "voice",
     });
     expect(platform.running.runs).toHaveLength(1);

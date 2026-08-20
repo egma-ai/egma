@@ -14,6 +14,7 @@
     "@egma/provider-credentials": "workspace:*",
     "@egma/retell": "workspace:*",
     "@egma/simulation-contract": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/instrumentation": "^0.221.0",
     "@opentelemetry/instrumentation-http": "^0.221.0",
     "@opentelemetry/instrumentation-pg": "^0.73.0",

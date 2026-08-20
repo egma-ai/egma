@@ -452,16 +452,23 @@ async def test_a_second_stop_signal_tears_down_at_once(
             max_duration_seconds=600,
         )
     )
-    simulator = start_simulator(workbench)
+    simulator = start_simulator(workbench, observe_drain=True)
 
     await workbench.wait_for(
         lambda records: len(turns_for(records, "sim-drain-hard-001")) >= 2
     )
+    output_lines_before_stop = len(simulator.output().splitlines())
     simulator.process.send_signal(signal.SIGTERM)
-    await asyncio.sleep(0.3)
+    await simulator.wait_for_output(
+        lambda output: any(
+            '"egma.test.event":"service_drain_started"' in line
+            and '"body":"stop requested; claiming nothing new' in line
+            for line in output.splitlines()[output_lines_before_stop:]
+        )
+    )
     simulator.process.send_signal(signal.SIGTERM)
 
-    simulator.process.wait(timeout=15)
+    await asyncio.to_thread(simulator.process.wait, timeout=15)
     assert (
         terminal_event_for(await workbench.records(), "sim-drain-hard-001")
         is None
@@ -530,12 +537,12 @@ async def test_an_over_granting_control_plane_does_not_take_the_simulator_down(
     assert len([r for r in later if r["kind"] == "claim"]) > claims_before
 
 
-async def test_a_spec_naming_an_unknown_connection_type_is_refused_out_loud(
+async def test_a_spec_naming_an_unknown_connection_kind_is_refused_out_loud(
     workbench, start_simulator
 ):
     """No plug, no exchange, no report — and the simulator carries on."""
     unplugged = scripted_spec("sim-unplugged-001")
-    unplugged["connection"]["type"] = "a-platform-with-no-plug-yet"
+    unplugged["connection"]["connection_kind"] = "a-connection-with-no-plug-yet"
     await workbench.offer(unplugged)
     simulator = start_simulator(workbench)
 
@@ -556,7 +563,7 @@ async def test_a_spec_naming_an_unknown_connection_type_is_refused_out_loud(
         and record["simulation_id"] == "sim-unplugged-001"
     ]
     assert unplugged_reports == []
-    assert "no platform plug" in simulator.output()
+    assert "no adapter for its connection kind" in simulator.output()
 
 
 async def test_a_plug_refusal_is_an_honest_failure_on_the_record(

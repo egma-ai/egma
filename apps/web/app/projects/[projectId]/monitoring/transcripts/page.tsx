@@ -12,6 +12,7 @@ import {
   rowsIn,
   type ApiKeyList,
 } from "../../../../../lib/settings.ts";
+import { monitoringSetupPath } from "../../../../../lib/monitoring.ts";
 import {
   COLUMNS,
   DEFAULT_WINDOW,
@@ -21,6 +22,7 @@ import {
   type WindowChoice,
 } from "../../../../../lib/transcript-copy.ts";
 import {
+  agentPlatformLabel,
   everRecordedPath,
   howLong,
   isWidestWindow,
@@ -35,10 +37,10 @@ import {
   type Listed,
   type ListPage,
   type Quiet,
+  type Window,
 } from "../../../../../lib/transcripts.ts";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
@@ -97,30 +99,19 @@ import { Notice } from "../../../../ui.tsx";
  * will be.
  */
 
-/**
- * The export setup's two kinds of line: what to do, and what to copy.
- *
- * This is the one place in the product that shows something to be copied
- * rather than something to be read, so the block borrows the transcript's
- * monospace treatment and nothing else. No new colour: it sits on the ordinary
- * canvas with the ordinary hairline, because it is instruction and not a state.
- *
- * It wraps rather than scrolling sideways. A long deployment address on a
- * narrow screen is a variable somebody has to copy whole, and a line that runs
- * out of view is a line half of them will copy half of.
- */
-const MACHINE_TEXT = cn(
-  "m-0 w-full overflow-x-auto rounded-input border border-border bg-background",
-  "px-4 py-3 font-mono text-sm",
-  "[overflow-wrap:anywhere] whitespace-pre-wrap",
-);
-
-const NOTE = "m-0 text-sm text-muted-foreground";
-
 type State =
   | { status: "loading" }
   | { status: "failed"; why: string }
-  | { status: "loaded"; rows: readonly Listed[]; more: string | null };
+  | {
+      status: "loaded";
+      pages: readonly {
+        readonly rows: readonly Listed[];
+        readonly nextCursor: string | null;
+      }[];
+      page: number;
+      window: Window;
+      pageFailure: string | null;
+    };
 
 export default function MonitoringTranscriptsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -147,11 +138,8 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
 
-  /**
-   * Which window the rows on screen belong to, readable from inside a promise
-   * that was started under a different one. See `showMore`.
-   */
-  const showing = useRef<WindowChoice | null>(null);
+  /** Changes whenever the first page changes, so a late next page is ignored. */
+  const requestGeneration = useRef(0);
 
   /**
    * The two reads that decide what a quiet page says, beside the list itself.
@@ -182,7 +170,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   function choose(chosen: WindowChoice): void {
     // At the click rather than only in the effect below, so that a request
     // already in flight cannot answer into the gap between the two.
-    showing.current = chosen;
+    requestGeneration.current += 1;
     setChoice(chosen);
     const asked = new URLSearchParams(globalThis.location.search);
     asked.set(WINDOW_PARAMETER, chosen);
@@ -192,16 +180,21 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   /**
    * One page of the list. `after` is the token the last answer stopped at, and
    * its absence is the first page — the same call either way, because a first
-   * page and a next page differ only by where they start.
+   * page and a next page differ only by where they start. `window` is created
+   * once for the first page and reused for every cursor that follows it.
    */
   const ask = useCallback(
     async (
-      chosen: WindowChoice,
+      window: Window,
       after: string | null,
-    ): Promise<ListPage | null> => {
+    ): Promise<
+      | { readonly status: "ready"; readonly page: ListPage }
+      | { readonly status: "failed"; readonly why: string }
+      | null
+    > => {
       const answer = await readJson<ListPage>(
         productionListPath({
-          window: recentWindow(chosen, new Date()),
+          window,
           projectId,
           cursor: after,
         }),
@@ -212,10 +205,9 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         return null;
       }
       if (answer.status !== "ready") {
-        setState({ status: "failed", why: answer.refusal.message });
-        return null;
+        return { status: "failed", why: answer.refusal.message };
       }
-      return answer.value;
+      return { status: "ready", page: answer.value };
     },
     [projectId],
   );
@@ -223,16 +215,35 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   useEffect(() => {
     if (choice === null) return undefined;
     let current = true;
-    showing.current = choice;
+    const generation = ++requestGeneration.current;
+    const window = recentWindow(choice, new Date());
+    setBusy(false);
     setState({ status: "loading" });
 
-    void ask(choice, null)
-      .then((page) => {
-        if (!current || page === null) return;
+    void ask(window, null)
+      .then((answer) => {
+        if (
+          !current ||
+          generation !== requestGeneration.current ||
+          answer === null
+        ) {
+          return;
+        }
+        if (answer.status === "failed") {
+          setState({ status: "failed", why: answer.why });
+          return;
+        }
         setState({
           status: "loaded",
-          rows: page.traces,
-          more: page.next_cursor,
+          pages: [
+            {
+              rows: answer.page.traces,
+              nextCursor: answer.page.next_cursor,
+            },
+          ],
+          page: 0,
+          window,
+          pageFailure: null,
         });
       })
       .catch(() => {
@@ -245,44 +256,79 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   }, [ask, choice, attempt]);
 
   /**
-   * The next page, appended — the token says where the last one stopped.
-   *
-   * The window is captured at the click and checked again at the append,
-   * because the two can disagree. Somebody clicks **Show more** on the last
-   * hour, then picks the last thirty days while that request is still out; the
-   * effect above starts the thirty-day list, that one answers first, and then
-   * the hour's second page arrives and appends rows from an hour to a list of
-   * a month — silently, and in the wrong order, since both are newest-first
-   * within themselves. Guarding on `state.status` alone does not catch it: by
-   * the time the late answer lands the new window has usually already loaded,
-   * so the status is `loaded` again.
+   * Move to the next page. A page already visited is reused. A page not yet
+   * visited is read with the cursor and the exact time window of page one.
    */
-  async function showMore(after: string): Promise<void> {
-    const asked = choice;
-    if (asked === null) return;
+  async function showNext(): Promise<void> {
+    if (state.status !== "loaded" || busy) return;
+    const currentPage = state.pages[state.page];
+    if (currentPage === undefined) return;
+    if (state.pages[state.page + 1] !== undefined) {
+      setState({ ...state, page: state.page + 1, pageFailure: null });
+      return;
+    }
+    if (currentPage.nextCursor === null) return;
+
+    const generation = requestGeneration.current;
+    const asked = state;
     setBusy(true);
+    setState({ ...state, pageFailure: null });
     try {
-      const page = await ask(asked, after);
-      if (page === null) return;
+      const answer = await ask(asked.window, currentPage.nextCursor);
+      if (answer === null || generation !== requestGeneration.current) return;
+      if (answer.status === "failed") {
+        setState((was) =>
+          was.status === "loaded" && generation === requestGeneration.current
+            ? { ...was, pageFailure: answer.why }
+            : was,
+        );
+        return;
+      }
       setState((was) =>
-        was.status === "loaded" && showing.current === asked
+        was.status === "loaded" &&
+        generation === requestGeneration.current &&
+        was.page === asked.page &&
+        was.window.from === asked.window.from &&
+        was.window.to === asked.window.to
           ? {
-              status: "loaded",
-              rows: [...was.rows, ...page.traces],
-              more: page.next_cursor,
+              ...was,
+              pages: [
+                ...was.pages,
+                {
+                  rows: answer.page.traces,
+                  nextCursor: answer.page.next_cursor,
+                },
+              ],
+              page: was.page + 1,
+              pageFailure: null,
             }
           : was,
       );
     } catch {
-      setState({ status: "failed", why: LIST.unreachable });
+      if (generation === requestGeneration.current) {
+        setState((was) =>
+          was.status === "loaded"
+            ? { ...was, pageFailure: LIST.unreachable }
+            : was,
+        );
+      }
     } finally {
-      setBusy(false);
+      if (generation === requestGeneration.current) setBusy(false);
     }
   }
 
-  // Where the last page stopped, hoisted so it is a value the button below can
-  // close over rather than a field that might have changed by the time it does.
-  const more = state.status === "loaded" ? state.more : null;
+  function showPrevious(): void {
+    if (busy) return;
+    setState((was) =>
+      was.status === "loaded" && was.page > 0
+        ? { ...was, page: was.page - 1, pageFailure: null }
+        : was,
+    );
+  }
+
+  const shownPage =
+    state.status === "loaded" ? (state.pages[state.page] ?? null) : null;
+  const shownRows = shownPage?.rows ?? [];
 
   /**
    * Whether this project has **ever** recorded anything, asked only when the
@@ -304,7 +350,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
    * answer. The three are kept apart because `quietState` may never read a
    * refusal as a zero.
    */
-  const emptyHere = state.status === "loaded" && state.rows.length === 0;
+  const emptyHere = state.status === "loaded" && shownRows.length === 0;
   const alreadyWidest = isWidestWindow(choice ?? DEFAULT_WINDOW);
   const [probed, setProbed] = useState<number | null | undefined>(undefined);
 
@@ -367,7 +413,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
     everRecorded === undefined
       ? null
       : quietState({
-          listed: state.rows.length,
+          listed: shownRows.length,
           everRecorded,
           organizationWideKeys: counted(
             keys,
@@ -381,16 +427,22 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
-      <PageHeader eyebrow={LIST.eyebrow} title={LIST.title} lead={LIST.lead} />
+      <PageHeader
+        eyebrow={LIST.eyebrow}
+        title={LIST.title}
+        lead={LIST.lead}
+        action={
+          <Button asChild>
+            <Link href={monitoringSetupPath(projectId)}>Set up monitoring</Link>
+          </Button>
+        }
+      />
       <PageBody>
         {/*
           The window is a filter, so it sits where every list page in this
           product now keeps its filters: the left of the strip above the list.
-          It was in the page header's action slot, which is where a page keeps
-          the *act* it offers — and this page offers none, so the one control it
-          had was standing in a slot that means something else. A person moving
-          between Runs and Monitoring had to look in two places for the same
-          kind of control.
+          A person moving between Runs and Monitoring should not have to look
+          in two places for the same kind of control.
         */}
         <Toolbar>
           <Select
@@ -437,7 +489,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           />
         ) : null}
 
-        {quiet === "set-up-capture" ? <SetUp projectId={projectId} /> : null}
+        {quiet === "set-up-capture" ? <SetUp /> : null}
 
         {quiet === "key-names-the-organization" ? (
           <Empty
@@ -453,77 +505,47 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           />
         ) : null}
 
-        {state.status === "loaded" && state.rows.length > 0 ? (
-          <DataTable
-            label={LIST.tableLabel}
-            columns={columnsFor(projectId, now)}
-            rows={state.rows}
-            keyOf={(row) => row.trace_id}
-            stretchPrimaryLink
-            {...(more === null
-              ? {}
-              : {
-                  more: {
-                    onMore: () => void showMore(more),
-                    loading: busy,
-                    note: LIST.counted(state.rows.length),
-                  },
-                })}
-          />
+        {state.status === "loaded" && shownPage !== null && shownRows.length > 0 ? (
+          <>
+            {state.pageFailure === null ? null : (
+              <p className="mb-3 text-sm text-destructive" role="alert">
+                {state.pageFailure}
+              </p>
+            )}
+            <DataTable
+              label={LIST.tableLabel}
+              columns={columnsFor(projectId, now)}
+              rows={shownRows}
+              keyOf={(row) => row.trace_id}
+              stretchPrimaryLink
+              pagination={{
+                page: state.page + 1,
+                canPrevious: state.page > 0,
+                canNext:
+                  state.pages[state.page + 1] !== undefined ||
+                  shownPage.nextCursor !== null,
+                loading: busy,
+                onPrevious: showPrevious,
+                onNext: () => void showNext(),
+                previousLabel: LIST.previousPage,
+                pageLabel: LIST.page,
+                nextLabel: LIST.nextPage,
+                note: LIST.counted(shownRows.length),
+              }}
+            />
+          </>
         ) : null}
       </PageBody>
     </ProductPage>
   );
 }
 
-/**
- * What a developer with nothing on this page needs: the address, the two
- * variables, and where the key comes from.
- *
- * **The address is this deployment's own**, read off the page rather than
- * written down anywhere, because a self-hoster's egma is wherever they put it
- * and a printed example would be somebody else's. The exporter appends the
- * signal's own path, so what is shown is the base and nothing after it.
- *
- * **Nothing is drawn until that address is known.** It only exists in a
- * browser, so it arrives one render after this component mounts — and the
- * render before it would print `OTEL_EXPORTER_OTLP_ENDPOINT=` with nothing after
- * the sign, which is a variable somebody could copy and an instruction that is
- * wrong for as long as it is on screen. Teaching arrives once and complete.
- */
-function SetUp({ projectId }: { readonly projectId: string }) {
-  const [origin, setOrigin] = useState<string | null>(null);
-
-  useEffect(() => {
-    setOrigin(globalThis.location.origin);
-  }, []);
-
-  if (origin === null) return null;
-
+/** Provider-specific teaching lives once, on the Monitoring setup page. */
+function SetUp() {
   return (
     <Empty
       title={QUIET.setUp.title}
       lead={QUIET.setUp.lead}
-      action={
-        <div className="grid w-full justify-items-start gap-3 text-left">
-          <p className={NOTE}>{QUIET.setUp.endpoint}</p>
-          <pre className={MACHINE_TEXT}>{origin}</pre>
-          <p className={NOTE}>{QUIET.setUp.variables}</p>
-          <pre className={MACHINE_TEXT}>{QUIET.setUp.exports(origin)}</pre>
-          <p className={NOTE}>{QUIET.setUp.keyLead}</p>
-          <Button asChild>
-            <Link href={settingsPath(projectId, "keys")}>{QUIET.setUp.key}</Link>
-          </Button>
-          {/*
-            The caution, which the state below says louder and to fewer people:
-            the key list answers for an admin and for whoever minted the key,
-            so a member whose project is fed by somebody else's
-            organization-wide key would otherwise never be told what to look
-            at. It is one line here and the whole answer there.
-          */}
-          <p className={NOTE}>{QUIET.setUp.caution}</p>
-        </div>
-      }
     />
   );
 }
@@ -594,7 +616,15 @@ function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
         ),
     ],
     [COLUMNS.environment, (row) => row.environment],
-    [COLUMNS.connection, (row) => row.connection_type],
+    [
+      COLUMNS.platform,
+      (row) =>
+        row.agent_platform === "" ? (
+          <Nothing />
+        ) : (
+          agentPlatformLabel(row.agent_platform)
+        ),
+    ],
   ];
 
   return order.map(([header, cell], index) => ({

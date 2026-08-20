@@ -15,6 +15,7 @@ import {
   stepLabel,
 } from "../../../../../../lib/transcript-copy.ts";
 import {
+  agentPlatformLabel,
   everyStep,
   howFarIn,
   howLong,
@@ -877,7 +878,10 @@ function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
     [FACTS.ended, asSecond(facts.ended_at)],
     [FACTS.source, facts.source],
     [FACTS.environment, facts.environment],
-    [FACTS.connection, facts.connection_type],
+    [FACTS.platform, agentPlatformLabel(facts.agent_platform)],
+    [FACTS.platformAgentName, facts.platform_agent_name],
+    [FACTS.platformAgentId, facts.platform_agent_id],
+    [FACTS.platformAgentVersion, facts.platform_agent_version],
     [FACTS.reference, facts.provider_call_id],
   ];
 

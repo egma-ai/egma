@@ -149,23 +149,22 @@ to confirm it:
   Egma creates this connection only after you confirm it.
 ```
 
-Retell voice agents use a Phone connection with the Voice modality. Retell chat
-agents use a Retell connection with the Chat modality. The CLI flag for the
-chat reach is `--reach text`. An explicit choice that does not match the agent
-stops before Egma writes a connection or a local binding.
+Retell voice agents use a Phone Number connection with the Voice modality.
+Retell chat agents use a Retell Chat API connection with the Chat modality. The
+CLI flag for the chat reach is `--reach text`. An explicit choice that does not
+match the agent stops before Egma writes a connection or a local binding.
 
 For a voice agent, Egma lists the numbers Retell routes to that agent. You pick
 one, and the
-connection it writes holds that number and nothing else — no Retell identifier
-and no credential of any kind, because the public telephone network neither
-knows nor cares what answers. For a Retell chat agent, the command writes one
-Retell Chat connection and seals its key on the platform. It never writes a
-Retell Chat connection for a voice agent.
+connection it writes holds that number and the Retell platform label. It holds
+no Retell agent ID or credential, because the phone adapter needs neither. A
+Retell chat agent uses a separate Retell Chat API connection, with its Retell
+agent ID and sealed API key. Egma does not offer that chat path for a voice
+agent.
 
-**What Retell answered is kept exactly as it answered it**, beside what Egma
-read out of it, so a field Egma has no place for today is still there tomorrow.
-Nothing in this step writes to your Retell account: every request Egma makes to
-it is a read.
+Egma uses Retell's answer to verify the selected agent and connection. It does
+not copy the full provider document into the agent record. Nothing in this step
+writes to your Retell account: every request Egma makes to it is a read.
 
 If your repository keeps a prompt of its own and it differs from what Retell is
 running, Egma says so in one line and carries on. It never blocks: being out of
@@ -174,7 +173,7 @@ grounded in.
 
 ### LiveKit
 
-For LiveKit, the wizard reads `GET /api/connection-types` from the Egma
+For LiveKit, the wizard reads `GET /api/connection-options` from the Egma
 platform. The platform supplies the field names, help text, and credential
 rules. You then choose one of two setups:
 
@@ -221,14 +220,12 @@ Egma will not decide on your behalf whether to dial somebody's telephone. With
 `--reach phone` and several numbers routed to the agent, name one with
 `--phone-number` or `EGMA_PHONE_NUMBER`.
 
-**Running it twice over the same voice agent is safe.** Egma answers the
-registration you already have rather than making a second one and says which of
-three things it did on the `registration:` line — `created`, `reused`, or
-`connection_added` when the same agent gained another way of being reached. The
-last two also print a `note:` line saying it in plain words. Coming back for the
-second reach lands on the same agent: one voice agent, two ways to reach it, one
-results history. `agent_registration:` and `connection_registration:` say the
-same thing for each half, as `created` or `reused`.
+**Running it twice over the same Retell agent is safe.** Egma reuses the agent
+and the same selected connection when it can prove both identities. It reports
+`created`, `reused`, or `connection_added` on the `registration:` line. A
+Retell voice agent stays on a phone connection; this repeat behavior does not
+turn it into a Retell chat connection. `agent_registration:` and
+`connection_registration:` state what happened to each record.
 
 ```
 url: http://localhost:3101
@@ -242,8 +239,11 @@ phone_number: +14155550111
 agent_id: agt_01K…
 agent_name: order-line
 connection_id: con_01K…
-connection_name: phone-1
-connection_type: phone
+connection_name: phone_number-1
+agent_platform: retell
+connection_kind: phone_number
+access_variant: phone_number.public_e164
+product_label: Retell phone
 connection_modality: voice
 registration: created
 agent_registration: created
@@ -361,7 +361,7 @@ Then one keystroke:
     open-on-sunday          somebody-in-a-hurry
     … 9 more (↑↓ browse · e opens in $EDITOR)
 
-Run these against order-line over retell-1 (chat)?
+Run these against order-line over retell_chat_api-1 (chat)?
 
 [enter] run   [e] edit first   [q] quit
 ```
@@ -417,7 +417,7 @@ A **verdict** is one of four, and Egma never turns four into three:
 A test that could not run is not a test that failed, and reporting one as the
 other would send you hunting a bug that is not there.
 
-If your connection is of a type whose adapter has not shipped yet, Egma refuses
+If your connection kind has no simulator adapter, Egma refuses
 the run **at creation**, in its own words, and the wizard prints those words as
 they came. You never wait on a run that could not happen.
 

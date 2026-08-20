@@ -263,7 +263,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
 
         def spec_for(connection, platform=None):
             document = {
-                "contract_version": 2,
+                "contract_version": 3,
                 "simulation_id": "sim-unconfigured",
                 "modality": "voice",
                 "connection": connection,
@@ -300,13 +300,17 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
             return SimulationSpec.from_document(document)
 
         LOOPBACK = spec_for({
-            "type": "loopback",
+            "agent_platform": None,
+            "connection_kind": "loopback",
+            "access_variant": "loopback.in_process",
             "config": {"replies": ["Noted."]},
             "credentials": None,
         })
         PHONE = spec_for(
             {
-                "type": "phone",
+                "agent_platform": None,
+                "connection_kind": "phone_number",
+                "access_variant": "phone_number.public_e164",
                 "config": {
                     "phoneNumber": "+15551234567",
                     "scripted": {"replies": ["Noted."]},

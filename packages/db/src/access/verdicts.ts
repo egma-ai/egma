@@ -119,7 +119,7 @@ export type AppendedVerdicts = {
  *
  * Only a row count, with none of the byte accounting the span path needs: a
  * verdict is a word, a number, one line of prose and a handful of span ids,
- * while a span carries the provider's whole payload verbatim. Re-grading a large
+ * while a span carries the provider's whole safe payload. Re-grading a large
  * run is the only thing that reaches this, and it is split rather than refused
  * for the same reason a big batch of spans is.
  */

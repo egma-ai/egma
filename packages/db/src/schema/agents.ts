@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean,
   check,
   foreignKey,
   index,
@@ -38,9 +37,26 @@ import {
  * pattern) without touching anything that references `agent`.
  */
 
-/** The ways egma can reach an agent today. Grows one adapter at a time. */
-export const CONNECTION_TYPES = ["retell", "phone", "livekit"] as const;
-export type ConnectionType = (typeof CONNECTION_TYPES)[number];
+/** The products or frameworks that run or expose an agent. */
+export const AGENT_PLATFORMS = ["retell", "livekit_agents"] as const;
+export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
+
+/** The direct paths Egma's simulator can select to reach an agent. */
+export const CONNECTION_KINDS = [
+  "retell_chat_api",
+  "phone_number",
+  "livekit_room",
+] as const;
+export type ConnectionKind = (typeof CONNECTION_KINDS)[number];
+
+/** The authority and configuration used inside one connection kind. */
+export const ACCESS_VARIANTS = [
+  "retell_chat_api.api_key",
+  "phone_number.public_e164",
+  "livekit_room.project_credentials",
+  "livekit_room.customer_token_endpoint",
+] as const;
+export type AccessVariant = (typeof ACCESS_VARIANTS)[number];
 
 /**
  * Whether anything has ever measured what a connection's target can do.
@@ -66,7 +82,7 @@ export const MODALITIES = ["voice", "chat"] as const;
 export type Modality = (typeof MODALITIES)[number];
 
 /**
- * Who moves first when a simulation starts. Derived from the type by the
+ * Who moves first when a simulation starts. Derived from the connection kind by the
  * access layer, never supplied by a caller — it predicts whether an agent on a
  * laptop is reachable, and a caller's guess would just be wrong.
  */
@@ -140,35 +156,38 @@ export const connection = pgTable(
       .notNull()
       .references(() => agent.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    type: text("type").notNull(),
+    /** The framework behind the target, or null when it is unknown. */
+    agentPlatform: text("agent_platform"),
+    /** The direct path the simulator selects. */
+    connectionKind: text("connection_kind").notNull(),
     modality: text("modality").notNull(),
     topology: text("topology").notNull(),
     /**
-     * Which shape of its type this connection is in, written down once at
-     * create and never again.
+     * The authority and configuration used inside this connection kind,
+     * written down once at create and never changed.
      *
-     * The shape used to be re-derived from the config on every read, by looking
+     * The access variant used to be re-derived from config on every read, by looking
      * for the discriminating key. That works while the registry is the registry
      * this row was written under, and stops working the moment a variant gains
      * or loses a key — the same stored config would then answer a different
-     * shape, and the credential rule a Restore is held to would change
-     * underneath a connection nobody edited. So the shape is a stored fact
+     * access variant, and the credential rule a Restore is held to would change
+     * underneath a connection nobody edited. So the access variant is a stored fact
      * about this row, and changing it is a new connection.
      */
-    variantId: text("variant_id").notNull(),
+    accessVariant: text("access_variant").notNull(),
     /** A label (`staging`, `production`), never a level in the hierarchy. */
     environment: text("environment"),
-    /** Non-secret, validated per type at the door: what to reach, never how to prove. */
+    /** Non-secret, validated per access variant: what to reach, never how to prove. */
     config: jsonb("config").notNull(),
     /**
-     * The sealed envelope (`v1.<iv>.<ciphertext>.<tag>`), or null for types
+     * The sealed envelope (`v1.<iv>.<ciphertext>.<tag>`), or null for variants
      * where the customer supplies no secret. Never selected by any read; the
      * one opener is the access layer's credential resolver.
      */
     credentials: text("credentials"),
     /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
-    /** Whether anything has measured this target. Never null: see the type. */
+    /** Whether anything has measured this target. Never null. */
     capabilityState: text("capability_state").notNull().default("unknown"),
     /**
      * The catalog keys the adapter actually looked at, and only for a `known`
@@ -194,44 +213,6 @@ export const connection = pgTable(
     capabilitiesCheckedAt: moment("capabilities_checked_at"),
     /** Which adapter measured it — evidence travels with the answer. */
     capabilitySource: text("capability_source"),
-    /**
-     * Whether egma watches this connection's production traffic.
-     *
-     * **Off for every connection that exists, and off for every connection
-     * made from now on.** Connecting an agent so it can be tested must never
-     * silently become storing the customer's real conversations, so watching is
-     * a switch somebody flips rather than a consequence of a feature shipping.
-     * Flipping it on starts the poller and registers the webhook where the
-     * deployment has a public address; flipping it off stops both and keeps
-     * what was already stored.
-     */
-    watchProduction: boolean("watch_production").notNull().default(false),
-    /**
-     * Everything this connection has produced at or before this instant has
-     * been **drained by the poller**. A statement of fact, never a statement of
-     * intent: it moves only after a conversation is written, so a poller that
-     * dies mid-sweep resumes exactly where the last durable write left it.
-     *
-     * A webhook never moves it. A delivery lands the conversation that just
-     * ended while the poller is still working through what came before it, and
-     * a cursor dragged forward by one would skip the rest for good. The
-     * delivered conversation is stored either way — the poller is offered it
-     * again on its way past, and the ledger skips it.
-     */
-    productionCursor: moment("production_cursor"),
-    /**
-     * When egma registered its receiving endpoint with the provider, or null
-     * for a connection egma polls and nothing more. Null is the ordinary state
-     * of a deployment with no public address, and it is not a fault.
-     */
-    webhookRegisteredAt: moment("webhook_registered_at"),
-    /**
-     * When a delivery for this connection was last accepted. What decides
-     * whether the poller is running at full cadence or at the safety-net one:
-     * webhooks arriving means the poller is a backstop, and webhooks stopping
-     * means it is the transport again.
-     */
-    webhookDeliveredAt: moment("webhook_delivered_at"),
     /** See the agent's own: the opaque revision an edit is written against. */
     revision: idText("revision").notNull(),
     /** When this connection stopped being reachable for new work, or null. */
@@ -244,7 +225,15 @@ export const connection = pgTable(
   },
   (table) => [
     prefixCheck("connection_id_prefix", table.id, "con"),
-    oneOf("connection_type_allowed", table.type, [...CONNECTION_TYPES]),
+    oneOf("connection_agent_platform_allowed", table.agentPlatform, [
+      ...AGENT_PLATFORMS,
+    ]),
+    oneOf("connection_kind_allowed", table.connectionKind, [
+      ...CONNECTION_KINDS,
+    ]),
+    oneOf("connection_access_variant_allowed", table.accessVariant, [
+      ...ACCESS_VARIANTS,
+    ]),
     oneOf("connection_modality_allowed", table.modality, [...MODALITIES]),
     oneOf("connection_topology_allowed", table.topology, [...TOPOLOGIES]),
     oneOf("connection_capability_state_allowed", table.capabilityState, [

@@ -5,6 +5,11 @@
  * number routing, and immediate number confirmation. The caller owns the
  * credential. This client never logs, stores, or returns it.
  */
+export {
+  RETELL_REDACTED,
+  safeRetellProviderData,
+} from "./provider-data.ts";
+
 /** The one thing this client needs from the world, so tests can stand in. */
 export type Fetch = typeof fetch;
 
@@ -142,7 +147,7 @@ export class RetellUnreachableError extends Error {
 
 type Answer = {
   readonly status: number;
-  /** The body as it arrived, which is what gets kept. */
+  /** The transient body as it arrived. It does not cross this client. */
   readonly body: string;
 };
 
@@ -164,9 +169,8 @@ async function ask(
   const url = `${base(reach)}${request.path}`;
   const fetchImpl = reach.fetchImpl ?? fetch;
 
-  let response: Response;
   try {
-    response = await fetchImpl(url, {
+    const response = await fetchImpl(url, {
       method: request.method,
       headers: {
         authorization: `Bearer ${key.reveal()}`,
@@ -175,26 +179,17 @@ async function ask(
       ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
       ...(reach.signal === undefined ? {} : { signal: reach.signal }),
     });
+    return { status: response.status, body: await response.text() };
   } catch (cause) {
     throw new RetellUnreachableError(base(reach), cause);
   }
-
-  return { status: response.status, body: await response.text() };
 }
 
-/** What Retell said went wrong, in words egma can put on a screen. */
+/** A safe refusal. Retell's raw error body never leaves this client. */
 function refusalIn(answer: Answer): string {
-  try {
-    const held = JSON.parse(answer.body) as Record<string, unknown>;
-    for (const field of ["error_message", "message", "error", "detail"]) {
-      const said = plain(held[field]);
-      if (said !== "") return said;
-    }
-  } catch {
-    // A refusal that is not JSON says nothing useful, and repeating a page of
-    // HTML at a terminal is worse than saying what the number means.
-  }
-  return `Retell answered ${answer.status}`;
+  if (answer.status === 429) return "Retell is busy. Try again shortly.";
+  if (answer.status >= 500) return "Retell is unavailable. Try again.";
+  return `Retell refused the request (${answer.status}).`;
 }
 
 function parsed(answer: Answer): Record<string, unknown> {
@@ -211,11 +206,12 @@ function agentFrom(row: unknown): RetellAgent | null {
   if (typeof row !== "object" || row === null) return null;
   const held = row as Record<string, unknown>;
   const id = plain(held["agent_id"]);
-  if (id === "") return null;
+  const channel = held["channel"];
+  if (id === "" || (channel !== "voice" && channel !== "chat")) return null;
   return {
     id,
     name: plain(held["agent_name"]),
-    modality: held["channel"] === "chat" ? "chat" : "voice",
+    modality: channel,
   };
 }
 
@@ -298,9 +294,60 @@ export async function listNumbers(
   key: RetellCredential,
   reach: RetellReach = {},
 ): Promise<ListedNumbers> {
-  let answer: Answer;
+  const numbers: RetellNumber[] = [];
+  let paginationKey: string | undefined;
+  const seenPaginationKeys = new Set<string>();
+  let complete = false;
+
   try {
-    answer = await ask(key, reach, { method: "GET", path: "/list-phone-numbers" });
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        sort_order: "ascending",
+        ...(paginationKey === undefined
+          ? {}
+          : { pagination_key: paginationKey }),
+      });
+      const answer = await ask(key, reach, {
+        method: "GET",
+        path: `/v2/list-phone-numbers?${query.toString()}`,
+      });
+
+      if (answer.status === 401 || answer.status === 403) {
+        return { kind: "invalid-key" };
+      }
+      if (answer.status < 200 || answer.status >= 300) {
+        return { kind: "refused", reason: refusalIn(answer) };
+      }
+
+      const held = parsed(answer);
+      const rows = held["items"];
+      const hasMore = held["has_more"];
+      if (!Array.isArray(rows) || typeof hasMore !== "boolean") {
+        return {
+          kind: "refused",
+          reason: "Retell answered a malformed phone-number page.",
+        };
+      }
+      for (const row of rows) {
+        const number = numberFrom(row);
+        if (number !== null) numbers.push(number);
+      }
+
+      const next = plain(held["pagination_key"]);
+      if (!hasMore) {
+        complete = true;
+        break;
+      }
+      if (next === "" || seenPaginationKeys.has(next)) {
+        return {
+          kind: "refused",
+          reason: "Retell answered a phone-number page without a new cursor.",
+        };
+      }
+      seenPaginationKeys.add(next);
+      paginationKey = next;
+    }
   } catch (cause) {
     if (cause instanceof RetellUnreachableError) {
       return { kind: "unreachable", reason: cause.message };
@@ -308,24 +355,13 @@ export async function listNumbers(
     throw cause;
   }
 
-  if (answer.status === 401 || answer.status === 403) return { kind: "invalid-key" };
-  if (answer.status < 200 || answer.status >= 300) {
-    return { kind: "refused", reason: refusalIn(answer) };
+  if (!complete) {
+    return {
+      kind: "refused",
+      reason: "Retell answered too many phone-number pages.",
+    };
   }
 
-  let held: unknown;
-  try {
-    held = JSON.parse(answer.body);
-  } catch {
-    held = [];
-  }
-  const rows = Array.isArray(held) ? held : [];
-
-  const numbers: RetellNumber[] = [];
-  for (const row of rows) {
-    const number = numberFrom(row);
-    if (number !== null) numbers.push(number);
-  }
   return { kind: "numbers", numbers };
 }
 

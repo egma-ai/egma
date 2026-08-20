@@ -51,7 +51,7 @@ export class AgentWriteRefusedError extends Error {
 /**
  * Which rule refused.
  *
- * - `not_admitted` — the connection registry's per-type gate: an unknown type,
+ * - `not_admitted` — the connection registry's per-kind gate: an unknown kind,
  *   a modality the type does not speak, a config key it has no place for, a
  *   credential where none belongs or none where one is required.
  * - `needs_a_name` — an agent or a connection arrived without a usable name.
@@ -879,7 +879,7 @@ export class ConnectionRestoreRefusedError extends Error {
   /** Whichever of the two the sentence named, for a layer that has to relay it. */
   readonly connectionId: string | undefined;
   readonly agentId: string | undefined;
-  readonly connectionType: string | undefined;
+  readonly connectionKind: string | undefined;
 
   constructor(
     reason: ConnectionRestoreRefusal,
@@ -887,7 +887,7 @@ export class ConnectionRestoreRefusedError extends Error {
     named: {
       readonly connectionId?: string;
       readonly agentId?: string;
-      readonly type?: string;
+      readonly connectionKind?: string;
     } = {},
   ) {
     super(message);
@@ -895,7 +895,7 @@ export class ConnectionRestoreRefusedError extends Error {
     this.reason = reason;
     this.connectionId = named.connectionId;
     this.agentId = named.agentId;
-    this.connectionType = named.type;
+    this.connectionKind = named.connectionKind;
   }
 }
 
@@ -934,12 +934,12 @@ export class CapabilityCheckFailedError extends Error {
  * nothing here to try*, and it will stay that way until an adapter ships.
  */
 export class NoCapabilityAdapterError extends Error {
-  readonly connectionType: string;
+  readonly connectionKind: string;
 
-  constructor(connectionType: string, message: string) {
+  constructor(connectionKind: string, message: string) {
     super(message);
     this.name = "NoCapabilityAdapterError";
-    this.connectionType = connectionType;
+    this.connectionKind = connectionKind;
   }
 }
 

@@ -1,9 +1,11 @@
 import { isIP } from "node:net";
 
 import {
-  CONNECTION_TYPES,
+  CONNECTION_KINDS,
   MODALITIES,
-  type ConnectionType,
+  type AccessVariant,
+  type AgentPlatform,
+  type ConnectionKind,
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
@@ -11,22 +13,22 @@ import { hasCapabilityDiscovery } from "./capabilities.ts";
 import { AgentWriteRefusedError } from "./errors.ts";
 
 /**
- * What each connection type is made of. The registry is code, not a table,
- * because a table could claim types the code cannot run: an entry lands here
+ * What each simulation connection kind is made of. The registry is code, not
+ * a table, because a table could claim kinds the code cannot run: an entry lands here
  * in the same commit as its adapter, following the `VOICE_PROVIDERS`
  * precedent.
  *
  * It drives everything the access layer decides about a connection at the
- * door — which modalities the type speaks, the topology it implies (derived,
+ * door — which modalities the kind supports, the topology it implies (derived,
  * never caller-supplied: it predicts who moves first when a simulation
  * starts, and a caller's guess would just be wrong), which config keys are
  * demanded and how each is checked, and whether a credential is required or
  * refused outright. Every failure is named at create, so a typo surfaces
  * immediately rather than at run time.
  *
- * The map is `Record<ConnectionType, …>`, so it cannot drift from the schema:
- * a type added to `CONNECTION_TYPES` refuses to build until it is described
- * here, and an entry describing a type the schema's CHECK would reject cannot
+ * The map is `Record<ConnectionKind, …>`, so it cannot drift from the schema:
+ * a kind added to `CONNECTION_KINDS` refuses to build until it is described
+ * here, and an entry describing a kind the schema's CHECK would reject cannot
  * be written at all.
  */
 
@@ -101,7 +103,7 @@ export type CredentialFieldMetadata = {
 };
 
 /**
- * The three answers to "does the customer supply a secret for this shape",
+ * The three answers to "does the customer supply a secret for this access variant",
  * said in the words the product uses everywhere else.
  *
  * The registry's own `required` field says the same thing in the words the
@@ -128,8 +130,8 @@ function isDemanded(demand: ConfigDemand): boolean {
 
 /**
  * One credential field's gate. Takes the field's value and answers it as it
- * will be sealed, or throws a sentence built from `what` — the shape being
- * described — and the field's own name. It never quotes the value: a refusal
+ * will be sealed, or throws a sentence built from `what` — the access variant
+ * being described — and the field's own name. It never quotes the value: a refusal
  * about a secret must not carry one.
  */
 export type CredentialGate = (
@@ -149,12 +151,12 @@ export type CredentialGate = (
 export type CredentialHint = (sealed: Record<string, string>) => string;
 
 /**
- * Whether the customer hands over a secret for this shape, and what it holds.
+ * Whether the customer hands over a secret for this access variant, and what it holds.
  *
  * `true` demands it and `false` refuses it outright — a credential supplied
  * where none belongs is rejected rather than stored and silently ignored,
  * because a caller who sent one believes it matters. `"if-sent"` is the third
- * case, and it is not a softening of the first: it belongs to a shape that
+ * case, and it is not a softening of the first: it belongs to an access variant that
  * really works either way, where demanding one would be egma inventing a rule
  * the customer's own deployment does not have.
  */
@@ -175,38 +177,30 @@ export type CredentialRule =
     };
 
 /**
- * One whole shape a connection type comes in: the config keys it holds and the
- * credential that goes with them, together.
+ * One access variant inside a connection kind: its config keys and credential
+ * rule, together.
  *
- * Together rather than separately because a shape is a fact about the pair. A
- * type whose config names a place to ask for a token holds no key pair of its
- * own, and a type that mints its own tokens has nowhere to put an endpoint's
+ * Together rather than separately because an access variant is a fact about
+ * the pair. A variant that asks an endpoint for a token holds no key pair of
+ * its own, and a variant that mints tokens has nowhere to put an endpoint's
  * headers — so gating config and credentials against separate rules would
  * admit connections that are half of each and can do neither.
  *
- * Most types come in exactly one shape, and say so with a one-entry list.
+ * Most connection kinds have one access variant and use a one-entry list.
  */
-export type ConnectionVariant = {
+export type AccessVariantDescriptor = {
   /**
-   * How a refusal names this shape, as the subject of a sentence: "a livekit
-   * connection", "a token-endpoint livekit connection". Left out on a type's
-   * only shape, which is named after the type itself.
+   * How a refusal names this access variant, as the subject of a sentence.
    */
   readonly named?: string;
   /**
-   * The config key whose presence chooses this shape. Left out on the shape a
-   * config lands in by naming none of the others, which is what a type's only
-   * shape always is.
-   */
-  readonly chosenBy?: string;
-  /**
-   * The stable name of this shape, stored on every connection written in it
+   * The stable name of this access variant, stored on every connection written in it
    * and never rewritten. It is contract twice over: a row carries it, and a
    * browser form is drawn from the entry it points at. Renaming one is a
    * migration, exactly as renaming a column would be.
    */
   readonly id: string;
-  /** What a person choosing between shapes reads. Safe to send to a browser. */
+  /** What a person choosing between access variants reads. Safe to send to a browser. */
   readonly label: string;
   readonly config: Readonly<Record<string, ConfigDemand>>;
   /**
@@ -220,14 +214,14 @@ export type ConnectionVariant = {
    * inside the gate and would make the safe projection a filtered view of the
    * gate rather than a thing of its own — one forgotten spread away from
    * shipping a validator to a browser. They are held level by
-   * `connectionTypeMetadata`, which refuses to describe a shape whose two
+   * the catalog projection, which refuses an access variant whose two
    * lists disagree, so drift is a failure at the door rather than a field
    * missing from a form.
    */
   readonly fields: readonly ConfigFieldMetadata[];
   readonly credentials: CredentialRule;
   /**
-   * What a person is told about this shape's credential, in words safe to put
+   * What a person is told about this access variant's credential, in words safe to put
    * on a screen. Never the refusal sentences: those name egma's internals and
    * are written for a terminal.
    */
@@ -235,64 +229,68 @@ export type ConnectionVariant = {
   /** The credential's fields, in the order a form asks for them. */
   readonly credentialFields: readonly CredentialFieldMetadata[];
   /**
-   * What a caller is told when the credentials they sent are the type's *other*
-   * shape's — the pair where an endpoint's headers belong, or the other way
+   * What a caller is told when the credentials they sent are the kind's *other*
+   * access variant's — the pair where endpoint headers belong, or the other way
    * round. Written out rather than derived, because the useful sentence names
    * both doors and how to get through either, and that is about what the two
-   * shapes are rather than about the machinery that tells them apart.
+   * access variants are rather than about the machinery that tells them apart.
    */
   readonly mixedUp?: string;
 };
 
 export type ConnectionDescriptor = {
-  /** What a person choosing a type reads. Safe to send to a browser. */
+  /** What a person choosing a connection kind reads. Safe to send to a browser. */
   readonly label: string;
+  /** Which agent platforms this direct path can reach, or every platform. */
+  readonly agentPlatforms: readonly AgentPlatform[] | "any";
   readonly modalities: readonly Modality[];
   readonly topology: Topology;
   /**
-   * The shapes this type comes in, the first being the one a config lands in
-   * by naming none of the others' keys. One entry for a type that comes in one
-   * shape, which is most of them.
+   * The access variants supported inside this connection kind. The request
+   * names one explicitly; config never selects one.
    */
-  readonly variants: readonly [ConnectionVariant, ...ConnectionVariant[]];
+  readonly accessVariants: readonly [
+    AccessVariantDescriptor,
+    ...AccessVariantDescriptor[],
+  ];
   /**
-   * Whether the simulator holds an adapter for this type — whether egma can
+   * Whether the simulator holds an adapter for this kind — whether Egma can
    * actually conduct a conversation over it.
    *
-   * A type can be registered before anything can run over it: a customer can
+   * A kind can be registered before anything can run over it: a customer can
    * describe how to reach their agent while the adapter that reaches it is
    * still being written. So this is a fact about the shipped simulator, kept
-   * here beside the rest of what the type is, and it is what refuses a run at
+   * here beside the rest of what the kind is, and it is what refuses a run at
    * creation instead of leaving it queued forever for a conductor that does
    * not exist. It flips to `true` in the same commit as the adapter.
    */
   readonly simulatorAdapter: boolean;
-  /** Whether conducting this type spends the deployment's shared carrier. */
+  /** Whether conducting this kind spends the deployment's shared carrier. */
   readonly usesPlatformCarrier: boolean;
   /**
-   * Which config key holds the vendor's own name for the agent, for the types
-   * that have one — and absent for the types that do not.
+   * Which config key holds the vendor's own name for the agent, for the kinds
+   * that have one — and absent for the kinds that do not.
    *
-   * This is the whole of a type's create-or-reuse rule. Registering the same
+   * This is the whole of a kind's create-or-reuse rule. Registering the same
    * vendor agent twice must not mint a second egma agent, because a retry
    * after an uncertain network failure is the ordinary case and a duplicate
-   * identity splits a team's results history in half. So a type that can say
+   * identity splits a team's results history in half. So a kind that can say
    * "this is the same agent you already registered" names the key that says
-   * it, and a type that cannot — a framework the customer runs themselves has
+   * it, and a kind that cannot — a framework the customer runs themselves has
    * no vendor identifier at all — declares none and always creates.
    */
   readonly reuseKey?: string | undefined;
 };
 
 /**
- * The credential rule of one shape, in the product's three words.
+ * The credential rule of one access variant, in the product's three words.
  *
- * `"if-sent"` is `optional` and that is not a softening: it is the shape that
+ * `"if-sent"` is `optional` and that is not a softening: it is the access variant that
  * genuinely works either way, and Restore holds it to an explicit choice rather
  * than to a guess, because "left out" cannot be told from "meant to clear it".
  */
 export function credentialRuleOf(
-  variant: ConnectionVariant,
+  variant: AccessVariantDescriptor,
 ): CredentialRuleName {
   const { required } = variant.credentials;
   if (required === false) return "forbidden";
@@ -300,79 +298,76 @@ export function credentialRuleOf(
 }
 
 /**
- * The shape a stored connection is in, by the id its row carries.
+ * The access variant a stored connection names, by the id its row carries.
  *
- * This is the read every rule about an existing connection goes through, and
- * it is deliberately not `shapeOf`: that one reads today's discriminator out of
- * a config, which answers correctly for a row written under today's registry
- * and can quietly answer differently for one written under an older one. A
- * stored id cannot drift.
+ * Every rule about an existing connection goes through this read. It never
+ * infers an answer from config, so a stored id cannot drift.
  *
  * An id no entry claims is this deployment running against rows a later
  * release wrote. It is a fault rather than a refusal — nothing the caller sent
- * is wrong — and it says which id and which type, because that is the whole of
+ * is wrong — and it says which access variant id and connection kind, because that is
  * what somebody needs to find it.
  */
-export function variantById(
-  type: ConnectionType,
-  variantId: string,
-): ConnectionVariant {
-  const found = descriptorOf(type).variants.find(
-    (variant) => variant.id === variantId,
+export function accessVariantById(
+  connectionKind: ConnectionKind,
+  accessVariant: string,
+): AccessVariantDescriptor {
+  const found = descriptorOf(connectionKind).accessVariants.find(
+    (variant) => variant.id === accessVariant,
   );
   if (found === undefined) {
     throw new Error(
-      `connection variant "${variantId}" is not one this Egma instance knows for a ` +
-        `${type} connection; the shapes it holds are ` +
-        descriptorOf(type)
-          .variants.map((variant) => variant.id)
+      `access variant "${accessVariant}" is not one this Egma instance knows for a ` +
+        `${connectionKind} connection; the access variants it holds are ` +
+        descriptorOf(connectionKind)
+          .accessVariants.map((variant) => variant.id)
           .join(", "),
     );
   }
   return found;
 }
 
-/** The stable id of the shape a config lands in — what a create stores. */
-export function variantIdOf(type: ConnectionType, config: unknown): string {
-  return shapeOf(type, config).id;
-}
-
 /**
- * Every connection type, as a browser may be told about it.
+ * Every supported simulation connection tuple, as a browser may be told about it.
  *
  * **What is not here is the point.** No gate, no hint function, no refusal
  * sentence, no credential value — the whole of what crosses is labels, field
  * shapes, the credential rule, and the two adapter facts. It is built by
- * reading the registry rather than by copying it, so a type added to the
+ * reading the registry rather than by copying it, so an option added to the
  * registry appears in a form with nothing else edited, and a web application
  * that kept its own copy of any of this would be a second opinion able to
  * disagree with the gate.
  *
- * **A shape whose two field lists disagree is refused here**, loudly and for
- * every caller at once. A gated key nobody described would be a field a form
+ * **An access variant whose two field lists disagree is refused here**, loudly
+ * and for every caller at once. A gated key nobody described would be a field a form
  * never asks for and a create that then refuses for missing it; a described key
  * nothing gates would be a box whose answer is silently dropped. Both are
  * caught the first time anything asks for the catalog.
  */
-export type ConnectionTypeMetadata = {
-  readonly type: ConnectionType;
-  readonly label: string;
-  readonly modalities: readonly Modality[];
+export type ConnectionOptionMetadata = {
+  readonly agentPlatform: AgentPlatform | null;
+  readonly agentPlatformLabel: string;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
+  readonly accessVariantLabel: string;
+  readonly modality: Modality;
+  readonly productLabel: string;
   readonly topology: Topology;
-  /** Whether egma can conduct a simulation over this type today. */
+  /** Whether egma can conduct a simulation over this connection today. */
   readonly simulatorAdapter: boolean;
-  /** Whether a claimed work order for this type needs the platform carrier. */
+  /** Whether a claimed work order for this kind needs the platform carrier. */
   readonly usesPlatformCarrier: boolean;
-  /** Whether egma ships something that can measure this type's targets. */
+  /** Whether egma ships something that can measure this connection's target. */
   readonly capabilityDiscovery: boolean;
-  readonly variants: readonly VariantMetadata[];
+  readonly fields: AccessVariantMetadata["fields"];
+  readonly credentialRule: CredentialRuleName;
+  readonly credentialHelp: string;
+  readonly credentialFields: AccessVariantMetadata["credentialFields"];
 };
 
-export type VariantMetadata = {
+export type AccessVariantMetadata = {
   readonly id: string;
   readonly label: string;
-  /** The config key whose presence chooses this shape, or null for the first. */
-  readonly chosenBy: string | null;
   readonly fields: readonly (ConfigFieldMetadata & {
     readonly required: boolean;
   })[];
@@ -383,7 +378,9 @@ export type VariantMetadata = {
   })[];
 };
 
-function variantMetadata(variant: ConnectionVariant): VariantMetadata {
+function accessVariantMetadata(
+  variant: AccessVariantDescriptor,
+): AccessVariantMetadata {
   const gated = Object.keys(variant.config);
   const described = variant.fields.map((field) => field.key);
 
@@ -391,7 +388,7 @@ function variantMetadata(variant: ConnectionVariant): VariantMetadata {
   const invented = described.filter((key) => !gated.includes(key));
   if (missing.length > 0 || invented.length > 0) {
     throw new Error(
-      `connection shape ${variant.id} describes ${described.length} config ` +
+      `connection access variant ${variant.id} describes ${described.length} config ` +
         `fields and gates ${gated.length}: ` +
         (missing.length > 0 ? `${missing.join(", ")} is gated and undescribed` : "") +
         (missing.length > 0 && invented.length > 0 ? "; " : "") +
@@ -410,7 +407,7 @@ function variantMetadata(variant: ConnectionVariant): VariantMetadata {
     credentialFields.some((field) => !describedCredentials.includes(field))
   ) {
     throw new Error(
-      `connection shape ${variant.id} gates credential fields ` +
+      `connection access variant ${variant.id} gates credential fields ` +
         `${credentialFields.join(", ") || "(none)"} and describes ` +
         `${describedCredentials.join(", ") || "(none)"}`,
     );
@@ -419,7 +416,6 @@ function variantMetadata(variant: ConnectionVariant): VariantMetadata {
   return {
     id: variant.id,
     label: variant.label,
-    chosenBy: variant.chosenBy ?? null,
     fields: variant.fields.map((field) => ({
       ...field,
       required: isDemanded(
@@ -438,20 +434,108 @@ function variantMetadata(variant: ConnectionVariant): VariantMetadata {
   };
 }
 
-export function connectionTypeMetadata(): readonly ConnectionTypeMetadata[] {
-  return CONNECTION_TYPES.map((type) => {
-    const descriptor = CONNECTION_REGISTRY[type];
+const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
+  retell: "Retell",
+  livekit_agents: "LiveKit Agents",
+};
+
+type ConnectionOption = {
+  readonly agentPlatform: AgentPlatform | null;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
+  readonly modality: Modality;
+  readonly productLabel: string;
+};
+
+const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
+  {
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
+    modality: "chat",
+    productLabel: "Retell chat",
+  },
+  {
+    agentPlatform: "retell",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Retell phone",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "voice",
+    productLabel: "LiveKit project credentials",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "livekit_room",
+    accessVariant: "livekit_room.customer_token_endpoint",
+    modality: "voice",
+    productLabel: "LiveKit token endpoint",
+  },
+  {
+    agentPlatform: "livekit_agents",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Phone number",
+  },
+  {
+    agentPlatform: null,
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: "Phone number",
+  },
+] as const;
+
+export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] {
+  return CONNECTION_OPTIONS.map((option) => {
+    const descriptor = descriptorOf(option.connectionKind);
+    const variant = accessVariantMetadata(
+      accessVariantById(option.connectionKind, option.accessVariant),
+    );
     return {
-      type,
-      label: descriptor.label,
-      modalities: descriptor.modalities,
+      ...option,
+      agentPlatformLabel:
+        option.agentPlatform === null
+          ? "Any or unknown"
+          : PLATFORM_LABELS[option.agentPlatform],
       topology: descriptor.topology,
+      accessVariantLabel: variant.label,
       simulatorAdapter: descriptor.simulatorAdapter,
       usesPlatformCarrier: descriptor.usesPlatformCarrier,
-      capabilityDiscovery: hasCapabilityDiscovery(type),
-      variants: descriptor.variants.map(variantMetadata),
+      capabilityDiscovery: hasCapabilityDiscovery(option.connectionKind),
+      fields: variant.fields,
+      credentialRule: variant.credentialRule,
+      credentialHelp: variant.credentialHelp,
+      credentialFields: variant.credentialFields,
     };
   });
+}
+
+export function productLabelOf(
+  agentPlatform: AgentPlatform | null,
+  connectionKind: ConnectionKind,
+  accessVariant: AccessVariant,
+  modality: Modality,
+): string {
+  const exact = CONNECTION_OPTIONS.find(
+    (option) =>
+      option.agentPlatform === agentPlatform &&
+      option.connectionKind === connectionKind &&
+      option.accessVariant === accessVariant &&
+      option.modality === modality,
+  );
+  if (exact !== undefined) return exact.productLabel;
+
+  throw new AgentWriteRefusedError(
+    "not_admitted",
+    "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+  );
 }
 
 function nonEmptyString(key: string, value: unknown): string {
@@ -715,20 +799,22 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
 }
 
 export const CONNECTION_REGISTRY: Readonly<
-  Record<ConnectionType, ConnectionDescriptor>
+  Record<ConnectionKind, ConnectionDescriptor>
 > = {
-  retell: {
-    label: "Retell",
-    // The direct Retell adapter uses the chat-session API. Voice agents are
+  retell_chat_api: {
+    label: "Retell chat API",
+    agentPlatforms: ["retell"],
+    // The Retell chat adapter uses the chat-session API. Voice agents are
     // reached through a phone connection after provider setup resolves one of
     // their routed numbers. Admitting `voice` here would create a connection
     // the simulator cannot conduct and fail it only after dispatch.
     modalities: ["chat"],
     topology: "hosted-broker",
-    variants: [
+    accessVariants: [
       {
-        id: "retell.api_key",
-        label: "Retell agent",
+        id: "retell_chat_api.api_key",
+        label: "Retell API key",
+        named: "a Retell chat connection",
         config: { retellAgentId: nonEmptyString },
         fields: [
           {
@@ -762,14 +848,16 @@ export const CONNECTION_REGISTRY: Readonly<
     simulatorAdapter: true,
     usesPlatformCarrier: false,
   },
-  phone: {
+  phone_number: {
     label: "Phone number",
+    agentPlatforms: "any",
     modalities: ["voice"],
     topology: "egma-dials-in",
-    variants: [
+    accessVariants: [
       {
-        id: "phone.number",
+        id: "phone_number.public_e164",
         label: "Public phone number",
+        named: "a phone-number connection",
         config: { phoneNumber: e164PhoneNumber },
         fields: [
           {
@@ -797,7 +885,7 @@ export const CONNECTION_REGISTRY: Readonly<
       },
     ],
     // The simulator dials. `egma_simulator.plugs.phone.PhoneCall` is registered
-    // for this type and places the call over the deployment's own carrier
+    // for this kind and places the call over the deployment's own carrier
     // trunk, so a run over a phone connection is one egma can conduct.
     //
     // **What this says is a fact about the build, never about one deployment's
@@ -816,8 +904,9 @@ export const CONNECTION_REGISTRY: Readonly<
     simulatorAdapter: true,
     usesPlatformCarrier: true,
   },
-  livekit: {
-    label: "LiveKit",
+  livekit_room: {
+    label: "LiveKit room",
+    agentPlatforms: ["livekit_agents"],
     // Voice only, and only because voice is the lane that exists. The registry
     // may not claim what no code can run, so `chat` arrives here in the same
     // commit as the code that conducts a livekit chat.
@@ -827,7 +916,7 @@ export const CONNECTION_REGISTRY: Readonly<
     // laptop reachable at all — nothing has to dial in to it.
     topology: "agent-dials-out",
     /**
-     * The first type to come in two shapes, and they are two answers to one
+     * The first kind to have two access variants, two answers to one
      * question: who mints the token that opens the room.
      *
      * The customer either hands egma their project's key pair and egma mints
@@ -842,10 +931,11 @@ export const CONNECTION_REGISTRY: Readonly<
      * not among its keys. Both are powers a key pair buys, and a config key
      * egma would silently ignore is worse than one it refuses by name.
      */
-    variants: [
+    accessVariants: [
       {
-        id: "livekit.key_pair",
+        id: "livekit_room.project_credentials",
         label: "LiveKit project credentials — Recommended",
+        named: "a LiveKit room connection",
         config: {
           // The LiveKit server: a customer's cloud project, or the one they
           // run.
@@ -908,13 +998,12 @@ export const CONNECTION_REGISTRY: Readonly<
           "a livekit connection mints its own tokens, so it needs the " +
           "project's apiKey and apiSecret. Send the pair, or name a " +
           "tokenEndpoint in the config and Egma will ask that endpoint for a " +
-          "token instead — which is the shape where the project's secret " +
+          "token instead — which is the access variant where the project's secret " +
           "never leaves the customer.",
       },
       {
         named: "a token-endpoint livekit connection",
-        chosenBy: "tokenEndpoint",
-        id: "livekit.token_endpoint",
+        id: "livekit_room.customer_token_endpoint",
         label: "Customer token endpoint — Advanced",
         config: {
           // Where the join goes, unless the endpoint's answer names another.
@@ -973,54 +1062,18 @@ export const CONNECTION_REGISTRY: Readonly<
   },
 };
 
-/**
- * The shape a config is in, out of the shapes it could be in.
- *
- * One config key tells them apart, and a config naming none of them lands on
- * the first — which is what makes a type's only shape the shape every one of
- * its connections is in, with nothing to declare.
- *
- * It takes the shapes rather than reading them off a type, so the rule can be
- * exercised on its own; `shapeOf` below is the registry-aware door.
- */
-export function shapeChosen(
-  shapes: readonly [ConnectionVariant, ...ConnectionVariant[]],
-  config: unknown,
-): ConnectionVariant {
-  const held =
-    typeof config === "object" && config !== null && !Array.isArray(config)
-      ? (config as Record<string, unknown>)
-      : {};
-
-  return (
-    shapes.find(
-      (shape) =>
-        shape.chosenBy !== undefined &&
-        // Written out as `undefined` is written out as left out, which is the
-        // same reading `gatedConfig` takes — so the two can never disagree
-        // about whether a key is there.
-        held[shape.chosenBy] !== undefined,
-    ) ?? shapes[0]
-  );
+/** How a refusal names one access variant. */
+function nameOf(
+  connectionKind: ConnectionKind,
+  variant: AccessVariantDescriptor,
+): string {
+  return variant.named ?? `a ${connectionKind} connection`;
 }
 
-/** The shape this connection is in, out of the shapes its type comes in. */
-export function shapeOf(
-  type: ConnectionType,
-  config: unknown,
-): ConnectionVariant {
-  return shapeChosen(descriptorOf(type).variants, config);
-}
-
-/** How a refusal names one shape: the type itself, unless the shape says. */
-function nameOf(type: ConnectionType, shape: ConnectionVariant): string {
-  return shape.named ?? `a ${type} connection`;
-}
-
-/** The types something can actually conduct a run over today. */
-export function conductableConnectionTypes(): readonly ConnectionType[] {
-  return CONNECTION_TYPES.filter(
-    (type) => CONNECTION_REGISTRY[type].simulatorAdapter,
+/** The connection kinds something can actually conduct a run over today. */
+export function conductableConnectionKinds(): readonly ConnectionKind[] {
+  return CONNECTION_KINDS.filter(
+    (connectionKind) => CONNECTION_REGISTRY[connectionKind].simulatorAdapter,
   );
 }
 
@@ -1028,77 +1081,91 @@ export function conductableConnectionTypes(): readonly ConnectionType[] {
  * Whether this exact stored connection can be handed to a simulator.
  *
  * The modality is checked here as well as at write time. Dispatch trusts only
- * a type/modality pair the current registry says its adapter can conduct. This
+ * a kind/access-variant/modality tuple the current registry says its adapter can
+ * conduct. This
  * check cannot know whether an id inside a chat-labelled row belongs to a
  * provider voice agent; the Retell read in the API claim assembler owns that
  * second, provider-aware check.
  */
 export function connectionIsConductable(
-  type: string,
+  connectionKind: string,
+  accessVariant: string,
   modality: string,
 ): boolean {
-  const descriptor = CONNECTION_REGISTRY[type as ConnectionType];
+  const descriptor = CONNECTION_REGISTRY[connectionKind as ConnectionKind];
   return (
     descriptor !== undefined &&
     descriptor.simulatorAdapter &&
+    descriptor.accessVariants.some((variant) => variant.id === accessVariant) &&
     descriptor.modalities.includes(modality as Modality)
   );
 }
 
-/** Whether this type needs the deployment carrier on its claimed work order. */
-export function connectionUsesPlatformCarrier(type: string): boolean {
-  return CONNECTION_REGISTRY[type as ConnectionType]?.usesPlatformCarrier === true;
+/** Whether this kind needs the deployment carrier on its claimed work order. */
+export function connectionKindUsesPlatformCarrier(
+  connectionKind: string,
+): boolean {
+  return (
+    CONNECTION_REGISTRY[connectionKind as ConnectionKind]
+      ?.usesPlatformCarrier === true
+  );
 }
 
 /**
- * What a run over a type nothing can conduct is told.
+ * What a run over a connection kind nothing can conduct is told.
  *
  * The wording is the platform's own and a client relays it word for word to
  * whoever is reading a terminal, so it says all of it in one place: what is
  * missing, why egma would rather refuse now than queue something forever, and
- * the move that works today. The list of types comes off the registry rather
+ * the move that works today. The list of kinds comes off the registry rather
  * than out of the sentence, so it can never name an adapter that has not
  * shipped or miss one that has.
  */
 export function noSimulatorAdapterMessage(
-  type: string,
+  connectionKind: string,
   modality?: string,
 ): string {
-  const reach = modality === undefined ? `${type}` : `${type} ${modality}`;
+  const reach =
+    modality === undefined
+      ? `${connectionKind}`
+      : `${connectionKind} ${modality}`;
   return (
     `Egma has no simulator adapter for a ${reach} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
-    `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`
+    `connection Egma conducts today: ${conductableConnectionKinds().join(", ")}.`
   );
 }
 
 /** The descriptor, or a refusal naming what egma actually supports. */
-export function descriptorOf(type: string): ConnectionDescriptor {
-  const descriptor = CONNECTION_REGISTRY[type as ConnectionType];
+export function descriptorOf(connectionKind: string): ConnectionDescriptor {
+  const descriptor = CONNECTION_REGISTRY[connectionKind as ConnectionKind];
   if (descriptor === undefined) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `"${type}" is not a connection type Egma knows; expected one of ` +
-        CONNECTION_TYPES.join(", "),
+      `"${connectionKind}" is not a connection kind Egma knows; expected one of ` +
+        CONNECTION_KINDS.join(", "),
     );
   }
   return descriptor;
 }
 
-/** The modality checked against the type's own list, so `phone` + `chat` dies here. */
-export function validModality(type: ConnectionType, modality: string): Modality {
-  const descriptor = descriptorOf(type);
+/** The modality checked against the connection kind's own list. */
+export function validModality(
+  connectionKind: ConnectionKind,
+  modality: string,
+): Modality {
+  const descriptor = descriptorOf(connectionKind);
   if (!descriptor.modalities.includes(modality as Modality)) {
     const speaks = descriptor.modalities.join(" or ");
     if (!MODALITIES.includes(modality as Modality)) {
       throw new AgentWriteRefusedError(
         "not_admitted",
-        `"${modality}" is not a modality; a ${type} connection speaks ${speaks}`,
+        `"${modality}" is not a modality; a ${connectionKind} connection speaks ${speaks}`,
       );
     }
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `a ${type} connection speaks ${speaks}, and this one was asked for ${modality}`,
+      `a ${connectionKind} connection speaks ${speaks}, and this one was asked for ${modality}`,
     );
   }
   return modality as Modality;
@@ -1111,10 +1178,10 @@ export function validModality(type: ConnectionType, modality: string): Modality 
  * into an error at create rather than a demanded key "missing" at run time.
  *
  * `what` names the thing being described — "a livekit connection" — and every
- * refusal is built from it, so one wording serves every type.
+ * refusal is built from it, so one wording serves every access variant.
  *
- * It takes the gates rather than reading them off a type, so the rule can be
- * exercised on its own and a new gate can be tried without a connection type
+ * It takes the gates rather than reading them off a variant, so the rule can be
+ * exercised on its own and a new gate can be tried without a connection kind
  * to hang it on. `validConfig` below is the registry-aware door, and is what
  * everything in the product actually calls.
  */
@@ -1163,25 +1230,29 @@ export function gatedConfig(
   return stored;
 }
 
-/** The config as it will be stored, gated by the shape the config is in. */
+/** The config as stored, gated by the explicitly named access variant. */
 export function validConfig(
-  type: ConnectionType,
+  connectionKind: ConnectionKind,
+  accessVariant: AccessVariant,
   config: unknown,
 ): Record<string, string> {
-  const shape = shapeOf(type, config);
-  return gatedConfig(nameOf(type, shape), shape.config, config);
+  const variant = accessVariantById(connectionKind, accessVariant);
+  return gatedConfig(nameOf(connectionKind, variant), variant.config, config);
 }
 
 /**
- * Whether a credential block could belong to one shape at all — its keys, and
- * whether it is there when the shape needs it there.
+ * Whether a credential block could belong to one access variant at all — its
+ * keys, and whether it is present when the variant requires it.
  *
  * The values are nobody's business here: a pair with a blank half belongs to
- * the shape that takes a pair, and telling the caller which half is blank is a
- * better answer than telling them they picked the wrong shape.
+ * the access variant that takes a pair, and telling the caller which half is
+ * blank is a better answer than telling them they picked the wrong variant.
  */
-function couldBe(shape: ConnectionVariant, credentials: unknown): boolean {
-  const rule = shape.credentials;
+function couldBe(
+  variant: AccessVariantDescriptor,
+  credentials: unknown,
+): boolean {
+  const rule = variant.credentials;
   if (credentials === undefined) return rule.required !== true;
   if (rule.required === false) return false;
   if (
@@ -1196,43 +1267,43 @@ function couldBe(shape: ConnectionVariant, credentials: unknown): boolean {
 
 /**
  * The credentials as they will be sealed, plus the display hint — or null for
- * a shape where the customer supplies no secret. A credential handed to such a
- * shape is refused with the shape's own reason, never stored and never
+ * an access variant where the customer supplies no secret. A credential handed
+ * to such a variant is refused with its own reason, never stored and never
  * silently dropped.
  *
- * The config comes in because the shape decides the rule, and only the config
- * says which shape this is. A caller who sent the *other* shape's credentials
+ * The access variant selects this rule explicitly. A caller who sent the
+ * *other* access variant's credentials
  * hears about the mix rather than about a key it never meant to send: whoever
  * pastes a key pair under a token endpoint has mixed up two whole ways of
  * working, and being told `"apiKey"` is not a field would send them looking
  * for a typo that is not there.
  */
 export function validCredentials(
-  type: ConnectionType,
-  config: unknown,
+  connectionKind: ConnectionKind,
+  accessVariant: AccessVariant,
   credentials: unknown,
 ): { readonly sealed: Record<string, string>; readonly hint: string } | null {
-  const descriptor = descriptorOf(type);
-  const shape = shapeChosen(descriptor.variants, config);
-  const what = nameOf(type, shape);
-  const rule = shape.credentials;
+  const descriptor = descriptorOf(connectionKind);
+  const variant = accessVariantById(connectionKind, accessVariant);
+  const what = nameOf(connectionKind, variant);
+  const rule = variant.credentials;
 
   if (
     credentials === undefined &&
     rule.required === true &&
-    shape.mixedUp !== undefined
+    variant.mixedUp !== undefined
   ) {
-    throw new AgentWriteRefusedError("not_admitted", shape.mixedUp);
+    throw new AgentWriteRefusedError("not_admitted", variant.mixedUp);
   }
 
   if (
-    shape.mixedUp !== undefined &&
-    !couldBe(shape, credentials) &&
-    descriptor.variants.some(
-      (other) => other !== shape && couldBe(other, credentials),
+    variant.mixedUp !== undefined &&
+    !couldBe(variant, credentials) &&
+    descriptor.accessVariants.some(
+      (other) => other !== variant && couldBe(other, credentials),
     )
   ) {
-    throw new AgentWriteRefusedError("not_admitted", shape.mixedUp);
+    throw new AgentWriteRefusedError("not_admitted", variant.mixedUp);
   }
 
   if (rule.required === false) {

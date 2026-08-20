@@ -798,16 +798,34 @@ they minted. Every role may mint a key for themselves, including `viewer` —
 logging in mints one as its last step, so an admin-only rule would close the
 product to most of an instance.
 
-## Sending an agent's traces
+## Production Monitoring
 
-Egma listens on the OpenTelemetry endpoint your agent already knows how to
-export to. Point it at this instance with an Egma key and write no integration
-code:
+Production Monitoring starts with the agent platform. It is separate from the
+connections the simulator uses.
+
+- For Retell, open **Monitoring → Set up monitoring**, enter one Retell API
+  key, and select the voice agents to monitor. Egma imports the previous 30
+  days and then polls for completed conversations about every 30 seconds.
+- For LiveKit Agents, install the Egma Python SDK and call
+  `monitor_livekit(ctx)` before `AgentSession.start`. The same helper works in a
+  customer-hosted worker and a LiveKit Cloud-hosted Python agent.
+
+Both paths write to the same trace store and use the same transcript, measure,
+and production grading code.
+
+### Direct OTLP
+
+Egma also accepts standard OTLP/HTTP from an exporter your agent process
+already creates. Point that exporter at this instance with an Egma project key:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
 ```
+
+These variables configure an existing exporter. They do not create a tracer
+provider or register one in an agent process. The LiveKit helper owns that
+setup for LiveKit Agents.
 
 The `%20` is not a typo: the OpenTelemetry specification says this variable is a
 list of `key=value` pairs whose values are percent-encoded, and a literal space
@@ -815,18 +833,11 @@ is not one of the characters a value may contain. Several SDKs pass an
 unencoded space straight through and the header arrives fine; others refuse the
 whole variable, and the failure looks like an agent that exports nothing.
 
-**Point an exporter at the API itself, and not at the pages.** On a self-host
-that is the API's own port — `http://localhost:3100` above, or whatever address
-you publish it on. On hosted Egma it is `https://api.egma.ai`, not
-`https://app.egma.ai`.
-
-The one-origin rule further up is about a browser: the pages proxy the API so
-that one session cookie is valid for both, which is what makes signing in depend
-on nothing you do not run. **This door is not a browser's.** It is authenticated
-by a Bearer key, carries no cookie, and is driven by an agent process — so the
-rule that governs the rest of the surface was never about it, and routing an
-exporter through a page server buys nothing but a hop and one more thing that
-can be down.
+Prefer the API address for an exporter. On a self-host that is the API's own
+port — `http://localhost:3100` above, or whatever address you publish it on. The
+web address also works because Egma forwards `/v1/traces` to the API; it only
+adds one hop. This lets the Monitoring setup page show its own reachable origin
+without making that origin a second telemetry contract.
 
 `POST /v1/traces` accepts OTLP/HTTP in both encodings the specification defines
 — `application/x-protobuf` and `application/json`, gzipped or not — and answers
@@ -838,16 +849,15 @@ A few things worth knowing about what happens next:
 - **Which organization and project the spans land in comes from the key**, never
   from the payload. An attribute naming an account is stored with everything
   else and consulted by nothing, so a leaked key cannot be pointed somewhere
-  else. A key minted for a whole organization files its spans under no project —
-  and **those spans do not appear in the dashboard**, because a browser session
-  reads the project it is acting in. Mint the exporter's key against a project
-  and the two agree.
+  else. Customer OTLP export requires a project key. Egma rejects an
+  organization-wide key before it decodes or stores the request body.
 - **The ids are yours.** Egma stores the trace and span ids that arrived and
   mints neither; a span carrying no usable id is reported back as rejected
   rather than given one.
-- **Nothing is invented and nothing is dropped.** One span in is one row; what
-  the columns have no place for — every attribute, event and resource field —
-  is kept verbatim on the row it came on.
+- **Direct OTLP keeps safe provider evidence.** One accepted span is one row;
+  attributes, events, and resource fields that have no typed column remain in
+  that span's payload. Egma removes credential fields and bearer-like values
+  before any OTLP or Retell provider payload reaches storage.
 - **A recent exact retry is free.** ClickHouse suppresses a byte-identical
   insert block while that block remains in its recent deduplication window.
   A later repeat can append, and regrouping, reordering, or changing any
@@ -862,7 +872,7 @@ A few things worth knowing about what happens next:
   does not. There is nothing to declare first. Names beginning `egma` are
   reserved and are refused with a reason.
 
-The same telemetry path works with a development server on your machine or
+The LiveKit helper works with a development server on your machine or with
 LiveKit Cloud.
 
 Spans Egma will not store are reported in the response's partial-success field
@@ -919,8 +929,8 @@ that catalog counts it in, one sample per measurement in the order they were
 taken, the span each sample came off, and **`worst`**: the single measurement a
 grader holds against a bound, as `{value, span_id}`. A measure this exchange did
 not produce is **absent** rather than present with nothing in it, so an empty
-list means nothing was measured — which is the ordinary answer for a production
-exchange, since Egma files a timing span only for its own simulator's telemetry.
+  list means nothing was measured. Production conversations have measures only
+  when their stored spans contain the timing evidence that measure needs.
 
 **`worst` is on the wire because the reduction is part of the answer.** A bound
 is held against one number, and which number that is — the worst measurement
@@ -963,9 +973,10 @@ Five things about the contract are worth knowing before you build on it:
 - **The organization comes from the credential.** There is no parameter that
   could name another one, and a trace id belonging to somebody else answers
   exactly as an id nobody ever minted does.
-- **The verbatim payload is not in either response.** It is by a wide margin the
+- **The stored payload is not in either response.** It is by a wide margin the
   largest thing on a span, and a transcript carrying it would be megabytes of
-  JSON nobody asked to render. It is still stored in full on the row.
+  JSON nobody asked to render. Safe Direct OTLP and Retell provider payloads
+  stay on their rows after credential-like values are redacted.
 - **A transcript of more than 10,000 spans is a prefix, and says so.**
   `spans_truncated` is then `true`, and it means exactly one thing: `turns` and
   `spans` hold the first 10,000 spans in time order, while `span_count` and every
@@ -979,7 +990,7 @@ within a few months, and a silently rounded latency is worse than no latency.
 
 ## Reading one in the dashboard
 
-Sign in and open **Monitoring**. You get that project's production transcripts,
+Sign in and open **Monitoring**. You get that project's production conversations,
 newest first, defaulting to the last twenty-four hours — when each one started,
 how long it ran, how many turns each speaker took, how many steps and tools and
 failures are in it, and the first thing the human said. Test traffic is not
@@ -1013,10 +1024,10 @@ Two things about this are worth knowing:
   under it needs one. That is why the link works when you send it to somebody,
   and why opening a transcript's address with no window asks you to come in from
   the list.
-- **A key minted for a whole organization files its spans under no project at
-  all** (see above), and those do not appear here. **Mint the exporter's key
-  against a project** and its telemetry lands where the page looks — the empty
-  page says so, and links to where the key is minted.
+- **Customer OTLP export requires a project key.** Egma rejects an
+  organization-wide key before it decodes or stores the request body. The empty
+  page says which scope is required and links to where the project key is
+  minted.
 
 The pages are drawn from the two v1 endpoints above — the same contract you
 would integrate against, on the same origin, authenticated by the same session

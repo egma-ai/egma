@@ -105,7 +105,7 @@ uv run --frozen pytest tests/test_live_mock_tools.py -v -s -rs || conducted=$?
 # anything as public as a process list — and only the variable's name is
 # ever printed.
 leaked=""
-for name in LIVEKIT_API_KEY LIVEKIT_API_SECRET OPENAI_API_KEY \
+for name in LIVEKIT_API_KEY LIVEKIT_API_SECRET OPENAI_API_KEY EGMA_API_KEY \
   DEEPGRAM_API_KEY ELEVENLABS_API_KEY; do
   value="${!name:-}"
   [ -n "$value" ] || continue

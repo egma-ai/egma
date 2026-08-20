@@ -217,7 +217,9 @@ function evidence(overrides: Record<string, unknown> = {}) {
     agent: { id: "agt_1", name: "Front desk", archived: false },
     connection: { id: "con_1", name: "retell-staging", archived: false },
     connection_snapshot: {
-      type: "phone",
+      agent_platform: "retell",
+      connection_kind: "phone_number",
+      access_variant: "phone_number.public_e164",
       modality: "voice",
       topology: "egma-dials-in",
       environment: "staging",
@@ -567,7 +569,7 @@ describe("one simulation's evidence", () => {
     const graders = within(workspace).getByRole("region", {
       name: "Grader results",
     });
-    const evidenceSheet = screen.getByRole("dialog", {
+    const evidenceSheet = await screen.findByRole("dialog", {
       name: "Transcript and audio",
     });
     const transcript = within(evidenceSheet).getByRole("region", {

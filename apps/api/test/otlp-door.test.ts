@@ -1,5 +1,10 @@
 import { gzipSync } from "node:zlib";
 
+import {
+  configureLiveKitMonitoring,
+  listMonitoringSetups,
+  type AuthContext,
+} from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
@@ -24,6 +29,7 @@ let api: TestApi;
 let secret: string;
 let organizationId: string;
 let projectId: string;
+let userId: string;
 
 /** One span, written the way the OTLP JSON mapping says to write one. */
 function jsonSpan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -46,12 +52,13 @@ function jsonSpan(overrides: Record<string, unknown> = {}): Record<string, unkno
 function jsonExport(
   spans: readonly Record<string, unknown>[],
   resourceAttributes: readonly Record<string, unknown>[] = [],
+  scopeName = "livekit-agents",
 ): string {
   return JSON.stringify({
     resourceSpans: [
       {
         resource: { attributes: resourceAttributes },
-        scopeSpans: [{ scope: { name: "livekit-agents" }, spans }],
+        scopeSpans: [{ scope: { name: scopeName }, spans }],
       },
     ],
   });
@@ -90,9 +97,11 @@ beforeAll(async () => {
   });
   expect(created.statusCode).toBe(201);
   const landed = created.json() as {
+    userId: string;
     organization: { id: string };
     project: { id: string };
   };
+  userId = landed.userId;
   organizationId = landed.organization.id;
   projectId = landed.project.id;
 
@@ -110,6 +119,72 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api?.close();
+});
+
+describe("LiveKit Monitoring health", () => {
+  function auth(): AuthContext {
+    return {
+      userId,
+      organizationId,
+      projectId,
+      role: "admin",
+      via: "session",
+    };
+  }
+
+  it("changes only after a valid LiveKit production span reaches storage", async () => {
+    const configured = await configureLiveKitMonitoring(auth());
+    expect(configured.lastReceivedAt).toBeNull();
+
+    const refused = await post(
+      jsonExport([
+        jsonSpan({
+          traceId: "not-an-otel-trace-id",
+          spanId: "not-an-otel-span",
+        }),
+      ]),
+    );
+    expect(refused.statusCode).toBe(200);
+    expect(
+      (await listMonitoringSetups(auth())).find(
+        (setup) => setup.agentPlatform === "livekit_agents",
+      )?.lastReceivedAt,
+    ).toBeNull();
+
+    const anotherPlatform = await post(
+      jsonExport(
+        [
+          jsonSpan({
+            traceId: "35353535353535353535353535353535",
+            spanId: "3535353535353535",
+          }),
+        ],
+        [],
+        "another-agent-platform",
+      ),
+    );
+    expect(anotherPlatform.statusCode).toBe(200);
+    expect(
+      (await listMonitoringSetups(auth())).find(
+        (setup) => setup.agentPlatform === "livekit_agents",
+      )?.lastReceivedAt,
+    ).toBeNull();
+
+    const accepted = await post(
+      jsonExport([
+        jsonSpan({
+          traceId: "45454545454545454545454545454545",
+          spanId: "4545454545454545",
+        }),
+      ]),
+    );
+    expect(accepted.statusCode).toBe(200);
+    expect(
+      (await listMonitoringSetups(auth())).find(
+        (setup) => setup.agentPlatform === "livekit_agents",
+      )?.lastReceivedAt,
+    ).toBeInstanceOf(Date);
+  });
 });
 
 describe("the JSON encoding", () => {
@@ -160,6 +235,119 @@ describe("the JSON encoding", () => {
       `select organization_id, project_id from spans where trace_id = '${traceId}'`,
     );
     expect(row).toEqual({ organization_id: organizationId, project_id: projectId });
+  });
+
+  it("redacts credential-like OTLP data before fields or payload are stored", async () => {
+    const traceId = "19191919191919191919191919191919";
+    const response = await post(
+      JSON.stringify({
+        resourceSpans: [
+          {
+            resource: {
+              attributes: [
+                {
+                  key: "session.id",
+                  value: { stringValue: "Bearer resource-secret" },
+                },
+                {
+                  key: "api_key",
+                  value: { stringValue: "resource-api-secret" },
+                },
+              ],
+            },
+            scopeSpans: [
+              {
+                scope: {
+                  name: "livekit-agents",
+                  attributes: [
+                    {
+                      key: "authorization",
+                      value: { stringValue: "Bearer scope-secret" },
+                    },
+                  ],
+                },
+                spans: [
+                  jsonSpan({
+                    traceId,
+                    spanId: "1919191919191919",
+                    attributes: [
+                      {
+                        key: "lk.response.text",
+                        value: { stringValue: "Bearer transcript-secret" },
+                      },
+                      {
+                        key: "lk.agent_name",
+                        value: { stringValue: "Basic agent-secret" },
+                      },
+                      {
+                        key: "password",
+                        value: { stringValue: "span-password-secret" },
+                      },
+                      {
+                        key: "metadata",
+                        value: {
+                          kvlistValue: {
+                            values: [
+                              {
+                                key: "access_token",
+                                value: { stringValue: "nested-token-secret" },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    ],
+                    events: [
+                      {
+                        name: "provider-event",
+                        timeUnixNano: "1785693880781989804",
+                        attributes: [
+                          {
+                            key: "client_secret",
+                            value: { stringValue: "event-client-secret" },
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(response.statusCode).toBe(200);
+
+    const [row] = await store().rows<{
+      payload: string;
+      provider_call_id: string;
+      text: string;
+      platform_agent_name: string;
+    }>(
+      `select payload, provider_call_id, text, platform_agent_name from spans ` +
+        `where trace_id = '${traceId}'`,
+    );
+    expect(row).toBeDefined();
+    const stored = JSON.stringify(row);
+    for (const secretValue of [
+      "resource-secret",
+      "resource-api-secret",
+      "scope-secret",
+      "transcript-secret",
+      "agent-secret",
+      "span-password-secret",
+      "nested-token-secret",
+      "event-client-secret",
+    ]) {
+      expect(stored).not.toContain(secretValue);
+    }
+    expect(row).toMatchObject({
+      provider_call_id: "",
+      text: "",
+      platform_agent_name: "",
+    });
+    expect(row?.payload).toContain("[REDACTED]");
   });
 
   it("keeps a Pipecat service span whole without making a transcript turn", async () => {
@@ -847,15 +1035,20 @@ describe("the role the key's holder acts at", () => {
       },
     });
     expect(created.statusCode).toBe(201);
-    viewerOrganizationId = (
-      created.json() as { organization: { id: string } }
-    ).organization.id;
+    const landed = created.json() as {
+      organization: { id: string };
+      project: { id: string };
+    };
+    viewerOrganizationId = landed.organization.id;
 
     const minted = await api.app.inject({
       method: "POST",
       url: "/api/keys",
       headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
-      payload: { name: "the read-only terminal" },
+      payload: {
+        name: "the read-only terminal",
+        project_id: landed.project.id,
+      },
     });
     expect(minted.statusCode).toBe(201);
     viewerSecret = (minted.json() as { secret: string }).secret;

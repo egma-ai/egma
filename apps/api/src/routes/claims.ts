@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
-  connectionUsesPlatformCarrier,
+  connectionKindUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
   getRun,
@@ -29,7 +29,7 @@ import { acceptsServiceToken } from "../auth/service-token.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import {
-  verifyRetellDirectChatAgent,
+  verifyRetellChatAgent,
   type RetellDirectTargetCheck,
 } from "../providers/retell.ts";
 
@@ -129,7 +129,7 @@ const SIMULATION_LIMITS = {
 } as const;
 
 /** The one clean-cut contract this control plane and simulator speak. */
-const CONTRACT_VERSION = 2;
+const CONTRACT_VERSION = 3;
 
 type Body = Record<string, unknown>;
 
@@ -355,12 +355,12 @@ async function assembledSpec(
     };
   }
 
-  if (connection.type === "retell") {
+  if (connection.connectionKind === "retell_chat_api") {
     const apiKey = connection.credentials?.["apiKey"] ?? "";
     const agentId = connection.config["retellAgentId"] ?? "";
     let checked = retellTargets.get(connection.connectionId);
     if (checked === undefined) {
-      checked = verifyRetellDirectChatAgent(
+      checked = verifyRetellChatAgent(
         apiKey,
         agentId,
         retellFetch,
@@ -377,10 +377,10 @@ async function assembledSpec(
     }
   }
 
-  // Read the live carrier route only for the plug that dials it. A Retell or
-  // LiveKit claim must not carry a SIP password it cannot use.
+  // Read the live carrier route only for `phone_number`. A Retell chat or
+  // LiveKit room claim must not carry a SIP password it cannot use.
   const platform =
-    connectionUsesPlatformCarrier(connection.type)
+    connectionKindUsesPlatformCarrier(connection.connectionKind)
       ? platformBlock(await resolvePlatformSettings(claim.auth))
       : undefined;
 
@@ -434,7 +434,9 @@ async function assembledSpec(
     simulation_id: claim.id,
     modality: claim.modality,
     connection: {
-      type: connection.type,
+      agent_platform: connection.agentPlatform,
+      connection_kind: connection.connectionKind,
+      access_variant: connection.accessVariant,
       config: connection.config,
       credentials: connection.credentials,
     },

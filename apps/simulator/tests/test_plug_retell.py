@@ -29,11 +29,16 @@ def retell(
     config: dict, *, modality: str = "chat", key: str | None = SENTINEL_KEY
 ) -> RetellChat:
     credentials = None if key is None else {"apiKey": key}
-    return RetellChat(modality=modality, config=config, credentials=credentials)
+    return RetellChat(
+        modality=modality,
+        access_variant="retell_chat_api.api_key",
+        config=config,
+        credentials=credentials,
+    )
 
 
 def test_the_registry_knows_the_retell_plug():
-    assert plug_for("retell") is RetellChat
+    assert plug_for("retell_chat_api") is RetellChat
 
 
 def test_a_connection_saying_nothing_about_where_reaches_retell_itself():
@@ -205,6 +210,7 @@ def test_credentials_of_the_wrong_shape_are_refused(credentials):
     with pytest.raises(PlugError):
         RetellChat(
             modality="chat",
+            access_variant="retell_chat_api.api_key",
             config={"retellAgentId": "agent_1"},
             credentials=credentials,
         )
@@ -214,6 +220,7 @@ def test_a_credential_refusal_names_the_key_and_never_its_value():
     with pytest.raises(PlugError) as refusal:
         RetellChat(
             modality="chat",
+            access_variant="retell_chat_api.api_key",
             config={"retellAgentId": "agent_1"},
             credentials={"apiKey": SENTINEL_KEY, "apiSecret": SENTINEL_KEY},
         )

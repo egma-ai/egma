@@ -56,9 +56,10 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
  * OTLP door, in as many exports as its exporter felt like flushing — so the row
  * is written on the **first** export carrying any span of it, and the four
  * columns below record what completion is later decided from. Every export of
- * that trace afterwards lands on the same row, because `trace_id` is unique here
- * exactly as `simulation_id` is: the door's write is idempotent by the same
- * constraint that makes one conversation ungradable twice.
+ * that trace afterwards lands on the same row, because `project_id` plus
+ * `trace_id` is unique here exactly as `simulation_id` is. Trace ids arrive
+ * from customers, so the project is part of the conversation's identity. The
+ * door's write is idempotent without letting one project name another's work.
  *
  * So a production job exists before its conversation is over, and `pending`
  * therefore means what it always meant — *this conversation is not judged yet* —
@@ -215,11 +216,14 @@ export const gradingJob = pgTable(
     // transition can be replayed and the second insert is a no-op — and it is
     // what the explicit re-grade action will reopen rather than duplicate.
     unique("grading_job_simulation_id_unique").on(table.simulationId),
-    // And one job per production trace, on exactly the same terms: an exporter
-    // sends a trace in as many flushes as it likes and every one of them lands
-    // on this row. It is what makes the ingest door's write idempotent, and it
-    // is the reason no conversation is ever judged twice.
-    unique("grading_job_trace_id_unique").on(table.traceId),
+    // And one job per production trace *inside one project*: an exporter sends
+    // a trace in as many flushes as it likes and every one lands on this row.
+    // The wire id is customer-controlled, so another project may use the same
+    // bytes without updating or suppressing this project's grading work.
+    unique("grading_job_project_id_trace_id_unique").on(
+      table.projectId,
+      table.traceId,
+    ),
     // The source and what it names are one fact: a simulation's job names a
     // simulation, a production trace's names a trace, and neither names both.
     check(

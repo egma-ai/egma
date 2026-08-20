@@ -4,6 +4,7 @@ import {
   appendSpans,
   authorize,
   NotPermittedError,
+  recordLiveKitMonitoringReceived,
   recordProductionTraces,
   resolveSimulationStanding,
   TraceStoreRefusedError,
@@ -49,12 +50,12 @@ import {
 /**
  * The ingest door: `POST /v1/traces`, OTLP/HTTP, protobuf or JSON.
  *
- * It is the standard path an OpenTelemetry exporter posts to, so a customer's
- * agent reaches egma by setting two environment variables and writing no
- * integration code. **One door**, for the customer's agent and for egma's own
- * simulator — one wire format, one code path, and a simulation and a
- * production trace therefore arrive the same way and are the same shape at
- * rest.
+ * It is the standard path a configured OpenTelemetry exporter posts to.
+ * LiveKit Agents customers configure that exporter with the explicit Egma
+ * Python SDK helper; other runtimes must configure their own exporter. **One
+ * door**, for customer agents and for egma's own simulator — one wire format,
+ * one code path, and a simulation and a production trace therefore arrive the
+ * same way and are the same shape at rest.
  *
  * **The door branches on the credential, and only there.** A customer key
  * resolves tenancy as it always has. The deployment's own service token — the
@@ -604,6 +605,22 @@ export async function traceRoutes(
 
     const { auth } = requesterOf(request);
 
+    // Production telemetry must name the project it belongs to. An
+    // organization-wide key cannot provide that fact, and accepting the body
+    // would leave valid-looking spans that no Monitoring page or grader owns.
+    // Refuse it before decoding so the customer gets one clear setup error and
+    // no part of the export can land under a storage sentinel.
+    if (auth.projectId === undefined) {
+      return statusResponse(
+        reply,
+        encoding,
+        403,
+        RPC_PERMISSION_DENIED,
+        "Production trace export requires a project API key. Create a key " +
+          "for the project you want to monitor, then use that key for OTLP export.",
+      );
+    }
+
     // Writing telemetry is a write, so it goes through the same function every
     // other write in the product goes through, before the body is looked at.
     // A read-only credential that could still file spans would be read-only in
@@ -672,6 +689,20 @@ export async function traceRoutes(
         `the trace store refused these spans: ${cause.message}. They were ` +
           "not stored and re-sending the same batch will not change that.",
       );
+    }
+
+    // Monitoring health means that a valid LiveKit Agents span reached the
+    // shared store. Update it only after the append succeeds. Other OTLP
+    // scopes do not prove a LiveKit Monitoring setup is working, and an empty
+    // or fully rejected export proves nothing arrived.
+    if (
+      normalised.spans.some(
+        (span) =>
+          span.source === "production" &&
+          span.agentPlatform === "livekit_agents",
+      )
+    ) {
+      await recordLiveKitMonitoringReceived(auth);
     }
 
     // And the conversations those spans belong to become known to the grading

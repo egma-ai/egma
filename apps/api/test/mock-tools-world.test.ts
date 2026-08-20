@@ -63,7 +63,9 @@ const RESCHEDULING = {
  */
 function retellFor(name: string): Record<string, unknown> {
   return {
-    type: "retell",
+    agent_platform: "retell",
+    connection_kind: "retell_chat_api",
+    access_variant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: `agent_in_retell_${name.replace(/\W+/gu, "_")}` },
     credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -575,7 +577,7 @@ describe("the longest delay, said in two places", () => {
       await readFile(
         fileURLToPath(
           new URL(
-            "../../../packages/simulation-contract/schemas/simulation-spec.v2.schema.json",
+            "../../../packages/simulation-contract/schemas/simulation-spec.v3.schema.json",
             import.meta.url,
           ),
         ),

@@ -29,8 +29,10 @@ In practice:
   repair that local ledger. After merge or use outside local development, add
   a new file instead; the runner refuses a changed recorded file.
 - **ClickHouse migrations must resume safely.** There is no transaction around
-  a file, so every statement uses `IF EXISTS` or `IF NOT EXISTS` and survives a
-  second run after a partial failure.
+  a file, so every schema statement uses `IF EXISTS` or `IF NOT EXISTS` and
+  survives a second run after a partial failure. An approved data mutation must
+  be idempotent and may name only a table guaranteed by an earlier immutable
+  migration; ClickHouse has no `IF EXISTS` form for `ALTER TABLE ... DELETE`.
 - **Pack compatible ClickHouse changes to one table into one `ALTER`.** If they
   must be separate, keep them ordered and let the runner retry only
   `517 CANNOT_ASSIGN_ALTER` while table metadata catches up.

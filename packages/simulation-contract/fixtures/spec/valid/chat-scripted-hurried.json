@@ -1,9 +1,11 @@
 {
-  "contract_version": 2,
+  "contract_version": 3,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEU",
   "modality": "chat",
   "connection": {
-    "type": "scripted",
+    "agent_platform": null,
+    "connection_kind": "scripted",
+    "access_variant": "scripted.in_memory",
     "config": {
       "replies": [
         "I can see the duplicate charge on that order — one moment while I reverse it.",

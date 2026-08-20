@@ -368,10 +368,9 @@ type Selected = {
  *
  * **Text is only a direct connection to a genuine Retell chat agent.** A voice
  * agent cannot take this branch until the Agent Playground Completion adapter
- * exists. **Phone carries the destination number and nothing else** —
- * no Retell identifier and no credential — because the public telephone network
- * neither knows nor cares what answers, and a phone connection that named a
- * provider would be claiming knowledge egma does not use.
+ * exists. **Phone carries the destination number and no credential.** The
+ * connection remains provider-blind, while the separate agent-platform field
+ * records that this onboarding flow found the agent in Retell.
  */
 function selectionFor(
   reach: Reach,
@@ -385,7 +384,9 @@ function selectionFor(
       // No name: the platform's own default is the convention, and one
       // convention in one place cannot drift from itself.
       connection: {
-        type: "phone",
+        agentPlatform: "retell",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: number ?? "" },
       },
@@ -395,7 +396,9 @@ function selectionFor(
   return {
     reach,
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       // Only Retell chat agents reach this branch. Their vendor identity is the
       // connection target, and no phone number is read or stored.
       modality: "chat",
@@ -408,13 +411,25 @@ function selectionFor(
 
 /** Whether a connection already on the platform is the one being asked for. */
 function isTheSameReach(held: RegisteredConnection, wanted: NewConnection): boolean {
-  if (held.type !== wanted.type || held.modality !== wanted.modality) return false;
+  if (
+    held.agentPlatform !== wanted.agentPlatform ||
+    held.connectionKind !== wanted.connectionKind ||
+    held.accessVariant !== wanted.accessVariant ||
+    held.modality !== wanted.modality
+  ) {
+    return false;
+  }
   return Object.entries(wanted.config).every(([key, value]) => held.config[key] === value);
 }
 
 /** The Retell agent a connection already on the platform reaches, if it names one. */
 function retellAgentOf(held: RegisteredConnection): string | null {
-  if (held.type !== "retell") return null;
+  if (
+    held.agentPlatform !== "retell" ||
+    held.connectionKind !== "retell_chat_api"
+  ) {
+    return null;
+  }
   const named = held.config["retellAgentId"];
   return named === undefined || named === "" ? null : named;
 }
@@ -563,7 +578,7 @@ async function register(
     // say at all — this is somebody else's agent under the same name, and the
     // next name is tried. Ambiguity goes that way on purpose: see above.
     const dialled = held.connections
-      .filter((one) => one.type === "phone")
+      .filter((one) => one.connectionKind === "phone_number")
       .map((one) => one.config["phoneNumber"] ?? "");
     if (reaches.length === 0 && dialled.length > 0) {
       const routed = await numbersOfTheAgent();
@@ -604,7 +619,7 @@ async function register(
         continue;
       /**
        * Nothing here names a connection, so the platform picks the first free
-       * `<type>-<n>` itself. There is exactly one ordinary way it can still
+       * `<connection-kind>-<n>` itself. There is exactly one ordinary way it can still
        * answer that the name is held: **two connects adding the same reach at
        * the same instant.** Both got past the check above while neither had
        * written anything, then one lost the connection-name index.

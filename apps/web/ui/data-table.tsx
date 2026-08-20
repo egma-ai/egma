@@ -53,6 +53,20 @@ export type More = {
   readonly note?: string;
 };
 
+/** One cursor-backed page, with labels supplied by the product surface. */
+export type Pagination = {
+  readonly page: number;
+  readonly canPrevious: boolean;
+  readonly canNext: boolean;
+  readonly loading: boolean;
+  readonly onPrevious: () => void;
+  readonly onNext: () => void;
+  readonly previousLabel: string;
+  readonly pageLabel: (page: number) => string;
+  readonly nextLabel: string;
+  readonly note?: string;
+};
+
 export function DataTable<Row>({
   label,
   columns,
@@ -61,6 +75,7 @@ export function DataTable<Row>({
   stretchPrimaryLink = false,
   stackWhenConstrained = false,
   more,
+  pagination,
 }: {
   /** What this table is a table of. Read out where there is no visible caption. */
   readonly label: string;
@@ -78,8 +93,10 @@ export function DataTable<Row>({
    */
   readonly stackWhenConstrained?: boolean;
   readonly more?: More;
+  readonly pagination?: Pagination;
 }) {
   const primary = columns.find((column) => column.primary) ?? columns[0];
+  const pageLabel = pagination?.pageLabel(pagination.page);
   function mobileHidden(column: Column<Row>): "true" | undefined {
     return column !== primary && column.hideOnMobile === true ? "true" : undefined;
   }
@@ -216,6 +233,36 @@ export function DataTable<Row>({
           >
             {more.loading ? "Loading…" : "Show more"}
           </Button>
+        </div>
+      )}
+
+      {pagination === undefined ? null : (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-4 text-xs text-muted-foreground">
+          <span>{pagination.note}</span>
+          <div className="flex items-center gap-2" aria-label={pageLabel}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={!pagination.canPrevious || pagination.loading}
+              onClick={pagination.onPrevious}
+            >
+              {pagination.previousLabel}
+            </Button>
+            <span className="min-w-16 text-center" aria-live="polite">
+              {pageLabel}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              busy={pagination.loading}
+              disabled={!pagination.canNext}
+              onClick={pagination.onNext}
+            >
+              {pagination.nextLabel}
+            </Button>
+          </div>
         </div>
       )}
     </div>

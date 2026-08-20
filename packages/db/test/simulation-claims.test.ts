@@ -101,7 +101,9 @@ async function seedCustomer(
   const created = await createAgent(auth, {
     name: "Front desk",
     connection: {
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_${apiKey}` },
       credentials: { apiKey },
@@ -347,7 +349,9 @@ describe("the connection door", () => {
 
     const reached = await resolveSimulationConnection(claim.auth, claim.id);
     expect(reached?.connectionId).toBe(acmeSeed.connectionId);
-    expect(reached?.type).toBe("retell");
+    expect(reached?.agentPlatform).toBe("retell");
+    expect(reached?.connectionKind).toBe("retell_chat_api");
+    expect(reached?.accessVariant).toBe("retell_chat_api.api_key");
     expect(reached?.config).toEqual({
       retellAgentId: "agent_retell-secret-A1B2C3D4WXYZ",
     });
@@ -429,7 +433,9 @@ describe("the connection door", () => {
     const restored = await createAgent(actingAsAcme(), {
       name: "Front desk restored",
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_restored_1" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -633,7 +639,9 @@ describe("a livekit connection's two credential shapes, through the claim", () =
     connection: Record<string, unknown>,
   ): Promise<string> {
     const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
-      type: "livekit",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       ...connection,
     } as never);
@@ -664,6 +672,7 @@ describe("a livekit connection's two credential shapes, through the claim", () =
 
   it("hands back the endpoint's auth headers, which are a credential like any other", async () => {
     const simulationId = await queuedOverLiveKit({
+      accessVariant: "livekit_room.customer_token_endpoint",
       config: {
         url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/livekit/token",
@@ -710,7 +719,9 @@ describe("archiving a target out from under work", () => {
   async function aSpareConnection(name: string): Promise<string> {
     const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
       name,
-      type: "retell",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_${name}` },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -725,7 +736,9 @@ describe("archiving a target out from under work", () => {
     const created = await createAgent(actingAsAcme(), {
       name,
       connection: {
-        type: "retell",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: `agent_${name}` },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },

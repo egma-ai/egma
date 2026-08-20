@@ -56,14 +56,18 @@ const RESCHEDULING = {
 } as const;
 
 const RETELL = {
-  type: "retell",
+  agent_platform: "retell",
+  connection_kind: "retell_chat_api",
+  access_variant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
 const LIVEKIT = {
-  type: "livekit",
+  agent_platform: "livekit_agents",
+  connection_kind: "livekit_room",
+  access_variant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -73,12 +77,14 @@ const LIVEKIT = {
 } as const;
 
 const PHONE = {
-  type: "phone",
+  agent_platform: null,
+  connection_kind: "phone_number",
+  access_variant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
 
-/** The ordinary direct Retell target in these route tests is a chat agent. */
+/** The Retell chat target in these route tests is a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
   if (!url.includes("/v2/list-agents")) {
@@ -107,7 +113,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: { contract_versions: [2], ...body },
+    payload: { contract_versions: [3], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -333,7 +339,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(2);
+    expect(spec.contract_version).toBe(3);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -348,7 +354,9 @@ describe("claiming work", () => {
     });
     expect(spec.modality).toBe("chat");
     expect(spec.connection).toEqual({
-      type: "retell",
+      agent_platform: "retell",
+      connection_kind: "retell_chat_api",
+      access_variant: "retell_chat_api.api_key",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
@@ -683,7 +691,7 @@ describe("what the claim door never touches", () => {
 });
 
 describe("a simulation the platform cannot hand over", () => {
-  it("blocks a legacy text-labelled row when Retell says its agent is voice", async () => {
+  it("blocks a Retell chat connection when Retell says its agent is voice", async () => {
     const providerReads: string[] = [];
     const retellFetch: typeof fetch = async (input) => {
       providerReads.push(String(input));
@@ -1223,7 +1231,7 @@ describe("one source of execution truth", () => {
     expect(row?.endingReason).toBe("dispatch_failed");
   });
 
-  it("does not claim work for a worker that cannot read contract version 2", async () => {
+  it("does not claim work for a worker that cannot read contract version 3", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_contract_cutover",
     );
@@ -1236,7 +1244,7 @@ describe("one source of execution truth", () => {
       contract_versions: [1],
     });
     expect(refused.statusCode).toBe(400);
-    expect(String(refused.body.message)).toContain("version 2");
+    expect(String(refused.body.message)).toContain("version 3");
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
   });

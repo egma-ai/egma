@@ -323,7 +323,7 @@ export {
   addConnection,
   archiveAgent,
   archiveConnection,
-  connectionTypeOf,
+  connectionKindOf,
   createAgent,
   getAgent,
   getConnection,
@@ -351,36 +351,58 @@ export {
   type RestoreCredential,
 } from "./agents.ts";
 export type {
+  AccessVariant,
+  AgentPlatform,
   CapabilityState,
-  ConnectionType,
+  ConnectionKind,
   Modality,
   Topology,
 } from "../schema/agents.ts";
 
-/**
- * Watching a customer's production traffic on somebody else's platform.
- *
- * The first three take no `AuthContext` and cannot be given one — see the file
- * they live in. Every one of them hands back the narrowed context the work is
- * then done under, and the four below take one.
- */
 export {
-  advanceProductionCursor,
+  checkpointRetellMonitoringPage,
+  claimDueRetellMonitoringAgent,
+  claimRetellIngestionFailureReplay,
   claimProductionTrace,
-  countRetellWebhookRefusal,
+  configureLiveKitMonitoring,
+  configureRetellMonitoring,
+  failRetellMonitoringTarget,
+  failRetellIngestionFailureReplay,
   finishProductionTrace,
-  recordRetellWebhookDelivery,
-  recordRetellWebhookRegistration,
-  resolveRetellWatch,
+  finishRetellMonitoringScan,
+  listMonitoringSetups,
+  recordLiveKitMonitoringReceived,
+  recordRetellCallReceived,
+  recordRetellIngestionFailure,
+  recordRetellMonitoringReceived,
+  recoverRetellMonitoringSetup,
+  releaseRetellMonitoringLease,
+  releaseRetellIngestionFailureReplay,
+  removeMonitoringSetup,
+  renewRetellMonitoringLease,
+  retellCallIsAccountedFor,
+  resolveRetellIngestionFailureReplay,
   sweepStaleProductionClaims,
+  yieldRetellMonitoringLease,
+  type MonitoringFailureKind,
+  type MonitoringSetup,
   type ProductionTraceClaim,
   type ProductionTraceOffer,
-  type RetellWatchQuery,
-  type RetellWatchTarget,
-} from "./production-watch.ts";
+  type RetellMonitoredAgent,
+  type RetellIngestionFailureReplayClaim,
+  type RetellIngestionFailureReplayProviderResult,
+  type RetellIngestionFailureReplayTarget,
+  type RetellIngestionFailureSummary,
+  type RetellMonitoringTarget,
+  type SelectedRetellAgent,
+} from "./production-monitoring.ts";
 export type {
-  ProductionTransport,
-  RetellWebhookRefusal,
+  MonitoringHealthState,
+  MonitoringPlatform,
+  MonitoringStrategy,
+  RetellFailureStatus,
+  RetellMonitoredAgentState,
+  RetellScanKind,
 } from "../schema/production.ts";
 
 

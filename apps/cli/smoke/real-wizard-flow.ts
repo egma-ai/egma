@@ -373,7 +373,15 @@ async function register(
   exited(ran, "egma connect");
   check(first(ran.said, "status") === "connected", "egma connect said it connected");
   check(first(ran.said, "registration") === "created", "the registration was a fresh one");
-  check(first(ran.said, "connection_type") === "retell", "the connection is a retell one");
+  check(first(ran.said, "agent_platform") === "retell", "the agent platform is Retell");
+  check(
+    first(ran.said, "connection_kind") === "retell_chat_api",
+    "the connection uses the Retell chat API",
+  );
+  check(
+    first(ran.said, "access_variant") === "retell_chat_api.api_key",
+    "the connection uses a Retell API key",
+  );
   check(
     first(ran.said, "connection_modality") === "chat",
     `the text connection is a chat one (${first(ran.said, "connection_modality")})`,

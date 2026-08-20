@@ -184,8 +184,14 @@ class SimulationSpec:
     persona_traits: dict[str, Any]
     """The persona version's complete authored human traits."""
 
-    connection_type: str
-    """Which plug reaches the agent. An open vocabulary, not an enum."""
+    agent_platform: str | None
+    """What runs the agent. Provenance only; never adapter dispatch."""
+
+    connection_kind: str
+    """Which adapter reaches the agent. An open vocabulary, not an enum."""
+
+    access_variant: str
+    """Which explicit authority and config path the adapter uses."""
 
     connection_config: dict[str, Any]
     """The non-secret reach configuration; its keys belong to the plug."""
@@ -230,7 +236,9 @@ class SimulationSpec:
                 max_turns=limits["max_turns"],
             ),
             persona_traits=document["persona"]["traits"],
-            connection_type=connection["type"],
+            agent_platform=connection["agent_platform"],
+            connection_kind=connection["connection_kind"],
+            access_variant=connection["access_variant"],
             connection_config=connection["config"],
             credentials=connection["credentials"],
         )

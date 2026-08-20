@@ -264,8 +264,12 @@ function describedFacts(facts: TraceFacts): Record<string, unknown> {
     source: facts.source,
     emitter: facts.emitter,
     environment: facts.environment,
-    connection_type: facts.connectionType,
+    connection_kind: facts.connectionKind,
     provider_call_id: facts.providerCallId,
+    agent_platform: facts.agentPlatform,
+    platform_agent_id: facts.platformAgentId,
+    platform_agent_name: facts.platformAgentName,
+    platform_agent_version: facts.platformAgentVersion,
     run_id: facts.runId,
     agent_id: facts.agentId,
   };

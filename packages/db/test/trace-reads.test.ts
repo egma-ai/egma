@@ -40,6 +40,7 @@ let store: MigratedTraceStore;
 
 const acme = { organizationId: newId("org"), userId: newId("usr") };
 const globex = { organizationId: newId("org"), userId: newId("usr") };
+const identityProof = { organizationId: newId("org"), userId: newId("usr") };
 
 const OUTBOUND = newId("prj");
 const SUPPORT = newId("prj");
@@ -95,7 +96,11 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     toolArguments: "",
     toolResult: "",
     providerCallId: "room-1",
-    connectionType: "livekit",
+    agentPlatform: "livekit_agents",
+    platformAgentId: "",
+    platformAgentName: "",
+    platformAgentVersion: "",
+    connectionKind: "",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -215,6 +220,73 @@ describe("another customer's trace", () => {
     expect(
       await readTrace(at(globex, SUPPORT), ACME_TRACE, { window: WINDOW }),
     ).toBeUndefined();
+  });
+});
+
+/**
+ * Some exporters send the root after one or more children. The platform agent
+ * reference may exist only on that root. A trace read must therefore prefer a
+ * non-empty root fact over an empty child rather than use whichever row an
+ * aggregate happens to see first.
+ */
+describe("platform agent reference carried only by a late root", () => {
+  const ROOT_ONLY = "abab2222222222222222222222222222";
+
+  beforeAll(async () => {
+    const root = spanId();
+
+    // The child lands first, in its own insert, with none of the platform agent
+    // reference fields. This is the ordering that exposed `any()` as unsafe.
+    await appendSpans(at(identityProof, SUPPORT), [
+      span({
+        traceId: ROOT_ONLY,
+        spanId: spanId(),
+        parentSpanId: root,
+        name: "user_turn",
+        kind: "turn:human",
+        text: "The child arrived first.",
+        providerCallId: "",
+        agentPlatform: "",
+        platformAgentId: "",
+        platformAgentName: "",
+        platformAgentVersion: "",
+        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
+      }),
+    ]);
+
+    await appendSpans(at(identityProof, SUPPORT), [
+      span({
+        traceId: ROOT_ONLY,
+        spanId: root,
+        providerCallId: "room-root-only",
+        agentPlatform: "livekit_agents",
+        platformAgentId: "cloud-agent-7",
+        platformAgentName: "Front desk",
+        platformAgentVersion: "2026-08-20",
+      }),
+    ]);
+  });
+
+  it("returns the same platform agent reference in the list and detail", async () => {
+    const expected = {
+      providerCallId: "room-root-only",
+      agentPlatform: "livekit_agents",
+      platformAgentId: "cloud-agent-7",
+      platformAgentName: "Front desk",
+      platformAgentVersion: "2026-08-20",
+    };
+    const listed = (
+      await listTraces(at(identityProof, SUPPORT), {
+        window: WINDOW,
+        limit: 200,
+      })
+    ).traces.find((trace) => trace.traceId === ROOT_ONLY);
+    const detail = await readTrace(at(identityProof, SUPPORT), ROOT_ONLY, {
+      window: WINDOW,
+    });
+
+    expect(listed).toMatchObject(expected);
+    expect(detail).toMatchObject(expected);
   });
 });
 

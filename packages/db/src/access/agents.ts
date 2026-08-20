@@ -17,7 +17,9 @@ import { db, type Queryable } from "../client.ts";
 import {
   agent,
   connection,
-  type ConnectionType,
+  type AccessVariant,
+  type AgentPlatform,
+  type ConnectionKind,
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
@@ -34,12 +36,11 @@ import {
 import {
   credentialRuleOf,
   descriptorOf,
-  shapeOf,
+  productLabelOf,
   validConfig,
   validCredentials,
   validModality,
-  variantById,
-  variantIdOf,
+  accessVariantById,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import {
@@ -86,15 +87,17 @@ import { within } from "./within.ts";
  */
 
 export type NewConnection = {
-  /** Defaults from the type (`retell-1`), so onboarding never stalls. */
+  /** Defaults from the product label, so onboarding never stalls. */
   readonly name?: string | undefined;
-  readonly type: ConnectionType;
+  readonly agentPlatform: AgentPlatform | null;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   /** A label (`staging`, `production`), never a level in the hierarchy. */
   readonly environment?: string | undefined;
-  /** Validated per type at the door: what to reach, never how to prove. */
+  /** Validated per access variant: what to reach, never how to prove. */
   readonly config: Readonly<Record<string, unknown>>;
-  /** Required or refused per type; sealed before it touches the row. */
+  /** Required or refused per access variant; sealed before it touches the row. */
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
 };
 
@@ -103,26 +106,20 @@ export type Connection = {
   readonly agentId: string;
   readonly projectId: string;
   readonly name: string;
-  readonly type: ConnectionType;
+  readonly agentPlatform: AgentPlatform | null;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
   readonly modality: Modality;
-  /** Derived from the type, never caller-supplied. */
+  /** Derived from the connection kind, never caller-supplied. */
   readonly topology: Topology;
-  /** Which shape of its type this is, frozen at create. */
-  readonly variantId: string;
+  /** Human display text derived from the stable technical axes. */
+  readonly productLabel: string;
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;
   /** The last characters of the sealed secret, or null where none belongs. */
   readonly credentialsHint: string | null;
   /** Measured by an adapter, never declared by a caller. Unknown until one has. */
   readonly capabilities: ConnectionCapabilities;
-  /**
-   * Whether egma watches this connection's production traffic. Off for every
-   * connection that was made before the switch existed, and off for every one
-   * made since: watching is something somebody turns on.
-   */
-  readonly watchProduction: boolean;
-  /** When egma registered its receiving endpoint with the provider, or null. */
-  readonly webhookRegisteredAt: Date | null;
   /** What an edit says it was written against. New after every change. */
   readonly revision: string;
   /** When it stopped being reachable for new work, or null while it is. */
@@ -132,28 +129,15 @@ export type Connection = {
 };
 
 /**
- * What an edit may touch. Type and modality are deliberately absent: changing
- * what a connection *is* is a new connection, and mutating it in place would
- * attribute yesterday's chat results to something that is now a phone number.
+ * What an edit may touch. The four technical axes are deliberately absent:
+ * changing what a connection *is* is a new connection, and mutating it in place
+ * would attribute yesterday's chat results to something that is now a phone number.
  * Credentials replace whole or stay untouched — never a merge, so plaintext
  * never round-trips out for editing. Absent means keep.
  */
 export type ConnectionChanges = {
   readonly name?: string | undefined;
   readonly environment?: string | null | undefined;
-  /**
-   * Start or stop watching this connection's production traffic.
-   *
-   * Absent means keep, like every other field here. Turning it **off** clears
-   * the registration stamp in the same statement, because a connection nobody
-   * is watching has no endpoint registered for it — and leaving the stamp
-   * behind would make a later switch-on think it had already registered.
-   *
-   * What it deliberately does not do is touch the cursor. Everything already
-   * stored stays stored, and a connection switched back on resumes from where
-   * it left off rather than replaying history.
-   */
-  readonly watchProduction?: boolean | undefined;
   readonly config?: Readonly<Record<string, unknown>> | undefined;
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
   /** The revision this edit was written against. See `AgentChanges`. */
@@ -170,7 +154,7 @@ export type ArchivedConnection = {
  * What a Restore brings for the credential, and why the third case is a choice
  * rather than an absence.
  *
- * A shape whose credential is `optional` genuinely works either way, so a
+ * An access variant whose credential is `optional` genuinely works either way, so a
  * Restore that simply left it out could mean two opposite things — *keep going
  * without one* and *I forgot* — and the archived envelope is still sitting
  * there for one of those readings to silently reuse. So the author says which:
@@ -283,10 +267,11 @@ const CONNECTION_COLUMNS = {
   agentId: connection.agentId,
   projectId: connection.projectId,
   name: connection.name,
-  type: connection.type,
+  agentPlatform: connection.agentPlatform,
+  connectionKind: connection.connectionKind,
+  accessVariant: connection.accessVariant,
   modality: connection.modality,
   topology: connection.topology,
-  variantId: connection.variantId,
   environment: connection.environment,
   config: connection.config,
   credentialsHint: connection.credentialsHint,
@@ -295,8 +280,6 @@ const CONNECTION_COLUMNS = {
   capabilitiesSupported: connection.capabilitiesSupported,
   capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
   capabilitySource: connection.capabilitySource,
-  watchProduction: connection.watchProduction,
-  webhookRegisteredAt: connection.webhookRegisteredAt,
   revision: connection.revision,
   archivedAt: connection.archivedAt,
   createdAt: connection.createdAt,
@@ -457,10 +440,11 @@ type ConnectionRow = {
   readonly agentId: string;
   readonly projectId: string;
   readonly name: string;
-  readonly type: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
   readonly modality: string;
   readonly topology: string;
-  readonly variantId: string;
   readonly environment: string | null;
   readonly config: unknown;
   readonly credentialsHint: string | null;
@@ -469,8 +453,6 @@ type ConnectionRow = {
   readonly capabilitiesSupported: unknown;
   readonly capabilitiesCheckedAt: Date | null;
   readonly capabilitySource: string | null;
-  readonly watchProduction: boolean;
-  readonly webhookRegisteredAt: Date | null;
   readonly revision: string;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -515,11 +497,23 @@ function capabilitiesFromRow(row: ConnectionRow): ConnectionCapabilities {
  * in the table.
  */
 function connectionFromRow(row: ConnectionRow): Connection {
+  const agentPlatform = row.agentPlatform as AgentPlatform | null;
+  const connectionKind = row.connectionKind as ConnectionKind;
+  const accessVariant = row.accessVariant as AccessVariant;
+  const modality = row.modality as Modality;
   return {
     ...row,
-    type: row.type as ConnectionType,
-    modality: row.modality as Modality,
+    agentPlatform,
+    connectionKind,
+    accessVariant,
+    modality,
     topology: row.topology as Topology,
+    productLabel: productLabelOf(
+      agentPlatform,
+      connectionKind,
+      accessVariant,
+      modality,
+    ),
     config: configFromRow(row.config, row.id),
     capabilities: capabilitiesFromRow(row),
   };
@@ -527,17 +521,18 @@ function connectionFromRow(row: ConnectionRow): Connection {
 
 /**
  * A new connection once the registry has had its say: modality checked
- * against the type, config gated key by key, credentials sealed or refused,
+ * against the tuple, config gated key by key, credentials sealed or refused,
  * topology derived. The name may still be absent — defaulting it takes a
  * read, and this shape exists so that read can wait for the insert's own
  * transaction.
  */
 type AdmittedConnection = {
   readonly name: string | undefined;
-  readonly type: ConnectionType;
+  readonly agentPlatform: AgentPlatform | null;
+  readonly connectionKind: ConnectionKind;
+  readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly topology: Topology;
-  readonly variantId: string;
   readonly environment: string | null;
   readonly config: Record<string, string>;
   readonly credentials: string | null;
@@ -549,23 +544,37 @@ type AdmittedConnection = {
  * before anything is written, wherever the caller is in a transaction.
  */
 function admitConnection(input: NewConnection): AdmittedConnection {
-  const descriptor = descriptorOf(input.type);
-  const modality = validModality(input.type, input.modality);
-  const config = validConfig(input.type, input.config);
-  // The config comes in beside the credentials because a type can come in more
-  // than one shape, and the config is what says which shape this is.
-  const sealed = validCredentials(input.type, input.config, input.credentials);
+  const descriptor = descriptorOf(input.connectionKind);
+  const modality = validModality(input.connectionKind, input.modality);
+  // This validates the complete supported tuple. The label is deliberately
+  // discarded here because it is derived again on reads.
+  productLabelOf(
+    input.agentPlatform,
+    input.connectionKind,
+    input.accessVariant,
+    modality,
+  );
+  const config = validConfig(
+    input.connectionKind,
+    input.accessVariant,
+    input.config,
+  );
+  const sealed = validCredentials(
+    input.connectionKind,
+    input.accessVariant,
+    input.credentials,
+  );
 
   return {
     name:
       input.name === undefined
         ? undefined
         : validName(input.name, "a connection"),
-    type: input.type,
+    agentPlatform: input.agentPlatform,
+    connectionKind: input.connectionKind,
+    accessVariant: input.accessVariant,
     modality,
     topology: descriptor.topology,
-    // Frozen here, from the config that chose it, and never derived again.
-    variantId: variantIdOf(input.type, input.config),
     environment: input.environment ?? null,
     config,
     credentials: sealed === null ? null : sealCredentials(sealed.sealed),
@@ -574,14 +583,14 @@ function admitConnection(input: NewConnection): AdmittedConnection {
 }
 
 /**
- * The smallest free `<type>-<n>` among the agent's living names, so an unnamed
+ * The smallest free `<kind>-<n>` among the agent's living names, so an unnamed
  * add always lands — a removed connection's number comes back into play the
  * same way its name does.
  */
 async function freeDefaultName(
   on: Queryable,
   agentId: string,
-  type: ConnectionType,
+  connectionKind: ConnectionKind,
 ): Promise<string> {
   const taken = new Set(
     (
@@ -593,7 +602,7 @@ async function freeDefaultName(
   );
 
   for (let n = 1; ; n += 1) {
-    const candidate = `${type}-${n}`;
+    const candidate = `${connectionKind}-${n}`;
     if (!taken.has(candidate)) return candidate;
   }
 }
@@ -643,7 +652,8 @@ async function insertConnection(
   admitted: AdmittedConnection,
 ): Promise<Connection> {
   const name =
-    admitted.name ?? (await freeDefaultName(on, home.id, admitted.type));
+    admitted.name ??
+    (await freeDefaultName(on, home.id, admitted.connectionKind));
 
   const [inserted] = await on
     .insert(connection)
@@ -653,10 +663,11 @@ async function insertConnection(
       projectId: home.projectId,
       agentId: home.id,
       name,
-      type: admitted.type,
+      agentPlatform: admitted.agentPlatform,
+      connectionKind: admitted.connectionKind,
+      accessVariant: admitted.accessVariant,
       modality: admitted.modality,
       topology: admitted.topology,
-      variantId: admitted.variantId,
       revision: newId("rev"),
       environment: admitted.environment,
       config: admitted.config,
@@ -703,7 +714,7 @@ async function insertAgent(
 /**
  * Everything a write to this factory settles before it touches the database:
  * where the rows land, what the agent is called, and the inline connection
- * once its type's registry entry has had its say.
+ * once its connection-kind registry entry has had its say.
  *
  * Pulled out because both write paths do it in the same order and the order is
  * the point — a bad inline connection dies before there is an agent to orphan,
@@ -785,7 +796,7 @@ export type Registration = {
  * failure. Minting a second identity for one vendor agent splits a team's
  * results history in half, which is the one thing that must not happen quietly.
  *
- * So the type's own reuse key decides (`connection-registry.ts`), and a living
+ * So the connection kind's reuse key decides (`connection-registry.ts`), and a living
  * connection in the project naming the same vendor agent decides the outcome:
  *
  * - **same modality** → that agent and that connection answer, with the
@@ -795,7 +806,7 @@ export type Registration = {
  * - **a different modality** → the same agent gains a new connection, because
  *   a chat endpoint and a voice endpoint on one vendor agent are two ways to
  *   reach one thing. `connection_added`.
- * - **no match, or a type with no reuse key at all** → both rows, exactly as
+ * - **no match, or a kind with no reuse key at all** → both rows, exactly as
  *   `createAgent` writes them. `created`.
  *
  * The reused and extended paths answer the agent as it stands and leave its
@@ -825,7 +836,7 @@ export async function registerAgent(
     };
   }
 
-  const reuseKey = descriptorOf(inline.type).reuseKey;
+  const reuseKey = descriptorOf(inline.connectionKind).reuseKey;
   const vendorAgent =
     reuseKey === undefined ? undefined : inline.config[reuseKey];
 
@@ -843,7 +854,7 @@ export async function registerAgent(
     };
   };
 
-  // A type with no reuse key has nothing to match on, so this is `createAgent`
+  // A kind with no reuse key has nothing to match on, so this is `createAgent`
   // with a word for what it did.
   if (reuseKey === undefined || vendorAgent === undefined) {
     return db().transaction(bothRows);
@@ -851,7 +862,7 @@ export async function registerAgent(
 
   // What the lock is taken on: this one vendor agent, in this one project, of
   // this one customer. Nothing else waits behind it.
-  const racing = `${auth.organizationId}:${projectId}:${inline.type}:${vendorAgent}`;
+  const racing = `${auth.organizationId}:${projectId}:${inline.connectionKind}:${vendorAgent}`;
 
   return db().transaction(async (tx): Promise<Registration> => {
     // Taken before anything is read, and let go when the transaction ends.
@@ -872,7 +883,11 @@ export async function registerAgent(
           connection,
           and(
             eq(connection.projectId, projectId),
-            eq(connection.type, inline.type),
+            inline.agentPlatform === null
+              ? isNull(connection.agentPlatform)
+              : eq(connection.agentPlatform, inline.agentPlatform),
+            eq(connection.connectionKind, inline.connectionKind),
+            eq(connection.accessVariant, inline.accessVariant),
             sql`${connection.config}->>${reuseKey} = ${vendorAgent}`,
             connectionNotArchived,
             notArchived,
@@ -890,7 +905,7 @@ export async function registerAgent(
         .update(connection)
         .set({
           // Whole, never merged: what arrived replaces what is stored, and a
-          // type that takes no secret clears both columns together, which is
+          // variant that takes no secret clears both columns together, which is
           // what the row's own CHECK demands.
           credentials: inline.credentials,
           credentialsHint: inline.credentialsHint,
@@ -1270,7 +1285,7 @@ function guardProjectScoped(auth: AuthContext, what: string): void {
  * would silently bring an old provider credential back into use. So Archive
  * takes them, and Restore deliberately does not give them back: each
  * connection comes back one at a time, through the credential rule its own
- * shape declares.
+ * access variant declares.
  */
 export async function archiveAgent(
   auth: AuthContext,
@@ -1342,7 +1357,7 @@ export async function archiveAgent(
  * rather than an omission: a connection carries a credential, and a Restore
  * that reactivated them in a batch would put old provider keys back into use
  * without anybody choosing to. Each comes back through its own Restore, which
- * asks for whatever its shape's credential rule requires.
+ * asks for whatever its access variant's credential rule requires.
  *
  * A name another active agent has taken since is refused unless the Restore
  * brings a replacement. It cannot be silently renamed: an agent is identified
@@ -1475,7 +1490,7 @@ export async function addConnection(
 }
 
 /**
- * What type one connection is, by its id alone — or `undefined` where this
+ * What kind one connection is, by its id alone — or `undefined` where this
  * caller has no such connection.
  *
  * **The one connection read that does not name an agent, and it exists for one
@@ -1486,7 +1501,7 @@ export async function addConnection(
  * `getConnection` would mean the caller first guessing an agent id it was never
  * given.
  *
- * It answers a type and nothing else, deliberately. A gate needs to know what
+ * It answers a connection kind and nothing else, deliberately. A gate needs to know what
  * kind of thing this is; it has no business with the config, and a shape that
  * cannot carry a credential cannot leak one.
  *
@@ -1497,10 +1512,10 @@ export async function addConnection(
  * naming somebody else's connection is a leak, and a gate that skipped
  * because it looked in the wrong project is no gate.
  */
-export async function connectionTypeOf(
+export async function connectionKindOf(
   auth: AuthContext,
   connectionId: string,
-): Promise<ConnectionType | undefined> {
+): Promise<ConnectionKind | undefined> {
   authorize(auth, "read", here(auth));
 
   // A run happens inside a project, so a credential acting in none is one
@@ -1511,7 +1526,7 @@ export async function connectionTypeOf(
   if (!isId("con", connectionId)) return undefined;
 
   const [row] = await db()
-    .select({ type: connection.type })
+    .select({ connectionKind: connection.connectionKind })
     .from(connection)
     .innerJoin(agent, eq(connection.agentId, agent.id))
     .where(
@@ -1529,9 +1544,11 @@ export async function connectionTypeOf(
     .limit(1);
 
   // The column is text, as every enum-shaped column in this schema is, and the
-  // registry is what decides which strings are types. The cast is the same one
+  // registry is what decides which strings are connection kinds. The cast is the same one
   // `connectionFromRow` makes for the same reason, in the same file.
-  return row === undefined ? undefined : (row.type as ConnectionType);
+  return row === undefined
+    ? undefined
+    : (row.connectionKind as ConnectionKind);
 }
 
 export async function getConnection(
@@ -1590,7 +1607,7 @@ export async function listConnections(
 
 /**
  * One door for every change. Name, environment and config write in place —
- * config checked whole against the registry entry for the row's own type — and
+ * config checked whole against the row's stored access variant — and
  * credentials replace whole or stay untouched, resealed under a fresh IV with
  * the hint moved along. Editing what the caller cannot see returns what
  * reading it would have: `undefined`, with nothing disturbed.
@@ -1602,11 +1619,9 @@ export async function listConnections(
  * something that was never checked. It becomes known again only when an
  * adapter measures the target as it now stands.
  *
- * **A config that would move the connection to another shape of its type is
- * refused.** The shape is stored, not re-derived, and it is what the Restore
- * credential rule is read from — so a connection that changed shape underneath
- * its stored id would be held to one shape's rule while carrying the other's
- * credential. Changing shape is a new connection, exactly as changing type is.
+ * **Agent platform, connection kind, access variant, and modality are
+ * immutable.** Changing any axis creates a new connection. Config is validated
+ * against the stored access variant and never selects another one.
  */
 export async function updateConnection(
   auth: AuthContext,
@@ -1619,7 +1634,13 @@ export async function updateConnection(
   // The changes type has no such fields, but a caller reaching this from
   // looser code — a request body, a spread — must hear the rule, not watch
   // an edit quietly drop half its payload.
-  for (const immutable of ["type", "modality", "topology"] as const) {
+  for (const immutable of [
+    "agentPlatform",
+    "connectionKind",
+    "accessVariant",
+    "modality",
+    "topology",
+  ] as const) {
     if (immutable in changes) {
       throw new Error(
         `a connection's ${immutable} never changes: what a connection is, ` +
@@ -1638,8 +1659,8 @@ export async function updateConnection(
   const [current] = await db()
     .select({
       id: connection.id,
-      type: connection.type,
-      variantId: connection.variantId,
+      connectionKind: connection.connectionKind,
+      accessVariant: connection.accessVariant,
       config: connection.config,
       archivedAt: connection.archivedAt,
     })
@@ -1648,56 +1669,24 @@ export async function updateConnection(
     .limit(1);
   if (current === undefined) return undefined;
 
-  // The registry rules are the row's own type's — which cannot have changed
+  // The registry rules are the row's own access variant's — which cannot have changed
   // since the read above, because nothing can change it at all.
-  const type = current.type as ConnectionType;
+  const connectionKind = current.connectionKind as ConnectionKind;
+  const accessVariant = current.accessVariant as AccessVariant;
 
-  // Watching is a fact about a platform egma can ask for finished
-  // conversations, and today Retell is the one it can ask. A switch that
-  // stored `true` and polled nothing would be a setting somebody turned on
-  // and then waited on forever, so it is refused by name instead.
-  if (changes.watchProduction === true && type !== "retell") {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `Egma watches production traffic over a retell connection, and this ` +
-        `one is ${type}. A ${type} agent runs where Egma can be pointed at ` +
-        `it directly, so its production traces arrive through the telemetry ` +
-        `door rather than by Egma asking the platform for them.`,
-    );
-  }
   const config =
     changes.config === undefined
       ? undefined
-      : validConfig(type, changes.config);
+      : validConfig(connectionKind, accessVariant, changes.config);
 
-  /**
-   * A credential belongs to the shape its config is in, so an edit that moves
-   * a connection from one shape to the other has to bring the credential the
-   * new shape needs. Left to itself it would write a row that is half of each:
-   * a config asking egma to fetch a token, over a sealed key pair nothing will
-   * ever open again — readable, unrefusable, and dead at the next run.
-   *
-   * The sealed half cannot be read here to check it, and does not need to be:
-   * what shape a connection is in is written in its config, in the clear.
-   */
-  const before = variantById(type, current.variantId);
-  const after = config === undefined ? before : shapeOf(type, config);
-  if (before !== after) {
-    throw new AgentWriteRefusedError(
-      "not_admitted",
-      `a connection's shape is fixed when it is created, and this change ` +
-        `moves it from ${before.label} to ${after.label}. The two hold ` +
-        `different config keys and different credentials, so this is a new ` +
-        `connection rather than an edit — add one, and archive this.`,
-    );
-  }
-
+  // The stored access variant owns the credential rule. An edit can replace
+  // the credential, but cannot turn this connection into another variant.
   const sealed =
     changes.credentials === undefined
       ? undefined
       : validCredentials(
-          type,
-          config ?? current.config,
+          connectionKind,
+          accessVariant,
           changes.credentials,
         );
 
@@ -1714,42 +1703,6 @@ export async function updateConnection(
         : {
             credentials: sealCredentials(sealed.sealed),
             credentialsHint: sealed.hint,
-          }),
-      ...(changes.watchProduction === undefined
-        ? {}
-        : {
-            watchProduction: changes.watchProduction,
-            /**
-             * **Every switch-on starts the cursor at now**, and that is the
-             * whole of what watching means: *from here on*.
-             *
-             * It used to keep whatever cursor the connection already had, so
-             * that only the first switch-on stamped one. That was consent
-             * running backwards. Watching is off, a team's agent takes calls
-             * all afternoon, somebody switches watching back on — and the next
-             * poll's window opens at the old cursor and sweeps in every
-             * conversation that happened while capture was deliberately off.
-             * The switch is the one place a customer says what egma may store,
-             * and an off switch has to mean it.
-             *
-             * **Only the off→on edge stamps.** Writing `true` over a connection
-             * that is already watching is not a switch-on — it is a form
-             * submitting the value it was already showing — and moving the
-             * cursor for it would drop whatever the poller had not yet drained.
-             * The `case` reads the row's own pre-update value inside the same
-             * statement, so there is no window between deciding and writing for
-             * a second request to land in.
-             *
-             * Switching off leaves the cursor exactly where it is. Nothing is
-             * re-read from it — the next switch-on overwrites it — and what was
-             * already stored stays stored.
-             */
-            ...(changes.watchProduction
-              ? {
-                  productionCursor: sql`case when ${connection.watchProduction} then ${connection.productionCursor} else now() end`,
-                }
-              : // Switching off deregisters, so the stamp goes with it.
-                { webhookRegisteredAt: null }),
           }),
       // The target moved, so what anybody measured about it is no longer about
       // this connection.
@@ -1863,16 +1816,16 @@ export async function archiveConnection(
 }
 
 /**
- * Bring one connection back, on the terms its own shape sets.
+ * Bring one connection back, on the terms its own access variant sets.
  *
  * Two rules, and neither is negotiable:
  *
  * - **The parent agent has to be active.** Restoring a connection under an
  *   archived agent would produce a reachable way into something nobody can
  *   run, and it would undo half of what agent Archive did without saying so.
- * - **The archived credential is never what comes back.** A shape that
- *   requires one demands a new one; a shape that forbids one refuses to be
- *   handed one; a shape where it is optional makes the author say `replace` or
+ * - **The archived credential is never what comes back.** An access variant
+ *   that requires one demands a new one; one that forbids it refuses to be
+ *   handed one; an optional variant makes the author say `replace` or
  *   `clear`, because leaving it out cannot be told from meaning to drop it and
  *   the sealed envelope is sitting right there for the wrong reading to reuse.
  *
@@ -1899,8 +1852,8 @@ export async function restoreConnection(
     .select({
       id: connection.id,
       name: connection.name,
-      type: connection.type,
-      variantId: connection.variantId,
+      connectionKind: connection.connectionKind,
+      accessVariant: connection.accessVariant,
       config: connection.config,
       archivedAt: connection.archivedAt,
       revision: connection.revision,
@@ -1925,40 +1878,45 @@ export async function restoreConnection(
     );
   }
 
-  const type = current.type as ConnectionType;
-  const variant = variantById(type, current.variantId);
+  const connectionKind = current.connectionKind as ConnectionKind;
+  const accessVariant = current.accessVariant as AccessVariant;
+  const variant = accessVariantById(connectionKind, accessVariant);
   const rule = credentialRuleOf(variant);
   const supplied = options.credential;
 
   if (rule === "required" && supplied?.choice !== "replace") {
     throw new ConnectionRestoreRefusedError(
       "credential_required",
-      `Connection ${connectionId} uses ${type}, which requires a new ` +
+      `Connection ${connectionId} uses ${connectionKind}, which requires a new ` +
         `credential after Archive. Enter a new credential and restore it again.`,
-      { connectionId, type },
+      { connectionId, connectionKind },
     );
   }
   if (rule === "forbidden" && supplied?.choice === "replace") {
     throw new ConnectionRestoreRefusedError(
       "credential_forbidden",
-      `Connection ${connectionId} uses ${type}, which does not accept ` +
+      `Connection ${connectionId} uses ${connectionKind}, which does not accept ` +
         `customer credentials. Remove the credential and restore it again.`,
-      { connectionId, type },
+      { connectionId, connectionKind },
     );
   }
   if (rule === "optional" && supplied === undefined) {
     throw new ConnectionRestoreRefusedError(
       "credential_choice_required",
-      `Connection ${connectionId} uses ${type}, which has an optional ` +
+      `Connection ${connectionId} uses ${connectionKind}, which has an optional ` +
         `credential. Choose Replace and enter a new credential, or choose ` +
         `Clear, then restore it again.`,
-      { connectionId, type },
+      { connectionId, connectionKind },
     );
   }
 
   const sealed =
     supplied?.choice === "replace"
-      ? validCredentials(type, current.config, supplied.credentials)
+      ? validCredentials(
+          connectionKind,
+          accessVariant,
+          supplied.credentials,
+        )
       : null;
 
   const name =
@@ -2017,7 +1975,7 @@ export async function restoreConnection(
  * the catalog keys it *found*; anything it did not find is unsupported, and an
  * adapter that could establish nothing leaves the record exactly as it was
  * rather than overwriting a good measurement with a bad moment. Nothing here
- * infers a capability from the provider's brand, which is why a type with no
+ * infers a capability from the provider's brand, which is why a kind with no
  * adapter is told so plainly instead of being handed a plausible answer.
  *
  * The write is guarded by the revision the connection had when the check
@@ -2036,8 +1994,8 @@ export async function refreshConnectionCapabilities(
   const [current] = await db()
     .select({
       id: connection.id,
-      type: connection.type,
-      variantId: connection.variantId,
+      connectionKind: connection.connectionKind,
+      accessVariant: connection.accessVariant,
       // What the transport carries, which is what most of what an adapter can
       // establish turns on.
       modality: connection.modality,
@@ -2050,17 +2008,20 @@ export async function refreshConnectionCapabilities(
     .limit(1);
   if (current === undefined) return undefined;
 
-  const type = current.type as ConnectionType;
-  const discovery = capabilityDiscoveryFor(type);
+  const connectionKind = current.connectionKind as ConnectionKind;
+  const discovery = capabilityDiscoveryFor(connectionKind);
   if (discovery === undefined) {
-    throw new NoCapabilityAdapterError(type, noCapabilityAdapterMessage(type));
+    throw new NoCapabilityAdapterError(
+      connectionKind,
+      noCapabilityAdapterMessage(connectionKind),
+    );
   }
 
   let found: Discovered;
   try {
     found = await discovery({
-      type,
-      variantId: current.variantId,
+      connectionKind,
+      accessVariant: current.accessVariant as AccessVariant,
       modality: current.modality as Modality,
       config: configFromRow(current.config, current.id),
     });
@@ -2073,7 +2034,11 @@ export async function refreshConnectionCapabilities(
   }
 
   const checkedAt = new Date();
-  const measured = measuredCapabilities(found, `${type} adapter`, checkedAt);
+  const measured = measuredCapabilities(
+    found,
+    `${connectionKind} adapter`,
+    checkedAt,
+  );
   if (measured.state !== "known") return getConnection(auth, agentId, connectionId);
 
   const [updated] = await db()

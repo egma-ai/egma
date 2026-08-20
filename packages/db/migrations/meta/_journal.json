@@ -267,6 +267,13 @@
       "when": 1787175627557,
       "tag": "0037_persona_library",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787215007592,
+      "tag": "0038_parched_goblin_queen",
+      "breakpoints": true
     }
   ]
 }

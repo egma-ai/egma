@@ -92,19 +92,15 @@ export type ListedConnection = {
   readonly agent_id: string;
   readonly project_id: string;
   readonly name: string;
-  readonly type: string;
-  /**
-   * What a person is shown for that type, decided by the server's registry.
-   *
-   * It travels with the connection so that a list of agents can name a platform
-   * without a second read, and so that no surface has to keep a label table of
-   * its own — a second vocabulary here could disagree with the registry that
-   * gates the connection forms.
-   */
-  readonly type_label: string;
-  /** Which shape of its type this is, frozen when it was created. */
-  readonly variant_id: string;
+  /** Who runs the agent, or null when Egma does not know. */
+  readonly agent_platform: string | null;
+  /** What Egma connects to for a simulation. */
+  readonly connection_kind: string;
+  /** How Egma gets access to that connection. */
+  readonly access_variant: string;
   readonly modality: string;
+  /** Customer-facing text derived by the server from the four axes above. */
+  readonly product_label: string;
   readonly topology: string;
   readonly environment: string | null;
   readonly config: Readonly<Record<string, string>>;

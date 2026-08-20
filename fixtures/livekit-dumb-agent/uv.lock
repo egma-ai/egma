@@ -444,14 +444,22 @@ wheels = [
 
 [[package]]
 name = "egma"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "../../sdks/python" }
 dependencies = [
     { name = "livekit-agents" },
+    { name = "openai" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "livekit-agents", specifier = ">=1.6.7,<1.7" }]
+requires-dist = [
+    { name = "livekit-agents", specifier = ">=1.6.7,<1.7" },
+    { name = "openai", specifier = ">=2,<3" },
+    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.39,<2" },
+    { name = "opentelemetry-sdk", specifier = ">=1.39,<2" },
+]
 
 [package.metadata.requires-dev]
 dev = [
@@ -469,8 +477,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "egma" },
     { name = "livekit-agents", extra = ["openai", "silero"] },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
 ]
 
 [package.dev-dependencies]
@@ -485,8 +491,6 @@ dev = [
 requires-dist = [
     { name = "egma", editable = "../../sdks/python" },
     { name = "livekit-agents", extras = ["openai", "silero"], specifier = "==1.6.7" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
 ]
 
 [package.metadata.requires-dev]

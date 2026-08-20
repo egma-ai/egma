@@ -119,7 +119,7 @@ export async function verifyRetellVoiceRoute(
   if (agent.modality !== "voice") {
     return {
       kind: "rejected",
-      message: "That Retell agent is text-only. Choose a voice agent.",
+      message: "That Retell agent is chat-only. Choose a voice agent.",
     };
   }
   if (number.kind === "gone") {
@@ -138,14 +138,14 @@ export async function verifyRetellVoiceRoute(
 }
 
 /**
- * Prove that a legacy direct Retell row points at a chat agent before its
+ * Prove that a Retell chat connection still points at a chat agent before its
  * credential is handed to the simulator.
  *
- * Old rows store the requested Egma modality, not the provider agent channel.
- * The registry pair check therefore cannot catch a voice agent id in a row
- * labelled chat. The shared provider listing is the source of truth here.
+ * The connection contract fixes `retell_chat_api` to chat modality. Retell can
+ * later reconfigure the platform agent as voice, so the provider listing is
+ * the source of truth for the agent's current modality.
  */
-export async function verifyRetellDirectChatAgent(
+export async function verifyRetellChatAgent(
   apiKey: string,
   agentId: string,
   fetchImpl: ProviderFetch = fetch,
@@ -191,8 +191,8 @@ export async function verifyRetellDirectChatAgent(
     return {
       kind: "blocked",
       message:
-        `Retell agent ${wanted} is a voice agent, but this legacy direct connection is marked as text. ` +
-        "Add one of the agent's routed phone numbers as a Phone connection before starting another run.",
+        `Retell agent ${wanted} is a voice agent, but this connection reaches Retell's Chat API and has chat modality. ` +
+        "Add one of the agent's routed phone numbers as a Retell phone connection before starting another run.",
     };
   }
   return { kind: "ready" };
