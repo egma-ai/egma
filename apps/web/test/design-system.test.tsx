@@ -240,11 +240,11 @@ describe("the development design proof", () => {
     render(<DesignSystemProof />);
 
     /*
-     * One set, one panel. Two tab sets are drawn, so both panels are counted:
-     * a `getByRole` that happened to find one would pass just as well if the
-     * other had quietly stopped rendering.
+     * One set, one panel. Three tab sets are drawn, so all three panels are
+     * counted: a `getByRole` that happened to find one would pass just as well
+     * if another had quietly stopped rendering.
      */
-    expect(screen.getAllByRole("tabpanel")).toHaveLength(2);
+    expect(screen.getAllByRole("tabpanel")).toHaveLength(3);
     const simulations = screen.getByRole("tab", { name: "Simulations" });
     expect(simulations.getAttribute("aria-selected")).toBe("true");
     expect(
@@ -265,6 +265,18 @@ describe("the development design proof", () => {
 
     /* The other set is the `line` variant, and it is a separate set. */
     expect(screen.getByRole("tab", { name: "Transcript" }).getAttribute("aria-selected")).toBe("true");
+
+    /*
+     * The third set is the vertical rail, which nothing in the product uses
+     * yet — so this surface is the only place its shape is held to anything.
+     * Its disabled tab is asserted beside it because "disable rather than hide"
+     * is a product decision: the choice stays readable and named, and stays out
+     * of reach. A set drawn without one would prove the easy half only.
+     */
+    expect(screen.getByRole("tab", { name: "Turns" }).getAttribute("aria-selected")).toBe("true");
+    const recording = screen.getByRole("tab", { name: "Recording" });
+    expect((recording as HTMLButtonElement).disabled).toBe(true);
+    expect(recording.getAttribute("aria-selected")).toBe("false");
 
     /*
      * The group's question is on the page, not only in an `aria-label`.

@@ -658,6 +658,42 @@ export function DesignSystemProof() {
                     </TabsContent>
                   </Tabs>
                 </div>
+                {/*
+                  * The third shape the component draws, and the one nothing in
+                  * the product uses yet.
+                  *
+                  * A vertical rail marks the current tab down its trailing edge
+                  * instead of under it, which is a separate set of rules from
+                  * the two above — and rules no page would have caught. It is
+                  * here so the shape is proven rather than dead: a strip of
+                  * evidence views is the layout it is waiting for.
+                  *
+                  * The disabled tab is the other half. "Disable rather than
+                  * hide" is this product's decision, so a set that can hold an
+                  * unavailable choice has to show what one looks like: still
+                  * read, still named, and not reachable by the arrow keys.
+                  */}
+                <div className={PREVIEW}>
+                  <Tabs defaultValue="turns" orientation="vertical">
+                    <TabsList variant="line">
+                      <TabsTrigger value="turns">Turns</TabsTrigger>
+                      <TabsTrigger value="metrics">Metrics</TabsTrigger>
+                      <TabsTrigger value="recording" disabled>
+                        Recording
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="turns">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        What the caller and the agent each said.
+                      </p>
+                    </TabsContent>
+                    <TabsContent value="metrics">
+                      <p className="m-0 text-sm text-muted-foreground">
+                        How long each turn took the agent to answer.
+                      </p>
+                    </TabsContent>
+                  </Tabs>
+                </div>
               </div>
             </div>
 
