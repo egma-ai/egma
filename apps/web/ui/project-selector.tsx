@@ -60,7 +60,8 @@ import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
  * depend on which page happened to put it somewhere.
  */
 const TRIGGER = [
-  "grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3",
+  "grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center",
+  "gap-x-3 gap-y-1",
   "min-h-[calc(var(--control-lg)+var(--space-5))] p-3",
   "rounded-card border border-border bg-surface text-left",
   "cursor-pointer transition-transform duration-(--duration-press) ease-out",
@@ -72,7 +73,7 @@ const TRIGGER = [
 ];
 
 const TRIGGER_COMPACT = [
-  "grid-cols-[minmax(0,1fr)_auto] gap-2",
+  "grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-0",
   "min-h-(--control-lg) max-w-[220px] rounded-input px-3 py-1",
   "max-[900px]:min-w-0 max-[900px]:max-w-[min(220px,56vw)]",
 ];
@@ -167,6 +168,19 @@ export function ProjectSelector({
       panelRole="dialog"
       trigger={
         <>
+          {/*
+           * The eyebrow takes the whole first row rather than sitting in the
+           * text column beside the mark, and it is measurement rather than
+           * taste: the docked bar is a 224px column, which leaves the text
+           * column 89px once the mark, the chevron and two gaps are out of it,
+           * and the word needs 119px. Across the card it has 167px. A fixed
+           * word that ellipses is a label saying it does not fit.
+           */}
+          {compact ? null : (
+            <span className="col-span-3 block text-sm leading-(--line-tight) whitespace-nowrap text-faint uppercase tracking-(--tracking-label)">
+              Organization
+            </span>
+          )}
           {compact ? null : (
             <span className={cn(MARK)} aria-hidden="true">
               {initial}
@@ -178,11 +192,6 @@ export function ProjectSelector({
              * is the 1.0 step rather than body text's 1.5, because these are
              * labels stacked and not a paragraph.
              */}
-            {compact ? null : (
-              <span className="mb-1 block overflow-hidden text-sm leading-(--line-tight) text-ellipsis whitespace-nowrap text-faint uppercase tracking-(--tracking-label)">
-                Organization
-              </span>
-            )}
             <span className="block overflow-hidden text-base leading-(--line-tight) font-medium text-ellipsis whitespace-nowrap text-foreground">
               {organizationName}
             </span>

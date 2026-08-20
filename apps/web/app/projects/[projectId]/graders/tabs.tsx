@@ -3,6 +3,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { graderTabsFor, type GraderTab } from "../../../../lib/presentation.ts";
 
 /**
@@ -24,6 +26,18 @@ const TAB =
   "text-sm text-muted-foreground no-underline " +
   "max-[640px]:flex-1 max-[640px]:justify-center";
 
+/**
+ * **Merged with `cn` rather than joined with a space, and that is a bug fix.**
+ * Both halves set `border-bottom-color`, so a plain join left
+ * `border-b-transparent` and `border-b-brand` in one class list and let the
+ * stylesheet's own order decide — and transparent was winning. The current tab
+ * has been drawing a 2px rule nobody could see since the strip was written.
+ * `cn` is tailwind-merge, which drops the losing half instead of shipping both.
+ *
+ * Found by the proof pass for this batch, on the screen the batch moved to the
+ * front. `DESIGN.md` asks a current tab for a shape as well as a colour, and
+ * the shape was the half that was missing.
+ */
 const TAB_CURRENT = "border-b-brand text-foreground";
 
 /**
@@ -88,7 +102,7 @@ export function GraderTabs({
         {graderTabsFor(projectId).map((tab) => (
           <Link
             key={tab.id}
-            className={`${TAB} ${active === tab.id ? TAB_CURRENT : ""}`}
+            className={cn(TAB, active === tab.id && TAB_CURRENT)}
             href={tab.href}
             aria-current={active === tab.id ? "page" : undefined}
           >
