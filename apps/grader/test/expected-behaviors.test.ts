@@ -42,8 +42,8 @@ import {
  * and there is no way to see it from the rows.
  *
  * **No key and no network.** The scripted judge stands in at the provider seam;
- * everything on this side of it — the project's judge configuration, the sealed
- * key, the resolution through the one door — is the real path.
+ * the pinned grader version, selected model, and verdict path on this side of
+ * that seam are real.
  */
 
 let world: World;

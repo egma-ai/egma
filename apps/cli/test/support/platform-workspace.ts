@@ -67,12 +67,8 @@ function hintOf(name: string, value: string): string {
 }
 
 function readinessOf(holds: Readonly<Record<string, string>>): {
-  setup: { state: string; missing: string[] };
   phone: { state: string; missing: string[] };
 } {
-  const missing = PLATFORM_SETTINGS.filter(
-    (setting) => setting.required && holds[setting.name] === undefined,
-  ).map((setting) => setting.label);
   const phoneMissing = (["carrier_trunk_address", "carrier_trunk_number"] as const)
     .filter((name) => holds[name] === undefined)
     .map(
@@ -80,7 +76,6 @@ function readinessOf(holds: Readonly<Record<string, string>>): {
         PLATFORM_SETTINGS.find((setting) => setting.name === name)?.label ?? name,
     );
   return {
-    setup: { state: missing.length === 0 ? "ready" : "setup_required", missing },
     phone: {
       state: phoneMissing.length === 0 ? "ready" : "setup_required",
       missing: phoneMissing,
@@ -157,7 +152,6 @@ export async function startPlatform(
     send(200, {
       instance_id: "pf_00000000000000000000000001",
       origin: options.reports === undefined ? url : options.reports(url),
-      setup: readiness.setup,
       phone: readiness.phone,
     });
   });

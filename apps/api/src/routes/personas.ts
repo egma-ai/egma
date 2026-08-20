@@ -586,9 +586,9 @@ export async function personaRoutes(
   });
 
   /**
-   * A project-owned persona carrying this one's current Name, Description and
-   * Personality. A fork starts its own history and is editable even when the
-   * source is an Egma-provided persona.
+   * A project-owned persona carrying the source's current name, description,
+   * complete human traits, and model selections. A fork starts its own history
+   * and is editable even when the source is an Egma-provided persona.
    */
   app.post(PERSONA_FORK_PATH, async (request, reply) => {
     const { auth } = requesterOf(request);

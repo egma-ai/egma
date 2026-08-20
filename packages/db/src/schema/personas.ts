@@ -208,7 +208,7 @@ export const personaVersion = pgTable(
         and nullif(btrim(${table.models}->'tts'->>'voiceId'), '') is not null
         and jsonb_path_exists(
           ${table.models},
-          '$.tts.speed ? (@.type() == "number" && @ >= 0.5 && @ <= 2)'::jsonpath
+          '$.tts.speed ? (@.type() == "number" && @ >= 0.6 && @ <= 1.5)'::jsonpath
         )
       `,
     ),

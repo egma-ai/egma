@@ -13,6 +13,30 @@ describe("one complete persona model selection", () => {
     );
   });
 
+  it.each([0.6, 1.5])(
+    "accepts the shared speaking-speed boundary %s",
+    (speed) => {
+      expect(
+        validPersonaModels({
+          ...RECOMMENDED_PERSONA_MODELS,
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
+        }).tts.speed,
+      ).toBe(speed);
+    },
+  );
+
+  it.each([0.5999, 1.5001])(
+    "refuses speaking speed %s before a simulation can claim it",
+    (speed) => {
+      expect(() =>
+        validPersonaModels({
+          ...RECOMMENDED_PERSONA_MODELS,
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
+        }),
+      ).toThrow("speaking speed must be between 0.6 and 1.5");
+    },
+  );
+
   it("refuses the exact cross-adapter STT pair that failed in production", () => {
     expect(() =>
       validPersonaModels({

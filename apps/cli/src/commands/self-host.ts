@@ -505,12 +505,6 @@ async function runUp(
 
   options.out(`platform: ${platform.instanceId}`);
   options.out(`services: ${STARTED.join(" ")}`);
-  // Two views of one deployment fact. Platform setup is the carrier route, and
-  // phone readiness says whether that route can place a call.
-  options.out(`setup: ${platform.setupState}`);
-  if (platform.setupMissing.length > 0) {
-    options.out(`setup_missing: ${platform.setupMissing.join(", ")}`);
-  }
   options.out(`phone: ${platform.phoneState}`);
   if (platform.phoneMissing.length > 0) {
     options.out(`phone_missing: ${platform.phoneMissing.join(", ")}`);
@@ -519,23 +513,28 @@ async function runUp(
   options.out(`connect: npx @egma/cli --url ${address}`);
 
   options.fail("");
-  options.fail(`Egma is running at ${address}`);
-  if (platform.setupState === "ready") {
+  options.fail(`Egma is ready at ${address}`);
+  if (platform.phoneState === "ready") {
     options.fail(
-      "It is configured, and it keeps that configuration through a restart, an upgrade and a move to another machine.",
+      "Phone calls are ready. The carrier route stays configured through a restart, an upgrade and a move to another machine.",
     );
   } else {
-    // **The whole next step, not just its last command.** Setup writes every
-    // answer through the platform's own API, and that door opens for an
-    // organization owner — so an operator who typed only the last line of this
-    // would meet a refusal telling them to go and log in. A first run should
-    // not route somebody through a refusal to discover a step.
     options.fail(
-      `It still needs ${
-        platform.setupMissing.length === 0 ? "setting up" : platform.setupMissing.join(", ")
-      }. Sign up at ${address} if you have not — the first person to sign up on a fresh`,
+      "Chat and text simulations can run now. Phone calls are optional and are not ready yet.",
     );
-    options.fail("Egma becomes its owner — then, here:");
+    // **The whole optional phone step, not just its last command.** Setup
+    // writes the carrier route through the platform's own API, and that door
+    // opens for an organization owner.
+    options.fail(
+      `Phone is missing ${
+        platform.phoneMissing.length === 0
+          ? "its carrier route"
+          : platform.phoneMissing.join(", ")
+      }.`,
+    );
+    options.fail(
+      `Sign up at ${address} if you have not. The first person to sign up on a fresh Egma becomes its owner. Then run:`,
+    );
     options.fail(`  npx @egma/cli login --url ${address}`);
     options.fail("  npx @egma/cli self-host setup");
   }
@@ -585,23 +584,30 @@ const MEDIA_DID_NOT_COME_BACK =
 type PlatformFacts = {
   readonly instanceId: string;
   readonly origin: string;
-  /** Whether the whole platform has been configured, carrier included. */
-  readonly setupState: string;
-  readonly setupMissing: readonly string[];
-  readonly phoneState: string;
+  /** Whether this otherwise-ready platform can place a phone call. */
+  readonly phoneState: "ready" | "setup_required";
   readonly phoneMissing: readonly string[];
 };
 
 type Readiness = { readonly state?: unknown; readonly missing?: unknown };
 
 function readinessIn(reported: Readiness | undefined): {
-  state: string;
+  state: "ready" | "setup_required";
   missing: readonly string[];
-} {
+} | null {
   const missing = reported?.missing;
+  if (
+    (reported?.state !== "ready" && reported?.state !== "setup_required") ||
+    !Array.isArray(missing) ||
+    !missing.every((one) => typeof one === "string") ||
+    (reported.state === "ready" && missing.length > 0) ||
+    (reported.state === "setup_required" && missing.length === 0)
+  ) {
+    return null;
+  }
   return {
-    state: typeof reported?.state === "string" ? reported.state : "unknown",
-    missing: Array.isArray(missing) ? missing.map(String) : [],
+    state: reported.state,
+    missing,
   };
 }
 
@@ -614,17 +620,14 @@ async function readPlatform(address: string): Promise<PlatformFacts | null> {
     const body = (await answer.json()) as {
       instance_id?: unknown;
       origin?: unknown;
-      setup?: Readiness;
       phone?: Readiness;
     };
     if (typeof body.instance_id !== "string" || typeof body.origin !== "string") return null;
-    const setup = readinessIn(body.setup);
     const phone = readinessIn(body.phone);
+    if (phone === null) return null;
     return {
       instanceId: body.instance_id,
       origin: body.origin,
-      setupState: setup.state,
-      setupMissing: setup.missing,
       phoneState: phone.state,
       phoneMissing: phone.missing,
     };
@@ -987,7 +990,7 @@ async function runSetup(
   // complete two-value or four-value route has been supplied.
   const carrierBundleMissing = carrierWanted && carrierBundle === null;
   const stillMissing = [
-    ...(platform?.setupMissing ?? []),
+    ...(platform?.phoneMissing ?? []),
     ...(carrierBundleMissing ? ["the complete SIP carrier bundle"] : []),
   ];
 
@@ -996,7 +999,7 @@ async function runSetup(
     command: "self-host setup",
     at: new Date().toISOString(),
     result:
-      platform?.setupState === "ready" && !carrierBundleMissing
+      platform?.phoneState === "ready" && !carrierBundleMissing
         ? "applied"
         : "failed",
     facts: {
@@ -1012,7 +1015,6 @@ async function runSetup(
           : "supplied, not recorded",
       configuration_file: configFile,
       platform_url: address,
-      setup: platform?.setupState ?? "unknown",
       phone: carrierBundleMissing
         ? "setup_required"
         : (platform?.phoneState ?? "unknown"),
@@ -1041,7 +1043,6 @@ async function runSetup(
           : "supplied",
     receipt: path.relative(workspace, receiptFile),
     platform_url: address,
-    setup: platform?.setupState ?? "unknown",
     phone: carrierBundleMissing
       ? "setup_required"
       : (platform?.phoneState ?? "unknown"),
@@ -1065,12 +1066,12 @@ async function runSetup(
       : []),
     ...(platform === null
       ? [
-          `the settings were written but ${address} stopped answering, so Egma cannot say whether this platform is configured`,
+          `the settings were written but ${address} stopped answering, so Egma cannot say whether phone calls are ready`,
         ]
-      : platform.setupState === "ready"
+      : platform.phoneState === "ready"
         ? []
         : [
-            `every answer was written and this platform still reports setup required. It is missing ${platform.setupMissing.join(
+            `every answer was written and this platform still reports phone setup required. It is missing ${platform.phoneMissing.join(
               ", ",
             )}. Run the same command again — it asks only for what is still absent.`,
           ]),
@@ -1088,7 +1089,7 @@ async function runSetup(
 
   answer(options, mode, { ...done, status: "ready" }, allSecrets);
   options.fail("");
-  options.fail("This Egma instance is configured.");
+  options.fail("Phone calls are ready on this Egma instance.");
   options.fail(
     "Its carrier route lives in the platform store, sealed, so it survives a restart and a move to another machine.",
   );

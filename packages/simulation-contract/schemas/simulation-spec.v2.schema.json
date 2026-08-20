@@ -224,7 +224,7 @@
         },
         "model": { "type": "string" },
         "voice_id": { "type": "string", "minLength": 1 },
-        "speed": { "type": "number", "minimum": 0.5, "maximum": 2 },
+        "speed": { "type": "number", "minimum": 0.6, "maximum": 1.5 },
         "key": { "type": "string", "minLength": 1 }
       },
       "allOf": [

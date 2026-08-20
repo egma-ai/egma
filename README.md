@@ -134,9 +134,9 @@ upgrade and a move to another machine. Every simulator receives the route on
 the phone work order it claims, so a second simulator on another host needs no
 carrier credential copied to it. The CLI keeps none of it.
 
-**Phone readiness is reported separately from platform readiness, and that is
-honest rather than fussy.** A platform with no carrier runs text simulations
-perfectly well, so it is reported as its own fact beside the whole-platform one.
+**Phone readiness is one optional capability, not platform readiness.** A
+platform with no carrier runs chat and text simulations. `self-host up` reports
+the platform ready and reports `phone: setup_required` beside it.
 
 **Normal setup never receives the Twilio Auth Token.** A running Egma receives
 only one developer or production SIP credential. That credential can

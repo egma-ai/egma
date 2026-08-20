@@ -202,8 +202,8 @@ def test_a_plain_compose_up_starts_the_whole_phone_stack():
     `docker compose up`, which is the same containers — brings all three
     up. What stays off until `egma self-host setup` has run is the
     simulator's *media backend*, because a simulator told to dial with no
-    trunk refuses to start and platform readiness must never wait on
-    carrier setup. That is asserted below.
+    trunk refuses to start and platform health must never wait on carrier
+    setup. That is asserted below.
     """
     default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     for service in ("livekit", "livekit-sip", "livekit-redis"):

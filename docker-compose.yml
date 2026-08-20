@@ -486,9 +486,8 @@ services:
       # No model, voice or provider key is container configuration. The pinned
       # persona version supplies one complete selection, and the claim adds only
       # the current keys for its selected providers. Missing data is refused;
-      # there is no environment fallback. The base URL below is only a network
-      # transport override for a compatible OpenAI endpoint.
-      # An internal simulator adapter, not persona or platform authoring.
+      # there is no environment fallback. Internal simulator adapters remain
+      # fixed deployment choices, not persona or platform authoring.
       # The scripted detector understands only the deterministic test codec;
       # every shipped live container must use the real speech detector.
       EGMA_SIMULATOR_VAD_PROVIDER: silero

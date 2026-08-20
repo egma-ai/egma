@@ -111,7 +111,7 @@ const PERSONA_FORM: PersonaForm = {
     },
   ],
   recommended_models: RECOMMENDED_MODELS,
-  speed_range: { slowest: 0.5, fastest: 2 },
+  speed_range: { slowest: 0.6, fastest: 1.5 },
 };
 
 function meWith(role: string): Me {
@@ -558,6 +558,11 @@ describe("authoring a persona", () => {
     expect(screen.getByLabelText("Speech-to-text model")).toBeDefined();
     expect(screen.getByLabelText("Text-to-speech model")).toBeDefined();
     expect(screen.getByLabelText("Speech rate")).toBeDefined();
+    expect(
+      screen.getByText(
+        "A multiple of the natural pace, from 0.6 to 1.5.",
+      ),
+    ).toBeDefined();
 
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Impatient Rita" },

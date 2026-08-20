@@ -2,7 +2,6 @@ import { platformFacts, platformInstanceId } from "@egma/db";
 import type { FastifyPluginAsync } from "fastify";
 
 import { phoneReadiness } from "../phone-readiness.ts";
-import { platformReadiness } from "../platform-readiness.ts";
 
 export type PlatformRouteOptions = {
   /** The one browser/API origin configured for this platform. */
@@ -75,10 +74,7 @@ export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
     // — this door is public and anybody who can reach the platform may knock as
     // often as they like.
     //
-    // One read for both answers. They are two facts about one deployment, and
-    // reading twice would let them be two facts about two moments.
     const held = await platformFacts();
-    const setup = platformReadiness(held);
     const phone = phoneReadiness(held);
 
     return reply.send({
@@ -88,11 +84,9 @@ export const platformRoutes: FastifyPluginAsync<PlatformRouteOptions> = async (
       // sync verb does anything, so an egma older or newer than this one says
       // so plainly instead of quietly reading half of what came back.
       repository_contract: REPOSITORY_CONTRACT,
-      // What platform configuration is still missing. The catalog is carrier
-      // only; model choices and provider credentials have other owners.
-      setup: { state: setup.state, missing: setup.missing },
-      // Phone is kept as its own fact because a platform with no carrier still
-      // runs chat simulations and serves every non-phone product surface.
+      // Carrier setup is an optional phone capability, not platform boot
+      // readiness. A platform with no carrier still runs chat simulations and
+      // serves every non-phone product surface.
       phone: { state: phone.state, missing: phone.missing },
     });
   });

@@ -78,10 +78,10 @@ export function scriptedJudge(options: ScriptedJudgeOptions): ScriptedJudge {
  * The judge seam as an executor is handed it, with no project and no store
  * behind it — for the unit tests that judge one conversation with one config.
  *
- * The whole path from a project's judge configuration to a resolved key has its
- * own tests and its own acceptance suite, through the real service. What is
- * stood in for here is only the resolution, so that "this rubric asked one
- * question and the answer became this row" is testable without a database.
+ * The whole path from a pinned grader version and current deployment credential
+ * to a provider client has its own service tests. What is stood in for here is
+ * only that client, so that "this rubric asked one question and the answer
+ * became this row" is testable without a database.
  */
 export function scriptedJudging(
   options: ScriptedJudgeOptions,

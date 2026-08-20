@@ -311,10 +311,9 @@ function describedTraitsFromRow(
 /**
  * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
  * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a `PersonaTraits` that isn't one. Shape only,
- * deliberately: the allowed provider list and the speed range may tighten
- * later, and an old version must stay readable exactly as it was written —
- * so the provider is taken on trust once it is a string.
+ * leak into a caller as a `PersonaTraits` that isn't one. This guard accepts
+ * only human behavior fields. Provider, model, voice, and speed are validated
+ * separately as the version's required `models` value.
  */
 function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
   const malformed = () =>
@@ -350,10 +349,10 @@ function traitsFromRow(value: unknown, versionId: string): PersonaTraits {
  * way jsonb re-ordered them.
  *
  * One comparator per field, in tables the compiler holds exhaustive: a field
- * added to the traits (or to the voice inside them) refuses to build until it
- * is also told how to compare. A hand-maintained comparator that missed a
- * field would call two different traits identical, and an edit would vanish
- * without a version — the one loss this whole file exists to rule out.
+ * added to the human traits refuses to build until it is also told how to
+ * compare. A hand-maintained comparator that missed a field would call two
+ * different traits identical, and an edit would vanish without a version —
+ * the one loss this whole file exists to rule out.
  */
 const sameTraitsField: {
   readonly [K in keyof PersonaTraits]-?: (
@@ -1358,9 +1357,6 @@ export async function forkPersona(
     );
   });
 }
-
-/** @deprecated Use the product word `forkPersona`. */
-export const clonePersona = forkPersona;
 
 /**
  * What a lifecycle change takes, beyond the persona it names.

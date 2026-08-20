@@ -37,26 +37,29 @@ def cartesia_voice(speed: float = 1.1) -> PersonaVoice:
     )
 
 
+@pytest.mark.parametrize("speed", [0.6, 1.5])
 def test_cartesia_receives_the_pinned_model_voice_and_speed(
     monkeypatch: pytest.MonkeyPatch,
+    speed: float,
 ):
     from pipecat.services.cartesia.tts import CartesiaTTSService
 
     calls = capture_construction(monkeypatch, CartesiaTTSService)
+    voice = cartesia_voice(speed)
     _leg, spoken_with, closers = _mouth(
         SpeechProviders(
             tts="cartesia",
             tts_key=A_KEY,
             tts_model="sonic-3.5",
         ),
-        cartesia_voice(),
+        voice,
     )
 
     settings = calls[0]["settings"]
     assert settings.model == "sonic-3.5"
     assert settings.voice == "pinned-cartesia-voice"
-    assert settings.generation_config.speed == pytest.approx(1.1)
-    assert spoken_with == cartesia_voice()
+    assert settings.generation_config.speed == pytest.approx(speed)
+    assert spoken_with == voice
     assert closers == ()
 
 
@@ -74,7 +77,7 @@ def test_cartesia_refuses_an_incomplete_selection(
         _mouth(providers, cartesia_voice())
 
 
-@pytest.mark.parametrize("speed", [0.5, 2.0])
+@pytest.mark.parametrize("speed", [0.5999, 1.5001])
 def test_cartesia_refuses_a_speed_it_cannot_honor(speed: float):
     with pytest.raises(SpeechFault, match="supported range"):
         _mouth(

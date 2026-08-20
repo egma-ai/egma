@@ -11,18 +11,8 @@ import {
 import { testConfig } from "./support/api.ts";
 
 /**
- * What a platform nobody has configured answers about its own setup: every
- * setting it needs, named in the words a person would use, and nothing else.
- */
-const NOTHING_SET_UP = {
-  state: "setup_required",
-  missing: ["the carrier trunk", "the source number"],
-};
-
-/**
- * And what its phone half answers: the two facts the carrier route
- * needs, named separately because a platform with no carrier still runs
- * text and chat simulations perfectly well.
+ * What an instance with no carrier answers about its optional phone half. The
+ * platform itself is ready because chat and text simulations can run.
  */
 const NO_CARRIER = {
   state: "setup_required",
@@ -57,18 +47,13 @@ it("keeps one public platform identity across an API restart", async () => {
       "origin",
       "phone",
       "repository_contract",
-      "setup",
     ]);
     expect(identity).toEqual({
       instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
       origin: config.baseUrl,
       repository_contract: REPOSITORY_CONTRACT,
-      // What the whole platform is still missing, read from the platform's own
-      // store rather than from this process's environment — which is why it
-      // survives a restart with nothing carried across but the database.
-      setup: NOTHING_SET_UP,
-      // Phone readiness is a separate public fact. A platform with no carrier
-      // still runs chat simulations even while setup names the missing route.
+      // Carrier setup is one optional capability. It does not make the whole
+      // platform unready when chat and text simulations can run.
       phone: NO_CARRIER,
     });
 
@@ -127,9 +112,8 @@ it("reads its identity rather than writing on every public request", async () =>
         // the build rather than anything in the store, so it is here on every
         // answer including the ones served entirely from memory.
         repository_contract: REPOSITORY_CONTRACT,
-        setup: NOTHING_SET_UP,
         // A platform with no carrier says so here rather than making a
-        // developer discover it during a phone run. Chat still works.
+        // developer discover it during a phone run. Chat and text still work.
         phone: NO_CARRIER,
       });
     }
@@ -168,7 +152,6 @@ it("reads its identity rather than writing on every public request", async () =>
       instance_id: minted.instance_id,
       origin: config.baseUrl,
       repository_contract: REPOSITORY_CONTRACT,
-      setup: NOTHING_SET_UP,
       phone: NO_CARRIER,
     });
   } finally {

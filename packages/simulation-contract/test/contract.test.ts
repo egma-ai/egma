@@ -222,6 +222,44 @@ describe("the two schemas, as one contract", () => {
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 
+  it("accepts only the shared speaking-speed range", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-loopback.json",
+    );
+    const withSpeed = (speed: number): Record<string, unknown> => {
+      const spec = structuredClone(base);
+      const models = spec.models as Record<string, Record<string, unknown>>;
+      const tts = models.tts;
+      if (tts === undefined) throw new Error("the valid fixture has no TTS selection");
+      tts.speed = speed;
+      return spec;
+    };
+
+    for (const speed of [0.6, 1.5]) {
+      const spec = withSpeed(speed);
+      expect(
+        validators.spec(spec),
+        `${speed}: ${ajv.errorsText(validators.spec.errors)}`,
+      ).toBe(true);
+    }
+
+    for (const [speed, keyword] of [
+      [0.5999, "minimum"],
+      [1.5001, "maximum"],
+    ] as const) {
+      expect(validators.spec(withSpeed(speed))).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/models/tts/speed",
+          keyword,
+        }),
+      );
+    }
+  });
+
   /**
    * The terminal facts are written once per status variant so that each
    * spells out the endings it may honestly claim. The price of writing them

@@ -106,7 +106,8 @@ describe("the platform carrier route", () => {
 
     const platform = await api.app.inject({ method: "GET", url: "/api/platform" });
     expect(platform.statusCode).toBe(200);
-    expect(platform.json().setup).toEqual({ state: "ready", missing: [] });
+    expect(platform.json().phone).toEqual({ state: "ready", missing: [] });
+    expect(platform.json()).not.toHaveProperty("setup");
   });
 
   it("seals the SIP password in storage", async () => {

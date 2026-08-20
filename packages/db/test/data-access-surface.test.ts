@@ -156,7 +156,6 @@ const CONTEXT_REQUIRING = [
   "appendVerdicts",
   "cancelRun",
   "changeRole",
-  "clonePersona",
   "cloneTest",
   "completeSimulation",
   // The type of one connection, by its id alone — the only connection read

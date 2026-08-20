@@ -384,7 +384,6 @@ export type {
 
 export {
   archivePersona,
-  clonePersona,
   createPersona,
   editPersona,
   forkPersona,

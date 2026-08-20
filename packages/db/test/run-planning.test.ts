@@ -578,21 +578,19 @@ describe("the grading plan a run freezes", () => {
 });
 
 /**
- * A project with no judge, and the three different runs it can ask for.
+ * A project and the three grader plans it can ask for.
  *
- * **The rule used to be "no judge, no run", and it stopped being true.** It
- * rested on the expected-behaviors grader being a built-in that was never a row
- * — every run carried it, it asks a model, so every run needed a judge. ADR-0009
- * made it an ordinary seeded copy, and deleting a copy is how a grader is
- * switched off. So the honest rule is about the plan rather than the project:
- * a run is refused when something in it would ask a model this project has not
- * configured, and nothing else about a missing judge refuses anything.
+ * The expected-behaviors grader used to be an implicit built-in. ADR-0009 made
+ * it an ordinary seeded copy, and deleting a copy is how a grader is switched
+ * off. A run now pins only the grader versions selected by its plan. A model-
+ * judged version carries its own model selection; a computed version carries
+ * no model at all.
  *
  * The three cases below are that rule, and the second and third are the ones
  * the old rule got wrong — it refused runs for a key they would never have
  * spent.
  */
-describe("a fresh project without project-level judge configuration", () => {
+describe("a run pins only the grader versions its plan selects", () => {
   /** A judge-less project with an agent, a persona and a test, and nothing else. */
   async function judgelessProject(slug: string): Promise<{
     readonly auth: AuthContext;
@@ -672,10 +670,8 @@ describe("a fresh project without project-level judge configuration", () => {
   });
 
   /**
-   * A project judging only by computation never asks a model, so a missing
-   * judge is nothing to it. The old rule refused this run, which is the shape
-   * of the whole reconciliation: a sentence that was true about a built-in
-   * nobody could remove, left standing over a row anybody can delete.
+   * A project judging only by computation never asks a model. Removing the
+   * seeded model grader therefore leaves one complete, executable plan.
    */
   it("starts a run whose graders are all computed rather than judged", async () => {
     const made = await judgelessProject("computed-only");

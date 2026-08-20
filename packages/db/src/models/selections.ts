@@ -25,7 +25,7 @@ export type PersonaModels = {
 
 export type GraderModel = ModelSelection;
 
-export const SPEED_RANGE = { slowest: 0.5, fastest: 2 } as const;
+export const SPEED_RANGE = { slowest: 0.6, fastest: 1.5 } as const;
 
 function validSelection(
   job: ModelJob,

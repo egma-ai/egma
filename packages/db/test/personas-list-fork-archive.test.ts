@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   archivePersona,
-  clonePersona,
   createPersona,
+  forkPersona,
   getPersona,
   getPersonaVersion,
   listPersonas,
@@ -24,10 +24,10 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 /**
- * List, clone, Archive and Restore — through the factory functions only, like
+ * List, Fork, Archive and Restore — through the factory functions only, like
  * the create
  * and fetch tests before them. Raw SQL appears in fixtures and in the one
- * count proving how many version rows a clone carries, which no seam lists
+ * count proving how many version rows a fork carries, which no seam lists
  * yet; every id an assertion needs comes off the seam itself.
  *
  * Each concern acts in a project of its own, so no assertion here depends on
@@ -39,7 +39,7 @@ let database: MigratedDatabase;
 const acme = {
   organization: newId("org"),
   listing: newId("prj"),
-  cloning: newId("prj"),
+  forking: newId("prj"),
   archiving: newId("prj"),
 };
 const globex = { organization: newId("org"), project: newId("prj") };
@@ -71,7 +71,7 @@ function actingAsGlobex(): AuthContext {
 function personaNamed(name: string): NewPersona {
   return {
     name,
-    description: `${name}, of the list-clone-archive tests`,
+    description: `${name}, of the list-fork-archive tests`,
     traits: {
       personality: `${name} books by phone, repeats the booking back twice, and hangs up satisfied.`,
       language: "en-US",
@@ -80,11 +80,11 @@ function personaNamed(name: string): NewPersona {
 }
 
 beforeAll(async () => {
-  database = await createConnectedDatabase("personas_list_clone_archive");
+  database = await createConnectedDatabase("personas_list_fork_archive");
 
   await seedOrganization(database, acme.organization, [
     { id: acme.listing, slug: "listing" },
-    { id: acme.cloning, slug: "cloning" },
+    { id: acme.forking, slug: "forking" },
     { id: acme.archiving, slug: "archiving" },
   ]);
   await seedOrganization(database, globex.organization, [
@@ -117,7 +117,7 @@ describe("listing personas", () => {
     // One in a sibling project and one at another customer, so "only the
     // acting project's" is a claim the assertions can actually falsify.
     neighbour = await createPersona(
-      actingIn(acme.cloning),
+      actingIn(acme.forking),
       personaNamed("Neighbour"),
     );
     stranger = await createPersona(actingAsGlobex(), personaNamed("Stranger"));
@@ -203,7 +203,7 @@ describe("listing personas", () => {
         .filter((item) => item.owner === "organization")
         .every((item) =>
           item.projectId !== null &&
-          [acme.listing, acme.cloning].includes(item.projectId),
+          [acme.listing, acme.forking].includes(item.projectId),
         ),
     ).toBe(true);
   });
@@ -233,46 +233,46 @@ describe("listing personas", () => {
   });
 });
 
-describe("cloning a persona", () => {
+describe("forking a persona", () => {
   let source: Persona;
 
   beforeAll(async () => {
-    source = await createPersona(actingIn(acme.cloning), personaNamed("Original"));
+    source = await createPersona(actingIn(acme.forking), personaNamed("Original"));
   });
 
   it("copies the current traits into a fresh persona at version 1, with its own ids", async () => {
-    const clone = await clonePersona(actingIn(acme.cloning), source.id);
+    const fork = await forkPersona(actingIn(acme.forking), source.id);
 
-    expect(clone).toBeDefined();
-    if (clone === undefined) throw new Error("unreachable");
-    expect(isId("prs", clone.id)).toBe(true);
-    expect(clone.id).not.toBe(source.id);
-    expect(clone.versionId).not.toBe(source.versionId);
-    expect(clone.version).toBe(1);
-    expect(clone.name).toBe(source.name);
-    expect(clone.description).toBe(source.description);
-    expect(clone.traits).toEqual(source.traits);
+    expect(fork).toBeDefined();
+    if (fork === undefined) throw new Error("unreachable");
+    expect(isId("prs", fork.id)).toBe(true);
+    expect(fork.id).not.toBe(source.id);
+    expect(fork.versionId).not.toBe(source.versionId);
+    expect(fork.version).toBe(1);
+    expect(fork.name).toBe(source.name);
+    expect(fork.description).toBe(source.description);
+    expect(fork.traits).toEqual(source.traits);
 
-    const fetched = await getPersona(actingIn(acme.cloning), clone.id);
+    const fetched = await getPersona(actingIn(acme.forking), fork.id);
     expect(fetched?.traits).toEqual(source.traits);
 
     // No shared history: one version row each, and not the same row.
     const sourceVersions = await versionIdsOf(source.id);
-    const cloneVersions = await versionIdsOf(clone.id);
+    const forkVersions = await versionIdsOf(fork.id);
     expect(sourceVersions).toHaveLength(1);
-    expect(cloneVersions).toHaveLength(1);
-    expect(cloneVersions[0]).not.toBe(sourceVersions[0]);
+    expect(forkVersions).toHaveLength(1);
+    expect(forkVersions[0]).not.toBe(sourceVersions[0]);
   });
 
   it("returns nothing for a persona the caller could not have fetched", async () => {
     expect(
-      await clonePersona(actingAsGlobex(), source.id),
+      await forkPersona(actingAsGlobex(), source.id),
     ).toBeUndefined();
     expect(
-      await clonePersona(actingIn(acme.archiving), source.id),
+      await forkPersona(actingIn(acme.archiving), source.id),
     ).toBeUndefined();
 
-    // Neither refused clone created anything. Both lists still contain only
+    // Neither refused fork created anything. Both lists still contain only
     // their earlier local rows plus the shared default persona.
     const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual([
@@ -287,19 +287,19 @@ describe("cloning a persona", () => {
 
   it("is refused to a viewer", async () => {
     await expect(
-      clonePersona(actingIn(acme.cloning, "viewer"), source.id),
+      forkPersona(actingIn(acme.forking, "viewer"), source.id),
     ).rejects.toThrow(NotPermittedError);
   });
 
-  it("is refused to a credential acting in no project, which has nowhere to put the clone", async () => {
+  it("is refused to a credential acting in no project, which has nowhere to put the fork", async () => {
     await expect(
-      clonePersona(actingIn(undefined), source.id),
+      forkPersona(actingIn(undefined), source.id),
     ).rejects.toThrow(/project/);
 
     // The refusal comes before the read, so an id that names nothing gets
     // the same loud answer — never an `undefined` that reads as invisible.
     await expect(
-      clonePersona(actingIn(undefined), newId("prs")),
+      forkPersona(actingIn(undefined), newId("prs")),
     ).rejects.toThrow(/project/);
   });
 });

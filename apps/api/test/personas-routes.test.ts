@@ -129,6 +129,7 @@ describe("creating and reading a persona", () => {
 
     expect(form.statusCode).toBe(200);
     expect(form.body.recommended_models).toEqual(RECOMMENDED_PERSONA_MODELS);
+    expect(form.body.speed_range).toEqual({ slowest: 0.6, fastest: 1.5 });
     expect(form.body.model_catalog).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -266,6 +267,42 @@ describe("creating and reading a persona", () => {
     expect(String(mismatchedStt.body.message)).toContain(
       "openai/nova-3-general",
     );
+  });
+
+  it("accepts only speaking speeds that can reach the simulator", async () => {
+    api = await createApi("personas_speed_range");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    for (const speed of [0.6, 1.5]) {
+      const made = await browse("POST", "/api/personas", ada, {
+        project: ada.projectId,
+        name: `Speed ${speed}`,
+        traits: TRAITS,
+        models: {
+          ...RECOMMENDED_PERSONA_MODELS,
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
+        },
+      });
+      expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
+      expect(personaIn(made).models.tts.speed).toBe(speed);
+    }
+
+    for (const speed of [0.5999, 1.5001]) {
+      const refused = await browse("POST", "/api/personas", ada, {
+        project: ada.projectId,
+        name: `Speed ${speed}`,
+        traits: TRAITS,
+        models: {
+          ...RECOMMENDED_PERSONA_MODELS,
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
+        },
+      });
+      expect(refused.statusCode).toBe(422);
+      expect(refused.body).toEqual({
+        error: "unprocessable",
+        message: "speaking speed must be between 0.6 and 1.5",
+      });
+    }
   });
 
   /**

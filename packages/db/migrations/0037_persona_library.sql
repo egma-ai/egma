@@ -160,7 +160,7 @@ ALTER TABLE "persona_version" ADD CONSTRAINT "persona_version_models_valid" CHEC
 	and nullif(btrim("persona_version"."models"->'tts'->>'voiceId'), '') is not null
 	and jsonb_path_exists(
 		"persona_version"."models",
-		'$.tts.speed ? (@.type() == "number" && @ >= 0.5 && @ <= 2)'::jsonpath
+		'$.tts.speed ? (@.type() == "number" && @ >= 0.6 && @ <= 1.5)'::jsonpath
 	)
 );--> statement-breakpoint
 

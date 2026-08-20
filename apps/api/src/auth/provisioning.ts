@@ -196,8 +196,8 @@ function constraintViolated(error: unknown): string | undefined {
  * The hook the provider fires once an identity is written.
  *
  * A new project receives its shared default persona and seeded grader in the
- * same database transaction. Provider credentials belong to the deployment,
- * so there is no project judge configuration to copy here.
+ * same database transaction. The grader version owns its model selection;
+ * provider credentials belong to the deployment.
  */
 export function onIdentityCreated(): IdentityHooks["onIdentityCreated"] {
   return async (identity, intent) => {

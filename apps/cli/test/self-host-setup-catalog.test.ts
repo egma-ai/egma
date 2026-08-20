@@ -14,7 +14,7 @@
  * What a drift would cost, in the order it would hurt:
  *
  * 1. **A setting the catalog requires and nothing supplies** leaves an operator
- *    who followed the setup interview still reading `setup required`.
+ *    who followed the setup interview still reading phone setup required.
  * 2. **A variable renamed on one side** is an interview and a seeder that
  *    disagree about which word feeds a setting, so an operator's exported value
  *    silently answers nothing.

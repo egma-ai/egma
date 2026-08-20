@@ -1,16 +1,17 @@
-import type { PlatformFacts, PlatformSettingName } from "@egma/db";
-
-import { holds, labelOf } from "./platform-readiness.ts";
+import {
+  PLATFORM_SETTINGS,
+  type PlatformFacts,
+  type PlatformSettingName,
+} from "@egma/db";
 
 /**
  * Whether this platform can place a phone call, and what is missing when it
  * cannot.
  *
- * **Platform readiness and phone readiness are two facts, not one.** A
- * deployment that has never been given a carrier still runs chat and text
- * simulations perfectly well, and saying it is unhealthy for that would be a
- * lie that stops a first-run story dead. So `self-host up` brings a platform up
- * *ready*, and this says separately whether the phone half has been set up.
+ * **Phone readiness is not platform readiness.** A deployment that has never
+ * been given a carrier still runs chat and text simulations. `self-host up`
+ * brings that platform up ready, and this says only whether it can place a
+ * phone call.
  *
  * **It is read from the platform's own store rather than from this process's
  * environment**, and that move is what makes the answer recoverable. The route
@@ -61,15 +62,31 @@ export const PHONE_SETUP_FACTS = {
   sourceNumber: "carrier_trunk_number",
 } as const satisfies Record<string, PlatformSettingName>;
 
+/** Read one setting's public label from the only platform-settings catalog. */
+function labelOf(name: PlatformSettingName): string {
+  const definition = PLATFORM_SETTINGS.find(
+    (setting) => setting.name === name,
+  );
+  return definition?.label ?? name;
+}
+
+/**
+ * Whether the store holds a setting at all.
+ *
+ * Presence is the fact because `platformFacts` returns `null` for a secret
+ * value. Testing the value would report every secret setting as missing.
+ */
+function holds(held: PlatformFacts, name: PlatformSettingName): boolean {
+  return Object.hasOwn(held, name);
+}
+
 export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
   const fact = (
     which: keyof typeof PHONE_SETUP_FACTS,
   ): string | null => held[PHONE_SETUP_FACTS[which]] ?? null;
 
-  // Asked with the same predicate the whole-platform answer asks, and never
-  // of the value: `platformFacts` answers `null` for every setting the catalog
-  // marks secret, so the day one of these three becomes a secret a value test
-  // would read it as absent forever. See `holds`.
+  // Ask about presence, never the value: `platformFacts` answers `null` for a
+  // secret, so a value test would read a secret setting as absent forever.
   const missing = (
     Object.keys(PHONE_SETUP_FACTS) as (keyof typeof PHONE_SETUP_FACTS)[]
   )

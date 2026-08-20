@@ -3246,6 +3246,45 @@ describe("persona availability over installed references (0037)", () => {
         constraint: "persona_version_traits_valid",
       });
 
+      for (const [offset, speed] of [0.6, 1.5].entries()) {
+        await prepared.client.query(
+          `insert into persona_version (id, persona_id, version, traits, models)
+           values ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+          [
+            newId("prsv"),
+            fixture.firstPersonaId,
+            2 + offset,
+            JSON.stringify({ personality: "Plain", language: "en-US" }),
+            JSON.stringify({
+              ...validModels,
+              tts: { ...validModels.tts, speed },
+            }),
+          ],
+        );
+      }
+
+      for (const [offset, speed] of [0.5999, 1.5001].entries()) {
+        await expect(
+          prepared.client.query(
+            `insert into persona_version (id, persona_id, version, traits, models)
+             values ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+            [
+              newId("prsv"),
+              fixture.firstPersonaId,
+              4 + offset,
+              JSON.stringify({ personality: "Plain", language: "en-US" }),
+              JSON.stringify({
+                ...validModels,
+                tts: { ...validModels.tts, speed },
+              }),
+            ],
+          ),
+        ).rejects.toMatchObject({
+          code: "23514",
+          constraint: "persona_version_models_valid",
+        });
+      }
+
       await expect(
         prepared.client.query(
           `update persona_version
@@ -3268,12 +3307,12 @@ describe("persona availability over installed references (0037)", () => {
         [authorId, `${authorId}@example.com`],
       );
       await prepared.client.query(
-        "update persona_version set created_by = $1 where persona_id = $2",
+        "update persona_version set created_by = $1 where persona_id = $2 and version = 1",
         [authorId, fixture.firstPersonaId],
       );
       await prepared.client.query(`delete from "user" where id = $1`, [authorId]);
       const authors = await prepared.client.query<{ created_by: string | null }>(
-        "select created_by from persona_version where persona_id = $1",
+        "select created_by from persona_version where persona_id = $1 and version = 1",
         [fixture.firstPersonaId],
       );
       expect(authors.rows).toEqual([{ created_by: null }]);

@@ -2665,9 +2665,9 @@ describe("the complete product, walked in order in a second project", () => {
         "#persona-description",
         "Somebody in a hurry, calling from a busy place.",
       );
-      // Who they are, which is the whole of a persona — never what they want,
-      // which is the test's. Customer authoring asks for one complete
-      // personality and keeps the platform's speech settings internal.
+      // Who they are, never what they want, which belongs to the test. Human
+      // traits and the separate Models section are saved together in the same
+      // immutable persona version.
       await walk.fill(
         "#persona-personality",
         "Speaks quickly, interrupts, and wants the answer before the greeting is over.",
