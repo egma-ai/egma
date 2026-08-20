@@ -25,8 +25,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
-import { Select } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
@@ -284,14 +284,21 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
         mayManage ? (
           <Select
             id={`role-${member.user_id}`}
-            label={`${member.email} role`}
+            aria-label={`${member.email} role`}
             value={member.role}
             disabled={busy}
-            options={ASSIGNABLE_ROLES.map((one) => ({ value: one, label: one }))}
-            onChange={(next) =>
-              void act(memberActionPath(member.user_id, "role"), { role: next })
+            onChange={(event) =>
+              void act(memberActionPath(member.user_id, "role"), {
+                role: event.target.value,
+              })
             }
-          />
+          >
+            {ASSIGNABLE_ROLES.map((one) => (
+              <option key={one} value={one}>
+                {one}
+              </option>
+            ))}
+          </Select>
         ) : (
           member.role
         ),
@@ -623,12 +630,14 @@ function Invitations({
                 id="invite-role"
                 value={role}
                 disabled={busy}
-                options={ASSIGNABLE_ROLES.map((one) => ({
-                  value: one,
-                  label: one,
-                }))}
-                onChange={setRole}
-              />
+                onChange={(event) => setRole(event.target.value)}
+              >
+                {ASSIGNABLE_ROLES.map((one) => (
+                  <option key={one} value={one}>
+                    {one}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </FormRow>
           <FormActions>

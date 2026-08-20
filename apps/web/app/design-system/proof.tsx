@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog as BaseDialog,
   DialogClose,
@@ -39,18 +40,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 import type { Me } from "../../lib/me.ts";
 import type { EvidenceTranscript } from "../../lib/simulations.ts";
 import { Choice } from "../../ui/choice.tsx";
-import {
-  Badge,
-  Button,
-  Checkbox,
-  Select,
-  TextArea,
-  TextInput,
-} from "../../ui/controls.tsx";
 import { DataTable, type Column } from "../../ui/data-table.tsx";
 import { Dialog } from "../../ui/dialog.tsx";
 import { Transcript } from "../../ui/evidence.tsx";
@@ -103,7 +98,9 @@ const COLUMNS: readonly Column<ProofAgent>[] = [
     key: "state",
     header: "State",
     cell: (agent) => (
-      <Badge tone={agent.state === "Active" ? "good" : "neutral"}>{agent.state}</Badge>
+      <BaseBadge variant={agent.state === "Active" ? "success" : "neutral"}>
+        {agent.state}
+      </BaseBadge>
     ),
   },
   { key: "id", header: "Identifier", mono: true, cell: (agent) => agent.id },
@@ -190,11 +187,11 @@ export function DesignSystemProof() {
           <p className={styles.kicker}>Component base — shadcn on Tailwind</p>
           <div className="flex flex-col gap-8">
             <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
-              The primitives every new screen is built from. Nothing here sets a
+              The primitives every screen is built from. Nothing here sets a
               colour, a radius, or a duration of its own: the Tailwind theme
               reads <code className="font-mono text-sm">ui/tokens.css</code>, so
-              these surfaces and the CSS Modules surfaces below cannot disagree
-              while both exist.
+              a value is changed in that one file and every surface on this page
+              changes with it.
             </p>
 
             <div className="flex flex-col gap-4">
@@ -220,14 +217,10 @@ export function DesignSystemProof() {
                 </BaseButton>
               </div>
               <p className="m-0 text-sm text-muted-foreground">
-                Beside the CSS Modules button, which reads the same tokens:
+                The filled one is the page&apos;s main action and there is one
+                of it. Every other button on a screen is one of the quieter
+                kinds.
               </p>
-              <div className="flex flex-wrap items-center gap-3">
-                <BaseButton>Base primary</BaseButton>
-                <Button weight="strong">Modules primary</Button>
-                <BaseButton variant="secondary">Base secondary</BaseButton>
-                <Button>Modules secondary</Button>
-              </div>
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">
@@ -282,7 +275,7 @@ export function DesignSystemProof() {
             </div>
 
             {/*
-              * The numeric field, which the shared control set never had.
+              * The numeric field, which the base has no primitive for.
               *
               * Its whole reason for existing is that a bound and a unit belong
               * on the control rather than in a sentence beside it, so the proof
@@ -452,10 +445,23 @@ export function DesignSystemProof() {
             projectId="prj_proof"
           />
           <div className={styles.actions}>
-            <Button weight="strong" onClick={() => setDialog(true)}>Register agent</Button>
-            <Button>Quiet action</Button>
-            <Button disabled why="Only an administrator can archive this agent.">Archive</Button>
-            <Button busy>Saving agent…</Button>
+            <BaseButton type="button" onClick={() => setDialog(true)}>
+              Register agent
+            </BaseButton>
+            <BaseButton type="button" variant="secondary">
+              Quiet action
+            </BaseButton>
+            <BaseButton
+              type="button"
+              variant="secondary"
+              disabled
+              why="Only an administrator can archive this agent."
+            >
+              Archive
+            </BaseButton>
+            <BaseButton type="button" variant="secondary" busy>
+              Saving agent…
+            </BaseButton>
             <Tooltip label="This copies the current project identifier.">
               <button className={styles.tooltipTrigger} type="button">Copy identifier</button>
             </Tooltip>
@@ -467,19 +473,23 @@ export function DesignSystemProof() {
                 nextFeedbackInput.current = "keyboard";
               }}
             >
-              <Button onClick={() => {
-                setToastInput(nextFeedbackInput.current);
-                setToast(true);
-              }}>
+              <BaseButton
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setToastInput(nextFeedbackInput.current);
+                  setToast(true);
+                }}
+              >
                 Show saved feedback
-              </Button>
+              </BaseButton>
             </span>
           </div>
           <div className={styles.badges}>
-            <Badge>Viewer</Badge>
-            <Badge tone="good">Passed</Badge>
-            <Badge tone="warn">Skipped</Badge>
-            <Badge tone="bad">Failed</Badge>
+            <BaseBadge>Viewer</BaseBadge>
+            <BaseBadge variant="success">Passed</BaseBadge>
+            <BaseBadge variant="warning">Skipped</BaseBadge>
+            <BaseBadge variant="failure">Failed</BaseBadge>
             <VerdictBadge verdict="errored" />
           </div>
         </article>
@@ -519,51 +529,64 @@ export function DesignSystemProof() {
             <Form>
               <FormRow>
                 <Field label="Name" htmlFor="proof-name" hint="Use the name your team already uses.">
-                  <TextInput id="proof-name" value={name} onChange={setName} />
+                  <Input
+                    id="proof-name"
+                    value={name}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) => setName(event.target.value)}
+                  />
                 </Field>
                 <Field label="Environment" htmlFor="proof-environment">
                   <Select
                     id="proof-environment"
                     value={environment}
-                    options={[
-                      { value: "staging", label: "Staging" },
-                      { value: "production", label: "Production" },
-                    ]}
-                    onChange={setEnvironment}
-                  />
+                    onChange={(event) =>
+                      setEnvironment(
+                        event.target.value as "staging" | "production",
+                      )
+                    }
+                  >
+                    <option value="staging">Staging</option>
+                    <option value="production">Production</option>
+                  </Select>
                 </Field>
                 <Field
                   label="Max concurrency"
                   htmlFor="proof-concurrency"
                   hint="Local runs use one shared concurrency value."
                 >
-                  <TextInput
+                  <Input
                     id="proof-concurrency"
+                    type="number"
                     value={maxConcurrency}
-                    numeric
-                    onChange={setMaxConcurrency}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) => setMaxConcurrency(event.target.value)}
                   />
                 </Field>
               </FormRow>
               <Field label="Description" htmlFor="proof-description">
-                <TextArea
+                <Textarea
                   id="proof-description"
                   rows={4}
                   value={description}
-                  onChange={setDescription}
+                  onChange={(event) => setDescription(event.target.value)}
                 />
               </Field>
               <div className={styles.checkboxRow}>
                 <Checkbox
                   id="proof-archived"
                   checked={includeArchived}
-                  onChange={setIncludeArchived}
+                  onChange={(event) => setIncludeArchived(event.target.checked)}
                 />
                 <label htmlFor="proof-archived">Include archived tests in this run</label>
               </div>
               <FormActions>
-                <Button weight="strong" type="submit">Save agent</Button>
-                <Button>Cancel</Button>
+                <BaseButton type="submit">Save agent</BaseButton>
+                <BaseButton type="button" variant="secondary">
+                  Cancel
+                </BaseButton>
               </FormActions>
             </Form>
           </Section>
@@ -574,7 +597,11 @@ export function DesignSystemProof() {
           <SettingsNav projectId="prj_proof" current="judge" />
           <Refused
             message="Your viewer role cannot change the default judge. Your draft is still here."
-            action={<Button>Review project access</Button>}
+            action={
+              <BaseButton type="button" variant="secondary">
+                Review project access
+              </BaseButton>
+            }
           />
         </article>
 
@@ -593,9 +620,11 @@ export function DesignSystemProof() {
               <div className={styles.narrowFrame}>
                 <SettingsNav projectId="prj_proof" current="project" />
                 <Field label="Run name" htmlFor="proof-narrow-name">
-                  <TextInput
+                  <Input
                     id="proof-narrow-name"
                     value="Regression check"
+                    autoComplete="off"
+                    spellCheck={false}
                     onChange={() => undefined}
                   />
                 </Field>
@@ -612,7 +641,7 @@ export function DesignSystemProof() {
                 <span>Spatial movement is removed; color and opacity stay brief</span>
               </header>
               <div className={styles.reducedActions}>
-                <Button weight="strong">Run test</Button>
+                <BaseButton type="button">Run test</BaseButton>
                 <Tooltip label="Keyboard and reduced-motion feedback does not move.">
                   <button className={styles.tooltipTrigger} type="button">Read motion rule</button>
                 </Tooltip>
@@ -627,7 +656,9 @@ export function DesignSystemProof() {
               <p className={styles.kicker}>Dense data</p>
               <h2>Agents</h2>
             </div>
-            <Actions><Button weight="strong">Register agent</Button></Actions>
+            <Actions>
+              <BaseButton type="button">Register agent</BaseButton>
+            </Actions>
           </div>
           <DataTable label="Proof agents" columns={COLUMNS} rows={AGENTS} keyOf={(agent) => agent.id} />
         </article>
@@ -655,8 +686,16 @@ export function DesignSystemProof() {
                 Existing runs and simulations stay available. New runs cannot use this agent.
               </p>
               <div className={styles.dialogActions}>
-                <Button onClick={dismiss}>Cancel</Button>
-                <Button tone="destructive" onClick={() => setDialog(false)}>Archive agent</Button>
+                <BaseButton type="button" variant="secondary" onClick={dismiss}>
+                  Cancel
+                </BaseButton>
+                <BaseButton
+                  type="button"
+                  variant="destructive"
+                  onClick={() => setDialog(false)}
+                >
+                  Archive agent
+                </BaseButton>
               </div>
             </>
           )}

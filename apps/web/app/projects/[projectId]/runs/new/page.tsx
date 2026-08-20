@@ -31,9 +31,10 @@ import {
   type TestPage,
 } from "../../../../../lib/tests.ts";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Checkbox, Select } from "../../../../../ui/controls.tsx";
 import { Field, Problem, Refused } from "../../../../../ui/form.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
@@ -397,20 +398,20 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                 ) : (
                   <Select
                     id="run-agent"
-                    label="Agent"
+                    aria-label="Agent"
                     value={agentId}
-                    onChange={(next) => {
+                    onChange={(event) => {
                       beginNewIntent();
-                      setAgentId(next);
+                      setAgentId(event.target.value);
                     }}
-                    options={[
-                      { value: "", label: "Choose an agent" },
-                      ...active.map((one) => ({
-                        value: one.id,
-                        label: one.name,
-                      })),
-                    ]}
-                  />
+                  >
+                    <option value="">Choose an agent</option>
+                    {active.map((one) => (
+                      <option key={one.id} value={one.id}>
+                        {one.name}
+                      </option>
+                    ))}
+                  </Select>
                 )}
               </Step>
 
@@ -441,20 +442,20 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                 ) : (
                   <Select
                     id="run-connection"
-                    label="Connection"
+                    aria-label="Connection"
                     value={connectionId}
-                    onChange={(next) => {
+                    onChange={(event) => {
                       beginNewIntent();
-                      setConnectionId(next);
+                      setConnectionId(event.target.value);
                     }}
-                    options={[
-                      { value: "", label: "Choose a connection" },
-                      ...connections.map((one) => ({
-                        value: one.id,
-                        label: connectionLabel(one),
-                      })),
-                    ]}
-                  />
+                  >
+                    <option value="">Choose a connection</option>
+                    {connections.map((one) => (
+                      <option key={one.id} value={one.id}>
+                        {connectionLabel(one)}
+                      </option>
+                    ))}
+                  </Select>
                 )}
               </Step>
 
@@ -660,11 +661,11 @@ function TestChoices({
             >
               <Checkbox
                 id={inputId}
-                label={`Include ${test.name}`}
+                aria-label={`Include ${test.name}`}
                 checked={chosen.includes(test.id)}
-                onChange={(checked) =>
+                onChange={(event) =>
                   onChoose(
-                    checked
+                    event.target.checked
                       ? [...chosen, test.id]
                       : chosen.filter((one) => one !== test.id),
                   )

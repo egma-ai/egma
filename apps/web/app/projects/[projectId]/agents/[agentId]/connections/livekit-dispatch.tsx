@@ -1,6 +1,7 @@
 "use client";
 
-import { Select, TextInput } from "../../../../../../ui/controls.tsx";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Field } from "../../../../../../ui/form.tsx";
 import type { ConnectionVariant } from "../../../../../../lib/connection-types.ts";
 
@@ -102,15 +103,16 @@ export function LiveKitDispatchSetup({
             : "LiveKit sends the room to any available agent that accepts automatic dispatch. Egma stores no agent name."
         }
       >
-        <Select<LiveKitDispatch>
+        <Select
           id="livekit-dispatch"
           value={mode}
-          options={[
-            { value: "named", label: "Named agent — Recommended" },
-            { value: "automatic", label: "Automatic dispatch" },
-          ]}
-          onChange={onModeChange}
-        />
+          onChange={(event) =>
+            onModeChange(event.target.value as LiveKitDispatch)
+          }
+        >
+          <option value="named">Named agent — Recommended</option>
+          <option value="automatic">Automatic dispatch</option>
+        </Select>
       </Field>
       {mode === "named" ? (
         <Field
@@ -118,12 +120,14 @@ export function LiveKitDispatchSetup({
           htmlFor="livekit-agent-name"
           hint="Enter the exact agent name registered by the deployed LiveKit worker. A different name prevents the agent from joining the room."
         >
-          <TextInput
+          <Input
             id="livekit-agent-name"
             value={agentName}
             required
             placeholder="The deployed agent's exact name"
-            onChange={onAgentNameChange}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(event) => onAgentNameChange(event.target.value)}
           />
         </Field>
       ) : null}

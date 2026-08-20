@@ -2,7 +2,8 @@
 
 import type { ReactNode } from "react";
 
-import { TextArea, TextInput } from "../../../../../../ui/controls.tsx";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Field, Help } from "../../../../../../ui/form.tsx";
 import type {
   ConnectionVariant,
@@ -50,15 +51,22 @@ function ConfigControl({
       htmlFor={id}
     >
       {field.kind === "json" ? (
-        <TextArea
+        <Textarea
           id={id}
           value={value}
           rows={3}
-          describedBy={helpId}
-          onChange={onChange}
+          aria-describedby={helpId}
+          onChange={(event) => onChange(event.target.value)}
         />
       ) : (
-        <TextInput id={id} value={value} describedBy={helpId} onChange={onChange} />
+        <Input
+          id={id}
+          value={value}
+          aria-describedby={helpId}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => onChange(event.target.value)}
+        />
       )}
       <Help id={helpId}>{field.help}</Help>
     </Field>
@@ -83,20 +91,22 @@ function CredentialControl({
         // A set of headers is secret in its values and ordinary in its names,
         // and it is too long for one line — so it gets room rather than a
         // password box that would hide what somebody is trying to paste.
-        <TextArea
+        <Textarea
           id={id}
           value={value}
           rows={3}
-          describedBy={helpId}
-          onChange={onChange}
+          aria-describedby={helpId}
+          onChange={(event) => onChange(event.target.value)}
         />
       ) : (
-        <TextInput
+        <Input
           id={id}
           value={value}
-          secret
-          describedBy={helpId}
-          onChange={onChange}
+          type="password"
+          autoComplete="new-password"
+          aria-describedby={helpId}
+          spellCheck={false}
+          onChange={(event) => onChange(event.target.value)}
         />
       )}
       <Help id={helpId}>{field.help}</Help>

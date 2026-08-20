@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { readJson, writeJson, type Refusal } from "../../../../../../lib/api.ts";
 import {
   agentDetailQuery,
@@ -19,12 +22,6 @@ import {
   type TestPage,
 } from "../../../../../../lib/tests.ts";
 import { Actions, Section } from "../../../../../../ui/section.tsx";
-import {
-  Button,
-  ButtonLink,
-  Checkbox,
-  TextInput,
-} from "../../../../../../ui/controls.tsx";
 import {
   Form,
   FormActions,
@@ -335,24 +332,28 @@ function AttachTests({
             lead="Finish this agent now, then write a test when you are ready to check it."
             action={
               <Actions>
-                <ButtonLink href={projectPath(projectId, "tests", "new")}>
-                  Leave setup and write a test
-                </ButtonLink>
-                <ButtonLink href={detailPath} weight="strong">
-                  Finish setup
-                </ButtonLink>
+                <Button asChild variant="secondary">
+                  <Link href={projectPath(projectId, "tests", "new")}>
+                    Leave setup and write a test
+                  </Link>
+                </Button>
+                <Button asChild>
+                  <Link href={detailPath}>Finish setup</Link>
+                </Button>
               </Actions>
             }
           />
         ) : (
           <Form onSubmit={() => void attachAndFinish()}>
-            <TextInput
+            <Input
               id="agent-onboarding-test-search"
-              label="Search tests by name"
+              aria-label="Search tests by name"
               placeholder="Search tests"
               value={typedSearch}
               disabled={saving}
-              onChange={setTypedSearch}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setTypedSearch(event.target.value)}
             />
             <Section
               title="Project tests"
@@ -360,6 +361,8 @@ function AttachTests({
               action={
                 <Actions>
                   <Button
+                    type="button"
+                    variant="secondary"
                     disabled={
                       saving ||
                       busyTests ||
@@ -379,6 +382,8 @@ function AttachTests({
                     Select page
                   </Button>
                   <Button
+                    type="button"
+                    variant="secondary"
                     disabled={saving || pending.length === 0}
                     onClick={() => setSelected(new Set(attached))}
                   >
@@ -403,7 +408,8 @@ function AttachTests({
                         id={field}
                         checked={selected.has(test.id)}
                         disabled={saving || alreadyAttached}
-                        onChange={(checked) => {
+                        onChange={(event) => {
+                          const checked = event.target.checked;
                           setSelected((held) => {
                             const next = new Set(held);
                             if (checked) next.add(test.id);
@@ -437,12 +443,16 @@ function AttachTests({
                 <span>{busyTests ? "Loading…" : `Page ${String(page + 1)}`}</span>
                 <Actions>
                   <Button
+                    type="button"
+                    variant="secondary"
                     disabled={saving || busyTests || page === 0}
                     onClick={() => setPage(page - 1)}
                   >
                     Previous
                   </Button>
                   <Button
+                    type="button"
+                    variant="secondary"
                     disabled={
                       saving ||
                       busyTests ||
@@ -457,7 +467,11 @@ function AttachTests({
               {readRefused === null ? null : (
                 <div className={styles.readProblem}>
                   <Problem>{readRefused.message}</Problem>
-                  <Button onClick={() => setAttempt((held) => held + 1)}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setAttempt((held) => held + 1)}
+                  >
                     Try again
                   </Button>
                 </div>
@@ -469,7 +483,6 @@ function AttachTests({
             <FormActions>
               <Button
                 type="submit"
-                weight="strong"
                 disabled={saving || !mayAuthor || selected.size === 0}
                 busy={saving}
               >
@@ -480,7 +493,9 @@ function AttachTests({
                     : `Attach ${String(pending.length)} ${pending.length === 1 ? "test" : "tests"} and finish`}
               </Button>
               {attached.size === 0 ? (
-                <ButtonLink href={detailPath}>Skip tests for now</ButtonLink>
+                <Button asChild variant="secondary">
+                  <Link href={detailPath}>Skip tests for now</Link>
+                </Button>
               ) : null}
             </FormActions>
             {attached.size === 0 ? (

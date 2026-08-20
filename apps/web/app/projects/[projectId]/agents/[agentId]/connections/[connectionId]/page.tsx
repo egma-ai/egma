@@ -3,6 +3,8 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
 import {
   agentDetailQuery,
@@ -21,7 +23,6 @@ import { roleOf } from "../../../../../../../lib/me.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import { Actions } from "../../../../../../../ui/section.tsx";
-import { Button, TextInput } from "../../../../../../../ui/controls.tsx";
 import {
   Field,
   Form,
@@ -240,6 +241,8 @@ function ConnectionDetail({
           role === null ? undefined : (
             <Actions>
               <Button
+                type="button"
+                variant="secondary"
                 disabled={!mayAuthor || variant === undefined}
                 why={
                   variant === undefined
@@ -409,12 +412,14 @@ function EditConnection({
       {(dismiss) => (
         <Form onSubmit={() => void save()}>
           <Field label="Name" htmlFor="edit-connection-name">
-            <TextInput
+            <Input
               id="edit-connection-name"
               value={name}
-              invalid={nameProblem !== null}
-              onChange={(value) => {
-                setName(value);
+              aria-invalid={nameProblem !== null ? true : undefined}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => {
+                setName(event.target.value);
                 if (nameProblem !== null) setNameProblem(null);
               }}
             />
@@ -445,7 +450,6 @@ function EditConnection({
           <FormActions>
             <Button
               type="submit"
-              weight="strong"
               disabled={saving || !changed || !liveKitForm.ready}
               why={
                 liveKitForm.ready
@@ -455,7 +459,9 @@ function EditConnection({
             >
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button onClick={dismiss}>Cancel</Button>
+            <Button type="button" variant="secondary" onClick={dismiss}>
+              Cancel
+            </Button>
           </FormActions>
         </Form>
       )}

@@ -11,8 +11,8 @@ import {
 } from "../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
-import { TextArea } from "../../../../ui/controls.tsx";
 import {
   Field,
   Form,
@@ -293,13 +293,14 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                 htmlFor="project-description"
                 hint="Optional. What this project is for, for whoever opens the selector next."
               >
-                <TextArea
+                <Textarea
                   id="project-description"
                   value={description}
+                  rows={3}
                   disabled={!mayAdminister}
-                  onChange={(next) => {
+                  onChange={(event) => {
                     editVersion.current += 1;
-                    setDescription(next);
+                    setDescription(event.target.value);
                     setSaved(false);
                   }}
                 />

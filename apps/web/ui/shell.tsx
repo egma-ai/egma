@@ -663,9 +663,10 @@ export function ProductPage({
           "flex h-svh min-h-0 flex-col overflow-hidden",
           "max-[900px]:h-[calc(100svh-var(--topbar-height))]",
           /*
-           * Settings is a workspace rather than a long document: the page title
-           * stays put and the body owns the remaining height. The rule is on
-           * the page because only the page knows it was asked for a viewport.
+           * Settings is a set of views rather than a long document: the page
+           * title stays put and the body owns the remaining height. The rule
+           * is on the page because only the page knows it was asked for a
+           * viewport.
            */
           "[&>[data-slot=page-body]]:min-h-0",
           "[&>[data-slot=page-body]]:flex-1",

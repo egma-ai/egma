@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { readJson, type Refusal } from "../../../../lib/api.ts";
 import {
   agentsQuery,
@@ -13,7 +15,6 @@ import {
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
-import { ButtonLink, TextInput } from "../../../../ui/controls.tsx";
 import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
@@ -197,15 +198,14 @@ function Agents({ projectId }: { readonly projectId: string }) {
    * their agent, and registering one is the first half of that.
    */
   const connect = () =>
-    role === null ? undefined : (
-      <ButtonLink
-        href={projectPath(projectId, "agents", "new")}
-        weight="strong"
-        disabled={!mayConnect}
-        why={mayConnect ? undefined : whyNot}
-      >
+    role === null ? undefined : mayConnect ? (
+      <Button asChild>
+        <Link href={projectPath(projectId, "agents", "new")}>Connect agent</Link>
+      </Button>
+    ) : (
+      <Button type="button" disabled why={whyNot}>
         Connect agent
-      </ButtonLink>
+      </Button>
     );
 
   const header = (
@@ -228,9 +228,11 @@ function Agents({ projectId }: { readonly projectId: string }) {
           message={answer.refusal.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -377,12 +379,14 @@ function Agents({ projectId }: { readonly projectId: string }) {
             <div className="flex flex-wrap items-center gap-3">
               {connect()}
             </div>
-            <TextInput
+            <Input
               id="agent-search"
               value={typed}
-              label="Search agents by name"
+              aria-label="Search agents by name"
               placeholder="Search by name"
-              onChange={setTyped}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setTyped(event.target.value)}
             />
           </Toolbar>
         )}

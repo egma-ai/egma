@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 
 import { withReturnTo } from "../../../lib/return-to.ts";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 
-import { Select } from "../../../ui/controls.tsx";
 import { AuthShell, LinkLine, Notice, StatePage } from "../../ui.tsx";
 
 /**
@@ -192,12 +192,14 @@ export default function ApproveDevicePage() {
               <Select
                 id="project"
                 value={projectId}
-                options={projects.map((project) => ({
-                  value: project.id,
-                  label: project.name,
-                }))}
-                onChange={setProjectId}
-              />
+                onChange={(event) => setProjectId(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </Select>
             </dd>
           </div>
         ) : (

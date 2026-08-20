@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
   agentDetailQuery,
@@ -17,12 +20,6 @@ import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { Actions, Section } from "../../../../../ui/section.tsx";
-import {
-  Button,
-  ButtonLink,
-  TextArea,
-  TextInput,
-} from "../../../../../ui/controls.tsx";
 import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
@@ -242,12 +239,16 @@ function AgentDetailView({
                * agent from the list. Hidden while the agent is archived,
                * because an archived agent cannot enter new work at all.
                */}
-              <ButtonLink
-                href={`${projectPath(projectId, "runs", "new")}?agent=${encodeURIComponent(agent.id)}`}
-              >
-                Create a run
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link
+                  href={`${projectPath(projectId, "runs", "new")}?agent=${encodeURIComponent(agent.id)}`}
+                >
+                  Create a run
+                </Link>
+              </Button>
               <Button
+                type="button"
+                variant="secondary"
                 disabled={!mayAuthor}
                 onClick={() => setEditing(true)}
               >
@@ -262,20 +263,24 @@ function AgentDetailView({
           title="Connections"
           lead="How Egma reaches this agent."
           action={
-            role === null ? undefined : (
-              <ButtonLink
-                href={projectPath(
-                  projectId,
-                  "agents",
-                  agentId,
-                  "connections",
-                  "new",
-                )}
-                disabled={!mayAuthor}
-                why={whyNot}
-              >
+            role === null ? undefined : mayAuthor ? (
+              <Button asChild variant="secondary">
+                <Link
+                  href={projectPath(
+                    projectId,
+                    "agents",
+                    agentId,
+                    "connections",
+                    "new",
+                  )}
+                >
+                  Add connection
+                </Link>
+              </Button>
+            ) : (
+              <Button type="button" variant="secondary" disabled why={whyNot}>
                 Add connection
-              </ButtonLink>
+              </Button>
             )
           }
         >
@@ -385,13 +390,17 @@ function EditAgent({
       {(dismiss) => (
         <Form onSubmit={() => void save()}>
           <Field label="Name" htmlFor="edit-agent-name">
-            <TextInput
+            <Input
               id="edit-agent-name"
               value={name}
-              invalid={nameProblem !== null}
-              describedBy={nameProblem === null ? undefined : "edit-agent-name-problem"}
-              onChange={(next) => {
-                setName(next);
+              aria-invalid={nameProblem !== null ? true : undefined}
+              aria-describedby={
+                nameProblem === null ? undefined : "edit-agent-name-problem"
+              }
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => {
+                setName(event.target.value);
                 if (nameProblem !== null) setNameProblem(null);
               }}
             />
@@ -401,21 +410,23 @@ function EditAgent({
           </Field>
 
           <Field label="Description" htmlFor="edit-agent-description">
-            <TextArea
+            <Textarea
               id="edit-agent-description"
               value={description}
               rows={3}
-              onChange={setDescription}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </Field>
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
 
           <FormActions>
-            <Button type="submit" weight="strong" disabled={saving}>
+            <Button type="submit" disabled={saving}>
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button onClick={dismiss}>Cancel</Button>
+            <Button type="button" variant="secondary" onClick={dismiss}>
+              Cancel
+            </Button>
           </FormActions>
         </Form>
       )}

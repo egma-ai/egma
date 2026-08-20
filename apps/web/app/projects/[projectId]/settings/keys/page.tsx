@@ -18,8 +18,8 @@ import {
 } from "../../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
-import { Select } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
@@ -322,18 +322,17 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                         id="key-scope"
                         value={scope}
                         disabled={busy}
-                        options={[
-                          ...projects.map((project) => ({
-                            value: project.id,
-                            label: `Project · ${project.name}`,
-                          })),
-                          {
-                            value: WHOLE_ORGANIZATION,
-                            label: "Whole organization",
-                          },
-                        ]}
-                        onChange={setScope}
-                      />
+                        onChange={(event) => setScope(event.target.value)}
+                      >
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {`Project · ${project.name}`}
+                          </option>
+                        ))}
+                        <option value={WHOLE_ORGANIZATION}>
+                          Whole organization
+                        </option>
+                      </Select>
                     </Field>
                   </FormRow>
                   <FormActions>

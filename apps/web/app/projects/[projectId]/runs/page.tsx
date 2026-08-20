@@ -26,8 +26,8 @@ import {
 } from "../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Actions, Toolbar } from "../../../../ui/section.tsx";
-import { Select } from "../../../../ui/controls.tsx";
 import { Refused } from "../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
@@ -572,43 +572,59 @@ function Runs({ projectId }: { readonly projectId: string }) {
           <Select
             id="runs-agent"
             value={agent}
-            label="Show only runs against one agent"
-            options={[
-              { value: "", label: "Any agent" },
-              ...agentRows.map((one) => ({ value: one.id, label: one.name })),
-            ]}
-            onChange={setAgent}
-          />
+            aria-label="Show only runs against one agent"
+            onChange={(event) => setAgent(event.target.value)}
+          >
+            <option value="">Any agent</option>
+            {agentRows.map((one) => (
+              <option key={one.id} value={one.id}>
+                {one.name}
+              </option>
+            ))}
+          </Select>
           <Select
             id="runs-connection"
             value={connection}
-            label="Show only runs over one connection"
-            options={[
-              { value: "", label: "Any connection" },
-              ...[...connections].map(([id, label]) => ({ value: id, label })),
-            ]}
-            onChange={setConnection}
-          />
+            aria-label="Show only runs over one connection"
+            onChange={(event) => setConnection(event.target.value)}
+          >
+            <option value="">Any connection</option>
+            {[...connections].map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </Select>
           <Select
             id="runs-status"
             value={status}
-            label="Show only runs whose machinery is in one state"
-            options={[
-              { value: "", label: "Any run state" },
-              ...RUN_STATUS_WORDS.map((one) => ({ value: one, label: one })),
-            ]}
-            onChange={(one) => setStatus(one as "" | RunStatusWord)}
-          />
+            aria-label="Show only runs whose machinery is in one state"
+            onChange={(event) =>
+              setStatus(event.target.value as "" | RunStatusWord)
+            }
+          >
+            <option value="">Any run state</option>
+            {RUN_STATUS_WORDS.map((one) => (
+              <option key={one} value={one}>
+                {one}
+              </option>
+            ))}
+          </Select>
           <Select
             id="runs-verdict"
             value={verdict}
-            label="Show only runs with one verdict"
-            options={[
-              { value: "", label: "Any verdict" },
-              ...VERDICT_WORDS.map((one) => ({ value: one, label: one })),
-            ]}
-            onChange={(one) => setVerdict(one as "" | VerdictWord)}
-          />
+            aria-label="Show only runs with one verdict"
+            onChange={(event) =>
+              setVerdict(event.target.value as "" | VerdictWord)
+            }
+          >
+            <option value="">Any verdict</option>
+            {VERDICT_WORDS.map((one) => (
+              <option key={one} value={one}>
+                {one}
+              </option>
+            ))}
+          </Select>
           {/*
             The field carries its own name rather than a visible label, the
             same way the four filters beside it do. `autoComplete` is said out

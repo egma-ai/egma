@@ -37,8 +37,8 @@ import {
   type Quiet,
 } from "../../../../../lib/transcripts.ts";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { Select } from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
@@ -388,10 +388,15 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           <Select
             id="window"
             value={choice ?? DEFAULT_WINDOW}
-            label={LIST.window}
-            options={WINDOW_OPTIONS}
-            onChange={choose}
-          />
+            aria-label={LIST.window}
+            onChange={(event) => choose(event.target.value as WindowChoice)}
+          >
+            {WINDOWS.map((one) => (
+              <option key={one.id} value={one.id}>
+                {one.label}
+              </option>
+            ))}
+          </Select>
         }
       />
       <PageBody>
@@ -622,8 +627,3 @@ const MEASURED_COLUMNS = new Set<string>([
   COLUMNS.tools,
   COLUMNS.errors,
 ]);
-
-const WINDOW_OPTIONS = WINDOWS.map((window) => ({
-  value: window.id,
-  label: window.label,
-}));
