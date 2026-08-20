@@ -1,5 +1,6 @@
 "use client";
 
+import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
@@ -33,17 +34,35 @@ import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
  */
 
 /**
- * The trigger, which is a two-line control rather than a row in a list.
+ * The trigger, which is a card in the sidebar and a compact control on a phone.
  *
- * The compact form is the mobile top bar's, and the width it is held to used to
- * be a rule in the shell's stylesheet reaching in by class name. It is here
- * now, on the one prop that asks for it, because a shared component's own size
- * should not depend on which page happened to put it somewhere.
+ * **The card is what the developer asked for after seeing the bar beside a
+ * competitor's.** It carries four things and they answer four questions in one
+ * glance: a square mark with the organization's initial (*which* organization,
+ * before any word is read), a quiet eyebrow naming what the primary line is,
+ * the organization name, and the project under it. The chevron points the way
+ * the menu opens.
+ *
+ * **The Egma mark is deliberately not the avatar.** `DESIGN.md` keeps the full
+ * logo out of the signed-in sidebar, and a logo here would say *Egma* to a
+ * person asking *which of my organizations am I in*. The initial answers the
+ * question that is actually being asked.
+ *
+ * **This is a restyle of the trigger and nothing else.** Search, the keyboard
+ * path, Escape, focus return, the unsaved-work guard and the origin-aware open
+ * are the menu's, and none of them is touched below.
+ *
+ * The compact form is the mobile top bar's, and it stays two lines. A card with
+ * a mark and an eyebrow is a block, and the top bar is a 44px row shared with a
+ * drawer button and a page title. The width it is held to used to be a rule in
+ * the shell's stylesheet reaching in by class name. It is here now, on the one
+ * prop that asks for it, because a shared component's own size should not
+ * depend on which page happened to put it somewhere.
  */
 const TRIGGER = [
-  "grid w-full min-w-0 grid-cols-[minmax(0,1fr)_12px] items-center gap-2",
+  "grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3",
   "min-h-[calc(var(--control-lg)+var(--space-5))] p-3",
-  "rounded-input border border-border bg-surface text-left",
+  "rounded-card border border-border bg-surface text-left",
   "cursor-pointer transition-transform duration-(--duration-press) ease-out",
   "pointer-coarse:min-h-(--tap-target)",
   "pointer-hover:border-border-strong pointer-hover:bg-surface-soft",
@@ -53,8 +72,23 @@ const TRIGGER = [
 ];
 
 const TRIGGER_COMPACT = [
-  "min-h-(--control-lg) max-w-[220px] py-1",
+  "grid-cols-[minmax(0,1fr)_auto] gap-2",
+  "min-h-(--control-lg) max-w-[220px] rounded-input px-3 py-1",
   "max-[900px]:min-w-0 max-[900px]:max-w-[min(220px,56vw)]",
+];
+
+/**
+ * The square mark, which carries one letter and never a logo.
+ *
+ * It is neutral rather than Ember. Ember is this product's signal for focus,
+ * for the current row and for a state that wants attention, and an avatar that
+ * is always on would spend it on something that is never news. The open trigger
+ * still turns, because the menu hands it `border-brand bg-selected`.
+ */
+const MARK = [
+  "grid size-9 flex-none place-items-center",
+  "rounded-button border border-border bg-surface-soft",
+  "text-base leading-(--line-tight) font-medium text-foreground",
 ];
 
 export function ProjectSelector({
@@ -96,6 +130,16 @@ export function ProjectSelector({
   const projectName =
     current?.name ?? (projectId === null ? "No project" : "Unknown project");
 
+  /**
+   * The letter in the square, and a dash where there is no name to take one
+   * from. A membership with no organization would otherwise wear the N of
+   * "No organization" and look like an organization whose name starts with N.
+   */
+  const initial =
+    organization === undefined
+      ? "\u2013"
+      : organization.name.trim().slice(0, 1).toUpperCase() || "\u2013";
+
   function choose(project: Project, close: () => void): void {
     if (project.id === projectId) {
       close();
@@ -123,12 +167,22 @@ export function ProjectSelector({
       panelRole="dialog"
       trigger={
         <>
+          {compact ? null : (
+            <span className={cn(MARK)} aria-hidden="true">
+              {initial}
+            </span>
+          )}
           <span className="min-w-0">
             {/*
-             * Both lines are one line each, whatever the name. The tight line
-             * height is the 1.0 step rather than body text's 1.5, because these
-             * are two labels stacked and not a paragraph.
+             * Every line is one line, whatever the name. The tight line height
+             * is the 1.0 step rather than body text's 1.5, because these are
+             * labels stacked and not a paragraph.
              */}
+            {compact ? null : (
+              <span className="mb-1 block overflow-hidden text-sm leading-(--line-tight) text-ellipsis whitespace-nowrap text-faint uppercase tracking-(--tracking-label)">
+                Organization
+              </span>
+            )}
             <span className="block overflow-hidden text-base leading-(--line-tight) font-medium text-ellipsis whitespace-nowrap text-foreground">
               {organizationName}
             </span>
@@ -136,18 +190,24 @@ export function ProjectSelector({
               {projectName}
             </span>
           </span>
-          <svg
-            className="block size-3.5 text-muted-foreground"
-            aria-hidden="true"
-            viewBox="0 0 12 12"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.4}
-          >
-            <path d="M3.25 4.75 6 7.5l2.75-2.75" />
-          </svg>
+          {/*
+           * The chevron points where the menu goes: right out of the bar on a
+           * wide screen, down out of the top bar on a narrow one. Same control,
+           * and it never promises a direction the panel does not take.
+           */}
+          {compact ? (
+            <ChevronDownIcon
+              className="block size-4 flex-none text-muted-foreground"
+              aria-hidden="true"
+              strokeWidth={1.75}
+            />
+          ) : (
+            <ChevronRightIcon
+              className="block size-4 flex-none text-muted-foreground"
+              aria-hidden="true"
+              strokeWidth={1.75}
+            />
+          )}
         </>
       }
     >

@@ -1,5 +1,15 @@
 "use client";
 
+import {
+  BotIcon,
+  ClipboardCheckIcon,
+  MessageSquareTextIcon,
+  PlayIcon,
+  ScaleIcon,
+  SlidersHorizontalIcon,
+  UsersIcon,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -174,43 +184,44 @@ export function ProductShellBoundary({ children }: { readonly children: ReactNod
   return usesProductShell ? <AppShell>{children}</AppShell> : <>{children}</>;
 }
 
-const NAVIGATION_ICON_PATHS: Record<SectionId, readonly string[]> = {
-  agents: [
-    "M10 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
-    "M4.5 16.5c.55-3 2.4-4.5 5.5-4.5s4.95 1.5 5.5 4.5",
-  ],
-  tests: ["M5 3.5h10v13H5z", "M7.5 7h5", "M7.5 10h5", "M7.5 13h3"],
-  runs: ["m6.5 4.5 8 5.5-8 5.5z"],
-  // A live line: what production is doing, read left to right.
-  monitoring: ["M3 12.5h3l2.5-6 3 9 2.5-5h3"],
-  personas: [
-    "M7.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
-    "M3.5 16c.45-2.75 1.8-4.1 4-4.1 2.15 0 3.55 1.35 4 4.1",
-    "M13 5.1a2.2 2.2 0 0 1 0 4.2",
-    "M13.5 11.8c1.75.2 2.75 1.6 3 4.2",
-  ],
-  graders: [
-    "m10 3 2.05 4.15 4.58.67-3.32 3.22.78 4.55L10 12.9l-4.1 2.15.78-4.55-3.32-3.22 4.58-.67z",
-  ],
-  settings: ["M4 5h12", "M4 10h12", "M4 15h12", "M7 3v4", "M13 8v4", "M8.5 13v4"],
+/**
+ * One line symbol per product area, from one set.
+ *
+ * **They are lucide's, and the point is that they are all lucide's.** These
+ * were six hand-drawn path lists before, each authored against a different idea
+ * of how heavy a line should be and how much of a 20px box to fill — a star
+ * that read as solid beside a figure that read as a sketch. A person does not
+ * name that when they call a bar unprofessional; they see it. One set, drawn on
+ * one grid at one weight, is what removes it. lucide is already a dependency of
+ * this application, so nothing was added to get it.
+ *
+ * Each icon says what its row says. `MessageSquareText` for the monitoring row
+ * because the row says Transcripts, and `ScaleIcon` for graders because a
+ * grader weighs a thing and returns a verdict — neither imitates the Egma mark,
+ * which `DESIGN.md` forbids of a product icon.
+ */
+const NAVIGATION_ICONS: Record<SectionId, LucideIcon> = {
+  agents: BotIcon,
+  tests: ClipboardCheckIcon,
+  runs: PlayIcon,
+  monitoring: MessageSquareTextIcon,
+  personas: UsersIcon,
+  graders: ScaleIcon,
+  settings: SlidersHorizontalIcon,
 };
 
-/** Small line symbols make the stable product areas easier to scan. */
+/**
+ * Small line symbols make the stable product areas easier to scan.
+ *
+ * 16px and stroke 1.75 on every one of them. The size is the row's, the weight
+ * is lighter than lucide's own 2 because the bar is quiet type and a heavier
+ * line would make the symbol the loudest thing in the row.
+ */
 function NavigationIcon({ section }: { readonly section: SectionId }) {
+  const Icon = NAVIGATION_ICONS[section];
+
   return (
-    <svg
-      className="size-4 flex-none"
-      aria-hidden="true"
-      focusable="false"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={1.35}
-    >
-      {NAVIGATION_ICON_PATHS[section].map((path) => <path d={path} key={path} />)}
-    </svg>
+    <Icon className="size-4 flex-none" aria-hidden="true" strokeWidth={1.75} />
   );
 }
 
@@ -243,8 +254,10 @@ function Navigation({
       <SidebarContent asChild>
         <nav aria-label="Product navigation">
           {groups.map((group) => (
-            <SidebarGroup key={group.id}>
-              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroup key={group.id} labelled={group.label !== null}>
+              {group.label === null ? null : (
+                <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              )}
               <SidebarMenu>
                 {group.items.map((link) => (
                   <SidebarMenuItem key={link.id}>

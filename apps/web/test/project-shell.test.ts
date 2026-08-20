@@ -116,9 +116,15 @@ describe("the product navigation", () => {
   const everyLink = (projectId: string) =>
     navigationFor(projectId).flatMap((group) => group.items);
 
-  it("names the two jobs, and the standing pair above them", () => {
+  /**
+   * **Two jobs are named and the pair above them is not.** The top group used
+   * to say "Global". The developer dropped the word on first sight of the built
+   * bar rather than replace it, and `null` is how the group says it has decided
+   * to stay quiet — an absent key would only mean nobody had got to it yet.
+   */
+  it("names the two jobs, and leaves the standing pair above them unnamed", () => {
     expect(NAVIGATION_GROUPS.map((group) => group.label)).toEqual([
-      "Global",
+      null,
       "Simulations",
       "Monitoring",
     ]);
@@ -126,13 +132,13 @@ describe("the product navigation", () => {
 
   /**
    * Agents stays the first row and stays the signed-in landing area. Graders
-   * moves up beside it: a grader is switched on once and then judges everything
-   * in its scope, which is what makes it standing rather than part of either
-   * job.
+   * sits beside it: a grader is switched on once and then judges everything in
+   * its scope, which is what makes it standing rather than part of either job.
    */
-  it("puts Agents and Graders under Global, Agents first", () => {
+  it("puts Agents and Graders in the unlabelled top group, Agents first", () => {
     const global = NAVIGATION_GROUPS[0];
     expect(global?.id).toBe("global");
+    expect(global?.label).toBeNull();
     expect(global?.items.map((item) => item.label)).toEqual([
       "Agents",
       "Graders",
