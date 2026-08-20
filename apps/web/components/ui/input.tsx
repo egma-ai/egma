@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 
+import { useFieldHint } from "@/ui/field-hint.ts";
 import { cn } from "@/lib/utils";
 
 /**
@@ -9,8 +10,17 @@ import { cn } from "@/lib/utils";
  * on every focusable element from outside every cascade layer, so focus here is
  * the same focus as everywhere else in the product and cannot be turned off by
  * a class.
+ *
+ * **A field inside a `Field` describes itself with that field's hint.** The id
+ * arrives through context rather than through a prop, because a caller wiring
+ * `aria-describedby` by hand forgets exactly the fields nobody checks — the
+ * page still looks right without it. An `aria-describedby` passed in wins,
+ * because a field being refused has something more urgent to say than what to
+ * write in it.
  */
 function Input({ className, type, ...props }: ComponentProps<"input">) {
+  const hint = useFieldHint();
+
   return (
     <input
       type={type}
@@ -24,6 +34,8 @@ function Input({ className, type, ...props }: ComponentProps<"input">) {
         className,
       )}
       {...props}
+      /* After the spread, so a caller passing nothing cannot erase the hint. */
+      aria-describedby={props["aria-describedby"] ?? hint}
     />
   );
 }

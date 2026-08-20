@@ -3,6 +3,10 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
@@ -21,14 +25,10 @@ import {
 } from "../../../../../lib/tests.ts";
 import {
   Actions,
-  Badge,
-  Button,
   Field,
   Problem,
   Refused,
   Section,
-  TextArea,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
@@ -53,7 +53,6 @@ import {
   SaveAction,
   VersionHistory,
 } from "../editor.tsx";
-import styles from "./test-detail.module.css";
 
 /**
  * One focused test editor beside its recent activity.
@@ -74,6 +73,21 @@ export default function TestDetailPage() {
     </AppShell>
   );
 }
+
+/**
+ * One group of fields inside the editing card, and the small heading that
+ * names a part of one.
+ *
+ * They are named here rather than repeated four times, because the hairline
+ * between groups and the heading step are one decision each about how this
+ * page reads — not four.
+ */
+const GROUP =
+  "flex min-w-0 flex-col gap-4 p-6 " +
+  "border-t border-border first:border-t-0 " +
+  "max-[40rem]:p-4";
+
+const FIELD_HEADING = "m-0 text-sm font-medium text-foreground";
 
 type Draft = {
   readonly testId: string;
@@ -454,13 +468,17 @@ function TestDetail({
           <>
             v{test.version} · changed{" "}
             <RelativeInstant instant={test.updated_at} now={now} />{" "}
-            {archived ? <Badge tone="warn">Archived</Badge> : null}{" "}
-            {standing.runnable ? null : <Badge tone="bad">Cannot run</Badge>}
+            {archived ? <Badge variant="warning">Archived</Badge> : null}{" "}
+            {standing.runnable ? null : (
+              <Badge variant="failure">Cannot run</Badge>
+            )}
           </>
         }
         action={
           <Actions>
             <Button
+              type="button"
+              variant="secondary"
               disabled={!mayAuthor || saving}
               why={whyNot}
               onClick={() => draftNavigation.request(() => void clone())}
@@ -468,6 +486,8 @@ function TestDetail({
               Clone
             </Button>
             <Button
+              type="button"
+              variant="secondary"
               disabled={!mayAuthor || saving}
               why={whyNot}
               onClick={() =>
@@ -483,33 +503,62 @@ function TestDetail({
         {refused === null ? null : (
           <Refused
             message={refused.message}
-            action={<Button onClick={reload}>Read the test again</Button>}
+            action={
+              <Button type="button" variant="secondary" onClick={reload}>
+                Read the test again
+              </Button>
+            }
           />
         )}
 
         {standing.why === null ? null : <Problem>{standing.why}</Problem>}
 
-        <div className={styles.layout}>
-          <section className={styles.editor} aria-labelledby="test-editor-title">
-            <div className={styles.group}>
-              <h2 className={styles.groupTitle} id="test-editor-title">
+        {/*
+          One editing column beside a rail of what has been happening to this
+          test. The rail is narrow and never below 340px, because a run row
+          with a verdict on it stops being readable before that; below 72rem
+          there is no room for two columns at all and the rail goes under the
+          editor rather than getting thinner.
+        */}
+        <div
+          className={
+            "grid items-start gap-8 " +
+            "grid-cols-[minmax(0,1.55fr)_minmax(340px,0.85fr)] " +
+            "max-[72rem]:grid-cols-1"
+          }
+        >
+          <section
+            className="min-w-0 rounded-card border border-border bg-surface"
+            aria-labelledby="test-editor-title"
+          >
+            <div className={GROUP}>
+              <h2
+                className="m-0 text-lg font-medium text-foreground"
+                id="test-editor-title"
+              >
                 Test details
               </h2>
               <Field label="Name" htmlFor="test-name">
-                <TextInput
+                <Input
                   id="test-name"
                   value={editing.name}
                   disabled={!mayAuthor}
-                  onChange={(name) => setDraft({ ...editing, name })}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) =>
+                    setDraft({ ...editing, name: event.target.value })
+                  }
                 />
               </Field>
               <Field label="Description" htmlFor="test-description">
-                <TextInput
+                <Input
                   id="test-description"
                   value={editing.description}
                   disabled={!mayAuthor}
-                  onChange={(description) =>
-                    setDraft({ ...editing, description })
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) =>
+                    setDraft({ ...editing, description: event.target.value })
                   }
                 />
               </Field>
@@ -523,18 +572,20 @@ function TestDetail({
               />
             </div>
 
-            <div className={styles.group}>
+            <div className={GROUP}>
               <Field label="Scenario" htmlFor="test-scenario">
-                <TextArea
+                <Textarea
                   id="test-scenario"
                   value={editing.scenario}
                   rows={4}
                   disabled={!mayAuthor}
-                  onChange={(scenario) => setDraft({ ...editing, scenario })}
+                  onChange={(event) =>
+                    setDraft({ ...editing, scenario: event.target.value })
+                  }
                 />
               </Field>
 
-              <h3 className={styles.fieldHeading}>Expected behaviors</h3>
+              <h3 className={FIELD_HEADING}>Expected behaviors</h3>
               <Behaviors
                 behaviors={editing.behaviors}
                 disabled={!mayAuthor}
@@ -542,7 +593,7 @@ function TestDetail({
               />
               {behaviorProblem === null ? null : <Problem>{behaviorProblem}</Problem>}
 
-              <h3 className={styles.fieldHeading}>Persona attached</h3>
+              <h3 className={FIELD_HEADING}>Persona attached</h3>
               <NamedSelector
                 label="Personas"
                 resource="personas"
@@ -570,8 +621,8 @@ function TestDetail({
               />
             </div>
 
-            <div className={styles.group}>
-              <h3 className={styles.fieldHeading}>Applies to agents</h3>
+            <div className={GROUP}>
+              <h3 className={FIELD_HEADING}>Applies to agents</h3>
               <NamedSelector
                 label="Agents"
                 resource="agents"
@@ -598,7 +649,24 @@ function TestDetail({
             </div>
           </section>
 
-          <aside className={styles.activity} aria-label="Test activity">
+          {/*
+            The rail follows the page down while the editor is long, and stops
+            doing so once the layout is one column and there is nothing beside
+            it to follow.
+
+            `mt-0!` is not decoration. A shared `Section` carries its own top
+            margin for a page's main column, and a CSS Modules stylesheet is
+            unlayered, so an ordinary utility loses to it whatever the class
+            list says. Important is what reaches across that boundary. It goes
+            when `Section` is migrated and can be told directly.
+          */}
+          <aside
+            className={
+              "sticky top-5 flex min-w-0 flex-col gap-8 " +
+              "max-[72rem]:static [&>section]:mt-0!"
+            }
+            aria-label="Test activity"
+          >
             <RecentRuns
               projectId={projectId}
               title="Recent runs"
@@ -635,10 +703,14 @@ function TestDetail({
                   : "This test returns to new runs. Egma will refuse the restore while its current version names an archived persona."}
               </p>
               <Actions>
-                <Button onClick={dismiss}>Cancel</Button>
+                <Button type="button" variant="secondary" onClick={dismiss}>
+                  Cancel
+                </Button>
                 <Button
-                  weight="strong"
-                  tone={confirmingLifecycle === "archive" ? "destructive" : "default"}
+                  type="button"
+                  variant={
+                    confirmingLifecycle === "archive" ? "destructive" : "default"
+                  }
                   disabled={saving}
                   onClick={() =>
                     draftNavigation.request(() =>

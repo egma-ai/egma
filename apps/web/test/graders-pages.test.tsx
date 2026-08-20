@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1168,6 +1169,110 @@ describe("changing a running copy", () => {
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "1200",
     );
+  });
+
+  /**
+   * **Everything that means "for the open row" is cleared when a different row
+   * opens** — the typed value and the refusal alike.
+   *
+   * The form is drawn once, under the table, for whichever row is open, because
+   * a form inside a cell would be drawn twice: the table draws every row once
+   * for the wide layout and once for the narrow one, and two fields over one
+   * piece of state means the browser focuses the one nobody can see. Drawing it
+   * once makes its state shared by every row, and the button that opens a row
+   * changes *which* row is open and nothing else.
+   *
+   * That is the shape the judge-credentials page was bitten twice by. A key
+   * typed for one credential stayed in the field when somebody opened another,
+   * so Save sent the first one's key to the second — rotating the wrong
+   * credential to a key its owner never chose. And clearing the field did not
+   * clear the *retry* a failed rotation leaves behind, which read the field as
+   * it stood when it was pressed. Two defects, and the fix for the first left
+   * the second passing.
+   *
+   * Here both are one mechanism: `EditForm` is keyed by the running copy, so
+   * opening another row is a different component with its own initial state
+   * rather than the same component pointed somewhere new. This holds the
+   * mechanism rather than the convention — take the key off and the second copy
+   * opens showing the first copy's typed bound, and the refusal about a save
+   * nobody can see any more is still on screen above it.
+   */
+  it("clears a typed value and a refusal when a different row opens", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /api/graders": {
+        status: 200,
+        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+      },
+      "GET /api/grader-library": SHELF,
+      "PATCH /api/graders/grd_2": {
+        status: 422,
+        body: {
+          error: "unprocessable",
+          message: "Egma does not compute a measure called that.",
+        },
+      },
+    });
+    render(<RunningGradersPage />);
+
+    // The second row is the one with values to type into: a measure, a bound,
+    // and a share of live traffic, because it applies to both.
+    const edits = await screen.findAllByRole("button", { name: "Edit" });
+    fireEvent.click(edits[1]!);
+    fireEvent.change(screen.getByLabelText("Bound"), {
+      target: { value: "50" },
+    });
+    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.sampleRate), {
+      target: { value: "99" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Egma does not compute a measure called that."),
+    ).toBeTruthy();
+
+    /*
+      The refusal appearing is not the write settling as far as *this page* is
+      concerned. The editor tells the page whether leaving would lose anything,
+      and it does so from an effect — so for one commit after the sentence is on
+      screen the page still believes a write is in flight and every Edit button
+      is still disabled. A press then does nothing at all, and the assertion
+      below would fail on a missing dialog while naming neither.
+
+      So the wait is on the control about to be pressed, rather than on
+      something near it.
+    */
+    await waitFor(() => {
+      expect((edits[0] as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    // Another row, over the top of a form that has been typed into and refused.
+    fireEvent.click(edits[0]!);
+    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+
+    const behaviors = screen.getByRole("region", {
+      name: "Edit Expected behaviors",
+    });
+    // This entry asks for nothing, so a Bound on screen could only be the other
+    // row's — and the refusal was about a save on the other row.
+    expect(within(behaviors).queryByLabelText("Bound")).toBeNull();
+    expect(
+      screen.queryByText("Egma does not compute a measure called that."),
+    ).toBeNull();
+
+    // And back, which is where the field would show the typed value if the
+    // state were the page's rather than the open row's.
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[1]!);
+    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
+      "2000",
+    );
+    expect(
+      (screen.getByLabelText(
+        runningCopy.EDIT.sampleRate,
+      ) as HTMLInputElement).value,
+    ).toBe("10");
+    expect(
+      screen.queryByText("Egma does not compute a measure called that."),
+    ).toBeNull();
   });
 });
 

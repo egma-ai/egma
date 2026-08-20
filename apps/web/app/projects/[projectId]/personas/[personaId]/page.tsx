@@ -3,6 +3,10 @@
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
@@ -23,15 +27,11 @@ import {
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
-  Badge,
-  Button,
   Facts,
   Field,
   Form,
   FormActions,
   Refused,
-  Select,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
@@ -52,9 +52,37 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "../../../../../ui/system.module.css";
-import personaStyles from "./persona.module.css";
 import { TraitFields } from "../traits-editor.tsx";
+
+/**
+ * The two surfaces this page is made of, and the parts of one.
+ *
+ * They are named here rather than repeated, because each is one decision about
+ * how the page reads — the card, the hairline between its sections, the heading
+ * step — and a decision written out three times is three decisions the next
+ * person has to keep in step.
+ *
+ * `[&>form]:…!` is the one thing here that is not ordinary layout, and it is
+ * the cascade rather than a shortcut. The shared `Form` draws itself as a card:
+ * a border, a radius, a paper background, 24px of padding and a 72ch cap. This
+ * page already *is* the card, so a form inside one has to be a plain column —
+ * which the route stylesheet used to say, and could, because CSS Modules are
+ * unlayered and beat every utility. An ordinary utility would now lose to it,
+ * so important is what reaches across that boundary. All four go when `Form` is
+ * migrated and can be told directly.
+ */
+const SURFACE = "min-w-0 overflow-hidden rounded-card border border-border bg-surface";
+
+const EDITOR_SECTION =
+  "p-6 max-[40rem]:p-5 border-t border-border first:border-t-0 " +
+  "[&>form]:max-w-none! [&>form]:border-0! [&>form]:bg-transparent! [&>form]:p-0!";
+
+const BLOCK_TITLE = "m-0 text-lg font-medium text-foreground";
+
+const BLOCK_LEAD = "mt-1 mb-0 max-w-[64ch] text-sm text-muted-foreground";
+
+/** A number beside the name: a version, a day. Quiet, and read in figures. */
+const HEADER_META = "text-sm tabular-nums text-faint";
 
 /**
  * One persona: who they are now and who they have been.
@@ -385,20 +413,36 @@ function PersonaDetail({
           <Refused
             message={refusal.message}
             action={
-              <Button onClick={reload}>Read this persona again</Button>
+              <Button type="button" variant="secondary" onClick={reload}>
+                Read this persona again
+              </Button>
             }
           />
         )}
 
-        <div className={personaStyles.personaLayout}>
-          <div className={personaStyles.editorSurface}>
+        {/*
+          One authoring surface beside a rail of what this persona has been.
+          The rail never goes under 280px, because a version and the day it was
+          written stop fitting on one line before that; below 68rem there is no
+          room for two columns and the rail goes under the editor.
+        */}
+        <div
+          className={
+            "grid min-w-0 items-start gap-6 " +
+            "grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] " +
+            "max-[68rem]:grid-cols-[minmax(0,1fr)]"
+          }
+        >
+          <div className={SURFACE}>
             <section
-              className={personaStyles.editorSection}
+              className={EDITOR_SECTION}
               aria-labelledby="persona-identity-title"
             >
-              <header className={personaStyles.sectionHeader}>
-                <h2 id="persona-identity-title">Name and description</h2>
-                <p>
+              <header className="mb-5">
+                <h2 className={BLOCK_TITLE} id="persona-identity-title">
+                  Name and description
+                </h2>
+                <p className={BLOCK_LEAD}>
                   These fields are live. Changing them does not change a past
                   simulation.
                 </p>
@@ -412,26 +456,31 @@ function PersonaDetail({
               {settled ? (
                 <Form onSubmit={() => void saveIdentity()}>
                   <Field label="Name" htmlFor="persona-name">
-                    <TextInput
+                    <Input
                       id="persona-name"
                       value={held.name}
                       disabled={!mayAuthor}
-                      onChange={(name) => setHeld({ ...held, name })}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        setHeld({ ...held, name: event.target.value })
+                      }
                     />
                   </Field>
                   <Field label="Description" htmlFor="persona-description">
-                    <TextInput
+                    <Input
                       id="persona-description"
                       value={held.description}
                       disabled={!mayAuthor}
-                      onChange={(description) =>
-                        setHeld({ ...held, description })
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) =>
+                        setHeld({ ...held, description: event.target.value })
                       }
                     />
                   </Field>
                   <FormActions>
                     <Button
-                      weight="strong"
                       type="submit"
                       disabled={!mayAuthor || saving !== null}
                       {...(mayAuthor || whyNot === undefined
@@ -459,12 +508,14 @@ function PersonaDetail({
             </section>
 
             <section
-              className={personaStyles.editorSection}
+              className={EDITOR_SECTION}
               aria-labelledby="persona-behavior-title"
             >
-              <header className={personaStyles.sectionHeader}>
-                <h2 id="persona-behavior-title">Behavior and voice</h2>
-                <p>
+              <header className="mb-5">
+                <h2 className={BLOCK_TITLE} id="persona-behavior-title">
+                  Behavior and voice
+                </h2>
+                <p className={BLOCK_LEAD}>
                   Saving a change makes a new version. Past simulations keep
                   the version they used.
                 </p>
@@ -479,7 +530,6 @@ function PersonaDetail({
                   />
                   <FormActions>
                     <Button
-                      weight="strong"
                       type="submit"
                       disabled={!mayAuthor || saving !== null}
                       {...(mayAuthor || whyNot === undefined
@@ -521,53 +571,75 @@ function PersonaDetail({
             </section>
           </div>
 
-          <aside
-            className={personaStyles.historyRail}
-            aria-labelledby="persona-history-title"
-          >
-            <header className={personaStyles.historyHeader}>
-              <h2 id="persona-history-title">Version history</h2>
-              <p>Newest first. Every past version stays readable.</p>
+          <aside className={SURFACE} aria-labelledby="persona-history-title">
+            <header className="border-b border-border p-6 max-[40rem]:p-5">
+              <h2 className={BLOCK_TITLE} id="persona-history-title">
+                Version history
+              </h2>
+              <p className={BLOCK_LEAD}>
+                Newest first. Every past version stays readable.
+              </p>
             </header>
             {history === null ? (
-              <div className={personaStyles.historyState}>
+              <div className="p-5">
                 <Loading what="this persona's history" />
               </div>
             ) : history.status === "ready" ? (
-              <ol className={personaStyles.versionList}>
+              <ol className="m-0 list-none p-0">
                 {history.value.items.map((version) => {
                   const current = version.id === one.version_id;
                   return (
                     <li
-                      className={`${personaStyles.versionRow} ${
-                        current ? personaStyles.versionRowCurrent : ""
-                      }`}
+                      className={
+                        "grid min-w-0 min-h-(--tap-target) items-center " +
+                        "grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 " +
+                        "px-4 py-3 max-[40rem]:px-3 " +
+                        "border-t border-border first:border-t-0 " +
+                        /*
+                         * The current version's mark: a 3px edge, carried over
+                         * from the stylesheet this replaces rather than chosen,
+                         * so it is written as a measurement instead of as a
+                         * scale step that does not exist.
+                         */
+                        "border-s-[3px] " +
+                        (current
+                          ? "border-s-brand bg-selected"
+                          : "border-s-transparent")
+                      }
                       key={version.id}
                     >
-                      <div className={personaStyles.versionIdentity}>
-                        <span className={personaStyles.versionNumber}>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="font-mono text-sm text-foreground">
                           v{version.version}
                         </span>
                         {current ? (
-                          <span className={personaStyles.currentVersion}>
+                          <span className="text-sm tracking-(--tracking-label) text-brand uppercase">
                             Current
                           </span>
                         ) : null}
                       </div>
-                      <span className={personaStyles.versionTime}>
+                      <span className="min-w-0 text-sm tabular-nums text-muted-foreground">
                         <RelativeInstant instant={version.created_at} now={now} />
                       </span>
-                      <Button onClick={() => setReading(version)}>Read</Button>
+                      {/* The control spans both lines of the row it belongs to. */}
+                      <Button
+                        className="col-start-2 row-span-2 row-start-1"
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setReading(version)}
+                      >
+                        Read
+                      </Button>
                     </li>
                   );
                 })}
               </ol>
             ) : history.status === "signed-out" ? (
-              <div className={personaStyles.historyState}>
+              <div className="p-5">
                 <Loading what="this persona's history" />
               </div>
             ) : (
-              <div className={personaStyles.historyState}>
+              <div className="p-5">
                 <Failure
                   message={history.refusal.message}
                   onRetry={reloadHistory}
@@ -703,6 +775,8 @@ function PersonaDetail({
     persona === null || role === null ? undefined : (
       <>
         <Button
+          type="button"
+          variant="secondary"
           disabled={!mayAuthor || saving !== null}
           {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
           onClick={() => void clone()}
@@ -711,7 +785,7 @@ function PersonaDetail({
         </Button>
         {archived ? (
           <Button
-            weight="strong"
+            type="button"
             disabled={!mayAuthor || saving !== null}
             {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
             onClick={() => void restore()}
@@ -720,6 +794,8 @@ function PersonaDetail({
           </Button>
         ) : (
           <Button
+            type="button"
+            variant="secondary"
             disabled={!mayAuthor || saving !== null}
             {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
             onClick={() => setArchiving(true)}
@@ -740,16 +816,14 @@ function PersonaDetail({
         ]}
         lead={
           persona === null ? undefined : (
-            <span className={personaStyles.headerSummary}>
-              <span className={personaStyles.headerDescription}>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="max-w-[58ch] text-muted-foreground">
                 {persona.description ?? "Who they are and how they behave."}
               </span>
               {persona.is_default ? <Badge>Project default</Badge> : null}
-              {archived ? <Badge tone="warn">Archived</Badge> : null}
-              <span className={personaStyles.headerMeta}>
-                v{persona.version}
-              </span>
-              <span className={personaStyles.headerMeta}>
+              {archived ? <Badge variant="warning">Archived</Badge> : null}
+              <span className={HEADER_META}>v{persona.version}</span>
+              <span className={HEADER_META}>
                 Updated <RelativeInstant instant={persona.updated_at} now={now} />
               </span>
             </span>
@@ -844,7 +918,7 @@ function ArchiveDialog({
     <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
       {(dismiss) => (
         <>
-          <p className={styles.stateLead}>
+          <p className="m-0 max-w-[62ch] text-base text-muted-foreground">
             They leave the list your team authors from. Every version stays exactly
             where it is, every run that pinned one stays readable, and Restore is on
             this page.
@@ -860,15 +934,21 @@ function ArchiveDialog({
                 <Refused
                   message={unread.message}
                   action={
-                    <Button onClick={() => setAttempt((one) => one + 1)}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setAttempt((one) => one + 1)}
+                    >
                       Try again
                     </Button>
                   }
                 />
               ) : others === null ? (
-                <p className={styles.fieldHint}>Reading this project's personas…</p>
+                <p className="m-0 text-sm text-faint">
+                  Reading this project's personas…
+                </p>
               ) : nobodyToTakeIt ? (
-                <p className={styles.fieldHint}>
+                <p className="m-0 text-sm text-faint">
                   There is no other active persona in this project to take it.
                   Create one first.
                 </p>
@@ -876,9 +956,14 @@ function ArchiveDialog({
                 <Select
                   id="persona-replacement"
                   value={chosen}
-                  options={others.map((one) => ({ value: one.id, label: one.name }))}
-                  onChange={setChosen}
-                />
+                  onChange={(event) => setChosen(event.target.value)}
+                >
+                  {others.map((one) => (
+                    <option key={one.id} value={one.id}>
+                      {one.name}
+                    </option>
+                  ))}
+                </Select>
               )}
             </Field>
           ) : null}
@@ -887,7 +972,8 @@ function ArchiveDialog({
 
           <FormActions>
             <Button
-              tone="destructive"
+              type="button"
+              variant="destructive"
               disabled={busy || cannotChoose || (persona.is_default && chosen === "")}
               {...(cannotChoose
                 ? {
@@ -900,7 +986,12 @@ function ArchiveDialog({
             >
               {busy ? "Archiving…" : "Archive persona"}
             </Button>
-            <Button disabled={busy} onClick={dismiss}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={dismiss}
+            >
               Cancel
             </Button>
           </FormActions>

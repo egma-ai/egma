@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   CONFIG,
   EDIT,
@@ -32,11 +35,6 @@ import {
   projectPath,
 } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
-import {
-  Badge,
-  Button,
-  ButtonLink,
-} from "../../../../../ui/controls.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
@@ -55,8 +53,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import styles from "../graders.module.css";
-import { GraderTabs } from "../tabs.tsx";
+import { GraderTabs, VIEW_CONTENT } from "../tabs.tsx";
 import { EditForm, SwitchOffPanel } from "./edit-form.tsx";
 
 /**
@@ -204,7 +201,7 @@ function columnsFor(
         copy.required ? (
           <Badge>{REQUIRED.yes}</Badge>
         ) : (
-          <Badge tone="warn">{REQUIRED.no}</Badge>
+          <Badge variant="warning">{REQUIRED.no}</Badge>
         ),
     },
     {
@@ -220,11 +217,13 @@ function columnsFor(
       cell: (copy) => (
         <>
           <Button
+            type="button"
+            variant="secondary"
             disabled={!mayAct || editorBusy}
             {...(mayAct || whyNotEdit === undefined ? {} : { why: whyNotEdit })}
-            ariaExpanded={open?.act === "edit" && open.copy.id === copy.id}
-            ariaControls={editorPanelId(copy.id)}
-            buttonRef={(button) => {
+            aria-expanded={open?.act === "edit" && open.copy.id === copy.id}
+            aria-controls={editorPanelId(copy.id)}
+            ref={(button) => {
               if (button === null) editButtons.delete(copy.id);
               else editButtons.set(copy.id, button);
             }}
@@ -233,6 +232,8 @@ function columnsFor(
             {EDIT.open}
           </Button>{" "}
           <Button
+            type="button"
+            variant="secondary"
             disabled={!mayAct || editorBusy}
             {...(mayAct || whyNotSwitchOff === undefined
               ? {}
@@ -389,9 +390,11 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
           message={missing.message}
           action={
             elsewhere === undefined ? undefined : (
-              <ButtonLink href={projectLanding(elsewhere.id)}>
-                Open {elsewhere.name}
-              </ButtonLink>
+              <Button asChild variant="secondary">
+                <Link href={projectLanding(elsewhere.id)}>
+                  Open {elsewhere.name}
+                </Link>
+              </Button>
             )
           }
         />
@@ -415,12 +418,11 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
           title="Nothing is judging this project"
           lead={RUNNING.empty}
           action={
-            <ButtonLink
-              href={projectPath(projectId, GRADERS_SECTION)}
-              weight="strong"
-            >
-              Open the library
-            </ButtonLink>
+            <Button asChild>
+              <Link href={projectPath(projectId, GRADERS_SECTION)}>
+                Open the library
+              </Link>
+            </Button>
           }
         />
       );
@@ -460,7 +462,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
       />
       <PageBody>
         <GraderTabs projectId={projectId} active="running" />
-        <div className={styles.viewContent}>
+        <div className={VIEW_CONTENT}>
           {/*
             What the last act came to, and it stays until the next one. Both
             sentences say what changed *and* what did not, because the question
@@ -469,8 +471,23 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
           */}
           {said === null ? null : <p role="status">{said}</p>}
 
+          {/*
+            One column while nothing is open, two while an editor is.
+
+            The 230px shell leaves about 1170px of work area at a 1400px
+            viewport, and below that the five-column table and the 440px editor
+            are both cramped — so the editor goes above the list rather than
+            beside it. The width that decides is the whole product frame rather
+            than a phone.
+          */}
           <div
-            className={styles.editorLayout}
+            className={
+              "min-w-0 " +
+              "data-[editing=true]:grid data-[editing=true]:items-start " +
+              "data-[editing=true]:gap-6 " +
+              "data-[editing=true]:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] " +
+              "max-[1400px]:data-[editing=true]:grid-cols-[minmax(0,1fr)]"
+            }
             data-editing={open?.act === "edit" ? "true" : "false"}
           >
             {/*
@@ -483,13 +500,20 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
             {open?.act === "edit" ? (
               <section
                 id={editorPanelId(open.copy.id)}
-                className={styles.editorPane}
+                className={
+                  "sticky top-6 col-start-2 row-start-1 min-w-0 " +
+                  "border-l border-border pl-6 " +
+                  "max-[1400px]:static max-[1400px]:col-start-1 " +
+                  "max-[1400px]:row-auto max-[1400px]:border-l-0 " +
+                  "max-[1400px]:border-b max-[1400px]:pt-0 max-[1400px]:pr-0 " +
+                  "max-[1400px]:pb-5 max-[1400px]:pl-0"
+                }
                 aria-labelledby={`${editorPanelId(open.copy.id)}-title`}
               >
-                <header className={styles.editorHead}>
+                <header className="mb-4">
                   <h2
                     ref={editorHeading}
-                    className={styles.editorTitle}
+                    className="m-0 text-lg font-medium text-foreground"
                     id={`${editorPanelId(open.copy.id)}-title`}
                     tabIndex={-1}
                   >
@@ -510,7 +534,15 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
               </section>
             ) : null}
 
-            <div className={styles.listPane}>{body()}</div>
+            <div
+              className={
+                "min-w-0 in-data-[editing=true]:col-start-1 " +
+                "in-data-[editing=true]:row-start-1 " +
+                "max-[1400px]:in-data-[editing=true]:row-auto"
+              }
+            >
+              {body()}
+            </div>
           </div>
 
           {/*
