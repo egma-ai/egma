@@ -12,6 +12,18 @@ import {
   type ReactNode,
 } from "react";
 
+import {
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+} from "@/components/ui/sidebar";
+
 import { readJson } from "../lib/api.ts";
 import { organizationOf, roleOf, type Me, type Project } from "../lib/me.ts";
 import {
@@ -197,6 +209,18 @@ function NavigationIcon({ section }: { readonly section: SectionId }) {
   );
 }
 
+/**
+ * The three groups, drawn once for wherever the bar is being shown.
+ *
+ * **One navigation model.** The docked bar and the mobile drawer render this
+ * same component, so the drawer cannot drift into a second, shorter list of
+ * where a person may go. The drawer passes `onNavigate` and the bar does not,
+ * which is the only difference between them: a drawer closes behind the choice
+ * it was opened to make.
+ *
+ * Where an item is lit still comes from the address, never from which group it
+ * happens to be in.
+ */
 function Navigation({
   projectId,
   pathname,
@@ -206,33 +230,33 @@ function Navigation({
   readonly pathname: string;
   readonly onNavigate?: () => void;
 }) {
-  const { primary, secondary, management } = navigationFor(projectId);
+  const groups = navigationFor(projectId);
   const active = activeSectionIn(pathname);
 
-  const group = (links: ReturnType<typeof navigationFor>["primary"], label?: string) => (
-    <div className={styles.navGroup}>
-      {label === undefined ? null : <p className={styles.navLabel}>{label}</p>}
-      {links.map((link) => (
-        <Link
-          key={link.id}
-          className={`${styles.navItem} ${active === link.id ? styles.navItemActive : ""}`}
-          href={link.href}
-          aria-current={active === link.id ? "page" : undefined}
-          onClick={onNavigate}
-        >
-          <NavigationIcon section={link.id} />
-          {link.label}
-        </Link>
-      ))}
-    </div>
-  );
-
   return (
-    <nav className={styles.nav} aria-label="Product navigation">
-      {group(primary)}
-      {group(secondary, "Library")}
-      {management.length === 0 ? null : group(management, "Manage")}
-    </nav>
+    <SidebarProvider onNavigate={onNavigate}>
+      <SidebarContent asChild>
+        <nav aria-label="Product navigation">
+          {groups.map((group) => (
+            <SidebarGroup key={group.id}>
+              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              <SidebarMenu>
+                {group.items.map((link) => (
+                  <SidebarMenuItem key={link.id}>
+                    <SidebarMenuButton asChild isActive={active === link.id}>
+                      <Link href={link.href}>
+                        <NavigationIcon section={link.id} />
+                        {link.label}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
+          ))}
+        </nav>
+      </SidebarContent>
+    </SidebarProvider>
   );
 }
 
@@ -449,10 +473,17 @@ function ShellFrame({
     <SessionContext.Provider value={session}>
     <DraftNavigationProvider>
     <div className={styles.shell}>
+      {/*
+       * The `<aside>` stays the shell's own: it is a column of the grid above
+       * and it is what the one layout breakpoint hides, so its class keeps
+       * living beside the breakpoint that reads it. Everything inside it is on
+       * the sidebar primitives — the switcher topmost in the header slot, the
+       * groups in the content, the account control in the footer slot.
+       */}
       <aside className={styles.sidebar}>
-        {selector(false)}
+        <SidebarHeader>{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
-        <div className={styles.sidebarFoot}>
+        <SidebarFooter>
           {role !== null && !canAuthor(role) ? (
             <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>
           ) : null}
@@ -463,7 +494,7 @@ function ShellFrame({
             placement="right-end"
             projectId={shown}
           />
-        </div>
+        </SidebarFooter>
       </aside>
 
       <div className={styles.body}>

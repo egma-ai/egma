@@ -13,10 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RunResultsAddress from "../app/runs/[runId]/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
-import {
-  PRIMARY_NAVIGATION,
-  SECONDARY_NAVIGATION,
-} from "../lib/navigation.ts";
+import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
 import { Button, ButtonLink, Checkbox, Field } from "../ui/controls.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
@@ -107,9 +104,7 @@ const ACME = { id: "org_1", name: "Acme", slug: "acme", role: "admin" };
  * and the test keeps passing while saying nothing about the item nobody
  * remembered — which is exactly what a navigation test is for.
  */
-const NAVIGATION_ITEMS = [...PRIMARY_NAVIGATION, ...SECONDARY_NAVIGATION].map(
-  (item) => item.label,
-);
+const NAVIGATION_ITEMS = EVERY_NAVIGATION_ITEM.map((item) => item.label);
 
 function meWith(role: string): Me {
   return {
@@ -1130,7 +1125,7 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
     // No link into a project the address never named — not Agents, not Tests,
-    // not Simulation runs, not Monitoring, and no href under /projects at all.
+    // not Runs, not Transcripts, and no href under /projects at all.
     for (const item of NAVIGATION_ITEMS) {
       expect(screen.queryByRole("link", { name: item })).toBeNull();
     }
@@ -1171,10 +1166,11 @@ describe("the role the shell shows", () => {
    * asks the rendered shell for the item by the words on it, and follows where
    * it goes.
    *
-   * `Simulation runs` is asked for by the same name, which is the whole of the
-   * rename: one label changed, one address unmoved.
+   * The words are the ones the groups left behind: the Monitoring group's item
+   * says `Transcripts`, and the Simulations group's says `Runs`. Both addresses
+   * are the ones they always were.
    */
-  it("puts Monitoring in the sidebar, opening this project's transcript list", async () => {
+  it("puts Transcripts in the sidebar, opening this project's transcript list", async () => {
     routed.pathname = "/projects/prj_2/agents";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -1188,14 +1184,14 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
 
-    const monitoring = screen.getAllByRole("link", { name: "Monitoring" })[0];
-    expect(monitoring?.getAttribute("href")).toBe(
+    const transcripts = screen.getAllByRole("link", { name: "Transcripts" })[0];
+    expect(transcripts?.getAttribute("href")).toBe(
       "/projects/prj_2/monitoring/transcripts",
     );
 
-    const runs = screen.getAllByRole("link", { name: "Simulation runs" })[0];
+    const runs = screen.getAllByRole("link", { name: "Runs" })[0];
     expect(runs?.getAttribute("href")).toBe("/projects/prj_2/runs");
-    expect(screen.queryByRole("link", { name: "Runs" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Simulation runs" })).toBeNull();
   });
 
   it("says the session is unavailable rather than that somebody is signed in", async () => {

@@ -12,10 +12,9 @@ import {
 } from "../lib/me.ts";
 import {
   activeSectionIn,
-  MANAGEMENT_NAVIGATION,
+  EVERY_NAVIGATION_ITEM,
   navigationFor,
-  PRIMARY_NAVIGATION,
-  SECONDARY_NAVIGATION,
+  NAVIGATION_GROUPS,
 } from "../lib/navigation.ts";
 import {
   inProject,
@@ -96,46 +95,106 @@ describe("which project a tab is looking at", () => {
 });
 
 describe("the product navigation", () => {
-  it("offers Agents, Tests, Simulation runs and Monitoring, in that order and no others", () => {
-    expect(PRIMARY_NAVIGATION.map((item) => item.label)).toEqual([
-      "Agents",
-      "Tests",
-      "Simulation runs",
+  /**
+   * **The addresses this bar offered before it had groups.**
+   *
+   * Written out rather than derived, because deriving them from the module
+   * under test would make this assertion agree with whatever the module says
+   * today. The groups are presentation: a person who copied any one of these
+   * links before the regroup opens the same page afterwards, and this list is
+   * the only thing that can say so.
+   */
+  const HREFS_BEFORE_THE_GROUPS = [
+    "/projects/prj_2/agents",
+    "/projects/prj_2/graders",
+    "/projects/prj_2/monitoring/transcripts",
+    "/projects/prj_2/personas",
+    "/projects/prj_2/runs",
+    "/projects/prj_2/tests",
+  ];
+
+  const everyLink = (projectId: string) =>
+    navigationFor(projectId).flatMap((group) => group.items);
+
+  it("names the two jobs, and the standing pair above them", () => {
+    expect(NAVIGATION_GROUPS.map((group) => group.label)).toEqual([
+      "Global",
+      "Simulations",
       "Monitoring",
     ]);
-    expect(PRIMARY_NAVIGATION.map((item) => item.id)).not.toContain("graders");
   });
 
   /**
-   * **Simulation runs is a label and only a label.** The addresses do not move,
-   * the stored word stays `run`, and the two surfaces now say which kind of
-   * traffic each one holds — which is the whole reason the rename exists beside
-   * a Monitoring item.
+   * Agents stays the first row and stays the signed-in landing area. Graders
+   * moves up beside it: a grader is switched on once and then judges everything
+   * in its scope, which is what makes it standing rather than part of either
+   * job.
+   */
+  it("puts Agents and Graders under Global, Agents first", () => {
+    const global = NAVIGATION_GROUPS[0];
+    expect(global?.id).toBe("global");
+    expect(global?.items.map((item) => item.label)).toEqual([
+      "Agents",
+      "Graders",
+    ]);
+    expect(everyLink("prj_2")[0]?.href).toBe(projectLanding("prj_2"));
+  });
+
+  /**
+   * Personas rises out of the old library shelf and into Simulations — the one
+   * rank change a person feels. A persona is authored on its own and reused
+   * across tests, so it belongs beside the tests that use it.
+   */
+  it("puts Tests, Personas and Runs under Simulations", () => {
+    const simulations = NAVIGATION_GROUPS[1];
+    expect(simulations?.id).toBe("simulations");
+    expect(simulations?.items.map((item) => item.label)).toEqual([
+      "Tests",
+      "Personas",
+      "Runs",
+    ]);
+  });
+
+  /**
+   * **"Simulation runs" is now "Runs", and only the words changed.** The group
+   * supplies the other word, so the pairing a person reads — Simulations →
+   * Runs — keeps saying which kind of traffic that surface holds. The address
+   * does not move and the stored word stays `run`.
    */
   it("renames the runs surface without moving one address", () => {
-    const runs = PRIMARY_NAVIGATION.find((item) => item.id === "runs");
-    expect(runs?.label).toBe("Simulation runs");
-    expect(navigationFor("prj_2").primary.map((link) => link.href)).toContain(
-      "/projects/prj_2/runs",
-    );
+    const runs = everyLink("prj_2").find((link) => link.id === "runs");
+    expect(runs?.label).toBe("Runs");
+    expect(runs?.href).toBe("/projects/prj_2/runs");
     expect(activeSectionIn("/projects/prj_2/runs/run_9")).toBe("runs");
   });
 
   /**
-   * Monitoring is a pillar rather than a library entry, and its item opens the
-   * transcript list directly.
-   *
-   * The area's own address is real and lands there too, so an item pointing at
-   * either would work — but the link is the list, so a navigation click costs no
-   * redirect and the reserved neighbour under this area can never become the
-   * landing by accident.
+   * **The word "Monitoring" moved up to the group label, so the item says what
+   * its page is.** The item is the same item: same id, same `opens`, same
+   * address — the transcript list, reached without a redirect and without a
+   * reserved neighbour under the area being able to become the landing.
    */
-  it("opens the project's transcript list from Monitoring", () => {
-    const monitoring = navigationFor("prj_2").primary.find(
+  it("puts one Transcripts item under Monitoring, opening the transcript list", () => {
+    const monitoring = NAVIGATION_GROUPS[2];
+    expect(monitoring?.id).toBe("monitoring");
+    expect(monitoring?.items.map((item) => item.label)).toEqual(["Transcripts"]);
+
+    const transcripts = everyLink("prj_2").find(
       (link) => link.id === "monitoring",
     );
-    expect(monitoring?.label).toBe("Monitoring");
-    expect(monitoring?.href).toBe("/projects/prj_2/monitoring/transcripts");
+    expect(transcripts?.label).toBe("Transcripts");
+    expect(transcripts?.href).toBe("/projects/prj_2/monitoring/transcripts");
+  });
+
+  /**
+   * **The groups moved no page.** This is the assertion the whole regroup rests
+   * on: six links before, the same six addresses after, whatever group each one
+   * is drawn under now.
+   */
+  it("offers the same addresses it offered before it had groups", () => {
+    const hrefs = everyLink("prj_2").map((link) => link.href);
+    expect([...hrefs].sort()).toEqual(HREFS_BEFORE_THE_GROUPS);
+    expect(hrefs).toHaveLength(HREFS_BEFORE_THE_GROUPS.length);
   });
 
   /** And the item stays lit on every page inside the area, list and one alike. */
@@ -154,8 +213,21 @@ describe("the product navigation", () => {
    * navigation offers claims it.
    */
   it("claims nothing at the reserved dashboard address", () => {
-    for (const link of navigationFor("prj_2").primary) {
+    for (const link of everyLink("prj_2")) {
       expect(link.href, link.id).not.toContain("dashboard");
+    }
+  });
+
+  /**
+   * **No row for something that does not ship.** Measures joins the Monitoring
+   * group when the measures bridge lands and not one day before — a "soon" row
+   * is a state that is not truthful, and a row with nowhere to go is worse.
+   */
+  it("offers no row that leads nowhere", () => {
+    for (const link of everyLink("prj_2")) {
+      expect(link.label.trim(), link.id).not.toBe("");
+      expect(link.label, link.id).not.toMatch(/soon|coming/i);
+      expect(link.href.startsWith("/projects/prj_2/"), link.id).toBe(true);
     }
   });
 
@@ -174,34 +246,13 @@ describe("the product navigation", () => {
   });
 
   /**
-   * A persona is reusable and must never be reachable only from inside a test
-   * form; a grader is switched on once and then judges without anybody visiting
-   * it again. Neither is one of the things a team works on all day, so both
-   * have direct paths rather than primary slots.
-   *
-   * **Graders had no item at all until wave two.** The screens that replaced
-   * this effort's authoring surface arrived organization-wide — they sat at
-   * `/graders`, carried no project in the address, and this shell reads the
-   * project out of the path — so an item pointing at one would have landed a
-   * person with three projects on whichever came first in their list, and
-   * pressing Use there would have made a running copy in a project they were
-   * not looking at. They are under `/projects/:projectId/graders` now, which is
-   * what this asserts: the item is back, and its href carries the project.
+   * Settings is administrative work rather than a project destination, so it is
+   * in no group and its addresses light nothing.
    */
-  it("gives Personas and Graders direct paths outside the primary three", () => {
-    expect(SECONDARY_NAVIGATION.map((item) => item.id)).toEqual([
-      "personas",
-      "graders",
-    ]);
-    expect(navigationFor("prj_2").secondary.map((link) => link.href)).toEqual([
-      "/projects/prj_2/personas",
-      "/projects/prj_2/graders",
-    ]);
-  });
-
   it("keeps Settings in the account menu instead of the project navigation", () => {
-    expect(MANAGEMENT_NAVIGATION).toEqual([]);
-    expect(navigationFor("prj_2").management).toEqual([]);
+    expect(EVERY_NAVIGATION_ITEM.map((item) => item.id)).not.toContain(
+      "settings",
+    );
     expect(activeSectionIn("/projects/prj_2/settings/people")).toBeNull();
   });
 
@@ -217,13 +268,7 @@ describe("the product navigation", () => {
   });
 
   it("has no item for a simulation, which is evidence reached from its run", () => {
-    const every = [
-      ...PRIMARY_NAVIGATION,
-      ...SECONDARY_NAVIGATION,
-      ...MANAGEMENT_NAVIGATION,
-    ].map(
-      (item) => item.id,
-    );
+    const every = EVERY_NAVIGATION_ITEM.map((item) => item.id);
     expect(every).not.toContain("simulations");
     expect(activeSectionIn("/projects/prj_1/runs/run_9/simulations/sim_1")).toBe(
       "runs",
@@ -231,16 +276,24 @@ describe("the product navigation", () => {
   });
 
   it("carries the project in every link it offers", () => {
-    const { primary } = navigationFor("prj_2");
-    for (const link of primary) {
-      expect(link.href.startsWith("/projects/prj_2/")).toBe(true);
+    for (const link of everyLink("prj_2")) {
+      expect(link.href.startsWith("/projects/prj_2/"), link.id).toBe(true);
     }
-    expect(primary.map((link) => link.href)).toContain("/projects/prj_2/agents");
+    expect(everyLink("prj_2").map((link) => link.href)).toContain(
+      "/projects/prj_2/agents",
+    );
   });
 
+  /**
+   * **A group is presentation and never an address.** The item an address is
+   * under is found by its own id, so the same path lights the same item it lit
+   * when the bar was flat — and no group name is ever read out of a URL.
+   */
   it("knows which item an address is under, and says nothing outside the product", () => {
     expect(activeSectionIn("/projects/prj_1/agents")).toBe("agents");
     expect(activeSectionIn("/projects/prj_1/personas/prs_3")).toBe("personas");
+    expect(activeSectionIn("/projects/prj_1/global")).toBeNull();
+    expect(activeSectionIn("/projects/prj_1/simulations")).toBeNull();
     // The two addresses the transcript pages used to answer at. They are inside
     // the project now, and nothing here is under them.
     expect(activeSectionIn("/traces")).toBeNull();
