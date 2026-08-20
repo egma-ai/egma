@@ -32,9 +32,8 @@ import { VerdictBadge } from "./run-status.tsx";
  * second opinion inside the page and the two would disagree the day somebody
  * changed one.
  *
- * They live in their own file, beside `run-status.tsx` and for the same reason:
- * the shared system in `controls.tsx` and `system.module.css` is deliberately
- * held closed.
+ * They live in their own file, beside `run-status.tsx` and for the same
+ * reason: the shared component set is deliberately held closed.
  *
  * **Speech, timing and judgement stay three things.** The transcript is what was
  * said and nothing else — tool calls and system work are not interleaved into

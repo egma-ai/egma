@@ -32,9 +32,9 @@ import { RelativeInstant } from "../../../../ui/relative-time.tsx";
  * that did it in one press would rewrite what a test checks from a page
  * somebody opened to look at the past.
  *
- * These live in this file rather than in `ui/controls.tsx` because they are the
- * Tests area's and nothing else uses them. The controls they are built from are
- * the shared ones.
+ * These live in this file rather than in the shared set because they are the
+ * Tests area's and nothing else uses them. The controls they are built from
+ * are the shared ones.
  */
 
 /**

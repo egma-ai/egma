@@ -44,7 +44,7 @@ import { Section } from "./section.tsx";
  * to appearance is here, once, and the pages ask for it.
  *
  * These live in their own file with their own stylesheet rather than in
- * `controls.tsx` and `system.module.css`, which the shared system deliberately
+ * the shared control set, which the shared system deliberately
  * holds closed.
  */
 
