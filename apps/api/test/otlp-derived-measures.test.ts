@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import {
+  mintKey,
   readTraceOverHttp,
   replayFixture,
   signUp,
@@ -146,7 +147,13 @@ beforeAll(async () => {
   api = await createApi("otlp_derived_measures", { traceStore: true });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   // The fourteen flushes, byte for byte as the exporter sent them.
-  await replayFixture(api.app, acme.secret);
+  const telemetrySecret = await mintKey(
+    api.app,
+    acme.cookie,
+    "Acme production telemetry",
+    acme.projectId,
+  );
+  await replayFixture(api.app, telemetrySecret);
 });
 
 afterAll(async () => {

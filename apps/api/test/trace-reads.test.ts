@@ -12,6 +12,7 @@ import {
   contextFor,
   everySpan,
   listTracesOverHttp,
+  mintKey,
   readTraceOverHttp,
   replayFixture,
   signUp,
@@ -58,7 +59,13 @@ const WINDOW = {
 beforeAll(async () => {
   api = await createApi("trace_reads", { traceStore: true });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
-  await replayFixture(api.app, acme.secret);
+  const telemetrySecret = await mintKey(
+    api.app,
+    acme.cookie,
+    "Acme production telemetry",
+    acme.projectId,
+  );
+  await replayFixture(api.app, telemetrySecret);
 });
 
 afterAll(async () => {

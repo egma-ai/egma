@@ -1035,15 +1035,20 @@ describe("the role the key's holder acts at", () => {
       },
     });
     expect(created.statusCode).toBe(201);
-    viewerOrganizationId = (
-      created.json() as { organization: { id: string } }
-    ).organization.id;
+    const landed = created.json() as {
+      organization: { id: string };
+      project: { id: string };
+    };
+    viewerOrganizationId = landed.organization.id;
 
     const minted = await api.app.inject({
       method: "POST",
       url: "/api/keys",
       headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
-      payload: { name: "the read-only terminal" },
+      payload: {
+        name: "the read-only terminal",
+        project_id: landed.project.id,
+      },
     });
     expect(minted.statusCode).toBe(201);
     viewerSecret = (minted.json() as { secret: string }).secret;
