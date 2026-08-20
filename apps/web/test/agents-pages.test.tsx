@@ -803,20 +803,26 @@ describe("onboarding an agent", () => {
   });
 
   /**
-   * "Skip connection for now", and the bar that has to tell the truth about it.
+   * An agent with no connection, and the bar that has to tell the truth about
+   * it without guessing how it got that way.
    *
    * Being behind the current stage is not the same as being finished. Somebody
-   * who skipped the connection arrives on the tests page with two stages behind
-   * them and one of them not done, and an agent with no connection cannot run a
-   * simulation at all — so a bar reading "2 of 3 stages finished" would be
-   * telling them the setup was nearly complete when the part that makes it work
-   * had been passed over.
+   * reaches the tests page with two stages behind them and one of them not
+   * done, and an agent with no connection cannot run a simulation at all — so a
+   * bar reading "2 of 3 stages finished" would call the setup nearly complete
+   * when the part that makes it work is missing.
    *
-   * Both halves are asserted: the count, and the word beside the stage.
-   * `DESIGN.md` will not let a state rest on a mark and a colour, and it names
-   * skipped as its own state rather than a shade of complete.
+   * **The word is asserted as a state rather than an intention**, and that is
+   * the point of this test rather than an incidental detail. This page reads
+   * the active connections, so an empty list is both "Skip connection for now"
+   * and "connected once, archived it later". A word like "Skipped" is right for
+   * one of those people and wrong for the other, and nothing on this page can
+   * tell which one is reading it.
+   *
+   * Both halves are checked, because `DESIGN.md` will not let a state rest on a
+   * mark and a colour: the count, and the words beside the stage.
    */
-  it("says a skipped connection was skipped, and does not count it as finished", async () => {
+  it("says an agent with no connection needs one, without calling it a skip", async () => {
     routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
@@ -838,17 +844,22 @@ describe("onboarding an agent", () => {
     });
     expect(bar.getAttribute("aria-valuenow")).toBe("1");
     expect(bar.getAttribute("aria-valuetext")).toBe(
-      "1 of 3 stages finished, 1 skipped",
+      "1 of 3 stages finished, Connection not finished",
     );
 
     const connection = within(progress).getByText("Connection");
-    expect(connection.getAttribute("data-skipped")).toBe("true");
+    expect(connection.getAttribute("data-unfinished")).toBe("true");
     expect(connection.getAttribute("data-complete")).toBeNull();
-    expect(within(progress).getByText("Skipped")).toBeTruthy();
+    expect(within(progress).getByText("Needs a connection")).toBeTruthy();
+    /*
+     * The word this must never go back to. Both people who see this screen have
+     * the same empty list, and only one of them pressed Skip.
+     */
+    expect(within(progress).queryByText(/skipped/iu)).toBeNull();
   });
 
-  /** The same page with the connection actually made, so the count moves. */
-  it("counts a connection that was made, and says nothing about a skip", async () => {
+  /** The same page with a connection in place, so the count moves. */
+  it("counts a connection that is in place, and says nothing beside it", async () => {
     routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
@@ -873,7 +884,8 @@ describe("onboarding an agent", () => {
 
     const connection = within(progress).getByText("Connection");
     expect(connection.getAttribute("data-complete")).toBe("true");
-    expect(within(progress).queryByText("Skipped")).toBeNull();
+    expect(connection.getAttribute("data-unfinished")).toBeNull();
+    expect(within(progress).queryByText("Needs a connection")).toBeNull();
   });
 
   it("attaches selected existing tests through each test's applicability revision", async () => {

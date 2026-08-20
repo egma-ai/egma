@@ -29,42 +29,41 @@ const STAGES: readonly {
  * first page and never reaches 3 — finishing the last stage leaves onboarding,
  * and a bar that filled completely on a page still asking for something would
  * be claiming the work was done.
- *
- * The reduced-motion form is the primitive's: `components/ui/progress.tsx`
- * carries `motion-reduce:transition-none`, so the bar is simply at its new
- * length and the stage words are what say it moved. Nothing else here moves.
  */
 export function AgentOnboardingProgress({
   current,
-  skipped = [],
+  unfinished = {},
 }: {
   readonly current: AgentOnboardingStage;
   /**
-   * Stages that were passed over rather than done.
+   * Stages that are behind the reader and still not done, each with the short
+   * state word to show beside it.
    *
    * **Being behind the current stage is not the same as being finished**, and
-   * onboarding has one place where the two part company: "Skip connection for
-   * now" lands on the tests page with the connection stage behind it and
-   * nothing attached. Deriving the count from the current stage alone counted
-   * that skip as work done, so the bar said "2 of 3 stages finished" about an
-   * agent that could not run a simulation.
+   * onboarding has a stage where the two part company: somebody can reach the
+   * tests page with the connection stage behind them and no connection on the
+   * agent.
    *
-   * A caller that knows a stage was skipped says so, and the stage is then
-   * drawn as skipped rather than silently promoted. `DESIGN.md` names skipped
-   * as its own state, separate from complete, for exactly this reason.
+   * **The word comes from the caller, and that is the point of the shape.**
+   * This component can see that a stage is not done; it cannot see *why*, and
+   * a word invented here would be a guess. The first version of this guessed
+   * "Skipped" — and a person who connected an agent and later archived that
+   * connection reads exactly the same empty list as a person who pressed "Skip
+   * connection for now". Calling both a skip told half of them they had done
+   * something they had not. So the caller says the word, and it says a state
+   * rather than an intention.
    */
-  readonly skipped?: readonly AgentOnboardingStage[];
+  readonly unfinished?: Partial<Record<AgentOnboardingStage, string>>;
 }) {
   const currentIndex = STAGES.findIndex((stage) => stage.id === current);
   /*
    * Only what is genuinely done. A stage ahead of the current one is not
-   * counted whether or not it was named as skipped, because nobody has reached
-   * it yet and a skip is something a person did rather than a state to predict.
+   * counted whether or not the caller named it, because nobody has reached it
+   * yet and a stage nobody has opened is not one they left undone.
    */
-  const finished = STAGES.filter(
-    (stage, index) => index < currentIndex && !skipped.includes(stage.id),
-  ).length;
-  const passedOver = currentIndex - finished;
+  const behind = STAGES.filter((stage, index) => index < currentIndex);
+  const waiting = behind.filter((stage) => unfinished[stage.id] !== undefined);
+  const finished = behind.length - waiting.length;
 
   return (
     <nav className="mb-6 border-b border-border pb-4" aria-label="Agent setup">
@@ -76,14 +75,20 @@ export function AgentOnboardingProgress({
         /*
          * A percentage is the wrong unit for three named stages: "33%" is a
          * number nobody can act on, while "1 of 3 stages finished" is the same
-         * fact said in the words the list beside it already uses. A skip is
-         * added rather than folded in, so the sentence accounts for every stage
-         * the reader can see behind them.
+         * fact said in the words the list beside it already uses.
+         *
+         * A stage left behind is named rather than folded into the count,
+         * because "1 of 3 finished" with two stages behind you is the one
+         * arithmetic a reader should not have to do. It is named as *not
+         * finished*, which is all this component knows and all that is true on
+         * every path into it.
          */
         getValueLabel={(value, max) =>
-          passedOver === 0
+          waiting.length === 0
             ? `${String(value)} of ${String(max)} stages finished`
-            : `${String(value)} of ${String(max)} stages finished, ${String(passedOver)} skipped`
+            : `${String(value)} of ${String(max)} stages finished, ${waiting
+                .map((stage) => stage.label)
+                .join(", ")} not finished`
         }
       />
       {/*
@@ -94,9 +99,9 @@ export function AgentOnboardingProgress({
       */}
       <ol className="m-0 flex list-none flex-wrap gap-4 p-0 max-[36rem]:gap-3">
         {STAGES.map((stage, index) => {
-          const behind = index < currentIndex;
-          const passed = behind && skipped.includes(stage.id);
-          const complete = behind && !passed;
+          const passed = index < currentIndex;
+          const waitingWord = passed ? unfinished[stage.id] : undefined;
+          const complete = passed && waitingWord === undefined;
           return (
             <li
               className={
@@ -111,22 +116,26 @@ export function AgentOnboardingProgress({
                 "max-[36rem]:flex-auto"
               }
               data-complete={complete ? "true" : undefined}
-              data-skipped={passed ? "true" : undefined}
+              data-unfinished={waitingWord === undefined ? undefined : "true"}
               aria-current={stage.id === current ? "step" : undefined}
               key={stage.id}
             >
               {/*
                 The mark keeps its 12px whether or not one is drawn, so the
-                labels do not shift sideways as stages complete. A skip gets its
-                own shape as well as its own colour — a tick that meant either
-                "done" or "passed over" would be the colour carrying the
-                difference on its own.
+                labels do not shift sideways as stages complete. A stage left
+                behind gets its own shape as well as its own colour — a tick
+                that meant either "done" or "not done" would be the colour
+                carrying the difference on its own.
               */}
               <span
-                className={passed ? "w-3 text-warning" : "w-3 text-success"}
+                className={
+                  waitingWord === undefined
+                    ? "w-3 text-success"
+                    : "w-3 text-warning"
+                }
                 aria-hidden="true"
               >
-                {complete ? "✓" : passed ? "–" : ""}
+                {complete ? "✓" : waitingWord === undefined ? "" : "–"}
               </span>
               {stage.label}
               {/*
@@ -134,7 +143,9 @@ export function AgentOnboardingProgress({
                 mark and a colour. It is inside the list item, so a screen
                 reader reads the stage and its state together.
               */}
-              {passed ? <span className="text-warning">Skipped</span> : null}
+              {waitingWord === undefined ? null : (
+                <span className="text-warning">{waitingWord}</span>
+              )}
             </li>
           );
         })}
