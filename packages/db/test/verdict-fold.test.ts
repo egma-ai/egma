@@ -266,10 +266,9 @@ describe("an assertion judged more than once", () => {
   });
 
   /**
-   * Re-grading at a tightened grader writes rows beside the old ones, so both
-   * are in the input. The newer grading is the one that speaks — otherwise a
-   * grader's old mistake would go on failing a run forever, which is precisely
-   * what the explicit re-grade exists to undo.
+   * Production grading at a newer current version can leave both rows in the
+   * input. The newer grading is the one that speaks. A simulation re-grade
+   * stays on its pinned version and replaces that version's row.
    */
   it("speaks with its newest grading, not with the one it replaced", () => {
     const rows = [

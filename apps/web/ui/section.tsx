@@ -2,6 +2,8 @@
 
 import type { ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
+
 /**
  * The parts a page is laid out from: a titled block, the strip above a list,
  * a group of controls, and a group of facts.
@@ -84,18 +86,51 @@ export function Actions({ children }: { readonly children: ReactNode }) {
  */
 export function Facts({
   facts,
+  layout = "grid",
 }: {
   readonly facts: readonly {
     readonly label: string;
     readonly value: ReactNode;
   }[];
+  /**
+   * Keep the compact grid, or put identity facts in one contained panel.
+   *
+   * The panel is for the short facts that say *which* thing this is: two of
+   * them side by side, then one full-width prose fact under them, which is the
+   * shape a name, a number and a description actually have. Its last fact
+   * keeps the newlines somebody wrote, because a description written in
+   * paragraphs is not the same description run together.
+   */
+  readonly layout?: "grid" | "panel";
 }) {
+  const panel = layout === "panel";
+
   return (
-    <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4">
-      {facts.map((fact) => (
-        <div className="min-w-0" key={fact.label}>
+    <dl
+      className={cn(
+        "m-0 grid",
+        panel
+          ? "grid-cols-2 gap-6 rounded-card border border-border bg-surface p-6 max-[40rem]:grid-cols-1 max-[40rem]:p-5"
+          : "grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4",
+      )}
+    >
+      {facts.map((fact, index) => (
+        <div
+          className={cn(
+            "min-w-0",
+            panel &&
+              index === facts.length - 1 &&
+              "col-span-full max-[40rem]:col-auto",
+          )}
+          key={fact.label}
+        >
           <dt className="mb-1 text-sm text-muted-foreground">{fact.label}</dt>
-          <dd className="m-0 min-w-0 text-base leading-(--line-normal) text-foreground [overflow-wrap:anywhere]">
+          <dd
+            className={cn(
+              "m-0 min-w-0 text-base leading-(--line-normal) text-foreground [overflow-wrap:anywhere]",
+              panel && "whitespace-pre-wrap",
+            )}
+          >
             {fact.value}
           </dd>
         </div>

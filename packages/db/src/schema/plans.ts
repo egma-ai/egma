@@ -69,34 +69,17 @@ export const gradingPlan = pgTable(
      */
     capturedAt: moment("captured_at"),
     /**
-     * The plan: groups under a tagged test reference, each holding its items.
+     * The plan: groups under a tagged test reference, each holding the ordinary
+     * running copies that judge it. Every item has one grader identity and one
+     * pinned immutable grader version. The seeded expected-behaviors copy has
+     * the same shape as every other copy.
      *
-     * **A tagged union, never one nullable shape.** A group is either a pinned
-     * test version or the one testless group an upgraded instance's older
-     * simulations fall into, and an item is either an authored grader or a
-     * built-in — and the two item shapes genuinely differ. An authored item has
-     * a grader identity, a pinned grader version, an origin, a scope and one
-     * priority for the whole item; the built-in has a reserved key and an
-     * engine version, and its verdicts take their priority one at a time from
-     * the behaviors of the pinned test version. Folding the two into one row of
-     * mostly-null columns would make every reader guess which half applied.
-     *
-     * `access/run-plans.ts` owns the shape and is the only thing that writes
-     * one. Empty on `not_recorded`, where the state is the whole answer.
+     * The group tag distinguishes a pinned test version from the historical
+     * testless group an upgraded database can hold. `access/run-plans.ts` owns
+     * the shape and is the only writer. Empty on `not_recorded`, where the state
+     * is the whole answer.
      */
     groups: jsonb("groups").notNull(),
-    /**
-     * Every `jcr_` judge credential the plan above names, as a flat array.
-     *
-     * **Derived, and written in the same statement as the plan it summarises.**
-     * It exists so that "is this credential still needed by outstanding work"
-     * is a plain indexed containment query rather than a walk through nested
-     * JSON — the question a credential's Archive has to answer before it can
-     * refuse, on the deployment's whole history. The `platform` sentinel is
-     * deliberately not in it: it names no customer credential and nothing can
-     * archive it.
-     */
-    judgeCredentialIds: jsonb("judge_credential_ids").notNull(),
     createdAt: createdAt(),
   },
   (table) => [
@@ -118,17 +101,12 @@ export const gradingPlan = pgTable(
       "grading_plan_groups_are_a_list",
       sql`jsonb_typeof(${table.groups}) = 'array'`,
     ),
-    check(
-      "grading_plan_credentials_are_a_list",
-      sql`jsonb_typeof(${table.judgeCredentialIds}) = 'array'`,
-    ),
     // An unrecorded plan holds nothing at all, so nothing can be read off it
     // as though it were a pin.
     check(
       "grading_plan_unrecorded_holds_nothing",
       sql`${table.state} <> 'not_recorded'
-        or (${table.groups} = '[]'::jsonb
-          and ${table.judgeCredentialIds} = '[]'::jsonb)`,
+        or ${table.groups} = '[]'::jsonb`,
     ),
     // The tenancy triangle, edge by edge, as everywhere else: the project is
     // this organization's, and the run is that project's.
@@ -142,11 +120,6 @@ export const gradingPlan = pgTable(
       columns: [table.runId, table.projectId],
       foreignColumns: [run.id, run.projectId],
     }).onDelete("cascade"),
-    // What a credential's Archive asks, over every plan on the deployment.
-    index("grading_plan_judge_credential_ids_idx").using(
-      "gin",
-      table.judgeCredentialIds,
-    ),
     index("grading_plan_organization_id_project_id_idx").on(
       table.organizationId,
       table.projectId,

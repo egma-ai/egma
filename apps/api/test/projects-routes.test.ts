@@ -23,12 +23,6 @@ afterEach(async () => {
   await api?.close();
 });
 
-const THE_PLATFORMS_JUDGE = {
-  provider: "openai",
-  model: "gpt-4o",
-  key: "sk-the-self-hoster-supplied-this-WXYZ",
-} as const;
-
 type Answer = { status: number; body: Record<string, unknown> };
 
 async function request(
@@ -166,13 +160,11 @@ describe("creating a project", () => {
 
   /**
    * The whole factory, proven from outside: the project the route made is
-   * usable, which means it has a default persona to give the first test and a
-   * judge to grade the first run.
+   * usable, which means it has a default persona and a mandatory running
+   * grader for its first test.
    */
-  it("makes a project that is born with a default persona and this deployment's judge", async () => {
-    api = await createApi("projects_create_whole", {
-      defaultJudge: THE_PLATFORMS_JUDGE,
-    });
+  it("makes a project with its default persona and mandatory grader", async () => {
+    api = await createApi("projects_create_whole");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const made = await request("POST", "/api/projects", { cookie: ada.cookie }, {
@@ -187,31 +179,11 @@ describe("creating a project", () => {
     );
     expect((personas.body.items as unknown[]).length).toBe(1);
 
-    const judge = await request(
-      "GET",
-      `/api/judge?project=${String(made.body.id)}`,
-      { cookie: ada.cookie },
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*) as count from grader where project_id = $1 and deleted_at is null",
+      [String(made.body.id)],
     );
-    expect(judge.body.state).toBe("configured");
-    expect(judge.body.source).toBe("platform");
-  });
-
-  it("starts a project in needs_setup where the deployment configured no judge", async () => {
-    api = await createApi("projects_create_needs_setup", {
-      defaultJudge: null,
-    });
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const made = await request("POST", "/api/projects", { cookie: ada.cookie }, {
-      name: "Unjudged",
-    });
-
-    const judge = await request(
-      "GET",
-      `/api/judge?project=${String(made.body.id)}`,
-      { cookie: ada.cookie },
-    );
-    expect(judge.body.state).toBe("needs_setup");
+    expect(rows[0]?.count).toBe("1");
   });
 
   it("refuses a project with no name", async () => {

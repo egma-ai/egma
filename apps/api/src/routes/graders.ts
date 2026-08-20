@@ -68,23 +68,17 @@ import { given, projectNamed, text } from "../http/reading.ts";
  * outlive it, so an old run keeps its own meaning rather than quietly losing a
  * grader's worth of evidence.
  *
- * **Delete is not part of that authoring surface, and it took a wave to notice
- * that it was being treated as though it were.** ADR-0009 shelved *defining*
- * graders; it made switching one off the plainest act in the area — "dormant is
- * no copy at all; there is no enable switch and no `none` value". The data
- * access module has said so since the redesign landed, the start-up backfill is
- * built around a person having taken that decision, and the door that would let
- * anybody take it was never registered. So a product whose only loudness
- * control is delete had no delete, and the screens that displayed the running
- * copies could only display them. It is a verb here now. Edit is still absent,
- * because editing a copy's values is the authoring surface, and that is what
- * was shelved.
+ * ADR-0009 shelved authoring new Library definitions, not managing a running
+ * copy. This route therefore supports both actions a project needs after Use:
+ * PATCH changes the copy's config, model, or live settings, and DELETE switches
+ * it off. There is still no custom-definition authoring door here.
  *
- * **A copy's definition never crosses this door.** What a read answers is the
- * pointer, the filled-in values, and where the grader applies. The judge prompt
- * is on the library entry and is read from `/api/grader-library`, which is the
- * same place the engine reads it at judging time — so the words on screen and
- * the words a model is sent are one row.
+ * **A copy's executable definition never crosses this door.** What a read
+ * answers is the stable library identity, the filled-in values, and where the
+ * grader applies. `/api/grader-library` shows the library's current immutable
+ * definition revision. The engine instead executes the exact revision pinned
+ * by the selected grader version, so a later catalog change cannot alter an
+ * old run.
  *
  * The addresses follow the standing rule: nothing is rooted at a project and
  * the organization is never in a path. A write may name a project in its body
@@ -115,6 +109,7 @@ const USE_KEYS = [
   "required",
   "scope",
   "production_sample_rate",
+  "judge_model",
   "project",
 ] as const;
 
@@ -146,8 +141,8 @@ function unknownKeyIn(
  * The one key an edit refuses in its own words rather than as an unknown one.
  *
  * `library_id` is not a key an edit forgot to support — it is the pointer, and
- * every version behind this copy holds values shaped by the type that pointer
- * decided. A copy that could be moved to another entry would be a different
+ * every version behind this copy holds values shaped by that library's stable
+ * type. A copy that could be moved to another entry would be a different
  * grader wearing the old one's history, and its verdicts would name assertion
  * keys nothing on the new shelf can read. Saying so beats "no such key",
  * because somebody sending it wants a copy of the other entry and Use makes one.
@@ -155,9 +150,9 @@ function unknownKeyIn(
 function repointing(body: Body): string | undefined {
   if (!("library_id" in body)) return undefined;
   return (
-    "a grader cannot be moved to another library entry: its type came from " +
-    "the entry it is a copy of, and every version behind it holds values that " +
-    "type shapes. Press Use on the entry you want, which makes a second copy " +
+    "a grader cannot be moved to another library entry: the entry owns its " +
+    "stable type, and every version behind the copy holds values that type " +
+    "shapes. Press Use on the entry you want, which makes a second copy " +
     "and leaves this one's history saying what it always said."
   );
 }
@@ -165,10 +160,11 @@ function repointing(body: Body): string | undefined {
 /**
  * One running copy as every read of one describes it.
  *
- * `library_id` rides at the front because it is what this row *is*: everything
- * a person wants to know about how it judges is read through it. The config is
- * the copy's own filled-in values and nothing else — no prompt, no criteria,
- * because those are the entry's and are never written down here.
+ * `library_id` rides at the front because it is what this row *is*: the stable
+ * identity of the definition family it runs. The config is the copy's own
+ * filled-in values and nothing else. Each immutable grader version stores the
+ * exact library-definition revision it executes; the copy does not duplicate
+ * that prompt or source code in its config.
  */
 function described(one: Grader): Record<string, unknown> {
   return {
@@ -184,6 +180,7 @@ function described(one: Grader): Record<string, unknown> {
     version: one.version,
     version_id: one.versionId,
     config: one.config,
+    judge_model: one.judgeModel,
     created_at: one.createdAt.toISOString(),
     updated_at: one.updatedAt.toISOString(),
   };
@@ -223,6 +220,48 @@ function paramsIn(body: Body): WrittenParams {
     };
   }
   return { params: params as FilledInForm };
+}
+
+type WrittenJudgeModel =
+  | { readonly value: NonNullable<Grader["judgeModel"]> | null | undefined }
+  | { readonly refusal: string };
+
+/** A grader version's exact non-secret model selection. */
+function judgeModelIn(body: Body): WrittenJudgeModel {
+  if (!("judge_model" in body) || body.judge_model === undefined) {
+    return { value: undefined };
+  }
+  if (body.judge_model === null) return { value: null };
+  if (
+    typeof body.judge_model !== "object" ||
+    Array.isArray(body.judge_model)
+  ) {
+    return {
+      refusal:
+        'judge_model is an object with exactly "provider" and "model" text fields',
+    };
+  }
+
+  const held = body.judge_model as Record<string, unknown>;
+  const keys = Object.keys(held);
+  if (
+    keys.length !== 2 ||
+    !keys.includes("provider") ||
+    !keys.includes("model") ||
+    typeof held.provider !== "string" ||
+    typeof held.model !== "string"
+  ) {
+    return {
+      refusal:
+        'judge_model is an object with exactly "provider" and "model" text fields',
+    };
+  }
+  return {
+    value: {
+      provider: held.provider,
+      model: held.model,
+    } as NonNullable<Grader["judgeModel"]>,
+  };
 }
 
 /** A flag a body sent, refused rather than coerced: `"false"` is not false. */
@@ -451,6 +490,15 @@ export async function graderRoutes(
     const params = paramsIn(body);
     if ("refusal" in params) return unprocessable(reply, params.refusal);
 
+    const judgeModel = judgeModelIn(body);
+    if ("refusal" in judgeModel) return unprocessable(reply, judgeModel.refusal);
+    if (judgeModel.value === null) {
+      return unprocessable(
+        reply,
+        "judge_model cannot be null when using a library entry; omit it to use the supported default",
+      );
+    }
+
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
@@ -479,6 +527,9 @@ export async function graderRoutes(
     const created = await useLibraryEntry(acting.auth, {
       libraryId,
       ...(params.params === undefined ? {} : { params: params.params }),
+      ...(judgeModel.value === undefined
+        ? {}
+        : { judgeModel: judgeModel.value }),
       // Absent leaves the copy named after the entry it is a copy of; an empty
       // one is the factory's refusal to make, in the factory's own words.
       ...(name.value === undefined ? {} : { name: name.value }),
@@ -550,6 +601,9 @@ export async function graderRoutes(
     const params = paramsIn(body);
     if ("refusal" in params) return unprocessable(reply, params.refusal);
 
+    const judgeModel = judgeModelIn(body);
+    if ("refusal" in judgeModel) return unprocessable(reply, judgeModel.refusal);
+
     const required = requiredIn(body);
     if ("refusal" in required) return unprocessable(reply, required.refusal);
 
@@ -575,6 +629,9 @@ export async function graderRoutes(
 
     const edited = await editGrader(acting.auth, graderId, {
       ...(params.params === undefined ? {} : { params: params.params }),
+      ...(judgeModel.value === undefined
+        ? {}
+        : { judgeModel: judgeModel.value }),
       // An empty name is not a rename this door drops — a copy has to be
       // called something, and the factory says so in its own words.
       ...(name.value === undefined ? {} : { name: name.value }),
@@ -613,9 +670,9 @@ export async function graderRoutes(
    * here rather than a tidier one.
    *
    * The library entry behind it is **not** released: a switched-off copy still
-   * points at its definition, and that definition has to outlive it for the
-   * verdicts to stay interpretable. Deleting the entry stays refused, which is
-   * what the foreign key underneath says too.
+   * owns immutable grader versions that point at exact definition revisions.
+   * Both have to outlive it for old verdicts to stay interpretable. Deleting
+   * the entry stays refused, which is what the foreign keys underneath say too.
    *
    * **A project may end up judged by nothing at all**, and that is allowed
    * rather than refused. The seeded expected-behaviors copy is an ordinary

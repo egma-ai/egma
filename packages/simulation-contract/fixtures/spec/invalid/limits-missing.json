@@ -1,5 +1,5 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
   "modality": "chat",
   "connection": {
@@ -13,16 +13,24 @@
   },
   "persona": {
     "traits": {
-      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
-      "language": "en-US",
-      "voice": {
-        "provider": "cartesia",
-        "voiceId": "warm-alto-2",
-        "speed": 0.9
-      }
+      "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.", "language": "en-US"
     }
   },
   "scenario": {
     "instructions": "Move a dental cleaning from Tuesday to Thursday."
+  },
+  "models": {
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "key": "fixture-not-a-real-secret-llm"
+    },
+    "stt": { "provider": "deepgram", "model": "nova-3-general" },
+    "tts": {
+      "provider": "cartesia",
+      "model": "sonic-3.5",
+      "voice_id": "warm-alto-2",
+      "speed": 0.9
+    }
   }
 }

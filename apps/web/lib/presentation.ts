@@ -39,6 +39,22 @@ export function graderDisplayName(name: string): string {
 }
 
 /**
+ * The two owners shown for personas and grader definitions.
+ *
+ * The API says `egma` or `organization`. Product tables say who owns the
+ * definition instead of turning ownership into a type. `Default` is not an
+ * owner: it is a separate project choice that can point at either one.
+ */
+const OWNER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  egma: "Egma",
+  organization: "You",
+};
+
+export function ownerDisplayName(owner: string): string {
+  return OWNER_DISPLAY_NAMES[owner] ?? owner;
+}
+
+/**
  * The two screens inside the Graders section, and the order they read in.
  *
  * **The library first, because that is where a grader comes from.** A running

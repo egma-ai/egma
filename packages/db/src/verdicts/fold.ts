@@ -196,8 +196,8 @@ export function verdictLanes<Row extends FoldableVerdict>(
  * The assertion a row is about, as a key that cannot be collided into.
  *
  * Deliberately **not** the storage identity: that one also spans the grader
- * version, because that is what makes a re-grade a second row rather than an
- * overwrite. What the fold counts is the assertion, once, whatever number of
+ * version, so production judgments made under different current versions stay
+ * distinct. What the fold counts is the assertion, once, whatever number of
  * rows have accumulated against it.
  *
  * `JSON.stringify` of the tuple rather than a joined string, because a grader
@@ -262,12 +262,11 @@ function isLater(row: FoldableVerdict, than: FoldableVerdict): boolean {
  * The rows that count, one per judged assertion, in the order they were handed
  * over.
  *
- * **The newest grading speaks.** Re-grading at a new grader version writes rows
- * beside the old ones rather than over them, so both are here; counting both
- * would score one assertion twice and would leave a grader's old mistake failing
- * a run forever. The newest is decided by the clock — a re-grade happens after
- * the grading it supersedes, so nothing here has to understand version
- * identifiers to know which came second.
+ * **The newest grading speaks.** Production re-grading can use a new current
+ * grader version and write beside the old row. Counting both would score one
+ * assertion twice. The newest is decided by the clock, so nothing here has to
+ * understand version identifiers to know which came second. A simulation
+ * re-grade stays on its run-pinned version and replaces that version's row.
  *
  * There is exactly one voice per grading now. A person disagreeing with a
  * judgment is not a second row on the machine's identity — corrections return as

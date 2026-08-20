@@ -95,7 +95,10 @@ async function aJudgedRun(label: string): Promise<{
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const connectionId = (registered.body.connection as { id: string }).id;
 
-  await createPersona(auth, { name: "Impatient Rita", traits: NEUTRAL_TRAITS });
+  await createPersona(auth, {
+    name: "Impatient Rita",
+    traits: NEUTRAL_TRAITS,
+  });
 
   const created = await request("POST", "/api/tests", key, {
     name: "Reschedules a booked appointment",

@@ -3,8 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createProject,
-  getProjectJudge,
   IdentityConflictError,
+  listGraders,
   listPersonas,
   listProjects,
   NotPermittedError,
@@ -14,6 +14,7 @@ import {
   UnprocessableInputError,
   updateOrganization,
   updateProject,
+  PREDEFINED_GRADERS,
   type AuthContext,
   type Role,
 } from "@egma/db";
@@ -26,13 +27,13 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * them.
  *
  * **The whole of this file is about one claim: a project is created whole or
- * not at all.** A project is not a row — it is a row, the persona a first test
- * gets when it names none, the pointer that makes that persona the default, and
- * whatever judge the deployment can give it. Signup has always written all four
- * together. An admin creating a second project used to write one of them, and
+ * not at all.** A project is not a row — it is a row, the shared persona a first
+ * test gets when it names none, the pointer that makes that persona the default,
+ * and its mandatory running grader. Signup writes all of them together. An
+ * admin creating a second project used to write one of them, and
  * everything downstream of that gap failed later and somewhere else: the first
  * test in the new project refused because the project pointed at nobody, and
- * the first run came back errored because there was no judge to ask.
+ * the first run could come back green having judged nothing.
  *
  * So the create is proven by what it leaves behind rather than by what it
  * returns, and the failure case is proven by the absence of every one of those
@@ -45,12 +46,6 @@ const acme = { organization: newId("org"), project: newId("prj") };
 const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
 const bob = newId("usr");
-
-const THE_PLATFORMS_JUDGE = {
-  provider: "openai",
-  model: "gpt-4o",
-  key: "sk-the-self-hoster-supplied-this-WXYZ",
-};
 
 function actingIn(
   organizationId: string,
@@ -80,10 +75,9 @@ afterAll(async () => {
 });
 
 describe("creating a project", () => {
-  it("writes the project, its starter persona and the pointer at them together", async () => {
+  it("writes the project and its shared default-persona pointer together", async () => {
     const made = await createProject(acmeAdmin(), {
       name: "Outbound sales",
-      defaultJudge: THE_PLATFORMS_JUDGE,
     });
 
     expect(made.name).toBe("Outbound sales");
@@ -93,45 +87,23 @@ describe("creating a project", () => {
     const personas = await listPersonas(inside, {});
     expect(personas.items).toHaveLength(1);
 
-    // The pointer, read the way the persona factory reads it: the starter is
-    // the project's default, so the first test written here has somebody to
-    // give when it names nobody.
+    // The pointer, read the way the persona factory reads it: the shared
+    // persona is the project's default, so the first test written here has a
+    // persona when it names none.
     expect(personas.items[0]?.isDefault).toBe(true);
-  });
-
-  it("gives the new project the deployment's own judge when there is one", async () => {
-    const made = await createProject(acmeAdmin(), {
-      name: "With a judge",
-      defaultJudge: THE_PLATFORMS_JUDGE,
-    });
-
-    const judge = await getProjectJudge(actingIn(acme.organization, made.id, "admin"));
-    expect(judge.state).toBe("configured");
-    if (judge.state !== "configured") throw new Error("unreachable");
-    expect(judge.judge.source).toBe("platform");
-    expect(judge.judge.model).toBe("gpt-4o");
-  });
-
-  /**
-   * A deployment that configured no judge of its own gives a new project none,
-   * and that is a state rather than a gap. `needs_setup` is what the settings
-   * page says out loud; a project silently born unjudged would look configured
-   * and return errored verdicts after real calls had been paid for.
-   */
-  it("starts a project in needs_setup on a deployment with no judge of its own", async () => {
-    const made = await createProject(acmeAdmin(), { name: "No judge here" });
-
-    const judge = await getProjectJudge(actingIn(acme.organization, made.id, "admin"));
-    expect(judge.state).toBe("needs_setup");
+    const graders = await listGraders(inside, {});
+    expect(graders.items).toHaveLength(1);
+    expect(graders.items[0]?.libraryId).toBe(
+      PREDEFINED_GRADERS.expectedBehaviors,
+    );
   });
 
   /**
    * The transaction, proven by breaking something inside it.
    *
-   * A key too short to be any provider's is refused by the judge row's own
-   * validation — which happens after the project row and the starter persona
-   * have already been inserted. If the four writes were four transactions, the
-   * project and the persona would survive; because they are one, nothing does.
+   * A slug collision is raised by the project insert. If the factory wrote its
+   * dependent rows outside one transaction, a failed create could leave one
+   * behind; because it writes as one unit, nothing does.
    */
   it("writes nothing at all when any part of the create is refused", async () => {
     const before = await listProjects(acmeAdmin());
@@ -139,9 +111,9 @@ describe("creating a project", () => {
     await expect(
       createProject(acmeAdmin(), {
         name: "Half a project",
-        defaultJudge: { ...THE_PLATFORMS_JUDGE, key: "short" },
+        slug: "default",
       }),
-    ).rejects.toThrow(UnprocessableInputError);
+    ).rejects.toThrow(ProjectSlugTakenError);
 
     const after = await listProjects(acmeAdmin());
     expect(after.map((one) => one.name)).toEqual(before.map((one) => one.name));

@@ -175,8 +175,8 @@ describe("choosing the phone", () => {
     expect(report).toEqual({
       kind: "failed",
       reason:
-        "Retell says this is a chat agent. Chat agents can be reached only by text, not phone. " +
-        "Choose text and try again. Nothing was written.",
+        "Retell says this is a chat agent. Chat agents require a Chat connection. " +
+        "Choose --reach text and try again. Nothing was written.",
     });
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -294,8 +294,8 @@ describe("choosing text", () => {
     expect(report).toEqual({
       kind: "failed",
       reason:
-        "Retell says this is a voice agent. Voice agents can be reached only by phone, not text. " +
-        "Choose phone and try again. Nothing was written.",
+        "Retell says this is a voice agent. Voice agents require a Phone connection. " +
+        "Choose --reach phone and try again. Nothing was written.",
     });
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);

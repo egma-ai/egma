@@ -147,26 +147,19 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("CLICKHOUSE_URL:");
   });
 
-  /**
-   * One presence and one absence, and both are load-bearing.
-   *
-   * The encryption key is here because a judged grader replays the project's own
-   * judge key to the provider and this is the process that makes the call. It is
-   * the same key the API seals with, and what this service can open with it is
-   * narrowed where it matters rather than by withholding the key: a judge key
-   * resolves only for a context built from a grading claim, and a connection's
-   * credentials ask for a permission the engine's context does not carry.
-   *
-   * A model key is still absent, and that is the one that must stay absent: a
-   * judge configured per container would be a judge no project chose, spending
-   * an account no project named, on conversations belonging to customers who
-   * never agreed to either.
+  /** The grader reads the shared provider bundle. It no longer opens model
+   * credentials stored in Postgres, so the connection encryption key must not
+   * cross this container boundary.
    */
-  it("is handed the encryption key it needs, and no model key at all", async () => {
+  it("is handed the provider credential inputs, and no encryption key", async () => {
     const block = serviceBlock(await read("docker-compose.yml"), "grader");
     expect(block).toBeDefined();
-    expect(block).toContain("EGMA_ENCRYPTION_KEY:");
-    expect(block).not.toMatch(/API_KEY:/);
+    expect(block).toContain("EGMA_OPENAI_API_KEY:");
+    expect(block).toContain("EGMA_DEEPGRAM_API_KEY:");
+    expect(block).toContain("EGMA_CARTESIA_API_KEY:");
+    expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_SECRET_ID:");
+    expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_REGION:");
+    expect(block).not.toContain("EGMA_ENCRYPTION_KEY:");
   });
 
   it("has no healthcheck, because nothing listens for one to reach", async () => {

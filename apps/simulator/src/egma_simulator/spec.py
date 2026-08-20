@@ -50,74 +50,13 @@ class MockTool:
 
 
 @dataclass(frozen=True)
-class PlatformModel:
-    """What the persona thinks with, as the platform has it configured.
-
-    Every field is optional, because a platform mid-setup holds some of
-    them and not others, and one that holds none is every platform before
-    anybody set it up. ``None`` here always means *the platform said
-    nothing about this*, never *the platform said nothing* — so a reader
-    leaves its own value standing rather than clearing it.
-    """
-
-    provider: str | None = None
-    model: str | None = None
-    key: str | None = field(default=None, repr=False)
-    """Kept out of the dataclass repr, like every other key in this
-    process: a log line carrying one is a log line that should not have."""
-
-    reasoning_effort: str | None = None
-    """How hard the model thinks before the persona speaks, in the
-    provider's own vocabulary, or ``None`` to send nothing at all.
-
-    A persona is a caller in a hurry: the reasoning under test is the
-    agent's, and time the persona spends thinking is silence on a live
-    line. Carried verbatim, because the accepted values are the
-    provider's and change on their schedule, not egma's."""
-
-
-@dataclass(frozen=True)
-class PlatformSpeech:
-    """What the persona speaks and hears with, as the platform has it.
-
-    A key per leg rather than one per provider, which is the shape the
-    contract carries and the shape :class:`~egma_simulator.speech.SpeechProviders`
-    holds: the two legs are two accounts as often as they are one, and a
-    shape that could not say so would make the second one unreachable.
-    """
-
-    stt_provider: str | None = None
-    stt_key: str | None = field(default=None, repr=False)
-    stt_model: str | None = None
-    """Which model the listening leg asks for, where its provider has more
-    than one.
-
-    Here beside ``tts_model`` rather than left in each simulator's
-    environment, which is where it used to be alone. That asymmetry was
-    the one setting a deployment could not change centrally: an operator
-    could move the mouth from a settings page and had to edit a container
-    and restart it to move the ears."""
-
-    tts_provider: str | None = None
-    tts_key: str | None = field(default=None, repr=False)
-    tts_model: str | None = None
-    tts_voice: str | None = None
-    vad_provider: str | None = None
-
-
-@dataclass(frozen=True)
 class PlatformCarrier:
-    """How a call reaches the telephone network, as the platform has it.
+    """The SIP trunk a deployment uses for phone simulations.
 
-    The media server's own key and secret are deliberately not here: they
-    are read by a third-party container when it is created and cannot come
-    from the platform's store, so they stay in each simulator's
-    environment. What is here is the choice of bridge and the trunk the
-    carrier authenticates — the paperwork somebody did once with Twilio,
-    which is exactly the thing this effort exists to stop losing.
+    The media backend is deployment configuration. It cannot ride this
+    block and cannot be selected by a work order.
     """
 
-    media_backend: str | None = None
     trunk_address: str | None = None
     trunk_number: str | None = None
     trunk_username: str | None = None
@@ -126,25 +65,8 @@ class PlatformCarrier:
 
 @dataclass(frozen=True)
 class PlatformSettings:
-    """What the deployment has been configured with, off the work order.
+    """The carrier part of deployment configuration on this work order."""
 
-    **These arrive per simulation and replace this container's own.** They
-    used to be each simulator's environment, which meant a second
-    simulator on another machine needed a file copied to it, and a
-    container started without one dialled nothing while reporting itself
-    healthy. They belong to the whole deployment, so the deployment holds
-    them and hands them down with the work.
-
-    Three groups, because the groups are what can be absent: a deployment
-    with no carrier is the ordinary deployment, and the whole phone half
-    then simply is not here. Absent everywhere is also ordinary and is
-    what every spec written before these existed carries — which is why
-    every field is optional and every reader treats ``None`` as *say
-    nothing*.
-    """
-
-    model: PlatformModel = field(default_factory=PlatformModel)
-    speech: PlatformSpeech = field(default_factory=PlatformSpeech)
     carrier: PlatformCarrier = field(default_factory=PlatformCarrier)
 
     @property
@@ -154,16 +76,8 @@ class PlatformSettings:
         One place to ask, exactly as the configuration's own secrets have
         one, so a fourth key arriving cannot fall out of the scrubbing.
         """
-        return tuple(
-            secret
-            for secret in (
-                self.model.key,
-                self.speech.stt_key,
-                self.speech.tts_key,
-                self.carrier.trunk_password,
-            )
-            if secret is not None
-        )
+        password = self.carrier.trunk_password
+        return () if password is None else (password,)
 
     @classmethod
     def from_document(cls, written: Any) -> PlatformSettings:
@@ -174,34 +88,70 @@ class PlatformSettings:
         of this module makes.
         """
         block = written or {}
-        model = block.get("model") or {}
-        speech = block.get("speech") or {}
         carrier = block.get("carrier") or {}
         return cls(
-            model=PlatformModel(
-                provider=model.get("provider"),
-                model=model.get("model"),
-                key=model.get("key"),
-                reasoning_effort=model.get("reasoning_effort"),
-            ),
-            speech=PlatformSpeech(
-                stt_provider=speech.get("stt_provider"),
-                stt_key=speech.get("stt_key"),
-                stt_model=speech.get("stt_model"),
-                tts_provider=speech.get("tts_provider"),
-                tts_key=speech.get("tts_key"),
-                tts_model=speech.get("tts_model"),
-                tts_voice=speech.get("tts_voice"),
-                vad_provider=speech.get("vad_provider"),
-            ),
             carrier=PlatformCarrier(
-                media_backend=carrier.get("media_backend"),
                 trunk_address=carrier.get("trunk_address"),
                 trunk_number=carrier.get("trunk_number"),
                 trunk_username=carrier.get("trunk_username"),
                 trunk_password=carrier.get("trunk_password"),
             ),
         )
+
+
+@dataclass(frozen=True)
+class ModelSelection:
+    """One pinned provider/model pair and its direct credential, when used."""
+
+    provider: str
+    model: str
+    key: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class SpeechSelection(ModelSelection):
+    """The TTS selection and the technical voice it owns."""
+
+    voice_id: str = ""
+    speed: float = 1.0
+
+
+@dataclass(frozen=True)
+class SelectedModels:
+    """The complete model selection from the pinned persona version."""
+
+    llm: ModelSelection
+    stt: ModelSelection
+    tts: SpeechSelection
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        """Every direct provider credential carried by this work order."""
+        return tuple(key for key in (self.llm.key, self.stt.key, self.tts.key) if key)
+
+    @classmethod
+    def from_document(cls, written: Any) -> SelectedModels:
+        """Read the required, already validated model block."""
+        tts = written["tts"]
+        return cls(
+            llm=_selection(written["llm"]),
+            stt=_selection(written["stt"]),
+            tts=SpeechSelection(
+                provider=tts["provider"],
+                model=tts["model"],
+                key=tts.get("key"),
+                voice_id=tts["voice_id"],
+                speed=float(tts["speed"]),
+            ),
+        )
+
+
+def _selection(written: Any) -> ModelSelection:
+    return ModelSelection(
+        provider=written["provider"],
+        model=written["model"],
+        key=written.get("key"),
+    )
 
 
 @dataclass(frozen=True)
@@ -232,12 +182,7 @@ class SimulationSpec:
     limits: Limits
 
     persona_traits: dict[str, Any]
-    """The persona's authored traits, passed through opaquely.
-
-    What a persona is made of is authoring's business: the persona brain
-    composes the whole block into its system prompt verbatim, and nothing
-    in the simulator picks favourites among the keys.
-    """
+    """The persona version's complete authored human traits."""
 
     connection_type: str
     """Which plug reaches the agent. An open vocabulary, not an enum."""
@@ -248,6 +193,9 @@ class SimulationSpec:
     credentials: Any
     """Secret material, or None. Held in memory, handed only to the plug."""
 
+    models: SelectedModels
+    """The only source for LLM, STT, TTS, and technical voice choices."""
+
     mock_tools: tuple[MockTool, ...] = ()
     """What egma answers for while this simulation runs, already resolved.
 
@@ -257,14 +205,7 @@ class SimulationSpec:
     """
 
     platform: PlatformSettings = field(default_factory=PlatformSettings)
-    """What the deployment has been configured with — its persona's model,
-    its speech legs, its carrier — read afresh for this simulation.
-
-    Empty is an ordinary state and means the platform said nothing, so
-    this container's own configuration stands exactly as it did. It is
-    never *this simulation asked for nothing*: the settings belong to the
-    deployment, and a simulation has no opinion about them.
-    """
+    """The optional SIP carrier block. It owns no model or voice choice."""
 
     @classmethod
     def from_document(cls, document: Any) -> SimulationSpec:
@@ -280,6 +221,7 @@ class SimulationSpec:
         return cls(
             mock_tools=_mock_tools(document.get("mock_tools") or []),
             platform=PlatformSettings.from_document(document.get("platform")),
+            models=SelectedModels.from_document(document["models"]),
             simulation_id=document["simulation_id"],
             modality=document["modality"],
             scenario_instructions=document["scenario"]["instructions"],

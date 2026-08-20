@@ -41,7 +41,6 @@ const gene = newId("usr");
 const neutralTraits = {
   personality: "Speaks plainly, stays patient, asks one question at a time.",
   language: "en-US",
-  voice: { provider: "elevenlabs", voiceId: "EXAVITQu4vr4xnSDxMaL", speed: 1 },
 } as const;
 
 function actingIn(
@@ -68,7 +67,10 @@ function actingAsGlobex(): AuthContext {
 }
 
 async function seedPersona(auth: AuthContext, name: string): Promise<string> {
-  const created = await createPersona(auth, { name, traits: neutralTraits });
+  const created = await createPersona(auth, {
+    name,
+    traits: neutralTraits,
+  });
   return created.id;
 }
 

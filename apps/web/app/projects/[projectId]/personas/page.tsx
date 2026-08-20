@@ -13,12 +13,20 @@ import {
   type Persona,
   type PersonaPage,
 } from "../../../../lib/personas.ts";
-import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
+import {
+  projectLanding,
+  projectPath,
+} from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import { Choice } from "../../../../ui/choice.tsx";
 import { Toolbar } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
-import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
+import {
+  Empty,
+  Failure,
+  Loading,
+  NotFound,
+} from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
   RelativeInstant,
@@ -35,11 +43,10 @@ import {
 /**
  * The personas of one project.
  *
- * **A persona is a first-class thing a project owns, not a field on a test.**
- * They are authored once and called on by many tests, which is what makes a
- * comparison between two prompt variants honest — the same person calls both.
- * A surface that only existed inside a test form would quietly turn a reusable
- * person into a field, which is exactly what this page exists to prevent.
+ * **A persona is a first-class thing, not a field on a test.** Egma supplies
+ * an Egma-provided persona to every project, and a project can author a Custom
+ * persona or fork the shared one. They are used by many tests, which makes a
+ * comparison between two prompt variants honest — the same person meets both.
  *
  * Two lists and never one. Active is what somebody authors from; Archived is
  * where the ones taken out of circulation are, and Restore is on their page. A
@@ -57,7 +64,10 @@ export default function PersonasPage() {
 
 type Shown = "active" | "archived";
 
-function columnsFor(projectId: string, now: number): readonly Column<Persona>[] {
+function columnsFor(
+  projectId: string,
+  now: number,
+): readonly Column<Persona>[] {
   return [
     {
       key: "name",
@@ -75,17 +85,23 @@ function columnsFor(projectId: string, now: number): readonly Column<Persona>[] 
       ),
     },
     {
+      key: "type",
+      header: "Type",
+      width: "140px",
+      cell: (persona) =>
+        persona.owner === "egma" ? "Egma-provided" : "Custom",
+    },
+    {
+      key: "default",
+      header: "Project default",
+      width: "130px",
+      cell: (persona) => (persona.is_default ? "Yes" : "No"),
+    },
+    {
       key: "description",
       header: "Description",
       hideOnMobile: true,
       cell: (persona) => persona.description ?? "—",
-    },
-    {
-      key: "language",
-      header: "Language",
-      mono: true,
-      width: "100px",
-      cell: (persona) => persona.traits.language,
     },
     {
       key: "version",
@@ -175,7 +191,8 @@ function Personas({ projectId }: { readonly projectId: string }) {
    * would have to say why, and every sentence it could say would be a claim
    * about somebody egma has not identified yet.
    */
-  const mayAuthor = role !== null && canAuthor(role) && answer?.status !== "missing";
+  const mayAuthor =
+    role !== null && canAuthor(role) && answer?.status !== "missing";
   const whyNot =
     role !== null && canAuthor(role)
       ? "There is no project here to author a persona in."
@@ -232,7 +249,8 @@ function Personas({ projectId }: { readonly projectId: string }) {
     }
 
     const items = [...answer.value.items, ...(carried?.items ?? [])];
-    const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
+    const cursor =
+      carried === null ? answer.value.next_cursor : carried.next_cursor;
 
     /**
      * The next page, and everything that can happen instead of one.
@@ -294,7 +312,7 @@ function Personas({ projectId }: { readonly projectId: string }) {
       ) : (
         <Empty
           title="No personas in this project yet"
-          lead="A persona is the synthetic person who calls the agent — who they are, never what they want on a given occasion."
+          lead="A persona is the synthetic person who speaks with the agent — who they are, never what they want in one simulation."
           action={author()}
         />
       );
@@ -344,7 +362,7 @@ function Personas({ projectId }: { readonly projectId: string }) {
       <PageHeader
         eyebrow="Project"
         title="Personas"
-        lead="The synthetic people who call the agents in this project. One persona calls about many situations; what they want on a given occasion is the test's."
+        lead="The synthetic people who speak with agents in this project. One persona is used in many situations; what they want in one simulation is the test's."
         action={author()}
       />
       <PageBody>

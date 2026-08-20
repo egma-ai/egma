@@ -2,10 +2,10 @@
 
 Everything else in this suite speaks the scripted codec, which proves the
 pipeline carries audio and nothing at all about a provider. This file is
-the other half: a whole voice simulation whose persona speaks with an
-ElevenLabs voice and hears with Deepgram's ears, conducted the way the
-local workbench story conducts one — a real simulator process, configured
-only through its environment, and every assertion read back off the
+the other half: a whole voice simulation whose persona speaks with a
+Cartesia voice and hears with Deepgram's ears, conducted the way the
+local workbench story conducts one — a real simulator process, and every
+assertion read back off the
 records it reported.
 
 No telephony is involved. The counterpart is the loopback's echo test
@@ -13,18 +13,16 @@ line, so what the persona says in a real voice is what comes back for
 real ears to read, and the whole round trip is provable without dialling
 anybody.
 
-Each leg is also proved on its own — ``test_live_elevenlabs.py`` and
-``test_live_deepgram.py`` — so a failure there names one provider. This
-one is the pair working together, which neither of those can show.
+The Deepgram leg is also proved on its own in ``test_live_deepgram.py``.
 
 It is opt-in because CI holds no provider account. With no credentials in
 the environment it skips — visibly, never failing, never waiting on
 anybody::
 
-    DEEPGRAM_API_KEY=... ELEVENLABS_API_KEY=... \\
+    DEEPGRAM_API_KEY=... CARTESIA_API_KEY=... \\
     uv run pytest tests/test_live_speech.py -v
 
-``TEST_DEEPGRAM_API_KEY`` and ``TEST_ELEVENLABS_API_KEY`` are read first,
+``TEST_DEEPGRAM_API_KEY`` and ``TEST_CARTESIA_API_KEY`` are read first,
 for a machine that keeps its test credentials apart from its working ones.
 """
 
@@ -34,6 +32,7 @@ import pytest
 from conftest import (
     assert_kept_secret,
     credential,
+    direct_models,
     has_terminal,
     loopback_spec,
     terminal_event_for,
@@ -45,13 +44,13 @@ from egma_simulator.recording import AGENT_CHANNEL, PERSONA_CHANNEL, channels_of
 from egma_simulator.speech import decode_speech
 
 DEEPGRAM_API_KEY = credential("TEST_DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY")
-ELEVENLABS_API_KEY = credential("TEST_ELEVENLABS_API_KEY", "ELEVENLABS_API_KEY")
+CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
 
 pytestmark = pytest.mark.skipif(
-    not (DEEPGRAM_API_KEY and ELEVENLABS_API_KEY),
+    not (DEEPGRAM_API_KEY and CARTESIA_API_KEY),
     reason=(
         "no live speech credentials: set TEST_DEEPGRAM_API_KEY and "
-        "TEST_ELEVENLABS_API_KEY to conduct a real spoken exchange"
+        "TEST_CARTESIA_API_KEY to conduct a real spoken exchange"
     ),
 )
 
@@ -79,11 +78,19 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
         echoes_what_it_hears=True,
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
+        models=direct_models(
+            modality="voice",
+            voice={
+                "provider": "cartesia",
+                "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
+                "speed": 1.0,
+            },
+            stt_key=DEEPGRAM_API_KEY,
+            tts_key=CARTESIA_API_KEY,
+        ),
     )
     await workbench.offer(spec)
-    # The providers arrive the one way they ever do: this deployment's
-    # environment. Nothing about the spec, the plug, or the persona knows
-    # which pair of legs it got.
+    # The work order carries the exact direct selections and current keys.
     simulator = start_simulator(
         workbench,
         # The loudest the simulator gets, for the two reasons the offline
@@ -91,11 +98,8 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
         # diagnosable if it was written down, and the most likely place a
         # key would leak is the chattiest one.
         log_level="DEBUG",
+        direct_speech=True,
         extra_env={
-            "EGMA_SIMULATOR_STT_PROVIDER": "deepgram",
-            "EGMA_SIMULATOR_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-            "EGMA_SIMULATOR_TTS_PROVIDER": "elevenlabs",
-            "EGMA_SIMULATOR_ELEVENLABS_API_KEY": ELEVENLABS_API_KEY,
             # Real speech needs the real detector: the scripted one reads
             # the test codec, where quiet is exactly no samples, and a
             # synthesized voice is neither that loud nor that silent.
@@ -103,9 +107,7 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
         },
     )
 
-    records = await workbench.wait_for(
-        has_terminal(SIMULATION_ID), within_seconds=180
-    )
+    records = await workbench.wait_for(has_terminal(SIMULATION_ID), within_seconds=180)
     terminal = terminal_event_for(records, SIMULATION_ID)
     assert terminal["status"] == "completed", terminal["reason"]
 
@@ -120,8 +122,7 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
         expected = words_of(said)
         survived = expected & words_of(transcribed)
         assert len(survived) >= len(expected) * 0.6, (
-            f"the transcriber heard {transcribed!r} where the persona said "
-            f"{said!r}"
+            f"the transcriber heard {transcribed!r} where the persona said {said!r}"
         )
 
     audio = terminal["facts"]["audio"]
@@ -147,6 +148,6 @@ async def test_a_real_voice_speaks_and_real_ears_read_it_back(
     # Both keys conducted the whole exchange and appear nowhere: not in a
     # report, not in a log line, not in the write-ahead log — and not in
     # the recording either, which is bytes this simulation wrote itself.
-    for secret in (DEEPGRAM_API_KEY, ELEVENLABS_API_KEY):
+    for secret in (DEEPGRAM_API_KEY, CARTESIA_API_KEY):
         assert_kept_secret(secret, records=records, simulator=simulator)
         assert secret.encode() not in recording

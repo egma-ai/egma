@@ -249,12 +249,6 @@ function runDetail(overrides: Record<string, unknown> = {}) {
               library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
               required: true,
               scope: "simulations",
-              judge: {
-                tag: "configured",
-                provider: "openai",
-                model: "gpt-4.1-mini",
-                source: "jcr_1",
-              },
             },
           ],
         },

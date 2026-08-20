@@ -71,6 +71,7 @@ from egma_simulator.plugs.livekit import LiveKitRoom
 from egma_simulator.recording import channels_of
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
+from egma_simulator.speech import SCRIPTED_PAIR
 from egma_simulator.walk import Conducted, WalkControls
 
 A_URL = "wss://lakeside-dental.livekit.cloud"
@@ -705,7 +706,9 @@ async def room_walk(
     async def on_measured(measure: str, began: int, ended: int) -> None:
         measures.append((measure, (ended - began) / 1_000_000, ended))
 
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     assert assembled.conductor is not None
     conducted = await assembled.conductor.conduct(
         persona=Persona(
@@ -1244,7 +1247,9 @@ async def test_a_real_transport_join_refusal_reaches_the_running_pipeline(
                 max_duration_seconds=30,
             )
         )
-        assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+        assembled = assemble(
+            spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+        )
         conductor = assembled.conductor
         assert conductor is not None
 
@@ -1568,7 +1573,9 @@ async def test_the_golden_livekit_fixture_is_a_connection_the_plug_accepts(
     assert plug.provider_reference is None, "no room exists before one is made"
     assert plug.backend.room_name.startswith(f"{ROOM_PREFIX}-")
 
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     assert assembled.conductor is not None
     assert assembled.audio is None, "nothing was conducted, so nothing was recorded"
 
@@ -2382,5 +2389,7 @@ async def test_the_golden_token_endpoint_fixture_is_a_connection_the_plug_accept
     # be able to check the name against its own rules.
     assert plug.backend.room_name == f"{ROOM_PREFIX}-{spec.simulation_id}"
 
-    assembled = assemble(spec, blobs=FilesystemBlobStore(tmp_path))
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
     assert assembled.conductor is not None

@@ -437,9 +437,8 @@ class _PersonaLLMService(LLMService):
     """Run Egma's existing ModelClient through Pipecat's native LLM seam.
 
     Pipecat owns the service lifecycle, instrumentation scope, span, input and
-    output attributes. The model client still owns the provider request, so a
-    generic OpenAI-compatible gateway sees the same non-streaming body and
-    timeout it saw before this service existed.
+    output attributes. The model client still owns the direct provider request,
+    including its non-streaming body and timeout.
     """
 
     def __init__(self, *, persona: Persona) -> None:

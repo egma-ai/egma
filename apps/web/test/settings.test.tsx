@@ -13,7 +13,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RootPage from "../app/page.tsx";
 import NewProjectPage from "../app/new-project/page.tsx";
 import ApiKeysPage from "../app/projects/[projectId]/settings/keys/page.tsx";
-import JudgeSettingsPage from "../app/projects/[projectId]/settings/judge/page.tsx";
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import PeoplePage from "../app/projects/[projectId]/settings/people/page.tsx";
 import ProjectSettingsPage from "../app/projects/[projectId]/settings/page.tsx";
@@ -89,31 +88,6 @@ const ORGANIZATION = {
   slug: "acme",
   created_at: "2026-08-01T10:00:00.000Z",
   may_manage_organization: true,
-};
-
-const CREDENTIAL = {
-  id: "jcr_1",
-  label: "Acme production",
-  provider: "openai",
-  hint: "1234",
-  revision: "rev_1",
-  created_at: "2026-08-01T10:00:00.000Z",
-  updated_at: "2026-08-01T10:00:00.000Z",
-};
-
-const NEEDS_SETUP = {
-  state: "needs_setup",
-  provider: null,
-  model: null,
-  source: null,
-  credential_id: null,
-  hint: null,
-};
-
-const REGISTRY = {
-  providers: [{ provider: "openai", model_is_free_text: true }],
-  platform_sentinel: "platform",
-  platform_judge_available: false,
 };
 
 function json(status: number, body: unknown): Response {
@@ -216,7 +190,6 @@ const ORGANIZATION_WIDE: readonly {
     page: "Organization",
     answers: {
       "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": { status: 200, body: { items: [] } },
     },
     open: () => render(<OrganizationSettingsPage />),
     removed: /Everything on this page belongs to the whole organization/,
@@ -254,15 +227,13 @@ describe("the Settings navigation", () => {
     expect(nav.textContent).toContain("Organization");
     expect(within(nav).getByRole("group", { name: "This project" })).toBeTruthy();
     expect(within(nav).getByRole("group", { name: "Organization" })).toBeTruthy();
+    expect(within(nav).queryByRole("link", { name: "Judge" })).toBeNull();
 
     // Every address carries the project, including the organization-wide ones:
     // the shell reads the project out of the address, and Settings has to stay
     // inside the product shell for the selector to be there at all.
     const people = within(nav).getByRole("link", { name: "People" });
     expect(people.getAttribute("href")).toBe("/projects/prj_1/settings/people");
-    expect(
-      within(nav).getByRole("link", { name: "Judge" }).getAttribute("href"),
-    ).toBe("/projects/prj_1/settings/judge");
 
     // The navigation and the state it controls share one stable frame. The
     // frame is present before the read settles and does not move when the form
@@ -297,7 +268,6 @@ describe("the Settings navigation", () => {
     },
   );
 });
-
 /* ------------------------------------------------------------------------ */
 
 describe("project settings", () => {
@@ -419,7 +389,7 @@ describe("project settings", () => {
 
     expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
     const settings = screen.getByRole("navigation", { name: "Settings" });
-    const judge = within(settings).getByRole("link", { name: "Judge" });
+    const judge = within(settings).getByRole("link", { name: "Organization" });
     const click = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -448,7 +418,7 @@ describe("project settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Judge" }),
+        .getByRole("link", { name: "Organization" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -472,7 +442,7 @@ describe("project settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Judge" }),
+        .getByRole("link", { name: "Organization" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -518,7 +488,7 @@ describe("project settings", () => {
     });
 
     const settings = screen.getByRole("navigation", { name: "Settings" });
-    const judge = within(settings).getByRole("link", { name: "Judge" });
+    const judge = within(settings).getByRole("link", { name: "Organization" });
     const click = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -909,12 +879,10 @@ describe("organization settings", () => {
   function open(
     role = "admin",
     organization: unknown = ORGANIZATION,
-    credentials: unknown[] = [],
   ) {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
       "/api/organization": { status: 200, body: organization },
-      "/api/judge-credentials": { status: 200, body: { items: credentials } },
     });
     render(<OrganizationSettingsPage />);
   }
@@ -927,7 +895,6 @@ describe("organization settings", () => {
         { status: 200, body: { ...ORGANIZATION, name: "Acme Voice" } },
         { status: 200, body: { ...ORGANIZATION, name: "Acme Voice" } },
       ],
-      "/api/judge-credentials": { status: 200, body: { items: [] } },
     });
     render(<OrganizationSettingsPage />);
 
@@ -991,7 +958,6 @@ describe("organization settings", () => {
         reloadAnswer,
         retryAnswer,
       ],
-      "/api/judge-credentials": { status: 200, body: { items: [] } },
     });
     render(<OrganizationSettingsPage />);
 
@@ -1017,7 +983,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Judge" }),
+        .getByRole("link", { name: "Organization" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -1046,7 +1012,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Judge" }),
+        .getByRole("link", { name: "Organization" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -1100,762 +1066,22 @@ describe("organization settings", () => {
   /**
    * A hint nothing points at is a hint only a sighted reader ever gets.
    *
-   * `Field` hands its hint id through React context and only the CSS Modules
-   * input read it. The base input reads nothing it is not given, so these two
-   * fields write the sentence and the `aria-describedby` in one place. Both are
-   * asserted because they are wired separately and either could be dropped
-   * without the page looking any different.
+   * `Field` hands its hint id through React context, and only the CSS Modules
+   * input ever read it. The base input reads nothing it is not given, so the
+   * field writes the sentence and the `aria-describedby` in one place. It is
+   * asserted rather than assumed because the wiring could be dropped without
+   * the page looking any different.
    */
-  it("names the hint under each field that has one", async () => {
-    open("admin", ORGANIZATION, [CREDENTIAL]);
+  it("names the hint under the field that has one", async () => {
+    open("admin", ORGANIZATION);
 
-    const nameHint = await screen.findByText(/breaks no link and no invitation/);
+    const nameHint = await screen.findByText(
+      /breaks no link and no invitation/,
+    );
+    expect(nameHint.id).not.toBe("");
     expect(screen.getByLabelText("Name").getAttribute("aria-describedby")).toBe(
       nameHint.id,
     );
-
-    const keys = await screen.findByRole("table", { name: "Organization keys" });
-    fireEvent.click(within(keys).getByRole("button", { name: "Replace key" }));
-    const replacementHint = screen.getByText(/Egma will not show it to you/);
-    expect(
-      screen.getByLabelText("New key").getAttribute("aria-describedby"),
-    ).toBe(replacementHint.id);
-    expect(replacementHint.id).not.toBe("");
-  });
-
-  /**
-   * The whole point of the credential design, asserted from the page: what is
-   * shown is a label and four characters, and the typed key is never rendered
-   * back anywhere.
-   */
-  it("shows a label and a hint, and never a stored key", async () => {
-    open("admin", ORGANIZATION, [CREDENTIAL]);
-
-    const keys = await screen.findByRole("region", { name: "Judge credentials" });
-    expect(keys.textContent).toContain("Acme production");
-    expect(keys.textContent).toContain("…1234");
-    expect(keys.textContent).toContain("never the key itself");
-  });
-
-  it("sends a typed key once and does not keep it on the page", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      /**
-       * Three answers, in the order the page actually asks for them: the list
-       * it opens with, the created credential, and **the list again**. Naming
-       * every answer is what makes the ordering the test's rather than the
-       * machine's — with only two, the refetch was served the create's own
-       * reply, which has no `items`.
-       */
-      "/api/judge-credentials": [
-        { status: 200, body: { items: [] } },
-        { status: 201, body: CREDENTIAL },
-        { status: 200, body: { items: [CREDENTIAL] } },
-      ],
-    });
-    render(<OrganizationSettingsPage />);
-
-    fireEvent.change(await screen.findByLabelText("Label"), {
-      target: { value: "Acme production" },
-    });
-    fireEvent.change(screen.getByLabelText("OpenAI key"), {
-      target: { value: "sk-typed-once-and-never-shown" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
-
-    await waitFor(() => {
-      expect(
-        within(
-          screen.getByRole("region", { name: "Judge credentials" }),
-        ).getAllByText(/Acme production/),
-      ).not.toHaveLength(0);
-    });
-    expect((screen.getByLabelText("OpenAI key") as HTMLInputElement).value).toBe("");
-
-    const post = sent.find((one) => one.method === "POST");
-    expect(post?.body).toEqual({
-      label: "Acme production",
-      provider: "openai",
-      key: "sk-typed-once-and-never-shown",
-    });
-    expect(document.body.textContent).not.toContain("sk-typed-once");
-  });
-
-  /**
-   * The shape guard, from the outside. A read whose shape is not the expected
-   * one is a deployment mid-upgrade or a proxy answering for something else,
-   * and the cost of trusting it is `undefined.map` — which takes the page down
-   * and with it the thing somebody came to change.
-   */
-  it("survives a credentials answer in a shape it does not expect", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": { status: 200, body: { id: "jcr_1" } },
-    });
-    render(<OrganizationSettingsPage />);
-
-    expect(await screen.findByLabelText("Label")).toBeTruthy();
-    expect(
-      screen.getByRole("region", { name: "Judge credentials" }).textContent,
-    ).toContain("No judge credentials yet.");
-  });
-
-  it("shows a refused credential read instead of a false empty list", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": {
-        status: 500,
-        body: { error: "unavailable", message: "Credential storage is offline." },
-      },
-    });
-    render(<OrganizationSettingsPage />);
-
-    expect(await screen.findByText("Credential storage is offline.")).toBeTruthy();
-    expect(screen.queryByText("No judge credentials yet.")).toBeNull();
-  });
-
-  it("shows credential loading instead of a false empty list", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": "never",
-    });
-    render(<OrganizationSettingsPage />);
-
-    expect(
-      await screen.findByText("Loading this organization's judge keys…"),
-    ).toBeTruthy();
-    expect(screen.queryByText("No judge credentials yet.")).toBeNull();
-  });
-
-  it("asks before archiving a judge credential", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": { status: 200, body: { items: [CREDENTIAL] } },
-      "/api/judge-credentials/jcr_1/archive": {
-        status: 200,
-        body: CREDENTIAL,
-      },
-    });
-    render(<OrganizationSettingsPage />);
-
-    const keys = await screen.findByRole("table", { name: "Organization keys" });
-    fireEvent.click(within(keys).getByRole("button", { name: "Archive" }));
-
-    const dialog = await screen.findByRole("dialog", {
-      name: "Archive judge credential “Acme production”?",
-    });
-    expect(dialog.textContent).toContain("Acme production");
-    expect(
-      sent.some((one) => one.url.includes("/archive") && one.method === "POST"),
-    ).toBe(false);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
-    await waitFor(() => {
-      expect(
-        sent.some((one) => one.url.includes("/archive") && one.method === "POST"),
-      ).toBe(true);
-    });
-  });
-
-  it("offers an empty field for a replacement and never prefills the stored key", async () => {
-    open("admin", ORGANIZATION, [CREDENTIAL]);
-
-    const keys = await screen.findByRole("table", { name: "Organization keys" });
-    fireEvent.click(within(keys).getByRole("button", { name: "Replace key" }));
-
-    const field = screen.getByLabelText("New key") as HTMLInputElement;
-    expect(field.value).toBe("");
-    expect(field.type).toBe("password");
-    expect(screen.getByText(/Egma will not show it to you/)).toBeTruthy();
-  });
-
-  /**
-   * A failure has to report the thing that failed, and its retry has to be the
-   * action that was refused rather than the one beside it.
-   */
-  it("reports the key that failed, and retries adding the key", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": [
-        { status: 200, body: { items: [] } },
-        {
-          status: 422,
-          body: {
-            error: "unprocessable",
-            message: "a judge key is at least 8 characters.",
-          },
-        },
-      ],
-    });
-    render(<OrganizationSettingsPage />);
-
-    fireEvent.change(await screen.findByLabelText("Label"), {
-      target: { value: "Acme production" },
-    });
-    fireEvent.change(screen.getByLabelText("OpenAI key"), {
-      target: { value: "sk-short" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add key" }));
-
-    expect(
-      await screen.findByText("a judge key is at least 8 characters."),
-    ).toBeTruthy();
-    expect(screen.getByText("Egma did not add this key.")).toBeTruthy();
-
-    const before = sent.filter((one) => one.method === "POST").length;
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => {
-      expect(sent.filter((one) => one.method === "POST").length).toBe(before + 1);
-    });
-  });
-
-  /**
-   * **The form is drawn once, for whichever key is open, so what is typed into
-   * it belongs to that key and to no other.**
-   *
-   * Leaving it behind when a different row opens is a silent cross-row write of
-   * a secret: the key typed for A is saved to B, so B starts spending on a key
-   * nobody chose for it while A keeps the one it was supposed to lose — and
-   * nothing on the page says so.
-   */
-  it("clears a replacement typed for one key when another key opens", async () => {
-    open("admin", ORGANIZATION, [
-      CREDENTIAL,
-      { ...CREDENTIAL, id: "jcr_2", label: "Acme staging", hint: "5678" },
-    ]);
-
-    // Scoped to this table so another Settings control cannot be mistaken for
-    // one of these two credentials.
-    const keys = await screen.findByRole("table", { name: "Organization keys" });
-    const [openFirst, openSecond] = within(keys).getAllByRole("button", {
-      name: "Replace key",
-    });
-
-    fireEvent.click(openFirst as HTMLElement);
-    fireEvent.change(screen.getByLabelText("New key"), {
-      target: { value: "sk-meant-for-production" },
-    });
-
-    fireEvent.click(openSecond as HTMLElement);
-
-    expect((screen.getByLabelText("New key") as HTMLInputElement).value).toBe("");
-    // And with nothing typed for this one, there is nothing to send.
-    expect(
-      screen.getByRole("button", { name: "Save new key" }).hasAttribute("disabled"),
-    ).toBe(true);
-  });
-
-  /**
-   * The second half, and the one a field-clearing fix does not close: a failed
-   * rotation leaves a **Try again** bound to the key that failed, while the
-   * action it calls reads the field as it stands when it is pressed. Fail on A,
-   * open B, type B's key, press it — and B's key is written to A and reported
-   * as success for a credential nobody is looking at.
-   */
-  it("takes the failed retry away with it when another key opens", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": { status: 200, body: ORGANIZATION },
-      "/api/judge-credentials": {
-        status: 200,
-        body: {
-          items: [
-            CREDENTIAL,
-            { ...CREDENTIAL, id: "jcr_2", label: "Acme staging", hint: "5678" },
-          ],
-        },
-      },
-      "/api/judge-credentials/jcr_1": {
-        status: 422,
-        body: {
-          error: "unprocessable",
-          message: "a judge key is at least 8 characters.",
-        },
-      },
-    });
-    render(<OrganizationSettingsPage />);
-
-    const keys = await screen.findByRole("table", { name: "Organization keys" });
-    const [openProduction, openStaging] = within(keys).getAllByRole("button", {
-      name: "Replace key",
-    });
-
-    fireEvent.click(openProduction as HTMLElement);
-    fireEvent.change(screen.getByLabelText("New key"), {
-      target: { value: "sk-short" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save new key" }));
-
-    expect(
-      await screen.findByText(/Egma did not replace the key for Acme production/),
-    ).toBeTruthy();
-
-    // A different key opens. The retry that would have written into the first
-    // one has to go with it.
-    fireEvent.click(openStaging as HTMLElement);
-
-    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
-    expect(
-      screen.queryByText(/Egma did not replace the key for Acme production/),
-    ).toBeNull();
-    expect((screen.getByLabelText("New key") as HTMLInputElement).value).toBe("");
-  });
-
-  it("leaves a member the key controls in place and truly disabled", async () => {
-    open("member", { ...ORGANIZATION, may_manage_organization: false }, [CREDENTIAL]);
-
-    expect(
-      (await screen.findByLabelText("Label")).hasAttribute("disabled"),
-    ).toBe(true);
-    expect(
-      screen.getByRole("button", { name: "Add key" }).hasAttribute("disabled"),
-    ).toBe(true);
-    expect(
-      screen
-        .getAllByRole("button", { name: "Replace key" })
-        .every((one) => one.hasAttribute("disabled")),
-    ).toBe(true);
-  });
-});
-
-/* ------------------------------------------------------------------------ */
-
-describe("judge settings", () => {
-  function open(
-    role = "admin",
-    judge: unknown = NEEDS_SETUP,
-    credentials: unknown[] = [],
-    registry: unknown = REGISTRY,
-  ) {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith(role) },
-      "/api/judge": { status: 200, body: judge },
-      "/api/judge/registry": { status: 200, body: registry },
-      "/api/judge-credentials": { status: 200, body: { items: credentials } },
-    });
-    render(<JudgeSettingsPage />);
-  }
-
-  /**
-   * `needs_setup` is a state and not an empty form. A project in it cannot ask a
-   * model anything, so the predefined expected-behaviors copy every project is
-   * created holding cannot judge — and a run carrying it comes back errored
-   * after real simulations have been paid for.
-   *
-   * **And the sentence stops short of claiming the project cannot run**, which
-   * is the half wave two settled: every grader is a deletable running copy, so
-   * a project judging only by computation needs no judge and starts perfectly
-   * well.
-   */
-  it("says plainly that a project with no judge cannot grade with a model", async () => {
-    open();
-
-    expect(await screen.findByText(/Needs setup/)).toBeTruthy();
-    expect(
-      screen.getByText(/a grader that judges by asking a model cannot run/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/A project running no such grader needs no judge/),
-    ).toBeTruthy();
-  });
-
-  it("puts the judge inside shared Settings navigation instead of a page action", async () => {
-    open();
-
-    const breadcrumb = await screen.findByRole("navigation", {
-      name: "Breadcrumb",
-    });
-    const settings = within(breadcrumb).getByRole("link", { name: "Settings" });
-    const judge = within(breadcrumb).getByText("Judge");
-
-    expect(settings.getAttribute("href")).toBe("/projects/prj_1/settings");
-    expect(judge.getAttribute("aria-current")).toBe("page");
-    expect(screen.queryByRole("link", { name: "Back to graders" })).toBeNull();
-  });
-
-  /**
-   * The separation this Settings area is built on, said on the page that would
-   * otherwise be the natural place to keep the keys: the choice belongs to a
-   * project, the keys belong to the organization.
-   */
-  it("points at organization settings for the keys themselves", async () => {
-    open("admin", NEEDS_SETUP, [CREDENTIAL]);
-
-    const link = await screen.findByRole("link", {
-      name: "Organization settings",
-    });
-    expect(link.getAttribute("href")).toBe(
-      "/projects/prj_1/settings/organization",
-    );
-    // And no key custody on this page at all.
-    expect(screen.queryByRole("button", { name: "Add key" })).toBeNull();
-  });
-
-  it("offers the deployment's own judge while the project is on a credential of its own", async () => {
-    open(
-      "admin",
-      {
-        state: "configured",
-        project_id: "prj_1",
-        provider: "openai",
-        model: "gpt-4.1-mini",
-        source: "credential",
-        credential_id: "jcr_1",
-        hint: "1234",
-        updated_at: "2026-08-01T10:00:00.000Z",
-      },
-      [CREDENTIAL],
-      { ...REGISTRY, platform_judge_available: true },
-    );
-
-    const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
-    // Found rather than fetched: the select exists as soon as the judge read
-    // answers, but this option is drawn from the *registry* read, which is a
-    // separate request that can land after it. Reading synchronously raced the
-    // second answer and failed about one run in six, on an option that was
-    // always going to arrive.
-    const offered = (await within(key).findByRole("option", {
-      name: "This deployment's own judge",
-    })) as HTMLOptionElement;
-    expect(offered.value).toBe("platform");
-
-    fireEvent.change(key, { target: { value: "platform" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save judge" }));
-
-    await waitFor(() => {
-      expect(sent.some((one) => one.method === "PUT")).toBe(true);
-    });
-    expect(sent.find((one) => one.method === "PUT")?.body).toMatchObject({
-      source: "platform",
-      provider: "openai",
-    });
-  });
-
-  it("offers nothing of the sort on a deployment that configured no judge", async () => {
-    open("admin", NEEDS_SETUP, [CREDENTIAL]);
-
-    const key = (await screen.findByLabelText("Key")) as HTMLSelectElement;
-    // The credential option first, and waited for. It comes from the same
-    // second request the platform option would come from, so its arrival is
-    // what says both reads have landed. Asserting the platform option is
-    // absent before then would pass because nothing had answered yet — the
-    // right result for the wrong reason, which is the kind of test that goes
-    // on passing after the behaviour it guards is gone.
-    expect(
-      await within(key).findByRole("option", { name: /Acme production/ }),
-    ).toBeTruthy();
-    expect(
-      within(key).queryByRole("option", {
-        name: "This deployment's own judge",
-      }),
-    ).toBeNull();
-  });
-
-  /**
-   * **A failed read is not a fact.** A registry read that failed must not be
-   * rendered as "this deployment has no judge of its own" — that would take the
-   * way back to the platform judge off the page, silently, over a blip.
-   */
-  it("says egma could not ask, rather than answering for it, when the registry read fails", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/judge": { status: 200, body: NEEDS_SETUP },
-      "/api/judge/registry": {
-        status: 500,
-        body: { error: "unavailable", message: "Egma could not answer that." },
-      },
-      "/api/judge-credentials": { status: 200, body: { items: [] } },
-    });
-    render(<JudgeSettingsPage />);
-
-    expect(await screen.findByText("Egma could not answer that.")).toBeTruthy();
-    expect(screen.queryByLabelText("Key")).toBeNull();
-    expect(screen.queryByLabelText("Provider")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Save judge" }).hasAttribute("disabled"),
-    ).toBe(true);
-  });
-
-  it("keeps the judge choices loading until the registry answers", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/judge": { status: 200, body: NEEDS_SETUP },
-      "/api/judge/registry": "never",
-      "/api/judge-credentials": { status: 200, body: { items: [] } },
-    });
-    render(<JudgeSettingsPage />);
-
-    expect(await screen.findByText("Loading the available judges…")).toBeTruthy();
-    expect(screen.queryByLabelText("Provider")).toBeNull();
-    expect(screen.queryByLabelText("Key")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Save judge" }).hasAttribute("disabled"),
-    ).toBe(true);
-  });
-
-  it("makes no role claim while the session is still loading", async () => {
-    apiAnswers({
-      "/api/me": "never",
-      "/api/judge": { status: 200, body: NEEDS_SETUP },
-      "/api/judge/registry": { status: 200, body: REGISTRY },
-      "/api/judge-credentials": { status: 200, body: { items: [] } },
-    });
-    render(<JudgeSettingsPage />);
-
-    await screen.findByLabelText("Provider");
-    expect(screen.queryByText(/role cannot change judge settings/)).toBeNull();
-  });
-
-  it("shows a refused credential read instead of saying the organization has no key", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/judge": { status: 200, body: NEEDS_SETUP },
-      "/api/judge/registry": { status: 200, body: REGISTRY },
-      "/api/judge-credentials": {
-        status: 500,
-        body: { error: "unavailable", message: "Credential storage is offline." },
-      },
-    });
-    render(<JudgeSettingsPage />);
-
-    expect(await screen.findByText("Credential storage is offline.")).toBeTruthy();
-    expect(screen.queryByLabelText("Key")).toBeNull();
-    expect(screen.queryByText(/holds no openai key yet/)).toBeNull();
-  });
-
-  it("says the deployment's own judge has nothing to rotate", async () => {
-    open("admin", {
-      state: "configured",
-      project_id: "prj_1",
-      provider: "openai",
-      model: "gpt-4o",
-      source: "platform",
-      credential_id: null,
-      hint: null,
-      updated_at: "2026-08-01T10:00:00.000Z",
-    });
-
-    expect(
-      await screen.findByText(/nothing here to rotate and no key to see/),
-    ).toBeTruthy();
-  });
-
-  it("leaves a member every control in place and truly disabled", async () => {
-    open("member");
-
-    expect(
-      await screen.findByText(/role cannot change judge settings/),
-    ).toBeTruthy();
-    expect(
-      (screen.getByLabelText("Provider") as HTMLSelectElement).disabled,
-    ).toBe(true);
-    expect((screen.getByLabelText("Model") as HTMLInputElement).disabled).toBe(
-      true,
-    );
-    expect(
-      screen.getByRole("button", { name: "Save judge" }).hasAttribute("disabled"),
-    ).toBe(true);
-  });
-
-  it("keeps an unchanged configured judge unsaveable", async () => {
-    open(
-      "admin",
-      {
-        state: "configured",
-        project_id: "prj_1",
-        provider: "openai",
-        model: "gpt-4.1-mini",
-        source: "credential",
-        credential_id: "jcr_1",
-        hint: "1234",
-        updated_at: "2026-08-01T10:00:00.000Z",
-      },
-      [CREDENTIAL],
-    );
-
-    await screen.findByDisplayValue("gpt-4.1-mini");
-    const save = screen.getByRole("button", { name: "Save judge" });
-    expect(save.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Model"), {
-      target: { value: "gpt-4.1" },
-    });
-    expect(save.hasAttribute("disabled")).toBe(false);
-  });
-
-  it("keeps newer judge choices typed while Save is confirming", async () => {
-    let finishSave!: (answer: StubbedResponse) => void;
-    let finishReload!: (answer: StubbedResponse) => void;
-    let finishRetry!: (answer: StubbedResponse) => void;
-    const saveAnswer = new Promise<StubbedResponse>((resolve) => {
-      finishSave = resolve;
-    });
-    const reloadAnswer = new Promise<StubbedResponse>((resolve) => {
-      finishReload = resolve;
-    });
-    const retryAnswer = new Promise<StubbedResponse>((resolve) => {
-      finishRetry = resolve;
-    });
-    const configured = {
-      state: "configured",
-      project_id: "prj_1",
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: "credential",
-      credential_id: "jcr_1",
-      hint: "1234",
-      updated_at: "2026-08-01T10:00:00.000Z",
-    };
-    const saved = { ...configured, model: "gpt-4.1" };
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
-
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/judge": [
-        { status: 200, body: configured },
-        saveAnswer,
-        reloadAnswer,
-        retryAnswer,
-      ],
-      "/api/judge/registry": { status: 200, body: REGISTRY },
-      "/api/judge-credentials": {
-        status: 200,
-        body: { items: [CREDENTIAL] },
-      },
-    });
-    render(<JudgeSettingsPage />);
-
-    const model = (await screen.findByDisplayValue(
-      "gpt-4.1-mini",
-    )) as HTMLInputElement;
-    await within(screen.getByLabelText("Key")).findByRole("option", {
-      name: /Acme production/,
-    });
-    fireEvent.change(model, { target: { value: "gpt-4.1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save judge" }));
-    expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
-
-    fireEvent.change(model, { target: { value: "gpt-4.1-nano" } });
-    await act(async () => {
-      finishSave({ status: 200, body: saved });
-    });
-    await waitFor(() => {
-      expect(
-        sent.filter((request) => request.url === "/api/judge?project=prj_1"),
-      ).toHaveLength(3);
-    });
-
-    const clickWhileConfirming = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    fireEvent(
-      within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
-      clickWhileConfirming,
-    );
-    expect(clickWhileConfirming.defaultPrevented).toBe(true);
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
-      .toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(confirm).not.toHaveBeenCalled();
-
-    await act(async () => {
-      finishReload({
-        status: 503,
-        body: { error: "unavailable", message: "Judge storage is offline." },
-      });
-    });
-    expect(await screen.findByText("Judge storage is offline.")).toBeTruthy();
-
-    const clickAfterFailure = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    fireEvent(
-      within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
-      clickAfterFailure,
-    );
-    expect(clickAfterFailure.defaultPrevented).toBe(true);
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
-      .toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => {
-      expect(
-        sent.filter((request) => request.url === "/api/judge?project=prj_1"),
-      ).toHaveLength(4);
-    });
-    await act(async () => {
-      finishRetry({ status: 200, body: saved });
-    });
-    expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe(
-      "gpt-4.1-nano",
-    );
-    expect(
-      screen
-        .getByRole("button", { name: "Save judge" })
-        .hasAttribute("disabled"),
-    ).toBe(false);
-  });
-
-  it("sends the provider, the model and the credential, and no key at all", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/api/judge": [
-        { status: 200, body: NEEDS_SETUP },
-        {
-          status: 200,
-          body: {
-            state: "configured",
-            project_id: "prj_1",
-            provider: "openai",
-            model: "gpt-4.1-mini",
-            source: "credential",
-            credential_id: "jcr_1",
-            hint: "1234",
-            updated_at: "2026-08-01T10:00:00.000Z",
-          },
-        },
-      ],
-      "/api/judge/registry": { status: 200, body: REGISTRY },
-      "/api/judge-credentials": { status: 200, body: { items: [CREDENTIAL] } },
-    });
-    render(<JudgeSettingsPage />);
-
-    fireEvent.change(await screen.findByLabelText("Model"), {
-      target: { value: "gpt-4.1-mini" },
-    });
-    const key = screen.getByLabelText("Key") as HTMLSelectElement;
-    // The option is drawn from the credentials read, which answers separately
-    // from the judge read that put the select on the page. Selecting a value
-    // with no option behind it yet leaves the select empty rather than failing,
-    // so the body assertion below would report the wrong thing about a page
-    // that was only slow.
-    await within(key).findByRole("option", { name: /Acme production/ });
-    fireEvent.change(key, { target: { value: "jcr_1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save judge" }));
-
-    await waitFor(() => {
-      expect(sent.some((one) => one.method === "PUT")).toBe(true);
-    });
-    const put = sent.find((one) => one.method === "PUT");
-    expect(put?.url).toBe("/api/judge?project=prj_1");
-    expect(put?.body).toEqual({
-      provider: "openai",
-      model: "gpt-4.1-mini",
-      source: "jcr_1",
-    });
   });
 });
 

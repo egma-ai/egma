@@ -1,14 +1,13 @@
 /**
  * The personas of one project, as `/api/personas` answers them.
  *
- * A **persona** is the synthetic person who calls the agent: manner, patience,
- * accent, speech rate, background noise, and what they do when things go
- * wrong. They belong to the project rather than to an agent or to a test,
- * which is why they have a page of their own and why every read here names a
- * project.
+ * A **persona** is the synthetic person who speaks with the agent. Egma
+ * supplies an Egma-provided persona to every project, and a project can author
+ * a Custom persona or fork the shared one. Human traits say how the person
+ * behaves; models say how the simulator brings that person to life.
  *
- * **Nothing in a persona says what the caller wants.** That is the test's
- * scenario. The whole worth of a persona is that one of them calls about forty
+ * **Nothing in a persona says what that persona wants.** That is the test's
+ * scenario. The whole worth of a persona is that one of them is used in forty
  * different situations, and a trait that said "asks to reschedule" would turn
  * a reusable person into a second copy of one test. The editor says so where
  * somebody is typing, and this file says so where somebody is reading.
@@ -21,12 +20,6 @@
 export type PersonaTraits = {
   readonly personality: string;
   readonly language: string;
-  readonly voice: {
-    readonly provider: string;
-    readonly voiceId: string;
-    /** Speech rate, as a multiple of the provider's natural pace. */
-    readonly speed: number;
-  };
   readonly manner?: string;
   readonly patience?: string;
   readonly accent?: string;
@@ -34,15 +27,34 @@ export type PersonaTraits = {
   readonly underFriction?: string;
 };
 
+export type ModelSelection = {
+  readonly provider: string;
+  readonly model: string;
+};
+
+export type PersonaModels = {
+  readonly llm: ModelSelection;
+  readonly stt: ModelSelection;
+  readonly tts: ModelSelection & {
+    readonly voiceId: string;
+    readonly speed: number;
+  };
+};
+
 export type Persona = {
   readonly id: string;
-  readonly project_id: string;
+  /** Null for an Egma-provided persona. */
+  readonly project_id: string | null;
+  /** Who owns the definition and therefore who may edit it. */
+  readonly owner: "egma" | "organization";
   readonly name: string;
   readonly description: string | null;
   readonly version: number;
   /** The current version's own id — what a traits write is written against. */
   readonly version_id: string;
   readonly traits: PersonaTraits;
+  /** Complete, required, and owned by this immutable version. */
+  readonly models: PersonaModels;
   /** The opaque token an identity write or a lifecycle change has to name. */
   readonly revision: string;
   readonly archived_at: string | null;
@@ -63,6 +75,7 @@ export type PersonaVersion = {
   readonly persona_id: string;
   readonly version: number;
   readonly traits: PersonaTraits;
+  readonly models: PersonaModels;
   readonly created_at: string;
 };
 
@@ -72,39 +85,20 @@ export type PersonaVersionPage = {
 };
 
 export const PERSONAS_PATH = "/api/personas";
-
-/** Where the persona form's server-owned metadata comes from. */
 export const PERSONA_FORM_PATH = "/api/persona-form";
 
-/**
- * What the persona form is allowed to offer, as the server says it.
- *
- * **The browser keeps no copy of this.** Which voices egma can ask for is the
- * server's list and it grows one entry at a time; a second copy here would be
- * wrong the day it grows, and wrong silently — the form would go on offering
- * yesterday's providers, and the new one would be unreachable from the only
- * place a persona is authored.
- */
-export type PersonaForm = {
-  readonly voice_providers: readonly string[];
+export type PersonaModelCatalogEntry = ModelSelection & {
+  readonly job: "llm" | "stt" | "tts";
+  readonly label: string;
+  readonly recommended_voice_id?: string;
 };
 
-/**
- * The providers a Select may show: the ones the server offers, plus whatever
- * this persona is already on.
- *
- * A persona authored against a provider that has since left the list still has
- * to be readable and still has to be editable in every other respect — so the
- * value in hand is always among the options, and dropping it silently would
- * change somebody's voice the first time they saved a typo in their accent.
- */
-export function providerOptions(
-  offered: readonly string[] | null,
-  held: string,
-): readonly string[] {
-  const known = offered ?? [];
-  return known.includes(held) || held === "" ? known : [...known, held];
-}
+/** The model choices and defaults exported by the server's adapter catalog. */
+export type PersonaForm = {
+  readonly model_catalog: readonly PersonaModelCatalogEntry[];
+  readonly recommended_models: PersonaModels;
+  readonly speed_range: { readonly slowest: number; readonly fastest: number };
+};
 
 /** One server-side search and one cursor page of a lifecycle state. */
 export function personasQuery(options: {
@@ -135,25 +129,21 @@ export function personaPath(personaId: string): string {
   return `${PERSONAS_PATH}/${personaId}`;
 }
 
+export function personaDefaultPath(personaId: string): string {
+  return `${personaPath(personaId)}/default`;
+}
+
 export function personaVersionsPath(personaId: string): string {
   return `${PERSONAS_PATH}/${personaId}/versions`;
 }
 
 /**
- * The traits an editor is holding, before anybody decides whether they differ
- * from what is stored.
- *
- * Speech rate is text here and a number on the wire. What somebody has typed
- * into a field is a string, including the half-typed `1.` in the middle of
- * typing `1.25`, and coercing on every keystroke is what makes a field fight
- * back while it is being used.
+ * The versioned field an editor is holding, before anybody decides whether it
+ * differs from what is stored.
  */
 export type TraitsDraft = {
   readonly personality: string;
   readonly language: string;
-  readonly provider: string;
-  readonly voiceId: string;
-  readonly speed: string;
   readonly manner: string;
   readonly patience: string;
   readonly accent: string;
@@ -165,9 +155,6 @@ export type TraitsDraft = {
 export const BLANK_TRAITS: TraitsDraft = {
   personality: "",
   language: "en-US",
-  provider: "elevenlabs",
-  voiceId: "",
-  speed: "1",
   manner: "",
   patience: "",
   accent: "",
@@ -180,9 +167,6 @@ export function draftOf(traits: PersonaTraits): TraitsDraft {
   return {
     personality: traits.personality,
     language: traits.language,
-    provider: traits.voice.provider,
-    voiceId: traits.voice.voiceId,
-    speed: String(traits.voice.speed),
     manner: traits.manner ?? "",
     patience: traits.patience ?? "",
     accent: traits.accent ?? "",
@@ -191,54 +175,95 @@ export function draftOf(traits: PersonaTraits): TraitsDraft {
   };
 }
 
-/**
- * The draft, as the wire carries it.
- *
- * A speech rate that is not a number at all is sent as `NaN`'s honest
- * equivalent — the raw text — and the server answers with the range it
- * accepts. This page does not hold a second copy of that rule: a validator
- * here that disagreed with the one that decides would refuse something egma
- * would have taken, or take something egma will refuse.
- */
-export function traitsFrom(draft: TraitsDraft): Record<string, unknown> {
-  const speed = Number(draft.speed);
-  return {
-    personality: draft.personality,
-    language: draft.language,
-    voice: {
-      provider: draft.provider,
-      voiceId: draft.voiceId,
-      speed: Number.isNaN(speed) ? draft.speed : speed,
-    },
-    manner: draft.manner,
-    patience: draft.patience,
-    accent: draft.accent,
-    backgroundNoise: draft.backgroundNoise,
-    underFriction: draft.underFriction,
-  };
+/** The human-traits draft, in the exact shape the API accepts. */
+export function traitsFrom(draft: TraitsDraft): PersonaTraits {
+  return { ...draft };
 }
 
-/**
- * The traits as a reader sees them: the described ones somebody actually
- * filled in, in the order the domain names them, and nothing for the rest.
- *
- * An unstated trait is left out rather than shown as a dash. "Nothing was said
- * about background noise" and "there is no background noise" are different
- * claims, and only the first one is true.
- */
+export function sameTraitsDraft(
+  left: TraitsDraft,
+  right: TraitsDraft,
+): boolean {
+  return (Object.keys(left) as (keyof TraitsDraft)[]).every(
+    (key) => left[key] === right[key],
+  );
+}
+
+/** Human traits in the order a read-only persona view shows them. */
 export function describedTraits(
   traits: PersonaTraits,
 ): readonly { readonly label: string; readonly value: string }[] {
-  const stated: { label: string; value: string | undefined }[] = [
+  const required = [
+    { label: "Personality", value: traits.personality },
+    { label: "Language", value: traits.language },
+  ];
+  const optional: readonly {
+    readonly label: string;
+    readonly value: string | undefined;
+  }[] = [
     { label: "Manner", value: traits.manner },
     { label: "Patience", value: traits.patience },
     { label: "Accent", value: traits.accent },
     { label: "Background noise", value: traits.backgroundNoise },
     { label: "Under friction", value: traits.underFriction },
   ];
-  return stated.flatMap((one) =>
-    one.value === undefined || one.value.trim() === ""
-      ? []
-      : [{ label: one.label, value: one.value }],
+  return [
+    ...required,
+    ...optional.flatMap((one) =>
+      one.value === undefined || one.value.trim() === ""
+        ? []
+        : [{ label: one.label, value: one.value }],
+    ),
+  ];
+}
+
+/** What the model editor holds while a speed can still be half typed. */
+export type ModelsDraft = {
+  readonly llmProvider: string;
+  readonly llmModel: string;
+  readonly sttProvider: string;
+  readonly sttModel: string;
+  readonly ttsProvider: string;
+  readonly ttsModel: string;
+  readonly voiceId: string;
+  readonly speed: string;
+};
+
+export function modelsDraftOf(models: PersonaModels): ModelsDraft {
+  return {
+    llmProvider: models.llm.provider,
+    llmModel: models.llm.model,
+    sttProvider: models.stt.provider,
+    sttModel: models.stt.model,
+    ttsProvider: models.tts.provider,
+    ttsModel: models.tts.model,
+    voiceId: models.tts.voiceId,
+    speed: String(models.tts.speed),
+  };
+}
+
+/** One complete models value, in the exact shape the API validates. */
+export function modelsFrom(draft: ModelsDraft): Record<string, unknown> {
+  const speed = Number(draft.speed);
+  return {
+    llm: { provider: draft.llmProvider, model: draft.llmModel },
+    stt: { provider: draft.sttProvider, model: draft.sttModel },
+    tts: {
+      provider: draft.ttsProvider,
+      model: draft.ttsModel,
+      voiceId: draft.voiceId,
+      // Preserve invalid text so the server can give the one authoritative
+      // range refusal. JSON cannot carry NaN.
+      speed: Number.isNaN(speed) ? draft.speed : speed,
+    },
+  };
+}
+
+export function sameModelsDraft(
+  left: ModelsDraft,
+  right: ModelsDraft,
+): boolean {
+  return (Object.keys(left) as (keyof ModelsDraft)[]).every(
+    (key) => left[key] === right[key],
   );
 }

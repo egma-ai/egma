@@ -5,25 +5,20 @@ brain still writes the words — it never learns that they are spoken — and
 these are what carry them: a text-to-speech leg giving the persona a
 voice, and a speech-to-text leg turning what comes back into the
 transcript's ``agent`` turns. A third leg listens for *whether* anybody is
-speaking rather than for words — the voice activity detector — and it is
-chosen here on the same terms as the other two.
+speaking rather than for words — the voice activity detector. It is an
+internal simulator choice, not authored persona data.
 
 Both legs are ordinary Pipecat frame processors, in the two places a
-real provider's service sits — ElevenLabs speaking, Deepgram listening —
+real provider's service sits — Cartesia or OpenAI speaking, and Deepgram
+or OpenAI Realtime listening —
 so the pipeline assembled around them is the same pipeline either way.
 The listening leg goes further and is a Pipecat STT service, the very
 class a real one subclasses; the speaking leg deliberately is not, and
 :class:`ScriptedTTS` says why.
 
-**Which pair is used is configuration, read at pipeline assembly and
-nowhere else** — see :class:`SpeechProviders`. Each leg is chosen on its
-own, because a real mouth with scripted ears is a configuration somebody
-will want. Nothing else in the simulator learns which pair it got: a plug
-still exchanges audio, and the persona brain still writes text.
-
-What CI runs on, and any deployment that sets nothing, is the scripted
-pair: no account, no network, no corpus to download, and the same words
-out of the listening leg that went into the speaking one.
+**Which pair is used comes only from the claimed models block.** The
+scripted pair is an explicit unit-test injection. Runtime work orders never
+fall back to it or combine it with one selected provider leg.
 
 **The scripted codec.** Scripted speech is real PCM — 16-bit signed
 little-endian mono, at whatever band the transport carries — and it is
@@ -49,7 +44,6 @@ from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import cache
-from typing import TYPE_CHECKING, Any
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
@@ -68,20 +62,8 @@ from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
-from .config import (
-    DEFAULT_CARTESIA_TTS_MODEL,
-    DEFAULT_REALTIME_STT_MODEL,
-    DEFAULT_STT_MODEL,
-    DEFAULT_TTS_MODEL,
-    DEFAULT_TTS_VOICE,
-    STT_PROVIDERS,
-    TTS_PROVIDERS,
-    VAD_PROVIDERS,
-)
-from .spec import PlatformSpeech
-
-if TYPE_CHECKING:
-    from .config import SimulatorConfig
+from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
+from .spec import SelectedModels
 
 logger = logging.getLogger(__name__)
 
@@ -103,35 +85,11 @@ TONE_BASE_HZ = 200
 TONE_STEP_HZ = 10
 TONE_AMPLITUDE = 8000
 
-DEFAULT_VOICE_ID = "egma-scripted-voice"
-"""What a persona authored with no voice block speaks with."""
-
-DEFAULT_ENGLISH_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
-"""The English voice a persona speaks with when its traits name none.
-
-Sarah, one of ElevenLabs' *premade* voices — the set every account is
-given, on every plan. Deliberately not one of the shared-library voices,
-which read as defaults in the documentation and which a free account is
-refused with ``paid_plan_required``: a default that only works once
-somebody has paid is not a default. A persona is authored for its
-behavior far more often than for its timbre, and one that named no voice
-must still be able to call."""
-
-DEFAULT_CARTESIA_VOICE_ID = "5ee9feff-1265-424a-9d7f-8e4d431a12c7"
-"""The English voice the cartesia mouth speaks with when traits name none.
-
-A voice id belongs to the provider that minted it, so this sits beside
-ElevenLabs' default rather than sharing one constant with it: handing
-either provider the other's identifier is a refusal at the first word.
-See :func:`_voice_from`, which is what keeps a persona authored for one
-provider from silencing itself on a deployment running another."""
-
 CARTESIA_SPEED_RANGE = (0.6, 1.5)
 """What the cartesia mouth accepts as a speed multiplier, its own numbers.
 
-A persona's speed was authored against whichever provider it was written
-for, and one outside this is clamped rather than sent — see
-:func:`_cartesia_mouth`."""
+A speed outside this range is refused. The adapter never changes the value
+selected by the pinned TTS model."""
 
 LISTENING_READY_SECONDS = 15.0
 """How long a listening leg may take to become able to hear.
@@ -144,31 +102,19 @@ without this wait the first turn of a real call would vanish."""
 
 @dataclass(frozen=True)
 class PersonaVoice:
-    """Which voice the persona speaks with, read from its authored traits.
-
-    Traits are otherwise opaque — the persona brain composes the whole
-    block into its prompt without picking favourites — and this is the one
-    key a leg reads out of them, defensively: a persona authored with no
-    voice, or a voice of some shape this code has never seen, still speaks.
-    """
+    """The technical voice owned by the pinned TTS selection."""
 
     voice_id: str
     provider: str | None
     speed: float | None
 
 
-def voice_from_traits(traits: dict[str, Any]) -> PersonaVoice:
-    """The persona's voice, or the default one where authoring said nothing."""
-    block = traits.get("voice")
-    if not isinstance(block, dict):
-        return PersonaVoice(voice_id=DEFAULT_VOICE_ID, provider=None, speed=None)
-    voice_id = block.get("voiceId")
-    provider = block.get("provider")
-    speed = block.get("speed")
+def voice_from_models(models: SelectedModels) -> PersonaVoice:
+    """Read the technical voice from its one owner."""
     return PersonaVoice(
-        voice_id=voice_id if isinstance(voice_id, str) else DEFAULT_VOICE_ID,
-        provider=provider if isinstance(provider, str) else None,
-        speed=float(speed) if isinstance(speed, int | float) else None,
+        voice_id=models.tts.voice_id,
+        provider=models.tts.provider,
+        speed=models.tts.speed,
     )
 
 
@@ -190,8 +136,7 @@ def _tones(sample_rate_hz: int) -> tuple[dict[int, bytes], dict[bytes, int]]:
             struct.pack(
                 "<h",
                 int(
-                    TONE_AMPLITUDE
-                    * math.cos(2 * math.pi * hertz * n / sample_rate_hz)
+                    TONE_AMPLITUDE * math.cos(2 * math.pi * hertz * n / sample_rate_hz)
                 ),
             )
             for n in range(SAMPLES_PER_BYTE)
@@ -421,9 +366,7 @@ class ScriptedVAD(VADAnalyzer):
         self.params.start_secs = (
             self.SPEAKING_WINDOWS * self._window_samples / sample_rate
         )
-        self.params.stop_secs = (
-            self.QUIET_WINDOWS * self._window_samples / sample_rate
-        )
+        self.params.stop_secs = self.QUIET_WINDOWS * self._window_samples / sample_rate
         super().set_sample_rate(sample_rate)
 
     def num_frames_required(self) -> int:
@@ -449,15 +392,7 @@ class SpeechFault(RuntimeError):
 
 @dataclass(frozen=True)
 class SpeechProviders:
-    """Which pair of legs a voice pipeline is assembled with.
-
-    Configuration, and the whole of it: everything that differs between a
-    scripted exchange and one carried by real providers is in these four
-    values, they are read once at assembly, and nothing above assembly
-    ever sees them. The default is the scripted pair, which is what makes
-    "a deployment that sets nothing behaves exactly as it did" true by
-    construction rather than by remembering.
-    """
+    """The speech adapters resolved from one pinned persona version."""
 
     stt: str = "scripted"
     tts: str = "scripted"
@@ -469,91 +404,55 @@ class SpeechProviders:
 
     stt_key: str | None = field(default=None, repr=False)
     tts_key: str | None = field(default=None, repr=False)
-    """A key per leg, not per provider.
-
-    The environment names its keys after providers, because one account
-    there really does serve both openai legs. The platform's own settings
-    name them after legs, because on a deployment that listens with one
-    company and speaks with another they are two accounts — and a shape
-    that could not say so would make the second key unreachable. So the
-    legs are what these are keyed by, and translating the environment's
-    provider-shaped names into them happens once, in
-    :meth:`for_simulation`.
-    """
+    """The direct credential for each selected leg."""
 
     stt_model: str | None = None
     tts_model: str | None = None
-    tts_voice: str | None = None
-    """What somebody named for the built leg to ask for, or ``None``.
-
-    **``None`` means nobody named one, and the leg answers with its own
-    provider's default** — never with another provider's. These three
-    fields cross providers and a model name does not: a deployment that
-    moved its mouth to cartesia and named no model would otherwise ask
-    cartesia for an openai model, and be refused at the first word. Each
-    builder below therefore holds its own fallback, and what is here is
-    only ever what a person actually said."""
+    """The exact pinned models. Runtime code supplies no default."""
 
     @classmethod
-    def for_simulation(
-        cls, config: SimulatorConfig, platform: PlatformSpeech | None = None
-    ) -> SpeechProviders:
-        """The pair one simulation is assembled with.
+    def from_models(cls, models: SelectedModels, *, vad: str) -> SpeechProviders:
+        """Resolve the direct adapters from the required models block.
 
-        This container's own configuration, with the platform's settings
-        laid over it leg by leg — which is what makes a second simulator on
-        another machine need no speech variables at all, and what makes a
-        replaced key apply to the next simulation with no restart.
-
-        **A leg's key follows its leg's provider.** Naming a provider and
-        no key is a deployment saying "use this company, with the key you
-        already have", which is what a self-hoster who set one key for both
-        openai legs means. Naming a key and no provider is that key for
-        whichever leg the container already chose.
+        OpenAI STT means its realtime socket. The segmented transcription
+        endpoint is not a second interpretation of the same selection.
         """
-        said = platform or PlatformSpeech()
-        stt = said.stt_provider or config.stt_provider
-        tts = said.tts_provider or config.tts_provider
+        stt = "openai_realtime" if models.stt.provider == "openai" else "deepgram"
         return cls(
             stt=stt,
-            tts=tts,
-            vad=said.vad_provider or config.vad_provider,
-            stt_key=said.stt_key or config.key_for(stt),
-            tts_key=said.tts_key or config.key_for(tts),
-            stt_model=said.stt_model or config.stt_model,
-            tts_model=said.tts_model or config.tts_model,
-            tts_voice=said.tts_voice or config.tts_voice,
+            tts=models.tts.provider,
+            vad=vad,
+            stt_key=models.stt.key,
+            tts_key=models.tts.key,
+            stt_model=models.stt.model,
+            tts_model=models.tts.model,
         )
-
 
     def checked(self) -> SpeechProviders:
         """These legs, or the refusal an unrecognised provider earns.
 
         **Refused rather than quietly downgraded to the stand-in.** Every
-        builder below falls through to the scripted leg for a provider it
-        does not implement, which is exactly right when the choice was
-        `scripted` and exactly wrong when the choice was `elevenlabss`: a
+        builder below accepts the scripted leg only for direct unit tests.
+        A misspelled runtime provider must not turn into a canned robot: a
         typo on a settings page would otherwise produce a completed, green
         simulation conducted by a canned robot, which is worse than a
         failure because a failure tells the truth about what happened.
 
-        This container's own three names are checked when it starts, so a
-        name that reaches here is one the platform holds — and the refusal
-        names the platform's setting, the value, and what this simulator
-        really has.
+        Runtime speech names come from the validated work order. The
+        additional scripted name exists only for explicit unit-test injection.
 
         Called where the legs are *built*, not where they are resolved: a
         chat simulation has no mouth and no ears, and must not fail over a
         speech provider it was never going to use.
         """
-        for setting, chosen, allowed in (
-            ("speech_to_text_provider", self.stt, STT_PROVIDERS),
-            ("text_to_speech_provider", self.tts, TTS_PROVIDERS),
-            ("voice_activity_provider", self.vad, VAD_PROVIDERS),
+        for owner, setting, chosen, allowed in (
+            ("persona", "STT selection", self.stt, STT_PROVIDERS),
+            ("persona", "TTS selection", self.tts, TTS_PROVIDERS),
+            ("deployment", "VAD adapter", self.vad, VAD_PROVIDERS),
         ):
             if chosen not in allowed:
                 raise SpeechFault(
-                    f"the platform's {setting} is {chosen!r}, which is not a "
+                    f"the {owner}'s {setting} is {chosen!r}, which is not a "
                     "speech leg this simulator has; it speaks and listens "
                     f"with {', '.join(allowed)}"
                 )
@@ -561,7 +460,7 @@ class SpeechProviders:
 
 
 SCRIPTED_PAIR = SpeechProviders()
-"""The pair a pipeline is assembled with when nothing is configured."""
+"""The deterministic pair used only by direct unit-test assembly."""
 
 
 @dataclass
@@ -572,9 +471,7 @@ class SpeechLegs:
     tts: FrameProcessor
 
     voice: PersonaVoice
-    """The voice the speaking leg was really built with — the authored one
-    where it could be honored, the default English one where it could
-    not. What this says is what the persona speaks with."""
+    """The exact voice pinned by this work order's TTS selection."""
 
     listening: Callable[[], Awaitable[None]] | None = None
     """Waits until the listening leg can hear, for a leg that connects."""
@@ -686,51 +583,14 @@ def _mouth(
         return _openai_mouth(providers, voice)
     if providers.tts == "cartesia":
         return _cartesia_mouth(providers, voice)
-    if providers.tts != "elevenlabs":
+    if providers.tts == "scripted":
         return ScriptedTTS(voice=voice), voice, ()
-
-    # Imported here and not at the top of the file: an unconfigured
-    # simulator must not pay for a provider it will not use, and a
-    # dependency that is never imported is a dependency that cannot
-    # reach the network on its own. The quarantine suite holds this.
-    import aiohttp
-    from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
-    from pipecat.services.tts_service import TextAggregationMode
-
-    if not providers.tts_key:
-        raise SpeechFault("the elevenlabs speaking leg was chosen without a key")
-
-    spoken_with = _voice_from(
-        voice, provider="elevenlabs", default_voice_id=DEFAULT_ENGLISH_VOICE_ID
-    )
-    settings = ElevenLabsHttpTTSService.Settings(voice=spoken_with.voice_id)
-    if spoken_with.speed is not None:
-        settings.speed = spoken_with.speed
-    session = aiohttp.ClientSession()
-    leg = ElevenLabsHttpTTSService(
-        api_key=providers.tts_key,
-        aiohttp_session=session,
-        settings=settings,
-        # One persona turn is one whole thing to say, so it goes to the
-        # provider in one piece rather than a sentence at a time, which
-        # is what the default mode would do and what would add its
-        # latency to every sentence.
-        #
-        # This does not avoid the sentence tokenizer, and it once was
-        # thought to: the service pairs this mode with a sequencer that
-        # regroups the streamed tokens back into sentences, to attribute
-        # spoken words to the transcript. That regrouping reads the
-        # tokenizer corpus, which is why the image ships one.
-        text_aggregation_mode=TextAggregationMode.TOKEN,
-    )
-    return leg, spoken_with, (session.close,)
+    raise SpeechFault(f"no speaking leg for {providers.tts!r}")
 
 
 def _ears(
     providers: SpeechProviders,
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
-    if providers.stt == "openai":
-        return _openai_ears(providers), None
     if providers.stt == "openai_realtime":
         return _openai_realtime_ears(providers)
     if providers.stt != "deepgram":
@@ -740,8 +600,13 @@ def _ears(
 
     if not providers.stt_key:
         raise SpeechFault("the deepgram listening leg was chosen without a key")
+    if not providers.stt_model:
+        raise SpeechFault("the deepgram listening leg was chosen without a model")
 
-    leg = DeepgramSTTService(api_key=providers.stt_key)
+    leg = DeepgramSTTService(
+        api_key=providers.stt_key,
+        settings=DeepgramSTTService.Settings(model=providers.stt_model),
+    )
 
     async def connected() -> None:
         # The service opens its websocket in a background task and drops
@@ -770,48 +635,31 @@ def _cartesia_mouth(
     It is asked for raw 16-bit signed little-endian mono. Pipecat gives it
     the output rate from the start frame and the transport owns conversion.
 
-    The voice is a Cartesia identifier and belongs to Cartesia, so a
-    persona authored for another provider's voice speaks with the default
-    rather than failing on a timbre — :func:`_voice_from` again, on the
-    same terms as every other mouth here.
+    The voice and speed are the pinned TTS selection's own. This adapter
+    neither substitutes nor clamps them.
     """
     from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
     from pipecat.services.tts_service import TextAggregationMode
 
     if not providers.tts_key:
         raise SpeechFault("the cartesia speaking leg was chosen without a key")
-
-    spoken_with = _voice_from(
-        voice,
-        provider="cartesia",
-        default_voice_id=providers.tts_voice or DEFAULT_CARTESIA_VOICE_ID,
-    )
+    if not providers.tts_model:
+        raise SpeechFault("the cartesia speaking leg was chosen without a model")
+    if voice.provider != "cartesia":
+        raise SpeechFault("the cartesia speaking leg received a non-cartesia voice")
+    if voice.speed is None or not (
+        CARTESIA_SPEED_RANGE[0] <= voice.speed <= CARTESIA_SPEED_RANGE[1]
+    ):
+        raise SpeechFault(
+            "the cartesia speaking leg received a speed outside its supported "
+            f"range {CARTESIA_SPEED_RANGE[0]}–{CARTESIA_SPEED_RANGE[1]}"
+        )
+    spoken_with = voice
     settings = CartesiaTTSService.Settings(
-        model=providers.tts_model or DEFAULT_CARTESIA_TTS_MODEL,
+        model=providers.tts_model,
         voice=spoken_with.voice_id,
     )
-    if spoken_with.speed is not None:
-        # **Speed rides this provider's own block, not a flat field.**
-        # Assigning `settings.speed` here would land on a dataclass that
-        # has no such field, be carried nowhere, and leave a persona
-        # authored to speak quickly speaking at exactly the default with
-        # nothing said about it.
-        #
-        # Clamped rather than passed through, because the accepted range
-        # is this provider's and a persona's speed was authored against
-        # whichever provider it was written for. A refused request would
-        # fail a whole simulation over a timbre, which is the outcome
-        # `_voice_from` exists to avoid one line above.
-        wanted = spoken_with.speed
-        allowed = min(max(wanted, CARTESIA_SPEED_RANGE[0]), CARTESIA_SPEED_RANGE[1])
-        if allowed != wanted:
-            logger.info(
-                "the persona's speed of %s is outside what cartesia accepts; "
-                "speaking at %s instead",
-                wanted,
-                allowed,
-            )
-        settings.generation_config = GenerationConfig(speed=allowed)
+    settings.generation_config = GenerationConfig(speed=spoken_with.speed)
 
     leg = CartesiaTTSService(
         api_key=providers.tts_key,
@@ -819,9 +667,8 @@ def _cartesia_mouth(
         container="raw",
         settings=settings,
         # One persona turn is one whole thing to say, so it goes over in
-        # one piece rather than a sentence at a time — the same choice the
-        # elevenlabs mouth makes above, for the same reason: the default
-        # waits for sentence-ending punctuation and adds that wait to
+        # one piece rather than a sentence at a time: the default waits for
+        # sentence-ending punctuation and adds that wait to
         # every sentence of every turn.
         text_aggregation_mode=TextAggregationMode.TOKEN,
     )
@@ -839,14 +686,13 @@ def _openai_mouth(
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
-
-    spoken_with = _voice_from(
-        voice,
-        provider="openai",
-        default_voice_id=providers.tts_voice or DEFAULT_TTS_VOICE,
-    )
+    if not providers.tts_model:
+        raise SpeechFault("the openai speaking leg was chosen without a model")
+    if voice.provider != "openai":
+        raise SpeechFault("the openai speaking leg received a non-openai voice")
+    spoken_with = voice
     settings = OpenAITTSService.Settings(
-        model=providers.tts_model or DEFAULT_TTS_MODEL, voice=spoken_with.voice_id
+        model=providers.tts_model, voice=spoken_with.voice_id
     )
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
@@ -857,38 +703,14 @@ def _openai_mouth(
     return leg, spoken_with, ()
 
 
-def _openai_ears(providers: SpeechProviders) -> FrameProcessor:
-    """What the agent said, transcribed by OpenAI.
-
-    This leg is segmented, so Pipecat hands the provider a WAV it writes
-    from the pipeline input. The provider accepts that recording directly.
-    """
-    from pipecat.services.openai.stt import OpenAISTTService
-
-    if not providers.stt_key:
-        raise SpeechFault("the openai listening leg was chosen without a key")
-
-    return OpenAISTTService(
-        api_key=providers.stt_key,
-        settings=OpenAISTTService.Settings(
-            model=providers.stt_model or DEFAULT_STT_MODEL
-        ),
-    )
-
-
 def _openai_realtime_ears(
     providers: SpeechProviders,
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     """What the agent said, transcribed while they are still saying it.
 
-    **The same account as the segmented leg above, and a different
-    transport.** That one posts a finished recording of a turn and waits;
-    this one holds a socket open and transcribes as the audio arrives. On
-    a phone line the difference is the whole of the listening latency: the
-    segmented leg cannot begin until the agent stops talking, so the
-    length of every agent turn is added to that turn's own delay before
-    the persona can even start thinking about a reply. A caller who worked
-    that way would be one nobody has ever spoken to.
+    This is the only OpenAI STT adapter in this release. It holds a socket
+    open and transcribes as audio arrives. The segmented transcription
+    endpoint is not another interpretation of the same model selection.
 
     **Turn boundaries stay egma's, not the provider's.** The service is
     built in its local-VAD mode, so the detector that decides where a turn
@@ -906,8 +728,10 @@ def _openai_realtime_ears(
     from pipecat.services.openai.stt import OpenAIRealtimeSTTService
 
     if not providers.stt_key:
+        raise SpeechFault("the openai_realtime listening leg was chosen without a key")
+    if not providers.stt_model:
         raise SpeechFault(
-            "the openai_realtime listening leg was chosen without a key"
+            "the openai_realtime listening leg was chosen without a model"
         )
 
     leg = OpenAIRealtimeSTTService(
@@ -917,9 +741,7 @@ def _openai_realtime_ears(
         # default, because a release changing it would move where a turn
         # ends without moving anything in this repository.
         turn_detection=False,
-        settings=OpenAIRealtimeSTTService.Settings(
-            model=providers.stt_model or DEFAULT_REALTIME_STT_MODEL
-        ),
+        settings=OpenAIRealtimeSTTService.Settings(model=providers.stt_model),
     )
 
     opened = asyncio.Event()
@@ -961,36 +783,3 @@ def _openai_realtime_ears(
             await asyncio.sleep(0.05)
 
     return leg, connected
-
-
-def _voice_from(
-    voice: PersonaVoice, *, provider: str, default_voice_id: str
-) -> PersonaVoice:
-    """The voice one provider can really speak with.
-
-    A voice id belongs to the provider it was authored for. A persona
-    naming this provider's voice — or naming a voice without saying whose
-    it is — is honored. One naming another provider's voice is authoring
-    for a deployment this is not, and the sensible default speaks instead:
-    the alternative is a simulation that fails on a timbre.
-
-    The default is the caller's, because one provider's default voice id is
-    a string another provider refuses outright. ElevenLabs names voices by
-    a long identifier and OpenAI by a word from a fixed list; handing
-    either one the other's is an error frame at the first turn.
-    """
-    authored = voice.provider
-    if voice.voice_id != DEFAULT_VOICE_ID and authored in (None, provider):
-        return PersonaVoice(
-            voice_id=voice.voice_id, provider=provider, speed=voice.speed
-        )
-    if authored not in (None, provider):
-        logger.info(
-            "the persona's voice was authored for %s and this simulation "
-            "speaks through %s; the default English voice speaks",
-            authored,
-            provider,
-        )
-    return PersonaVoice(
-        voice_id=default_voice_id, provider=provider, speed=voice.speed
-    )

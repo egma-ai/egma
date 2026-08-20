@@ -395,7 +395,7 @@ describe("which connection egma creates", () => {
     expect(result.stdout).toContain("reach_option: phone");
     expect(result.stdout).not.toContain("reach_option: text");
     expect(result.stderr).toContain(
-      "Voice agents can be reached only by phone, not text. Choose phone and try again.",
+      "Voice agents require a Phone connection. Choose --reach phone and try again.",
     );
     expect(platform.registered.agents).toHaveLength(0);
     expect(platform.registered.connections).toHaveLength(0);
@@ -541,7 +541,7 @@ describe("the whole walk, headless", () => {
     expect(result.stdout).not.toContain("reach_option: text");
     expect(result.stdout).toContain(
       "Egma could not finish: Retell says this is a voice agent. " +
-        "Voice agents can be reached only by phone, not text. Choose phone and try again. " +
+        "Voice agents require a Phone connection. Choose --reach phone and try again. " +
         "Nothing was written.",
     );
     expect(platform.registered.agents).toHaveLength(0);

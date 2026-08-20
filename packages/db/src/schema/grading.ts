@@ -197,9 +197,9 @@ export const gradingJob = pgTable(
      * would still be narrowed when a straggling re-enqueue reopened it in June,
      * and a conversation would quietly stop being judged by everything else.
      *
-     * The grader is named by identity and never by version: which version
-     * judges is always the current one, which is the whole point of asking
-     * again.
+     * The grader is named by identity and never by version. A simulation
+     * resolves that identity from its run's pinned plan; a production trace
+     * resolves the current version because it has no run plan.
      */
     regradeGraderId: idText("regrade_grader_id").references(() => grader.id),
     finishedAt: moment("finished_at"),

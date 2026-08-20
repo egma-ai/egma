@@ -111,12 +111,11 @@ import { within } from "./within.ts";
  * notification the enqueue does, because a service should wake for a re-grade
  * exactly as it wakes for a conversation ending.
  *
- * Nothing about a re-grade names a grader *version*. The job is a conversation,
- * the service judges it with whatever applies to it **at each grader's current
- * version**, and that is what puts a tightened grader's rows beside the old ones
- * rather than over them: the verdict's identity spans the grader version, so a
- * grader nobody edited rewrites its own row in place and only the edited one
- * adds.
+ * Nothing about a re-grade names a grader *version*. A simulation keeps the
+ * immutable grader versions its run pinned; editing a grader affects only a new
+ * run. A production trace has no run plan, so it resolves the current versions
+ * when it is judged. The source owns that choice and the reopened job does not
+ * copy it.
  *
  * A re-grade **may** name a grader, and that is a question about spend rather
  * than about what the rows come to say. Re-judging the conversation whole
@@ -238,10 +237,9 @@ export type GradingClaim = {
    * conversation — which is what a first grading and an un-narrowed re-grade
    * both are.
    *
-   * The engine judges with this grader and nothing else when it is set: not the
-   * other graders that apply, and not the built-in. Somebody who fixed one
-   * rubric asked for one rubric's judgment, and every other judge call on the
-   * conversation would be spend they did not ask for.
+   * The engine judges with this running copy and nothing else when it is set.
+   * Somebody who fixed one rubric asked for one rubric's judgment, and every
+   * other judge call on the conversation would be spend they did not ask for.
    */
   readonly regradeGraderId: string | null;
   /** Including this one, so a copy can say which attempt it is making. */
@@ -1039,9 +1037,9 @@ const MOST_CONVERSATIONS_PER_REGRADE = 500;
  * than moving the conversation to today.
  *
  * A job that is `pending` or `claimed` is left exactly alone and answers
- * `undefined`: it is already going to be judged, at today's grader versions,
- * which is everything a re-grade was going to ask for. So does a job out of the
- * caller's reach — the answer reading it would have given.
+ * `undefined`: it is already going to be judged. A simulation uses its run's
+ * pinned grader versions; a production trace uses current versions. So does a
+ * job out of the caller's reach — the answer reading it would have given.
  *
  * **This verb asks for the whole conversation and cannot ask for less.**
  * Narrowing to one grader is a re-grade's decision, made by the person who named
@@ -1177,17 +1175,19 @@ type RegradeConversations =
  *
  * So:
  *
- * - **A grader named** narrows the re-judge to that one grader, at its current
- *   version. Nothing else on the conversation is judged — not the other graders,
- *   not the built-in — and nothing else's rows are touched. This is what
+ * - **A grader named** narrows the re-judge to that one grader identity. A
+ *   simulation still uses the version its run pinned; a production trace uses
+ *   the current version. No other running copy on the conversation is judged,
+ *   and nothing else's rows are touched. This is what
  *   somebody who fixed one rubric is asking for, and it is the only shape in
  *   which fixing a rubric costs one rubric's worth of judging.
  * - **No grader named** re-judges the conversation, which is what a re-grade has
  *   always meant here and stays the default so that the plain ask keeps working.
  *
- * The grader is named **by identity**, never by version. Which version judges is
- * always the current one — that is the whole point of asking again — exactly as
- * resolving what applies to a conversation gets today's version of every copy.
+ * The grader is named **by identity**, never by version. Which version judges
+ * is a property of the original source: a simulation resolves that identity
+ * from its run's frozen plan, while a production trace resolves the current
+ * copy because it has no run plan.
  *
  * **The expected-behaviors grader can be named like any other**, and that is
  * what stopped being a special case. It used to be implicit — never a row in
@@ -1218,8 +1218,9 @@ export type Regraded = {
   /**
    * How many of the conversations named were already waiting to be judged and
    * were left exactly alone. Almost all of them are neither a failure nor a
-   * skip: a conversation still in the queue is going to be judged at today's
-   * grader versions, which is all a re-grade was going to ask for.
+   * skip: a conversation still in the queue is going to be judged from the
+   * version source it already has — a simulation's pinned plan or a production
+   * trace's current copy.
    *
    * **Almost**, because `beingJudgedNarrower` below counts the ones where that
    * is not true, and they are counted in here as well. This number stays what
@@ -1247,14 +1248,14 @@ export type Regraded = {
 };
 
 /**
- * Judge these conversations again, at whatever the current grader version is.
+ * Judge these conversations again, with the versions their source resolves.
  *
  * **This is the only thing that ever re-scores history, and somebody has to ask
  * for it.** Editing a grader mints a version and changes nothing that was
- * already judged; the rows written last week keep saying what they said, in the
- * words of the version that decided them. A tightened threshold reaches
- * yesterday only through this call, which is what makes "our numbers changed
- * overnight" impossible to arrive at by accident.
+ * already judged. A simulation re-grade stays on the run's pinned versions, so
+ * a tightened threshold reaches only a new run. A production trace has no run
+ * plan and therefore uses the current version when somebody explicitly asks it
+ * to be judged again. Neither path changes history without this call.
  *
  * **The ask may name a grader, and then only that grader judges.** Every other
  * grader's rows on those conversations are left exactly where they are, and no
@@ -1264,12 +1265,11 @@ export type Regraded = {
  * gone, and it is cleared when the job finishes. Naming no grader re-judges the
  * conversation, which is what this call has always done.
  *
- * What comes of it is rows **beside** the old ones rather than over them,
- * because the verdict's identity spans the grader version: the graders nobody
- * edited rewrite their own rows in place, the edited one writes a second row
- * against the same assertion, and the read prefers the newest grading with the
- * older still fetchable underneath. Nothing is deleted and nothing is edited,
- * here or anywhere.
+ * A simulation re-grade writes against the same pinned grader-version identity,
+ * so it replaces that version's prior judgment. A production re-grade can add
+ * rows for a newer current version; the read prefers the newest grading and
+ * keeps the older version fetchable underneath. Nothing here rewrites a grader
+ * version or a run plan.
  *
  * The conversations are resolved, their jobs reopened, and the service does the
  * judging — so a re-grade returns as soon as the work is queued rather than when

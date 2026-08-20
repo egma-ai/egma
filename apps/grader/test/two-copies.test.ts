@@ -1,5 +1,6 @@
 import {
   claimGradingJobs,
+  deleteGrader,
   listGradingJobsForSimulation,
   readVerdicts,
   reopenGradingJob,
@@ -15,6 +16,7 @@ import {
   runService,
   seedGrader,
   testConfig,
+  theSeededGrader,
   type World,
 } from "./support/world.ts";
 import type { Service } from "../src/service.ts";
@@ -77,6 +79,7 @@ async function rowsStoredFor(simulationId: string): Promise<number> {
 
 beforeAll(async () => {
   world = await makeWorld("grader_two_copies");
+  await deleteGrader(world.auth, await theSeededGrader(world));
   await seedGrader(world, aLatencyCopy());
 });
 
@@ -164,9 +167,9 @@ describe("judging one conversation again at the same grader version", () => {
    * re-grade is when nobody has edited the grader in between: the job is
    * reopened rather than a second one created. The store's identity spans the
    * grader version, so the second judgment is a rewrite of the first rather than
-   * a row beside it — the conversation's answer cannot come to disagree with
-   * itself, and a re-grade of a run whose graders are mostly unchanged
-   * accumulates rows only for the ones that moved.
+   * a row beside it — the conversation's answer cannot disagree with itself.
+   * A simulation re-grade always has this shape because its run pins the
+   * version.
    */
   it("replaces the judgment rather than doubling it", async () => {
     aCopy("grader-again");

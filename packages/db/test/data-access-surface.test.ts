@@ -141,9 +141,8 @@ const WORK_DISPATCHING = [
  *
  * `regrade` and `reopenGradingJob` are the one way a judgment is ever revisited,
  * and neither is an edit: they reopen the queue so the engine judges again at
- * today's grader versions, narrowed to one grader when the ask names one. There
- * are no routes above them yet, so this surface is the altitude re-grading is
- * reachable at.
+ * a simulation's pinned versions or a production trace's current versions,
+ * narrowed to one grader identity when the ask names one.
  */
 const CONTEXT_REQUIRING = [
   "addConnection",
@@ -156,7 +155,6 @@ const CONTEXT_REQUIRING = [
   "appendVerdicts",
   "cancelRun",
   "changeRole",
-  "clonePersona",
   "cloneTest",
   "completeSimulation",
   // The type of one connection, by its id alone — the only connection read
@@ -169,11 +167,6 @@ const CONTEXT_REQUIRING = [
   "createAgent",
   "createApiKey",
   "createInvitation",
-  // An organization's judge credential: created and labelled, listed, read as
-  // a label and a hint, and relabelled or rotated whole. Five doors and none
-  // that answers with a key — the plaintext has one reader, the grading
-  // engine, and it reaches it through `resolveJudgeKey` alone.
-  "createJudgeCredential",
   "createMockTool",
   "createPersona",
   "createProject",
@@ -194,11 +187,12 @@ const CONTEXT_REQUIRING = [
   "restoreTest",
   // Which agents a test applies to. Its own door because it moves its own
   // revision and mints no version — target coverage is not test content.
+  "setDefaultPersona",
   "setTestAgents",
   "editGrader",
-  "editJudgeCredential",
   "editMockTool",
   "editPersona",
+  "forkPersona",
   "editTest",
   "failSimulation",
   // The claim path's own landing, for a claimed simulation the platform could
@@ -219,13 +213,10 @@ const CONTEXT_REQUIRING = [
   "getGraderVersion",
   "getGradingJob",
   "getGradingJobForTrace",
-  "getJudgeConfiguration",
-  "getJudgeCredential",
   "getPersona",
   "getPersonaVersion",
   "getRun",
   "getSimulation",
-  "getProjectJudge",
   "getSimulationTestVersion",
   "getTest",
   "getTestVersion",
@@ -271,9 +262,8 @@ const CONTEXT_REQUIRING = [
   "markSimulationCanceled",
   "readOrganization",
   "readOrganizationSettings",
-  // The deployment's own settings, on the judge configuration's exact terms:
-  // an owner writes them, a read answers a hint and never a stored secret, and
-  // the environment seeds what the platform does not already hold.
+  // Safe carrier-setting metadata and secret hints. Model-provider credentials
+  // have their own runtime source and never enter this store.
   "readPlatformSettings",
   // Hosted egma has no organization owner who may configure its shared carrier
   // route. Startup reconciles that deployment-owned route from a complete
@@ -319,12 +309,8 @@ const CONTEXT_REQUIRING = [
   "restoreConnection",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
-  // back from: it is made by pressing **Use** and deleted whole, and what it
-  // judges by is read through its library entry at judging time.
-  "listJudgeCredentials",
-  // The second secret egma holds, on the first one's terms: the read answers a
-  // reference and a hint, and this is the one door to the plaintext behind it.
-  "resolveJudgeKey",
+  // back from: it is made by pressing **Use** and deleted whole. Internally each
+  // grader version pins the exact immutable library-definition revision it runs.
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
   // only ones the context already reaches.
@@ -336,11 +322,11 @@ const CONTEXT_REQUIRING = [
   // Which active tests currently name a persona — the same question their
   // Archive asks, so a page and a refusal can never disagree about it.
   "testsUsingPersona",
-  // The dispatch path's door to the deployment's own settings in the clear —
-  // the third secret egma holds, and the same door the connection's
-  // credentials below come through. It takes the context like everything else
-  // and then refuses every one that did not come from a simulation claim,
-  // because conducting is the only thing egma does with these.
+  // The dispatch path's door to the deployment's carrier route in the clear.
+  // A credential-auth route may contain its SIP pair; model-provider keys do
+  // not use this table or this door. It takes the context like everything else
+  // and refuses every one that did not come from a simulation claim, because
+  // conducting a phone simulation is the only thing egma does with this route.
   "resolvePlatformSettings",
   // The dispatch path's door to a connection's plaintext. It takes the context
   // like everything else — and then refuses every one that did not come from a
@@ -348,20 +334,18 @@ const CONTEXT_REQUIRING = [
   // connection's credentials at this seam.
   "resolveSimulationConnection",
   "revokeApiKey",
-  "seedDefaultJudge",
   // egma's own graders, written onto the shelf from egma's own catalog at
   // start-up. The deployment configuring itself again, one table over: no
   // user, no customer — a predefined entry belongs to none — and an upsert, so
   // running it on every boot writes only what a release changed.
   "seedGraderLibrary",
+  "seedPersonaLibrary",
   "seedPlatformSettings",
   // The other half of the library seeding, one table down: a shelf full of
   // definitions judges nothing until a project is running a copy of one, so
   // every project that has never had the expected-behaviors copy is given it.
   // It names no customer and takes no argument at all.
   "seedRunningGraders",
-  "setJudgeConfiguration",
-  "setProjectJudge",
   "startRun",
   "startSimulation",
   // What a run would freeze, answered before anybody starts it — and the same
@@ -371,17 +355,15 @@ const CONTEXT_REQUIRING = [
   // What a run actually froze, including the honest `not_recorded` state for
   // history that predates frozen plans.
   "getGradingPlan",
-  // Taking a judge credential out of use, and asking what is stopping that.
-  // Both refuse and answer from one read, so a settings page and the refusal
-  // can never give two different reasons.
-  "archiveJudgeCredential",
-  "judgeCredentialUses",
+  // The exact grader versions one simulation froze. The grading worker uses
+  // this rather than following today's current-version pointers.
+  "pinnedSimulationGraders",
   "updateAgent",
   "updateConnection",
   // A project's live name, slug and description, written against the revision
   // the edit was read at. Its counterpart `createProject` above is the one
   // factory signup uses too, so a project made from Settings is born with the
-  // same starter persona, default pointer and judge state.
+  // same shared default-persona pointer and mandatory grader.
   "updateProject",
   // No `testsNamingGrader`, and it was here. It counted the live tests naming a
   // grader so an archive could be refused and the blocking tests named. A test
@@ -445,6 +427,30 @@ const THE_GRADER_LIBRARY = [
   "RESERVED_LIBRARY_TYPES",
 ];
 
+const THE_PERSONA_LIBRARY = [
+  "PERSONA_LIBRARY_CATALOG",
+  "EGMA_PROVIDED_PERSONAS",
+];
+
+/** One executable provider/model catalog shared by persona and grader writes. */
+const THE_MODELS = [
+  "MODEL_JOBS",
+  "MODEL_PROVIDERS",
+  "PROVIDERS_BY_JOB",
+  "PROVIDER_CATALOG",
+  "RECOMMENDED_ENTRY",
+  "RECOMMENDED_GRADER_MODEL",
+  "RECOMMENDED_PERSONA_MODELS",
+  "SPEED_RANGE",
+  "graderModelFromRow",
+  "isModelProvider",
+  "personaModelsFromRow",
+  "sameGraderModel",
+  "samePersonaModels",
+  "validGraderModel",
+  "validPersonaModels",
+];
+
 /** Vocabulary: the table definitions, how a caller proved who they are, and the refusals. */
 const VALUES = [
   // The agent factory's own refusal, carrying which of its three rules turned
@@ -465,23 +471,21 @@ const VALUES = [
   // A connection could not be brought back on the terms its own shape sets.
   // Four rules, four codes, and the reason travels beside the sentence.
   "ConnectionRestoreRefusedError",
-  // A library entry cannot leave the shelf while graders point at it. A copy
-  // reads its definition through that pointer every time it judges, so an entry
-  // taken away underneath one would leave a grader that judges nothing while
-  // still appearing on screen — refusal, never `set null`, never orphaned.
+  // A library entry cannot leave the shelf while graders point at it. Their
+  // immutable versions reference exact definition revisions owned by that
+  // identity, so removing it would break old judgment history — refusal, never
+  // `set null`, never orphaned.
   "GraderLibraryEntryInUseError",
   // The grader factory has no refusal of its own any more. A copy's delete used
   // to be turned away while a live test named it; a test names no graders, so
   // switching one off is a decision about the project with nothing in its way.
-  // A project's judge pointed at a credential issued by somebody else's
-  // provider. Its own class because the fix is specific and nameable.
-  "JudgeProviderMismatchError",
   "LastAdminError",
   // A second answer for a tool this project already answers for. Its own class
   // because nothing about the body is wrong and something is already there,
   // which is a different answer in kind.
   "MockToolTakenError",
   "NotPermittedError",
+  "EgmaProvidedPersonaError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
   // default persona, and this is what keeps that true.
@@ -495,14 +499,6 @@ const VALUES = [
   // the one failure the key exists to prevent.
   "IdempotencyConflictError",
   "IdentityConflictError",
-  // A judge credential something still needs — a project pointing at it, a run
-  // whose frozen plan names it while a conversation is still moving, or a
-  // grading job about to resolve its secret. It carries every blocking use,
-  // because the fix for each is somewhere different.
-  "JudgeCredentialInUseError",
-  // A run refused before anything was dialed, because its plan holds a grader
-  // that judges by asking a model and the project has configured none.
-  "JudgeNotConfiguredError",
   "PersonaNamedByTestsError",
   // A delete that named one of egma's own graders. Its own class because
   // nothing about the request is wrong and nothing is in the way — the entry
@@ -565,7 +561,6 @@ const VALUES = [
   // page token that was not issued here. Both are 400s, and neither is a fault.
   "UnreadableTraceQueryError",
   "VIA",
-  "VOICE_PROVIDERS",
   // The capability catalog, and the two readers that hold a key to it. Pure
   // values: they reach no store, take no context, and are the one list a test
   // requirement and a connection measurement are both written from.
@@ -595,9 +590,10 @@ const VALUES = [
   // one in its place.
   "transportCapabilities",
   // The connection registry, as a browser may be told about it — labels, field
-  // shapes, the credential rule, and the two adapter facts. Never a gate, a
+  // shapes, the credential rule, and the adapter facts. Never a gate, a
   // hint function, a refusal sentence or a credential.
   "connectionTypeMetadata",
+  "connectionUsesPlatformCarrier",
   "credentialRuleOf",
   "variantById",
   "variantIdOf",
@@ -609,9 +605,6 @@ const VALUES = [
   // by one refuses anything else by name rather than from a second copy of the
   // list.
   "RUN_STATUSES",
-  "JUDGE_PROVIDERS",
-  "JUDGE_SOURCES",
-  "PLATFORM_JUDGE",
   // No `GRADER_TYPE_REGISTRY` and no `EXPECTED_BEHAVIORS_GRADER`. The first
   // held what each of four authorable grader types read and could score; the
   // second described the built-in that was never a row. `GRADER_LIBRARY_CATALOG`
@@ -747,6 +740,8 @@ describe("the data-access module's surface", () => {
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
         ...THE_GRADER_LIBRARY,
+        ...THE_PERSONA_LIBRARY,
+        ...THE_MODELS,
       ].sort(),
     );
   });

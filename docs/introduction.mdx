@@ -18,7 +18,7 @@ Voice agents are hard to test with unit tests alone. The behavior that matters e
 
 Egma is organized around three internal services that you never configure directly, but that are worth understanding at a high level.
 
-**The simulator** conducts conversations. It claims test work from the control plane, picks up the persona and scenario for each test, and holds a real exchange with your agent — over text, over a LiveKit room, or over the telephone network through a SIP trunk. It streams every turn, tool call, and timing as OpenTelemetry spans to Egma's own ingest, so simulated and production conversations land in the same store and are read by the same tools.
+**The simulator** conducts conversations. It claims test work from the control plane, picks up the persona and scenario for each test, and holds a real exchange with your agent — through a Retell Chat connection, a LiveKit room, or a Phone connection over a SIP trunk. It streams every turn, tool call, and timing as OpenTelemetry spans to Egma's own ingest, so simulated and production conversations land in the same store and are read by the same tools.
 
 **The grader** judges conversations. The moment a simulation finishes — or the moment a production call's telemetry goes quiet — the grader claims it, reads the transcript, resolves the graders that apply to it, and writes one verdict row per expected behavior. It runs on its own and scales horizontally — more throughput is simply more copies running in parallel, with nothing in front of them.
 
@@ -28,7 +28,7 @@ Egma is organized around three internal services that you never configure direct
 
 Egma works with the two most common voice agent platforms today.
 
-**Retell** agents connect by pasting your Retell API key into `egma connect`. Egma reads your agent's configuration — prompt, voice, tools — registers it, and lets you choose whether to reach it over text (exercising the prompt and reasoning) or over phone (exercising the full speech stack and carrier path). The same agent can have both connections; one results history ties them together.
+**Retell** agents connect by pasting your Retell API key into `egma connect`. Egma reads the selected agent's modality. It creates a Retell Chat connection for a chat agent or a Phone connection for a voice agent. It does not offer an incompatible path.
 
 **LiveKit agents** connect with the three variables already in your agent's own environment: its LiveKit URL, API key, and API secret. Egma creates a room in your LiveKit project, joins it, dispatches your worker, and holds the conversation there. No trunk, no carrier, no phone number. For teams who prefer not to hand a testing tool their project key pair, a token-endpoint mode keeps the secret on your side.
 

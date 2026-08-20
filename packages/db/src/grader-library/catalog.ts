@@ -169,11 +169,10 @@ const A_JUDGES_REPLY: LibraryOutputDefinition = {
  * it must choose between met and not-met will guess, and a guess dressed as a
  * judgment is the false trust this product exists to kill.
  *
- * These were the engine's own words and this row is now the only place they
- * live. The engine reads them through its running copy's `library_id` at
- * judging time, so what the Library screen shows and what a judge is sent are
- * one string with no copy to drift from — the whole reason the definition is
- * never written down onto a copy.
+ * These were the engine's own words and the catalog is their factory. Seeding
+ * writes each change once as an immutable Library definition revision. New
+ * grader versions reference it; runs already in progress keep the older
+ * revision they pinned.
  */
 const EXPECTED_BEHAVIORS_PROMPT = [
   "You judge one criterion about one recorded conversation between a customer's",

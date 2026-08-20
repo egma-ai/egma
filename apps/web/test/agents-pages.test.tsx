@@ -515,7 +515,7 @@ describe("reading an agent's reach from the list", () => {
     // The registry's word for the platform, not the token a client branches
     // on: the connection page says "Retell", and a row that said "retell"
     // would be a second vocabulary for one fact.
-    expect(screen.getByText("Retell · Text")).toBeDefined();
+    expect(screen.getByText("Retell · Chat")).toBeDefined();
     expect(screen.getByText("Not checked")).toBeDefined();
 
     // The production one, which somebody has.
@@ -926,7 +926,7 @@ describe("one agent's page", () => {
     expect(screen.getByText("Phone number")).toBeDefined();
     expect(screen.getByText("Retell")).toBeDefined();
     expect(screen.getByText("Voice")).toBeDefined();
-    expect(screen.getByText("Text")).toBeDefined();
+    expect(screen.getByText("Chat")).toBeDefined();
 
     // What left.
     expect(screen.queryByRole("navigation", { name: "Agent sections" })).toBeNull();

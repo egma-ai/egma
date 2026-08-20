@@ -61,6 +61,9 @@ export default defineConfig({
       // with `@` and would be rewritten into the web application.
       "@/": `${resolve("./apps/web")}/`,
       "@egma/ids": resolve("./packages/ids/src/index.ts"),
+      "@egma/provider-credentials": resolve(
+        "./packages/provider-credentials/src/index.ts",
+      ),
       "@egma/retell": resolve("./packages/retell/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
       "@egma/simulation-contract": resolve(

@@ -15,7 +15,7 @@ The sections below separate what you must supply from what you can safely leave 
 Set all seven of the following before running `egma self-host up`. The remaining three (`EGMA_BASE_URL`, `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`) are set automatically by `egma self-host up` and do not need to be set by hand unless you are driving `docker compose` directly.
 
 <ParamField path="EGMA_ENCRYPTION_KEY" type="string" required>
-  32 random bytes encoded as 64 hex characters. Seals every provider credential and platform setting stored in the database. Back this up alongside the database — the sealed values are unrecoverable without it.
+  32 random bytes encoded as 64 hex characters. Seals connection credentials and the carrier SIP password stored in Postgres. Back this up alongside the database — the sealed values are unrecoverable without it.
 
   ```bash
   openssl rand -hex 32
@@ -204,25 +204,47 @@ Email is entirely optional. Without it, invitation links are returned directly t
 
 ---
 
-## Default judge
+## Model provider credentials
 
-These three variables seed the judge that a new project receives when it has not configured one of its own. Set all three or none — a partial judge configuration causes the API to refuse startup.
+Persona versions choose the LLM, speech-to-text, text-to-speech, and voice.
+Grader versions choose their judge model. The variables below supply only the
+credentials needed to call those providers.
 
-<Warning>
-  The `egma self-host setup` command does not ask for these. A judge belongs to the project that chose it rather than to the deployment, so set them here in `.env` if you want every new project to have a default.
-</Warning>
+`egma self-host setup` does not ask for provider credentials. Put one current
+key per provider in `.env`, then recreate the API and grader containers so they
+receive the changed environment.
 
-<ParamField path="EGMA_JUDGE_PROVIDER" type="string">
-  The LLM provider to use for judging — for example, `openai`.
+<ParamField path="EGMA_OPENAI_API_KEY" type="string">
+  The deployment's OpenAI key. It can be used by simulation LLM, OpenAI STT or
+  TTS selections, and by OpenAI-backed graders.
 </ParamField>
 
-<ParamField path="EGMA_JUDGE_MODEL" type="string">
-  The model name — for example, `gpt-4o`.
+<ParamField path="EGMA_DEEPGRAM_API_KEY" type="string">
+  The deployment's Deepgram key for persona versions that select Deepgram STT.
 </ParamField>
 
-<ParamField path="EGMA_JUDGE_API_KEY" type="string">
-  The API key for the judge provider. Sealed with `EGMA_ENCRYPTION_KEY` and written into each new project's configuration at boot. Never overwrites a judge a project has already configured.
+<ParamField path="EGMA_CARTESIA_API_KEY" type="string">
+  The deployment's Cartesia key for persona versions that select Cartesia TTS.
 </ParamField>
+
+Egma Cloud can read the same three-key bundle from one AWS Secrets Manager
+object instead of direct environment values. Set both selector variables or
+neither:
+
+<ParamField path="EGMA_PROVIDER_CREDENTIALS_SECRET_ID" type="string">
+  The secret ID or ARN. The secret JSON uses `openai_api_key`,
+  `deepgram_api_key`, and `cartesia_api_key`. The API and grader fetch its
+  current value for each work item.
+</ParamField>
+
+<ParamField path="EGMA_PROVIDER_CREDENTIALS_REGION" type="string">
+  The AWS region that contains `EGMA_PROVIDER_CREDENTIALS_SECRET_ID`.
+</ParamField>
+
+<Note>
+  These credentials are not platform settings and are not stored in Postgres.
+  A simulator receives only the keys required by its claimed work order.
+</Note>
 
 ---
 

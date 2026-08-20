@@ -276,7 +276,7 @@ function ConnectionDetail({
           { label: agentLabel, href: agentHome },
           { label: connection.name },
         ]}
-        lead={`${type?.label ?? connection.type} · ${connection.modality === "voice" ? "Voice" : "Text"}`}
+        lead={`${type?.label ?? connection.type} · ${connection.modality === "voice" ? "Voice" : "Chat"}`}
         action={
           role === null ? undefined : (
             <Actions>
@@ -319,7 +319,7 @@ function ConnectionDetail({
               { label: "Provider", value: type?.label ?? connection.type },
               {
                 label: "Modality",
-                value: connection.modality === "voice" ? "Voice" : "Text",
+                value: connection.modality === "voice" ? "Voice" : "Chat",
               },
             ]}
           />
