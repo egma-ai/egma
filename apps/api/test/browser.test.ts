@@ -2689,7 +2689,7 @@ describe("the complete product, walked in order in a second project", () => {
         .first();
       await expect
         .poll(() => row.innerText(), { timeout: 30_000 })
-        .toContain("Phone number · Voice");
+        .toContain("Retell phone · Voice");
       const said = await row.innerText();
       expect(said).toContain("Unlabelled");
       // Read without regard to case: a chip is drawn in capitals, and the word
