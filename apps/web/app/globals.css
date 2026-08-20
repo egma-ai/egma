@@ -75,8 +75,34 @@
  * own. An unlayered rule beats every utility whatever its specificity, so this
  * is the product's focus indicator everywhere, and a pasted component cannot
  * quietly remove it.
+ *
+ * **It names roles as well as elements.** The element names alone missed every
+ * menu item in the product: Radix draws one as `<div role="menuitem">`, so the
+ * one surface a keyboard user crosses by arrow key was the one surface with no
+ * Ember ring on it. It was not invisible — the highlighted item paints the
+ * quiet neutral surface — but "focus is always visible" means the product's own
+ * indicator, not a different answer in one place. The element names stay: a
+ * `<button>` is still reached as a button whatever role it is given.
  */
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+:is(
+  button, a, input, select, textarea, summary,
+  [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"],
+  [role="option"], [role="tab"], [role="button"], [role="link"],
+  [tabindex]
+):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+/*
+ * Inside a menu the ring turns inward.
+ *
+ * The panel holds its items on 8px of padding and scrolls, so a ring drawn 3px
+ * *outside* a full-width item is clipped on both sides and reads as two stripes
+ * rather than a rectangle. A negative offset puts the whole ring on the item.
+ *
+ * This is a design call rather than a fact, and it is called out in the pull
+ * request for the developer to overrule: -2px, so the ring sits just inside the
+ * item's own 6px radius without touching the text.
+ */
+:is([role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"]):focus-visible { outline-offset: -2px; }
 
 @layer base {
   @supports (appearance: base-select) {

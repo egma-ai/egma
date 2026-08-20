@@ -86,8 +86,12 @@ function DialogContent({
             className={cn(
               "absolute top-4 right-4 inline-flex size-8 cursor-pointer items-center justify-center",
               "rounded-button border border-transparent text-muted-foreground",
-              /* Named, so the focus ring is not among them. See `button.tsx`. */
-              "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
+              /*
+               * Named, so the focus ring is not among them. See `button.tsx`.
+               * Only the two this hover actually changes: the border stays
+               * transparent throughout, so naming it would be decoration.
+               */
+              "transition-[color,background-color] duration-(--duration-hover) ease-out",
               "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
             )}
           >
