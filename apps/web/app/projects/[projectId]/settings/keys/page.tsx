@@ -349,7 +349,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
                     </Button>
                     {whyNot === undefined ? null : (
                       <span
-                        className="max-w-[56ch] text-sm text-muted-foreground"
+                        className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
                         id={whyNotCreate}
                       >
                         {whyNot}

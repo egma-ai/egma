@@ -252,7 +252,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                     setSaved(false);
                   }}
                 />
-                <p className="m-0 text-sm text-faint" id={nameHint}>
+                <p className="m-0 text-sm leading-(--line-normal) text-faint" id={nameHint}>
                   What Egma calls your organization. Changing it breaks no link
                   and no invitation.
                 </p>
@@ -272,7 +272,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 </Button>
                 {whyNot === undefined ? null : (
                   <span
-                    className="max-w-[56ch] text-sm text-muted-foreground"
+                    className="max-w-[56ch] text-sm leading-(--line-normal) text-muted-foreground"
                     id={whyNotSave}
                   >
                     {whyNot}
@@ -596,7 +596,7 @@ function Credentials({
                     aria-describedby={replacementHint}
                     onChange={(event) => setReplacement(event.target.value)}
                   />
-                  <p className="m-0 text-sm text-faint" id={replacementHint}>
+                  <p className="m-0 text-sm leading-(--line-normal) text-faint" id={replacementHint}>
                     Replaces the stored key whole. You do not need the old one,
                     and Egma will not show it to you.
                   </p>

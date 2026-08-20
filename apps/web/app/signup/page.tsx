@@ -191,7 +191,7 @@ export default function SignUpPage() {
               setOrganizationName(event.target.value);
             }}
           />
-          <p className="m-0 text-sm text-faint" id={organizationHint}>
+          <p className="m-0 text-sm leading-(--line-normal) text-faint" id={organizationHint}>
             Filled in from your email. Change it if you like.
           </p>
         </Field>

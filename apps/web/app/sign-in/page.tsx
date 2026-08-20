@@ -128,6 +128,14 @@ export default function SignInPage() {
               className={cn(
                 "absolute top-1/2 right-1 size-(--control-md) min-h-(--control-md)",
                 "-translate-y-1/2 p-0 text-muted-foreground",
+                /*
+                 * The icon brightens under a fine pointer. The base ghost
+                 * variant changes only the background, and the quiet colour
+                 * pinned above wins over its `text-foreground` at rest *and* on
+                 * hover — so the hover half has to be said here too, or the
+                 * only answer to pointing at the control is a faint wash.
+                 */
+                "pointer-hover:text-foreground",
                 "pointer-coarse:right-0 pointer-coarse:size-(--tap-target)",
                 "pointer-coarse:min-h-(--tap-target)",
               )}

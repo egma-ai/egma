@@ -304,8 +304,9 @@ export function DesignSystemProof() {
               </h3>
               <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
                 The bounds are the browser&apos;s own validation and its own
-                arrow-key stepping; the unit is read out with the value rather
-                than drawn beside it; the digits are tabular. The spin buttons
+                arrow-key stepping; the unit sits beside the field rather than
+                inside it, and is read out with the value rather than left as
+                decoration; the digits are tabular. The spin buttons
                 are hidden because every browser draws them differently and each
                 one is a target smaller than this product allows anywhere else.
               </p>

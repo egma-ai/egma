@@ -265,7 +265,7 @@ export default function InvitePage() {
             aria-describedby={emailHint}
             value={invitation.email}
           />
-          <p className="m-0 text-sm text-faint" id={emailHint}>
+          <p className="m-0 text-sm leading-(--line-normal) text-faint" id={emailHint}>
             The address this invitation was sent to.
           </p>
         </Field>

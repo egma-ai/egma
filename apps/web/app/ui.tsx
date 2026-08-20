@@ -73,7 +73,13 @@ export function ThemeToggle() {
         "transition-[transform,background-color] duration-(--duration-press) ease-out",
         "pointer-hover:bg-surface-soft",
         "[&:active:not(:focus-visible)]:scale-97",
-        "motion-reduce:transition-none",
+        /*
+         * Reduced motion takes the movement away and leaves the colour. The
+         * transition itself stays: `DESIGN.md` asks every movement for "a
+         * reduced-motion form with useful opacity or color feedback", and
+         * removing the transition outright leaves the control answering a
+         * press with nothing at all.
+         */
         "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
       )}
       type="button"
@@ -113,7 +119,7 @@ export function LinkLine({ children }: { readonly children: ReactNode }) {
         "[&_a]:pointer-coarse:min-h-(--tap-target)",
         "[&_a]:transition-transform [&_a]:duration-(--duration-press) [&_a]:ease-out",
         "[&_a:active:not(:focus-visible)]:scale-97",
-        "motion-reduce:[&_a]:transition-none",
+        /* The movement goes; the colour feedback stays. See ThemeToggle. */
         "motion-reduce:[&_a:active:not(:focus-visible)]:scale-100",
       )}
     >

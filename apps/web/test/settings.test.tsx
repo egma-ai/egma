@@ -1950,10 +1950,6 @@ describe("people and invitations", () => {
   });
 
   /**
-   * Removing somebody is not a click. The dialog says what happens and to whom,
-   * and closing it leaves the page exactly as it was.
-   */
-  /**
    * The reason sits in the row it is about, and every row names its own copy.
    *
    * A table is where one sentence hoisted above it would be cheapest and
@@ -1977,6 +1973,10 @@ describe("people and invitations", () => {
     expect(new Set(said.map((one) => one.id)).size).toBe(said.length);
   });
 
+  /**
+   * Removing somebody is not a click. The dialog says what happens and to whom,
+   * and closing it leaves the page exactly as it was.
+   */
   it("asks before removing somebody, and posts only once it is answered", async () => {
     open();
 
