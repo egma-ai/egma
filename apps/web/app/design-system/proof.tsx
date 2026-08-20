@@ -898,10 +898,10 @@ export function DesignSystemProof() {
                 does not say it.
               </p>
               {/*
-                * The pulse is Tailwind's own `animate-pulse` and it needs no
-                * reduced-motion form written here: `globals.css` already caps
-                * every animation on the page at one iteration of a single frame
-                * under that query, so the shape stops moving and stays legible.
+                * The pulse is the theme's own skeleton keyframes, keyed on the
+                * kit slot at 560ms with egma's easing, and its reduced-motion
+                * form lives beside it in the theme — nothing here needs to
+                * write motion or take it away.
                 */}
               <div className={PREVIEW} role="status" aria-busy="true">
                 <p className="m-0 mb-4 text-sm text-muted-foreground">

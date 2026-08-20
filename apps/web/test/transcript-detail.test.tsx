@@ -353,7 +353,7 @@ describe("the states before there is a transcript", () => {
     await open();
 
     expect(
-      await screen.findByText(DETAIL.loading, { exact: false }),
+      await screen.findByText("Loading this transcript", { exact: false }),
     ).toBeTruthy();
   });
 

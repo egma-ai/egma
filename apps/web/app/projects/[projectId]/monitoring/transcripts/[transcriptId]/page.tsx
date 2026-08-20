@@ -52,6 +52,7 @@ import { shownScore } from "../../../../../../ui/run-status.tsx";
 import { JudgmentCard } from "../../../../../judgment-card.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
 import { PageNavigation } from "../../../../../../ui/page-navigation.tsx";
+import { Loading } from "../../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
   useMinuteClock,
@@ -281,15 +282,18 @@ export default function TranscriptPage({
   }, [projectId, transcriptId]);
 
   if (state.status === "loading") {
+    // The same frame the route boundary draws, so the wait for the API reads
+    // as one continued state rather than a second, static loading language.
     return (
       <ProductStatePage
         title={DETAIL.title}
-        lead={DETAIL.loading}
         breadcrumbs={[
           { label: LIST.title, href: transcriptsPath(projectId) },
           { label: DETAIL.title },
         ]}
-      />
+      >
+        <Loading what="this transcript" />
+      </ProductStatePage>
     );
   }
 

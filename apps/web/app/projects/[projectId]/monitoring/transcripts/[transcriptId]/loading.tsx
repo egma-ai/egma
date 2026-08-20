@@ -11,9 +11,10 @@ import { ProductStatePage } from "../../../../../../ui/shell.tsx";
  * What the router draws between the press and
  * `/projects/:projectId/monitoring/transcripts/:transcriptId` arriving.
  *
- * `DETAIL.loading` is the string “Loading…”, which is the sentence this
- * component exists to replace, so the subject is named here instead. The
- * title and the crumbs are still the copy module's.
+ * The page's own wait once said a bare “Loading…”; that sentence is retired
+ * everywhere now — its client branch draws this same frame — so the subject
+ * is named here instead. The title and the crumbs are still the copy
+ * module's.
  *
  * Its header is the page's own down to its shape — the same eyebrow or the
  * same crumbs, never one standing in for the other — so nothing is redrawn a
