@@ -94,8 +94,15 @@ const TRACE: TraceFacts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connection_type: "livekit",
+  // Nothing egma dialled: production telemetry arrives by export, so a
+  // monitored exchange names the platform that ran the agent and no egma
+  // connection. `transcripts.test.ts` reads the same shape off the API.
+  connection_kind: "",
   provider_call_id: "egma-fixture-capture-1",
+  agent_platform: "livekit_agents",
+  platform_agent_id: "agent_7f3c",
+  platform_agent_name: "kelly",
+  platform_agent_version: "2026.08.02",
   run_id: "",
   agent_id: "",
 };
@@ -316,6 +323,22 @@ function inspectorFactsIn(inspector: HTMLElement): HTMLElement {
   const facts = inspector.querySelector("dl");
   if (facts === null) throw new Error("the inspector drew no facts");
   return facts as HTMLElement;
+}
+
+/**
+ * The provenance disclosure at the foot of the inspector, found by its own
+ * summary rather than by position: it is the third description list on the
+ * page, and counting to three would break on the day a fourth arrives.
+ */
+function whereItCameFrom(): HTMLElement {
+  const inspector = screen.getByLabelText(DETAIL.inspector);
+  const disclosure = within(inspector)
+    .getByText(DETAIL.whereItCameFrom)
+    .closest("details");
+  if (disclosure === null) {
+    throw new Error("where it came from is not a disclosure");
+  }
+  return disclosure as HTMLElement;
 }
 
 beforeEach(() => {
@@ -889,6 +912,70 @@ describe("the inspector", () => {
     const inspector = screen.getByLabelText(DETAIL.inspector);
     expect(within(inspector).getByText(DETAIL.whereItCameFrom)).toBeTruthy();
     expect(within(inspector).getByText(DETAIL.technicalDetails)).toBeTruthy();
+  });
+
+  /**
+   * **Provenance names the platform that ran the agent**, which is the answer
+   * production monitoring replaced a single *Connection* row with: a person
+   * looking at a production exchange cannot open the connection egma dialled,
+   * because egma dialled nothing. What identifies the agent is the platform's
+   * own name for it, its identifier there, and the version that answered.
+   *
+   * The platform is read out in a reader's words rather than in the wire's —
+   * `livekit_agents` is what arrives and **LiveKit Agents** is what is drawn.
+   */
+  it("names the platform, and the agent the platform ran", async () => {
+    stub({ status: 200, body: detail() });
+    await open();
+    await settled();
+
+    const came = whereItCameFrom();
+    for (const [label, value] of [
+      [FACTS.platform, "LiveKit Agents"],
+      [FACTS.platformAgentName, TRACE.platform_agent_name],
+      [FACTS.platformAgentId, TRACE.platform_agent_id],
+      [FACTS.platformAgentVersion, TRACE.platform_agent_version],
+      [FACTS.reference, TRACE.provider_call_id],
+    ]) {
+      expect(within(came).getByText(label), label).toBeTruthy();
+      expect(within(came).getByText(value), value).toBeTruthy();
+    }
+  });
+
+  /**
+   * A capture that carried no platform identity draws no row for it, rather
+   * than a label above a blank — `DESIGN.md`: "Make every state truthful."
+   * A trace exported before its agent named itself is the ordinary case, and
+   * four empty rows would read as four facts egma failed to show.
+   */
+  it("leaves out a fact the capture did not carry", async () => {
+    stub({
+      status: 200,
+      body: detail({
+        trace: {
+          ...TRACE,
+          agent_platform: "",
+          platform_agent_id: "",
+          platform_agent_name: "",
+          platform_agent_version: "",
+        },
+      }),
+    });
+    await open();
+    await settled();
+
+    const came = whereItCameFrom();
+    for (const label of [
+      FACTS.platform,
+      FACTS.platformAgentName,
+      FACTS.platformAgentId,
+      FACTS.platformAgentVersion,
+    ]) {
+      expect(within(came).queryByText(label), label).toBeNull();
+    }
+    // What did arrive is still there, so the disclosure is not simply empty.
+    expect(within(came).getByText(FACTS.source)).toBeTruthy();
+    expect(within(came).getByText(TRACE.source)).toBeTruthy();
   });
 });
 
