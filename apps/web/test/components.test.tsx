@@ -701,6 +701,38 @@ describe("a page of rows", () => {
     expect(onMore).toHaveBeenCalledTimes(1);
   });
 
+  it("draws one page at a time with previous and next controls", () => {
+    const onPrevious = vi.fn();
+    const onNext = vi.fn();
+    render(
+      <DataTable
+        label="Agents"
+        columns={COLUMNS}
+        rows={ROWS}
+        keyOf={(row) => row.id}
+        pagination={{
+          page: 2,
+          canPrevious: true,
+          canNext: false,
+          loading: false,
+          onPrevious,
+          onNext,
+          previousLabel: "Previous",
+          pageLabel: (page) => `Page ${page}`,
+          nextLabel: "Next",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Page 2")).toBeDefined();
+    expect(
+      (screen.getByRole("button", { name: "Next" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
   it("mounts an interactive cell once, with one id and one focus target", () => {
     const roleCell = vi.fn((row: Row) => (
       <select id={`role-${row.id}`} aria-label={`Role for ${row.name}`}>

@@ -41,10 +41,13 @@ export const LIST = {
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
   window: "Window",
-  showMore: "Show more",
-  loadingMore: "Loading…",
+  previousPage: "Previous",
+  nextPage: "Next",
+  page: (number: number) => `Page ${number}`,
   counted: (shown: number) =>
-    shown === 1 ? "1 transcript" : `${shown} transcripts`,
+    shown === 1
+      ? "1 transcript on this page"
+      : `${shown} transcripts on this page`,
   /** The two speakers, where a count rather than a transcript names them. */
   human: "human",
   agent: "agent",

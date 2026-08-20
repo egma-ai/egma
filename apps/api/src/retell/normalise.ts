@@ -17,12 +17,11 @@ import { catalogedMeasure, isSpanDerivedMeasure } from "@egma/simulation-contrac
  * live polling pass and a historical import cannot disagree about what a
  * conversation is.
  *
- * **Nothing here is synthesised.** Retell publishes no per-turn timing, so
- * there is no per-turn span: the turns come from the transcript, and every
+ * **Nothing here is synthesised.** Spoken turns use Retell's reported word
+ * bounds when they exist. A turn with no usable word bounds stays at the call
+ * start with zero duration rather than receiving invented timing. Every
  * latency figure Retell reports rides the root span as an attribute of the
- * whole conversation. The trace store's rule is literal — never write a span
- * egma did not observe — and a per-turn duration invented by dividing a total
- * would be exactly that, wearing a number that looks measured.
+ * whole conversation.
  *
  * **The safe payload is kept whole on the root.** Every span is built from the
  * same copy after access tokens and authentication header values are removed.
@@ -202,6 +201,8 @@ function extent(call: RetellCall, now: number): {
 type Turn = {
   readonly kind: "turn:human" | "turn:agent";
   readonly text: string;
+  readonly startedAfterNanoseconds: bigint | undefined;
+  readonly durationNanoseconds: bigint | undefined;
 };
 
 type ToolCall = {
@@ -218,6 +219,52 @@ type Transcript = {
   readonly toolCalls: readonly ToolCall[];
   readonly whole: boolean;
 };
+
+/** Retell word bounds, measured from the start of the call. */
+function reportedTimingIn(row: Readonly<Record<string, unknown>>): {
+  readonly startedAfterNanoseconds: bigint;
+  readonly durationNanoseconds: bigint;
+} | undefined {
+  const words = row["words"];
+  if (!Array.isArray(words) || words.length === 0) return undefined;
+
+  const bounds = words.flatMap((word) => {
+    if (typeof word !== "object" || word === null || Array.isArray(word)) return [];
+    const held = word as Record<string, unknown>;
+    const start = number(held["start"]);
+    const end = number(held["end"]);
+    return start === undefined || end === undefined || start < 0 || end < start
+      ? []
+      : [{ start, end }];
+  });
+  const first = bounds[0];
+  const last = bounds.at(-1);
+  if (first === undefined || last === undefined || last.end < first.start) {
+    return undefined;
+  }
+
+  const startedAfterNanoseconds = BigInt(
+    Math.round(first.start * 1_000_000_000),
+  );
+  const endedAfterNanoseconds = BigInt(Math.round(last.end * 1_000_000_000));
+  return {
+    startedAfterNanoseconds,
+    durationNanoseconds: endedAfterNanoseconds - startedAfterNanoseconds,
+  };
+}
+
+function spokenTurnIn(
+  row: Readonly<Record<string, unknown>>,
+  role: "user" | "agent",
+): Turn {
+  const timing = reportedTimingIn(row);
+  return {
+    kind: role === "user" ? "turn:human" : "turn:agent",
+    text: text(row["content"]),
+    startedAfterNanoseconds: timing?.startedAfterNanoseconds,
+    durationNanoseconds: timing?.durationNanoseconds,
+  };
+}
 
 function spokenTurnsIn(value: unknown): {
   readonly turns: readonly Turn[];
@@ -241,10 +288,7 @@ function spokenTurnsIn(value: unknown): {
       // None of them gives Egma permission to invent a speaker turn.
       continue;
     }
-    turns.push({
-      kind: role === "user" ? "turn:human" : "turn:agent",
-      text: text(row["content"]),
-    });
+    turns.push(spokenTurnIn(row, role));
   }
   return { turns, whole };
 }
@@ -312,10 +356,7 @@ function turnsIn(call: RetellCall): Transcript {
     const row = entry as Record<string, unknown>;
     const role = text(row["role"]);
     if (role === "user" || role === "agent") {
-      turns.push({
-        kind: role === "user" ? "turn:human" : "turn:agent",
-        text: text(row["content"]),
-      });
+      turns.push(spokenTurnIn(row, role));
       continue;
     }
 
@@ -668,14 +709,14 @@ export function normaliseRetellCall(
         parentSpanId: rootId,
         name: turn.kind === "turn:human" ? "human_turn" : "agent_turn",
         kind: turn.kind,
-        // Retell publishes no per-turn timing, so every turn opens at the
-        // conversation's own start and lasts nothing. **That is the honest
-        // answer**: a duration divided out of a total would look measured and
-        // would not be, and the transcript surface was built to render a trace
-        // whose child spans are sparse.
-        startedAtMicroseconds: startedAt,
+        // Retell reports word bounds relative to the call start. Where it does
+        // not, keep the prior honest fallback: call start and zero duration.
+        startedAtMicroseconds:
+          startedAt + (turn.startedAfterNanoseconds ?? 0n) / 1000n,
+        durationNanoseconds: turn.durationNanoseconds ?? 0n,
         text: turn.text,
-        payload: JSON.stringify(turn),
+        // BigInt timing belongs in typed span fields and cannot be JSON encoded.
+        payload: JSON.stringify({ kind: turn.kind, text: turn.text }),
       }),
     );
   }

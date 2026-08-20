@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
@@ -355,6 +355,68 @@ describe("what the Monitoring list shows", () => {
     const carried = new URLSearchParams(href.slice(href.indexOf("?")));
     expect(carried.get("from")).not.toBeNull();
     expect(carried.get("to")).not.toBeNull();
+  });
+
+  it("shows one cached page at a time inside one fixed time window", async () => {
+    const second = {
+      ...ONE_ROW,
+      trace_id: "6d2f5c1a9e3b4d7f8a0b1c2d3e4f5061",
+      preview: "The older conversation",
+    };
+    const { asked } = apiAnswers({
+      "/api/me": { status: 200, body: ME },
+      "/v1/traces": (at) =>
+        at.searchParams.get("cursor") === "older"
+          ? {
+              status: 200,
+              body: {
+                traces: [second],
+                next_cursor: null,
+                window: {
+                  from: at.searchParams.get("from"),
+                  to: at.searchParams.get("to"),
+                },
+              },
+            }
+          : {
+              status: 200,
+              body: {
+                traces: [ONE_ROW],
+                next_cursor: "older",
+                window: {
+                  from: at.searchParams.get("from"),
+                  to: at.searchParams.get("to"),
+                },
+              },
+            },
+      "/api/graders": {
+        status: 200,
+        body: { items: [grader("both")], next_cursor: null },
+      },
+      "/api/keys": { status: 200, body: { keys: [key("prj_2")] } },
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByText(ONE_ROW.preview);
+    expect(screen.getByText("Page 1")).toBeDefined();
+    expect(screen.queryByText(second.preview)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText(second.preview);
+    expect(screen.queryByText(ONE_ROW.preview)).toBeNull();
+    expect(screen.getByText("Page 2")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    await screen.findByText(ONE_ROW.preview);
+    expect(screen.queryByText(second.preview)).toBeNull();
+
+    const listReads = asked
+      .filter((one) => one.startsWith("/v1/traces?"))
+      .map((one) => new URLSearchParams(one.slice(one.indexOf("?"))));
+    expect(listReads).toHaveLength(2);
+    expect(listReads[1]?.get("cursor")).toBe("older");
+    expect(listReads[1]?.get("from")).toBe(listReads[0]?.get("from"));
+    expect(listReads[1]?.get("to")).toBe(listReads[0]?.get("to"));
   });
 });
 

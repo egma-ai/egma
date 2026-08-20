@@ -213,6 +213,59 @@ describe("the spans a captured payload becomes", () => {
     expect(turns[1]?.text).toBe("I would like to reschedule Tuesday.");
   });
 
+  it("keeps Retell's word timing so a transcript reads in call order", () => {
+    const timed = normaliseRetellCall(
+      capturedCall({
+        transcript_with_tool_calls: [
+          {
+            role: "agent",
+            content: "First",
+            words: [{ word: "First", start: 1.25, end: 1.75 }],
+          },
+          {
+            role: "user",
+            content: "Second",
+            words: [{ word: "Second", start: 3, end: 3.75 }],
+          },
+          {
+            role: "agent",
+            content: "Third",
+            words: [{ word: "Third", start: 5.5, end: 6.5 }],
+          },
+        ],
+      }),
+      FILED_INTO,
+      NOW,
+    );
+    const timedRoot = timed.spans.find((span) => span.parentSpanId === "");
+    const timedTurns = timed.spans.filter((span) =>
+      span.kind.startsWith("turn:"),
+    );
+    const opened = timedRoot?.startedAtMicroseconds ?? 0n;
+
+    expect(
+      timedTurns.map((turn) => [
+        turn.startedAtMicroseconds - opened,
+        turn.durationNanoseconds,
+      ]),
+    ).toEqual([
+      [1_250_000n, 500_000_000n],
+      [3_000_000n, 750_000_000n],
+      [5_500_000n, 1_000_000_000n],
+    ]);
+    expect(
+      [...timedTurns]
+        .sort((left, right) =>
+          left.startedAtMicroseconds === right.startedAtMicroseconds
+            ? left.spanId.localeCompare(right.spanId)
+            : left.startedAtMicroseconds < right.startedAtMicroseconds
+              ? -1
+              : 1,
+        )
+        .map((turn) => turn.text),
+    ).toEqual(["First", "Second", "Third"]);
+  });
+
   it("carries the agent's tool call inside the turn it happened in", () => {
     expect(tools).toHaveLength(1);
     expect(tools[0]?.toolName).toBe("check_calendar");
@@ -309,9 +362,9 @@ describe("the spans a captured payload becomes", () => {
     });
   });
 
-  it("synthesises no per-turn timing, because Retell reports none", () => {
-    // Every turn opens where the conversation opened and claims no duration.
-    // A number divided out of the total would look measured and would not be.
+  it("keeps an untimed Retell turn at the call start without inventing timing", () => {
+    // These fixture turns have no words. A number divided out of the total
+    // would look measured and would not be.
     for (const turn of turns) {
       expect(turn.startedAtMicroseconds).toBe(root?.startedAtMicroseconds);
       expect(turn.durationNanoseconds).toBe(0n);
