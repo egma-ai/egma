@@ -114,6 +114,12 @@ function TabsTrigger({
       className={cn(
         [
           "relative inline-flex flex-1 cursor-pointer items-center justify-center gap-2",
+          /*
+           * Down a rail the labels start together. The list stretches its tabs
+           * to the widest one, so centring leaves every shorter label sitting
+           * at its own indent and the column reads ragged.
+           */
+          "group-data-[orientation=vertical]/tabs:justify-start",
           "min-h-(--control-sm) rounded-button border border-transparent px-3",
           "text-sm whitespace-nowrap text-muted-foreground",
           "pointer-coarse:min-h-(--tap-target)",
@@ -150,6 +156,32 @@ function TabsTrigger({
            */
           "group-data-[variant=line]/tabs-list:flex-none",
           "group-data-[variant=line]/tabs-list:min-h-(--control-lg)",
+          /*
+           * No border on a rail tab. The shared one is transparent and exists
+           * only to hold the room the segmented plate's Ember edge moves into,
+           * so on this variant it is a pixel that draws nothing — and it is the
+           * pixel between the first label and the column edge below.
+           */
+          "group-data-[variant=line]/tabs-list:border-0",
+          /*
+           * **The first label starts on the column's own left edge.** A rail
+           * strip leads a page, so its first word is read against the headings
+           * under it — and the shared `px-3` that gives every tab its plate had
+           * pushed that word 12px right of every `Section` title beside it.
+           * `DESIGN.md` asks for exact alignment.
+           *
+           * Padding rather than a negative margin on the list, which is the
+           * other way to do this: the Settings column is `overflow-y-auto`, so
+           * its `overflow-x` computes to `auto` as well, and anything pulled
+           * left of the content box is clipped with no scroll that can reach
+           * it. Dropping the first tab's own left padding moves the label and
+           * its plate together, and neither leaves the column.
+           *
+           * Horizontal only. Down a vertical rail the first tab is the top
+           * one, and taking its left padding away would step it out of line
+           * with every tab below it.
+           */
+          "group-data-[orientation=horizontal]/tabs:group-data-[variant=line]/tabs-list:first:pl-0",
           "group-data-[orientation=horizontal]/tabs:group-data-[variant=line]/tabs-list:rounded-b-none",
           "group-data-[orientation=vertical]/tabs:group-data-[variant=line]/tabs-list:rounded-r-none",
           /*
@@ -193,19 +225,33 @@ function TabsTrigger({
          *
          * Radix selects on `mousedown` rather than on `click`, which is right
          * — `DESIGN.md`: "A control answers on press, not after an animation."
-         * A pointer press and a keyboard Enter both reach it, the first
-         * through `mousedown` and the second through `keydown`.
+         * A pointer press reaches it through `mousedown` and a keyboard Enter
+         * through `keydown`, so both are already answered.
          *
-         * What reaches neither is a bare `click` that nobody pressed: some
-         * assistive technology and automation activate a control by
-         * dispatching one directly, and `detail` is 0 because no pointer was
-         * involved. Against a strip listening only for a press, those people
-         * cannot change tab at all. So the press is re-issued rather than the
-         * selection being re-implemented here — Radix stays the one thing that
-         * decides what activating a tab means, and a duplicate reaches it as
-         * the same value it already holds, which its controlled state drops.
+         * What reaches neither is a click that was *dispatched* rather than
+         * performed — a script, an automation harness, or this repository's
+         * own component tests, where `fireEvent.click` sends the click alone
+         * and no press ever happens. Eight Settings tests failed on exactly
+         * that. So the press is re-issued rather than the selection being
+         * re-implemented here, and Radix stays the one thing that decides what
+         * activating a tab means.
+         *
+         * **`isTrusted` is what keeps this off the keyboard path.** A browser
+         * fires a click with `detail === 0` after Enter or Space as well, so
+         * `detail` alone cannot tell a dispatched click from a keyboard one —
+         * and re-issuing there hands the consumer a second `onValueChange` for
+         * one press. Harmless against a page that commits the change straight
+         * away, and a trap for one that does not. Only a browser can set
+         * `isTrusted`, so a dispatched click is the one case left.
+         *
+         * **The re-issued press bubbles**, because React listens at the root
+         * and would not see it otherwise. It can therefore also reach an
+         * ancestor's `onMouseDown` or an outside-press handler. Nothing wraps a
+         * tab strip that way today; a component that does needs to know this is
+         * here.
          */
         if (event.defaultPrevented || event.detail > 0) return;
+        if (event.nativeEvent.isTrusted) return;
         event.currentTarget.dispatchEvent(
           new MouseEvent("mousedown", { bubbles: true, button: 0 }),
         );
