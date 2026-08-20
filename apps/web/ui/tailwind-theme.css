@@ -44,9 +44,15 @@
  * explanation. Scanning only the files that carry class attributes stops the
  * prose being read as markup. No `.ts` file under `apps/web` holds a class
  * name; a future one that does has to be added here.
+ *
+ * `../ui` is the third glob because the shared components live there and are
+ * being migrated onto this theme. Until that sweep finishes the directory holds
+ * CSS Modules components too, whose class names are hashed by the module
+ * compiler and so can never collide with a utility of the same word.
  */
 @source "../app/**/*.tsx";
 @source "../components/**/*.tsx";
+@source "../ui/**/*.tsx";
 
 /*
  * `DESIGN.md`: "Pointer hover motion runs only under `(hover: hover) and
@@ -274,6 +280,12 @@
  * transform-origin measured from the trigger — so the rules key off those and
  * the component files stay stock shadcn.
  *
+ * A sub-menu is named beside its parent in every list below rather than being
+ * handed the parent's `data-slot`. Sharing the name is the shorter way to make
+ * a sub-menu move, and it costs the ability to ever address the two apart: a
+ * later rule meant for one silently reaches the other, and the component stops
+ * matching the registry it came from.
+ *
  * Exits are animations rather than transitions on purpose: Radix waits for
  * `animationend` before unmounting, and a transition would be cut off halfway.
  *
@@ -354,17 +366,20 @@
     transform-origin: var(--radix-popover-content-transform-origin);
   }
 
-  [data-slot="dropdown-menu-content"] {
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"] {
     transform-origin: var(--radix-dropdown-menu-content-transform-origin);
   }
 
   [data-slot="popover-content"][data-state="open"],
-  [data-slot="dropdown-menu-content"][data-state="open"] {
+  [data-slot="dropdown-menu-content"][data-state="open"],
+  [data-slot="dropdown-menu-sub-content"][data-state="open"] {
     animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
   }
 
   [data-slot="popover-content"][data-state="closed"],
-  [data-slot="dropdown-menu-content"][data-state="closed"] {
+  [data-slot="dropdown-menu-content"][data-state="closed"],
+  [data-slot="dropdown-menu-sub-content"][data-state="closed"] {
     animation: egma-anchored-out var(--duration-popover-out) var(--ease-out);
   }
 
@@ -404,6 +419,7 @@
 
     [data-slot="popover-content"][data-state="open"],
     [data-slot="dropdown-menu-content"][data-state="open"],
+    [data-slot="dropdown-menu-sub-content"][data-state="open"],
     [data-slot="dialog-content"][data-state="open"],
     [data-slot="dialog-overlay"][data-state="open"] {
       animation: egma-fade-in var(--duration-hover) linear;
@@ -411,6 +427,7 @@
 
     [data-slot="popover-content"][data-state="closed"],
     [data-slot="dropdown-menu-content"][data-state="closed"],
+    [data-slot="dropdown-menu-sub-content"][data-state="closed"],
     [data-slot="dialog-content"][data-state="closed"],
     [data-slot="dialog-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;

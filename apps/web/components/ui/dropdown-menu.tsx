@@ -217,7 +217,7 @@ function DropdownMenuSubContent({
 }: ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   return (
     <DropdownMenuPrimitive.SubContent
-      data-slot="dropdown-menu-content"
+      data-slot="dropdown-menu-sub-content"
       className={cn(
         "z-30 min-w-40 overflow-hidden rounded-card border border-border bg-popover p-1",
         "text-popover-foreground shadow-popover outline-none",
