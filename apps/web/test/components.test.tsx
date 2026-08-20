@@ -10,7 +10,11 @@ import {
 import { Suspense, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import RunResultsAddress from "../app/runs/[runId]/page.tsx";
+import AgentsLoading from "../app/projects/[projectId]/agents/loading.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
 import { EVERY_NAVIGATION_ITEM } from "../lib/navigation.ts";
@@ -20,7 +24,7 @@ import { Choice } from "../ui/choice.tsx";
 import { Field } from "../ui/form.tsx";
 import { DataTable, type Column } from "../ui/data-table.tsx";
 import { Dialog } from "../ui/dialog.tsx";
-import { Failure, NotFound } from "../ui/page-state.tsx";
+import { Failure, Loading, NotFound } from "../ui/page-state.tsx";
 import { PageNavigation } from "../ui/page-navigation.tsx";
 import { ProjectSelector } from "../ui/project-selector.tsx";
 import { RunProgress } from "../ui/run-status.tsx";
@@ -1025,6 +1029,146 @@ describe("a page that is not showing its data", () => {
 
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Not available here");
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The loading state, which used to be a sentence and nothing else.
+ *
+ * `DESIGN.md` asks it for a "fast, quiet indicator", and the four rules below
+ * are what "quiet" costs: theme timing rather than Tailwind's, a wait before
+ * anything appears, a reduced-motion form, and a stagger that cannot be
+ * cancelled by the order Tailwind happens to emit its rules in.
+ *
+ * The class lists are read directly because jsdom computes no animation. That
+ * is the trade: these assert the declaration rather than the movement, and the
+ * movement itself is proven in a browser.
+ */
+describe("the state a page shows while it is still waiting", () => {
+  function loadingState(): HTMLElement {
+    render(<Loading what="agents" />);
+    return screen.getByRole("status");
+  }
+
+  function bars(within_: HTMLElement): readonly HTMLElement[] {
+    return [...within_.querySelectorAll<HTMLElement>('[data-slot="skeleton"]')];
+  }
+
+  function classStartingWith(on: HTMLElement, prefix: string): string | undefined {
+    return [...on.classList].find((one) => one.startsWith(prefix));
+  }
+
+  it("still says what it is waiting for, in the quiet tone it always had", () => {
+    const said = loadingState();
+
+    expect(said.dataset.tone).toBe("quiet");
+    expect(screen.getByText("Loading agents…")).toBeTruthy();
+  });
+
+  it("shows the wait is alive without saying it twice to a screen reader", () => {
+    const said = loadingState();
+    const indicator = said.querySelector('[data-slot="loading-indicator"]');
+
+    expect(indicator?.getAttribute("aria-hidden")).toBe("true");
+    expect(bars(said)).toHaveLength(3);
+    // The sentence is announced once, by the heading above the bars.
+    expect(said.textContent).toBe("Loading agents…");
+  });
+
+  it("is timed by the theme, never by the numbers shadcn shipped", () => {
+    const [first] = bars(loadingState());
+    const pulse = classStartingWith(first as HTMLElement, "[--animate-pulse:");
+
+    expect(pulse).toContain("var(--duration-drawer-in)");
+    expect(pulse).toContain("var(--ease-in-out)");
+    // Tailwind's own `2s cubic-bezier(0.4, 0, 0.6, 1)`, gone.
+    expect(pulse).not.toContain("2s");
+    expect(pulse).not.toContain("cubic-bezier");
+  });
+
+  /**
+   * The rule this proves is a number: a page that answers before the delay is
+   * up is drawn without the indicator ever having been on screen. So the token
+   * is read out of the theme and checked against the threshold, rather than
+   * the test agreeing with whatever the theme happens to say today.
+   */
+  it("waits longer than a fast answer takes, so nothing flashes", async () => {
+    const said = loadingState();
+    const enter = classStartingWith(said, "[animation:egma-fade-in");
+
+    expect(enter).toContain("var(--duration-popover-in)");
+    // `both` is what holds it at nothing for the length of the wait.
+    expect(enter).toContain("both");
+
+    // `import.meta.dirname`, not a URL: this file runs under jsdom, where
+    // `import.meta.url` is an http address rather than a path on disk.
+    const theme = await readFile(
+      path.join(import.meta.dirname, "../ui/tailwind-theme.css"),
+      "utf8",
+    );
+    const waited = /--duration-popover-in:\s*(\d+)ms/.exec(theme)?.[1];
+    expect(Number(waited)).toBeGreaterThanOrEqual(150);
+  });
+
+  it("keeps the meaning under reduced motion and drops the movement", () => {
+    for (const bar of bars(loadingState())) {
+      expect(bar.className).toContain("motion-reduce:animate-none");
+    }
+  });
+
+  /**
+   * The offset is a custom property rather than an `animation-delay` utility.
+   * Both would be on the same element, and `animation:` resets
+   * `animation-delay`, so a delay written as its own declaration lives or dies
+   * by which rule Tailwind emits second. Folding it into the shorthand removes
+   * the question.
+   */
+  it("staggers the bars with a variable, not with a declaration that can be reset", () => {
+    const drawn = bars(loadingState());
+    const offsets = drawn
+      .map((bar) => classStartingWith(bar, "[--pulse-delay:"))
+      .filter((one) => one !== undefined);
+
+    expect(offsets).toHaveLength(2);
+    expect(new Set(offsets).size).toBe(2);
+    for (const bar of drawn) {
+      expect(bar.className).not.toContain("[animation-delay:");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+
+/**
+ * The route boundary, which is the half of this a person actually meets.
+ *
+ * A press on a navigation item used to hold the previous page on screen with
+ * nothing said until the next one was ready. The fallback answers the press
+ * instead: the shell never moves, the destination is named, and the same
+ * indicator runs under it.
+ */
+describe("what the router draws while a page is still coming", () => {
+  it("keeps the frame, names where the press landed, and shows the one indicator", async () => {
+    apiAnswers({ "/api/me": { status: 200, body: meWith("admin") } });
+    render(
+      <ProductShellBoundary>
+        <AgentsLoading />
+      </ProductShellBoundary>,
+    );
+
+    // The shell is the root layout's, so the fallback must not draw a second
+    // one: one navigation, one account control, one session read.
+    expect(await screen.findAllByText("ada@acme.example")).toHaveLength(1);
+    expect(
+      screen.getAllByRole("navigation", { name: "Product navigation" }),
+    ).toHaveLength(1);
+
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeTruthy();
+    const said = screen.getByRole("status");
+    expect(said.textContent).toBe("Loading agents…");
+    expect(said.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
   });
 });
 
