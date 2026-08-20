@@ -266,6 +266,19 @@ describe("the development design proof", () => {
     /* The other set is the `line` variant, and it is a separate set. */
     expect(screen.getByRole("tab", { name: "Transcript" }).getAttribute("aria-selected")).toBe("true");
 
+    /*
+     * The group's question is on the page, not only in an `aria-label`.
+     * `DESIGN.md` keeps labels visible, so the element a reader can see is the
+     * same one that names the group — asserted as one fact rather than two, so
+     * the wiring cannot drift away from the words.
+     */
+    const group = screen.getByRole("radiogroup", {
+      name: "What a repeated run reuses",
+    });
+    expect(group.getAttribute("aria-labelledby")).toBe(
+      screen.getByText("What a repeated run reuses").id,
+    );
+
     /* One answer out of the set, and the page says which one it heard. */
     const fresh = screen.getByRole("radio", {
       name: "A new persona for each simulation",

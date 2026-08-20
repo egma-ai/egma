@@ -328,7 +328,20 @@ function AttachTests({
     <ProductPage>
       {header}
       <PageBody>
-        <AgentOnboardingProgress current="tests" />
+        {/*
+          * "Skip connection for now" is how somebody arrives here with the
+          * connection stage behind them and nothing attached, and the bar must
+          * not count that as work done. This page already holds the agent's
+          * connections, so it is the one place that can tell a skip from a
+          * finished stage: no connection on the agent means the stage was
+          * passed over rather than completed.
+          */}
+        <AgentOnboardingProgress
+          current="tests"
+          skipped={
+            parentAgent.value.connections.length === 0 ? ["connection"] : []
+          }
+        />
 
         {pages.length === 0 && busyTests ? (
           <Loading what="this project's tests" />

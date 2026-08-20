@@ -802,6 +802,80 @@ describe("onboarding an agent", () => {
     );
   });
 
+  /**
+   * "Skip connection for now", and the bar that has to tell the truth about it.
+   *
+   * Being behind the current stage is not the same as being finished. Somebody
+   * who skipped the connection arrives on the tests page with two stages behind
+   * them and one of them not done, and an agent with no connection cannot run a
+   * simulation at all — so a bar reading "2 of 3 stages finished" would be
+   * telling them the setup was nearly complete when the part that makes it work
+   * had been passed over.
+   *
+   * Both halves are asserted: the count, and the word beside the stage.
+   * `DESIGN.md` will not let a state rest on a mark and a colour, and it names
+   * skipped as its own state rather than a shade of complete.
+   */
+  it("says a skipped connection was skipped, and does not count it as finished", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [onboardingTest()], next_cursor: null } },
+      ],
+    });
+    render(<AgentOnboardingPage />);
+
+    const progress = await screen.findByRole("navigation", {
+      name: "Agent setup",
+    });
+    const bar = within(progress).getByRole("progressbar", {
+      name: "Agent setup progress",
+    });
+    expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(bar.getAttribute("aria-valuetext")).toBe(
+      "1 of 3 stages finished, 1 skipped",
+    );
+
+    const connection = within(progress).getByText("Connection");
+    expect(connection.getAttribute("data-skipped")).toBe("true");
+    expect(connection.getAttribute("data-complete")).toBeNull();
+    expect(within(progress).getByText("Skipped")).toBeTruthy();
+  });
+
+  /** The same page with the connection actually made, so the count moves. */
+  it("counts a connection that was made, and says nothing about a skip", async () => {
+    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/api/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [CONNECTION] },
+      },
+      "/api/tests": [
+        { status: 200, body: { items: [onboardingTest()], next_cursor: null } },
+      ],
+    });
+    render(<AgentOnboardingPage />);
+
+    const progress = await screen.findByRole("navigation", {
+      name: "Agent setup",
+    });
+    const bar = within(progress).getByRole("progressbar", {
+      name: "Agent setup progress",
+    });
+    expect(bar.getAttribute("aria-valuenow")).toBe("2");
+    expect(bar.getAttribute("aria-valuetext")).toBe("2 of 3 stages finished");
+
+    const connection = within(progress).getByText("Connection");
+    expect(connection.getAttribute("data-complete")).toBe("true");
+    expect(within(progress).queryByText("Skipped")).toBeNull();
+  });
+
   it("attaches selected existing tests through each test's applicability revision", async () => {
     routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
     const test = onboardingTest();

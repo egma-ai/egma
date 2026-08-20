@@ -14,12 +14,19 @@ import { cn } from "@/lib/utils";
  * with the default easing, which is `all` (forbidden outright) decelerating
  * (which lies about the rate of the work). Both are fixed here.
  *
- * **Its look is `RunProgress`'s look, on purpose.** `ui/run-status.tsx` already
- * draws this product's progress bar — a neutral track, an ink fill, the chip
- * radius, 200ms linear, and no movement under reduced motion — so the kit
- * primitive is dressed to match rather than to a second opinion. A later ticket
- * moving `RunProgress` onto this primitive should be deleting code, not
- * redrawing a bar.
+ * **It is dressed to meet `RunProgress`, not to copy it today.**
+ * `ui/run-status.tsx` already draws this product's progress bar, and every
+ * decision it made that `DESIGN.md` backs is taken here too: a neutral track,
+ * an ink fill, the chip radius, 200ms linear, and no movement under reduced
+ * motion.
+ *
+ * **One measurement differs on purpose.** `RunProgress` is `h-1.5`, which is
+ * 6px and not on the 4px grid `DESIGN.md` sets; a general primitive has no
+ * business starting off the grid, so this is `h-2`. The two are therefore 2px
+ * apart until `RunProgress` moves onto this primitive, and adopting the 8px is
+ * the change that migration should make rather than an override it should
+ * carry. `run-status.tsx` is outside this ticket's fence, so it is named here
+ * instead of edited.
  *
  * The fill is `--foreground` rather than the brand orange, which is the choice
  * `RunProgress` already made and worth keeping deliberately: `DESIGN.md` spends

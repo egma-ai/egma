@@ -122,10 +122,11 @@ const KICKER =
  * "section, state, or dialog titles that need stronger hierarchy" — the same
  * rule that separates it from `KICKER` above.
  *
- * The older panels on this page still write these three lines out at each
- * `<h3>`. They are left alone rather than swept into this constant: the
- * primitives batch is not the place to touch six sections it has no other
- * business in, and a sweep is its own change with its own proof.
+ * Every `<h3>` on the page reads it, including the six on the older panels that
+ * wrote the same three utilities out by hand. Naming it once is the rule this
+ * file states at the top — "named once rather than written nine times because
+ * nine copies drift" — and a constant that only the newest sections obeyed
+ * would have been a seventh copy with extra steps.
  */
 const SUBHEAD =
   "m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground";
@@ -325,7 +326,7 @@ export function DesignSystemProof() {
             </p>
 
             <div className="flex flex-col gap-4">
-              <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+              <h3 className={SUBHEAD}>
                 Buttons
               </h3>
               <div className="flex flex-wrap items-center gap-3">
@@ -355,7 +356,7 @@ export function DesignSystemProof() {
 
             <div className="grid gap-6 md:grid-cols-2">
               <div className="flex flex-col gap-4">
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Fields
                 </h3>
                 <label className="flex flex-col gap-2" htmlFor="base-suite">
@@ -377,7 +378,7 @@ export function DesignSystemProof() {
               </div>
 
               <div className="flex flex-col gap-4">
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Chips
                 </h3>
                 <div className="flex flex-wrap items-center gap-3">
@@ -390,7 +391,7 @@ export function DesignSystemProof() {
                   Brand orange is absent on purpose. It never means passed,
                   failed, skipped, or errored.
                 </p>
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Theme, straight from the tokens
                 </h3>
                 <div className="grid grid-cols-3 gap-2">
@@ -416,7 +417,7 @@ export function DesignSystemProof() {
               * the grader threshold uses.
               */}
             <div className="flex flex-col gap-4">
-              <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+              <h3 className={SUBHEAD}>
                 Numeric fields
               </h3>
               <p className="m-0 max-w-[68ch] text-base text-muted-foreground">
@@ -486,7 +487,7 @@ export function DesignSystemProof() {
               </Card>
 
               <div className="flex flex-col gap-4">
-                <h3 className="m-0 text-sm font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                <h3 className={SUBHEAD}>
                   Menus and layers
                 </h3>
                 <div className="flex flex-wrap items-center gap-3">
@@ -670,10 +671,24 @@ export function DesignSystemProof() {
                 a reader is meant to compare before making it.
               </p>
               <div className={PREVIEW}>
+                {/*
+                  * The question is on the page rather than only in an
+                  * `aria-label`. `DESIGN.md` says labels stay visible, and a
+                  * group of options whose question only a screen reader is told
+                  * leaves everybody else reading two answers to nothing. The
+                  * same element is what names the group, so the two cannot
+                  * drift apart.
+                  */}
+                <p
+                  className="m-0 mb-3 text-sm font-medium text-foreground"
+                  id="proof-reuse-question"
+                >
+                  What a repeated run reuses
+                </p>
                 <RadioGroup
                   value={reuse}
                   onValueChange={(next) => setReuse(next as "same" | "fresh")}
-                  aria-label="What a repeated run reuses"
+                  aria-labelledby="proof-reuse-question"
                 >
                   <div className="flex min-h-(--tap-target) items-center gap-3">
                     <RadioGroupItem id="proof-reuse-same" value="same" />
