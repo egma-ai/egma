@@ -45,14 +45,24 @@ const buttonVariants = cva(
           "pointer-hover:bg-primary-hover pointer-hover:border-primary-hover",
           "active:bg-primary-pressed active:border-primary-pressed",
         ],
-        /* Secondary: transparent with a one-pixel Midnight Ink border. */
+        /*
+         * Secondary: transparent with a one-pixel Midnight Ink border.
+         *
+         * Hover raises the border to `--foreground` as well as the fill. In
+         * light theme that is invisible — `--border-strong` and `--foreground`
+         * are both Midnight Ink — which is exactly why it went missing: the
+         * CSS Modules button it replaces said it out loud, and dark theme is
+         * where the two part company (`#4a4a44` against `#f2f2ed`). Without
+         * it a quiet button in dark theme answered a hover with a fill change
+         * and a border that stayed put.
+         */
         secondary: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:bg-surface-soft",
+          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
         ],
         outline: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:bg-surface-soft",
+          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
         ],
         /* Quiet action: text only. */
         ghost:

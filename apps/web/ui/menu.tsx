@@ -70,24 +70,6 @@ export type MenuProps = {
 };
 
 /**
- * Where a panel sits, and which corner it grows from.
- *
- * The two that hang below the trigger keep a touch target's worth of room off
- * the bottom of the screen, because that is the one direction a panel can be
- * opened into and then not be scrolled to.
- */
-const PLACEMENT = {
-  "below-start":
-    "top-[calc(100%+var(--space-2))] left-0 origin-top-left max-h-[calc(100svh-var(--tap-target)-var(--space-8))]",
-  "below-end":
-    "top-[calc(100%+var(--space-2))] right-0 origin-top-right max-h-[calc(100svh-var(--tap-target)-var(--space-8))]",
-  "above-start": "bottom-[calc(100%+var(--space-2))] left-0 origin-bottom-left",
-  "above-end": "bottom-[calc(100%+var(--space-2))] right-0 origin-bottom-right",
-  "right-start": "top-0 left-[calc(100%+var(--space-2))] origin-top-left",
-  "right-end": "bottom-0 left-[calc(100%+var(--space-2))] origin-bottom-left",
-} as const;
-
-/**
  * One row in a panel, as a class list.
  *
  * `Menu` uses it as the default trigger dress and `MenuItem` wears it, which is
@@ -266,12 +248,18 @@ export function Menu({
       {open ? (
         <div
           className={cn(
+            /*
+             * Where this panel sits is not here. `data-placement` below is the
+             * whole of it: `tailwind-theme.css` reads that attribute for the
+             * offsets, the corner it grows from, and the extra room the two
+             * that hang below the trigger keep off the bottom of the screen.
+             * The attribute is the mechanism rather than a label beside one, so
+             * removing it moves the panel to the corner of its trigger.
+             */
             "absolute z-20 w-max overflow-y-auto p-2",
             "min-w-[min(240px,calc(100vw-var(--space-8)))]",
             "max-w-[min(320px,calc(100vw-var(--space-8)))]",
-            "max-h-[calc(100svh-var(--space-8))]",
             "rounded-card border border-border bg-surface shadow-popover",
-            PLACEMENT[placement],
             panelClassName,
           )}
           data-slot="menu-panel"

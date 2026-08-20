@@ -109,11 +109,12 @@ export function DataTable<Row>({
                   className={cn(
                     "border-b border-border px-(--row-padding-x) py-2",
                     "text-left text-sm font-normal tracking-normal whitespace-nowrap text-faint",
-                    column.action === true && "text-right",
+                    "data-[action=true]:text-right",
                     column.hideOnMobile === true &&
                       column !== primary &&
                       "max-[900px]:hidden",
                   )}
+                  data-action={column.action === true ? "true" : undefined}
                   data-mobile-hidden={mobileHidden(column)}
                   key={column.key}
                   scope="col"
@@ -132,31 +133,6 @@ export function DataTable<Row>({
                   "stacked:flex stacked:flex-col stacked:gap-1",
                   "stacked:border-t stacked:border-border stacked:px-(--row-padding-x) stacked:py-3",
                   "stacked:first:border-t-0",
-                  stretchPrimaryLink && [
-                    "relative",
-                    /*
-                     * The stretched link covers the row with an `::after`,
-                     * which would otherwise swallow the press meant for an
-                     * Edit button four columns along. Every kind of control a
-                     * cell may hold is lifted back above it. The selector is
-                     * written out twice rather than built from a constant:
-                     * Tailwind finds classes by reading this file as text, and
-                     * a name assembled at runtime produces no CSS at all.
-                     */
-                    "[&_td_:is(a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=checkbox],[role=switch])]:relative",
-                    "[&_td_:is(a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=checkbox],[role=switch])]:z-2",
-                    "[&_[data-primary=true]_a:first-of-type]:static",
-                    "[&_[data-primary=true]_a:first-of-type]:transition-[color]",
-                    "[&_[data-primary=true]_a:first-of-type]:duration-(--duration-hover)",
-                    "[&_[data-primary=true]_a:first-of-type]:ease-out",
-                    "[&_[data-primary=true]_a:first-of-type]:after:absolute",
-                    "[&_[data-primary=true]_a:first-of-type]:after:inset-0",
-                    "[&_[data-primary=true]_a:first-of-type]:after:z-1",
-                    "[&_[data-primary=true]_a:first-of-type]:after:cursor-pointer",
-                    "[&_[data-primary=true]_a:first-of-type]:after:content-['']",
-                    /* Hovering the row says which link the whole row is. */
-                    "pointer-hover:[&_[data-primary=true]_a:first-of-type]:text-brand",
-                  ],
                 )}
                 data-slot="data-table-row"
                 data-stretch-primary-link={
@@ -169,7 +145,7 @@ export function DataTable<Row>({
                     className={cn(
                       "h-(--row-height) border-t border-border align-middle",
                       "px-(--row-padding-x) py-(--row-padding-y) text-sm text-muted-foreground",
-                      column.action === true && "text-right",
+                      "data-[action=true]:text-right",
                       "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-baseline",
                       "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
                       column === primary
@@ -181,11 +157,9 @@ export function DataTable<Row>({
                             "stacked:before:uppercase",
                             "stacked:before:content-[attr(data-label)]",
                           ],
-                      column.action === true &&
-                        "stacked:mt-2 stacked:items-center",
+                      "data-[action=true]:stacked:mt-2 data-[action=true]:stacked:items-center",
                       /* A row control that drew nothing leaves no empty line. */
-                      column.action === true &&
-                        "max-[900px]:has-[[data-slot=cell]:empty]:hidden",
+                      "data-[action=true]:max-[900px]:has-[[data-slot=cell]:empty]:hidden",
                       column.header === "" && [
                         "@max-[60rem]/data-table:justify-end",
                         "@max-[60rem]/data-table:has-[[data-slot=cell]:empty]:hidden",
@@ -205,11 +179,19 @@ export function DataTable<Row>({
                         "block overflow-hidden text-ellipsis whitespace-nowrap",
                         column === primary && "font-medium text-foreground",
                         column.mono === true && "font-mono text-sm",
-                        column.action === true &&
-                          "flex items-center justify-end overflow-visible text-clip",
+                        /*
+                         * The action cell's own shape, read off the cell it
+                         * sits in rather than off a prop this file re-tested.
+                         * The class is unconditional and `data-action` decides,
+                         * so the attribute is what draws the row's control at
+                         * the trailing edge — not a label beside whatever does.
+                         */
+                        "in-data-[action=true]:flex in-data-[action=true]:items-center",
+                        "in-data-[action=true]:justify-end",
+                        "in-data-[action=true]:overflow-visible in-data-[action=true]:text-clip",
                         column !== primary &&
                           "stacked:min-w-0 stacked:max-w-[70%] stacked:text-right",
-                        column.action === true && "stacked:max-w-none",
+                        "in-data-[action=true]:stacked:max-w-none",
                       )}
                       data-slot="cell"
                     >

@@ -499,6 +499,132 @@
   }
 
   /*
+   * A list row whose primary link is stretched across the whole row.
+   *
+   * Keyed on `data-stretch-primary-link`, and in the theme for the same reason
+   * the placement above is: the attribute has to be what does the work. Written
+   * as a class list on the row it was ten arbitrary variants that a test could
+   * only check by re-reading the prop that produced them.
+   *
+   * The `::after` covers the row, so every kind of control a cell may hold is
+   * lifted back above it — otherwise the press meant for an Edit button four
+   * columns along opens the row instead. There is still exactly one link in the
+   * accessibility tree; this adds a pointer target, not a second link.
+   */
+  [data-slot="data-table-row"][data-stretch-primary-link="true"] {
+    position: relative;
+  }
+
+  [data-slot="data-table-row"][data-stretch-primary-link="true"] td
+    :is(
+      a,
+      button,
+      input,
+      select,
+      textarea,
+      label,
+      summary,
+      [role="button"],
+      [role="link"],
+      [role="checkbox"],
+      [role="switch"]
+    ) {
+    position: relative;
+    z-index: 2;
+  }
+
+  [data-slot="data-table-row"][data-stretch-primary-link="true"]
+    [data-primary="true"]
+    a:first-of-type {
+    position: static;
+    transition: color var(--duration-hover) var(--ease-out);
+  }
+
+  [data-slot="data-table-row"][data-stretch-primary-link="true"]
+    [data-primary="true"]
+    a:first-of-type::after {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    cursor: pointer;
+    content: "";
+  }
+
+  /* Hovering the row says which link the whole row is. */
+  @media (hover: hover) and (pointer: fine) {
+    [data-slot="data-table-row"][data-stretch-primary-link="true"]:hover
+      [data-primary="true"]
+      a:first-of-type {
+      color: var(--accent);
+    }
+  }
+
+  /*
+   * Where an anchored panel sits, keyed on the placement it was given.
+   *
+   * This is in the theme rather than in a class list because the attribute has
+   * to be the mechanism. A lookup in the component that turned `below-end` into
+   * a string of utilities left `data-placement` as a label nothing read: a test
+   * asserting it was asserting the prop it had just passed in, and deleting the
+   * lookup broke the product without failing anything. Now the attribute *is*
+   * the placement, and a test that reads it is reading what positions the panel.
+   *
+   * The max-height is here too, and not as a utility, for the same reason it
+   * bit the dialog's backdrop: a utility outranks `@layer components`, so a
+   * `max-h-*` class on the panel would beat the tighter limit the two downward
+   * placements need.
+   */
+  [data-slot="menu-panel"] {
+    max-height: calc(100svh - var(--space-8));
+  }
+
+  [data-slot="menu-panel"][data-placement="below-start"] {
+    top: calc(100% + var(--space-2));
+    left: 0;
+    transform-origin: top left;
+  }
+
+  [data-slot="menu-panel"][data-placement="below-end"] {
+    top: calc(100% + var(--space-2));
+    right: 0;
+    transform-origin: top right;
+  }
+
+  /*
+   * A panel hanging below its trigger keeps a touch target's worth of room off
+   * the bottom of the screen. That is the one direction a panel can be opened
+   * into and then not be scrolled to.
+   */
+  [data-slot="menu-panel"][data-placement="below-start"],
+  [data-slot="menu-panel"][data-placement="below-end"] {
+    max-height: calc(100svh - var(--tap-target) - var(--space-8));
+  }
+
+  [data-slot="menu-panel"][data-placement="above-start"] {
+    bottom: calc(100% + var(--space-2));
+    left: 0;
+    transform-origin: bottom left;
+  }
+
+  [data-slot="menu-panel"][data-placement="above-end"] {
+    right: 0;
+    bottom: calc(100% + var(--space-2));
+    transform-origin: bottom right;
+  }
+
+  [data-slot="menu-panel"][data-placement="right-start"] {
+    top: 0;
+    left: calc(100% + var(--space-2));
+    transform-origin: top left;
+  }
+
+  [data-slot="menu-panel"][data-placement="right-end"] {
+    bottom: 0;
+    left: calc(100% + var(--space-2));
+    transform-origin: bottom left;
+  }
+
+  /*
    * The product's own anchored panel, beside the Radix one and for the same
    * reasons: `@starting-style` for the entrance, `data-closing` for an exit
    * that finishes before React removes the panel, and a pointer-only rule
