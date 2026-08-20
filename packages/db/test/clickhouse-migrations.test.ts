@@ -146,6 +146,58 @@ async function fakeClickHouse(
   };
 }
 
+async function coldStartingClickHouse(): Promise<{
+  readonly url: string;
+  readonly state: {
+    requests: number;
+    ledgerWrites: number;
+  };
+  readonly close: () => Promise<void>;
+}> {
+  const state = { requests: 0, ledgerWrites: 0 };
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      state.requests += 1;
+
+      if (state.requests === 1) {
+        setTimeout(() => {
+          response.statusCode = 200;
+          response.end();
+        }, 75);
+        return;
+      }
+
+      const url = new URL(request.url ?? "/", "http://clickhouse.test");
+      const query = url.searchParams.get("query") ?? body;
+      if (query.includes("INSERT INTO egma_meta_migration")) {
+        state.ledgerWrites += 1;
+      }
+
+      response.statusCode = 200;
+      response.end();
+    });
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${port}?request_timeout=25`,
+    state,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
 /**
  * The statements of one file, split on the marker the runner splits on, with
  * the comments off and the whitespace collapsed. The guards below judge each
@@ -482,6 +534,25 @@ describe("a replicated ALTER whose metadata is still catching up", () => {
     },
     15_000,
   );
+});
+
+describe("a ClickHouse Cloud service waking from idle", () => {
+  it("retries the complete idempotent migration after the first request times out", async () => {
+    const clickhouse = await coldStartingClickHouse();
+
+    try {
+      const result = await runClickHouseMigrations(
+        clickhouse.url,
+        fixture("clickhouse-transient"),
+      );
+
+      expect(result.applied).toEqual(["0000_retry_replicated_alter.sql"]);
+      expect(clickhouse.state.requests).toBeGreaterThan(1);
+      expect(clickhouse.state.ledgerWrites).toBe(1);
+    } finally {
+      await clickhouse.close();
+    }
+  });
 });
 
 describe("the schema a boot leaves behind", () => {
