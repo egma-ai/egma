@@ -426,6 +426,79 @@
   }
 
   /*
+   * The tooltip and the toast.
+   *
+   * Position and motion are on separate properties on purpose, which is the
+   * same rule the dialog above follows and for the same reason. A tooltip is
+   * centred on its trigger by `translate`, so its arrival is written on
+   * `scale`; a toast arrives by moving, so its motion is on `translate` and
+   * nothing else writes that property. Neither can cancel the other however
+   * the class lists are later edited.
+   *
+   * A *warm* tooltip has no transition at all. Once one has been shown the
+   * next opens at once, because a delay repeated across a row of controls is
+   * the tooltip behaviour everybody complains about.
+   *
+   * These rules leave with the hand-written feedback surfaces.
+   */
+  [data-slot="tooltip"][data-input="pointer"]:not([data-instant="true"]) {
+    transition:
+      opacity var(--duration-hover) var(--ease-out),
+      scale var(--duration-hover) var(--ease-out);
+  }
+
+  [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
+    opacity: 0;
+    scale: 0.97;
+  }
+
+  [data-slot="toast"][data-input="pointer"] {
+    transition:
+      opacity var(--duration-popover-in) var(--ease-out),
+      translate var(--duration-popover-in) var(--ease-out);
+  }
+
+  [data-slot="toast"][data-input="pointer"][data-closing="true"] {
+    opacity: 0;
+    translate: 0 100%;
+    transition-duration: var(--duration-popover-out);
+  }
+
+  @starting-style {
+    [data-slot="tooltip"][data-input="pointer"]:not([data-instant="true"]) {
+      opacity: 0;
+      scale: 0.97;
+    }
+
+    [data-slot="toast"][data-input="pointer"] {
+      opacity: 0;
+      translate: 0 100%;
+    }
+  }
+
+  /*
+   * The development proof can show the same contract without changing the OS.
+   * Deliberately outside the media query below: this is how the reduced-motion
+   * form is inspected, not a second definition of it.
+   */
+  [data-preview="reduced-motion"] [data-slot="tooltip"][data-input="pointer"] {
+    scale: 1;
+    transition: opacity var(--duration-hover) linear;
+  }
+
+  [data-preview="reduced-motion"]
+    [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
+    scale: 1;
+  }
+
+  @starting-style {
+    [data-preview="reduced-motion"] [data-slot="tooltip"][data-input="pointer"] {
+      opacity: 0;
+      scale: 1;
+    }
+  }
+
+  /*
    * The product's own anchored panel, beside the Radix one and for the same
    * reasons: `@starting-style` for the entrance, `data-closing` for an exit
    * that finishes before React removes the panel, and a pointer-only rule
@@ -589,10 +662,38 @@
       transition: opacity var(--duration-popover-out) linear;
     }
 
+    [data-slot="tooltip"][data-input="pointer"],
+    [data-slot="tooltip"][data-input="pointer"][data-closing="true"] {
+      scale: 1;
+    }
+
+    [data-slot="tooltip"][data-input="pointer"] {
+      transition: opacity var(--duration-hover) linear;
+    }
+
+    [data-slot="toast"][data-input="pointer"],
+    [data-slot="toast"][data-input="pointer"][data-closing="true"] {
+      translate: none;
+    }
+
+    [data-slot="toast"][data-input="pointer"] {
+      transition: opacity var(--duration-hover) linear;
+    }
+
     @starting-style {
       [data-slot="menu"][data-input="pointer"] [data-slot="menu-panel"] {
         opacity: 0;
         transform: none;
+      }
+
+      [data-slot="tooltip"][data-input="pointer"] {
+        opacity: 0;
+        scale: 1;
+      }
+
+      [data-slot="toast"][data-input="pointer"] {
+        opacity: 0;
+        translate: none;
       }
     }
 
