@@ -1220,9 +1220,16 @@ describe("one persona's page", () => {
  *
  * A second test sat here, on the archive filter: one Tab stop for the group, an
  * arrow key moving inside it, and selection following focus. The control came
- * off every list page in this batch and the test went with it. `ui/choice.tsx`
- * is untouched and still does all of that — `apps/web/test/components.test.tsx`
- * is where the shared control is proven, which is where that proof belongs.
+ * off every list page in this batch, so it could not stay on a page that no
+ * longer draws it. It was **moved, not deleted** — it is now
+ * `describe("a choice between two lists")` in
+ * `apps/web/test/components.test.tsx`, which renders `Choice` directly and
+ * drives the same radiogroup semantics.
+ *
+ * An earlier draft of this comment said that file already proved the control.
+ * It did not. Its `describe("a binary choice")` is about `Checkbox`, which is a
+ * different component with native semantics, and between the removal and the
+ * move there was no test anywhere asking `Choice` for any of this.
  */
 describe("driving the Personas area without a pointer", () => {
   it("traps focus in version history, closes it with Escape, and restores its trigger", async () => {

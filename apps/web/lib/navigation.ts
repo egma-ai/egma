@@ -29,10 +29,22 @@ import { projectPath, sectionIn } from "./project-context.ts";
  * plain wrapper rather than a named region reading a heading that is not
  * there.
  *
- * **The groups are presentation, and only presentation.** Every href is the one
- * it was before the groups existed, `activeSectionIn` still reads the address
- * rather than the group, and a copied URL keeps meaning what it meant. Nothing
- * here can move a page.
+ * **The groups are presentation, and only presentation.** A group cannot move a
+ * page: `activeSectionIn` reads the address rather than the group, an item is
+ * found by its own id, and grouping these six rows moved no href at all.
+ *
+ * **What can move an href is a decision, taken here and written down.** The bar
+ * points at an address; it does not own one. Every address a row has ever
+ * pointed at still resolves, and a copied URL still opens what it opened — that
+ * is the invariant, and it is a different and smaller claim than the one this
+ * paragraph used to make.
+ *
+ * One row has moved, once. The 2026-08-20 annotation batch put Running at the
+ * front of the Graders strip, and Graders gained `opens: ["running"]` so the
+ * bar opens the tab the strip leads with — a first tab nobody lands on is not a
+ * first tab. `/projects/{projectId}/graders` is still the library and still
+ * opens it. Monitoring has pointed one step deeper since it was written, for
+ * its own reason, recorded on `opens` below.
  *
  * What the words do:
  *
