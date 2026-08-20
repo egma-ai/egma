@@ -434,6 +434,21 @@ describe("every timestamp", () => {
   });
 });
 
+describe("a persona version is executable by itself", () => {
+  it("requires one complete models value and has no database default", () => {
+    const models = columns.find(
+      (column) =>
+        column.table_name === "persona_version" &&
+        column.column_name === "models",
+    );
+
+    expect(models, "persona_version.models").toBeDefined();
+    expect(models?.type_name).toBe("jsonb");
+    expect(models?.not_null).toBe(true);
+    expect(models?.has_default).toBe(false);
+  });
+});
+
 describe("every enumerated value", () => {
   it("is text plus a check, never a native Postgres enum type", async () => {
     const { rows } = await database.sql<{ typname: string }>(
