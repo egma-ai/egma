@@ -226,6 +226,9 @@ describe("the run screen", () => {
       `◼ ${TESTS[0]}`,
       "passed",
       `✓ First verdict: ${TESTS[0]} passed`,
+      "passed 1",
+      "waiting 2",
+      "The suite keeps running on Egma",
     );
     expect(landed).toContain("passed 1");
     expect(landed).toContain("waiting 2");
