@@ -3,6 +3,8 @@
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
@@ -17,12 +19,10 @@ import {
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
-  Button,
   Field,
   Form,
   FormActions,
   Refused,
-  TextInput,
 } from "../../../../../ui/controls.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
@@ -143,11 +143,13 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             htmlFor="persona-name"
             hint="What your team will call them in a list. Names are not unique, so two callers can share one."
           >
-            <TextInput
+            <Input
               id="persona-name"
               value={name}
               placeholder="Impatient Rita"
-              onChange={setName}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setName(event.target.value)}
             />
           </Field>
 
@@ -156,11 +158,13 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
             htmlFor="persona-description"
             hint="Optional. One line, for whoever is picking a persona off a list."
           >
-            <TextInput
+            <Input
               id="persona-description"
               value={description}
               placeholder="Somebody in a hurry, calling from a busy place"
-              onChange={setDescription}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setDescription(event.target.value)}
             />
           </Field>
 
@@ -172,7 +176,6 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
 
           <FormActions>
             <Button
-              weight="strong"
               type="submit"
               disabled={!mayAuthor || saving}
               {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
