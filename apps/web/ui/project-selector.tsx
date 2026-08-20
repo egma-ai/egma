@@ -3,12 +3,12 @@
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { projectsMatching, type Organization, type Project } from "../lib/me.ts";
 import { inProject } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
-import { TextInput } from "./controls.tsx";
 import { useDraftNavigation } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 
@@ -156,13 +156,16 @@ export function ProjectSelector({
           <MenuLabel>{organizationName}</MenuLabel>
           {projects.length > 1 ? (
             <div className="px-1 pt-1 pb-2">
-              <TextInput
+              <Input
                 id="project-search"
-                label="Search projects"
+                aria-label="Search projects"
                 placeholder="Search projects"
                 value={query}
-                autoFocusFirst
-                onChange={setQuery}
+                autoComplete="off"
+                spellCheck={false}
+                /* The field an opening menu puts focus in. */
+                data-menu-focus-first=""
+                onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
                   const only = shown[0];
