@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Button } from "../ui/controls.tsx";
+import { Button } from "@/components/ui/button";
 import { Toast, Tooltip, type FeedbackInput } from "../ui/feedback.tsx";
 
 afterEach(() => {
@@ -98,7 +98,11 @@ describe("shared feedback", () => {
   });
 
   it("names a busy button and makes it inert", () => {
-    render(<Button busy>Saving agent…</Button>);
+    render(
+      <Button type="button" busy>
+        Saving agent…
+      </Button>,
+    );
     const button = screen.getByRole("button", { name: "Saving agent…" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(button.getAttribute("aria-busy")).toBe("true");
