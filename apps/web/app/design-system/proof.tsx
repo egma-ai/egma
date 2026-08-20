@@ -42,11 +42,11 @@ import {
 
 import type { Me } from "../../lib/me.ts";
 import type { EvidenceTranscript } from "../../lib/simulations.ts";
+import { Choice } from "../../ui/choice.tsx";
 import {
   Badge,
   Button,
   Checkbox,
-  Choice,
   Select,
   TextArea,
   TextInput,
