@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1229,9 +1230,24 @@ describe("changing a running copy", () => {
       await screen.findByText("Egma does not compute a measure called that."),
     ).toBeTruthy();
 
+    /*
+      The refusal appearing is not the write settling as far as *this page* is
+      concerned. The editor tells the page whether leaving would lose anything,
+      and it does so from an effect — so for one commit after the sentence is on
+      screen the page still believes a write is in flight and every Edit button
+      is still disabled. A press then does nothing at all, and the assertion
+      below would fail on a missing dialog while naming neither.
+
+      So the wait is on the control about to be pressed, rather than on
+      something near it.
+    */
+    await waitFor(() => {
+      expect((edits[0] as HTMLButtonElement).disabled).toBe(false);
+    });
+
     // Another row, over the top of a form that has been typed into and refused.
     fireEvent.click(edits[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
 
     const behaviors = screen.getByRole("region", {
       name: "Edit Expected behaviors",
