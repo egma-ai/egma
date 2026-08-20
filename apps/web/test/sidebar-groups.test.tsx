@@ -1,0 +1,268 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { Me } from "../lib/me.ts";
+import { AppShell } from "../ui/shell.tsx";
+
+/**
+ * The grouped sidebar, drawn.
+ *
+ * The module test beside this one says what the three groups *are*. This says
+ * what a person meets: three labelled groups in one navigation landmark, the
+ * row they are on lit and saying so, the same six addresses the flat bar
+ * offered, and the same three groups inside the mobile drawer rather than a
+ * second, shorter list of where they may go.
+ *
+ * jsdom loads no stylesheet, so the Ember Wash and the Ember mark are asserted
+ * as the mapping that produces them — the class that turns them on is bound to
+ * the same `data-active` the row carries. The colours themselves were read back
+ * in a real browser, in both themes, at both widths.
+ */
+
+const routed = vi.hoisted(() => ({ pathname: "/projects/prj_2/agents" }));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => routed.pathname,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  useParams: () => ({ projectId: "prj_2" }),
+}));
+
+const ADA: Me = {
+  user: { id: "usr_1", email: "ada@acme.example" },
+  organizations: [{ id: "org_1", name: "Acme", slug: "acme", role: "admin" }],
+  projects: [
+    { id: "prj_1", name: "Default", slug: "default" },
+    { id: "prj_2", name: "Outbound", slug: "outbound" },
+  ],
+};
+
+/** The six addresses the bar offered before the groups existed. */
+const EVERY_ADDRESS = [
+  "/projects/prj_2/agents",
+  "/projects/prj_2/graders",
+  "/projects/prj_2/monitoring/transcripts",
+  "/projects/prj_2/personas",
+  "/projects/prj_2/runs",
+  "/projects/prj_2/tests",
+];
+
+const GROUPS = [
+  { label: "Global", items: ["Agents", "Graders"] },
+  { label: "Simulations", items: ["Tests", "Personas", "Runs"] },
+  { label: "Monitoring", items: ["Transcripts"] },
+];
+
+function drawShell(pathname = "/projects/prj_2/agents"): void {
+  routed.pathname = pathname;
+  render(
+    <AppShell initialMe={ADA}>
+      <p>page</p>
+    </AppShell>,
+  );
+}
+
+/** The docked bar's own navigation landmark, which is the first one drawn. */
+function sidebarNavigation(): HTMLElement {
+  return screen.getAllByRole("navigation", { name: "Product navigation" })[0]!;
+}
+
+function groupsIn(navigation: HTMLElement): readonly HTMLElement[] {
+  return within(navigation).getAllByRole("group");
+}
+
+beforeEach(() => {
+  vi.stubGlobal("scrollTo", vi.fn());
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  routed.pathname = "/projects/prj_2/agents";
+});
+
+describe("the grouped sidebar", () => {
+  it("draws three labelled groups, in the order the bar reads", () => {
+    drawShell();
+
+    const groups = groupsIn(sidebarNavigation());
+    expect(groups).toHaveLength(3);
+    expect(groups.map((group) => group.getAttribute("aria-labelledby"))).not.toContain(
+      null,
+    );
+    for (const [index, expected] of GROUPS.entries()) {
+      const group = groups[index]!;
+      expect(within(group).getByText(expected.label)).toBeTruthy();
+      expect(
+        within(group)
+          .getAllByRole("link")
+          .map((link) => link.textContent?.trim()),
+      ).toEqual(expected.items);
+    }
+  });
+
+  /**
+   * The label belongs to the group rather than floating over it, so a screen
+   * reader says which group it has entered instead of reading six links with
+   * nothing between them.
+   */
+  it("gives each group its label as its accessible name", () => {
+    drawShell();
+
+    const navigation = sidebarNavigation();
+    for (const { label } of GROUPS) {
+      expect(within(navigation).getByRole("group", { name: label })).toBeTruthy();
+    }
+  });
+
+  /**
+   * **The assertion the regroup rests on.** Six links before, the same six
+   * addresses after, whatever group each is drawn under now — so a copied URL
+   * keeps meaning what it meant.
+   */
+  it("offers the same six addresses the flat bar offered", () => {
+    drawShell();
+
+    const hrefs = within(sidebarNavigation())
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href") ?? "");
+    expect([...hrefs].sort()).toEqual(EVERY_ADDRESS);
+  });
+
+  it("says Runs and Transcripts, and no longer says Simulation runs", () => {
+    drawShell();
+
+    const navigation = sidebarNavigation();
+    expect(
+      within(navigation).getByRole("link", { name: "Runs" }).getAttribute("href"),
+    ).toBe("/projects/prj_2/runs");
+    expect(
+      within(navigation)
+        .getByRole("link", { name: "Transcripts" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_2/monitoring/transcripts");
+    expect(
+      within(navigation).queryByRole("link", { name: "Simulation runs" }),
+    ).toBeNull();
+    expect(within(navigation).queryByRole("link", { name: "Monitoring" })).toBeNull();
+  });
+
+  /**
+   * One row lit per group, from the address and nothing else. Each of the three
+   * is checked, because a group that could never light one would be a group
+   * nobody could tell they were in.
+   */
+  it.each([
+    ["/projects/prj_2/agents", "Agents"],
+    ["/projects/prj_2/graders/running", "Graders"],
+    ["/projects/prj_2/personas/prs_3", "Personas"],
+    ["/projects/prj_2/runs/run_9", "Runs"],
+    ["/projects/prj_2/monitoring/transcripts/5c1e4b0f", "Transcripts"],
+  ])("lights one row on %s, and says which", (pathname, lit) => {
+    drawShell(pathname);
+
+    const navigation = sidebarNavigation();
+    const links = within(navigation).getAllByRole("link");
+    const active = links.filter(
+      (link) => link.getAttribute("data-active") === "true",
+    );
+
+    expect(active).toHaveLength(1);
+    expect(active[0]?.textContent?.trim()).toBe(lit);
+    // Never colour alone.
+    expect(active[0]?.getAttribute("aria-current")).toBe("page");
+    for (const quiet of links.filter((link) => link !== active[0])) {
+      expect(quiet.getAttribute("aria-current")).toBeNull();
+    }
+  });
+
+  /**
+   * **The Ember Wash and the small Ember mark, as the mapping that draws them.**
+   *
+   * jsdom loads no stylesheet, so what is guarded here is that the wash and the
+   * mark are bound to the same `data-active` the row above proved it carries —
+   * `bg-selected` is Ember Wash and `bg-brand` is Ember, both by way of
+   * `tailwind-theme.css`. Renaming either one would take the active state's
+   * whole appearance with it and nothing else in the suite would say so.
+   */
+  it("binds Ember Wash and the Ember mark to the row that is lit", () => {
+    drawShell();
+
+    const agents = within(sidebarNavigation()).getByRole("link", {
+      name: "Agents",
+    });
+    expect(agents.className).toContain("data-[active=true]:bg-selected");
+    expect(agents.className).toContain("data-[active=true]:before:bg-brand");
+    expect(agents.className).toContain("before:content-['']");
+    // And the row keeps the theme's hover, dropped under reduced motion.
+    expect(agents.className).toContain("motion-reduce:transition-none");
+    expect(agents.className).not.toContain("transition-all");
+  });
+
+  /**
+   * **One navigation model.** The drawer draws the same component, so it cannot
+   * drift into a shorter list — and it closes behind the choice it was opened
+   * to make.
+   */
+  it("shows the same three groups in the mobile drawer, and closes behind a choice", () => {
+    drawShell();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open product navigation" }),
+    );
+
+    const drawer = screen.getByRole("dialog", { name: "Navigation" });
+    const inDrawer = within(drawer).getByRole("navigation", {
+      name: "Product navigation",
+    });
+
+    const groups = within(inDrawer).getAllByRole("group");
+    expect(groups).toHaveLength(3);
+    for (const [index, expected] of GROUPS.entries()) {
+      expect(
+        within(groups[index]!)
+          .getAllByRole("link")
+          .map((link) => link.textContent?.trim()),
+      ).toEqual(expected.items);
+    }
+    expect(
+      within(inDrawer)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href") ?? "")
+        .sort(),
+    ).toEqual(EVERY_ADDRESS);
+
+    fireEvent.click(within(inDrawer).getByRole("link", { name: "Tests" }));
+    expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
+  });
+
+  /**
+   * The switcher stays topmost and the account control stays at the bottom.
+   * Both keep the implementations they shipped with; what this asserts is that
+   * the groups landed *between* them rather than around them — which is also
+   * the order a keyboard walks the bar in.
+   */
+  it("keeps the switcher above the groups and the account control below them", () => {
+    drawShell();
+
+    const bar = sidebarNavigation().closest("aside");
+    expect(bar).not.toBeNull();
+
+    const order = Array.from(
+      bar!.querySelectorAll<HTMLElement>("a[href], button"),
+    );
+    const at = (node: HTMLElement | null) =>
+      node === null ? -1 : order.indexOf(node);
+
+    const switcher = within(bar!).getByRole("button", { name: /^Organization Acme/ });
+    const account = within(bar!).getByRole("button", { name: /account menu$/ });
+    const agents = within(bar!).getByRole("link", { name: "Agents" });
+    const transcripts = within(bar!).getByRole("link", { name: "Transcripts" });
+
+    expect(at(switcher)).toBe(0);
+    expect(at(switcher)).toBeLessThan(at(agents));
+    expect(at(agents)).toBeLessThan(at(transcripts));
+    expect(at(transcripts)).toBeLessThan(at(account));
+    expect(at(account)).toBe(order.length - 1);
+  });
+});
