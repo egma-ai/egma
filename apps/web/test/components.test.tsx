@@ -874,12 +874,10 @@ describe("a dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     expect(screen.queryByRole("dialog", { name: "Navigation" })).toBeNull();
-    // The kit hands focus back once the layer above it has gone, which is the
-    // task after the press rather than the press itself.
-    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(document.activeElement).toBe(opener);
   });
 
-  it("uses the same modal layer for a right-side sheet", async () => {
+  it("uses the same modal layer for a right-side sheet", () => {
     function Example() {
       const [open, setOpen] = useState(false);
       return (
@@ -914,7 +912,41 @@ describe("a dialog", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Transcript and audio" })).toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(document.activeElement).toBe(opener);
+  });
+
+  /**
+   * The sheet is the one kind that does not take the screen, and this is the
+   * whole reason it is allowed to be different: the simulation page opens one
+   * by default and is built to be read with the transcript beside the grader
+   * results. A sheet that hid the page or closed on a press into it would take
+   * that page away.
+   */
+  it("leaves the page beside a sheet readable and usable", async () => {
+    const pressed = vi.fn();
+    render(
+      <>
+        <button type="button" onClick={pressed}>Judge again</button>
+        <Dialog kind="sheet" title="Transcript and audio" onClose={vi.fn()}>
+          <audio aria-label="Simulation recording" />
+        </Dialog>
+      </>,
+    );
+
+    const behind = screen.getByRole("button", { name: "Judge again" });
+    expect(behind.closest("[aria-hidden='true']")).toBeNull();
+
+    // The panel starts listening for a press outside on the task after it
+    // opened, so the press that opened it is not the one that closes it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    fireEvent.pointerDown(behind);
+    fireEvent.click(behind);
+
+    expect(pressed).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog", { name: "Transcript and audio" }))
+      .toBeTruthy();
   });
 
   /**
@@ -948,6 +980,58 @@ describe("a dialog", () => {
 
     expect(screen.queryByRole("dialog", { name: "Archive agent?" })).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * "No motion delays input. A control answers on press, not after an
+   * animation."
+   *
+   * So this is about *when*, and the animation has to be real for the question
+   * to exist: with no stylesheet the panel leaves in the same tick and every
+   * naive assertion here passes without proving anything. With one in flight,
+   * the panel is still on screen, `onClose` has not been called, and the
+   * keyboard is nevertheless already back on the control that opened it.
+   */
+  it("hands the keyboard back on the press, not at the end of the exit", () => {
+    withClosingAnimation();
+    const onClose = vi.fn();
+    function Example() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Archive</button>
+          {open ? (
+            <Dialog title="Archive agent?" onClose={onClose}>
+              {(dismiss) => (
+                <Button type="button" variant="secondary" onClick={dismiss}>
+                  Cancel
+                </Button>
+              )}
+            </Dialog>
+          ) : null}
+        </>
+      );
+    }
+
+    render(<Example />);
+    const opener = screen.getByRole("button", { name: "Archive" });
+    opener.focus();
+    fireEvent.click(opener);
+    const panel = screen.getByRole("dialog", { name: "Archive agent?" });
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // Still leaving: the panel is on screen and the owner has not been told.
+    expect(panel.dataset.state).toBe("closed");
+    expect(screen.getByRole("dialog", { name: "Archive agent?" })).toBe(panel);
+    expect(onClose).not.toHaveBeenCalled();
+    // And the keyboard is already back, mid-exit.
+    expect(document.activeElement).toBe(opener);
+
+    finishExit(panel, "egma-dialog-out");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(opener);
   });
 
   it("gives a Cancel action written by the caller the same way out", () => {
@@ -1350,9 +1434,7 @@ describe("the shared draft navigation guard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(screen.queryByRole("dialog", { name: "Leave without saving?" }))
       .toBeNull();
-    // The dialog hands focus back once its layer has gone, which is the task
-    // after the press rather than the press itself.
-    await waitFor(() => expect(document.activeElement).toBe(destination));
+    expect(document.activeElement).toBe(destination);
 
     const [projectSelector] = screen.getAllByRole("button", {
       name: /^Organization Acme/u,
@@ -1368,7 +1450,7 @@ describe("the shared draft navigation guard", () => {
       .toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(routed.push).not.toHaveBeenCalled();
-    await waitFor(() => expect(document.activeElement).toBe(projectSelector));
+    expect(document.activeElement).toBe(projectSelector);
 
     fireEvent.click(destination);
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));

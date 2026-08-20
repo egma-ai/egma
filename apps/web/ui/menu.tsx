@@ -150,10 +150,13 @@ export function Menu({
    * leave behind them. Radix then sees focus has moved out, stops restoring it
    * a second time, and the panel's exit runs to its end regardless.
    *
-   * It is also what the project selector reads. It walks up from whatever has
-   * focus to `[data-slot="menu"]` to find its own trigger for the unsaved-work
-   * dialog, and the panel is drawn outside that root now, so the button being
-   * focused already is what keeps that answer correct.
+   * It is also what keeps the project selector's unsaved-work dialog pointing
+   * at the right control. That page walks up from whatever has focus to
+   * `[data-slot="menu"]` to find its own trigger — a walk that now finds
+   * nothing, because the panel is drawn at the end of the page rather than
+   * inside that root, so the walk starts outside it and its answer is always
+   * null. What saves it is the fallback: the dialog it opens takes whatever
+   * has focus, and by then this has already put that back on the trigger.
    */
   const returnFocus = useCallback(() => triggerRef.current?.focus(), []);
 

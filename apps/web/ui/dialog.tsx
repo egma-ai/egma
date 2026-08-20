@@ -41,12 +41,11 @@ export type DialogDismiss = (event?: { readonly detail?: number }) => void;
  * because the system response should not wait for decoration — the gate below
  * stays quiet on that path rather than closing the same dialog twice.
  *
- * **The centred motion is not here.** `tailwind-theme.css` keys the entrance,
- * the exit and the reduced-motion form of both on the `data-slot` and
- * `data-state` the kit writes. The two edge-attached kinds add the travel that
- * `DESIGN.md` asks of them, because the theme's edge rules were written for the
- * native `<dialog>` this file just retired and the Radix slots have no drawer
- * rule of their own yet.
+ * **The motion is not here.** `tailwind-theme.css` keys the entrance, the exit
+ * and the reduced-motion form of both on the `data-slot`, `data-kind` and
+ * `data-state` the kit and this file write — the centred dialog and the
+ * drawer's edge travel alike. The one piece left below is the sheet's travel,
+ * which has no token pair of its own to be given a rule for.
  */
 
 /**
@@ -55,9 +54,8 @@ export type DialogDismiss = (event?: { readonly detail?: number }) => void;
  * The kit centres with `-translate-x-1/2 -translate-y-1/2` on the `translate`
  * property and animates `scale`, so position and motion never share a property.
  * The two edge kinds keep that arrangement: they sit at their edge with no
- * centring shift, and the travel below is written on `translate` as well, so
- * the theme's `scale` animation and this file's slide compose instead of
- * cancelling each other.
+ * centring shift, and their travel is written on `translate` as well, so a
+ * `scale` animation and a slide compose instead of cancelling each other.
  */
 const PANEL_SHAPE = {
   /* A tall dialog scrolls inside the viewport rather than off it. */
@@ -77,34 +75,33 @@ const PANEL_SHAPE = {
 } as const;
 
 /**
- * The travel of the two kinds that are attached to an edge.
+ * The travel of the sheet, which is the one edge kind the theme does not move.
  *
- * `DESIGN.md`: "Mobile drawer — translate from its attached edge." The theme
- * holds the panel for the length of its `scale` animation, which is what Radix
- * waits for before unmounting, so the slide is given the same two tokens and
- * ends with it rather than being cut off halfway. `@starting-style` is what
- * makes the entrance a movement: without it a panel that mounts already open
- * has nowhere to travel from.
+ * The drawer's movement is in `tailwind-theme.css`, keyed on `data-kind`, as an
+ * animation of its own at the drawer's own tokens — an animation, because Radix
+ * removes a panel on `animationend` and so whatever is animating is what holds
+ * the panel on screen while it leaves. A sheet has no token pair of its own, so
+ * it travels on a transition at the dialog's two, which the theme's `scale`
+ * animation is exactly as long as. `@starting-style` is what makes the entrance
+ * a movement: without it a panel that mounts already open has nowhere to travel
+ * from.
  *
- * Reduced motion drops the transition and nothing else. The panel then arrives
- * and leaves in place, and the opacity the theme still runs is what says a
- * surface came or went.
+ * **Reduced motion removes the travel from both ends, not just the entrance.**
+ * Dropping the transition alone left the exit teleporting: the closed position
+ * still applied, so the panel jumped off the edge in one frame with nothing
+ * left to say it had gone. So the closed position is put back where the open
+ * one is, and the opacity the theme still runs is what says a surface left.
  */
 const PANEL_TRAVEL = {
   dialog: "",
-  drawer: [
-    "transition-[translate] duration-(--duration-dialog-in) ease-out",
-    "starting:-translate-x-full",
-    "data-[state=closed]:-translate-x-full",
-    "data-[state=closed]:duration-(--duration-dialog-out)",
-    "motion-reduce:transition-none",
-  ],
+  drawer: "",
   sheet: [
     "transition-[translate] duration-(--duration-dialog-in) ease-out",
     "starting:translate-x-full",
     "data-[state=closed]:translate-x-full",
     "data-[state=closed]:duration-(--duration-dialog-out)",
     "motion-reduce:transition-none",
+    "motion-reduce:data-[state=closed]:translate-x-0!",
   ],
 } as const;
 
@@ -116,13 +113,27 @@ const HEAD_SHAPE = {
 } as const;
 
 /**
+ * How long a stuck exit is given before the dialog is taken away anyway.
+ *
+ * Not a motion value, and deliberately not on the motion scale: it is longer
+ * than every exit token so it can never pre-empt one. Both implementations this
+ * file replaced carried the same guard, for the same reason — an exit that ends
+ * in an event ends in an event that can go missing. A browser that never fires
+ * `animationend`, an injected stylesheet that removes the animation, or a tab
+ * that was hidden mid-exit would otherwise leave a dismissed dialog mounted,
+ * the page behind it hidden from assistive technology, and `onClose` never
+ * called.
+ */
+const EXIT_WATCHDOG_MS = 600;
+
+/**
  * The moment the panel finished leaving.
  *
  * It renders nothing and exists for its unmount: Radix removes the panel only
  * after the closing animation ends, so this component's cleanup is that end.
  * Waiting on it rather than on a timer means the exit is never cut short and
  * never guessed at, and the duration stays in the theme where `DESIGN.md` puts
- * it.
+ * it. The watchdog above is the other half of that bargain.
  */
 function ExitGate({ onGone }: { readonly onGone: () => void }) {
   const gone = useRef(onGone);
@@ -190,20 +201,45 @@ export function Dialog({
     setOpen(false);
   }, []);
 
-  /**
-   * Focus goes back the moment the panel does, rather than a task later.
-   *
-   * The kit hands focus back from a timer, which is soon enough to look right
-   * and one task too late for anything that reads `document.activeElement`
-   * straight after a press. `DESIGN.md` asks a control to answer on press, so
-   * this puts focus back as the panel is removed. `onCloseAutoFocus` below
-   * keeps the kit from moving it again afterwards, and repeats the same move
-   * in case a future version removes the panel differently.
-   */
+  const backRef = useRef<HTMLElement | null>(null);
+  backRef.current = returnFocusTo ?? opener;
+
   const restoreFocus = () => {
-    const back = returnFocusTo ?? opener;
+    const back = backRef.current;
     if (back !== null && back.isConnected) back.focus();
   };
+
+  /**
+   * The keyboard goes back on the press, not at the end of the exit.
+   *
+   * `DESIGN.md`: "No motion delays input. A control answers on press, not
+   * after an animation." Waiting for the panel to finish leaving is a fifth of
+   * a second with focus sitting on a button that is on its way out, inside a
+   * layer the page behind is still hidden from — a Tab in that window goes
+   * nowhere useful. So focus moves the moment the dialog is told to close.
+   *
+   * **It is an effect rather than a line inside `dismiss`, and the ordering is
+   * the reason.** While the dialog is open the kit traps focus and pulls
+   * anything that leaves straight back in, so focusing the opener during the
+   * press would simply be undone. The trap is released in the same render that
+   * closes the dialog, and React runs that release before this effect — so
+   * this is the first moment the move can stick, and it is still the same
+   * frame as the press.
+   *
+   * The timer is the other half. See `EXIT_WATCHDOG_MS`.
+   */
+  useEffect(() => {
+    if (open) return undefined;
+    restoreFocus();
+    const forced = window.setTimeout(() => {
+      if (!dismissedRef.current) return;
+      dismissedRef.current = false;
+      closeRef.current();
+    }, EXIT_WATCHDOG_MS);
+    return () => window.clearTimeout(forced);
+    // `restoreFocus` reads a ref, so it needs no dependency of its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   return (
     <KitDialog
@@ -223,13 +259,18 @@ export function Dialog({
          */
         aria-describedby={undefined}
         onCloseAutoFocus={(event) => {
-          // The kit's own answer here is its `DialogTrigger`, which these
-          // callers do not use, so this says where focus belongs instead: the
-          // control a caller named, or the one that was in hand. An opener
-          // removed by the very write this dialog confirmed is left alone —
-          // focus falls to the page rather than to something nobody can see.
+          /*
+           * The kit's own answer here is its `DialogTrigger`, which these
+           * callers do not use, so left alone it would drop focus on the page
+           * body. Saying no to it is most of the job — focus has already gone
+           * back, above, at the press. What is left is the case where it fell
+           * to the body anyway, and then this puts it where it belongs. It is
+           * deliberately not unconditional: the exit is long enough to Tab
+           * during, and pulling focus back off somebody mid-exit would be the
+           * same rudeness in the other direction.
+           */
           event.preventDefault();
-          restoreFocus();
+          if (document.activeElement === document.body) restoreFocus();
         }}
         /*
          * A sheet stays open while the page beside it is used. Without this a
@@ -246,7 +287,6 @@ export function Dialog({
         {typeof children === "function" ? children(dismiss) : children}
         <ExitGate
           onGone={() => {
-            restoreFocus();
             if (!dismissedRef.current) return;
             dismissedRef.current = false;
             closeRef.current();
