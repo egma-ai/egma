@@ -2,7 +2,9 @@
 
 This file defines Egma's current product interface. Read it before any visual or interaction change.
 
-The orange-red palette, the Egma logo, and native CSS Modules are locked. Change them only with explicit developer approval.
+The orange-red palette and the Egma logo are locked. Change them only with explicit developer approval.
+
+The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
 ## Product context
 
@@ -18,16 +20,35 @@ The orange-red palette, the Egma logo, and native CSS Modules are locked. Change
 - Make every state truthful. Loading, empty, failed, disabled, saving, saved, skipped, and errored states must say what happened.
 - Use Egma's domain terms exactly: agent, test, test suite, run, simulation, grader, persona, transcript, outcome, and metric.
 - Build responsive, keyboard, touch, reduced-motion, light-theme, and dark-theme behavior as one system.
+- Every component is clean, modern, and slick. Clean is nothing on the surface that carries no meaning. Modern is the current shape of the web: exact alignment, one clear focus, honest depth, and no ornament that imitates another medium. Slick is a component that looks finished at every width and in every state, including empty, loading, failed, and disabled. This raises the standard. It unlocks nothing: the palette, the logo, and every rule in this file stay as written. (Developer decision, 2026-08-19.)
 
 ## Styling architecture
 
-Egma uses native CSS custom properties and CSS Modules.
+shadcn/ui on Tailwind is the component base. Build new components on it.
 
-- `apps/web/ui/tokens.css` owns shared visual values.
-- Shared components own behavior and component-level styling.
-- Route pages compose shared components and add only route-specific layout.
+The developer approved this on 2026-08-19, with the conflict on the table: this
+section said "Do not introduce Tailwind," and shadcn/ui ships on Tailwind. The
+architecture unlocked. The palette and the logo did not.
+
+**This file stays the single source of theme values.** Tailwind holds no value of
+its own. It is given egma's values by reference, so a Tailwind surface and a CSS
+Modules surface read one declaration instead of two copies of it.
+
+Where the pieces live:
+
+- `apps/web/ui/tokens.css` owns shared visual values, and is the only file that holds one.
+- `apps/web/ui/tailwind-theme.css` hands those values to Tailwind. Every key in it is a `var()` into the token file.
+- `apps/web/components/ui/` holds the shadcn primitives. Add one with the shadcn CLI; `components.json` points it at the right places.
+- `apps/web/lib/utils.ts` holds `cn`, which every primitive merges a caller's classes with.
+- `apps/web/app/globals.css` is the one stylesheet the application loads.
+
+Rules:
+
 - Use semantic tokens such as `--action`, `--surface-active`, and `--border` outside the token file.
-- Do not introduce Tailwind.
+- Do not put a color, a radius, a size, or a duration in a component. Read it from the theme.
+- Where shadcn has a default and this file has a rule, this file decides. The theme deletes the utilities this file has no value for: weights above 500, cool gray shadows, radii that belong to no component, and type steps outside the scale below.
+- The CSS Modules components in `apps/web/ui/` are legacy. They stay correct and supported until they are migrated. Do not start a new component in CSS Modules.
+- Route pages compose shared components and add only route-specific layout.
 - Do not add a one-off component when a shared component already owns the behavior.
 
 ## Brand
@@ -219,6 +240,12 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 
 Motion explains state, location, or feedback. It does not decorate routine work.
 
+Motion is fast, modern, and slick. Fast is the shortest duration that still
+explains the change. Modern is `transform` and `opacity`, composited, and
+interruptible. Slick is one movement that starts where the person is looking and
+ends where the content is. This raises the standard. The rules below are the
+floor and do not move. (Developer decision, 2026-08-19.)
+
 ### Rules
 
 - Do not animate actions used many times each day, especially keyboard navigation.
@@ -230,6 +257,9 @@ Motion explains state, location, or feedback. It does not decorate routine work.
 - Pointer hover motion runs only under `(hover: hover) and (pointer: fine)`.
 - Every movement has a reduced-motion form with useful opacity or color feedback.
 - Interaction motion stays below 300ms.
+- Choose the shorter token when two would both explain the change.
+- Motion is interruptible. A surface closed while it is still opening reverses from where it is. It does not jump.
+- No motion delays input. A control answers on press, not after an animation.
 
 ### Motion tokens
 
