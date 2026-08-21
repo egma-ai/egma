@@ -420,7 +420,7 @@ describe("the pages", () => {
     expect(rewrites).toContain(
       '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
     );
-    expect(rewrites).toContain(
+    expect(rewrites).not.toContain(
       '{ source: "/health", destination: `${api}/health` }',
     );
     expect(rewrites).toContain(
