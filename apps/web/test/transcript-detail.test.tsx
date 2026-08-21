@@ -22,6 +22,7 @@ import type {
   Measured,
   Step,
 } from "../lib/transcripts.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * **One transcript**, rendered rather than read as source.
@@ -83,75 +84,75 @@ const ME: Me = {
 const TRACE_ID = "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d";
 
 const TRACE: TraceFacts = {
-  trace_id: TRACE_ID,
-  started_at: "2026-08-02T18:04:40.281989Z",
-  ended_at: "2026-08-02T18:05:53.776865Z",
-  duration_ns: "73494876403",
-  span_count: 6,
-  turn_counts: { human: 1, agent: 1 },
-  tool_span_count: 1,
-  errored_span_count: 0,
+  traceId: TRACE_ID,
+  startedAt: "2026-08-02T18:04:40.281989Z",
+  endedAt: "2026-08-02T18:05:53.776865Z",
+  durationNs: "73494876403",
+  spanCount: 6,
+  turnCounts: { human: 1, agent: 1 },
+  toolSpanCount: 1,
+  erroredSpanCount: 0,
   source: "production",
   emitter: "agent",
   environment: "default",
   // Nothing egma dialled: production telemetry arrives by export, so a
   // monitored exchange names the platform that ran the agent and no egma
   // connection. `transcripts.test.ts` reads the same shape off the API.
-  connection_kind: "",
-  provider_call_id: "egma-fixture-capture-1",
-  agent_platform: "livekit_agents",
-  platform_agent_id: "agent_7f3c",
-  platform_agent_name: "kelly",
-  platform_agent_version: "2026.08.02",
-  run_id: "",
-  agent_id: "",
+  connectionKind: "",
+  providerCallId: "egma-fixture-capture-1",
+  agentPlatform: "livekit_agents",
+  platformAgentId: "agent_7f3c",
+  platformAgentName: "kelly",
+  platformAgentVersion: "2026.08.02",
+  runId: "",
+  agentId: "",
 };
 
 /** One timed step, with only what a case cares about spelled out. */
-function step(over: Partial<Step> & { readonly span_id: string }): Step {
+function step(over: Partial<Step> & { readonly spanId: string }): Step {
   return {
-    parent_span_id: "",
+    parentSpanId: "",
     name: "",
     kind: "other",
     status: "ok",
-    started_at: "2026-08-02T18:04:41.000000Z",
-    duration_ns: "1000000000",
+    startedAt: "2026-08-02T18:04:41.000000Z",
+    durationNs: "1000000000",
     text: "",
-    audio_url: "",
-    tool_name: "",
-    tool_arguments: "",
-    tool_result: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
     spans: [],
     ...over,
   };
 }
 
 const TOOL = step({
-  span_id: "span_tool",
+  spanId: "span_tool",
   name: "lookup_appointment",
   kind: "tool",
-  tool_name: "lookup_appointment",
-  tool_arguments: '{"id":"apt_9"}',
-  tool_result: '{"when":"Tuesday"}',
+  toolName: "lookup_appointment",
+  toolArguments: '{"id":"apt_9"}',
+  toolResult: '{"when":"Tuesday"}',
 });
 
 const HUMAN_TURN = step({
-  span_id: "span_turn_human",
+  spanId: "span_turn_human",
   kind: "turn:human",
   text: "I need to move my appointment",
-  started_at: "2026-08-02T18:04:41.000000Z",
+  startedAt: "2026-08-02T18:04:41.000000Z",
 });
 
 const AGENT_TURN = step({
-  span_id: "span_turn_agent",
+  spanId: "span_turn_agent",
   kind: "turn:agent",
   text: "Of course — when would suit you?",
-  started_at: "2026-08-02T18:04:44.000000Z",
+  startedAt: "2026-08-02T18:04:44.000000Z",
   spans: [TOOL],
 });
 
 const OUTSIDE_STEP = step({
-  span_id: "span_outside",
+  spanId: "span_outside",
   name: "worker.startup",
   kind: "other",
 });
@@ -159,21 +160,23 @@ const OUTSIDE_STEP = step({
 const MEASURE: Measured = {
   measure: "agent_response_latency",
   unit: "ms",
+  derived: false,
   samples: [420, 1100],
-  span_ids: ["span_turn_agent", "span_turn_agent"],
-  worst: { value: 1100, span_id: "span_turn_agent" },
+  spanIds: ["span_turn_agent", "span_turn_agent"],
+  worst: { value: 1100, spanId: "span_turn_agent" },
+  partial: false,
 };
 
 const JUDGMENT: Judgment = {
-  grader_id: "grd_1",
+  graderId: "grd_1",
   assertion: "behavior_1",
-  assertion_text: "The agent offers a new time",
+  assertionText: "The agent offers a new time",
   required: true,
   verdict: "passed",
   score: 1,
   rationale: "The agent offered Tuesday and the caller agreed.",
-  cited_turns: ["turn:2"],
-  judged_at: "2026-08-02T18:06:00.000000Z",
+  citedTurns: ["turn:2"],
+  judgedAt: "2026-08-02T18:06:00.000000Z",
 };
 
 /** The whole answer, with a case naming only the part it is about. */
@@ -182,14 +185,16 @@ function detail(over: Partial<Detail> = {}): Detail {
     trace: TRACE,
     turns: [HUMAN_TURN, AGENT_TURN],
     spans: [OUTSIDE_STEP],
-    spans_truncated: false,
+    spansTruncated: false,
     measures: [MEASURE],
+    simulationId: null,
     outcome: {
       verdict: "passed",
       score: 1,
       counts: { passed: 2, failed: 0, skipped: 0, errored: 0, total: 2 },
     },
     verdicts: [JUDGMENT],
+    diagnostics: null,
     ...over,
   };
 }
@@ -215,8 +220,8 @@ function apiAnswers(
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string) => {
-      const at = new URL(String(input), "http://egma.test");
+    vi.fn(async (input: FetchInput) => {
+      const { address: at } = await observeRequest(input);
       asked.push(`${at.pathname}${at.search}`);
       const held = answers[at.pathname];
       if (held === undefined) {
@@ -249,7 +254,7 @@ function stub(
   return apiAnswers({
     "/api/me": { status: 200, body: ME },
     [`/v1/traces/${TRACE_ID}`]: answer,
-    [`/api/simulations/${SIMULATION_ID}/recording`]: recording,
+    [`/v1/simulations/${SIMULATION_ID}/recording`]: recording,
   });
 }
 
@@ -367,8 +372,8 @@ describe("the states before there is a transcript", () => {
     // finished loading.
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string) =>
-        String(input) === "/api/me"
+      vi.fn(async (input: FetchInput) =>
+        (await observeRequest(input)).path === "/api/me"
           ? json(200, ME)
           : new Promise<Response>(() => undefined),
       ),
@@ -450,7 +455,7 @@ describe("the transcript that was read", () => {
   it("counts the errors in the chip when something went wrong", async () => {
     stub({
       status: 200,
-      body: detail({ trace: { ...TRACE, errored_span_count: 2 } }),
+      body: detail({ trace: { ...TRACE, erroredSpanCount: 2 } }),
     });
     await open();
     await settled();
@@ -480,7 +485,7 @@ describe("the transcript that was read", () => {
   });
 
   it("says the reading is only the beginning when the store cut it short", async () => {
-    stub({ status: 200, body: detail({ spans_truncated: true }) });
+    stub({ status: 200, body: detail({ spansTruncated: true }) });
     await open();
     await settled();
 
@@ -547,7 +552,7 @@ describe("what the exchange measured", () => {
     stub({
       status: 200,
       body: detail({
-        measures: [{ ...MEASURE, derived: true, reported_by: "retell" }],
+        measures: [{ ...MEASURE, derived: true, reportedBy: "retell" }],
       }),
     });
     await open();
@@ -884,11 +889,11 @@ describe("the inspector", () => {
     expect(work).toBeTruthy();
 
     const shown = within(work as HTMLElement);
-    expect(shown.getByText(TOOL.tool_name)).toBeTruthy();
+    expect(shown.getByText(TOOL.toolName)).toBeTruthy();
     expect(shown.getByText(FACTS.toolArguments)).toBeTruthy();
-    expect(shown.getByText(TOOL.tool_arguments)).toBeTruthy();
+    expect(shown.getByText(TOOL.toolArguments)).toBeTruthy();
     expect(shown.getByText(FACTS.toolResult)).toBeTruthy();
-    expect(shown.getByText(TOOL.tool_result)).toBeTruthy();
+    expect(shown.getByText(TOOL.toolResult)).toBeTruthy();
   });
 
   /** A step that did no tool work draws no tool section at all. */
@@ -932,10 +937,10 @@ describe("the inspector", () => {
     const came = whereItCameFrom();
     for (const [label, value] of [
       [FACTS.platform, "LiveKit Agents"],
-      [FACTS.platformAgentName, TRACE.platform_agent_name],
-      [FACTS.platformAgentId, TRACE.platform_agent_id],
-      [FACTS.platformAgentVersion, TRACE.platform_agent_version],
-      [FACTS.reference, TRACE.provider_call_id],
+      [FACTS.platformAgentName, TRACE.platformAgentName],
+      [FACTS.platformAgentId, TRACE.platformAgentId],
+      [FACTS.platformAgentVersion, TRACE.platformAgentVersion],
+      [FACTS.reference, TRACE.providerCallId],
     ]) {
       expect(within(came).getByText(label), label).toBeTruthy();
       expect(within(came).getByText(value), value).toBeTruthy();
@@ -954,10 +959,10 @@ describe("the inspector", () => {
       body: detail({
         trace: {
           ...TRACE,
-          agent_platform: "",
-          platform_agent_id: "",
-          platform_agent_name: "",
-          platform_agent_version: "",
+          agentPlatform: "",
+          platformAgentId: "",
+          platformAgentName: "",
+          platformAgentVersion: "",
         },
       }),
     });
@@ -995,7 +1000,7 @@ describe("what Egma heard", () => {
   });
 
   it("stays silent when the conversation recorded nothing", async () => {
-    stub({ status: 200, body: detail({ simulation_id: SIMULATION_ID }) });
+    stub({ status: 200, body: detail({ simulationId: SIMULATION_ID }) });
     await open();
     await settled();
 
@@ -1011,7 +1016,7 @@ describe("what Egma heard", () => {
    */
   it("says so out loud when the refusal is about egma", async () => {
     stub(
-      { status: 200, body: detail({ simulation_id: SIMULATION_ID }) },
+      { status: 200, body: detail({ simulationId: SIMULATION_ID }) },
       {
         status: 503,
         body: {
@@ -1032,7 +1037,7 @@ describe("what Egma heard", () => {
 
   it("draws a player, and says whose audio it is, when there is one", async () => {
     stub(
-      { status: 200, body: detail({ simulation_id: SIMULATION_ID }) },
+      { status: 200, body: detail({ simulationId: SIMULATION_ID }) },
       {
         status: 200,
         body: { url: "https://store.example/recording.wav?signed" },

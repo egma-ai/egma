@@ -37,6 +37,7 @@ import {
   ProductShellBoundary,
   useShellSession,
 } from "../ui/shell.tsx";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * The shared components, rendered.
@@ -143,8 +144,8 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string) => {
-      const path = new URL(input, "http://egma.test").pathname;
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const { path } = await observeRequest(input, init);
       const held = answers[path];
       if (held === undefined) throw new Error(`nothing stubbed for ${path}`);
 
@@ -1659,7 +1660,7 @@ describe("the role the shell shows", () => {
   });
 
   it("claims nothing at all while the session read is in flight", async () => {
-    apiAnswers({ "/api/me": "never", "/api/agents": "never" });
+    apiAnswers({ "/api/me": "never", "/v1/agents": "never" });
     render(
       <AppShell>
         <p>page</p>
@@ -1674,7 +1675,7 @@ describe("the role the shell shows", () => {
   it("never shows an admin a View only badge, before or after the answer", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": "never",
+      "/v1/agents": "never",
     });
     render(
       <AppShell>
@@ -1690,7 +1691,7 @@ describe("the role the shell shows", () => {
   it("shows a viewer that they are one, once it knows", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/agents": "never",
+      "/v1/agents": "never",
     });
     render(
       <AppShell>
@@ -1742,7 +1743,7 @@ describe("the role the shell shows", () => {
     routed.pathname = "/projects/prj_2/agents";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": "never",
+      "/v1/agents": "never",
     });
     render(
       <AppShell>
@@ -1774,7 +1775,7 @@ describe("the role the shell shows", () => {
     routed.pathname = "/projects/prj_2/agents";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": "never",
+      "/v1/agents": "never",
     });
     render(
       <AppShell>
@@ -1797,7 +1798,7 @@ describe("the role the shell shows", () => {
   it("says the session is unavailable rather than that somebody is signed in", async () => {
     apiAnswers({
       "/api/me": { status: 503, body: { error: "x", message: "y" } },
-      "/api/agents": "never",
+      "/v1/agents": "never",
     });
     render(
       <AppShell>
@@ -1821,9 +1822,9 @@ describe("the role the shell shows", () => {
  * draws the selector unconditionally — so the selector is on screen for as long
  * as the read takes, and indefinitely when the read does not end in a forward.
  *
- * This is that case: a `results_url` for a run the session cannot reach settles
+ * This is that case: a `resultsUrl` for a run the session cannot reach settles
  * into `missing` and stays there. It is not an exotic state — it is what a
- * copied `results_url` for a run in another project does today — and one click
+ * copied `resultsUrl` for a run in another project does today — and one click
  * on the selector goes straight into `inProject` from an address carrying no
  * project. So of the five addresses that reach that function, these two are the
  * likeliest, not the impossible ones.
@@ -1834,7 +1835,7 @@ describe("the run address a terminal prints, stuck", () => {
     routed.projectId = undefined;
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/runs/run_9": {
+      "/v1/runs/run_9": {
         status: 404,
         body: {
           error: "not_found",
@@ -1892,34 +1893,46 @@ describe("the run address a terminal prints, stuck", () => {
 describe("the Agents page", () => {
   const AGENT = {
     id: "agt_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     name: "Front desk",
     description: "Answers the main line.",
     // The list read carries every agent's connections, so a row in this
     // fixture carries the field. An agent with none is one of the states the
     // page draws, and it is drawn from an empty list rather than a missing one.
     connections: [],
-    created_at: "2026-08-15T10:00:00.000Z",
-    updated_at: "2026-08-15T10:00:00.000Z",
+    createdAt: "2026-08-15T10:00:00.000Z",
+    updatedAt: "2026-08-15T10:00:00.000Z",
   };
 
   it("names its project in the request, every time", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": { status: 200, body: { items: [AGENT], next_cursor: null } },
+      "/v1/agents": {
+        status: 200,
+        body: { agents: [AGENT], nextPageToken: null },
+      },
     });
     render(<AgentsPage />);
 
     // Once, because the table changes layout without cloning the row.
     expect(await screen.findAllByText("Front desk")).toHaveLength(1);
-    const asked = vi.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url));
-    expect(asked).toContain("/api/agents?project=prj_1");
+    const asked = await Promise.all(
+      vi.mocked(globalThis.fetch).mock.calls.map(([input, init]) =>
+        observeRequest(input as FetchInput, init),
+      ),
+    );
+    expect(asked.map(({ address }) => `${address.pathname}${address.search}`)).toContain(
+      "/v1/agents?projectId=prj_1",
+    );
   });
 
   it("shows an empty project as empty, not as a failure", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": { status: 200, body: { items: [], next_cursor: null } },
+      "/v1/agents": {
+        status: 200,
+        body: { agents: [], nextPageToken: null },
+      },
     });
     render(<AgentsPage />);
 
@@ -1936,7 +1949,7 @@ describe("the Agents page", () => {
   it("shows a project this organization has not got as an absence, in egma's words", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": {
+      "/v1/agents": {
         status: 404,
         body: {
           error: "project_outside_organization",
@@ -1968,8 +1981,11 @@ describe("the Agents page", () => {
   it("says so when the next page fails, and lets somebody ask again on purpose", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": [
-        { status: 200, body: { items: [AGENT], next_cursor: "agt_1" } },
+      "/v1/agents": [
+        {
+          status: 200,
+          body: { agents: [AGENT], nextPageToken: "agt_1" },
+        },
         {
           status: 503,
           body: { error: "unavailable", message: "Egma could not reach the agents store." },
@@ -1977,8 +1993,8 @@ describe("the Agents page", () => {
         {
           status: 200,
           body: {
-            items: [{ ...AGENT, id: "agt_2", name: "Outbound reminders" }],
-            next_cursor: null,
+            agents: [{ ...AGENT, id: "agt_2", name: "Outbound reminders" }],
+            nextPageToken: null,
           },
         },
       ],
@@ -2015,24 +2031,24 @@ describe("the Agents page", () => {
 
     const firstPageOf = (project: string | null) =>
       json(200, {
-        items: [
+        agents: [
           {
             ...AGENT,
-            project_id: String(project),
+            projectId: String(project),
             id: `agt_${String(project)}`,
             name: project === "prj_1" ? "Front desk" : "Night line",
           },
         ],
-        next_cursor: "agt_cursor",
+        nextPageToken: "agt_cursor",
       });
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string) => {
-        const at = new URL(String(input), "http://egma.test");
+      vi.fn(async (input: FetchInput, init?: RequestInit) => {
+        const { address: at } = await observeRequest(input, init);
         if (at.pathname === "/api/me") return json(200, meWith("admin"));
-        if (at.searchParams.has("cursor")) return pending;
-        return firstPageOf(at.searchParams.get("project"));
+        if (at.searchParams.has("pageToken")) return pending;
+        return firstPageOf(at.searchParams.get("projectId"));
       }),
     );
 
@@ -2051,8 +2067,8 @@ describe("the Agents page", () => {
     // The first project's next page finally arrives.
     release(
       json(200, {
-        items: [{ ...AGENT, id: "agt_stale", name: "Somebody else's project" }],
-        next_cursor: null,
+        agents: [{ ...AGENT, id: "agt_stale", name: "Somebody else's project" }],
+        nextPageToken: null,
       }),
     );
     await new Promise((settle) => setTimeout(settle, 0));
@@ -2065,7 +2081,10 @@ describe("the Agents page", () => {
   it("offers a member the way to connect an agent, and a viewer the same control disabled", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents": { status: 200, body: { items: [AGENT], next_cursor: null } },
+      "/v1/agents": {
+        status: 200,
+        body: { agents: [AGENT], nextPageToken: null },
+      },
     });
     const { unmount } = render(<AgentsPage />);
     expect(await screen.findByRole("link", { name: "Connect agent" })).toBeDefined();
@@ -2073,7 +2092,10 @@ describe("the Agents page", () => {
 
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/agents": { status: 200, body: { items: [AGENT], next_cursor: null } },
+      "/v1/agents": {
+        status: 200,
+        body: { agents: [AGENT], nextPageToken: null },
+      },
     });
     render(<AgentsPage />);
 

@@ -1,4 +1,5 @@
 import { ping, pingClickHouse } from "@egma/db";
+import { platformOpenApi } from "@egma/platform-api/openapi";
 import type { Fetch as RetellFetch } from "@egma/retell";
 import Fastify, { LogController, type FastifyInstance } from "fastify";
 
@@ -13,32 +14,17 @@ import {
   type EmailSender,
 } from "./auth/email.ts";
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
-import { agentRoutes } from "./routes/agents.ts";
-import { apiKeyRoutes } from "./routes/api-keys.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
-import { graderLibraryRoutes } from "./routes/grader-library.ts";
-import { graderRoutes } from "./routes/graders.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
 import { invitationRoutes } from "./routes/invitations.ts";
 import { meRoutes } from "./routes/me.ts";
-import { memberRoutes } from "./routes/members.ts";
-import { monitoringRoutes } from "./routes/monitoring.ts";
-import { organizationRoutes } from "./routes/organization.ts";
-import { personaRoutes } from "./routes/personas.ts";
-import { projectRoutes } from "./routes/projects.ts";
-import { mockToolRoutes } from "./routes/mock-tools.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
-import { platformRoutes } from "./routes/platform.ts";
+import { platformApiRoutes } from "./routes/platform-api.ts";
 import { platformSettingsRoutes } from "./routes/platform-settings.ts";
-import { recordingRoutes } from "./routes/recordings.ts";
 import { reportRoutes } from "./routes/reports.ts";
-import { runRoutes } from "./routes/runs.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
-import { simulationRoutes } from "./routes/simulations.ts";
-import { testRoutes } from "./routes/tests.ts";
-import { traceReadRoutes } from "./routes/trace-reads.ts";
 import { traceRoutes } from "./routes/traces.ts";
 import { fixedWindowRateLimit, type RateLimit } from "./http/rate-limit.ts";
 import { webHandler } from "./http/web-handler.ts";
@@ -124,6 +110,13 @@ export function buildApi(options: ServerOptions): Api {
 
   const app = Fastify({
     logger,
+    ajv: {
+      customOptions: {
+        coerceTypes: false,
+        removeAdditional: false,
+        useDefaults: false,
+      },
+    },
     // Fastify's built-in request lines include the raw URL and client address.
     // One safe completion record is written below from the route template.
     logController: new LogController({ disableRequestLogging: true }),
@@ -210,6 +203,12 @@ export function buildApi(options: ServerOptions): Api {
       .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
   });
 
+  app.get("/openapi.json", { logLevel: "warn" }, async (_request, reply) =>
+    reply
+      .header("cache-control", "public, max-age=300")
+      .send(platformOpenApi),
+  );
+
   app.addHook("onResponse", (request, reply, done) => {
     const route = request.routeOptions.url;
     if (route === "/health" && reply.statusCode < 400) {
@@ -231,17 +230,6 @@ export function buildApi(options: ServerOptions): Api {
     else request.log.info(event);
     done();
   });
-
-  // Read before login and before any repository identifier is sent. It is
-  // public because the CLI uses it to decide whether login is safe to start.
-  //
-  // Whether this deployment can dial is no longer worked out here and handed
-  // down: the carrier is one of the platform's own settings now, so the door
-  // that reports it and the door that enforces it each read the store when
-  // they are asked. That is what stops them being one answer from start-up
-  // that an operator finishing setup cannot change without a restart, and they
-  // still cannot disagree — one store, one `phoneReadiness`, two callers.
-  void app.register(platformRoutes, { origin: config.baseUrl });
 
   // Registered without `fastify-plugin` on purpose: the adapter replaces every
   // body parser inside its own scope so the provider sees the bytes that were
@@ -275,24 +263,15 @@ export function buildApi(options: ServerOptions): Api {
       windowMilliseconds: 60_000,
     });
 
-  void app.register(apiKeyRoutes, { provider: identity.provider, rateLimit });
-
-  // The agent group: registering an agent with the first way of reaching it,
-  // reading it back, and attaching another. Its own credentialed scope, like
-  // every other group, so the rate limit and the context resolve once for it.
-  void app.register(agentRoutes, {
+  // Every customer-managed resource is registered through this one boundary.
+  // It is the same explicit operation set that produces OpenAPI and the
+  // generated TypeScript client. The separate protocols below do not enter it.
+  void app.register(platformApiRoutes, {
     provider: identity.provider,
     rateLimit,
-    ...(options.retellFetch === undefined
-      ? {}
-      : { retellFetch: options.retellFetch }),
-  });
-
-  // Production Monitoring setup is project configuration, not a simulation
-  // connection. Each platform opens its own setup flow behind this route group.
-  void app.register(monitoringRoutes, {
-    provider: identity.provider,
-    rateLimit,
+    emailSender,
+    baseUrl: config.baseUrl,
+    blob: config.blob,
     ...(options.retellFetch === undefined
       ? {}
       : { retellFetch: options.retellFetch }),
@@ -301,34 +280,11 @@ export function buildApi(options: ServerOptions): Api {
       : { retellReach: options.retellReach }),
   });
 
-  void app.register(memberRoutes, {
-    provider: identity.provider,
-    rateLimit,
-    emailSender,
-    baseUrl: config.baseUrl,
-  });
-
-  // The customer itself, and the product areas inside it. Two groups rather
-  // than one because they answer different questions — which organization am I
-  // in, and which projects does it hold — and because a project is addressed in
-  // the path here while every product resource names one beside itself.
-  void app.register(organizationRoutes, {
-    provider: identity.provider,
-    rateLimit,
-  });
-
-  void app.register(projectRoutes, {
-    provider: identity.provider,
-    rateLimit,
-  });
-
   // What this deployment has been configured with, as an owner reads and
   // changes it. Its own credentialed scope, like every other group, so its one
   // refusal — the settings of a platform are not everybody's to see — never
-  // reaches another group's error handler. It sits beside the public platform
-  // route rather than inside it: they answer at addresses that share a prefix
-  // and share nothing else, one asking for no credential and one refusing
-  // anybody but an owner.
+  // reaches another group's error handler. It stays outside the public
+  // platform API because deployment settings are not customer resources.
   void app.register(platformSettingsRoutes, {
     provider: identity.provider,
     rateLimit,
@@ -337,75 +293,6 @@ export function buildApi(options: ServerOptions): Api {
     // customers the carrier route belongs to none of them, and the question of
     // whose it is is not answered yet.
     singleOrganization: config.singleOrganization,
-  });
-
-  // What a developer's folder syncs against. Its own scope, like every other
-  // group here, so the credentialed hook and the routes it protects cannot come
-  // apart and one group's error handler never answers another's refusals.
-  void app.register(personaRoutes, {
-    provider: identity.provider,
-    rateLimit,
-  });
-
-  void app.register(testRoutes, { provider: identity.provider, rateLimit });
-
-  // The shelf of grader definitions a developer picks from — egma's own two,
-  // and a team's when custom authoring arrives. Its own scope like every other
-  // group, and one verb inside it: the library is read, never authored, which
-  // is the whole shape of shipping a small set of predefined graders rather
-  // than an authoring surface.
-  void app.register(graderLibraryRoutes, {
-    provider: identity.provider,
-    rateLimit,
-  });
-
-  // The graders a project actually judges with, the one act that makes another
-  // — pressing Use on an entry from the shelf above — and the one act that
-  // stops one, which is deleting it, because a copy that exists judges and
-  // there is no other switch. Its own scope like every other group. No create
-  // taking a type and criteria and no edit, because a grader is always a copy
-  // of a definition somebody can read, and defining one is the surface
-  // ADR-0009 shelved.
-  void app.register(graderRoutes, { provider: identity.provider, rateLimit });
-
-  // The mocked world a project's simulations run in: what egma answers with
-  // when the agent calls one of its tools, so a test never books a real
-  // appointment. Its own scope like every other group, so its refusals — a tool
-  // this project already answers for among them — never reach another group's
-  // error handler.
-  void app.register(mockToolRoutes, { provider: identity.provider, rateLimit });
-
-  // What a terminal starts and then watches: a run over one connection,
-  // pinning exact versions, and the numbered feed a follower resumes from.
-  // The base URL is handed in because the reply carries a results address a
-  // person opens in a browser, and where this instance is is configuration
-  // rather than something a route can know.
-  void app.register(runRoutes, {
-    provider: identity.provider,
-    rateLimit,
-    baseUrl: config.baseUrl,
-  });
-
-  // One conversation's own evidence: what happened, how egma judged it, and the
-  // two ways a person revisits that judgement. Its own scope beside the run
-  // group rather than inside it, because a conversation is reached by its own id
-  // — the address somebody pastes into a ticket — and because its refusals are
-  // its own: nothing to judge again, and nothing to disagree with.
-  void app.register(simulationRoutes, {
-    provider: identity.provider,
-    rateLimit,
-  });
-
-  // Where a recording's reference becomes something a browser can play. Its own
-  // scope beside the run group rather than inside it, because one route serves
-  // two surfaces — a run's results and a transcript — and neither owns it. The
-  // store is handed in and may be absent: naming where a browser reaches it is
-  // what turns this on, and a deployment that named none says so in a sentence
-  // rather than answering an empty player.
-  void app.register(recordingRoutes, {
-    provider: identity.provider,
-    rateLimit,
-    blob: config.blob,
   });
 
   // The simulator's claim door. Outside the credentialed scope and the
@@ -446,15 +333,6 @@ export function buildApi(options: ServerOptions): Api {
     provider: identity.provider,
     rateLimit,
     serviceToken: config.simulatorServiceToken,
-  });
-
-  // The v1 read surface, in its own scope beside the door rather than inside
-  // it. It shares the `/v1/traces` path and none of the door's arrangements: a
-  // list and a transcript are ordinary JSON responses, and the parser the door
-  // replaces is one they want back.
-  void app.register(traceReadRoutes, {
-    provider: identity.provider,
-    rateLimit,
   });
 
   // Outside the credentialed scope on purpose: somebody following an

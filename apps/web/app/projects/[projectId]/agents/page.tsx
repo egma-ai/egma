@@ -3,16 +3,17 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { listAgents } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { readJson, type Refusal } from "../../../../lib/api.ts";
+import type { Refusal } from "../../../../lib/api.ts";
 import {
-  agentsQuery,
   type AgentPage,
   type ListedAgentWithConnections,
 } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import { Toolbar, TOOLBAR_SEARCH } from "../../../../ui/section.tsx";
@@ -125,8 +126,15 @@ function Agents({ projectId }: { readonly projectId: string }) {
   }, [typed]);
 
   const { answer, reload } = useProjectRead<AgentPage>(
-    agentsQuery({ search }),
+    (projectId) =>
+      platformAnswer(
+        listAgents(
+          { projectId, ...(search.trim() === "" ? {} : { search: search.trim() }) },
+          { client: platformClient },
+        ),
+      ),
     projectId,
+    search,
   );
 
   /**
@@ -243,8 +251,11 @@ function Agents({ projectId }: { readonly projectId: string }) {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    const items = [...answer.value.items, ...(carried?.items ?? [])];
-    const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
+    const items = [...answer.value.agents, ...(carried?.agents ?? [])];
+    const cursor =
+      carried === null
+        ? answer.value.nextPageToken
+        : carried.nextPageToken;
 
     if (items.length === 0) {
       // A search with no match and an empty project lead somewhere different.
@@ -282,9 +293,15 @@ function Agents({ projectId }: { readonly projectId: string }) {
       setMoreRefused(null);
       setLoadingMore(true);
 
-      const next = await readJson<AgentPage>(
-        agentsQuery({ search, cursor }),
-        { project: asked },
+      const next = await platformAnswer(
+        listAgents(
+          {
+            projectId: asked,
+            pageToken: cursor,
+            ...(search.trim() === "" ? {} : { search: search.trim() }),
+          },
+          { client: platformClient },
+        ),
       );
 
       setLoadingMore(false);
@@ -303,8 +320,8 @@ function Agents({ projectId }: { readonly projectId: string }) {
       setAfter({
         project: asked,
         page: {
-          items: [...(carried?.items ?? []), ...next.value.items],
-          next_cursor: next.value.next_cursor,
+          agents: [...(carried?.agents ?? []), ...next.value.agents],
+          nextPageToken: next.value.nextPageToken,
         },
       });
     }
@@ -352,7 +369,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
    */
   const nothingHereYet =
     answer?.status === "ready" &&
-    answer.value.items.length === 0 &&
+    answer.value.agents.length === 0 &&
     search.trim() === "";
 
   return (

@@ -40,7 +40,7 @@ beforeEach(async () => {
   await createEgmaFolder({
     repository: workspace.dir,
     config: {
-      platform: { origin: platform.url, instance: platform.instanceId },
+      platform: { origin: platform.url },
       agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
       connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
       suite: { name: "first-suite", id: null },

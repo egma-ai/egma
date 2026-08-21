@@ -88,7 +88,7 @@ export function sectionIn(pathname: string): string | null {
  * never being here.**
  * Both draw `ProductStatePage`, which is this shell around a page, so the
  * selector is on screen for as long as the read takes — and longer than that
- * when the read does not end in a forward at all. Open a `results_url` for a
+ * when the read does not end in a forward at all. Open a `resultsUrl` for a
  * run in a project the session cannot reach and `/runs/{runId}` settles into
  * its `missing` state and stays there, shell and selector included, with one
  * click on the selector calling straight into this function. So the two that

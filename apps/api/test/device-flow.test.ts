@@ -282,7 +282,7 @@ describe("approving", () => {
     // And the terminal now holds something that works.
     const used = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: { authorization: `Bearer ${secret}` },
     });
     expect(used.statusCode).toBe(200);

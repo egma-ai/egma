@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { readJson, type Answer } from "../lib/api.ts";
+import type { Answer } from "../lib/api.ts";
 
 /**
  * One product read, with its four answers and a way to ask again.
@@ -15,8 +15,9 @@ import { readJson, type Answer } from "../lib/api.ts";
  * answer is something egma said, and "nothing yet" is not.
  */
 export function useProjectRead<T>(
-  path: string,
+  read: (projectId: string) => Promise<Answer<T>>,
   project: string | null,
+  requestKey = "",
 ): {
   readonly answer: Answer<T> | null;
   readonly reload: () => void;
@@ -25,6 +26,8 @@ export function useProjectRead<T>(
 } {
   const [answer, setAnswer] = useState<Answer<T> | null>(null);
   const [attempt, setAttempt] = useState({ number: 0, quiet: false });
+  const readNow = useRef(read);
+  readNow.current = read;
 
   const reload = useCallback(() => {
     setAnswer(null);
@@ -40,14 +43,14 @@ export function useProjectRead<T>(
     let current = true;
     if (!attempt.quiet) setAnswer(null);
 
-    void readJson<T>(path, { project }).then((next) => {
+    void readNow.current(project).then((next) => {
       if (current) setAnswer(next);
     });
 
     return () => {
       current = false;
     };
-  }, [path, project, attempt]);
+  }, [project, requestKey, attempt]);
 
   return { answer, reload, refresh };
 }

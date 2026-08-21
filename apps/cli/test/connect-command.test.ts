@@ -179,7 +179,7 @@ describe("egma connect", () => {
     // The same four things the wizard's own walk writes, so a repository
     // connected by the verb and one connected by the wizard hold one file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
-      platform: { origin: platform.url, instance: platform.instanceId },
+      platform: { origin: platform.url },
       agent: { name: said.agent_name, id: said.agent_id },
       connection: { name: said.connection_name, id: said.connection_id },
       suite: { name: "first-suite", id: null },
@@ -269,7 +269,6 @@ describe("egma connect", () => {
     const written = await readConfig(folderPathsIn(workspace.dir).config);
     expect(written.platform).toEqual({
       origin: platform.url,
-      instance: platform.instanceId,
     });
     // The order is what makes the file trustworthy: the agent that exists on
     // the platform is named in the same file as the platform that issued it.
@@ -425,7 +424,7 @@ describe("which connection egma creates", () => {
 
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
-    // No Retell, Twilio, LiveKit, SIP or OpenAI credential is anywhere near it.
+    // No durable Retell, Twilio, LiveKit, SIP or OpenAI credential is stored on it.
     expect(platform.registered.sealed).toEqual([]);
     expect(JSON.stringify(platform.registered)).not.toContain(KEY);
 

@@ -16,7 +16,7 @@
  * its filled-in values, one set per **assertion** — the word for one 0-or-1
  * check inside a grader, un-banned by the same redesign.
  *
- * The URL is deliberately not copy. `/api/graders` is a machine surface — it is
+ * The URL is deliberately not copy. `/v1/graders` is a machine surface — it is
  * the endpoint's own path, and matching it is how somebody reading the network
  * tab finds the request — and no page ever prints it as a word.
  *

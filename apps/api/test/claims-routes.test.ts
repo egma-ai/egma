@@ -52,22 +52,22 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: ["confirms the new time back before finishing"],
+  expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
 const RETELL = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
 const LIVEKIT = {
-  agent_platform: "livekit_agents",
-  connection_kind: "livekit_room",
-  access_variant: "livekit_room.project_credentials",
+  agentPlatform: "livekit_agents",
+  connectionKind: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -77,9 +77,9 @@ const LIVEKIT = {
 } as const;
 
 const PHONE = {
-  agent_platform: null,
-  connection_kind: "phone_number",
-  access_variant: "phone_number.public_e164",
+  agentPlatform: null,
+  connectionKind: "phone_number",
+  accessVariant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
@@ -139,7 +139,7 @@ async function aCustomerReadyToRun(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await ask(api.app, "POST", "/api/agents", key, {
+  const registered = await ask(api.app, "POST", "/v1/agents", key, {
     name: "Front desk",
     connection: RETELL,
   });
@@ -153,7 +153,7 @@ async function aCustomerReadyToRun(
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
   });
-  const pushed = await ask(api.app, "POST", "/api/tests", key, {
+  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
     personas: ["Impatient Rita"],
   });
@@ -164,7 +164,7 @@ async function aCustomerReadyToRun(
     key,
     agentId,
     connectionId,
-    versionId: String(pushed.body.version_id),
+    versionId: String(pushed.body.versionId),
   };
 }
 
@@ -184,7 +184,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await ask(api.app, "POST", "/api/agents", key, {
+  const registered = await ask(api.app, "POST", "/v1/agents", key, {
     name: "Live voice desk",
     connection,
   });
@@ -205,7 +205,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
       },
     },
   });
-  const pushed = await ask(api.app, "POST", "/api/tests", key, {
+  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
     personas: ["Realtime Rita"],
   });
@@ -215,7 +215,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
     ada,
     key,
     connectionId,
-    versionId: String(pushed.body.version_id),
+    versionId: String(pushed.body.versionId),
   };
 }
 
@@ -235,14 +235,14 @@ async function applyTo(
   const version = await ask(
     api.app,
     "GET",
-    `/api/test-versions/${versionId}`,
+    `/v1/test-versions/${versionId}`,
     key,
   );
   expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
   const linked = await ask(
     api.app,
     "POST",
-    `/api/tests/${String(version.body.test_id)}/agents`,
+    `/v1/tests/${String(version.body.testId)}/agents`,
     key,
     { agents: [...agentIds] },
   );
@@ -255,10 +255,10 @@ async function aQueuedRun(
   connectionId: string,
   versionId: string,
 ): Promise<{ runId: string; simulationId: string }> {
-  const started = await ask(api.app, "POST", "/api/runs", key, {
-    connection: connectionId,
-    test_versions: [versionId],
-    idempotency_key: newId("run"),
+  const started = await ask(api.app, "POST", "/v1/runs", key, {
+    connectionId: connectionId,
+    testVersionIds: [versionId],
+    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];
@@ -394,7 +394,7 @@ describe("claiming work", () => {
     expect(row?.claimedBy).toBe("sim-under-test");
     expect(row?.heartbeatAt).toBeInstanceOf(Date);
 
-    const header = await ask(api.app, "GET", `/api/runs/${runId}`, key);
+    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("running");
   });
 
@@ -405,7 +405,7 @@ describe("claiming work", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const registered = await ask(api.app, "POST", "/api/agents", key, {
+    const registered = await ask(api.app, "POST", "/v1/agents", key, {
       name: "Front desk",
       connection: RETELL,
     });
@@ -419,24 +419,24 @@ describe("claiming work", () => {
     // The project's world: two tools answered for every test it runs.
     for (const written of [
       { tool: "check_availability", answer: { slots: ["Tuesday 14:00"] } },
-      { tool: "send_confirmation_sms", answer: { delivered: true }, delay_ms: 250 },
+      { tool: "send_confirmation_sms", answer: { delivered: true }, delayMs: 250 },
     ]) {
-      const authored = await ask(api.app, "POST", "/api/mock-tools", key, written);
+      const authored = await ask(api.app, "POST", "/v1/mock-tools", key, written);
       expect(authored.statusCode, JSON.stringify(authored.body)).toBe(201);
     }
 
     // And one test that forces a branch the project's world does not have.
-    const pushed = await ask(api.app, "POST", "/api/tests", key, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", key, {
       ...RESCHEDULING,
       personas: ["Impatient Rita"],
-      mock_tools: [
+      mockTools: [
         { tool: "check_availability", answer: { slots: [] } },
         { tool: "book_appointment", error: "the booking service is down" },
       ],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
-    await aQueuedRun(key, connectionId, String(pushed.body.version_id));
+    await aQueuedRun(key, connectionId, String(pushed.body.versionId));
     const answered = await claim(api.config.simulatorServiceToken, {
       claimant: "sim-under-test",
       capacity: 4,
@@ -477,7 +477,7 @@ describe("claiming work", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const registered = await ask(api.app, "POST", "/api/agents", key, {
+    const registered = await ask(api.app, "POST", "/v1/agents", key, {
       name: "Front desk",
       connection: RETELL,
     });
@@ -486,15 +486,15 @@ describe("claiming work", () => {
       name: "Impatient Rita",
       traits: NEUTRAL_TRAITS,
     });
-    const authored = await ask(api.app, "POST", "/api/mock-tools", key, {
+    const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
       tool: "check_availability",
       answer: { slots: ["Tuesday 14:00"] },
     });
-    const pushed = await ask(api.app, "POST", "/api/tests", key, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", key, {
       ...RESCHEDULING,
       personas: ["Impatient Rita"],
     });
-    await aQueuedRun(key, connectionId, String(pushed.body.version_id));
+    await aQueuedRun(key, connectionId, String(pushed.body.versionId));
 
     // The edit lands after the run was created, which is the case the
     // snapshot exists for: a mock tool is unversioned and an edit
@@ -503,7 +503,7 @@ describe("claiming work", () => {
     const edited = await ask(
       api.app,
       "PATCH",
-      `/api/mock-tools/${String(authored.body.id)}`,
+      `/v1/mock-tools/${String(authored.body.id)}`,
       key,
       { answer: { slots: [] } },
     );
@@ -670,13 +670,13 @@ describe("what the claim door never touches", () => {
     }
 
     // The organization's own budget is untouched by all of that…
-    const read = await ask(api.app, "GET", "/api/agents", key);
+    const read = await ask(api.app, "GET", "/v1/agents", key);
     expect(read.statusCode).toBe(200);
 
     // …and once the organization does spend it, the claim door is unmoved.
     let refused = 0;
     for (let i = 0; i < 6; i += 1) {
-      const answer = await ask(api.app, "GET", "/api/agents", key);
+      const answer = await ask(api.app, "GET", "/v1/agents", key);
       if (answer.statusCode === 429) refused += 1;
     }
     expect(refused).toBeGreaterThan(0);
@@ -789,7 +789,7 @@ describe("a simulation the platform cannot hand over", () => {
     const canceled = await ask(
       api.app,
       "POST",
-      `/api/runs/${waiting.runId}/cancel`,
+      `/v1/runs/${waiting.runId}/cancel`,
       key,
     );
     expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
@@ -807,13 +807,13 @@ describe("a simulation the platform cannot hand over", () => {
     const settled = await ask(
       api.app,
       "GET",
-      `/api/runs/${waiting.runId}`,
+      `/v1/runs/${waiting.runId}`,
       key,
     );
     expect(settled.body).toMatchObject({
       status: "canceled",
-      canceled_count: 1,
-      finished_at: expect.any(String),
+      canceledCount: 1,
+      finishedAt: expect.any(String),
     });
     const finalFeed = await listRunEvents(
       contextFor(ada, "member"),
@@ -856,7 +856,7 @@ describe("a simulation the platform cannot hand over", () => {
       await aCustomerReadyToRun("claims_retell_bounded_batch", {
         retellFetch,
       });
-    const second = await ask(api.app, "POST", "/api/agents", key, {
+    const second = await ask(api.app, "POST", "/v1/agents", key, {
       name: "Second desk",
       connection: {
         ...RETELL,
@@ -909,7 +909,7 @@ describe("a simulation the platform cannot hand over", () => {
     // Two runs over two connections; one connection stops resolving before the
     // claim, so one spec can be assembled and one cannot.
     const doomed = await aQueuedRun(key, connectionId, versionId);
-    const registered = await ask(api.app, "POST", "/api/agents", key, {
+    const registered = await ask(api.app, "POST", "/v1/agents", key, {
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });
@@ -961,11 +961,11 @@ describe("a simulation the platform cannot hand over", () => {
 
     // That landing was the doomed run's last outstanding conversation, so
     // the run settles now, with counts that say what happened.
-    const header = await ask(api.app, "GET", `/api/runs/${doomed.runId}`, key);
+    const header = await ask(api.app, "GET", `/v1/runs/${doomed.runId}`, key);
     expect(header.body.status).toBe("completed");
-    expect(header.body.completed_count).toBe(0);
-    expect(header.body.failed_count).toBe(1);
-    expect(header.body.canceled_count).toBe(0);
+    expect(header.body.completedCount).toBe(0);
+    expect(header.body.failedCount).toBe(1);
+    expect(header.body.canceledCount).toBe(0);
   });
 
   it("lands a credential that will not unseal the same way, and the batch dispatches whole", async () => {
@@ -973,7 +973,7 @@ describe("a simulation the platform cannot hand over", () => {
       await aCustomerReadyToRun("claims_corrupt");
 
     const doomed = await aQueuedRun(key, connectionId, versionId);
-    const registered = await ask(api.app, "POST", "/api/agents", key, {
+    const registered = await ask(api.app, "POST", "/v1/agents", key, {
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });

@@ -24,31 +24,3 @@ export function given(value: string | undefined): string | undefined {
 export function textList(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.map((entry) => text(entry)) : [];
 }
-
-/**
- * Which project a request named, wherever the caller put it — **the one
- * spelling of this rule in the API**.
- *
- * **The query and the body, because both are in honest use.** A terminal posts
- * the project in the body beside everything else it is sending; a browser's
- * write helper appends it to the address, which is where every read is asked.
- * A door that took only one of the two would not refuse the other — it would
- * **ignore** it, fall back to the credential's own project, which for a session
- * is the organization's *first*, and answer confidently about somebody else's
- * product area. That is not a hypothetical: `POST /api/agents` did exactly it,
- * and answered `201` about an agent in the wrong project.
- *
- * **The address wins where both are given**, because the address is what a
- * browser is looking at.
- *
- * It lives here rather than in each route group because three groups had
- * written it for themselves, two of them character for character under one
- * name that a third group used for something else entirely. One rule about
- * where a project is named, spelled once.
- */
-export function projectNamed(
-  query: Record<string, unknown>,
-  body: Record<string, unknown>,
-): string | undefined {
-  return given(text(query.project)) ?? given(text(body.project));
-}

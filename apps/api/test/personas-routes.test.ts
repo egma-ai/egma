@@ -77,10 +77,10 @@ type WirePersona = {
   name: string;
   description: string | null;
   version: number;
-  version_id: string;
+  versionId: string;
   revision: string;
-  archived_at: string | null;
-  is_default: boolean;
+  archivedAt: string | null;
+  isDefault: boolean;
   owner: "egma" | "organization";
   traits: Record<string, unknown>;
   models: PersonaModels;
@@ -96,8 +96,8 @@ async function createPersonaThrough(
   traits: PersonaTraits = TRAITS,
   projectId = who.projectId,
 ): Promise<WirePersona> {
-  const made = await browse("POST", "/api/personas", who, {
-    project: projectId,
+  const made = await browse("POST", "/v1/personas", who, {
+    projectId: projectId,
     name,
     traits,
     models: RECOMMENDED_PERSONA_MODELS,
@@ -124,14 +124,14 @@ describe("creating and reading a persona", () => {
 
     const form = await browse(
       "GET",
-      `/api/persona-form?project=${ada.projectId}`,
+      `/v1/persona-form?projectId=${ada.projectId}`,
       ada,
     );
 
     expect(form.statusCode).toBe(200);
-    expect(form.body.recommended_models).toEqual(RECOMMENDED_PERSONA_MODELS);
-    expect(form.body.speed_range).toEqual(SPEED_RANGE);
-    expect(form.body.model_catalog).toEqual(
+    expect(form.body.recommendedModels).toEqual(RECOMMENDED_PERSONA_MODELS);
+    expect(form.body.speedRange).toEqual(SPEED_RANGE);
+    expect(form.body.modelCatalog).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           job: "stt",
@@ -155,17 +155,17 @@ describe("creating and reading a persona", () => {
 
     expect(made.name).toBe("Impatient Rita");
     expect(made.version).toBe(1);
-    expect(made.archived_at).toBeNull();
-    expect(made.is_default).toBe(false);
+    expect(made.archivedAt).toBeNull();
+    expect(made.isDefault).toBe(false);
     expect(made.owner).toBe("organization");
     expect(made.revision).toEqual(expect.any(String));
-    expect(made.version_id).toEqual(expect.any(String));
+    expect(made.versionId).toEqual(expect.any(String));
     expect(made.traits).toEqual(TRAITS);
     expect(made.models).toEqual(RECOMMENDED_PERSONA_MODELS);
 
     const read = await browse(
       "GET",
-      `/api/personas/${made.id}?project=${ada.projectId}`,
+      `/v1/personas/${made.id}?projectId=${ada.projectId}`,
       ada,
     );
     expect(read.statusCode).toBe(200);
@@ -176,8 +176,8 @@ describe("creating and reading a persona", () => {
     api = await createApi("personas_validation");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const nameless = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const nameless = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "   ",
       traits: TRAITS,
       models: RECOMMENDED_PERSONA_MODELS,
@@ -188,8 +188,8 @@ describe("creating and reading a persona", () => {
       message: "a persona needs a name",
     });
 
-    const blankPersonality = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const blankPersonality = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "Fast Freddie",
       traits: { ...TRAITS, personality: "   " },
       models: RECOMMENDED_PERSONA_MODELS,
@@ -200,8 +200,8 @@ describe("creating and reading a persona", () => {
       message: "a persona needs a personality",
     });
 
-    const missingLanguage = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const missingLanguage = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "No silent language default",
       traits: { personality: TRAITS.personality },
       models: RECOMMENDED_PERSONA_MODELS,
@@ -212,8 +212,8 @@ describe("creating and reading a persona", () => {
       message: "a persona needs a language",
     });
 
-    const removedControl = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const removedControl = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "No dummy controls",
       traits: {
         ...TRAITS,
@@ -229,8 +229,8 @@ describe("creating and reading a persona", () => {
         "Provider, model, voice id, and speed belong in models.",
     });
 
-    const unknownControl = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const unknownControl = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "No silent controls",
       traits: { ...TRAITS, background_noise: "A busy kitchen." },
       models: RECOMMENDED_PERSONA_MODELS,
@@ -243,8 +243,8 @@ describe("creating and reading a persona", () => {
         "Provider, model, voice id, and speed belong in models.",
     });
 
-    const missingModels = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const missingModels = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "No implicit execution",
       traits: TRAITS,
     });
@@ -255,8 +255,8 @@ describe("creating and reading a persona", () => {
         "a persona needs one complete models value with llm, stt and tts",
     });
 
-    const mismatchedStt = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const mismatchedStt = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "No mismatched adapter",
       traits: TRAITS,
       models: {
@@ -275,8 +275,8 @@ describe("creating and reading a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     for (const speed of [SPEED_RANGE.slowest, SPEED_RANGE.fastest]) {
-      const made = await browse("POST", "/api/personas", ada, {
-        project: ada.projectId,
+      const made = await browse("POST", "/v1/personas", ada, {
+        projectId: ada.projectId,
         name: `Speed ${speed}`,
         traits: TRAITS,
         models: {
@@ -292,8 +292,8 @@ describe("creating and reading a persona", () => {
       SPEED_RANGE.slowest - 0.0001,
       SPEED_RANGE.fastest + 0.0001,
     ]) {
-      const refused = await browse("POST", "/api/personas", ada, {
-        project: ada.projectId,
+      const refused = await browse("POST", "/v1/personas", ada, {
+        projectId: ada.projectId,
         name: `Speed ${speed}`,
         traits: TRAITS,
         models: {
@@ -323,8 +323,8 @@ describe("creating and reading a persona", () => {
     api = await createApi("personas_no_scenario");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const made = await browse("POST", "/api/personas", ada, {
-      project: ada.projectId,
+    const made = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
       name: "Smuggling Sid",
       traits: {
         ...TRAITS,
@@ -351,17 +351,17 @@ describe("creating and reading a persona", () => {
 
     const listed = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}`,
+      `/v1/personas?projectId=${ada.projectId}`,
       ada,
     );
-    const items = listed.body.items as WirePersona[];
+    const items = listed.body.personas as WirePersona[];
     const found = items.find((one) => one.id === defaultPersonaId);
 
     expect(found).toMatchObject({
       name: "Default Persona",
       description: "Regular conversationalist persona",
       version: 1,
-      is_default: true,
+      isDefault: true,
       owner: "egma",
       traits: {
         personality:
@@ -387,15 +387,15 @@ describe("creating and reading a persona", () => {
         "underFriction",
       ].sort(),
     );
-    expect(items.filter((one) => one.is_default)).toHaveLength(1);
+    expect(items.filter((one) => one.isDefault)).toHaveLength(1);
 
     const refused = await browse(
       "PATCH",
-      `/api/personas/${defaultPersonaId}`,
+      `/v1/personas/${defaultPersonaId}`,
       ada,
       {
-        project: ada.projectId,
-        expected_revision: found?.revision,
+        projectId: ada.projectId,
+        expectedRevision: found?.revision,
         name: "The one everybody starts with",
       },
     );
@@ -418,29 +418,29 @@ describe("choosing the project default", () => {
 
     const selectedCustom = await browse(
       "POST",
-      `/api/personas/${custom.id}/default`,
+      `/v1/personas/${custom.id}/default`,
       ada,
-      { project: ada.projectId },
+      { projectId: ada.projectId },
     );
     expect(selectedCustom.statusCode).toBe(200);
     expect(personaIn(selectedCustom)).toMatchObject({
       id: custom.id,
       owner: "organization",
-      is_default: true,
+      isDefault: true,
     });
     expect(await defaultPersonaOf(ada.projectId)).toBe(custom.id);
 
     const selectedEgma = await browse(
       "POST",
-      `/api/personas/${egmaProvidedId}/default`,
+      `/v1/personas/${egmaProvidedId}/default`,
       ada,
-      { project: ada.projectId },
+      { projectId: ada.projectId },
     );
     expect(selectedEgma.statusCode).toBe(200);
     expect(personaIn(selectedEgma)).toMatchObject({
       id: egmaProvidedId,
       owner: "egma",
-      is_default: true,
+      isDefault: true,
     });
     expect(await defaultPersonaOf(ada.projectId)).toBe(egmaProvidedId);
   });
@@ -458,34 +458,34 @@ describe("the list", () => {
     const [, second] = made;
     if (second === undefined) throw new Error("nothing was made");
 
-    await browse("POST", `/api/personas/${second.id}/archive`, ada, {
-      project: ada.projectId,
-      expected_revision: second.revision,
+    await browse("POST", `/v1/personas/${second.id}/archive`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: second.revision,
     });
 
     const active = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}`,
+      `/v1/personas?projectId=${ada.projectId}`,
       ada,
     );
-    const activeIds = (active.body.items as WirePersona[]).map((one) => one.id);
+    const activeIds = (active.body.personas as WirePersona[]).map((one) => one.id);
     expect(activeIds).not.toContain(second.id);
 
     const searched = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}&search=O`,
+      `/v1/personas?projectId=${ada.projectId}&search=O`,
       ada,
     );
     expect(
-      (searched.body.items as WirePersona[]).map((one) => one.name),
+      (searched.body.personas as WirePersona[]).map((one) => one.name),
     ).toEqual(["Four", "One", "Default Persona"]);
 
     const archive = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}&archived=true`,
+      `/v1/personas?projectId=${ada.projectId}&archived=true`,
       ada,
     );
-    expect((archive.body.items as WirePersona[]).map((one) => one.id)).toEqual([
+    expect((archive.body.personas as WirePersona[]).map((one) => one.id)).toEqual([
       second.id,
     ]);
 
@@ -493,12 +493,12 @@ describe("the list", () => {
     // with no row seen twice and none missed.
     const first = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}&cursor=${activeIds[0]}`,
+      `/v1/personas?projectId=${ada.projectId}&pageToken=${activeIds[0]}`,
       ada,
     );
-    const after = (first.body.items as WirePersona[]).map((one) => one.id);
+    const after = (first.body.personas as WirePersona[]).map((one) => one.id);
     expect(after).toEqual(activeIds.slice(1));
-    expect(first.body.next_cursor).toBeNull();
+    expect(first.body.nextPageToken).toBeNull();
   });
 
   it("keeps two personas of one name apart, because a name is not an identity", async () => {
@@ -512,20 +512,20 @@ describe("the list", () => {
     const second = await createPersonaThrough(ada, "Impatient caller");
     expect(second.id).not.toBe(first.id);
 
-    await browse("PATCH", `/api/personas/${second.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: second.revision,
+    await browse("PATCH", `/v1/personas/${second.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: second.revision,
       description: "The second one.",
     });
 
     const one = await browse(
       "GET",
-      `/api/personas/${first.id}?project=${ada.projectId}`,
+      `/v1/personas/${first.id}?projectId=${ada.projectId}`,
       ada,
     );
     const other = await browse(
       "GET",
-      `/api/personas/${second.id}?project=${ada.projectId}`,
+      `/v1/personas/${second.id}?projectId=${ada.projectId}`,
       ada,
     );
     expect(personaIn(one).description).toBeNull();
@@ -538,7 +538,7 @@ describe("the list", () => {
 
     const refused = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}&cursor=prsv_nonsense`,
+      `/v1/personas?projectId=${ada.projectId}&pageToken=prsv_nonsense`,
       ada,
     );
     expect(refused.statusCode).toBe(422);
@@ -554,7 +554,7 @@ describe("the list", () => {
     api = await createApi("personas_no_project");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await browse("GET", "/api/personas", ada);
+    const refused = await browse("GET", "/v1/personas", ada);
     expect(refused.statusCode).toBe(422);
     expect(refused.body).toEqual({
       error: "project_required",
@@ -585,11 +585,11 @@ describe("the list", () => {
 
     const inDefault = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}`,
+      `/v1/personas?projectId=${ada.projectId}`,
       ada,
     );
-    const defaultIds = (inDefault.body.items as WirePersona[]).map((o) => o.id);
-    const sharedPersona = (inDefault.body.items as WirePersona[]).find(
+    const defaultIds = (inDefault.body.personas as WirePersona[]).map((o) => o.id);
+    const sharedPersona = (inDefault.body.personas as WirePersona[]).find(
       (one) => one.id === shared,
     );
     expect(sharedPersona?.owner).toBe("egma");
@@ -600,7 +600,7 @@ describe("the list", () => {
     // and reads exactly as one that was never minted.
     const misfiled = await browse(
       "GET",
-      `/api/personas/${there.id}?project=${ada.projectId}`,
+      `/v1/personas/${there.id}?projectId=${ada.projectId}`,
       ada,
     );
     expect(misfiled.statusCode).toBe(404);
@@ -614,7 +614,7 @@ describe("the list", () => {
     // And another organization cannot even name the project.
     const stranger = await browse(
       "GET",
-      `/api/personas/${here.id}?project=${ada.projectId}`,
+      `/v1/personas/${here.id}?projectId=${ada.projectId}`,
       grace,
     );
     expect(stranger.statusCode).toBe(404);
@@ -628,9 +628,9 @@ describe("editing a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Renamed Rowan");
 
-    const renamed = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
+    const renamed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
       name: "Rowan",
       description: "Somebody who calls about a bill.",
     });
@@ -640,7 +640,7 @@ describe("editing a persona", () => {
     expect(now.name).toBe("Rowan");
     expect(now.description).toBe("Somebody who calls about a bill.");
     expect(now.version).toBe(1);
-    expect(now.version_id).toBe(made.version_id);
+    expect(now.versionId).toBe(made.versionId);
     expect(now.revision).not.toBe(made.revision);
   });
 
@@ -649,32 +649,32 @@ describe("editing a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Versioned Vera");
 
-    const changed = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
-      expected_version_id: made.version_id,
+    const changed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
+      expectedVersionId: made.versionId,
       traits: { ...TRAITS, personality: "Vera, after a long wait." },
     });
     expect(changed.statusCode).toBe(200);
     expect(personaIn(changed).version).toBe(2);
 
-    const identical = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: personaIn(changed).revision,
-      expected_version_id: personaIn(changed).version_id,
+    const identical = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: personaIn(changed).revision,
+      expectedVersionId: personaIn(changed).versionId,
       traits: personaIn(changed).traits,
     });
     expect(identical.statusCode).toBe(200);
     expect(personaIn(identical).version).toBe(2);
-    expect(personaIn(identical).version_id).toBe(personaIn(changed).version_id);
+    expect(personaIn(identical).versionId).toBe(personaIn(changed).versionId);
 
     const history = await browse(
       "GET",
-      `/api/personas/${made.id}/versions?project=${ada.projectId}`,
+      `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
     expect(
-      (history.body.items as { version: number }[]).map((v) => v.version),
+      (history.body.versions as { version: number }[]).map((v) => v.version),
     ).toEqual([2, 1]);
   });
 
@@ -692,10 +692,10 @@ describe("editing a persona", () => {
       },
     };
 
-    const changed = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
-      expected_version_id: made.version_id,
+    const changed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
+      expectedVersionId: made.versionId,
       models,
     });
 
@@ -704,10 +704,10 @@ describe("editing a persona", () => {
 
     const history = await browse(
       "GET",
-      `/api/personas/${made.id}/versions?project=${ada.projectId}`,
+      `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
-    expect(history.body.items).toMatchObject([
+    expect(history.body.versions).toMatchObject([
       { version: 2, traits: TRAITS, models },
       { version: 1, traits: TRAITS, models: RECOMMENDED_PERSONA_MODELS },
     ]);
@@ -718,16 +718,16 @@ describe("editing a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Contested Cora");
 
-    await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
+    await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
       name: "Cora, renamed once",
     });
 
     // The second tab, still holding the revision it read before that.
-    const refused = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
+    const refused = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
       name: "Cora, renamed twice",
     });
 
@@ -736,13 +736,13 @@ describe("editing a persona", () => {
       error: "identity_conflict",
       message:
         `Persona ${made.id} changed after you opened it. Read it again, keep ` +
-        "or reapply your edits, and send the update with expected_revision " +
+        "or reapply your edits, and send the update with expectedRevision " +
         "set to its new revision.",
     });
 
     const now = await browse(
       "GET",
-      `/api/personas/${made.id}?project=${ada.projectId}`,
+      `/v1/personas/${made.id}?projectId=${ada.projectId}`,
       ada,
     );
     expect(personaIn(now).name).toBe("Cora, renamed once");
@@ -753,20 +753,20 @@ describe("editing a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Contested Cyrus");
 
-    const second = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
-      expected_version_id: made.version_id,
+    const second = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
+      expectedVersionId: made.versionId,
       traits: {
         ...TRAITS,
         personality: "Cyrus waits once, then asks for a manager.",
       },
     });
 
-    const refused = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: personaIn(second).revision,
-      expected_version_id: made.version_id,
+    const refused = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: personaIn(second).revision,
+      expectedVersionId: made.versionId,
       traits: {
         ...TRAITS,
         personality: "Cyrus asks for a manager immediately.",
@@ -777,10 +777,10 @@ describe("editing a persona", () => {
     expect(refused.body).toEqual({
       error: "version_conflict",
       message:
-        `this persona edit was written against version ${made.version_id}, ` +
-        `and it has moved on to ${personaIn(second).version_id}. Read the ` +
+        `this persona edit was written against version ${made.versionId}, ` +
+        `and it has moved on to ${personaIn(second).versionId}. Read the ` +
         "persona again, keep or reapply your edits, and send them with " +
-        `expected_version_id set to ${personaIn(second).version_id}.`,
+        `expectedVersionId set to ${personaIn(second).versionId}.`,
     });
   });
 
@@ -789,34 +789,34 @@ describe("editing a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Guarded Gail");
 
-    const noRevision = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
+    const noRevision = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
       name: "Gail",
     });
     expect(noRevision.statusCode).toBe(422);
-    expect(String(noRevision.body.message)).toContain("expected_revision");
+    expect(String(noRevision.body.message)).toContain("expectedRevision");
 
-    const noVersion = await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
+    const noVersion = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
       traits: { ...TRAITS, personality: "Gail is still waiting." },
     });
     expect(noVersion.statusCode).toBe(422);
-    expect(String(noVersion.body.message)).toContain("expected_version_id");
+    expect(String(noVersion.body.message)).toContain("expectedVersionId");
 
     const noModelsVersion = await browse(
       "PATCH",
-      `/api/personas/${made.id}`,
+      `/v1/personas/${made.id}`,
       ada,
       {
-        project: ada.projectId,
-        expected_revision: made.revision,
+        projectId: ada.projectId,
+        expectedRevision: made.revision,
         models: RECOMMENDED_PERSONA_MODELS,
       },
     );
     expect(noModelsVersion.statusCode).toBe(422);
     expect(String(noModelsVersion.body.message)).toContain(
-      "expected_version_id",
+      "expectedVersionId",
     );
   });
 });
@@ -828,13 +828,13 @@ describe("forking a persona", () => {
     const made = personaIn(
       await browse(
         "GET",
-        `/api/personas/${await defaultPersonaOf(ada.projectId)}?project=${ada.projectId}`,
+        `/v1/personas/${await defaultPersonaOf(ada.projectId)}?projectId=${ada.projectId}`,
         ada,
       ),
     );
 
-    const forked = await browse("POST", `/api/personas/${made.id}/fork`, ada, {
-      project: ada.projectId,
+    const forked = await browse("POST", `/v1/personas/${made.id}/fork`, ada, {
+      projectId: ada.projectId,
     });
 
     expect(forked.statusCode).toBe(201);
@@ -846,14 +846,14 @@ describe("forking a persona", () => {
     expect(fork.owner).toBe("organization");
     // Its own history, starting over: the source's versions are the source's.
     expect(fork.version).toBe(1);
-    expect(fork.version_id).not.toBe(made.version_id);
+    expect(fork.versionId).not.toBe(made.versionId);
 
     const history = await browse(
       "GET",
-      `/api/personas/${fork.id}/versions?project=${ada.projectId}`,
+      `/v1/personas/${fork.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
-    expect(history.body.items).toHaveLength(1);
+    expect(history.body.versions).toHaveLength(1);
   });
 });
 
@@ -877,9 +877,9 @@ describe("archiving a persona", () => {
 
     const refused = await browse(
       "POST",
-      `/api/personas/${made.id}/archive`,
+      `/v1/personas/${made.id}/archive`,
       ada,
-      { project: ada.projectId, expected_revision: made.revision },
+      { projectId: ada.projectId, expectedRevision: made.revision },
     );
 
     expect(refused.statusCode).toBe(409);
@@ -893,10 +893,10 @@ describe("archiving a persona", () => {
 
     const still = await browse(
       "GET",
-      `/api/personas/${made.id}?project=${ada.projectId}`,
+      `/v1/personas/${made.id}?projectId=${ada.projectId}`,
       ada,
     );
-    expect(personaIn(still).archived_at).toBeNull();
+    expect(personaIn(still).archivedAt).toBeNull();
   });
 
   it("refuses every lifecycle write to an Egma-provided persona", async () => {
@@ -905,7 +905,7 @@ describe("archiving a persona", () => {
     const defaultPersonaId = await defaultPersonaOf(ada.projectId);
     const read = await browse(
       "GET",
-      `/api/personas/${defaultPersonaId}?project=${ada.projectId}`,
+      `/v1/personas/${defaultPersonaId}?projectId=${ada.projectId}`,
       ada,
     );
     const holding = personaIn(read);
@@ -913,9 +913,9 @@ describe("archiving a persona", () => {
     for (const action of ["archive", "restore"] as const) {
       const refused = await browse(
         "POST",
-        `/api/personas/${defaultPersonaId}/${action}`,
+        `/v1/personas/${defaultPersonaId}/${action}`,
         ada,
-        { project: ada.projectId, expected_revision: holding.revision },
+        { projectId: ada.projectId, expectedRevision: holding.revision },
       );
       expect(refused.statusCode, action).toBe(422);
       expect(refused.body, action).toEqual({
@@ -934,31 +934,31 @@ describe("archiving a persona", () => {
 
     const archived = await browse(
       "POST",
-      `/api/personas/${made.id}/archive`,
+      `/v1/personas/${made.id}/archive`,
       ada,
-      { project: ada.projectId, expected_revision: made.revision },
+      { projectId: ada.projectId, expectedRevision: made.revision },
     );
     expect(archived.statusCode).toBe(200);
-    expect(personaIn(archived).archived_at).toEqual(expect.any(String));
+    expect(personaIn(archived).archivedAt).toEqual(expect.any(String));
 
     const restored = await browse(
       "POST",
-      `/api/personas/${made.id}/restore`,
+      `/v1/personas/${made.id}/restore`,
       ada,
       {
-        project: ada.projectId,
-        expected_revision: personaIn(archived).revision,
+        projectId: ada.projectId,
+        expectedRevision: personaIn(archived).revision,
       },
     );
     expect(restored.statusCode).toBe(200);
-    expect(personaIn(restored).archived_at).toBeNull();
+    expect(personaIn(restored).archivedAt).toBeNull();
 
     const active = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}`,
+      `/v1/personas?projectId=${ada.projectId}`,
       ada,
     );
-    expect((active.body.items as WirePersona[]).map((one) => one.id)).toContain(
+    expect((active.body.personas as WirePersona[]).map((one) => one.id)).toContain(
       made.id,
     );
   });
@@ -991,9 +991,9 @@ describe("archiving a persona", () => {
 
     const archived = await browse(
       "POST",
-      `/api/personas/${leaving.id}/archive`,
+      `/v1/personas/${leaving.id}/archive`,
       ada,
-      { project: ada.projectId, expected_revision: leaving.revision },
+      { projectId: ada.projectId, expectedRevision: leaving.revision },
     );
     expect(archived.statusCode).toBe(200);
   });
@@ -1021,9 +1021,9 @@ describe("archiving a persona", () => {
     // is not going to run cannot lose a simulation.
     const blocked = await browse(
       "POST",
-      `/api/personas/${leaving.id}/archive`,
+      `/v1/personas/${leaving.id}/archive`,
       ada,
-      { project: ada.projectId, expected_revision: leaving.revision },
+      { projectId: ada.projectId, expectedRevision: leaving.revision },
     );
     expect(blocked.statusCode).toBe(409);
     expect(blocked.body.error).toBe("persona_in_use");
@@ -1032,12 +1032,12 @@ describe("archiving a persona", () => {
 
     const archived = await browse(
       "POST",
-      `/api/personas/${leaving.id}/archive`,
+      `/v1/personas/${leaving.id}/archive`,
       ada,
-      { project: ada.projectId, expected_revision: leaving.revision },
+      { projectId: ada.projectId, expectedRevision: leaving.revision },
     );
     expect(archived.statusCode, JSON.stringify(archived.body)).toBe(200);
-    expect(personaIn(archived).archived_at).toEqual(expect.any(String));
+    expect(personaIn(archived).archivedAt).toEqual(expect.any(String));
   });
 });
 
@@ -1055,14 +1055,14 @@ describe("what a viewer is refused", () => {
 
     const read = await browse(
       "GET",
-      `/api/personas/${made.id}?project=${ada.projectId}`,
+      `/v1/personas/${made.id}?projectId=${ada.projectId}`,
       reader,
     );
     expect(read.statusCode).toBe(200);
 
     const history = await browse(
       "GET",
-      `/api/personas/${made.id}/versions?project=${ada.projectId}`,
+      `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
       reader,
     );
     expect(history.statusCode).toBe(200);
@@ -1071,42 +1071,42 @@ describe("what a viewer is refused", () => {
       [
         [
           "POST",
-          "/api/personas",
-          { project: ada.projectId, name: "Nope", traits: TRAITS },
+          "/v1/personas",
+          { projectId: ada.projectId, name: "Nope", traits: TRAITS },
           "create personas",
         ],
         [
           "PATCH",
-          `/api/personas/${made.id}`,
+          `/v1/personas/${made.id}`,
           {
-            project: ada.projectId,
-            expected_revision: made.revision,
+            projectId: ada.projectId,
+            expectedRevision: made.revision,
             name: "Nope",
           },
           "edit personas",
         ],
         [
           "POST",
-          `/api/personas/${made.id}/fork`,
-          { project: ada.projectId },
+          `/v1/personas/${made.id}/fork`,
+          { projectId: ada.projectId },
           "fork personas",
         ],
         [
           "POST",
-          `/api/personas/${made.id}/default`,
-          { project: ada.projectId },
+          `/v1/personas/${made.id}/default`,
+          { projectId: ada.projectId },
           "change the project default persona",
         ],
         [
           "POST",
-          `/api/personas/${made.id}/archive`,
-          { project: ada.projectId, expected_revision: made.revision },
+          `/v1/personas/${made.id}/archive`,
+          { projectId: ada.projectId, expectedRevision: made.revision },
           "archive personas",
         ],
         [
           "POST",
-          `/api/personas/${made.id}/restore`,
-          { project: ada.projectId, expected_revision: made.revision },
+          `/v1/personas/${made.id}/restore`,
+          { projectId: ada.projectId, expectedRevision: made.revision },
           "restore personas",
         ],
       ];
@@ -1131,11 +1131,11 @@ describe("what a viewer is refused", () => {
     // boundary, and a browser was never part of the decision.
     const listed = await browse(
       "GET",
-      `/api/personas?project=${ada.projectId}`,
+      `/v1/personas?projectId=${ada.projectId}`,
       ada,
     );
     expect(
-      (listed.body.items as WirePersona[]).map((one) => one.name),
+      (listed.body.personas as WirePersona[]).map((one) => one.name),
     ).toContain("Readable Rae");
   });
 });
@@ -1146,10 +1146,10 @@ describe("history and usage", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Historic Hana");
 
-    await browse("PATCH", `/api/personas/${made.id}`, ada, {
-      project: ada.projectId,
-      expected_revision: made.revision,
-      expected_version_id: made.version_id,
+    await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      expectedRevision: made.revision,
+      expectedVersionId: made.versionId,
       traits: {
         ...TRAITS,
         personality: "Hana has waited too long and is now blunt.",
@@ -1158,7 +1158,7 @@ describe("history and usage", () => {
 
     const older = await browse(
       "GET",
-      `/api/persona-versions/${made.version_id}?project=${ada.projectId}`,
+      `/v1/persona-versions/${made.versionId}?projectId=${ada.projectId}`,
       ada,
     );
     expect(older.statusCode).toBe(200);
@@ -1169,7 +1169,7 @@ describe("history and usage", () => {
 
     const before = await browse(
       "GET",
-      `/api/personas/${made.id}/usage?project=${ada.projectId}`,
+      `/v1/personas/${made.id}/usage?projectId=${ada.projectId}`,
       ada,
     );
     expect(before.body.tests).toEqual([]);
@@ -1188,7 +1188,7 @@ describe("history and usage", () => {
 
     const after = await browse(
       "GET",
-      `/api/personas/${made.id}/usage?project=${ada.projectId}`,
+      `/v1/personas/${made.id}/usage?projectId=${ada.projectId}`,
       ada,
     );
     expect(after.body.tests).toEqual([
@@ -1209,9 +1209,9 @@ describe("history and usage", () => {
     };
 
     for (const url of [
-      `/api/personas/${nobody}?project=${ada.projectId}`,
-      `/api/personas/${nobody}/versions?project=${ada.projectId}`,
-      `/api/personas/${nobody}/usage?project=${ada.projectId}`,
+      `/v1/personas/${nobody}?projectId=${ada.projectId}`,
+      `/v1/personas/${nobody}/versions?projectId=${ada.projectId}`,
+      `/v1/personas/${nobody}/usage?projectId=${ada.projectId}`,
     ]) {
       const refused = await browse("GET", url, ada);
       expect(refused.statusCode, url).toBe(404);

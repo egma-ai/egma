@@ -251,7 +251,7 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
 /**
  * A phrase the counterpart says back, and the turn the judge is scripted to
  * cite. It is not a grader of its own any more — there is one grader on this
- * project and it is the copy of `expected_behaviors` every project is created
+ * project and it is the copy of `expectedBehaviors` every project is created
  * with — so what it proves now is where the cited turn came from: the judge was
  * shown a transcript egma assembled out of the spans the simulator streamed,
  * and the turn it pointed at is the turn holding these words.
@@ -316,9 +316,9 @@ async function signedUpKey(): Promise<{
     project: { id: string };
   };
 
-  const minted = await call("POST", "/api/keys", {
+  const minted = await call("POST", "/v1/keys", {
     cookie,
-    body: { name: "walking", project_id: landed.project.id },
+    body: { name: "walking", projectId: landed.project.id },
   });
   expect(minted.status, JSON.stringify(minted.body)).toBe(201);
   return {
@@ -388,7 +388,7 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
 }
 
 /**
- * The one grader this project judges with: the copy of `expected_behaviors`
+ * The one grader this project judges with: the copy of `expectedBehaviors`
  * every project is created with, found rather than authored.
  */
 async function theProjectsGrader(
@@ -482,7 +482,7 @@ async function settledRun(
 ): Promise<Record<string, unknown>> {
   const deadline = Date.now() + within;
   for (;;) {
-    const read = await call("GET", `/api/runs/${runId}`, { key });
+    const read = await call("GET", `/v1/runs/${runId}`, { key });
     expect(read.status, JSON.stringify(read.body)).toBe(200);
     const status = String(read.body.status);
     if (status === "completed" || status === "canceled") return read.body;
@@ -527,14 +527,14 @@ describe("the shipped simulator against the real API", () => {
 
       // The agent and the way to reach it — a retell chat connection whose
       // key the counterpart accepts, and a second whose key it refuses.
-      const registered = await call("POST", "/api/agents", {
+      const registered = await call("POST", "/v1/agents", {
         key,
         body: {
           name: "Front desk",
           connection: {
-            agent_platform: "retell",
-            connection_kind: "retell_chat_api",
-            access_variant: "retell_chat_api.api_key",
+            agentPlatform: "retell",
+            connectionKind: "retell_chat_api",
+            accessVariant: "retell_chat_api.api_key",
             modality: "chat",
             config: { retellAgentId: "agent_under_walk" },
             credentials: { apiKey: COUNTERPART_KEY },
@@ -545,12 +545,12 @@ describe("the shipped simulator against the real API", () => {
       const agentId = (registered.body.agent as { id: string }).id;
       const goodConnection = (registered.body.connection as { id: string }).id;
 
-      const attached = await call("POST", `/api/agents/${agentId}/connections`, {
+      const attached = await call("POST", `/v1/agents/${agentId}/connections`, {
         key,
         body: {
-          agent_platform: "retell",
-          connection_kind: "retell_chat_api",
-          access_variant: "retell_chat_api.api_key",
+          agentPlatform: "retell",
+          connectionKind: "retell_chat_api",
+          accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_under_walk" },
           credentials: { apiKey: REFUSED_KEY },
@@ -593,28 +593,28 @@ describe("the shipped simulator against the real API", () => {
       // expected-behaviors copy; its immutable version owns the model and the
       // worker resolves the deployment credential at claim time.
 
-      const pushed = await call("POST", "/api/tests", {
+      const pushed = await call("POST", "/v1/tests", {
         key,
         body: {
           name: "Reschedules a booked appointment",
           scenario:
             "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-          expected_behaviors: [THE_BEHAVIOR],
+          expectedBehaviors: [THE_BEHAVIOR],
           personas: ["Impatient Rita"],
         },
       });
       expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
-      const versionId = String(pushed.body.version_id);
+      const versionId = String(pushed.body.versionId);
 
       // Both runs queued before the simulator exists, so the walk starts
       // from the resting state a trigger leaves behind.
       const startRunOver = async (connection: string) => {
-        const started = await call("POST", "/api/runs", {
+        const started = await call("POST", "/v1/runs", {
           key,
           body: {
-            connection,
-            test_versions: [versionId],
-            idempotency_key: newId("run"),
+            connectionId: connection,
+            testVersionIds: [versionId],
+            idempotencyKey: newId("run"),
           },
         });
         expect(started.status, JSON.stringify(started.body)).toBe(201);
@@ -801,8 +801,8 @@ describe("the shipped simulator against the real API", () => {
       expect(new Set(spans.map((span) => span.span_id)).size).toBe(spans.length);
 
       expect(conductedRun.status).toBe("completed");
-      expect(conductedRun.completed_count).toBe(1);
-      expect(conductedRun.failed_count).toBe(0);
+      expect(conductedRun.completedCount).toBe(1);
+      expect(conductedRun.failedCount).toBe(0);
 
       // The conversation that could not happen: the platform refused the
       // key, and the record says failed with the simulator's honest word —
@@ -819,18 +819,18 @@ describe("the shipped simulator against the real API", () => {
       expect(refusedSpans.map((span) => span.name)).toEqual(["simulation"]);
 
       expect(refusedRun.status).toBe("completed");
-      expect(refusedRun.completed_count).toBe(0);
-      expect(refusedRun.failed_count).toBe(1);
+      expect(refusedRun.completedCount).toBe(0);
+      expect(refusedRun.failedCount).toBe(1);
 
       // And the verdict, which is what the whole walk was for. One grader
-      // judged this conversation — the copy of `expected_behaviors` the project
+      // judged this conversation — the copy of `expectedBehaviors` the project
       // was created with — and it answered out of a transcript that exists only
       // as the spans above.
       const verdicts = await verdictsOn(auth, conducted.simulationId, 1, 30_000);
       const [behavior] = verdicts;
 
       // **It names a real grader**, which is the whole of what the seeded copy
-      // bought: a verdict row used to carry the word `expected_behaviors` where
+      // bought: a verdict row used to carry the word `expectedBehaviors` where
       // a grader id belongs, because the built-in was never a row anywhere.
       const seeded = await theProjectsGrader(auth);
       expect(behavior).toMatchObject({

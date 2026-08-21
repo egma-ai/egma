@@ -73,7 +73,7 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: [
+  expectedBehaviors: [
     "verifies who it is speaking to before discussing the booking",
     "confirms the new time back before finishing",
   ],
@@ -93,9 +93,9 @@ function registration(
     name: overrides.name ?? "Front desk",
     connection: {
       ...(overrides.connectionName === undefined ? {} : { name: overrides.connectionName }),
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -108,9 +108,9 @@ function connectionPayload(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
@@ -171,7 +171,7 @@ describe("the repository refusal both ends make", () => {
 
 describe("creating a test", () => {
   it("answers the whole test, with the version a file will pin", async () => {
-    const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
+    const created = await ask("POST", "/v1/tests", { ...RESCHEDULING });
 
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     expect(created.body).toMatchObject({
@@ -181,22 +181,22 @@ describe("creating a test", () => {
       // Sentences in, sentences out. What a body sends is what comes back:
       // an expected behavior carries no metadata, and the retired
       // `{behavior, priority}` shape is refused by name on the way in.
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expectedBehaviors: [...RESCHEDULING.expectedBehaviors],
     });
     expect(String(created.body.id)).toMatch(/^tst_/u);
-    expect(String(created.body.version_id)).toMatch(/^tstv_/u);
+    expect(String(created.body.versionId)).toMatch(/^tstv_/u);
     expect(String(created.body.revision)).toMatch(/^rev_/u);
-    expect(created.body.created_at).toBeTypeOf("string");
+    expect(created.body.createdAt).toBeTypeOf("string");
   });
 
   it("takes the project's default persona when the file names nobody", async () => {
-    const named = await ask("POST", "/api/tests", { ...RESCHEDULING, personas: [] });
-    const absent = await ask("POST", "/api/tests", { ...RESCHEDULING, name: "Another" });
+    const named = await ask("POST", "/v1/tests", { ...RESCHEDULING, personas: [] });
+    const absent = await ask("POST", "/v1/tests", { ...RESCHEDULING, name: "Another" });
 
     for (const created of [named, absent]) {
       expect(created.status).toBe(201);
       expect(created.body.personas).toEqual([
-        { id: expect.any(String), name: expect.any(String), archived_at: null },
+        { id: expect.any(String), name: expect.any(String), archivedAt: null },
       ]);
     }
   });
@@ -205,31 +205,31 @@ describe("creating a test", () => {
     const omar = platform.tests.addPersona("Omar");
     const rita = platform.tests.addPersona("Impatient Rita");
 
-    const created = await ask("POST", "/api/tests", {
+    const created = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
       personas: ["Impatient Rita", "Omar"],
     });
 
     expect(created.status).toBe(201);
     expect(created.body.personas).toEqual([
-      { id: rita, name: "Impatient Rita", archived_at: null },
-      { id: omar, name: "Omar", archived_at: null },
+      { id: rita, name: "Impatient Rita", archivedAt: null },
+      { id: omar, name: "Omar", archivedAt: null },
     ]);
   });
 
   it("resolves an identifier too, so a client holding one needs no name", async () => {
     const omar = platform.tests.addPersona("Omar");
 
-    const created = await ask("POST", "/api/tests", { ...RESCHEDULING, personas: [omar] });
+    const created = await ask("POST", "/v1/tests", { ...RESCHEDULING, personas: [omar] });
 
     expect(created.status).toBe(201);
     expect(created.body.personas).toEqual([
-      { id: omar, name: "Omar", archived_at: null },
+      { id: omar, name: "Omar", archivedAt: null },
     ]);
   });
 
   it("refuses a persona nobody in this project answers to", async () => {
-    const refused = await ask("POST", "/api/tests", {
+    const refused = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
       personas: ["Impatient Rita"],
     });
@@ -246,7 +246,7 @@ describe("creating a test", () => {
   it("refuses one persona named twice, because that asks for one simulation twice", async () => {
     platform.tests.addPersona("Omar");
 
-    const refused = await ask("POST", "/api/tests", {
+    const refused = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
       personas: ["Omar", "Omar"],
     });
@@ -259,7 +259,7 @@ describe("creating a test", () => {
   });
 
   it("refuses personas sent as anything but text, rather than quietly dropping them", async () => {
-    const structured = await ask("POST", "/api/tests", {
+    const structured = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
       personas: [{ name: "Omar" }],
     });
@@ -273,7 +273,7 @@ describe("creating a test", () => {
         'list of text, like ["impatient-caller"].',
     });
 
-    const notAList = await ask("POST", "/api/tests", {
+    const notAList = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
       personas: "Omar",
     });
@@ -291,23 +291,23 @@ describe("creating a test", () => {
   });
 
   it("relays the factory's own sentence for a test that could never be one", async () => {
-    const nameless = await ask("POST", "/api/tests", { ...RESCHEDULING, name: "" });
+    const nameless = await ask("POST", "/v1/tests", { ...RESCHEDULING, name: "" });
     expect(nameless.status).toBe(422);
     expect(nameless.body).toEqual({
       error: "unprocessable",
       message: "a test needs a name",
     });
 
-    const situationless = await ask("POST", "/api/tests", { ...RESCHEDULING, scenario: "" });
+    const situationless = await ask("POST", "/v1/tests", { ...RESCHEDULING, scenario: "" });
     expect(situationless.status).toBe(422);
     expect(situationless.body).toEqual({
       error: "unprocessable",
       message: "a test needs a scenario: the situation the agent is put in",
     });
 
-    const unfalsifiable = await ask("POST", "/api/tests", {
+    const unfalsifiable = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      expected_behaviors: [],
+      expectedBehaviors: [],
     });
     expect(unfalsifiable.status).toBe(422);
     expect(unfalsifiable.body).toEqual({
@@ -316,9 +316,9 @@ describe("creating a test", () => {
         "a test needs at least one expected behavior, because a test that cannot fail is not a test",
     });
 
-    const empty = await ask("POST", "/api/tests", {
+    const empty = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      expected_behaviors: ["  "],
+      expectedBehaviors: ["  "],
     });
     expect(empty.status).toBe(422);
     expect(empty.body).toEqual({
@@ -344,25 +344,25 @@ describe("a mock tool the folder authors", () => {
   const CALENDAR = { tool: "check_availability", answer: { slots: [] } } as const;
 
   it("answers the whole mock tool, with no version anywhere on it", async () => {
-    const created = await ask("POST", "/api/mock-tools", { ...CALENDAR });
+    const created = await ask("POST", "/v1/mock-tools", { ...CALENDAR });
 
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     expect(created.body).toMatchObject({
       tool: "check_availability",
       answer: { slots: [] },
-      delay_ms: 0,
+      delayMs: 0,
       agents: [],
     });
     expect(String(created.body.id)).toMatch(/^mck_/u);
     // The one authored thing egma does not version: there is no version to
     // read, so a client cannot grow a pin it would then have to keep in step.
     expect(created.body).not.toHaveProperty("version");
-    expect(created.body).not.toHaveProperty("version_id");
-    expect(created.body).not.toHaveProperty("project_id");
+    expect(created.body).not.toHaveProperty("versionId");
+    expect(created.body).not.toHaveProperty("projectId");
   });
 
   it("keeps an answer of null tellable from no answer at all", async () => {
-    const created = await ask("POST", "/api/mock-tools", {
+    const created = await ask("POST", "/v1/mock-tools", {
       tool: "last_visit",
       answer: null,
     });
@@ -373,7 +373,7 @@ describe("a mock tool the folder authors", () => {
   });
 
   it("relays the factory's own sentence for an answer it cannot serve", async () => {
-    const blank = await ask("POST", "/api/mock-tools", { ...CALENDAR, tool: "   " });
+    const blank = await ask("POST", "/v1/mock-tools", { ...CALENDAR, tool: "   " });
     expect(blank.status).toBe(422);
     expect(blank.body).toEqual({
       error: "unprocessable",
@@ -383,7 +383,7 @@ describe("a mock tool the folder authors", () => {
         "registers it.",
     });
 
-    const both = await ask("POST", "/api/mock-tools", {
+    const both = await ask("POST", "/v1/mock-tools", {
       ...CALENDAR,
       error: "unavailable",
     });
@@ -395,7 +395,7 @@ describe("a mock tool the folder authors", () => {
         "error. Send whichever branch the test needs.",
     });
 
-    const neither = await ask("POST", "/api/mock-tools", { tool: "check_availability" });
+    const neither = await ask("POST", "/v1/mock-tools", { tool: "check_availability" });
     expect(neither.status).toBe(422);
     expect(neither.body).toEqual({
       error: "unprocessable",
@@ -408,25 +408,25 @@ describe("a mock tool the folder authors", () => {
   it("names the ceiling a delay went past, with the arithmetic the fix needs", async () => {
     const tooLong = LONGEST_MOCK_TOOL_DELAY_MILLISECONDS + 1;
 
-    const refused = await ask("POST", "/api/mock-tools", {
+    const refused = await ask("POST", "/v1/mock-tools", {
       ...CALENDAR,
-      delay_ms: tooLong,
+      delayMs: tooLong,
     });
 
     expect(refused.status).toBe(422);
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        `delay_ms is ${tooLong}, and a mock tool may delay its answer by at ` +
+        `delayMs is ${tooLong}, and a mock tool may delay its answer by at ` +
         `most ${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the ` +
-        `budget the exchange carrying it is given. Send a smaller delay_ms.`,
+        `budget the exchange carrying it is given. Send a smaller delayMs.`,
     });
   });
 
   it("names the size an answer went past, counted the way the exchange counts", async () => {
     const enormous = "x".repeat(LARGEST_MOCK_TOOL_ANSWER_BYTES);
 
-    const refused = await ask("POST", "/api/mock-tools", {
+    const refused = await ask("POST", "/v1/mock-tools", {
       tool: "read_document",
       answer: { body: enormous },
     });
@@ -446,7 +446,7 @@ describe("a mock tool the folder authors", () => {
   });
 
   it("refuses a key it has no place for, by name", async () => {
-    const refused = await ask("POST", "/api/mock-tools", {
+    const refused = await ask("POST", "/v1/mock-tools", {
       ...CALENDAR,
       matches: { city: "Berlin" },
     });
@@ -456,15 +456,15 @@ describe("a mock tool the folder authors", () => {
       error: "invalid_request",
       message:
         'a mock tool has no key "matches"; it holds tool, answer, error, ' +
-        "delay_ms, agents, project",
+        "delayMs, agents, projectId",
     });
   });
 
   it("refuses a second answer for a tool this project already answers for", async () => {
-    const first = await ask("POST", "/api/mock-tools", { ...CALENDAR });
+    const first = await ask("POST", "/v1/mock-tools", { ...CALENDAR });
     expect(first.status).toBe(201);
 
-    const refused = await ask("POST", "/api/mock-tools", {
+    const refused = await ask("POST", "/v1/mock-tools", {
       tool: CALENDAR.tool,
       error: "the calendar is unreachable",
     });
@@ -480,12 +480,12 @@ describe("a mock tool the folder authors", () => {
   });
 
   it("overwrites on an edit, minting nothing and asking for no version", async () => {
-    const created = await ask("POST", "/api/mock-tools", { ...CALENDAR });
+    const created = await ask("POST", "/v1/mock-tools", { ...CALENDAR });
     const id = String(created.body.id);
 
-    const edited = await ask("PATCH", `/api/mock-tools/${id}`, {
+    const edited = await ask("PATCH", `/v1/mock-tools/${id}`, {
       error: "the calendar is unreachable",
-      delay_ms: 250,
+      delayMs: 250,
     });
 
     expect(edited.status).toBe(200);
@@ -493,7 +493,7 @@ describe("a mock tool the folder authors", () => {
       id,
       tool: "check_availability",
       error: "the calendar is unreachable",
-      delay_ms: 250,
+      delayMs: 250,
     });
     // The branch it left behind is gone rather than kept beside the new one.
     expect(edited.body).not.toHaveProperty("answer");
@@ -502,7 +502,7 @@ describe("a mock tool the folder authors", () => {
   it("says the same thing about a mock tool that is not there and one that is not yours", async () => {
     const theirs = "mck_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
-    const refused = await ask("PATCH", `/api/mock-tools/${theirs}`, { answer: 1 });
+    const refused = await ask("PATCH", `/v1/mock-tools/${theirs}`, { answer: 1 });
 
     expect(refused.status).toBe(404);
     expect(refused.body).toEqual({
@@ -514,19 +514,19 @@ describe("a mock tool the folder authors", () => {
   });
 
   it("answers one envelope, and refuses a cursor it never issued", async () => {
-    await ask("POST", "/api/mock-tools", { ...CALENDAR });
+    await ask("POST", "/v1/mock-tools", { ...CALENDAR });
 
-    const listed = await ask("GET", "/api/mock-tools");
+    const listed = await ask("GET", "/v1/mock-tools");
     expect(listed.status).toBe(200);
-    expect(Object.keys(listed.body).sort()).toEqual(["items", "next_cursor"]);
-    expect(listed.body.next_cursor).toBeNull();
+    expect(Object.keys(listed.body).sort()).toEqual(["mockTools", "nextPageToken"]);
+    expect(listed.body.nextPageToken).toBeNull();
 
-    const refused = await ask("GET", "/api/mock-tools?cursor=not-a-cursor");
+    const refused = await ask("GET", "/v1/mock-tools?pageToken=not-a-cursor");
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"not-a-cursor" is not a cursor this list issued. Send the next_cursor ' +
+        '"not-a-cursor" is not a cursor this list issued. Send the nextPageToken ' +
         "an earlier page answered with, or leave it out to start at the newest " +
         "mock tool.",
     });
@@ -542,45 +542,45 @@ describe("a mock tool the folder authors", () => {
  */
 describe("the mock tools a test overrides", () => {
   it("rides the test, comes back on it, and versions with it", async () => {
-    const created = await ask("POST", "/api/tests", {
+    const created = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      mock_tools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 250 }],
+      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delayMs: 250 }],
     });
 
     expect(created.status, JSON.stringify(created.body)).toBe(201);
-    expect(created.body.mock_tools).toEqual([
-      { tool: "check_availability", answer: { slots: [] }, delay_ms: 250 },
+    expect(created.body.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] }, delayMs: 250 },
     ]);
 
     // Editing one is editing the test, so it mints the next version.
-    const edited = await ask("PATCH", `/api/tests/${String(created.body.id)}`, {
-      expected_version_id: String(created.body.version_id),
-      mock_tools: [{ tool: "check_availability", error: "the calendar is unreachable" }],
+    const edited = await ask("PATCH", `/v1/tests/${String(created.body.id)}`, {
+      expectedVersionId: String(created.body.versionId),
+      mockTools: [{ tool: "check_availability", error: "the calendar is unreachable" }],
     });
     expect(edited.status).toBe(200);
     expect(edited.body.version).toBe(2);
-    expect(edited.body.mock_tools).toEqual([
-      { tool: "check_availability", error: "the calendar is unreachable", delay_ms: 0 },
+    expect(edited.body.mockTools).toEqual([
+      { tool: "check_availability", error: "the calendar is unreachable", delayMs: 0 },
     ]);
 
     // And the version it left behind still says what it said.
-    const before = await ask("GET", `/api/test-versions/${String(created.body.version_id)}`);
-    expect(before.body.mock_tools).toEqual([
-      { tool: "check_availability", answer: { slots: [] }, delay_ms: 250 },
+    const before = await ask("GET", `/v1/test-versions/${String(created.body.versionId)}`);
+    expect(before.body.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] }, delayMs: 250 },
     ]);
 
     // An empty list clears them; leaving the field out keeps them.
-    const cleared = await ask("PATCH", `/api/tests/${String(created.body.id)}`, {
-      expected_version_id: String(edited.body.version_id),
-      mock_tools: [],
+    const cleared = await ask("PATCH", `/v1/tests/${String(created.body.id)}`, {
+      expectedVersionId: String(edited.body.versionId),
+      mockTools: [],
     });
-    expect(cleared.body.mock_tools).toEqual([]);
+    expect(cleared.body.mockTools).toEqual([]);
   });
 
   it("refuses an override that scopes agents, because an override scopes nothing", async () => {
-    const refused = await ask("POST", "/api/tests", {
+    const refused = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      mock_tools: [{ tool: "check_availability", answer: 1, agents: ["front-desk"] }],
+      mockTools: [{ tool: "check_availability", answer: 1, agents: ["front-desk"] }],
     });
 
     expect(refused.status).toBe(422);
@@ -588,30 +588,30 @@ describe("the mock tools a test overrides", () => {
       error: "unprocessable",
       message:
         'a mock tool a test overrides has no key "agents"; it holds tool, ' +
-        "answer, error, delay_ms",
+        "answer, error, delayMs",
     });
     expect(platform.tests.tests).toEqual([]);
   });
 
   it("holds an override to every gate a project's own mock tool passes", async () => {
     const tooLong = LONGEST_MOCK_TOOL_DELAY_MILLISECONDS + 1;
-    const refused = await ask("POST", "/api/tests", {
+    const refused = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      mock_tools: [{ tool: "check_availability", answer: 1, delay_ms: tooLong }],
+      mockTools: [{ tool: "check_availability", answer: 1, delayMs: tooLong }],
     });
 
     expect(refused.status).toBe(422);
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        `delay_ms is ${tooLong}, and a mock tool may delay its answer by at ` +
+        `delayMs is ${tooLong}, and a mock tool may delay its answer by at ` +
         `most ${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the ` +
-        `budget the exchange carrying it is given. Send a smaller delay_ms.`,
+        `budget the exchange carrying it is given. Send a smaller delayMs.`,
     });
 
-    const twice = await ask("POST", "/api/tests", {
+    const twice = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      mock_tools: [
+      mockTools: [
         { tool: "check_availability", answer: 1 },
         { tool: "check_availability", answer: 2 },
       ],
@@ -622,15 +622,15 @@ describe("the mock tools a test overrides", () => {
       message: 'this test overrides "check_availability" twice; override each tool once',
     });
 
-    const notAList = await ask("POST", "/api/tests", {
+    const notAList = await ask("POST", "/v1/tests", {
       ...RESCHEDULING,
-      mock_tools: { tool: "check_availability" },
+      mockTools: { tool: "check_availability" },
     });
     expect(notAList.status).toBe(422);
     expect(notAList.body).toEqual({
       error: "unprocessable",
       message:
-        "mock_tools is the list of tools this test answers for itself. Send " +
+        "mockTools is the list of tools this test answers for itself. Send " +
         'it as a list of objects, like [{"tool": "check_availability", ' +
         '"answer": {"slots": []}}], or leave it out and the project\'s mock ' +
         "tools are the whole world.",
@@ -656,18 +656,18 @@ describe("the door every group is behind", () => {
     };
 
     for (const [method, path, payload] of [
-      ["GET", "/api/tests"],
-      ["POST", "/api/tests", RESCHEDULING],
-      ["PATCH", "/api/tests/tst_01JZZZZZZZZZZZZZZZZZZZZZZZ", RESCHEDULING],
-      ["GET", "/api/test-versions/tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
-      ["GET", "/api/agents"],
-      ["POST", "/api/agents", registration()],
-      ["GET", "/api/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
-      ["POST", "/api/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ/connections", connectionPayload()],
-      ["POST", "/api/runs", { connection: "con_01JZZZZZZZZZZZZZZZZZZZZZZZ" }],
-      ["GET", "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
-      ["GET", "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events"],
-      ["GET", "/api/keys"],
+      ["GET", "/v1/tests"],
+      ["POST", "/v1/tests", RESCHEDULING],
+      ["PATCH", "/v1/tests/tst_01JZZZZZZZZZZZZZZZZZZZZZZZ", RESCHEDULING],
+      ["GET", "/v1/test-versions/tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
+      ["GET", "/v1/agents"],
+      ["POST", "/v1/agents", registration()],
+      ["GET", "/v1/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
+      ["POST", "/v1/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ/connections", connectionPayload()],
+      ["POST", "/v1/runs", { connectionId: "con_01JZZZZZZZZZZZZZZZZZZZZZZZ" }],
+      ["GET", "/v1/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ"],
+      ["GET", "/v1/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events"],
+      ["GET", "/v1/keys"],
     ] as const) {
       const response = await fetch(`${platform.url}${path}`, {
         method,
@@ -707,24 +707,24 @@ describe("the list of tests", () => {
         platform.tests.add({
           name: `test ${String(index).padStart(2, "0")}`,
           scenario: RESCHEDULING.scenario,
-          expectedBehaviors: [...RESCHEDULING.expected_behaviors],
+          expectedBehaviors: [...RESCHEDULING.expectedBehaviors],
         }).id,
       );
     }
 
-    const page = await ask("GET", "/api/tests");
+    const page = await ask("GET", "/v1/tests");
     expect(page.status).toBe(200);
-    const items = page.body.items as { id: string }[];
+    const items = page.body.tests as { id: string }[];
     expect(items).toHaveLength(A_PAGE);
     // Newest first, so the last one written is the first one read.
     expect(items[0]?.id).toBe(written.at(-1));
-    expect(page.body.next_cursor).toBe(items.at(-1)?.id);
+    expect(page.body.nextPageToken).toBe(items.at(-1)?.id);
 
-    const rest = await ask("GET", `/api/tests?cursor=${String(page.body.next_cursor)}`);
-    const remaining = rest.body.items as { id: string }[];
+    const rest = await ask("GET", `/v1/tests?pageToken=${String(page.body.nextPageToken)}`);
+    const remaining = rest.body.tests as { id: string }[];
     expect(remaining.map((test) => test.id)).toEqual([written[0]]);
     // Null rather than absent, so "no next page" is told from "an older shape".
-    expect(rest.body.next_cursor).toBeNull();
+    expect(rest.body.nextPageToken).toBeNull();
 
     expect(new Set([...items, ...remaining].map((test) => test.id))).toEqual(new Set(written));
   });
@@ -736,14 +736,14 @@ describe("the list of tests", () => {
       expectedBehaviors: ["confirms the new time"],
     });
 
-    const listed = await ask("GET", "/api/tests");
+    const listed = await ask("GET", "/v1/tests");
 
     expect(listed.status).toBe(200);
-    expect(Object.keys(listed.body).sort()).toEqual(["items", "next_cursor"]);
-    expect((listed.body.items as unknown[]).length).toBe(1);
+    expect(Object.keys(listed.body).sort()).toEqual(["nextPageToken", "tests"]);
+    expect((listed.body.tests as unknown[]).length).toBe(1);
     // Null rather than absent, so a client can tell "there is no next page"
     // from "this answer is an older shape that never had one".
-    expect(listed.body.next_cursor).toBeNull();
+    expect(listed.body.nextPageToken).toBeNull();
   });
 
   it("refuses a project this credential may not act in, on a read as on a write", async () => {
@@ -754,27 +754,27 @@ describe("the list of tests", () => {
         `this credential may not act in project ${theirs}. A ` +
         `credential authorized for one project acts in that one, and a key ` +
         `for the whole organization acts in any project of that organization. ` +
-        `Leave project out to use the project this credential already acts in.`,
+        `Leave projectId out to use the project this credential already acts in.`,
     };
 
-    const reading = await ask("GET", `/api/tests?project=${theirs}`);
+    const reading = await ask("GET", `/v1/tests?projectId=${theirs}`);
     expect(reading.status).toBe(403);
     expect(reading.body).toEqual(refusal);
 
-    const writing = await ask("POST", "/api/tests", { ...RESCHEDULING, project: theirs });
+    const writing = await ask("POST", "/v1/tests", { ...RESCHEDULING, projectId: theirs });
     expect(writing.status).toBe(403);
     expect(writing.body).toEqual(refusal);
     expect(platform.tests.tests).toEqual([]);
   });
 
   it("refuses a cursor it never issued rather than starting again from the top", async () => {
-    const refused = await ask("GET", "/api/tests?cursor=not-a-cursor");
+    const refused = await ask("GET", "/v1/tests?pageToken=not-a-cursor");
 
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"not-a-cursor" is not a cursor this list issued. Send the next_cursor an earlier page answered with, or leave it out to start at the newest test.',
+        '"not-a-cursor" is not a cursor this list issued. Send the nextPageToken an earlier page answered with, or leave it out to start at the newest test.',
     });
   });
 });
@@ -783,7 +783,7 @@ describe("one frozen version", () => {
   it("is not found for a version this egma never issued", async () => {
     const missing = "tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
-    const refused = await ask("GET", `/api/test-versions/${missing}`);
+    const refused = await ask("GET", `/v1/test-versions/${missing}`);
 
     expect(refused.status).toBe(404);
     expect(refused.body).toEqual({
@@ -796,17 +796,17 @@ describe("one frozen version", () => {
 describe("editing a test", () => {
   /** A test on the platform, and the version an edit would be written against. */
   async function aTest(): Promise<{ id: string; versionId: string }> {
-    const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
+    const created = await ask("POST", "/v1/tests", { ...RESCHEDULING });
     return {
       id: String(created.body.id),
-      versionId: String(created.body.version_id),
+      versionId: String(created.body.versionId),
     };
   }
 
   it("refuses an edit that named no version it was written against", async () => {
     const test = await aTest();
 
-    const refused = await ask("PATCH", `/api/tests/${test.id}`, {
+    const refused = await ask("PATCH", `/v1/tests/${test.id}`, {
       scenario: "Something else entirely.",
     });
 
@@ -815,7 +815,7 @@ describe("editing a test", () => {
       error: "unprocessable",
       message:
         "an edit says which version it was written against, and this one " +
-        "named no expected_version_id. Send the version_id you last read " +
+        "named no expectedVersionId. Send the versionId you last read " +
         "for this test, or read the test again and send the version it " +
         "names now.",
     });
@@ -830,10 +830,10 @@ describe("editing a test", () => {
     });
     const current = moved.versionId;
 
-    const refused = await ask("PATCH", `/api/tests/${test.id}`, {
+    const refused = await ask("PATCH", `/v1/tests/${test.id}`, {
       ...RESCHEDULING,
       scenario: "And this is what the file says.",
-      expected_version_id: stale,
+      expectedVersionId: stale,
     });
 
     expect(refused.status).toBe(409);
@@ -842,19 +842,19 @@ describe("editing a test", () => {
       message:
         `this edit was written against version ${stale}, and the test has ` +
         `moved on to ${current}. Read the test again and send the edit with ` +
-        `expected_version_id set to the version it names now.`,
+        `expectedVersionId set to the version it names now.`,
       test: { id: test.id, name: RESCHEDULING.name },
-      expected_version_id: stale,
-      current_version_id: current,
+      expectedVersionId: stale,
+      currentVersionId: current,
     });
   });
 
   it("is not found for a test this credential cannot see", async () => {
     const theirs = "tst_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
-    const refused = await ask("PATCH", `/api/tests/${theirs}`, {
+    const refused = await ask("PATCH", `/v1/tests/${theirs}`, {
       ...RESCHEDULING,
-      expected_version_id: "tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ",
+      expectedVersionId: "tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ",
     });
 
     expect(refused.status).toBe(404);
@@ -867,13 +867,13 @@ describe("editing a test", () => {
   it("mints nothing for content byte-identical to what it already holds", async () => {
     const test = await aTest();
 
-    const again = await ask("PATCH", `/api/tests/${test.id}`, {
+    const again = await ask("PATCH", `/v1/tests/${test.id}`, {
       ...RESCHEDULING,
-      expected_version_id: test.versionId,
+      expectedVersionId: test.versionId,
     });
 
     expect(again.status).toBe(200);
-    expect(again.body.version_id).toBe(test.versionId);
+    expect(again.body.versionId).toBe(test.versionId);
     expect(again.body.version).toBe(1);
     expect(platform.tests.versionsOf(RESCHEDULING.name)).toBe(1);
   });
@@ -881,7 +881,7 @@ describe("editing a test", () => {
 
 describe("registering an agent", () => {
   it("writes the agent and the first way of reaching it in one request", async () => {
-    const registered = await ask("POST", "/api/agents", registration());
+    const registered = await ask("POST", "/v1/agents", registration());
 
     expect(registered.status).toBe(201);
     expect(registered.body.result).toBe("created");
@@ -889,30 +889,30 @@ describe("registering an agent", () => {
       name: "Front desk",
       description: null,
     });
-    expect(String(agentOf(registered).project_id)).toMatch(/^prj_/u);
+    expect(String(agentOf(registered).projectId)).toMatch(/^prj_/u);
     expect(connectionOf(registered)).toMatchObject({
-      agent_id: agentOf(registered).id,
+      agentId: agentOf(registered).id,
       name: "retell_chat_api-1",
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       // Derived from the type, never caller-supplied.
       topology: "hosted-broker",
       config: { retellAgentId: "agent_in_retell_1" },
-      credentials_hint: "WXYZ",
+      credentialsHint: "WXYZ",
     });
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
   });
 
   it("leaves no agent behind when the connection payload is refused", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         // One letter wrong, which is the whole point: a typo dies at the door.
         config: { retellAgentld: "agent_in_retell_1" },
@@ -930,7 +930,7 @@ describe("registering an agent", () => {
   });
 
   it("claims an identity on its own when no connection is named", async () => {
-    const registered = await ask("POST", "/api/agents", { name: "Front desk" });
+    const registered = await ask("POST", "/v1/agents", { name: "Front desk" });
 
     expect(registered.status).toBe(201);
     expect(registered.body.result).toBe("created");
@@ -939,7 +939,7 @@ describe("registering an agent", () => {
   });
 
   it("refuses an agent with no name, in the factory's own words", async () => {
-    const refused = await ask("POST", "/api/agents", { name: "  " });
+    const refused = await ask("POST", "/v1/agents", { name: "  " });
 
     expect(refused.status).toBe(422);
     expect(refused.body).toEqual({
@@ -951,9 +951,9 @@ describe("registering an agent", () => {
 
 describe("a connection payload its kind will not take", () => {
   it("names a connection kind egma has never heard of", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Front desk",
-      connection: connectionPayload({ connection_kind: "vapi" }),
+      connection: connectionPayload({ connectionKind: "vapi" }),
     });
 
     expect(refused.status).toBe(400);
@@ -966,12 +966,12 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("names a modality the type does not speak", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Old line",
       connection: {
-        agent_platform: null,
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
       },
@@ -985,12 +985,12 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("names the credentials shape when none arrived", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_2" },
       },
@@ -1004,7 +1004,7 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("names the floor under a credential that arrived too short", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: connectionPayload({ credentials: { apiKey: "short" } }),
     });
@@ -1017,7 +1017,7 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("refuses a connection sent with a blank name, in the factory's own words", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: connectionPayload({ name: "  " }),
     });
@@ -1031,12 +1031,12 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("refuses a credential where the type takes none", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Old line",
       connection: {
-        agent_platform: null,
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -1060,12 +1060,12 @@ describe("a connection payload its kind will not take", () => {
    * working on the client offline.
    */
   it("refuses a key pair sent alongside a token endpoint", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Production agent",
       connection: {
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.customer_token_endpoint",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -1091,12 +1091,12 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("names both ways in when a livekit connection carries neither", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Quickstart agent",
       connection: {
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.project_credentials",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "voice",
         config: { url: "wss://acme.livekit.cloud" },
       },
@@ -1115,12 +1115,12 @@ describe("a connection payload its kind will not take", () => {
   });
 
   it("refuses an agent to dispatch on a connection that cannot dispatch", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Production agent",
       connection: {
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.customer_token_endpoint",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -1143,12 +1143,12 @@ describe("a connection payload its kind will not take", () => {
 
 describe("a livekit connection that asks an endpoint for its tokens", () => {
   it("lands, and reads back hinted by the header's name and never its value", async () => {
-    const registered = await ask("POST", "/api/agents", {
+    const registered = await ask("POST", "/v1/agents", {
       name: "Production agent",
       connection: {
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.customer_token_endpoint",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -1162,16 +1162,16 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
 
     expect(registered.status, JSON.stringify(registered.body)).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.customer_token_endpoint",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       topology: "agent-dials-out",
       config: {
         url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
       },
-      credentials_hint: "Authorization",
+      credentialsHint: "Authorization",
     });
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
     expect(JSON.stringify(registered.body)).not.toContain("a-long-random-secret");
@@ -1182,14 +1182,14 @@ describe("registering the same vendor agent again", () => {
   it("answers what is already there, with the credential rotated whole", async () => {
     const first = await ask(
       "POST",
-      "/api/agents",
+      "/v1/agents",
       registration({ apiKey: "retell-secret-first-0000AAAA" }),
     );
     expect(first.body.result).toBe("created");
 
     const again = await ask(
       "POST",
-      "/api/agents",
+      "/v1/agents",
       registration({ apiKey: "retell-secret-second-1111ZZZZ" }),
     );
 
@@ -1200,22 +1200,22 @@ describe("registering the same vendor agent again", () => {
 
     // The hint is the whole of what a read can see, so it is the whole of what
     // can show that the newly supplied key is the one now stored.
-    expect(connectionOf(first).credentials_hint).toBe("AAAA");
-    expect(connectionOf(again).credentials_hint).toBe("ZZZZ");
+    expect(connectionOf(first).credentialsHint).toBe("AAAA");
+    expect(connectionOf(again).credentialsHint).toBe("ZZZZ");
 
     expect(platform.registered.agents).toHaveLength(1);
     expect(platform.registered.connections).toHaveLength(1);
   });
 
   it("adds a phone connection to the same agent through the connection route", async () => {
-    const chat = await ask("POST", "/api/agents", registration());
+    const chat = await ask("POST", "/v1/agents", registration());
     const voice = await ask(
       "POST",
-      `/api/agents/${String(agentOf(chat).id)}/connections`,
+      `/v1/agents/${String(agentOf(chat).id)}/connections`,
       {
-        agent_platform: null,
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
       },
@@ -1224,15 +1224,15 @@ describe("registering the same vendor agent again", () => {
     expect(voice.status).toBe(201);
     expect(connectionOf(voice).id).not.toBe(connectionOf(chat).id);
     expect(connectionOf(voice)).toMatchObject({
-      agent_id: agentOf(chat).id,
+      agentId: agentOf(chat).id,
       name: "phone_number-1",
-      agent_platform: null,
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
     });
 
-    const one = await ask("GET", `/api/agents/${String(agentOf(chat).id)}`);
+    const one = await ask("GET", `/v1/agents/${String(agentOf(chat).id)}`);
     expect((one.body.connections as { name: string }[]).map((held) => held.name)).toEqual([
       "retell_chat_api-1",
       "phone_number-1",
@@ -1253,7 +1253,7 @@ describe("registering the same vendor agent again", () => {
   it("checks the whole payload before it decides this is a reuse", async () => {
     const first = await ask(
       "POST",
-      "/api/agents",
+      "/v1/agents",
       registration({ apiKey: "retell-secret-first-0000AAAA" }),
     );
     expect(first.body.result).toBe("created");
@@ -1283,24 +1283,24 @@ describe("registering the same vendor agent again", () => {
     ] as const;
 
     for (const [body, status, refusal] of refusals) {
-      const refused = await ask("POST", "/api/agents", body as Record<string, unknown>);
+      const refused = await ask("POST", "/v1/agents", body as Record<string, unknown>);
       expect(refused.status, JSON.stringify(refusal)).toBe(status);
       expect(refused.body).toEqual(refusal);
     }
 
     // And nothing rotated: the key the first registration sealed is still the
     // one stored, because none of those bodies ever reached the reuse rule.
-    const one = await ask("GET", `/api/agents/${String(agentOf(first).id)}`);
+    const one = await ask("GET", `/v1/agents/${String(agentOf(first).id)}`);
     const held = one.body.connections as Record<string, unknown>[];
     expect(held).toHaveLength(1);
-    expect(held[0]?.credentials_hint).toBe("AAAA");
+    expect(held[0]?.credentialsHint).toBe("AAAA");
     expect(platform.registered.sealed).toEqual(["retell-secret-first-0000AAAA"]);
   });
 
   it("reads the envelopes before the project, and the project before the payload", async () => {
     // The connection's unknown key is answered before the agent's blank name,
     // because the route reads both envelopes before the factory reads anything.
-    const envelopeFirst = await ask("POST", "/api/agents", {
+    const envelopeFirst = await ask("POST", "/v1/agents", {
       name: "  ",
       connection: connectionPayload({ topology: "hosted-broker" }),
     });
@@ -1308,14 +1308,14 @@ describe("registering the same vendor agent again", () => {
     expect(envelopeFirst.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agent_platform, connection_kind, access_variant, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
     });
 
     // And the agent's name is answered before anything the registry checks,
     // because a name is answerable without knowing what a retell connection is.
-    const nameBeforePayload = await ask("POST", "/api/agents", {
+    const nameBeforePayload = await ask("POST", "/v1/agents", {
       name: "  ",
-      connection: connectionPayload({ connection_kind: "vapi" }),
+      connection: connectionPayload({ connectionKind: "vapi" }),
     });
     expect(nameBeforePayload.status).toBe(422);
     expect(nameBeforePayload.body).toEqual({
@@ -1325,10 +1325,10 @@ describe("registering the same vendor agent again", () => {
   });
 
   it("creates twice for a different vendor agent, which is a different agent", async () => {
-    await ask("POST", "/api/agents", registration());
+    await ask("POST", "/v1/agents", registration());
     const other = await ask(
       "POST",
-      "/api/agents",
+      "/v1/agents",
       registration({ name: "Back office", retellAgentId: "agent_in_retell_9" }),
     );
 
@@ -1340,7 +1340,7 @@ describe("registering the same vendor agent again", () => {
 
 describe("the vendor payload egma no longer keeps", () => {
   it("is refused as an unknown key on a registration, loudly rather than ignored", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       ...registration(),
       pulled: {
         vendor: "retell",
@@ -1357,7 +1357,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "description, project, connection; the agent's content stays at the " +
+        "description, projectId, connection; the agent's content stays at the " +
         "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
@@ -1365,7 +1365,7 @@ describe("the vendor payload egma no longer keeps", () => {
   });
 
   it("names the object it was actually sent on, with that object's own keys", async () => {
-    const refused = await ask("POST", "/api/agents", {
+    const refused = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: connectionPayload({ pulled: { vendor: "retell" } }),
     });
@@ -1375,15 +1375,15 @@ describe("the vendor payload egma no longer keeps", () => {
       error: "invalid_request",
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
-        'connection has no "pulled" key. Drop it and send name, agent_platform, ' +
-        "connection_kind, access_variant, modality, environment, config, credentials; the agent's content " +
+        'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
+        "connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
   });
 
   it("names any other unknown key the same way", async () => {
-    const onTheRegistration = await ask("POST", "/api/agents", {
+    const onTheRegistration = await ask("POST", "/v1/agents", {
       ...registration(),
       organization: "org_whatever",
     });
@@ -1392,12 +1392,12 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(onTheRegistration.body).toEqual({
       error: "invalid_request",
       message:
-        'a registration has no key "organization"; it holds name, description, project, connection',
+        'a registration has no key "organization"; it holds name, description, projectId, connection',
     });
 
     // Topology is derived from the type, so a supplied one is the unknown key
     // it is rather than a preference egma weighs up.
-    const onTheConnection = await ask("POST", "/api/agents", {
+    const onTheConnection = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: connectionPayload({ topology: "hosted-broker" }),
     });
@@ -1406,17 +1406,17 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(onTheConnection.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agent_platform, connection_kind, access_variant, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
     });
   });
 });
 
 describe("names, and reading an agent back", () => {
   it("refuses a connection name a living one on that agent already holds", async () => {
-    const registered = await ask("POST", "/api/agents", registration());
+    const registered = await ask("POST", "/v1/agents", registration());
     const agentId = String(agentOf(registered).id);
 
-    const clash = await ask("POST", `/api/agents/${agentId}/connections`, {
+    const clash = await ask("POST", `/v1/agents/${agentId}/connections`, {
       ...connectionPayload(),
       name: "retell_chat_api-1",
     });
@@ -1429,9 +1429,9 @@ describe("names, and reading an agent back", () => {
   });
 
   it("refuses an agent name a living agent in the project already holds", async () => {
-    await ask("POST", "/api/agents", registration());
+    await ask("POST", "/v1/agents", registration());
 
-    const clash = await ask("POST", "/api/agents", {
+    const clash = await ask("POST", "/v1/agents", {
       name: "Front desk",
       connection: connectionPayload({ config: { retellAgentId: "agent_in_retell_other" } }),
     });
@@ -1447,16 +1447,16 @@ describe("names, and reading an agent back", () => {
     const refusal = {
       error: "not_found",
       message:
-        "no agent of yours has that id. Check the id, or list your agents with GET /api/agents.",
+        "no agent of yours has that id. Check the id, or list your agents with GET /v1/agents.",
     };
 
-    const reading = await ask("GET", "/api/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ");
+    const reading = await ask("GET", "/v1/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ");
     expect(reading.status).toBe(404);
     expect(reading.body).toEqual(refusal);
 
     const attaching = await ask(
       "POST",
-      "/api/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ/connections",
+      "/v1/agents/agt_01JZZZZZZZZZZZZZZZZZZZZZZZ/connections",
       connectionPayload(),
     );
     expect(attaching.status).toBe(404);
@@ -1467,7 +1467,7 @@ describe("names, and reading an agent back", () => {
     for (let n = 0; n < 51; n += 1) {
       const written = await ask(
         "POST",
-        "/api/agents",
+        "/v1/agents",
         registration({
           name: `Agent ${String(n).padStart(2, "0")}`,
           retellAgentId: `agent_in_retell_${n}`,
@@ -1476,31 +1476,31 @@ describe("names, and reading an agent back", () => {
       expect(written.status, `agent ${n}`).toBe(201);
     }
 
-    const page = await ask("GET", "/api/agents");
+    const page = await ask("GET", "/v1/agents");
     expect(page.status).toBe(200);
-    expect(Object.keys(page.body).sort()).toEqual(["items", "next_cursor"]);
-    const first = page.body.items as { name: string }[];
+    expect(Object.keys(page.body).sort()).toEqual(["agents", "nextPageToken"]);
+    const first = page.body.agents as { name: string }[];
     expect(first).toHaveLength(50);
     // Newest first, because the agent somebody is looking for is usually the
     // one they just registered.
     expect(first[0]?.name).toBe("Agent 50");
-    expect(page.body.next_cursor).toBeTypeOf("string");
+    expect(page.body.nextPageToken).toBeTypeOf("string");
 
-    const rest = await ask("GET", `/api/agents?cursor=${String(page.body.next_cursor)}`);
-    expect((rest.body.items as { name: string }[]).map((one) => one.name)).toEqual(["Agent 00"]);
-    expect(rest.body.next_cursor).toBeNull();
+    const rest = await ask("GET", `/v1/agents?pageToken=${String(page.body.nextPageToken)}`);
+    expect((rest.body.agents as { name: string }[]).map((one) => one.name)).toEqual(["Agent 00"]);
+    expect(rest.body.nextPageToken).toBeNull();
   });
 
   it("refuses a cursor that is not an agent id", async () => {
-    await ask("POST", "/api/agents", registration());
+    await ask("POST", "/v1/agents", registration());
 
-    const refused = await ask("GET", "/api/agents?cursor=not-an-id");
+    const refused = await ask("GET", "/v1/agents?pageToken=not-an-id");
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
         '"not-an-id" is not an agent id, so it cannot be a cursor. Send back ' +
-        "the next_cursor from the page before this one, or leave it out to " +
+        "the nextPageToken from the page before this one, or leave it out to " +
         "start at the newest.",
     });
   });
@@ -1517,23 +1517,23 @@ describe("names, and reading an agent back", () => {
    * teach a client to branch on a sentence the real thing does not always send.
    */
   it("refuses a project this credential was not minted for, in this group's own words", async () => {
-    const registered = await ask("POST", "/api/agents", registration());
-    const ours = String(agentOf(registered).project_id);
+    const registered = await ask("POST", "/v1/agents", registration());
+    const ours = String(agentOf(registered).projectId);
     const theirs = "prj_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
-    const reading = await ask("GET", `/api/agents?project=${theirs}`);
+    const reading = await ask("GET", `/v1/agents?projectId=${theirs}`);
     expect(reading.status).toBe(403);
     expect(reading.body).toEqual({
       error: "not_permitted",
       message:
         `this credential acts in project ${ours}, and the request ` +
         `named ${theirs}. A key minted for one product area reads that ` +
-        "one; drop the project, or use a key for the whole organization.",
+        "one; drop projectId, or use a key for the whole organization.",
     });
 
-    const writing = await ask("POST", "/api/agents", {
+    const writing = await ask("POST", "/v1/agents", {
       ...registration({ name: "Elsewhere", retellAgentId: "agent_in_retell_5" }),
-      project: theirs,
+      projectId: theirs,
     });
     expect(writing.status).toBe(403);
     expect(writing.body).toEqual({
@@ -1541,17 +1541,17 @@ describe("names, and reading an agent back", () => {
       message:
         `this credential acts in project ${ours}, and the request ` +
         `named ${theirs}. A key minted for one product area writes into ` +
-        "that one; drop the project, or use a key for the whole organization.",
+        "that one; drop projectId, or use a key for the whole organization.",
     });
     expect(platform.registered.agents).toHaveLength(1);
   });
 
   it("never answers a sealed secret back, on any read", async () => {
     const secret = "retell-secret-A1B2C3D4WXYZ";
-    const registered = await ask("POST", "/api/agents", registration({ apiKey: secret }));
+    const registered = await ask("POST", "/v1/agents", registration({ apiKey: secret }));
     const agentId = String(agentOf(registered).id);
 
-    for (const where of ["/api/agents", `/api/agents/${agentId}`]) {
+    for (const where of ["/v1/agents", `/v1/agents/${agentId}`]) {
       const answer = await fetch(`${platform.url}${where}`, {
         headers: { authorization: `Bearer ${key}` },
       });
@@ -1568,31 +1568,31 @@ describe("starting a run", () => {
     connectionId: string;
     oneCaller: string;
   }> {
-    const registered = await ask("POST", "/api/agents", {
+    const registered = await ask("POST", "/v1/agents", {
       name: type === "retell" ? "Front desk" : "Old line",
       connection:
         type === "retell"
           ? {
-              agent_platform: "retell",
-              connection_kind: "retell_chat_api",
-              access_variant: "retell_chat_api.api_key",
+              agentPlatform: "retell",
+              connectionKind: "retell_chat_api",
+              accessVariant: "retell_chat_api.api_key",
               modality: "chat",
               config: { retellAgentId: "agent_in_retell_1" },
               credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
             }
           : {
-              agent_platform: null,
-              connection_kind: "phone_number",
-              access_variant: "phone_number.public_e164",
+              agentPlatform: null,
+              connectionKind: "phone_number",
+              accessVariant: "phone_number.public_e164",
               modality: "voice",
               config: { phoneNumber: "+15551234567" },
             },
     });
-    const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
+    const created = await ask("POST", "/v1/tests", { ...RESCHEDULING });
     return {
       agentId: String(agentOf(registered).id),
       connectionId: String(connectionOf(registered).id),
-      oneCaller: String(created.body.version_id),
+      oneCaller: String(created.body.versionId),
     };
   }
 
@@ -1600,21 +1600,21 @@ describe("starting a run", () => {
     const { connectionId, oneCaller } = await readyToRun();
     const missing = "tstv_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
-    const unknown = await ask("POST", "/api/runs", {
-      connection: connectionId,
-      test_versions: [oneCaller, missing],
+    const unknown = await ask("POST", "/v1/runs", {
+      connectionId,
+      testVersionIds: [oneCaller, missing],
     });
     expect(unknown.status).toBe(422);
     expect(unknown.body).toEqual({
       error: "unprocessable",
       message:
         `there is no test version ${missing} on this Egma instance. Push the test ` +
-        `first, or read the test and pin the version_id it names now.`,
+        `first, or read the test and pin the versionId it names now.`,
     });
 
-    const doubled = await ask("POST", "/api/runs", {
-      connection: connectionId,
-      test_versions: [oneCaller, oneCaller],
+    const doubled = await ask("POST", "/v1/runs", {
+      connectionId,
+      testVersionIds: [oneCaller, oneCaller],
     });
     expect(doubled.status).toBe(422);
     expect(doubled.body).toEqual({
@@ -1625,29 +1625,29 @@ describe("starting a run", () => {
         `persona.`,
     });
 
-    const unusable = await ask("POST", "/api/runs", {
-      connection: connectionId,
-      test_versions: [oneCaller, 7],
+    const unusable = await ask("POST", "/v1/runs", {
+      connectionId,
+      testVersionIds: [oneCaller, 7],
     });
     expect(unusable.status).toBe(422);
     expect(unusable.body).toEqual({
       error: "unprocessable",
       message:
-        "a run pins each test version as text — the version_id a push or a " +
-        "read answered with — and one entry in test_versions is neither. " +
+        "a run pins each test version as text — the versionId a push or a " +
+        "read answered with — and one entry in testVersionIds is neither. " +
         "Send them all, or none of them runs.",
     });
 
-    const none = await ask("POST", "/api/runs", {
-      connection: connectionId,
-      test_versions: [],
+    const none = await ask("POST", "/v1/runs", {
+      connectionId,
+      testVersionIds: [],
     });
     expect(none.status).toBe(422);
     expect(none.body).toEqual({
       error: "unprocessable",
       message:
         "a run needs at least one test version, because a run with no " +
-        "simulations checks nothing. Pin the version_id of each test this " +
+        "simulations checks nothing. Pin the versionId of each test this " +
         "run should execute.",
     });
 
@@ -1659,9 +1659,9 @@ describe("starting a run", () => {
     const missing = "con_01JZZZZZZZZZZZZZZZZZZZZZZZ";
     const other = "agt_01JZZZZZZZZZZZZZZZZZZZZZZZ";
 
-    const nowhere = await ask("POST", "/api/runs", {
-      connection: missing,
-      test_versions: [oneCaller],
+    const nowhere = await ask("POST", "/v1/runs", {
+      connectionId: missing,
+      testVersionIds: [oneCaller],
     });
     expect(nowhere.status).toBe(404);
     expect(nowhere.body).toEqual({
@@ -1671,10 +1671,10 @@ describe("starting a run", () => {
         `or read your agents to see how each one is reached.`,
     });
 
-    const mismatched = await ask("POST", "/api/runs", {
-      agent: other,
-      connection: connectionId,
-      test_versions: [oneCaller],
+    const mismatched = await ask("POST", "/v1/runs", {
+      agentId: other,
+      connectionId,
+      testVersionIds: [oneCaller],
     });
     expect(mismatched.status).toBe(404);
     expect(mismatched.body).toEqual({
@@ -1687,10 +1687,10 @@ describe("starting a run", () => {
 
     // A string that could not be an agent id at all is the same mistake one
     // step earlier, and it says which of the two ids it could not read.
-    const misread = await ask("POST", "/api/runs", {
-      agent: connectionId,
-      connection: connectionId,
-      test_versions: [oneCaller],
+    const misread = await ask("POST", "/v1/runs", {
+      agentId: connectionId,
+      connectionId,
+      testVersionIds: [oneCaller],
     });
     expect(misread.status).toBe(404);
     expect(misread.body).toEqual({
@@ -1702,9 +1702,9 @@ describe("starting a run", () => {
     });
 
     // And a connection id that could not be one either.
-    const unreadable = await ask("POST", "/api/runs", {
-      connection: agentId,
-      test_versions: [oneCaller],
+    const unreadable = await ask("POST", "/v1/runs", {
+      connectionId: agentId,
+      testVersionIds: [oneCaller],
     });
     expect(unreadable.status).toBe(404);
     expect(unreadable.body).toEqual({
@@ -1721,11 +1721,11 @@ describe("starting a run", () => {
     // Absent and blank are the same mistake, and "no connection of yours has
     // that id" would be a sentence about an id nobody sent.
     for (const body of [
-      { test_versions: [oneCaller] },
-      { connection: "", test_versions: [oneCaller] },
-      { connection: "   ", test_versions: [oneCaller] },
+      { testVersionIds: [oneCaller] },
+      { connectionId: "", testVersionIds: [oneCaller] },
+      { connectionId: "   ", testVersionIds: [oneCaller] },
     ]) {
-      const refused = await ask("POST", "/api/runs", body);
+      const refused = await ask("POST", "/v1/runs", body);
       expect(refused.status, JSON.stringify(body)).toBe(422);
       expect(refused.body).toEqual({
         error: "unprocessable",
@@ -1740,9 +1740,9 @@ describe("starting a run", () => {
   it("starts a run over a phone connection, because the phone adapter has shipped", async () => {
     const { connectionId, oneCaller } = await readyToRun("phone");
 
-    const started = await ask("POST", "/api/runs", {
-      connection: connectionId,
-      test_versions: [oneCaller],
+    const started = await ask("POST", "/v1/runs", {
+      connectionId,
+      testVersionIds: [oneCaller],
     });
 
     // This was the `no_adapter` refusal until the phone plug shipped. Both
@@ -1750,11 +1750,11 @@ describe("starting a run", () => {
     // here would let a client pass its checks and fail on a real platform.
     expect(started.status, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
-      connection_id: connectionId,
-      agent_platform: null,
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
-      product_label: "Phone number",
+      connectionId: connectionId,
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      productLabel: "Phone number",
       modality: "voice",
     });
     expect(platform.running.runs).toHaveLength(1);
@@ -1765,24 +1765,24 @@ describe("starting a run", () => {
    *
    * The shape of the selection is read at the door, before anything about the
    * connection is; the *contents* of the selection are read after. So a
-   * `test_versions` that is not a list of text beats a missing connection, and
-   * a `test_versions` that is empty does not. It is worth pinning because a
+   * `testVersionIds` that is not a list of text beats a missing connection, and
+   * a `testVersionIds` that is empty does not. It is worth pinning because a
    * coding agent fixes one refusal at a time and meets them in this order.
    */
   it("reads the shape of the selection before the connection, and its contents after", async () => {
-    const unusable = await ask("POST", "/api/runs", { test_versions: [7] });
+    const unusable = await ask("POST", "/v1/runs", { testVersionIds: [7] });
     expect(unusable.status).toBe(422);
     expect(unusable.body).toEqual({
       error: "unprocessable",
       message:
-        "a run pins each test version as text — the version_id a push or a " +
-        "read answered with — and one entry in test_versions is neither. " +
+        "a run pins each test version as text — the versionId a push or a " +
+        "read answered with — and one entry in testVersionIds is neither. " +
         "Send them all, or none of them runs.",
     });
 
     // Empty is not a shape problem — it is a selection problem — so the missing
     // connection is answered first.
-    const empty = await ask("POST", "/api/runs", { test_versions: [] });
+    const empty = await ask("POST", "/v1/runs", { testVersionIds: [] });
     expect(empty.status).toBe(422);
     expect(empty.body).toEqual({
       error: "unprocessable",
@@ -1808,9 +1808,9 @@ describe("starting a run", () => {
       }).versionId,
     );
 
-    const refused = await ask("POST", "/api/runs", {
-      connection: connectionId,
-      test_versions: versions,
+    const refused = await ask("POST", "/v1/runs", {
+      connectionId,
+      testVersionIds: versions,
     });
 
     expect(refused.status).toBe(422);
@@ -1827,11 +1827,11 @@ describe("starting a run", () => {
 
 describe("reading and following a run", () => {
   async function aRun(): Promise<string> {
-    const registered = await ask("POST", "/api/agents", registration());
-    const created = await ask("POST", "/api/tests", { ...RESCHEDULING });
-    const started = await ask("POST", "/api/runs", {
-      connection: String(connectionOf(registered).id),
-      test_versions: [String(created.body.version_id)],
+    const registered = await ask("POST", "/v1/agents", registration());
+    const created = await ask("POST", "/v1/tests", { ...RESCHEDULING });
+    const started = await ask("POST", "/v1/runs", {
+      connectionId: String(connectionOf(registered).id),
+      testVersionIds: [String(created.body.versionId)],
     });
     expect(started.status).toBe(201);
     return String(started.body.id);
@@ -1840,14 +1840,14 @@ describe("reading and following a run", () => {
   it("says the same thing about a run that is not there and one that is not yours", async () => {
     const refusal = {
       error: "not_found",
-      message: "no run of yours has that id. Check the id, or start a run with POST /api/runs.",
+      message: "no run of yours has that id. Check the id, or start a run with POST /v1/runs.",
     };
 
-    const reading = await ask("GET", "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ");
+    const reading = await ask("GET", "/v1/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ");
     expect(reading.status).toBe(404);
     expect(reading.body).toEqual(refusal);
 
-    const following = await ask("GET", "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events");
+    const following = await ask("GET", "/v1/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events");
     expect(following.status).toBe(404);
     expect(following.body).toEqual(refusal);
   });
@@ -1873,7 +1873,7 @@ describe("reading and following a run", () => {
     ]) {
       const refused = await ask(
         "GET",
-        `/api/runs/${runId}/events?after=${encodeURIComponent(after)}`,
+        `/v1/runs/${runId}/events?after=${encodeURIComponent(after)}`,
       );
       expect(refused.status, after).toBe(400);
       expect(refused.body).toEqual({
@@ -1888,7 +1888,7 @@ describe("reading and following a run", () => {
     // A parameter that arrived empty is a parameter nobody set — the rule every
     // query in this API shares — so `?after=` starts at the beginning rather
     // than being refused for a value it does not have.
-    const blank = await ask("GET", `/api/runs/${runId}/events?after=`);
+    const blank = await ask("GET", `/v1/runs/${runId}/events?after=`);
     expect(blank.status).toBe(200);
     // The whole body: a follower seeds itself from `next` and stops on `done`,
     // so a feed that answered the right keys with the wrong numbers would send
@@ -1908,7 +1908,7 @@ describe("reading and following a run", () => {
   it("answers a cursor it cannot read before it says whether the run is there", async () => {
     const refused = await ask(
       "GET",
-      "/api/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events?after=1e3",
+      "/v1/runs/run_01JZZZZZZZZZZZZZZZZZZZZZZZ/events?after=1e3",
     );
 
     expect(refused.status).toBe(400);

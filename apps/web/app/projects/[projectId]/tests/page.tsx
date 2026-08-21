@@ -3,20 +3,21 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { listAgents, listTests } from "@egma/platform-api/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { readJson, type Refusal } from "../../../../lib/api.ts";
-import { agentsQuery, type AgentPage } from "../../../../lib/agents.ts";
+import type { Refusal } from "../../../../lib/api.ts";
+import type { AgentPage } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
   activeAgents,
   availability,
-  testsPath,
   type ListedTest,
   type TestPage,
 } from "../../../../lib/tests.ts";
@@ -71,7 +72,7 @@ function Applies({ test }: { readonly test: ListedTest }) {
     // Only an upgrade can produce this, and Restore takes an agent to fix it.
     return <Badge variant="failure">No agent</Badge>;
   }
-  if (!runnable && test.archived_at === null) {
+  if (!runnable && test.archivedAt === null) {
     return (
       <Badge variant="warning" title="Every agent this test applies to is archived.">
         {test.agents.length} archived
@@ -125,8 +126,8 @@ function restFor(now: number): readonly Column<ListedTest>[] {
       hideOnMobile: true,
       width: "100px",
       cell: (test) =>
-        `${String(test.expected_behaviors.length)} ${
-          test.expected_behaviors.length === 1 ? "behavior" : "behaviors"
+        `${String(test.expectedBehaviors.length)} ${
+          test.expectedBehaviors.length === 1 ? "behavior" : "behaviors"
         }`,
     },
     {
@@ -149,7 +150,7 @@ function restFor(now: number): readonly Column<ListedTest>[] {
       header: "Changed",
       mono: true,
       width: "120px",
-      cell: (test) => <RelativeInstant instant={test.updated_at} now={now} />,
+      cell: (test) => <RelativeInstant instant={test.updatedAt} now={now} />,
     },
   ];
 }
@@ -181,14 +182,28 @@ function Tests({ projectId }: { readonly projectId: string }) {
   const [typed, setTyped] = useState("");
   const [searching, setSearching] = useState("");
 
-  const path = testsPath({
-    archived,
-    ...(agent === "" ? {} : { agent }),
-    ...(searching === "" ? {} : { name: searching }),
-  });
-  const { answer, reload } = useProjectRead<TestPage>(path, projectId);
+  const question = `${String(archived)}:${agent}:${searching}`;
+  const { answer, reload } = useProjectRead<TestPage>(
+    (projectId) =>
+      platformAnswer(
+        listTests(
+          {
+            projectId,
+            ...(archived ? { archived: "true" } : {}),
+            ...(agent === "" ? {} : { agentId: agent }),
+            ...(searching === "" ? {} : { name: searching }),
+          },
+          { client: platformClient },
+        ),
+      ),
+    projectId,
+    question,
+  );
   const { answer: agents } = useProjectRead<AgentPage>(
-    agentsQuery({}),
+    (projectId) =>
+      platformAnswer(
+        listAgents({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
 
@@ -212,7 +227,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
   const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
 
   const carried =
-    after !== null && after.project === projectId && after.asked === path
+    after !== null && after.project === projectId && after.asked === question
       ? after.page
       : null;
 
@@ -299,8 +314,9 @@ function Tests({ projectId }: { readonly projectId: string }) {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    const items = [...answer.value.items, ...(carried?.items ?? [])];
-    const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
+    const items = [...answer.value.tests, ...(carried?.tests ?? [])];
+    const cursor =
+      carried === null ? answer.value.nextPageToken : carried.nextPageToken;
 
     /**
      * The next page, and everything that can happen instead of one.
@@ -314,13 +330,21 @@ function Tests({ projectId }: { readonly projectId: string }) {
       if (cursor === null) return;
 
       const asked = projectId;
-      const question = path;
+      const askedQuestion = question;
       setMoreRefused(null);
       setLoadingMore(true);
 
-      const next = await readJson<TestPage>(
-        `${question}${question.includes("?") ? "&" : "?"}cursor=${encodeURIComponent(cursor)}`,
-        { project: asked },
+      const next = await platformAnswer(
+        listTests(
+          {
+            projectId: asked,
+            pageToken: cursor,
+            ...(archived ? { archived: "true" } : {}),
+            ...(agent === "" ? {} : { agentId: agent }),
+            ...(searching === "" ? {} : { name: searching }),
+          },
+          { client: platformClient },
+        ),
       );
 
       setLoadingMore(false);
@@ -338,10 +362,10 @@ function Tests({ projectId }: { readonly projectId: string }) {
 
       setAfter({
         project: asked,
-        asked: question,
+        asked: askedQuestion,
         page: {
-          items: [...(carried?.items ?? []), ...next.value.items],
-          next_cursor: next.value.next_cursor,
+          tests: [...(carried?.tests ?? []), ...next.value.tests],
+          nextPageToken: next.value.nextPageToken,
         },
       });
     }
@@ -400,7 +424,7 @@ function Tests({ projectId }: { readonly projectId: string }) {
 
   const choosable =
     agents?.status === "ready"
-      ? agents.value.items.filter((one) => one.archived_at === null)
+      ? agents.value.agents.filter((one) => one.archivedAt === null)
       : [];
 
   return (

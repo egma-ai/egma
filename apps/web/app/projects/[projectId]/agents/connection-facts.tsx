@@ -59,7 +59,7 @@ export function CapabilityState({
   readonly now: number;
 }) {
   const checked =
-    capabilities.state === "known" && capabilities.checked_at !== null;
+    capabilities.state === "known" && capabilities.checkedAt !== null;
 
   return (
     <span className="inline-flex min-w-0 items-center gap-2">
@@ -67,9 +67,9 @@ export function CapabilityState({
         <CapabilityMark checked={checked} />
         {checked ? "Checked" : "Not checked"}
       </Badge>
-      {checked && capabilities.checked_at !== null ? (
+      {checked && capabilities.checkedAt !== null ? (
         <span className="truncate text-sm text-muted-foreground">
-          <RelativeInstant instant={capabilities.checked_at} now={now} />
+          <RelativeInstant instant={capabilities.checkedAt} now={now} />
         </span>
       ) : null}
     </span>
@@ -103,7 +103,7 @@ export function ConnectionFacts({
         {connection.environment ?? NO_ENVIRONMENT}
       </span>
       <span className="truncate text-sm text-muted-foreground">
-        {connection.product_label} · {modalityLabel(connection.modality)}
+        {connection.productLabel} · {modalityLabel(connection.modality)}
       </span>
       <CapabilityState capabilities={connection.capabilities} now={now} />
     </span>

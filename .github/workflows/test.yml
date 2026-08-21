@@ -504,7 +504,7 @@ jobs:
         if: steps.decide.outputs.platform == 'true'
         run: |
           set -euo pipefail
-          url="${{ vars.PLATFORM_URL || 'https://app.egma.ai' }}/api/platform"
+          url="${{ vars.PLATFORM_URL || 'https://app.egma.ai' }}/health"
           for attempt in 1 2 3 4 5 6; do
             code=$(curl -sS -o /tmp/platform.json -w '%{http_code}' --max-time 20 "$url" || echo 000)
             if [ "$code" = "200" ]; then

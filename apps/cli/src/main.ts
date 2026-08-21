@@ -40,26 +40,17 @@ import {
 import type { PlatformBinding } from "./folder/egma-folder.ts";
 import {
   BoundPlatformAddressError,
-  BoundPlatformUnavailableError,
   choosePlatform,
   credentialsFileIn,
-  DefaultPlatformUnusableError,
   KEYS_UNUSABLE,
   KeysUnusableError,
-  PlatformBindingMismatchError,
   RepositoryPlatformConfigError,
   UnboundPlatformIdentifiersError,
   UnusableUrlError,
-  verifyPlatform,
   type ChosenPlatform,
   type PlatformAccess,
-  type VerifiedPlatformAccess,
 } from "./platform/credentials.ts";
 import { PlatformUnreachableError } from "./platform/device-flow.ts";
-import {
-  PlatformIdentityError,
-  PlatformOriginMismatchError,
-} from "./platform/identity.ts";
 import { RETELL_API } from "./retell/client.ts";
 import { HeadlessUI } from "./ui/headless-ui.ts";
 import { buildExitNotice, exitLines, type ExitReport } from "./wizard/exit-line.ts";
@@ -246,7 +237,7 @@ export function helpText(): string {
     "                           environment, never as an argument.",
     "  egma init [options]      Make the egma folder this repository's tests",
     "                           live in. Talks to nobody, unless --url names an",
-    "                           Egma instance to bind this repository to. Safe to run",
+    "                           Egma platform URL to bind this repository to. Safe to run",
     "                           again.",
     "  egma pull [options]      Write Egma's current test versions, and the mock",
     "                           tools it answers with, into it.",
@@ -280,12 +271,11 @@ export function helpText(): string {
     "  --coding-agent <id>  Use one installed coding agent without asking.",
     `                       ${SUPPORTED_CODING_AGENT_IDS.join(", ")}`,
     "  --cwd <path>         The folder to work in. Default: this folder.",
-    "  --url <address>      Which Egma instance this one command talks to. It is the only",
+    "  --url <address>      Which Egma platform this one command talks to. It is the only",
     "                       way to name one, so a command that should reach that",
-    "                       Egma instance carries it. With init and with the wizard: Egma",
-    "                       asks that address who it is and records its verified",
-    "                       identity in egma/config.yaml, and every later command",
-    "                       in this repository then needs no address at all.",
+    "                       platform carries it. With init and with the wizard, Egma",
+    "                       records the normalized URL in egma/config.yaml, and every",
+    "                       later command in this repository needs no address at all.",
     "  --force              With login: sign in again even when this machine",
     "                       already holds a key.",
     "  --no-follow          With run: start the run and return at once, without",
@@ -378,7 +368,6 @@ export function helpText(): string {
     "  4 Egma did not answer, or refused",
     "  5 push refused: Egma has moved on, pull first",
     "  6 Egma turned a test or a mock tool away at its door",
-    "  7 this Egma instance and this platform read different shapes: upgrade one of them",
     "  130 stopped part way",
     "",
     "What egma run prints, one fact per line:",
@@ -501,32 +490,18 @@ function retellReach(env: NodeJS.ProcessEnv): { readonly url: string } | undefin
  * repository's identifiers to the address on offer. `null` is anything else,
  * which is not this function's to explain.
  *
- * It is one function because two surfaces raise these now. A verb asks the
- * address who it is before it starts; the wizard asks after the keystroke of
- * consent, so its refusal arrives out of the walk rather than in front of it.
- * The developer must not be able to tell which of the two happened from the
- * sentence or the number they get.
+ * Address-selection refusals happen before network work. Transport failures
+ * come from the operation the developer asked for.
  */
 function platformRefusal(error: unknown): "refused" | "unreachable" | null {
-  // egma's own built-in address is the one refusal that can be either. Nobody
-  // typed it, so what is at it decides: a redirect or a page that is not a
-  // platform will still be there in a minute, and saying `unreachable` about it
-  // would send whoever is driving into a retry loop that cannot end.
-  if (error instanceof DefaultPlatformUnusableError) return error.refusal;
   if (
-    error instanceof PlatformBindingMismatchError ||
     error instanceof BoundPlatformAddressError ||
-    error instanceof PlatformOriginMismatchError ||
     error instanceof RepositoryPlatformConfigError ||
     error instanceof UnboundPlatformIdentifiersError
   ) {
     return "refused";
   }
-  if (
-    error instanceof PlatformUnreachableError ||
-    error instanceof PlatformIdentityError ||
-    error instanceof BoundPlatformUnavailableError
-  ) {
+  if (error instanceof PlatformUnreachableError) {
     return "unreachable";
   }
   return null;
@@ -688,7 +663,7 @@ async function runFolderVerb(
   verb: "init" | "pull" | "push" | "run",
   invocation: Invocation,
   access: PlatformAccess,
-  /** For `init`: the verified platform to commit, when `--url` named one. */
+  /** For `init`: the selected platform URL to commit, when `--url` named one. */
   binding: PlatformBinding | null = null,
 ): Promise<number> {
   const controller = new AbortController();
@@ -754,7 +729,7 @@ async function runLogin(invocation: Invocation, access: PlatformAccess): Promise
 /** The connect verb: a key from a pipe or the environment, and plain lines. */
 async function runConnect(
   invocation: Invocation,
-  access: VerifiedPlatformAccess,
+  access: PlatformAccess,
 ): Promise<number> {
   const controller = new AbortController();
   const onSignal = (): void => controller.abort("interrupt");
@@ -850,11 +825,11 @@ export async function main(argv: readonly string[]): Promise<void> {
   const cwd = path.resolve(invocation.cwd ?? process.cwd());
 
   // `init` with no address named is only a local folder write. It never
-  // verifies a platform, signs in, or sends an identifier anywhere, so it is
+  // selects a platform, signs in, or sends an identifier anywhere, so it is
   // settled here rather than below and works with the network cable out.
   //
-  // `init --url` is the one exception, and it falls through to the ordinary
-  // resolution below: it asks that address who it is and commits the answer.
+  // `init --url` is the one exception. It falls through to the ordinary
+  // resolution below and commits the selected URL.
   // Sending it through the same path as every other verb is what makes a bound
   // repository refuse a second, different address here exactly as it does
   // everywhere else.
@@ -935,13 +910,12 @@ export async function main(argv: readonly string[]): Promise<void> {
   // bad address is turned away before anything is started on it rather than
   // after, and nothing has been asked of any address yet.
   let chosen: ChosenPlatform;
-  let access: VerifiedPlatformAccess | null = null;
+  let access: PlatformAccess | null = null;
   try {
     chosen = await choosePlatform({ env: process.env, flag: invocation.url, cwd });
-    // A verb has no screen to say which egma this is on and no keystroke to
-    // take, so it asks the address who it is here, exactly as it always has.
-    // The wizard asks after its first screen — see below.
-    if (invocation.verb !== null) access = await verifyPlatform(chosen);
+    if (invocation.verb !== null) {
+      access = { url: chosen.url, credentialsFile: chosen.credentialsFile };
+    }
   } catch (error) {
     if (error instanceof UnusableUrlError) {
       process.stderr.write(`${error.message}\n`);
@@ -969,12 +943,9 @@ export async function main(argv: readonly string[]): Promise<void> {
         return;
       }
       // Only `init --url` reaches here: the flagless form was answered above.
-      // The address has already said who it is, so what is committed is a whole
-      // binding or the command has already refused and written nothing.
       if (invocation.verb === "init") {
         process.exitCode = await runFolderVerb(invocation.verb, invocation, access, {
           origin: access.url,
-          instance: access.instanceId,
         });
         return;
       }
@@ -989,21 +960,18 @@ export async function main(argv: readonly string[]): Promise<void> {
     }
 
     // Every verb has returned by now, so what is left is the bare command, and
-    // the walk it needs was built above. It is handed the address and the way
-    // to ask who is there, and it asks only once the developer has read the
-    // address and pressed the key that agrees to the rest.
+    // the walk it needs was built above. It is handed the selected address and
+    // starts login only after the developer has read that address and pressed
+    // the key that agrees to the rest.
     if (theWizard !== null) {
       const selected = chosen;
       process.exitCode = await theWizard({
         url: selected.url,
         bound: selected.binding !== null,
-        verify: () => verifyPlatform(selected),
+        credentialsFile: selected.credentialsFile,
       });
     }
   } catch (error) {
-    // The wizard's platform read happens inside the walk, so its refusal
-    // arrives here rather than above. Same sentence, same number, whichever
-    // side of the keystroke it came from.
     const status = platformRefusal(error);
     if (status !== null) {
       sayPlatformRefusal(status, (error as Error).message);

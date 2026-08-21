@@ -191,7 +191,6 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
       try {
         await bindRepositoryPlatform(options.cwd, {
           origin: options.platform.url,
-          instance: options.platform.instanceId,
         });
       } catch (cause) {
         // Carried out rather than answered from in here: the flow has no
@@ -201,7 +200,7 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
         throw cause;
       }
       ui.pushStatus(
-        `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.instanceId}.`,
+        `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.url}.`,
       );
     },
   }).catch((cause: unknown) => {

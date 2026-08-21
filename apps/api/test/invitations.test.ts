@@ -87,13 +87,13 @@ async function invite(
 ): Promise<Invited> {
   const response = await api.app.inject({
     method: "POST",
-    url: "/api/invitations",
+    url: "/v1/invitations",
     headers: { cookie: host.cookie },
     payload: role === undefined ? { email } : { email, role },
   });
 
   const body = response.json() as Record<string, unknown>;
-  const url = typeof body.accept_url === "string" ? body.accept_url : "";
+  const url = typeof body.acceptUrl === "string" ? body.acceptUrl : "";
   return {
     status: response.statusCode,
     body,
@@ -149,7 +149,7 @@ describe("with no mail transport configured", () => {
     expect(invited.body.delivered).toBe(false);
     // The whole point: something usable came back rather than an error or a
     // success with nothing in it.
-    expect(invited.body.accept_url).toMatch(/\/invite\?token=/);
+    expect(invited.body.acceptUrl).toMatch(/\/invite\?token=/);
     expect(invited.token).not.toBe("");
 
     // And it works. A link that comes back and does nothing would be worse
@@ -186,7 +186,7 @@ describe("with a transport that delivers", () => {
     expect(invited.body.delivered).toBe(true);
     // It reached the person it names, so the person it names is the one who
     // should be holding it.
-    expect(invited.body.accept_url).toBeUndefined();
+    expect(invited.body.acceptUrl).toBeUndefined();
 
     // Ada's own verification message went through the same seam a moment ago,
     // which is the point of there being one seam.
@@ -249,7 +249,7 @@ describe("who may invite", () => {
 
       const reaching = await api.app.inject({
         method: "POST",
-        url: "/api/invitations",
+        url: "/v1/invitations",
         headers: { cookie: joined.cookie },
         payload: { email: "somebody@acme.example" },
       });
@@ -543,7 +543,7 @@ describe("somebody who already has an account and belongs nowhere", () => {
 
     await api.app.inject({
       method: "POST",
-      url: `/api/members/${bobUserId}/remove`,
+      url: `/v1/members/${bobUserId}/remove`,
       headers: { cookie: ada.cookie },
     });
 
@@ -587,7 +587,7 @@ describe("the list of invitations", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/invitations",
+      url: "/v1/invitations",
       headers: { cookie: ada.cookie },
     });
 
@@ -600,7 +600,7 @@ describe("the list of invitations", () => {
     expect(invitations.map((one) => one.email)).toEqual([
       "carol@acme.example",
     ]);
-    expect(JSON.stringify(invitations)).not.toContain("accept_url");
+    expect(JSON.stringify(invitations)).not.toContain("acceptUrl");
   });
 
   it("never shows one customer another customer's", async () => {
@@ -612,7 +612,7 @@ describe("the list of invitations", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/invitations",
+      url: "/v1/invitations",
       headers: { cookie: grace.cookie },
     });
 

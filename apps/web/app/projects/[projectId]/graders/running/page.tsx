@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import {
+  listGraderLibrary,
+  listGraders,
+} from "@egma/platform-api/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,15 +21,19 @@ import {
   SWITCH_OFF,
 } from "../../../../../lib/grader-running-copy.ts";
 import {
-  GRADER_LIBRARY_PATH,
-  GRADERS_PATH,
+  assertionsOf,
   GRADERS_SECTION,
+  parametersOf,
   type GraderParameter,
   type LibraryPage,
   type RunningGrader,
   type RunningPage,
 } from "../../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../../lib/me.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import {
   graderDisplayName,
   GRADER_VIEW_LABELS,
@@ -131,8 +139,8 @@ function scopeOf(copy: RunningGrader): string {
  * read as a grader somebody forgot to finish.
  */
 function configOf(copy: RunningGrader): string {
-  const assertions = copy.config?.assertions;
-  if (!Array.isArray(assertions) || assertions.length === 0) {
+  const assertions = assertionsOf(copy);
+  if (assertions.length === 0) {
     return CONFIG.fromTheTest;
   }
   return CONFIG.counted(assertions.length);
@@ -189,7 +197,7 @@ function columnsFor(
           // for. A scope cell that said only "live traffic" would leave the one
           // number that matters on a screen nobody has built.
           <span>
-            {scopeOf(copy)} · {String(copy.production_sample_rate)}%
+            {scopeOf(copy)} · {String(copy.productionSampleRate)}%
           </span>
         ),
     },
@@ -267,11 +275,15 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
 
   const { answer, reload } = useProjectRead<RunningPage>(
-    GRADERS_PATH,
+    (projectId) =>
+      platformAnswer(listGraders({ projectId }, { client: platformClient })),
     projectId,
   );
   const { answer: shelf } = useProjectRead<LibraryPage>(
-    GRADER_LIBRARY_PATH,
+    (projectId) =>
+      platformAnswer(
+        listGraderLibrary({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
 
@@ -310,7 +322,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
   const whyNotEdit = role === null ? undefined : EDIT.notYours(role);
   const whyNotSwitchOff = role === null ? undefined : SWITCH_OFF.notYours(role);
 
-  const rows = answer?.status === "ready" ? answer.value.items : [];
+  const rows = answer?.status === "ready" ? answer.value.graders : [];
 
   /**
    * What each entry asks for, by the entry's own id.
@@ -321,7 +333,9 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
    */
   const asks = new Map<string, readonly GraderParameter[]>(
     shelf?.status === "ready"
-      ? shelf.value.items.map((entry) => [entry.id, entry.params ?? []] as const)
+      ? shelf.value.graderLibraryEntries.map(
+          (entry) => [entry.id, parametersOf(entry)] as const,
+        )
       : [],
   );
 
@@ -560,7 +574,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
                 <EditForm
                   key={open.copy.id}
                   copy={open.copy}
-                  params={asks.get(open.copy.library_id) ?? []}
+                  params={asks.get(open.copy.libraryId) ?? []}
                   projectId={projectId}
                   onProtectionChange={setEditorState}
                   onCancel={() => show(null)}

@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { listAgents, listPersonas } from "@egma/platform-api/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { agentsQuery } from "../../../../lib/agents.ts";
-import { readJson } from "../../../../lib/api.ts";
-import { personasQuery } from "../../../../lib/personas.ts";
+import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
 import {
   type ExpectedBehavior,
   type Named,
@@ -125,31 +124,12 @@ export function Behaviors({
   );
 }
 
-type NamedPage = {
-  readonly items: readonly Named[];
-  readonly next_cursor: string | null;
-};
-
 type SelectorPage = {
   readonly items: readonly Named[];
   readonly nextCursor: string | null;
 };
 
 type NamedResource = "agents" | "personas";
-
-function namedPagePath(
-  resource: NamedResource,
-  search: string,
-  cursor?: string,
-): string {
-  const asking = {
-    ...(search === "" ? {} : { search }),
-    ...(cursor === undefined ? {} : { cursor }),
-  };
-  return resource === "agents"
-    ? agentsQuery(asking)
-    : personasQuery(asking);
-}
 
 /** The quiet supporting line inside the panel: a placeholder, a page, an absence. */
 const SELECTOR_QUIET = "text-sm text-muted-foreground";
@@ -213,10 +193,21 @@ export function NamedSelector({
     setLoading(true);
     setProblem(null);
 
-    void readJson<NamedPage>(namedPagePath(resource, search), {
-      project,
-      signal: controller.signal,
-    }).then((answer) => {
+    const request =
+      resource === "agents"
+        ? platformAnswer(
+            listAgents(
+              { projectId: project, ...(search === "" ? {} : { search }) },
+              { client: platformClient },
+            ),
+          )
+        : platformAnswer(
+            listPersonas(
+              { projectId: project, ...(search === "" ? {} : { search }) },
+              { client: platformClient },
+            ),
+          );
+    void request.then((answer) => {
       if (
         controller.signal.aborted ||
         generation.current !== heldGeneration
@@ -232,11 +223,13 @@ export function NamedSelector({
         setProblem(answer.refusal.message);
         return;
       }
-      for (const item of answer.value.items) named.current.set(item.id, item);
+      const items =
+        "agents" in answer.value ? answer.value.agents : answer.value.personas;
+      for (const item of items) named.current.set(item.id, item);
       setPages([
         {
-          items: answer.value.items,
-          nextCursor: answer.value.next_cursor,
+          items,
+          nextCursor: answer.value.nextPageToken,
         },
       ]);
     });
@@ -286,10 +279,28 @@ export function NamedSelector({
     const heldGeneration = generation.current;
     setLoading(true);
     setProblem(null);
-    const answer = await readJson<NamedPage>(
-      namedPagePath(resource, search, current.nextCursor),
-      { project },
-    );
+    const answer =
+      resource === "agents"
+        ? await platformAnswer(
+            listAgents(
+              {
+                projectId: project,
+                pageToken: current.nextCursor,
+                ...(search === "" ? {} : { search }),
+              },
+              { client: platformClient },
+            ),
+          )
+        : await platformAnswer(
+            listPersonas(
+              {
+                projectId: project,
+                pageToken: current.nextCursor,
+                ...(search === "" ? {} : { search }),
+              },
+              { client: platformClient },
+            ),
+          );
     if (generation.current !== heldGeneration) return;
     setLoading(false);
     if (answer.status === "signed-out") {
@@ -300,12 +311,14 @@ export function NamedSelector({
       setProblem(answer.refusal.message);
       return;
     }
-    for (const item of answer.value.items) named.current.set(item.id, item);
+    const items =
+      "agents" in answer.value ? answer.value.agents : answer.value.personas;
+    for (const item of items) named.current.set(item.id, item);
     setPages((held) => [
       ...held,
       {
-        items: answer.value.items,
-        nextCursor: answer.value.next_cursor,
+        items,
+        nextCursor: answer.value.nextPageToken,
       },
     ]);
     setPage(page + 1);
@@ -363,7 +376,7 @@ export function NamedSelector({
                 ) : (
                   shown.map((one) => {
                     const selected = chosen.includes(one.id);
-                    const unavailable = (one.archived_at ?? null) !== null;
+                    const unavailable = one.archivedAt !== null;
                     return (
                       <button
                         className={
@@ -580,7 +593,7 @@ export function VersionHistory({
               v{version.version}
             </span>
             <span className="text-sm text-muted-foreground">
-              <RelativeInstant instant={version.created_at} now={now} />
+              <RelativeInstant instant={version.createdAt} now={now} />
             </span>
             {version.current ? (
               <Badge variant="success">Current</Badge>
@@ -611,7 +624,7 @@ export function VersionHistory({
             {reading.scenario}
           </p>
           <ul className="m-0 flex flex-col gap-1 pl-6 text-sm text-foreground">
-            {reading.expected_behaviors.map((one, at) => (
+            {reading.expectedBehaviors.map((one, at) => (
               // No identity of their own, and this list is read-only.
               // eslint-disable-next-line react/no-array-index-key
               <li key={at}>{one}</li>

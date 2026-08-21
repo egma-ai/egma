@@ -1,6 +1,9 @@
 "use client";
 
 import {
+  getSimulationRecording,
+} from "@egma/platform-api/client";
+import {
   useEffect,
   useRef,
   useState,
@@ -12,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { graderDisplayName } from "../lib/presentation.ts";
+import { platformAnswer, platformClient } from "../lib/platform-client.ts";
 import type { VerdictWord } from "../lib/runs.ts";
 import {
   citedTurnPositions,
@@ -27,9 +31,9 @@ import { VerdictBadge } from "./run-status.tsx";
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
 function durationOf(evidence: SimulationEvidence): number | null {
-  const measured = evidence.measures.duration_ms;
-  if (Number.isFinite(measured)) return measured;
-  const recorded = evidence.transcript?.duration_ns;
+  const measured = evidence.measures.durationMs;
+  if (typeof measured === "number" && Number.isFinite(measured)) return measured;
+  const recorded = evidence.transcript?.durationNs;
   if (recorded === undefined) return null;
   if (!/^-?\d+$/u.test(recorded)) return null;
   const elapsedMilliseconds = milliseconds(recorded);
@@ -46,9 +50,9 @@ function shownDuration(milliseconds: number | null): string {
 }
 
 function turnsOf(evidence: SimulationEvidence): number | null {
-  const measured = evidence.measures.turn_count;
-  if (Number.isFinite(measured)) return measured;
-  const counts = evidence.transcript?.turn_counts;
+  const measured = evidence.measures.turnCount;
+  if (typeof measured === "number" && Number.isFinite(measured)) return measured;
+  const counts = evidence.transcript?.turnCounts;
   return counts === undefined ? null : counts.human + counts.agent;
 }
 
@@ -183,7 +187,7 @@ export function useSimulationEvidenceRecording(
   projectId: string,
 ): SimulationEvidenceRecording {
   const recordingId = evidence?.id ?? null;
-  const hasRecording = evidence?.has_recording ?? false;
+  const hasRecording = evidence?.hasRecording ?? false;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const activeRecording = useRef<string | null>(null);
   const [status, setStatus] = useState<RecordingStatus>(
@@ -233,24 +237,26 @@ export function useSimulationEvidenceRecording(
     setStatus("loading");
     resolvedAttempt.current = -1;
     const attempt = asked;
-    void fetch(
-      `/api/simulations/${encodeURIComponent(recordingId)}/recording?project=${encodeURIComponent(projectId)}`,
-      { cache: "no-store", headers: { accept: "application/json" } },
+    void platformAnswer(
+      getSimulationRecording(
+        { simulationId: recordingId, projectId },
+        { client: platformClient },
+      ),
     )
-      .then(async (answer) => {
-        const body = (await answer.json().catch(() => ({}))) as {
-          readonly url?: string;
-          readonly message?: string;
-        };
-        if (!answer.ok || body.url === undefined) {
-          throw new Error(body.message ?? "The recording could not be opened.");
+      .then((answer) => {
+        if (answer.status !== "ready") {
+          throw new Error(
+            answer.status === "signed-out"
+              ? "Sign in again to open the recording."
+              : answer.refusal.message,
+          );
         }
         if (!current) return;
         resolvedAttempt.current = attempt;
         mediaReadyAttempt.current = -1;
         decodeReadyAttempt.current = -1;
         setWaveformLoading(true);
-        setSource({ recordingId, url: body.url });
+        setSource({ recordingId, url: answer.value.url });
         setStatus("ready");
       })
       .catch((why: unknown) => {
@@ -496,7 +502,7 @@ function evidenceRow(
       row.speaking.rationale.trim() === "" ? null : row.speaking.rationale,
     verdict: row.speaking.verdict,
     citedTurns: citedTurnPositions(
-      row.speaking.cited_turns,
+      row.speaking.citedTurns,
       evidence.transcript?.turns ?? [],
     ),
     superseded: row.superseded,
@@ -509,16 +515,16 @@ function evidenceGraders(
   judged: readonly JudgedAssertion[],
 ): readonly EvidenceGrader[] {
   if (evidence.grading === "not_required") return [];
-  const expected = evidence.test.expected_behaviors ?? [];
-  const planItems = evidence.grading_plan?.items ?? [];
+  const expected = evidence.test.expectedBehaviors ?? [];
+  const planItems = evidence.gradingPlan?.items ?? [];
   const ids = new Set<string>([
-    ...planItems.map((item) => item.grader_id),
-    ...evidence.by_grader.map((item) => item.grader_id),
+    ...planItems.map((item) => item.graderId),
+    ...evidence.byGrader.map((item) => item.graderId),
     ...judged.map((item) => item.graderId),
   ]);
   let expectedId = planItems.find(
     (item) => item.name === "expected_behaviors",
-  )?.grader_id;
+  )?.graderId;
   expectedId ??= judged.find(
     (row) => behaviorPosition(row.assertion) !== null,
   )?.graderId;
@@ -534,8 +540,8 @@ function evidenceGraders(
   }
 
   return ordered.map((id) => {
-    const planItem = planItems.find((item) => item.grader_id === id);
-    const summary = evidence.by_grader.find((item) => item.grader_id === id);
+    const planItem = planItems.find((item) => item.graderId === id);
+    const summary = evidence.byGrader.find((item) => item.graderId === id);
     const rows = judged.filter((item) => item.graderId === id);
     const expectedGroup = isExpectedBehaviors(planItem?.name, rows) || id === expectedId;
     const used = new Set<string>();
@@ -866,7 +872,7 @@ function ChatTranscript({
                 : "justify-end ps-[14%] max-[40rem]:ps-5",
             )}
             id={`transcript-turn-${String(at + 1)}`}
-            key={turn.span_id}
+            key={turn.spanId}
             aria-label={`Turn ${String(at + 1)}, ${speaker}`}
           >
             <div
@@ -1048,7 +1054,7 @@ function GraderGroup({
                       {assertion.superseded.map((row) => (
                         <p
                           className={cn(ASSERTION_TEXT, "mt-2 text-muted-foreground")}
-                          key={row.judged_at}
+                          key={row.judgedAt}
                         >
                           {verdictWord(row.verdict)} — {row.rationale}
                         </p>
@@ -1098,7 +1104,7 @@ function SimulationEvidencePanel({
 }) {
   const stillJudging =
     evidence.grading === "pending" ||
-    evidence.grading_jobs.some((job) =>
+    evidence.gradingJobs.some((job) =>
       ["pending", "claimed"].includes(job.status),
     );
   const graders = evidenceGraders(evidence, assertions);
@@ -1236,9 +1242,9 @@ function SimulationEvidencePanel({
                 </div>
               ) : (
                 <>
-                  {evidence.transcript.spans_truncated ? (
+                  {evidence.transcript.spansTruncated ? (
                     <p className={NOTICE_LINE}>
-                      {`This simulation filed ${String(evidence.transcript.span_count)} steps. This view shows the first steps in order.`}
+                      {`This simulation filed ${String(evidence.transcript.spanCount)} steps. This view shows the first steps in order.`}
                     </p>
                   ) : null}
                   <ChatTranscript transcript={evidence.transcript} />

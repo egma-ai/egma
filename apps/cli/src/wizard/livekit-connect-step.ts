@@ -286,14 +286,13 @@ export async function connectLiveKitStep(
       try {
         await bindRepositoryPlatform(options.cwd, {
           origin: options.platform.url,
-          instance: options.platform.instanceId,
         });
         bound = true;
       } catch (cause) {
         return ending(cause instanceof Error ? cause.message : String(cause));
       }
       options.ui.pushStatus(
-        `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.instanceId}.`,
+        `${ACTION_MARK} Bound this repository to Egma platform ${options.platform.url}.`,
       );
     }
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { getSimulationRecording } from "@egma/platform-api/client";
 
+import { platformAnswer, platformClient } from "../lib/platform-client.ts";
 import { offersNothing } from "../lib/recording-refusals.ts";
 import { Notice } from "./ui.tsx";
 
@@ -159,31 +161,32 @@ export function RecordingPlayer({
 
     const resolve = async (): Promise<void> => {
       try {
-        const answer = await fetch(
-          `/api/simulations/${encodeURIComponent(simulationId)}/recording` +
-            (project === undefined
-              ? ""
-              : `?project=${encodeURIComponent(project)}`),
-          { headers: { accept: "application/json" }, cache: "no-store" },
+        const answer = await platformAnswer(
+          getSimulationRecording(
+            { simulationId, projectId: project },
+            { client: platformClient },
+          ),
         );
         if (stopped) return;
-        if (!answer.ok) {
+        if (answer.status !== "ready") {
           // The **code**, which is what egma promises never to change, and the
           // sentence, which it improves. Anything that is not egma answering —
           // a proxy's own page for a path it stopped forwarding, a body that
           // will not parse — carries neither, and is a broken deployment rather
           // than a conversation with no audio.
-          const said = (await answer.json().catch(() => ({}))) as {
-            error?: string;
-            message?: string;
-          };
           return setPlayable({
             status: "unresolved",
-            why: said.message ?? words.refused(answer.status),
-            code: said.error,
+            why:
+              answer.status === "signed-out"
+                ? words.refused(401)
+                : answer.refusal.message,
+            code:
+              answer.status === "signed-out"
+                ? undefined
+                : answer.refusal.error,
           });
         }
-        // `expires_at` comes back with this and is deliberately not read. It is
+        // `expiresAt` comes back with this and is deliberately not read. It is
         // there for a client that *keeps* a link — the terminal, anything that
         // caches one — and these pages keep none. Branching on it here would
         // mean comparing a server's timestamp to this browser's clock, and a
@@ -191,9 +194,7 @@ export function RecordingPlayer({
         // and never ask again, which is the dead scrubber this whole path
         // exists to prevent. What replaces a link here is a failure, not a
         // clock.
-        const resolved = (await answer.json()) as { url: string };
-        if (stopped) return;
-        setPlayable({ status: "ready", url: resolved.url });
+        setPlayable({ status: "ready", url: answer.value.url });
       } catch {
         if (!stopped) {
           setPlayable({

@@ -4,11 +4,13 @@ import {
   type LibraryEntry,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { graderLibraryOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { invalid, notPermitted } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
@@ -39,11 +41,9 @@ export type GraderLibraryRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const GRADER_LIBRARY_PATH = "/api/grader-library";
-
 type Query = {
-  readonly project?: string;
-  readonly cursor?: string;
+  readonly projectId?: string;
+  readonly pageToken?: string;
 };
 
 /**
@@ -63,13 +63,13 @@ function described(entry: LibraryEntry): Record<string, unknown> {
     // "egma" or "organization", from tenancy. The Library screen's Owner
     // column, and the one field on this answer nothing stores.
     owner: entry.owner,
-    project_id: entry.projectId,
+    projectId: entry.projectId,
     version: entry.version,
     prompt: entry.prompt,
     params: entry.params,
-    output_definition: entry.outputDefinition,
-    created_at: entry.createdAt.toISOString(),
-    updated_at: entry.updatedAt.toISOString(),
+    outputDefinition: entry.outputDefinition,
+    createdAt: entry.createdAt.toISOString(),
+    updatedAt: entry.updatedAt.toISOString(),
   };
 }
 
@@ -85,22 +85,22 @@ export async function graderLibraryRoutes(
   /**
    * The shelf, newest first, one page at a time.
    *
-   * `{ items, next_cursor }` is the envelope every list in this API answers
+   * `{ graderLibraryEntries, nextPageToken }` is this list's envelope
    * with, and the cursor is the last id of the page rather than a count of rows
    * to skip.
    */
-  app.get(GRADER_LIBRARY_PATH, async (request, reply) => {
+  registerPlatformOperation(app, graderLibraryOperations.listGraderLibrary, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
-    const acting = await actingIn(auth, given(query.project));
+    const acting = await actingIn(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
+    const cursor = given(query.pageToken);
     if (cursor !== undefined && !isId("grl", cursor)) {
       return invalid(
         reply,
-        `"${cursor}" is not a cursor this list issued. Send the next_cursor ` +
+        `"${cursor}" is not a cursor this list issued. Send the nextPageToken ` +
           `an earlier page answered with, or leave it out to start at the ` +
           `newest library entry.`,
       );
@@ -109,10 +109,10 @@ export async function graderLibraryRoutes(
     const page = await listGraderLibrary(acting.auth, { cursor });
 
     return reply.send({
-      items: page.items.map(described),
+      graderLibraryEntries: page.items.map(described),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 

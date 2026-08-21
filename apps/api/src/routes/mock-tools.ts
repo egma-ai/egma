@@ -13,12 +13,14 @@ import {
   type MockToolAgent,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { mockToolOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, cannotActIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { answerAsSent, describedMockTool } from "../http/mock-tools.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   conflict,
   invalid,
@@ -35,7 +37,7 @@ import { given, text } from "../http/reading.ts";
  *
  * Three things about this group are contract rather than convenience.
  *
- * **An edit overwrites.** There is no `expected_version_id` here and there is
+ * **An edit overwrites.** There is no `expectedVersionId` here and there is
  * no version to name: a mock tool is the one authored thing egma does not
  * version, decided out loud, and the two mechanisms that carry its history
  * instead are the answers landing on each simulation's record and the world a
@@ -63,23 +65,20 @@ export type MockToolRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const MOCK_TOOLS_PATH = "/api/mock-tools";
-export const MOCK_TOOL_PATH = "/api/mock-tools/:mockToolId";
-
 type Body = Record<string, unknown>;
 
 type Query = {
-  readonly project?: string;
-  readonly cursor?: string;
+  readonly projectId?: string;
+  readonly pageToken?: string;
 };
 
 const MOCK_TOOL_KEYS = [
   "tool",
   "answer",
   "error",
-  "delay_ms",
+  "delayMs",
   "agents",
-  "project",
+  "projectId",
 ] as const;
 
 /**
@@ -111,8 +110,8 @@ function described(one: MockTool): Record<string, unknown> {
     id: one.id,
     ...describedMockTool(one),
     agents: one.agents.map(describedAgent),
-    created_at: one.createdAt.toISOString(),
-    updated_at: one.updatedAt.toISOString(),
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
   };
 }
 
@@ -129,17 +128,17 @@ type WrittenDelay =
   | { readonly refusal: string };
 
 function delayIn(body: Body): WrittenDelay {
-  if (!("delay_ms" in body) || body.delay_ms === undefined) {
+  if (!("delayMs" in body) || body.delayMs === undefined) {
     return { delayMilliseconds: undefined };
   }
-  if (typeof body.delay_ms !== "number") {
+  if (typeof body.delayMs !== "number") {
     return {
       refusal:
-        "delay_ms is how long Egma holds this answer back, as a whole number " +
-        `of milliseconds, and this request sent ${typeof body.delay_ms}.`,
+        "delayMs is how long Egma holds this answer back, as a whole number " +
+        `of milliseconds, and this request sent ${typeof body.delayMs}.`,
     };
   }
-  return { delayMilliseconds: body.delay_ms };
+  return { delayMilliseconds: body.delayMs };
 }
 
 /**
@@ -206,22 +205,22 @@ export async function mockToolRoutes(
   /**
    * The project's mock tools, newest first, one page at a time.
    *
-   * `{ items, next_cursor }` is the envelope every list in this API answers
+   * `{ mockTools, nextPageToken }` is this list's envelope
    * with, and the cursor is the last id of the page rather than a count of rows
    * to skip.
    */
-  app.get(MOCK_TOOLS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, mockToolOperations.listMockTools, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
-    const acting = await actingIn(auth, given(query.project));
+    const acting = await actingIn(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
+    const cursor = given(query.pageToken);
     if (cursor !== undefined && !isId("mck", cursor)) {
       return invalid(
         reply,
-        `"${cursor}" is not a cursor this list issued. Send the next_cursor ` +
+        `"${cursor}" is not a cursor this list issued. Send the nextPageToken ` +
           `an earlier page answered with, or leave it out to start at the ` +
           `newest mock tool.`,
       );
@@ -230,10 +229,10 @@ export async function mockToolRoutes(
     const page = await listMockTools(acting.auth, { cursor });
 
     return reply.send({
-      items: page.items.map(described),
+      mockTools: page.items.map(described),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -244,7 +243,7 @@ export async function mockToolRoutes(
    * factory takes for the same reason: a viewer is refused for being a viewer,
    * rather than after a read that tells them what is there.
    */
-  app.post(MOCK_TOOLS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, mockToolOperations.createMockTool, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
 
@@ -264,7 +263,7 @@ export async function mockToolRoutes(
     const agents = "agents" in body ? agentEntries(body.agents) : { entries: [] };
     if ("refusal" in agents) return unprocessable(reply, agents.refusal);
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    const acting = await actingIn(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const agentIds = await resolveMockToolAgents(acting.auth, agents.entries);
@@ -289,7 +288,7 @@ export async function mockToolRoutes(
    * — except `agents`, where an empty list means what it means on a create: the
    * mock tool applies to every agent in the project.
    */
-  app.patch(MOCK_TOOL_PATH, async (request, reply) => {
+  registerPlatformOperation(app, mockToolOperations.updateMockTool, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { mockToolId } = request.params as { mockToolId: string };
     const body = (request.body ?? {}) as Body;
@@ -314,7 +313,7 @@ export async function mockToolRoutes(
       return unprocessable(reply, agents.refusal);
     }
 
-    const acting = await actingIn(auth, given(text(body.project)));
+    const acting = await actingIn(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const agentIds =
@@ -353,7 +352,7 @@ export async function mockToolRoutes(
    * run's world is a copy rather than a pointer. That is the same property that
    * lets an edit overwrite in place, applied to the last edit there is.
    */
-  app.delete(MOCK_TOOL_PATH, async (request, reply) => {
+  registerPlatformOperation(app, mockToolOperations.deleteMockTool, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { mockToolId } = request.params as { mockToolId: string };
     const query = (request.query ?? {}) as Query;
@@ -363,7 +362,7 @@ export async function mockToolRoutes(
       projectId: auth.projectId,
     });
 
-    const acting = await actingIn(auth, given(query.project));
+    const acting = await actingIn(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const removed = await deleteMockTool(acting.auth, mockToolId);
@@ -374,7 +373,7 @@ export async function mockToolRoutes(
     return reply.send({
       id: removed.id,
       tool: removed.toolName,
-      deleted_at: removed.deletedAt.toISOString(),
+      deletedAt: removed.deletedAt.toISOString(),
     });
   });
 

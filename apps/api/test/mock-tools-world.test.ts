@@ -53,7 +53,7 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: ["confirms the new time back before finishing"],
+  expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
 /**
@@ -63,9 +63,9 @@ const RESCHEDULING = {
  */
 function retellFor(name: string): Record<string, unknown> {
   return {
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: `agent_in_retell_${name.replace(/\W+/gu, "_")}` },
     credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -78,14 +78,14 @@ async function pushTest(
   key: string,
   body: Record<string, unknown>,
 ): Promise<Pinned & { body: Record<string, unknown> }> {
-  const created = await request("POST", "/api/tests", key, {
+  const created = await request("POST", "/v1/tests", key, {
     ...RESCHEDULING,
     ...body,
   });
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
   return {
     testId: String(created.body.id),
-    versionId: String(created.body.version_id),
+    versionId: String(created.body.versionId),
     body: created.body,
   };
 }
@@ -94,7 +94,7 @@ async function registerAgent(
   key: string,
   name: string,
 ): Promise<{ agentId: string; connectionId: string }> {
-  const registered = await request("POST", "/api/agents", key, {
+  const registered = await request("POST", "/v1/agents", key, {
     name,
     connection: { ...retellFor(name), name },
   });
@@ -109,7 +109,7 @@ async function mockTool(
   key: string,
   body: Record<string, unknown>,
 ): Promise<string> {
-  const created = await request("POST", "/api/mock-tools", key, body);
+  const created = await request("POST", "/v1/mock-tools", key, body);
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
   return String(created.body.id);
 }
@@ -136,20 +136,20 @@ describe("a test's own overrides", () => {
     await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
 
     const pushed = await pushTest(key, {
-      mock_tools: [{ ...EMPTY_CALENDAR, delay_ms: 400 }],
+      mockTools: [{ ...EMPTY_CALENDAR, delayMs: 400 }],
     });
 
-    expect(pushed.body.mock_tools).toEqual([
-      { tool: "check_availability", answer: { slots: [] }, delay_ms: 400 },
+    expect(pushed.body.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] }, delayMs: 400 },
     ]);
 
     const frozen = await request(
       "GET",
-      `/api/test-versions/${pushed.versionId}`,
+      `/v1/test-versions/${pushed.versionId}`,
       key,
     );
     expect(frozen.statusCode).toBe(200);
-    expect(frozen.body.mock_tools).toEqual(pushed.body.mock_tools);
+    expect(frozen.body.mockTools).toEqual(pushed.body.mockTools);
   });
 
   it("mints a version when one is edited, exactly as a behavior does", async () => {
@@ -157,22 +157,22 @@ describe("a test's own overrides", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
-    const pushed = await pushTest(key, { mock_tools: [EMPTY_CALENDAR] });
+    const pushed = await pushTest(key, { mockTools: [EMPTY_CALENDAR] });
 
-    const edited = await request("PATCH", `/api/tests/${pushed.testId}`, key, {
-      mock_tools: [
+    const edited = await request("PATCH", `/v1/tests/${pushed.testId}`, key, {
+      mockTools: [
         { tool: "check_availability", error: "the calendar is unreachable" },
       ],
-      expected_version_id: pushed.versionId,
+      expectedVersionId: pushed.versionId,
     });
 
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
     expect(edited.body.version).toBe(2);
-    expect(edited.body.mock_tools).toEqual([
+    expect(edited.body.mockTools).toEqual([
       {
         tool: "check_availability",
         error: "the calendar is unreachable",
-        delay_ms: 0,
+        delayMs: 0,
       },
     ]);
     expect(await versionCount(pushed.testId)).toBe(2);
@@ -180,11 +180,11 @@ describe("a test's own overrides", () => {
     // And the version it left behind still says what it said.
     const before = await request(
       "GET",
-      `/api/test-versions/${pushed.versionId}`,
+      `/v1/test-versions/${pushed.versionId}`,
       key,
     );
-    expect(before.body.mock_tools).toEqual([
-      { tool: "check_availability", answer: { slots: [] }, delay_ms: 0 },
+    expect(before.body.mockTools).toEqual([
+      { tool: "check_availability", answer: { slots: [] }, delayMs: 0 },
     ]);
   });
 
@@ -193,15 +193,15 @@ describe("a test's own overrides", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
-    const pushed = await pushTest(key, { mock_tools: [EMPTY_CALENDAR] });
+    const pushed = await pushTest(key, { mockTools: [EMPTY_CALENDAR] });
 
-    const again = await request("PATCH", `/api/tests/${pushed.testId}`, key, {
-      mock_tools: [EMPTY_CALENDAR],
-      expected_version_id: pushed.versionId,
+    const again = await request("PATCH", `/v1/tests/${pushed.testId}`, key, {
+      mockTools: [EMPTY_CALENDAR],
+      expectedVersionId: pushed.versionId,
     });
 
     expect(again.statusCode, JSON.stringify(again.body)).toBe(200);
-    expect(again.body.version_id).toBe(pushed.versionId);
+    expect(again.body.versionId).toBe(pushed.versionId);
     expect(await versionCount(pushed.testId)).toBe(1);
   });
 
@@ -210,26 +210,26 @@ describe("a test's own overrides", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
     await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
-    const pushed = await pushTest(key, { mock_tools: [EMPTY_CALENDAR] });
+    const pushed = await pushTest(key, { mockTools: [EMPTY_CALENDAR] });
 
     const elsewhere = await request(
       "PATCH",
-      `/api/tests/${pushed.testId}`,
+      `/v1/tests/${pushed.testId}`,
       key,
       {
         scenario: "They want the Wednesday slot instead.",
-        expected_version_id: pushed.versionId,
+        expectedVersionId: pushed.versionId,
       },
     );
     expect(elsewhere.statusCode, JSON.stringify(elsewhere.body)).toBe(200);
-    expect(elsewhere.body.mock_tools).toEqual(pushed.body.mock_tools);
+    expect(elsewhere.body.mockTools).toEqual(pushed.body.mockTools);
 
-    const cleared = await request("PATCH", `/api/tests/${pushed.testId}`, key, {
-      mock_tools: [],
-      expected_version_id: elsewhere.body.version_id,
+    const cleared = await request("PATCH", `/v1/tests/${pushed.testId}`, key, {
+      mockTools: [],
+      expectedVersionId: elsewhere.body.versionId,
     });
     expect(cleared.statusCode, JSON.stringify(cleared.body)).toBe(200);
-    expect(cleared.body.mock_tools).toEqual([]);
+    expect(cleared.body.mockTools).toEqual([]);
     expect(cleared.body.version).toBe(3);
   });
 
@@ -239,9 +239,9 @@ describe("a test's own overrides", () => {
     const key = await projectKeyFor(api.app, ada);
     await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
 
-    const blank = await request("POST", "/api/tests", key, {
+    const blank = await request("POST", "/v1/tests", key, {
       ...RESCHEDULING,
-      mock_tools: [{ tool: "  ", answer: {} }],
+      mockTools: [{ tool: "  ", answer: {} }],
     });
     expect(blank.statusCode).toBe(422);
     expect(blank.body).toEqual({
@@ -252,22 +252,22 @@ describe("a test's own overrides", () => {
         "registers it.",
     });
 
-    const slow = await request("POST", "/api/tests", key, {
+    const slow = await request("POST", "/v1/tests", key, {
       ...RESCHEDULING,
-      mock_tools: [{ ...EMPTY_CALENDAR, delay_ms: 60_000 }],
+      mockTools: [{ ...EMPTY_CALENDAR, delayMs: 60_000 }],
     });
     expect(slow.statusCode).toBe(422);
     expect(slow.body).toEqual({
       error: "unprocessable",
       message:
-        "delay_ms is 60000, and a mock tool may delay its answer by at most " +
+        "delayMs is 60000, and a mock tool may delay its answer by at most " +
         "30000 milliseconds — the budget the exchange carrying it is given. " +
-        "Send a smaller delay_ms.",
+        "Send a smaller delayMs.",
     });
 
-    const twice = await request("POST", "/api/tests", key, {
+    const twice = await request("POST", "/v1/tests", key, {
       ...RESCHEDULING,
-      mock_tools: [EMPTY_CALENDAR, { ...EMPTY_CALENDAR, answer: { slots: [1] } }],
+      mockTools: [EMPTY_CALENDAR, { ...EMPTY_CALENDAR, answer: { slots: [1] } }],
     });
     expect(twice.statusCode).toBe(422);
     expect(twice.body).toEqual({
@@ -304,36 +304,36 @@ describe("the world a run freezes", () => {
     const mockToolId = await mockTool(key, EMPTY_CALENDAR);
     const pinned = await pushTest(key, {});
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [pinned.versionId],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [pinned.versionId],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
 
-    expect(started.body.mock_tools).toEqual({
+    expect(started.body.mockTools).toEqual({
       defaults: [
         {
           tool: "check_availability",
-          mock_tool_id: mockToolId,
+          mockToolId: mockToolId,
           answer: { slots: [] },
-          delay_ms: 0,
+          delayMs: 0,
         },
       ],
       overrides: {},
     });
 
     // The world moves, after the run was created.
-    const edited = await request("PATCH", `/api/mock-tools/${mockToolId}`, key, {
+    const edited = await request("PATCH", `/v1/mock-tools/${mockToolId}`, key, {
       answer: { slots: ["Tuesday 14:00"] },
-      delay_ms: 2_000,
+      delayMs: 2_000,
     });
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
 
     // And the run answers exactly what it froze, in every reading of it.
-    const read = await request("GET", `/api/runs/${runId}`, key);
-    expect(read.body.mock_tools).toEqual(started.body.mock_tools);
+    const read = await request("GET", `/v1/runs/${runId}`, key);
+    expect(read.body.mockTools).toEqual(started.body.mockTools);
 
     const held = await getRun(contextFor(ada, "member"), runId);
     expect(resolveMockTools(held!.mockToolSnapshot, pinned.versionId)).toEqual([
@@ -347,14 +347,14 @@ describe("the world a run freezes", () => {
 
     // A run started now sees the world as it is now, which is the other half:
     // the freeze is per run, never a refusal to move.
-    const after = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [pinned.versionId],
-      idempotency_key: newId("run"),
+    const after = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [pinned.versionId],
+      idempotencyKey: newId("run"),
     });
     expect(
-      (after.body.mock_tools as { defaults: { delay_ms: number }[] }).defaults[0]
-        ?.delay_ms,
+      (after.body.mockTools as { defaults: { delayMs: number }[] }).defaults[0]
+        ?.delayMs,
     ).toBe(2_000);
   });
 
@@ -371,19 +371,19 @@ describe("the world a run freezes", () => {
     const plain = await pushTest(key, { name: "the ordinary path" });
     const forcing = await pushTest(key, {
       name: "the calendar is down",
-      mock_tools: [
+      mockTools: [
         {
           tool: "check_availability",
           error: "the calendar is unreachable",
-          delay_ms: 250,
+          delayMs: 250,
         },
       ],
     });
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [plain.versionId, forcing.versionId],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [plain.versionId, forcing.versionId],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -433,13 +433,13 @@ describe("the world a run freezes", () => {
       "mock_world_override_only",
     );
     const pinned = await pushTest(key, {
-      mock_tools: [{ tool: "lookup_customer", answer: { tier: "gold" } }],
+      mockTools: [{ tool: "lookup_customer", answer: { tier: "gold" } }],
     });
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [pinned.versionId],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [pinned.versionId],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -475,10 +475,10 @@ describe("the world a run freezes", () => {
     const auth = contextFor(ada, "member");
 
     const against = async (connectionId: string) => {
-      const started = await request("POST", "/api/runs", key, {
-        connection: connectionId,
-        test_versions: [pinned.versionId],
-        idempotency_key: newId("run"),
+      const started = await request("POST", "/v1/runs", key, {
+        connectionId: connectionId,
+        testVersionIds: [pinned.versionId],
+        idempotencyKey: newId("run"),
       });
       expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
       const held = await getRun(auth, String(started.body.id));
@@ -504,13 +504,13 @@ describe("the world a run freezes", () => {
     );
     const pinned = await pushTest(key, {});
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [pinned.versionId],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [pinned.versionId],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.mock_tools).toEqual({ defaults: [], overrides: {} });
+    expect(started.body.mockTools).toEqual({ defaults: [], overrides: {} });
 
     const held = await getRun(
       contextFor(ada, "member"),
@@ -533,7 +533,7 @@ describe("no version chain exists for a mock tool", () => {
     for (const slots of [["Tuesday"], ["Wednesday"], ["Thursday"]]) {
       const edited = await request(
         "PATCH",
-        `/api/mock-tools/${mockToolId}`,
+        `/v1/mock-tools/${mockToolId}`,
         key,
         { answer: { slots } },
       );

@@ -2,21 +2,32 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  archiveTest,
+  cloneTest,
+  getTest,
+  listTestVersions,
+  restoreTest,
+  setTestAgents,
+  updateTest,
+} from "@egma/platform-api/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import {
+  platformAnswer,
+  platformClient,
+  type PlatformRequest,
+} from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   availability,
   behaviorsAreUsable,
-  testAgentsPath,
-  testPath,
-  testVersionsPath,
   whyBehaviorsRefuse,
   type ExpectedBehavior,
   type ListedTest,
@@ -119,11 +130,25 @@ function TestDetail({
   const now = useMinuteClock();
 
   const { answer, reload } = useProjectRead<ListedTest>(
-    testPath(testId),
+    (projectId) =>
+      platformAnswer(
+        getTest({ testId, projectId }, { client: platformClient }),
+      ),
     projectId,
+    testId,
   );
   const { answer: history, reload: reloadHistory } =
-    useProjectRead<TestVersionPage>(testVersionsPath(testId), projectId);
+    useProjectRead<TestVersionPage>(
+      (projectId) =>
+        platformAnswer(
+          listTestVersions(
+            { testId, projectId },
+            { client: platformClient },
+          ),
+        ),
+      projectId,
+      testId,
+    );
   const readTest = answer?.status === "ready" ? answer.value : null;
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -141,7 +166,7 @@ function TestDetail({
   const test =
     baseline !== null &&
     baseline.id === testId &&
-    baseline.project_id === projectId
+    baseline.projectId === projectId
       ? baseline
       : readTest;
 
@@ -163,7 +188,7 @@ function TestDetail({
       name: readTest.name,
       description: readTest.description ?? "",
       scenario: readTest.scenario,
-      behaviors: readTest.expected_behaviors,
+      behaviors: readTest.expectedBehaviors,
       personas: readTest.personas.map((one) => one.id),
       agents: readTest.agents.map((one) => one.id),
     });
@@ -192,7 +217,7 @@ function TestDetail({
     editing !== null &&
     test !== null &&
     (editing.scenario !== test.scenario ||
-      !sameStrings(editing.behaviors, test.expected_behaviors) ||
+      !sameStrings(editing.behaviors, test.expectedBehaviors) ||
       !sameStrings(editing.personas, test.personas.map((one) => one.id)));
   const agentsChanged =
     editing !== null &&
@@ -212,9 +237,7 @@ function TestDetail({
   };
 
   async function write(
-    path: string,
-    body: Record<string, unknown>,
-    method: "POST" | "PATCH" = "PATCH",
+    request: PlatformRequest<ListedTest>,
     area: SaveArea | null = null,
   ): Promise<ListedTest | null> {
     setRefused(null);
@@ -232,11 +255,7 @@ function TestDetail({
     }
     setSavingArea(area);
     setSaving(true);
-    const written = await writeJson<ListedTest>(path, {
-      method,
-      project: projectId,
-      body,
-    });
+    const written = await platformAnswer(request);
     setSaving(false);
     setSavingArea(null);
 
@@ -260,15 +279,23 @@ function TestDetail({
   async function saveLive(): Promise<void> {
     if (editing === null || test === null) return;
     const sent = editing;
-    const written = await write(testPath(testId), {
-      name: editing.name.trim(),
-      description:
-        editing.description.trim() === "" ? null : editing.description.trim(),
+    const written = await write(
+      updateTest(
+        {
+          testId,
+          projectId,
+          name: editing.name.trim(),
+          description:
+            editing.description.trim() === "" ? null : editing.description.trim(),
       // The live half carries the revision alone. Sending the version too would
       // make a rename fail because somebody else sharpened a scenario, which is
       // a conflict that never existed.
-      expected_revision: test.revision,
-    }, "PATCH", "settings");
+          expectedRevision: test.revision,
+        },
+        { client: platformClient },
+      ),
+      "settings",
+    );
     if (written === null) return;
 
     setBaseline(written);
@@ -293,17 +320,25 @@ function TestDetail({
   async function saveContent(): Promise<void> {
     if (editing === null || test === null) return;
     const sent = editing;
-    const written = await write(testPath(testId), {
-      scenario: editing.scenario.trim(),
-      expected_behaviors: editing.behaviors
-        .map((one) => one.trim())
-        .filter((one) => one !== ""),
-      personas: [...editing.personas],
+    const written = await write(
+      updateTest(
+        {
+          testId,
+          projectId,
+          scenario: editing.scenario.trim(),
+          expectedBehaviors: editing.behaviors
+            .map((one) => one.trim())
+            .filter((one) => one !== ""),
+          personas: [...editing.personas],
       // And the content half carries the version alone, for the mirror reason.
       // Hidden capabilities and mock-tool overrides are deliberately absent.
       // The form does not edit them, so leaving them out preserves them.
-      expected_version_id: test.version_id,
-    }, "PATCH", "version");
+          expectedVersionId: test.versionId,
+        },
+        { client: platformClient },
+      ),
+      "version",
+    );
     if (written !== null) {
       setBaseline(written);
       setDraft((current) => {
@@ -320,7 +355,7 @@ function TestDetail({
         return {
           ...current,
           scenario: written.scenario,
-          behaviors: written.expected_behaviors,
+          behaviors: written.expectedBehaviors,
           personas: written.personas.map((one) => one.id),
         };
       });
@@ -332,12 +367,15 @@ function TestDetail({
     if (editing === null || test === null) return;
     const sent = editing;
     const written = await write(
-      testAgentsPath(testId),
-      {
-        agents: [...editing.agents],
-        expected_applicability_revision: test.applicability_revision,
-      },
-      "POST",
+      setTestAgents(
+        {
+          testId,
+          projectId,
+          agents: [...editing.agents],
+          expectedApplicabilityRevision: test.applicabilityRevision,
+        },
+        { client: platformClient },
+      ),
       "agents",
     );
     if (written === null) return;
@@ -361,7 +399,12 @@ function TestDetail({
 
   async function clone(): Promise<void> {
     if (test === null) return;
-    const written = await write(`${testPath(testId)}/clone`, {}, "POST");
+    const written = await write(
+      cloneTest(
+        { testId, projectId },
+        { client: platformClient },
+      ),
+    );
     if (written !== null) {
       router.push(projectPath(projectId, "tests", written.id));
     }
@@ -369,18 +412,27 @@ function TestDetail({
 
   async function setArchived(next: boolean): Promise<void> {
     if (test === null || editing === null) return;
-    const written = await write(
-      `${testPath(testId)}/${next ? "archive" : "restore"}`,
-      {
-        expected_revision: test.revision,
+    const request = next
+      ? archiveTest(
+          {
+            testId,
+            projectId,
+            expectedRevision: test.revision,
+          },
+          { client: platformClient },
+        )
+      : restoreTest(
+          {
+            testId,
+            projectId,
+            expectedRevision: test.revision,
         // A test an upgrade left with no agent takes one in the Restore itself,
         // so there is never an instant in which it is active and unusable.
-        ...(next || test.agents.length > 0
-          ? {}
-          : { agents: [...editing.agents] }),
-      },
-      "POST",
-    );
+            ...(test.agents.length > 0 ? {} : { agents: [...editing.agents] }),
+          },
+          { client: platformClient },
+        );
+    const written = await write(request);
     setConfirmingLifecycle(null);
     if (written !== null) reload();
   }
@@ -443,7 +495,7 @@ function TestDetail({
     );
   }
 
-  const archived = test.archived_at !== null;
+  const archived = test.archivedAt !== null;
   const standing = availability(test);
   const behaviorProblem = whyBehaviorsRefuse(editing.behaviors);
   const whyNot = mayAuthor
@@ -462,7 +514,7 @@ function TestDetail({
         lead={
           <>
             v{test.version} · changed{" "}
-            <RelativeInstant instant={test.updated_at} now={now} />{" "}
+            <RelativeInstant instant={test.updatedAt} now={now} />{" "}
             {archived ? <Badge variant="warning">Archived</Badge> : null}{" "}
             {standing.runnable ? null : (
               <Badge variant="failure">Cannot run</Badge>
@@ -666,13 +718,13 @@ function TestDetail({
               projectId={projectId}
               title="Recent runs"
               lead="Latest executions of this test."
-              filters={{ test: testId }}
+              filters={{ testId }}
             />
 
             <Section title="Version history">
               {history?.status === "ready" ? (
                 <VersionHistory
-                  versions={history.value.items}
+                  versions={history.value.versions}
                   reading={reading}
                   now={now}
                   onRead={setReading}

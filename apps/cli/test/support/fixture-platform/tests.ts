@@ -121,7 +121,7 @@ export type SeedTest = {
   readonly requiredCapabilities?: readonly string[];
   /** The agents it applies to. Empty is what a test authored before links had. */
   readonly agents?: readonly string[];
-  /** As the wire carries them: `{ tool, answer | error, delay_ms }`. */
+  /** As the wire carries them: `{ tool, answer | error, delayMs }`. */
   readonly mockTools?: readonly Record<string, unknown>[];
 };
 
@@ -197,7 +197,7 @@ const A_PERSONA_IS_TEXT =
 
 const NO_EXPECTED_VERSION =
   "an edit says which version it was written against, and this one " +
-  "named no expected_version_id. Send the version_id you last read " +
+  "named no expectedVersionId. Send the versionId you last read " +
   "for this test, or read the test again and send the version it " +
   "names now.";
 
@@ -226,22 +226,22 @@ function personaEntries(value: unknown): NamedPersonas {
 
 /** The wire's own refusals for a test's overrides, word for word. */
 const MOCK_TOOLS_NOT_A_LIST =
-  "mock_tools is the list of tools this test answers for itself. Send " +
+  "mockTools is the list of tools this test answers for itself. Send " +
   'it as a list of objects, like [{"tool": "check_availability", ' +
   '"answer": {"slots": []}}], or leave it out and the project\'s mock ' +
   "tools are the whole world.";
 
 const AN_OVERRIDE_IS_AN_OBJECT =
-  "each entry in mock_tools names one tool and what it answers with. " +
+  "each entry in mockTools names one tool and what it answers with. " +
   'Send objects, like {"tool": "check_availability", "error": "the ' +
   'calendar is unreachable"}.';
 
-/** The keys one entry of `mock_tools` holds, and no others. */
-const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
+/** The keys one entry of `mockTools` holds, and no others. */
+const OVERRIDE_KEYS = ["tool", "answer", "error", "delayMs"] as const;
 
 /** The wire's own refusals about expected behaviors, word for word. */
 const BEHAVIORS_NOT_A_LIST =
-  "expected_behaviors is what should happen, as a list of sentences, " +
+  "expectedBehaviors is what should happen, as a list of sentences, " +
   'like ["confirms the new time back before finishing"].';
 
 const THE_RETIRED_BEHAVIOR_SHAPE =
@@ -303,11 +303,11 @@ function overrideEntries(value: unknown): WrittenOverrides {
     const written = entry as Record<string, unknown>;
     const unknown = unknownKeyIn(written, OVERRIDE_KEYS, "a mock tool a test overrides");
     if (unknown !== undefined) return { refusal: unknown };
-    if ("delay_ms" in written && typeof written.delay_ms !== "number") {
+    if ("delayMs" in written && typeof written.delayMs !== "number") {
       return {
         refusal:
-          "delay_ms is how long Egma holds an answer back, as a whole number " +
-          `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
+          "delayMs is how long Egma holds an answer back, as a whole number " +
+          `of milliseconds, and one entry in mockTools sent ${typeof written.delayMs}.`,
       };
     }
     entries.push(written);
@@ -334,7 +334,7 @@ function validOverrides(
 
     const answer = answerOf(entry);
     if ("refusal" in answer) return { refusal: answer.refusal };
-    const delay = delayOf(entry.delay_ms);
+    const delay = delayOf(entry.delayMs);
     if ("refusal" in delay) return { refusal: delay.refusal };
 
     overrides.push({
@@ -348,7 +348,7 @@ function validOverrides(
 
 /** One override as the wire carries it, in both directions. */
 function describedOverride(one: StoredOverride): Record<string, unknown> {
-  return { tool: one.toolName, ...one.answer, delay_ms: one.delayMilliseconds };
+  return { tool: one.toolName, ...one.answer, delayMs: one.delayMilliseconds };
 }
 
 /**
@@ -506,7 +506,7 @@ export function testRoutes(options: {
       // the identifier in it.
       if (answering.length > 1) {
         return {
-          code: "persona_name_ambiguous",
+          code: "personaName_ambiguous",
           refusal:
             `Persona name ${wanted} matches more than one active persona in ` +
             `this project. Put the intended persona's stable ID in the file ` +
@@ -624,15 +624,15 @@ export function testRoutes(options: {
     scenario: version.scenario,
     // Sentences, always. The `{behavior, priority}` shape retired with the
     // ladder and is refused by name on the way in.
-    expected_behaviors: [...version.expectedBehaviors],
+    expectedBehaviors: [...version.expectedBehaviors],
     personas: namesOf(version.personaIds).map((persona) => ({
       id: persona.id,
       name: persona.name,
-      archived_at: null,
+      archivedAt: null,
     })),
-    required_capabilities: [...version.requiredCapabilities],
-    mock_tools: version.mockOverrides.map(describedOverride),
-    override_count: version.mockOverrides.length,
+    requiredCapabilities: [...version.requiredCapabilities],
+    mockTools: version.mockOverrides.map(describedOverride),
+    overrideCount: version.mockOverrides.length,
   });
 
   /** The one sentence a test nobody can see gets, whichever way it is absent. */
@@ -650,19 +650,19 @@ export function testRoutes(options: {
     const current = currentOf(test);
     return {
       id: test.id,
-      project_id: projectId,
+      projectId,
       name: test.name,
       description: test.description,
       version: current.version,
-      version_id: current.id,
+      versionId: current.id,
       ...describedContent(current),
-      agents: test.agentIds.map((id) => ({ id, name: id, archived_at: null })),
+      agents: test.agentIds.map((id) => ({ id, name: id, archivedAt: null })),
       revision: test.revision,
-      applicability_revision: test.applicabilityRevision,
-      archived_at: test.archivedAt === null ? null : test.archivedAt.toISOString(),
-      archive_reason: null,
-      created_at: test.createdAt.toISOString(),
-      updated_at: test.updatedAt.toISOString(),
+      applicabilityRevision: test.applicabilityRevision,
+      archivedAt: test.archivedAt === null ? null : test.archivedAt.toISOString(),
+      archiveReason: null,
+      createdAt: test.createdAt.toISOString(),
+      updatedAt: test.updatedAt.toISOString(),
     };
   };
 
@@ -721,12 +721,12 @@ export function testRoutes(options: {
     // The shape of the overrides is read straight after the shape of the
     // personas and still before the project, because both are answerable
     // without knowing anything about what this project holds.
-    const written = "mock_tools" in said ? overrideEntries(said.mock_tools) : undefined;
+    const written = "mockTools" in said ? overrideEntries(said.mockTools) : undefined;
     if (written !== undefined && "refusal" in written) {
       return { answer: refuse(422, "unprocessable", written.refusal) };
     }
 
-    const outsider = projectNamed(given(text(said.project)));
+    const outsider = projectNamed(given(text(said.projectId)));
     if (outsider !== null) return { answer: outsider };
 
     const overrides = written === undefined ? undefined : written.entries;
@@ -785,8 +785,8 @@ export function testRoutes(options: {
     if ("answer" in who) return who;
 
     const behaviors =
-      "expected_behaviors" in said
-        ? behaviorEntries(said.expected_behaviors)
+      "expectedBehaviors" in said
+        ? behaviorEntries(said.expectedBehaviors)
         : { entries: [] as readonly StoredBehavior[] };
     if ("refusal" in behaviors) {
       return { answer: refuse(422, "unprocessable", behaviors.refusal) };
@@ -824,7 +824,7 @@ export function testRoutes(options: {
         // does: a first test costs nobody a persona to author.
         personaIds: who.ids ?? [defaultPersonaId],
         graderIds: textList(said.graders).filter((id) => id !== ""),
-        requiredCapabilities: textList(said.required_capabilities).filter(
+        requiredCapabilities: textList(said.requiredCapabilities).filter(
           (one) => one !== "",
         ),
         agentIds,
@@ -840,7 +840,7 @@ export function testRoutes(options: {
         /**
          * The project's tests, newest first, one page at a time.
          *
-         * `{ items, next_cursor }` is the envelope every list in this API
+         * `{ items, nextPageToken }` is the envelope every list in this API
          * answers with, and the cursor is the last id of the page rather than a
          * count of rows to skip: the ids sort by mint time, so a list changing
          * under a reader never shows them a row twice and never skips one.
@@ -849,24 +849,24 @@ export function testRoutes(options: {
          * and the cursor carries a reader through the rest.
          */
         method: "GET",
-        path: "/api/tests",
+        path: "/v1/tests",
         handle: (request) =>
           behindAKey(request, () => {
-            const outsider = projectNamed(given(request.url.searchParams.get("project")));
+            const outsider = projectNamed(given(request.url.searchParams.get("projectId")));
             if (outsider !== null) return outsider;
 
-            const cursor = given(request.url.searchParams.get("cursor"));
+            const cursor = given(request.url.searchParams.get("pageToken"));
             if (cursor !== undefined && !isId("tst", cursor)) {
               return refuse(
                 400,
                 "invalid_request",
-                `"${cursor}" is not a cursor this list issued. Send the next_cursor ` +
+                `"${cursor}" is not a cursor this list issued. Send the nextPageToken ` +
                   `an earlier page answered with, or leave it out to start at the ` +
                   `newest test.`,
               );
             }
 
-            const agent = given(request.url.searchParams.get("agent"));
+            const agent = given(request.url.searchParams.get("agentId"));
             if (agent !== undefined && !isId("agt", agent)) {
               return refuse(
                 400,
@@ -895,11 +895,11 @@ export function testRoutes(options: {
             return {
               status: 200,
               body: {
-                items: page.map(described),
+                tests: page.map(described),
                 // Null rather than absent, so a client can tell "there is no
                 // next page" from "this answer is an older shape that never
                 // had one".
-                next_cursor: more ? (page.at(-1)?.id ?? null) : null,
+                nextPageToken: more ? (page.at(-1)?.id ?? null) : null,
               },
             };
           }),
@@ -909,7 +909,7 @@ export function testRoutes(options: {
         // through, so it says which test the version belongs to and whether the
         // test has moved past it.
         method: "GET",
-        path: "/api/test-versions/:versionId",
+        path: "/v1/test-versions/:versionId",
         handle: (request) =>
           behindAKey(request, () => {
             const wanted = request.params.versionId ?? "";
@@ -929,12 +929,12 @@ export function testRoutes(options: {
               status: 200,
               body: {
                 id: version.id,
-                test_id: test.id,
-                test_name: test.name,
+                testId: test.id,
+                testName: test.name,
                 version: version.version,
                 current: test.currentVersionId === version.id,
                 ...describedContent(version),
-                created_at: version.createdAt.toISOString(),
+                createdAt: version.createdAt.toISOString(),
               },
             };
           }),
@@ -950,10 +950,10 @@ export function testRoutes(options: {
          * its page.
          */
         method: "GET",
-        path: "/api/tests/:testId",
+        path: "/v1/tests/:testId",
         handle: (request) =>
           behindAKey(request, () => {
-            const outsider = projectNamed(given(request.url.searchParams.get("project")));
+            const outsider = projectNamed(given(request.url.searchParams.get("projectId")));
             if (outsider !== null) return outsider;
 
             const wanted = request.params.testId ?? "";
@@ -964,7 +964,7 @@ export function testRoutes(options: {
       },
       {
         method: "POST",
-        path: "/api/tests",
+        path: "/v1/tests",
         handle: (request) =>
           behindAKey(request, () => {
             const read = writeFrom(request.body);
@@ -976,7 +976,7 @@ export function testRoutes(options: {
         /**
          * An edit, carrying the version it was written against.
          *
-         * `expected_version_id` is **required**, and it is required because it
+         * `expectedVersionId` is **required**, and it is required because it
          * is the whole of the refusal rule: an edit that named no version would
          * be accepted over a test somebody else moved in the meantime, and the
          * later write would quietly become what the test says. It costs the
@@ -992,12 +992,12 @@ export function testRoutes(options: {
          * test it names is even there.
          */
         method: "PATCH",
-        path: "/api/tests/:testId",
+        path: "/v1/tests/:testId",
         handle: (request) =>
           behindAKey(request, () => {
             const said = request.body ?? {};
 
-            const expected = given(text(said.expected_version_id));
+            const expected = given(text(said.expectedVersionId));
             if (expected === undefined) {
               return refuse(422, "unprocessable", NO_EXPECTED_VERSION);
             }
@@ -1022,7 +1022,7 @@ export function testRoutes(options: {
             // told to relink the test or remove the file; telling it the content
             // had moved would send somebody to pull a test their folder would be
             // refused for pushing again.
-            const repositoryAgent = given(text(said.repository_agent));
+            const repositoryAgent = given(text(said.repositoryAgentId));
             if (
               repositoryAgent !== undefined &&
               !test.agentIds.includes(repositoryAgent)
@@ -1036,7 +1036,7 @@ export function testRoutes(options: {
               );
             }
 
-            const expectedRevision = given(text(said.expected_revision));
+            const expectedRevision = given(text(said.expectedRevision));
             if (
               expectedRevision !== undefined &&
               expectedRevision !== test.revision
@@ -1046,7 +1046,7 @@ export function testRoutes(options: {
                 "identity_conflict",
                 `Test ${test.id} changed after you opened it. Read it again, ` +
                   `keep or reapply your edits, and send the update with ` +
-                  `expected_revision set to its new revision.`,
+                  `expectedRevision set to its new revision.`,
               );
             }
 
@@ -1061,11 +1061,11 @@ export function testRoutes(options: {
                   message:
                     `this edit was written against version ${expected}, and the ` +
                     `test has moved on to ${test.currentVersionId}. Read the test ` +
-                    `again and send the edit with expected_version_id set to the ` +
+                    `again and send the edit with expectedVersionId set to the ` +
                     `version it names now.`,
                   test: { id: test.id, name: test.name },
-                  expected_version_id: expected,
-                  current_version_id: test.currentVersionId,
+                  expectedVersionId: expected,
+                  currentVersionId: test.currentVersionId,
                 },
               };
             }
@@ -1079,8 +1079,8 @@ export function testRoutes(options: {
             // on a create, which is that the project's default persona calls.
             const current = currentOf(test);
             const behaviors =
-              "expected_behaviors" in said
-                ? behaviorEntries(said.expected_behaviors)
+              "expectedBehaviors" in said
+                ? behaviorEntries(said.expectedBehaviors)
                 : { entries: current.expectedBehaviors };
             if ("refusal" in behaviors) {
               return refuse(422, "unprocessable", behaviors.refusal);
@@ -1107,8 +1107,8 @@ export function testRoutes(options: {
               expectedBehaviors: [...content.expectedBehaviors],
               personaIds: who.ids ?? current.personaIds,
               requiredCapabilities:
-                "required_capabilities" in said
-                  ? textList(said.required_capabilities).filter((one) => one !== "")
+                "requiredCapabilities" in said
+                  ? textList(said.requiredCapabilities).filter((one) => one !== "")
                   : current.requiredCapabilities,
               mockOverrides: overrides.overrides,
             });

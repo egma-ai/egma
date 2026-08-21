@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
+import { getRun } from "@egma/platform-api/client";
 
-import { readJson } from "../../../lib/api.ts";
+import { platformAnswer, platformClient } from "../../../lib/platform-client.ts";
 import { projectPath } from "../../../lib/project-context.ts";
-import { runPath, type RunDetail } from "../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { Failure, Loading, NotFound } from "../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../ui/shell.tsx";
@@ -16,14 +16,14 @@ import { ProductStatePage } from "../../../ui/shell.tsx";
  * the run inside its project.
  *
  * **This was a second run detail page, and two of them was the problem.** A run
- * is reached from a terminal by an address with no project in it — `results_url`
+ * is reached from a terminal by an address with no project in it — `resultsUrl`
  * — and from the product by a project-scoped one. Drawing both meant two pages
  * showing one run, free to disagree about what a skipped conversation means or
  * whether pending grading is a failure, and only one of them being kept in step
  * as the product moved. So this one stopped drawing anything.
  *
- * **The forwarding is a read rather than a guess.** `GET /api/runs/{id}` answers
- * `project_id` precisely so that a page holding only a run id can find out where
+ * **The forwarding is a read rather than a guess.** `GET /v1/runs/{id}` answers
+ * `projectId` precisely so that a page holding only a run id can find out where
  * the run belongs — a browser cannot know it, and an organization with two
  * projects makes any default wrong. So the run is read, and the answer decides
  * the address.
@@ -32,7 +32,7 @@ import { ProductStatePage } from "../../../ui/shell.tsx";
  * rather than changed.** This address names no project and cannot, so the read
  * below names none — and for a **session** that means the session's own
  * project, which is the organization's *first*. `getRun` narrows by it. So a
- * `results_url` for a run in any other project is answered as an absence, by
+ * `resultsUrl` for a run in any other project is answered as an absence, by
  * the one address a terminal prints.
  *
  * **A terminal is not affected, and that is the asymmetry rather than an
@@ -77,7 +77,9 @@ export default function RunResultsAddress({
     // No project is named, and none can be: this address carries none. What
     // that means today is the paragraph above — the read acts in the session's
     // own project rather than across the organization.
-    void readJson<RunDetail>(runPath(runId)).then((answer) => {
+    void platformAnswer(
+      getRun({ runId }, { client: platformClient }),
+    ).then((answer) => {
       if (!current) return;
       if (answer.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -92,7 +94,7 @@ export default function RunResultsAddress({
         return;
       }
       router.replace(
-        projectPath(answer.value.project_id, "runs", answer.value.id),
+        projectPath(answer.value.projectId, "runs", answer.value.id),
       );
     });
 

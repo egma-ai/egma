@@ -17,6 +17,11 @@ import RegisterAgentPage from "../app/projects/[projectId]/agents/new/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
 import type { ListedTest } from "../lib/tests.ts";
+import {
+  observeRequest,
+  requestUrl,
+  type FetchInput,
+} from "./platform-request.ts";
 
 /**
  * The Agents and Connections pages, rendered and driven.
@@ -92,17 +97,17 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, options?: RequestInit) => {
-      const address = new URL(input, "http://egma.test");
-      const path = address.pathname;
+    vi.fn(async (input: FetchInput, options?: RequestInit) => {
+      const request = await observeRequest(input, options);
+      const { address, path } = request;
       const held = answers[path];
       if (held === undefined) throw new Error(`nothing stubbed for ${path}`);
 
-      if (options?.method !== undefined && options.method !== "GET") {
+      if (request.method !== "GET") {
         sent.push({
           url: `${path}${address.search}`,
-          method: options.method,
-          body: JSON.parse(String(options.body ?? "{}")) as Record<string, unknown>,
+          method: request.method,
+          body: (request.body ?? {}) as Record<string, unknown>,
         });
       }
 
@@ -122,36 +127,36 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
 const AGENT = {
   id: "agt_1",
-  project_id: "prj_1",
+  projectId: "prj_1",
   name: "Front desk",
   description: "Answers the main line.",
   revision: "rev_one",
   archived: false,
-  archived_at: null,
-  created_at: "2026-08-15T10:00:00.000Z",
-  updated_at: "2026-08-15T10:00:00.000Z",
+  archivedAt: null,
+  createdAt: "2026-08-15T10:00:00.000Z",
+  updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
 const CONNECTION = {
   id: "con_1",
-  agent_id: "agt_1",
-  project_id: "prj_1",
+  agentId: "agt_1",
+  projectId: "prj_1",
   name: "staging",
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
-  product_label: "Retell chat",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
+  productLabel: "Retell chat",
   modality: "chat",
   topology: "hosted-broker",
   environment: "staging",
   config: { retellAgentId: "agent_abc" },
-  credential_present: true,
-  credentials_hint: "WXYZ",
+  credentialPresent: true,
+  credentialsHint: "WXYZ",
   capabilities: {
     state: "unknown" as const,
     measured: null,
     supported: null,
-    checked_at: null,
+    checkedAt: null,
     source: null,
     standing: {
       dtmf: "not_measured" as const,
@@ -161,9 +166,9 @@ const CONNECTION = {
   },
   revision: "rev_con_one",
   archived: false,
-  archived_at: null,
-  created_at: "2026-08-15T10:00:00.000Z",
-  updated_at: "2026-08-15T10:00:00.000Z",
+  archivedAt: null,
+  createdAt: "2026-08-15T10:00:00.000Z",
+  updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
 /**
@@ -177,20 +182,20 @@ const MEASURED_CONNECTION = {
   // Named apart from its environment on purpose: a fixture where the two read
   // the same would let a cell showing the wrong one pass.
   name: "phone line",
-  agent_platform: null,
-  connection_kind: "phone_number",
-  access_variant: "phone_number.public_e164",
-  product_label: "Phone number",
+  agentPlatform: null,
+  connectionKind: "phone_number",
+  accessVariant: "phone_number.public_e164",
+  productLabel: "Phone number",
   modality: "voice",
   environment: "production",
   config: { phoneNumber: "+14155550100" },
-  credential_present: false,
-  credentials_hint: null,
+  credentialPresent: false,
+  credentialsHint: null,
   capabilities: {
     state: "known" as const,
     measured: ["dtmf"],
     supported: ["dtmf"],
-    checked_at: "2026-08-18T09:00:00.000Z",
+    checkedAt: "2026-08-18T09:00:00.000Z",
     source: "retell",
     standing: {
       dtmf: "supported" as const,
@@ -220,23 +225,24 @@ function onboardingTest(
 ): ListedTest {
   return {
     id: "tst_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     name: "Books an appointment",
     description: "The caller asks for a booking.",
     version: 2,
-    version_id: "tstv_2",
+    versionId: "tstv_2",
     scenario: "Ask for an appointment.",
-    expected_behaviors: ["The agent offers a time."],
+    expectedBehaviors: ["The agent offers a time."],
     personas: [],
-    required_capabilities: [],
-    override_count: 0,
-    agents: [{ id: "agt_9", name: "Existing agent", archived_at: null }],
+    requiredCapabilities: [],
+    mockTools: [],
+    overrideCount: 0,
+    agents: [{ id: "agt_9", name: "Existing agent", archivedAt: null }],
     revision: "rev_test_1",
-    applicability_revision: "rev_app_1",
-    archived_at: null,
-    archive_reason: null,
-    created_at: "2026-08-15T10:00:00.000Z",
-    updated_at: "2026-08-15T10:00:00.000Z",
+    applicabilityRevision: "rev_app_1",
+    archivedAt: null,
+    archiveReason: null,
+    createdAt: "2026-08-15T10:00:00.000Z",
+    updatedAt: "2026-08-15T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -244,16 +250,16 @@ function onboardingTest(
 const TYPES = {
   items: [
     {
-      agent_platform: "retell",
-      agent_platform_label: "Retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
-      access_variant_label: "Retell API key",
+      agentPlatform: "retell",
+      agentPlatformLabel: "Retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      accessVariantLabel: "Retell API key",
       modality: "chat",
-      product_label: "Retell chat",
+      productLabel: "Retell chat",
       topology: "hosted-broker",
-      simulator_adapter: true,
-      capability_discovery: false,
+      simulatorAdapter: true,
+      capabilityDiscovery: false,
       fields: [
         {
           key: "retellAgentId",
@@ -261,12 +267,12 @@ const TYPES = {
           kind: "text",
           required: true,
           help: "The agent's own identifier in Retell.",
-          after_credentials: false,
+          afterCredentials: false,
         },
       ],
-      credential_rule: "required",
-      credential_help: "Egma seals your key and never shows it again.",
-      credential_fields: [
+      credentialRule: "required",
+      credentialHelp: "Egma seals your key and never shows it again.",
+      credentialFields: [
         {
           field: "apiKey",
           label: "Retell API key",
@@ -277,41 +283,41 @@ const TYPES = {
       ],
     },
     {
-      agent_platform: "retell",
-      agent_platform_label: "Retell",
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
-      access_variant_label: "Public E.164 number",
+      agentPlatform: "retell",
+      agentPlatformLabel: "Retell",
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      accessVariantLabel: "Public E.164 number",
       modality: "voice",
-      product_label: "Retell phone",
+      productLabel: "Retell phone",
       topology: "egma-dials-in",
-      simulator_adapter: true,
-      capability_discovery: false,
+      simulatorAdapter: true,
+      capabilityDiscovery: false,
       fields: [
         {
-          key: "phoneNumber",
+          key: "phone_number",
           label: "Phone number",
           kind: "e164",
           required: true,
           help: "A phone number routed to the selected Retell agent.",
-          after_credentials: false,
+          afterCredentials: false,
         },
       ],
-      credential_rule: "forbidden",
-      credential_help: "A phone connection takes no credential.",
-      credential_fields: [],
+      credentialRule: "forbidden",
+      credentialHelp: "A phone connection takes no credential.",
+      credentialFields: [],
     },
     {
-      agent_platform: "livekit_agents",
-      agent_platform_label: "LiveKit Agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
-      access_variant_label: "API key and secret",
+      agentPlatform: "livekit_agents",
+      agentPlatformLabel: "LiveKit Agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      accessVariantLabel: "API key and secret",
       modality: "voice",
-      product_label: "LiveKit project credentials",
+      productLabel: "LiveKit project credentials",
       topology: "egma-dials-out",
-      simulator_adapter: true,
-      capability_discovery: false,
+      simulatorAdapter: true,
+      capabilityDiscovery: false,
       fields: [
         {
           key: "url",
@@ -319,7 +325,7 @@ const TYPES = {
           kind: "url",
           required: true,
           help: "Your LiveKit project or self-hosted server.",
-          after_credentials: false,
+          afterCredentials: false,
         },
         {
           key: "agentName",
@@ -327,7 +333,7 @@ const TYPES = {
           kind: "text",
           required: false,
           help: "The LiveKit worker dispatch name. Leave it empty for automatic dispatch.",
-          after_credentials: false,
+          afterCredentials: false,
         },
         {
           key: "metadata",
@@ -335,12 +341,12 @@ const TYPES = {
           kind: "json",
           required: false,
           help: "JSON handed to the agent.",
-          after_credentials: true,
+          afterCredentials: true,
         },
       ],
-      credential_rule: "required",
-      credential_help: "Used to create the room.",
-      credential_fields: [
+      credentialRule: "required",
+      credentialHelp: "Used to create the room.",
+      credentialFields: [
         {
           field: "apiKey",
           label: "LiveKit API key",
@@ -358,16 +364,16 @@ const TYPES = {
       ],
     },
     {
-      agent_platform: "livekit_agents",
-      agent_platform_label: "LiveKit Agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.customer_token_endpoint",
-      access_variant_label: "Token endpoint",
+      agentPlatform: "livekit_agents",
+      agentPlatformLabel: "LiveKit Agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      accessVariantLabel: "Token endpoint",
       modality: "voice",
-      product_label: "LiveKit token endpoint",
+      productLabel: "LiveKit token endpoint",
       topology: "egma-dials-out",
-      simulator_adapter: true,
-      capability_discovery: false,
+      simulatorAdapter: true,
+      capabilityDiscovery: false,
       fields: [
         {
           key: "url",
@@ -375,7 +381,7 @@ const TYPES = {
           kind: "url",
           required: true,
           help: "Your LiveKit project or self-hosted server.",
-          after_credentials: false,
+          afterCredentials: false,
         },
         {
           key: "tokenEndpoint",
@@ -383,12 +389,12 @@ const TYPES = {
           kind: "url",
           required: true,
           help: "The service that creates room tokens.",
-          after_credentials: false,
+          afterCredentials: false,
         },
       ],
-      credential_rule: "required",
-      credential_help: "Auth headers for the endpoint.",
-      credential_fields: [
+      credentialRule: "required",
+      credentialHelp: "Auth headers for the endpoint.",
+      credentialFields: [
         {
           field: "headers",
           label: "Auth headers",
@@ -399,29 +405,29 @@ const TYPES = {
       ],
     },
     {
-      agent_platform: null,
-      agent_platform_label: "Any or unknown",
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
-      access_variant_label: "Public E.164 number",
+      agentPlatform: null,
+      agentPlatformLabel: "Any or unknown",
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      accessVariantLabel: "Public E.164 number",
       modality: "voice",
-      product_label: "Phone number",
+      productLabel: "Phone number",
       topology: "egma-dials-in",
-      simulator_adapter: true,
-      capability_discovery: false,
+      simulatorAdapter: true,
+      capabilityDiscovery: false,
       fields: [
         {
-          key: "phoneNumber",
+          key: "phone_number",
           label: "Phone number",
           kind: "e164",
           required: true,
           help: "In international form, like +15551234567.",
-          after_credentials: false,
+          afterCredentials: false,
         },
       ],
-      credential_rule: "forbidden",
-      credential_help: "A phone connection takes no credential.",
-      credential_fields: [],
+      credentialRule: "forbidden",
+      credentialHelp: "A phone connection takes no credential.",
+      credentialFields: [],
     },
   ],
 };
@@ -468,9 +474,9 @@ describe("finding an agent in a long list", () => {
   it("asks egma for the match rather than filtering the page in hand", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": {
+      "/v1/agents": {
         status: 200,
-        body: { items: [LISTED_AGENT], next_cursor: null },
+        body: { agents: [LISTED_AGENT], nextPageToken: null },
       },
     });
     render(<AgentsPage />);
@@ -483,19 +489,19 @@ describe("finding an agent in a long list", () => {
     await waitFor(() => {
       const asked = vi
         .mocked(globalThis.fetch)
-        .mock.calls.map(([url]) => String(url));
+        .mock.calls.map(([input]) => requestUrl(input as FetchInput));
       // A filter applied to what came back would answer differently depending
       // on how far somebody had scrolled.
-      expect(asked).toContain("/api/agents?search=front&project=prj_1");
+      expect(asked).toContain("/v1/agents?projectId=prj_1&search=front");
     });
   });
 
   it("says a search matched nothing without calling the project empty", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents": [
-        { status: 200, body: { items: [LISTED_AGENT], next_cursor: null } },
-        { status: 200, body: { items: [], next_cursor: null } },
+      "/v1/agents": [
+        { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
+        { status: 200, body: { agents: [], nextPageToken: null } },
       ],
     });
     render(<AgentsPage />);
@@ -520,15 +526,17 @@ describe("finding an agent in a long list", () => {
  * The question the list exists to answer: which agents egma can reach, and how.
  */
 describe("reading an agent's reach from the list", () => {
-  function listOf(...items: readonly unknown[]): void {
+  function listOf(...agents: readonly unknown[]): void {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents": { status: 200, body: { items, next_cursor: null } },
+      "/v1/agents": { status: 200, body: { agents, nextPageToken: null } },
     });
   }
 
   function asked(): readonly string[] {
-    return vi.mocked(globalThis.fetch).mock.calls.map(([url]) => String(url));
+    return vi
+      .mocked(globalThis.fetch)
+      .mock.calls.map(([input]) => requestUrl(input as FetchInput));
   }
 
   it("shows each connection's platform, channel, environment and capability state", async () => {
@@ -556,8 +564,8 @@ describe("reading an agent's reach from the list", () => {
     // And all of it out of the one read that painted the list. A page that
     // fetched per row would still look right here, which is why the requests
     // are what is asserted rather than the pixels.
-    expect(asked().filter((one) => one.startsWith("/api/agents"))).toHaveLength(1);
-    expect(asked().some((one) => one.includes("/api/agents/"))).toBe(false);
+    expect(asked().filter((one) => one.startsWith("/v1/agents"))).toHaveLength(1);
+    expect(asked().some((one) => one.includes("/v1/agents/"))).toBe(false);
   });
 
   it("says plainly when egma has no way into an agent", async () => {
@@ -608,9 +616,9 @@ describe("reading an agent's reach from the list", () => {
   it("tells a viewer why the control is not theirs, where a keyboard can reach it", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/agents": {
+      "/v1/agents": {
         status: 200,
-        body: { items: [LISTED_AGENT], next_cursor: null },
+        body: { agents: [LISTED_AGENT], nextPageToken: null },
       },
     });
     render(<AgentsPage />);
@@ -636,7 +644,7 @@ describe("registering an agent", () => {
   it("sends the name and description, and nothing about the provider", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents": { status: 201, body: { agent: AGENT } },
+      "/v1/agents": { status: 201, body: { agent: AGENT } },
     });
     render(<RegisterAgentPage />);
 
@@ -658,7 +666,7 @@ describe("registering an agent", () => {
      * that the page names it *at all*.
      *
      * It named it in the query once before and that was right about the page
-     * and wrong about the door: `POST /api/agents` read a body key only, so
+     * and wrong about the door: `POST /v1/agents` read a body key only, so
      * the query was not refused, it was **ignored**. The door found no project,
      * fell back to the session's own — the organization's **first** — wrote the
      * agent there, and answered 201, sending the browser to a detail page for
@@ -668,7 +676,7 @@ describe("registering an agent", () => {
      * where it was rather than in this caller alone, and this file no longer
      * has to know which half a door happens to read.
      */
-    expect(sent[0]?.url).toBe("/api/agents?project=prj_1");
+    expect(sent[0]?.url).toBe("/v1/agents?projectId=prj_1");
     expect(sent[0]?.body).toEqual({
       name: "Front desk",
       description: "Answers the main line.",
@@ -688,7 +696,7 @@ describe("registering an agent", () => {
   it("refuses an empty name here rather than making somebody wait for egma", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents": { status: 201, body: { agent: AGENT } },
+      "/v1/agents": { status: 201, body: { agent: AGENT } },
     });
     render(<RegisterAgentPage />);
 
@@ -706,7 +714,7 @@ describe("registering an agent", () => {
   it("keeps everything that was typed when egma refuses the save", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents": {
+      "/v1/agents": {
         status: 409,
         body: {
           error: "name_taken",
@@ -742,7 +750,7 @@ describe("registering an agent", () => {
   it("tells a viewer the page is not theirs instead of pretending it worked", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/agents": { status: 201, body: { agent: AGENT } },
+      "/v1/agents": { status: 201, body: { agent: AGENT } },
     });
     render(<RegisterAgentPage />);
 
@@ -762,12 +770,12 @@ describe("onboarding an agent", () => {
     routed.search = "?onboarding=connection";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
       },
@@ -852,12 +860,12 @@ describe("onboarding an agent", () => {
     routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/tests": [
-        { status: 200, body: { items: [onboardingTest()], next_cursor: null } },
+      "/v1/tests": [
+        { status: 200, body: { tests: [onboardingTest()], nextPageToken: null } },
       ],
     });
     render(<AgentOnboardingPage />);
@@ -889,12 +897,12 @@ describe("onboarding an agent", () => {
     routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [CONNECTION] },
       },
-      "/api/tests": [
-        { status: 200, body: { items: [onboardingTest()], next_cursor: null } },
+      "/v1/tests": [
+        { status: 200, body: { tests: [onboardingTest()], nextPageToken: null } },
       ],
     });
     render(<AgentOnboardingPage />);
@@ -920,32 +928,32 @@ describe("onboarding an agent", () => {
     const second = onboardingTest({
       id: "tst_2",
       name: "Handles a cancellation",
-      applicability_revision: "rev_app_2",
+      applicabilityRevision: "rev_app_2",
     });
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [CONNECTION] },
       },
-      "/api/tests": [
-        { status: 200, body: { items: [test], next_cursor: "cursor_2" } },
-        { status: 200, body: { items: [second], next_cursor: null } },
+      "/v1/tests": [
+        { status: 200, body: { tests: [test], nextPageToken: "cursor_2" } },
+        { status: 200, body: { tests: [second], nextPageToken: null } },
       ],
-      "/api/tests/tst_1/agents": {
+      "/v1/tests/tst_1/agents": {
         status: 200,
         body: {
           ...test,
           agents: [...test.agents, { id: "agt_1", name: "Front desk" }],
-          applicability_revision: "rev_app_2",
+          applicabilityRevision: "rev_app_2",
         },
       },
-      "/api/tests/tst_2/agents": {
+      "/v1/tests/tst_2/agents": {
         status: 200,
         body: {
           ...second,
           agents: [...second.agents, { id: "agt_1", name: "Front desk" }],
-          applicability_revision: "rev_app_3",
+          applicabilityRevision: "rev_app_3",
         },
       },
     });
@@ -968,20 +976,20 @@ describe("onboarding an agent", () => {
     );
 
     await waitFor(() => {
-      expect(sent.find((call) => call.url.startsWith("/api/tests/tst_1/agents")))
+      expect(sent.find((call) => call.url.startsWith("/v1/tests/tst_1/agents")))
         .toBeDefined();
     });
-    const call = sent.find((item) => item.url.startsWith("/api/tests/tst_1/agents"));
+    const call = sent.find((item) => item.url.startsWith("/v1/tests/tst_1/agents"));
     expect(call?.body).toEqual({
       agents: ["agt_9", "agt_1"],
-      expected_applicability_revision: "rev_app_1",
+      expectedApplicabilityRevision: "rev_app_1",
     });
     const secondCall = sent.find((item) =>
-      item.url.startsWith("/api/tests/tst_2/agents"),
+      item.url.startsWith("/v1/tests/tst_2/agents"),
     );
     expect(secondCall?.body).toEqual({
       agents: ["agt_9", "agt_1"],
-      expected_applicability_revision: "rev_app_2",
+      expectedApplicabilityRevision: "rev_app_2",
     });
     await waitFor(() =>
       expect(routed.push).toHaveBeenCalledWith(
@@ -995,13 +1003,13 @@ describe("onboarding an agent", () => {
     const test = onboardingTest();
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/tests": [
-        { status: 200, body: { items: [test], next_cursor: null } },
-        { status: 200, body: { items: [], next_cursor: null } },
+      "/v1/tests": [
+        { status: 200, body: { tests: [test], nextPageToken: null } },
+        { status: 200, body: { tests: [], nextPageToken: null } },
       ],
     });
     render(<AgentOnboardingPage />);
@@ -1017,8 +1025,8 @@ describe("onboarding an agent", () => {
     await waitFor(() => {
       const asked = vi
         .mocked(globalThis.fetch)
-        .mock.calls.map(([url]) => String(url));
-      expect(asked).toContain("/api/tests?name=weekend&project=prj_1");
+        .mock.calls.map(([input]) => requestUrl(input as FetchInput));
+      expect(asked).toContain("/v1/tests?projectId=prj_1&name=weekend");
     });
     expect(
       (screen.getByRole("checkbox", {
@@ -1042,7 +1050,7 @@ describe("one agent's page", () => {
     // an answer standing by for one would quietly make a re-introduction work.
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/agents/agt_1": { status: 200, body: { agent, connections } },
+      "/v1/agents/agt_1": { status: 200, body: { agent, connections } },
     });
   }
 
@@ -1081,9 +1089,9 @@ describe("one agent's page", () => {
     expect(screen.queryByRole("heading", { name: "Attached tests" })).toBeNull();
     const asked = vi
       .mocked(globalThis.fetch)
-      .mock.calls.map(([url]) => String(url));
-    expect(asked.some((one) => one.startsWith("/api/runs"))).toBe(false);
-    expect(asked.some((one) => one.startsWith("/api/tests"))).toBe(false);
+      .mock.calls.map(([input]) => requestUrl(input as FetchInput));
+    expect(asked.some((one) => one.startsWith("/v1/runs"))).toBe(false);
+    expect(asked.some((one) => one.startsWith("/v1/tests"))).toBe(false);
 
     // Identity is still the page's own, and still edited from here. Present and
     // genuinely disabled: a viewer sees what egma can do here and is told
@@ -1118,7 +1126,7 @@ describe("one agent's page", () => {
   it("claims nothing about a role while the session read is still in flight", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents/agt_1": { status: 200, body: { agent: AGENT, connections: [] } },
+      "/v1/agents/agt_1": { status: 200, body: { agent: AGENT, connections: [] } },
     });
     render(<AgentDetailPage />);
 
@@ -1135,14 +1143,14 @@ describe("one agent's page", () => {
   it("sends the revision it was opened on, and keeps the edit when it is stale", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": [
+      "/v1/agents/agt_1": [
         { status: 200, body: { agent: AGENT, connections: [] } },
         {
           status: 409,
           body: {
             error: "identity_conflict",
             message:
-              "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expected_revision set to its new revision.",
+              "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
           },
         },
       ],
@@ -1159,13 +1167,13 @@ describe("one agent's page", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("PATCH");
-    expect(sent[0]?.body.expected_revision).toBe("rev_one");
+    expect(sent[0]?.body.expectedRevision).toBe("rev_one");
 
     // The conflict is shown in egma's own words and the work stays on screen:
     // reading again is one click, retyping is not.
     expect(
       await screen.findByText(
-        "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expected_revision set to its new revision.",
+        "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
       ),
     ).toBeDefined();
     expect(
@@ -1181,11 +1189,11 @@ describe("adding a connection", () => {
   it("keeps the connection hierarchy present while the parent agent loads", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": { status: 200, body: TYPES },
+      "/v1/connection-options": { status: 200, body: TYPES },
     });
     render(<NewConnectionPage />);
 
@@ -1201,37 +1209,52 @@ describe("adding a connection", () => {
     ).toBeTruthy();
   });
 
-  it("confirms a Retell phone route before it stores the provider-blind connection", async () => {
+  it("stores a discovered Retell phone candidate through the generic connection route", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": { status: 200, body: TYPES },
-      "/api/providers/retell/voice-agents": {
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents:discover": {
         status: 200,
         body: {
           agents: [
             {
-              id: "agent_voice_1",
+              platformAgentId: "agent_voice_1",
               name: "Appointment line",
-              numbers: [
-                { number: "+14155550100", label: "Main number" },
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionKind: "retell_chat_api",
+                  accessVariant: "retell_chat_api.api_key",
+                  modality: "chat",
+                  productLabel: "Retell chat",
+                  config: { retellAgentId: "agent_voice_1" },
+                },
+                {
+                  agentPlatform: "retell",
+                  connectionKind: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550100" },
+                },
               ],
             },
           ],
         },
       },
-      "/api/agents/agt_1/connections/retell-phone": {
+      "/v1/agents/agt_1/connections": {
         status: 201,
         body: {
           connection: {
             ...CONNECTION,
-            agent_platform: "retell",
-            connection_kind: "phone_number",
-            access_variant: "phone_number.public_e164",
-            product_label: "Retell phone",
+            agentPlatform: "retell",
+            connectionKind: "phone_number",
+            accessVariant: "phone_number.public_e164",
+            productLabel: "Retell phone",
             modality: "voice",
             config: { phoneNumber: "+14155550100" },
           },
@@ -1254,11 +1277,13 @@ describe("adding a connection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load Retell agents" }));
 
     expect(
-      (await screen.findByLabelText("Retell voice agent") as HTMLSelectElement)
+      (await screen.findByLabelText("Retell agent") as HTMLSelectElement)
         .value,
     ).toBe("agent_voice_1");
-    expect((screen.getByLabelText("Phone number") as HTMLSelectElement).value)
-      .toBe("+14155550100");
+    expect(
+      (screen.getByLabelText("Connection") as HTMLSelectElement)
+        .selectedOptions[0]?.textContent,
+    ).toBe("Retell phone · +14155550100");
     expect(field.value).toBe("retell-secret-A1B2C3D4WXYZ");
 
     const add = screen.getByRole("button", { name: "Add connection" });
@@ -1267,16 +1292,26 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(2));
     expect(sent[0]).toMatchObject({
-      url: "/api/providers/retell/voice-agents?project=prj_1",
-      body: { api_key: "retell-secret-A1B2C3D4WXYZ" },
+      url: "/v1/agents:discover?projectId=prj_1",
+      body: {
+        agentPlatform: "retell",
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
     });
     expect(sent[1]?.body).toEqual({
-      api_key: "retell-secret-A1B2C3D4WXYZ",
-      retell_agent_id: "agent_voice_1",
-      phone_number: "+14155550100",
+      agentPlatform: "retell",
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+14155550100" },
+      agentPlatformSelection: {
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
     });
+    expect(sent[1]?.body).not.toHaveProperty("credentials");
     expect(sent[1]?.url).toBe(
-      "/api/agents/agt_1/connections/retell-phone?project=prj_1",
+      "/v1/agents/agt_1/connections?projectId=prj_1",
     );
     await waitFor(() => expect(field.value).toBe(""));
     expect(routed.push).toHaveBeenCalledWith(
@@ -1284,15 +1319,79 @@ describe("adding a connection", () => {
     );
   });
 
-  it("uses either honest LiveKit access method and defaults its channel to voice", async () => {
+  it("sends a discovered chat selection without duplicate connection credentials", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents:discover": {
+        status: 200,
+        body: {
+          agents: [
+            {
+              platformAgentId: "agent_chat_1",
+              name: "Chat support",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionKind: "retell_chat_api",
+                  accessVariant: "retell_chat_api.api_key",
+                  modality: "chat",
+                  productLabel: "Retell chat",
+                  config: { retellAgentId: "agent_chat_1" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      "/v1/agents/agt_1/connections": {
+        status: 201,
+        body: { connection: CONNECTION },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    const field = (await screen.findByLabelText(
+      "Retell API key",
+    )) as HTMLInputElement;
+    fireEvent.change(field, {
+      target: { value: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load Retell agents" }));
+    expect(
+      (await screen.findByLabelText("Retell agent") as HTMLSelectElement).value,
+    ).toBe("agent_chat_1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]?.body).toEqual({
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      modality: "chat",
+      config: { retellAgentId: "agent_chat_1" },
+      agentPlatformSelection: {
+        platformAgentId: "agent_chat_1",
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
+    });
+    expect(sent[1]?.body).not.toHaveProperty("credentials");
+  });
+
+  it("uses either honest LiveKit access method and defaults its channel to voice", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/agents/agt_1": {
+        status: 200,
+        body: { agent: AGENT, connections: [] },
+      },
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
       },
@@ -1320,9 +1419,9 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.customer_token_endpoint",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://rooms.example.test",
@@ -1336,12 +1435,12 @@ describe("adding a connection", () => {
     cleanup();
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
       },
@@ -1387,9 +1486,9 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: {
         url: "wss://rooms.example.test",
@@ -1406,12 +1505,12 @@ describe("adding a connection", () => {
   it("makes automatic LiveKit dispatch an explicit choice that stores no agent name", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": { status: 200, body: TYPES },
-      "/api/agents/agt_1/connections": {
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
       },
@@ -1446,9 +1545,9 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://rooms.example.test" },
       credentials: {
@@ -1461,18 +1560,18 @@ describe("adding a connection", () => {
   it("says so and offers a retry when egma could not describe the types", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/agents/agt_1": {
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/connection-options": [
+      "/v1/connection-options": [
         {
           status: 500,
           body: { error: "unreadable_answer", message: "Egma could not answer." },
         },
         { status: 200, body: TYPES },
       ],
-      "/api/agents/agt_1/connections": {
+      "/v1/agents/agt_1/connections": {
         status: 201,
         body: { connection: CONNECTION },
       },
@@ -1500,12 +1599,12 @@ describe("one connection's page", () => {
   ): void {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/connection-options": { status: 200, body: TYPES },
-      "/api/agents/agt_1": {
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents/agt_1": {
         status: 200,
         body: { agent: AGENT, connections: [] },
       },
-      "/api/agents/agt_1/connections/con_1": { status: 200, body: { connection } },
+      "/v1/agents/agt_1/connections/con_1": { status: 200, body: { connection } },
       ...extra,
     });
   }
@@ -1538,19 +1637,19 @@ describe("one connection's page", () => {
     for (const connection of [
       {
         ...CONNECTION,
-        agent_platform: null,
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
-        product_label: "Phone number",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        productLabel: "Phone number",
         modality: "voice",
         config: { phoneNumber: "+14155550100" },
       },
       {
         ...CONNECTION,
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.customer_token_endpoint",
-        product_label: "LiveKit token endpoint",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
+        productLabel: "LiveKit token endpoint",
         modality: "voice",
         config: {
           url: "wss://example.livekit.cloud",
@@ -1611,17 +1710,17 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "Primary Retell connection",
       config: { retellAgentId: "agent_moved" },
-      expected_revision: "rev_con_one",
+      expectedRevision: "rev_con_one",
     });
   });
 
   it("edits named and automatic LiveKit dispatch as two explicit modes", async () => {
     const named = {
       ...CONNECTION,
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
-      product_label: "LiveKit project credentials",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      productLabel: "LiveKit project credentials",
       modality: "voice",
       config: {
         url: "wss://example.livekit.cloud",
@@ -1646,7 +1745,7 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "staging",
       config: { url: "wss://example.livekit.cloud" },
-      expected_revision: "rev_con_one",
+      expectedRevision: "rev_con_one",
     });
 
     cleanup();
@@ -1692,21 +1791,21 @@ describe("one connection's page", () => {
         url: "wss://example.livekit.cloud",
         agentName: "customer-support",
       },
-      expected_revision: "rev_con_one",
+      expectedRevision: "rev_con_one",
     });
   });
 
   it("says so when it could not describe the type, and offers a retry", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-options": [
+      "/v1/connection-options": [
         {
           status: 500,
           body: { error: "unreadable_answer", message: "Egma could not answer." },
         },
         { status: 200, body: TYPES },
       ],
-      "/api/agents/agt_1/connections/con_1": {
+      "/v1/agents/agt_1/connections/con_1": {
         status: 200,
         body: { connection: CONNECTION },
       },
@@ -1728,11 +1827,11 @@ describe("one connection's page", () => {
   it("does not open an editor when the type catalog is unavailable", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-options": {
+      "/v1/connection-options": {
         status: 500,
         body: { error: "unreadable_answer", message: "Egma could not answer." },
       },
-      "/api/agents/agt_1/connections/con_1": {
+      "/v1/agents/agt_1/connections/con_1": {
         status: 200,
         body: { connection: CONNECTION },
       },
@@ -1754,8 +1853,8 @@ describe("one connection's page", () => {
     vi.stubGlobal("location", { replace, assign: vi.fn(), href: "" });
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/connection-options": { status: 401, body: {} },
-      "/api/agents/agt_1/connections/con_1": {
+      "/v1/connection-options": { status: 401, body: {} },
+      "/v1/agents/agt_1/connections/con_1": {
         status: 200,
         body: { connection: CONNECTION },
       },

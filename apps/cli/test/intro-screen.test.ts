@@ -80,7 +80,7 @@ async function wizardInBoundRepository(): Promise<TerminalRun> {
   await createEgmaFolder({
     repository: workspace.dir,
     config: {
-      platform: { origin: platform.url, instance: platform.instanceId },
+      platform: { origin: platform.url },
       agent: null,
       connection: null,
       suite: null,
@@ -128,7 +128,7 @@ describe("the wizard's first screen", () => {
       terminal.write("\r");
       expect(
         await terminal.waitFor(() =>
-          platform.records.some((record) => record.path === "/api/platform"),
+          platform.records.some((record) => record.path === "/api/device/code"),
         ),
       ).toBe(true);
     } finally {

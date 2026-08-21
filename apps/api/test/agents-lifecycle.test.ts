@@ -51,7 +51,7 @@ async function browser(
   const separator = url.includes("?") ? "&" : "?";
   const response = await api.app.inject({
     method,
-    url: `${url}${separator}project=${who.projectId}`,
+    url: `${url}${separator}projectId=${who.projectId}`,
     headers: { cookie: who.cookie },
     ...(payload === undefined ? {} : { payload }),
   });
@@ -81,20 +81,20 @@ type AgentBody = {
 type ConnectionBody = {
   readonly id: string;
   readonly name: string;
-  readonly agent_platform: string | null;
-  readonly connection_kind: string;
-  readonly access_variant: string;
-  readonly product_label: string;
+  readonly agentPlatform: string | null;
+  readonly connectionKind: string;
+  readonly accessVariant: string;
+  readonly productLabel: string;
   readonly revision: string;
   readonly archived: boolean;
-  readonly credential_present: boolean;
-  readonly credentials_hint: string | null;
+  readonly credentialPresent: boolean;
+  readonly credentialsHint: string | null;
   readonly config: Record<string, string>;
   readonly capabilities: {
     readonly state: string;
     readonly measured: readonly string[] | null;
     readonly supported: readonly string[] | null;
-    readonly checked_at: string | null;
+    readonly checkedAt: string | null;
     readonly source: string | null;
     readonly standing: Readonly<Record<string, string>>;
   };
@@ -104,9 +104,9 @@ const RETELL_KEY = "retell-secret-A1B2C3D4WXYZ";
 
 /** A voice connection that needs no carrier configuration in this test API. */
 const LIVEKIT_VOICE = {
-  agent_platform: "livekit_agents",
-  connection_kind: "livekit_room",
-  access_variant: "livekit_room.project_credentials",
+  agentPlatform: "livekit_agents",
+  connectionKind: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -116,7 +116,7 @@ const LIVEKIT_VOICE = {
 } as const;
 
 async function anAgent(who: Customer, name: string): Promise<AgentBody> {
-  const created = await browser("POST", "/api/agents", who, { name });
+  const created = await browser("POST", "/v1/agents", who, { name });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return held<AgentBody>(created, "agent");
 }
@@ -128,12 +128,12 @@ async function aConnection(
 ): Promise<ConnectionBody> {
   const added = await browser(
     "POST",
-    `/api/agents/${agentId}/connections`,
+    `/v1/agents/${agentId}/connections`,
     who,
     {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: RETELL_KEY },
@@ -153,25 +153,25 @@ describe("the agent list a browser reads", () => {
       await anAgent(ada, name);
     }
 
-    const found = await browser("GET", "/api/agents?search=front", ada);
+    const found = await browser("GET", "/v1/agents?search=front", ada);
     expect(found.status).toBe(200);
     expect(
-      (held<readonly AgentBody[]>(found, "items")).map((one) => one.name).sort(),
+      (held<readonly AgentBody[]>(found, "agents")).map((one) => one.name).sort(),
     ).toEqual(["Front desk", "Front office"]);
 
     // The search reaches the whole project rather than the page in hand: asking
     // for one row at a time still finds the second match on the next page.
-    const first = await browser("GET", "/api/agents?search=front&limit=1", ada);
-    expect(held<readonly AgentBody[]>(first, "items")).toHaveLength(1);
-    const cursor = first.body.next_cursor as string;
+    const first = await browser("GET", "/v1/agents?search=front&pageSize=1", ada);
+    expect(held<readonly AgentBody[]>(first, "agents")).toHaveLength(1);
+    const cursor = first.body.nextPageToken as string;
     expect(cursor).toBeTypeOf("string");
     const second = await browser(
       "GET",
-      `/api/agents?search=front&limit=1&cursor=${cursor}`,
+      `/v1/agents?search=front&pageSize=1&pageToken=${cursor}`,
       ada,
     );
-    expect(held<readonly AgentBody[]>(second, "items")).toHaveLength(1);
-    expect(second.body.next_cursor).toBeNull();
+    expect(held<readonly AgentBody[]>(second, "agents")).toHaveLength(1);
+    expect(second.body.nextPageToken).toBeNull();
   });
 
   it("keeps the archived half behind its own filter, and keeps it readable", async () => {
@@ -182,25 +182,25 @@ describe("the agent list a browser reads", () => {
     const retired = await anAgent(ada, "Retiring");
     const archived = await browser(
       "POST",
-      `/api/agents/${retired.id}/archive`,
+      `/v1/agents/${retired.id}/archive`,
       ada,
-      { expected_revision: retired.revision },
+      { expectedRevision: retired.revision },
     );
     expect(archived.status).toBe(200);
 
-    const listed = await browser("GET", "/api/agents", ada);
-    expect(held<readonly AgentBody[]>(listed, "items").map((one) => one.id)).toEqual([
+    const listed = await browser("GET", "/v1/agents", ada);
+    expect(held<readonly AgentBody[]>(listed, "agents").map((one) => one.id)).toEqual([
       active.id,
     ]);
 
-    const filed = await browser("GET", "/api/agents?archived=true", ada);
-    expect(held<readonly AgentBody[]>(filed, "items").map((one) => one.id)).toEqual([
+    const filed = await browser("GET", "/v1/agents?archived=true", ada);
+    expect(held<readonly AgentBody[]>(filed, "agents").map((one) => one.id)).toEqual([
       retired.id,
     ]);
 
     // Archived is not gone: the detail page of an archived agent has to open,
     // because its runs are still evidence and Restore is reached from it.
-    const opened = await browser("GET", `/api/agents/${retired.id}`, ada);
+    const opened = await browser("GET", `/v1/agents/${retired.id}`, ada);
     expect(opened.status).toBe(200);
     expect(held<AgentBody>(opened, "agent").archived).toBe(true);
   });
@@ -209,7 +209,7 @@ describe("the agent list a browser reads", () => {
     api = await createApi("agents_browser_limit");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const asked = await browser("GET", "/api/agents?limit=5000", ada);
+    const asked = await browser("GET", "/v1/agents?pageSize=5000", ada);
     expect(asked.status).toBe(400);
     expect(asked.body.error).toBe("invalid_request");
   });
@@ -221,10 +221,10 @@ describe("the Egma-owned half of an agent", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
-    const edited = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+    const edited = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       name: "Front desk",
       description: "Answers the main line",
-      expected_revision: agent.revision,
+      expectedRevision: agent.revision,
     });
     expect(edited.status).toBe(200);
     expect(held<AgentBody>(edited, "agent").description).toBe(
@@ -233,7 +233,7 @@ describe("the Egma-owned half of an agent", () => {
 
     // No prompt, no model, no tools: those live at the provider, and a read
     // carrying a copy would be a copy going stale.
-    const read = await browser("GET", `/api/agents/${agent.id}`, ada);
+    const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
     const shape = held<Record<string, unknown>>(read, "agent");
     for (const provider of ["prompt", "model", "tools", "voice", "pulled"]) {
       expect(Object.keys(shape)).not.toContain(provider);
@@ -241,9 +241,9 @@ describe("the Egma-owned half of an agent", () => {
 
     // And an edit that tried to set one is refused by name rather than having
     // the key quietly dropped.
-    const tried = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+    const tried = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       prompt: "You are a helpful agent",
-      expected_revision: held<AgentBody>(edited, "agent").revision,
+      expectedRevision: held<AgentBody>(edited, "agent").revision,
     });
     expect(tried.status).toBe(400);
     expect(String(tried.body.message)).toContain("prompt");
@@ -256,27 +256,27 @@ describe("the Egma-owned half of an agent", () => {
     const agent = await anAgent(ada, "Front desk");
 
     // Two editors open the same agent. The first saves.
-    const first = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+    const first = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       description: "Edited first",
-      expected_revision: agent.revision,
+      expectedRevision: agent.revision,
     });
     expect(first.status).toBe(200);
 
     // The second saves against what it read, and is told rather than winning.
-    const second = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+    const second = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       description: "Edited second",
-      expected_revision: agent.revision,
+      expectedRevision: agent.revision,
     });
     expect(second.status).toBe(409);
     expect(second.body.error).toBe("identity_conflict");
     expect(second.body.message).toBe(
       `agent ${agent.id} changed after you opened it. Read it again, keep or ` +
-        `reapply your edits, and send the update with expected_revision set ` +
+        `reapply your edits, and send the update with expectedRevision set ` +
         `to its new revision.`,
     );
 
     // And the first editor's work is exactly where they left it.
-    const read = await browser("GET", `/api/agents/${agent.id}`, ada);
+    const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
     expect(held<AgentBody>(read, "agent").description).toBe("Edited first");
   });
 
@@ -285,7 +285,7 @@ describe("the Egma-owned half of an agent", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const agent = await anAgent(ada, "Front desk");
 
-    const blind = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+    const blind = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       description: "No revision named",
     });
     expect(blind.status).toBe(422);
@@ -303,18 +303,18 @@ describe("archiving an agent", () => {
 
     const archived = await browser(
       "POST",
-      `/api/agents/${agent.id}/archive`,
+      `/v1/agents/${agent.id}/archive`,
       ada,
-      { expected_revision: agent.revision },
+      { expectedRevision: agent.revision },
     );
     expect(archived.status).toBe(200);
-    expect(archived.body.archived_connections).toEqual([wiring.id]);
+    expect(archived.body.archivedConnections).toEqual([wiring.id]);
 
     const restored = await browser(
       "POST",
-      `/api/agents/${agent.id}/restore`,
+      `/v1/agents/${agent.id}/restore`,
       ada,
-      { expected_revision: held<AgentBody>(archived, "agent").revision },
+      { expectedRevision: held<AgentBody>(archived, "agent").revision },
     );
     expect(restored.status).toBe(200);
     expect(held<AgentBody>(restored, "agent").archived).toBe(false);
@@ -322,11 +322,11 @@ describe("archiving an agent", () => {
     // The whole reason the connections do not come back with the agent: each
     // one carries a credential, and reactivating them in a batch would put an
     // old provider key into use without anybody choosing to.
-    const active = await browser("GET", `/api/agents/${agent.id}`, ada);
+    const active = await browser("GET", `/v1/agents/${agent.id}`, ada);
     expect(held<readonly ConnectionBody[]>(active, "connections")).toEqual([]);
     const filed = await browser(
       "GET",
-      `/api/agents/${agent.id}?archived=true`,
+      `/v1/agents/${agent.id}?archived=true`,
       ada,
     );
     expect(
@@ -341,9 +341,9 @@ describe("archiving an agent", () => {
     const first = await anAgent(ada, "Front desk");
     const archived = await browser(
       "POST",
-      `/api/agents/${first.id}/archive`,
+      `/v1/agents/${first.id}/archive`,
       ada,
-      { expected_revision: first.revision },
+      { expectedRevision: first.revision },
     );
     const revision = held<AgentBody>(archived, "agent").revision;
 
@@ -352,9 +352,9 @@ describe("archiving an agent", () => {
 
     const refused = await browser(
       "POST",
-      `/api/agents/${first.id}/restore`,
+      `/v1/agents/${first.id}/restore`,
       ada,
-      { expected_revision: revision },
+      { expectedRevision: revision },
     );
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe("name_taken");
@@ -362,9 +362,9 @@ describe("archiving an agent", () => {
     // The recovery the refusal names: a replacement name in the Restore.
     const renamed = await browser(
       "POST",
-      `/api/agents/${first.id}/restore`,
+      `/v1/agents/${first.id}/restore`,
       ada,
-      { expected_revision: revision, name: "Front desk (original)" },
+      { expectedRevision: revision, name: "Front desk (original)" },
     );
     expect(renamed.status).toBe(200);
     expect(held<AgentBody>(renamed, "agent").name).toBe("Front desk (original)");
@@ -383,7 +383,7 @@ describe("archiving an agent", () => {
 function movedOn(resource: "agent" | "connection", id: string): string {
   return (
     `${resource} ${id} changed after you opened it. Read it again, keep or ` +
-    `reapply your edits, and send the update with expected_revision set to ` +
+    `reapply your edits, and send the update with expectedRevision set to ` +
     `its new revision.`
   );
 }
@@ -393,7 +393,7 @@ function movedOn(resource: "agent" | "connection", id: string): string {
  * edit is.
  *
  * **Every other Archive and Restore in this file sends the revision it read a
- * line earlier**, so a handler that took `expected_revision` and dropped it
+ * line earlier**, so a handler that took `expectedRevision` and dropped it
  * would leave all of them green. What that would let through is the race the
  * guard exists for: one tab archives an agent while another, holding a page
  * from before a rename, restores it — and neither person is ever told that
@@ -412,29 +412,29 @@ describe("the revision an Archive or a Restore is written against", () => {
 
     // Two tabs on the same agent. The first renames it, which moves the
     // revision the second is still holding.
-    const renamed = await browser("PATCH", `/api/agents/${agent.id}`, ada, {
+    const renamed = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       name: "Front desk, renamed",
-      expected_revision: agent.revision,
+      expectedRevision: agent.revision,
     });
     expect(renamed.status).toBe(200);
     const current = held<AgentBody>(renamed, "agent").revision;
 
-    const stale = await browser("POST", `/api/agents/${agent.id}/archive`, ada, {
-      expected_revision: agent.revision,
+    const stale = await browser("POST", `/v1/agents/${agent.id}/archive`, ada, {
+      expectedRevision: agent.revision,
     });
     expect(stale.status).toBe(409);
     expect(stale.body.error).toBe("identity_conflict");
     expect(stale.body.message).toBe(movedOn("agent", agent.id));
 
     // Refused means nothing written: the agent is still in new work.
-    const standing = await browser("GET", `/api/agents/${agent.id}`, ada);
+    const standing = await browser("GET", `/v1/agents/${agent.id}`, ada);
     expect(held<AgentBody>(standing, "agent").archived).toBe(false);
 
     const archived = await browser(
       "POST",
-      `/api/agents/${agent.id}/archive`,
+      `/v1/agents/${agent.id}/archive`,
       ada,
-      { expected_revision: current },
+      { expectedRevision: current },
     );
     expect(archived.status).toBe(200);
     const afterArchive = held<AgentBody>(archived, "agent").revision;
@@ -443,19 +443,19 @@ describe("the revision an Archive or a Restore is written against", () => {
     // is holding, and Restore refuses it for the same reason.
     const staleRestore = await browser(
       "POST",
-      `/api/agents/${agent.id}/restore`,
+      `/v1/agents/${agent.id}/restore`,
       ada,
-      { expected_revision: current },
+      { expectedRevision: current },
     );
     expect(staleRestore.status).toBe(409);
     expect(staleRestore.body.error).toBe("identity_conflict");
     expect(staleRestore.body.message).toBe(movedOn("agent", agent.id));
 
-    const filed = await browser("GET", `/api/agents/${agent.id}`, ada);
+    const filed = await browser("GET", `/v1/agents/${agent.id}`, ada);
     expect(held<AgentBody>(filed, "agent").archived).toBe(true);
 
-    const back = await browser("POST", `/api/agents/${agent.id}/restore`, ada, {
-      expected_revision: afterArchive,
+    const back = await browser("POST", `/v1/agents/${agent.id}/restore`, ada, {
+      expectedRevision: afterArchive,
     });
     expect(back.status).toBe(200);
     expect(held<AgentBody>(back, "agent").archived).toBe(false);
@@ -467,17 +467,17 @@ describe("the revision an Archive or a Restore is written against", () => {
 
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id, { name: "staging" });
-    const at = `/api/agents/${agent.id}/connections/${wiring.id}`;
+    const at = `/v1/agents/${agent.id}/connections/${wiring.id}`;
 
     const renamed = await browser("PATCH", at, ada, {
       name: "staging, renamed",
-      expected_revision: wiring.revision,
+      expectedRevision: wiring.revision,
     });
     expect(renamed.status).toBe(200);
     const current = held<ConnectionBody>(renamed, "connection").revision;
 
     const stale = await browser("POST", `${at}/archive`, ada, {
-      expected_revision: wiring.revision,
+      expectedRevision: wiring.revision,
     });
     expect(stale.status).toBe(409);
     expect(stale.body.error).toBe("identity_conflict");
@@ -490,7 +490,7 @@ describe("the revision an Archive or a Restore is written against", () => {
     expect(held<ConnectionBody>(standing, "connection").archived).toBe(false);
 
     const archived = await browser("POST", `${at}/archive`, ada, {
-      expected_revision: current,
+      expectedRevision: current,
     });
     expect(archived.status).toBe(200);
     const afterArchive = held<ConnectionBody>(archived, "connection").revision;
@@ -502,7 +502,7 @@ describe("the revision an Archive or a Restore is written against", () => {
       credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
     };
     const staleRestore = await browser("POST", `${at}/restore`, ada, {
-      expected_revision: current,
+      expectedRevision: current,
       credential,
     });
     expect(staleRestore.status).toBe(409);
@@ -513,7 +513,7 @@ describe("the revision an Archive or a Restore is written against", () => {
     expect(held<ConnectionBody>(filed, "connection").archived).toBe(true);
 
     const back = await browser("POST", `${at}/restore`, ada, {
-      expected_revision: afterArchive,
+      expectedRevision: afterArchive,
       credential,
     });
     expect(back.status).toBe(200);
@@ -531,26 +531,26 @@ describe("a connection's stored credential", () => {
 
     const read = await browser(
       "GET",
-      `/api/agents/${agent.id}/connections/${wiring.id}`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}`,
       ada,
     );
     const shape = held<ConnectionBody>(read, "connection");
-    expect(shape.credential_present).toBe(true);
-    expect(shape.credentials_hint).toBe("WXYZ");
+    expect(shape.credentialPresent).toBe(true);
+    expect(shape.credentialsHint).toBe("WXYZ");
     expect(JSON.stringify(read.body)).not.toContain(RETELL_KEY);
 
     // Rotation replaces the whole credential and is visible only as a new hint.
     const rotated = await browser(
       "PATCH",
-      `/api/agents/${agent.id}/connections/${wiring.id}`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}`,
       ada,
       {
         credentials: { apiKey: "retell-secret-Z9Y8X7W6MNOP" },
-        expected_revision: shape.revision,
+        expectedRevision: shape.revision,
       },
     );
     expect(rotated.status).toBe(200);
-    expect(held<ConnectionBody>(rotated, "connection").credentials_hint).toBe(
+    expect(held<ConnectionBody>(rotated, "connection").credentialsHint).toBe(
       "MNOP",
     );
     expect(JSON.stringify(rotated.body)).not.toContain("MNOPQ");
@@ -561,28 +561,28 @@ describe("a connection's stored credential", () => {
     api = await createApi("agents_browser_connection_options");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const catalog = await browser("GET", "/api/connection-options", ada);
+    const catalog = await browser("GET", "/v1/connection-options", ada);
     expect(catalog.status).toBe(200);
 
     const items = held<
       readonly {
-        readonly agent_platform: string | null;
-        readonly connection_kind: string;
-        readonly access_variant: string;
-        readonly simulator_adapter: boolean;
-        readonly capability_discovery: boolean;
-        readonly credential_rule: string;
+        readonly agentPlatform: string | null;
+        readonly connectionKind: string;
+        readonly accessVariant: string;
+        readonly simulatorAdapter: boolean;
+        readonly capabilityDiscovery: boolean;
+        readonly credentialRule: string;
         readonly fields: readonly { readonly key: string; readonly kind: string }[];
-        readonly credential_fields: readonly { readonly field: string }[];
+        readonly credentialFields: readonly { readonly field: string }[];
       }[]
     >(catalog, "items");
 
     const livekit = items.filter(
       (one) =>
-        one.agent_platform === "livekit_agents" &&
-        one.connection_kind === "livekit_room",
+        one.agentPlatform === "livekit_agents" &&
+        one.connectionKind === "livekit_room",
     );
-    expect(livekit.map((one) => one.access_variant)).toEqual([
+    expect(livekit.map((one) => one.accessVariant)).toEqual([
       "livekit_room.project_credentials",
       "livekit_room.customer_token_endpoint",
     ]);
@@ -590,21 +590,21 @@ describe("a connection's stored credential", () => {
     // The three credential rules the product's Restore is written against,
     // each named on the shape that has it.
     expect(
-      items.find((one) => one.connection_kind === "retell_chat_api")
-        ?.credential_rule,
+      items.find((one) => one.connectionKind === "retell_chat_api")
+        ?.credentialRule,
     ).toBe("required");
     expect(
       items.find(
         (one) =>
-          one.agent_platform === null &&
-          one.connection_kind === "phone_number",
-      )?.credential_rule,
+          one.agentPlatform === null &&
+          one.connectionKind === "phone_number",
+      )?.credentialRule,
     ).toBe("forbidden");
     expect(
       livekit.find(
         (one) =>
-          one.access_variant === "livekit_room.customer_token_endpoint",
-      )?.credential_rule,
+          one.accessVariant === "livekit_room.customer_token_endpoint",
+      )?.credentialRule,
     ).toBe("required");
 
     // Nothing that could be a validator, an internal refusal or a secret. The
@@ -624,9 +624,9 @@ describe("a connection's shape", () => {
 
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id, {
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
       credentials: {
@@ -634,11 +634,11 @@ describe("a connection's shape", () => {
         apiSecret: "livekit-secret-E5F6G7H8QRST",
       },
     });
-    expect(wiring.access_variant).toBe("livekit_room.project_credentials");
+    expect(wiring.accessVariant).toBe("livekit_room.project_credentials");
 
     const moved = await browser(
       "PATCH",
-      `/api/agents/${agent.id}/connections/${wiring.id}`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}`,
       ada,
       {
         config: {
@@ -646,7 +646,7 @@ describe("a connection's shape", () => {
           tokenEndpoint: "https://acme.example/egma/livekit-token",
         },
         credentials: { headers: '{"Authorization":"Bearer token-value"}' },
-        expected_revision: wiring.revision,
+        expectedRevision: wiring.revision,
       },
     );
     expect(moved.status).toBe(400);
@@ -656,10 +656,10 @@ describe("a connection's shape", () => {
 
     const read = await browser(
       "GET",
-      `/api/agents/${agent.id}/connections/${wiring.id}`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}`,
       ada,
     );
-    expect(held<ConnectionBody>(read, "connection").access_variant).toBe(
+    expect(held<ConnectionBody>(read, "connection").accessVariant).toBe(
       "livekit_room.project_credentials",
     );
   });
@@ -675,9 +675,9 @@ describe("restoring a connection", () => {
 
     const archived = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${wiring.id}/archive`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}/archive`,
       ada,
-      { expected_revision: wiring.revision },
+      { expectedRevision: wiring.revision },
     );
     expect(archived.status).toBe(200);
     const revision = held<ConnectionBody>(archived, "connection").revision;
@@ -686,9 +686,9 @@ describe("restoring a connection", () => {
     // in the product's own words rather than quietly reusing what was sealed.
     const bare = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${wiring.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}/restore`,
       ada,
-      { expected_revision: revision },
+      { expectedRevision: revision },
     );
     expect(bare.status).toBe(422);
     expect(bare.body.error).toBe("credential_required");
@@ -699,10 +699,10 @@ describe("restoring a connection", () => {
 
     const back = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${wiring.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}/restore`,
       ada,
       {
-        expected_revision: revision,
+        expectedRevision: revision,
         credential: {
           choice: "replace",
           credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
@@ -714,7 +714,7 @@ describe("restoring a connection", () => {
     expect(restored.archived).toBe(false);
     // The hint is the new credential's, which is the visible proof that the
     // archived one was replaced rather than reused.
-    expect(restored.credentials_hint).toBe("ABCD");
+    expect(restored.credentialsHint).toBe("ABCD");
   });
 
   it("refuses a credential on a forbidden shape and demands one on a required shape", async () => {
@@ -725,27 +725,27 @@ describe("restoring a connection", () => {
 
     const phone = await aConnection(ada, agent.id, {
       name: "hotline",
-      agent_platform: null,
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
       credentials: undefined,
     });
     const archivedPhone = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${phone.id}/archive`,
+      `/v1/agents/${agent.id}/connections/${phone.id}/archive`,
       ada,
-      { expected_revision: phone.revision },
+      { expectedRevision: phone.revision },
     );
     const phoneRevision = held<ConnectionBody>(archivedPhone, "connection").revision;
 
     const withCredential = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${phone.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${phone.id}/restore`,
       ada,
       {
-        expected_revision: phoneRevision,
+        expectedRevision: phoneRevision,
         credential: { choice: "replace", credentials: { apiKey: "nope-nope-nope" } },
       },
     );
@@ -754,18 +754,18 @@ describe("restoring a connection", () => {
 
     const plain = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${phone.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${phone.id}/restore`,
       ada,
-      { expected_revision: phoneRevision },
+      { expectedRevision: phoneRevision },
     );
     expect(plain.status).toBe(200);
 
     // A public token endpoint always needs a fresh auth credential on Restore.
     const endpoint = await aConnection(ada, agent.id, {
       name: "endpoint",
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.customer_token_endpoint",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -775,9 +775,9 @@ describe("restoring a connection", () => {
     });
     const archivedEndpoint = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${endpoint.id}/archive`,
+      `/v1/agents/${agent.id}/connections/${endpoint.id}/archive`,
       ada,
-      { expected_revision: endpoint.revision },
+      { expectedRevision: endpoint.revision },
     );
     const endpointRevision = held<ConnectionBody>(
       archivedEndpoint,
@@ -786,28 +786,28 @@ describe("restoring a connection", () => {
 
     const undecided = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${endpoint.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${endpoint.id}/restore`,
       ada,
-      { expected_revision: endpointRevision },
+      { expectedRevision: endpointRevision },
     );
     expect(undecided.status).toBe(422);
     expect(undecided.body.error).toBe("credential_required");
 
     const cleared = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${endpoint.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${endpoint.id}/restore`,
       ada,
-      { expected_revision: endpointRevision, credential: { choice: "clear" } },
+      { expectedRevision: endpointRevision, credential: { choice: "clear" } },
     );
     expect(cleared.status).toBe(422);
     expect(cleared.body.error).toBe("credential_required");
 
     const replaced = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${endpoint.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${endpoint.id}/restore`,
       ada,
       {
-        expected_revision: endpointRevision,
+        expectedRevision: endpointRevision,
         credential: {
           choice: "replace",
           credentials: {
@@ -818,8 +818,8 @@ describe("restoring a connection", () => {
     );
     expect(replaced.status).toBe(200);
     const back = held<ConnectionBody>(replaced, "connection");
-    expect(back.credential_present).toBe(true);
-    expect(back.credentials_hint).toBe("Authorization");
+    expect(back.credentialPresent).toBe(true);
+    expect(back.credentialsHint).toBe("Authorization");
   });
 
   it("refuses while the parent agent is archived", async () => {
@@ -830,15 +830,15 @@ describe("restoring a connection", () => {
     const wiring = await aConnection(ada, agent.id);
     const archived = await browser(
       "POST",
-      `/api/agents/${agent.id}/archive`,
+      `/v1/agents/${agent.id}/archive`,
       ada,
-      { expected_revision: agent.revision },
+      { expectedRevision: agent.revision },
     );
     expect(archived.status).toBe(200);
 
     const filed = await browser(
       "GET",
-      `/api/agents/${agent.id}?archived=true`,
+      `/v1/agents/${agent.id}?archived=true`,
       ada,
     );
     const revision = held<readonly ConnectionBody[]>(filed, "connections")[0]
@@ -846,10 +846,10 @@ describe("restoring a connection", () => {
 
     const refused = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${wiring.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}/restore`,
       ada,
       {
-        expected_revision: revision,
+        expectedRevision: revision,
         credential: {
           choice: "replace",
           credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
@@ -875,9 +875,9 @@ describe("a connection Restore that collides on its name", () => {
 
     const archived = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${first.id}/archive`,
+      `/v1/agents/${agent.id}/connections/${first.id}/archive`,
       ada,
-      { expected_revision: first.revision },
+      { expectedRevision: first.revision },
     );
     const revision = held<ConnectionBody>(archived, "connection").revision;
 
@@ -891,9 +891,9 @@ describe("a connection Restore that collides on its name", () => {
 
     const refused = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${first.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${first.id}/restore`,
       ada,
-      { expected_revision: revision, credential },
+      { expectedRevision: revision, credential },
     );
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe("name_taken");
@@ -907,15 +907,15 @@ describe("a connection Restore that collides on its name", () => {
 
     const renamed = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${first.id}/restore`,
+      `/v1/agents/${agent.id}/connections/${first.id}/restore`,
       ada,
-      { expected_revision: revision, name: "staging (original)", credential },
+      { expectedRevision: revision, name: "staging (original)", credential },
     );
     expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
     const back = held<ConnectionBody>(renamed, "connection");
     expect(back.name).toBe("staging (original)");
     expect(back.archived).toBe(false);
-    expect(back.credentials_hint).toBe("ABCD");
+    expect(back.credentialsHint).toBe("ABCD");
   });
 
   it("names the colliding name for an agent Restore too", async () => {
@@ -925,17 +925,17 @@ describe("a connection Restore that collides on its name", () => {
     const first = await anAgent(ada, "Front desk");
     const archived = await browser(
       "POST",
-      `/api/agents/${first.id}/archive`,
+      `/v1/agents/${first.id}/archive`,
       ada,
-      { expected_revision: first.revision },
+      { expectedRevision: first.revision },
     );
     await anAgent(ada, "Front desk");
 
     const refused = await browser(
       "POST",
-      `/api/agents/${first.id}/restore`,
+      `/v1/agents/${first.id}/restore`,
       ada,
-      { expected_revision: held<AgentBody>(archived, "agent").revision },
+      { expectedRevision: held<AgentBody>(archived, "agent").revision },
     );
     expect(refused.body.message).toBe(
       "The name Front desk is already used by an active agent. Choose a " +
@@ -975,15 +975,15 @@ describe("a key minted for the whole organization", () => {
 
     const archivedConnection = await withKey(
       "POST",
-      `/api/agents/${agent.id}/connections/${wiring.id}/archive`,
+      `/v1/agents/${agent.id}/connections/${wiring.id}/archive`,
       {},
     );
     expect(archivedConnection.status).toBe(200);
 
-    const archived = await withKey("POST", `/api/agents/${agent.id}/archive`, {});
+    const archived = await withKey("POST", `/v1/agents/${agent.id}/archive`, {});
     expect(archived.status, JSON.stringify(archived.body)).toBe(200);
 
-    const restored = await withKey("POST", `/api/agents/${agent.id}/restore`, {});
+    const restored = await withKey("POST", `/v1/agents/${agent.id}/restore`, {});
     expect(restored.status, JSON.stringify(restored.body)).toBe(200);
 
     // Archive and Restore answer the same key the same way, which they did not
@@ -1006,7 +1006,7 @@ describe("a connection's capability record", () => {
     // Never an empty list: nobody has looked, and a reader who saw `[]` would
     // read it as a target measured and found bare.
     expect(wiring.capabilities.supported).toBeNull();
-    expect(wiring.capabilities.checked_at).toBeNull();
+    expect(wiring.capabilities.checkedAt).toBeNull();
   });
 
   it("answers what egma's own transport settles: audio on voice, none on chat", async () => {
@@ -1026,7 +1026,7 @@ describe("a connection's capability record", () => {
     const measure = async (connectionId: string) => {
       const done = await browser(
         "POST",
-        `/api/agents/${agent.id}/connections/${connectionId}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${connectionId}/capabilities/refresh`,
         ada,
       );
       expect(done.status, JSON.stringify(done.body)).toBe(200);
@@ -1075,7 +1075,7 @@ describe("a connection's capability record", () => {
 
     const done = await browser(
       "POST",
-      `/api/agents/${agent.id}/connections/${spoken.id}/capabilities/refresh`,
+      `/v1/agents/${agent.id}/connections/${spoken.id}/capabilities/refresh`,
       ada,
     );
     expect(done.status, JSON.stringify(done.body)).toBe(200);
@@ -1121,7 +1121,7 @@ describe("a connection's capability record", () => {
     try {
       const done = await browser(
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
         ada,
       );
       expect(done.status).toBe(200);
@@ -1152,7 +1152,7 @@ describe("a connection's capability record", () => {
     try {
       const asked = await browser(
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
         ada,
       );
       expect(asked.status).toBe(422);
@@ -1181,25 +1181,25 @@ describe("a connection's capability record", () => {
     try {
       const measured = await browser(
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
         ada,
       );
       expect(measured.status).toBe(200);
       const known = held<ConnectionBody>(measured, "connection").capabilities;
       expect(known.state).toBe("known");
       expect(known.supported).toEqual(["dtmf", "raw_audio"]);
-      expect(known.checked_at).toBeTypeOf("string");
+      expect(known.checkedAt).toBeTypeOf("string");
       expect(known.source).toBe("retell_chat_api adapter");
 
       // Changing where the connection points changes which target this is, so
       // a measurement of the old one stops being evidence about it.
       const edited = await browser(
         "PATCH",
-        `/api/agents/${agent.id}/connections/${wiring.id}`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}`,
         ada,
         {
           config: { retellAgentId: "agent_in_retell_2" },
-          expected_revision: held<ConnectionBody>(measured, "connection").revision,
+          expectedRevision: held<ConnectionBody>(measured, "connection").revision,
         },
       );
       expect(edited.status).toBe(200);
@@ -1225,7 +1225,7 @@ describe("a connection's capability record", () => {
     try {
       const asked = await browser(
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
         ada,
       );
       expect(asked.status).toBe(502);
@@ -1238,7 +1238,7 @@ describe("a connection's capability record", () => {
 
       const read = await browser(
         "GET",
-        `/api/agents/${agent.id}/connections/${wiring.id}`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}`,
         ada,
       );
       expect(held<ConnectionBody>(read, "connection").capabilities.state).toBe(
@@ -1255,7 +1255,7 @@ describe("the capability catalog", () => {
     api = await createApi("agents_browser_capability_catalog");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const catalog = await browser("GET", "/api/capabilities", ada);
+    const catalog = await browser("GET", "/v1/capabilities", ada);
     expect(catalog.status).toBe(200);
     const keys = held<readonly { readonly key: string }[]>(
       catalog,
@@ -1275,13 +1275,13 @@ describe("the capability catalog", () => {
     try {
       const asked = await browser(
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
         ada,
       );
       expect(asked.status).toBe(500);
       const read = await browser(
         "GET",
-        `/api/agents/${agent.id}/connections/${wiring.id}`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}`,
         ada,
       );
       expect(held<ConnectionBody>(read, "connection").capabilities.state).toBe(
@@ -1304,11 +1304,11 @@ describe("what a viewer may do here", () => {
     const wiring = await aConnection(ada, agent.id);
 
     // Reads are theirs, all of them.
-    expect((await browser("GET", "/api/agents", viewer)).status).toBe(200);
+    expect((await browser("GET", "/v1/agents", viewer)).status).toBe(200);
     expect(
-      (await browser("GET", `/api/agents/${agent.id}`, viewer)).status,
+      (await browser("GET", `/v1/agents/${agent.id}`, viewer)).status,
     ).toBe(200);
-    expect((await browser("GET", "/api/connection-options", viewer)).status).toBe(
+    expect((await browser("GET", "/v1/connection-options", viewer)).status).toBe(
       200,
     );
 
@@ -1324,35 +1324,35 @@ describe("what a viewer may do here", () => {
     };
 
     const writes: readonly [string, string, Record<string, unknown>][] = [
-      ["POST", "/api/agents", { name: "Theirs" }],
+      ["POST", "/v1/agents", { name: "Theirs" }],
       [
         "PATCH",
-        `/api/agents/${agent.id}`,
-        { name: "Renamed", expected_revision: agent.revision },
+        `/v1/agents/${agent.id}`,
+        { name: "Renamed", expectedRevision: agent.revision },
       ],
       [
         "POST",
-        `/api/agents/${agent.id}/archive`,
-        { expected_revision: agent.revision },
+        `/v1/agents/${agent.id}/archive`,
+        { expectedRevision: agent.revision },
       ],
       [
         "POST",
-        `/api/agents/${agent.id}/restore`,
-        { expected_revision: agent.revision },
+        `/v1/agents/${agent.id}/restore`,
+        { expectedRevision: agent.revision },
       ],
       [
         "PATCH",
-        `/api/agents/${agent.id}/connections/${wiring.id}`,
-        { name: "renamed", expected_revision: wiring.revision },
+        `/v1/agents/${agent.id}/connections/${wiring.id}`,
+        { name: "renamed", expectedRevision: wiring.revision },
       ],
       [
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/archive`,
-        { expected_revision: wiring.revision },
+        `/v1/agents/${agent.id}/connections/${wiring.id}/archive`,
+        { expectedRevision: wiring.revision },
       ],
       [
         "POST",
-        `/api/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
         {},
       ],
     ];
@@ -1369,7 +1369,7 @@ describe("what a viewer may do here", () => {
     }
 
     // Nothing moved.
-    const read = await browser("GET", `/api/agents/${agent.id}`, viewer);
+    const read = await browser("GET", `/v1/agents/${agent.id}`, viewer);
     expect(held<AgentBody>(read, "agent").name).toBe("Front desk");
     expect(held<AgentBody>(read, "agent").archived).toBe(false);
   });
@@ -1385,20 +1385,20 @@ describe("another organization's agent", () => {
     const wiring = await aConnection(ada, agent.id);
 
     for (const [method, url, payload] of [
-      ["GET", `/api/agents/${agent.id}`, undefined],
+      ["GET", `/v1/agents/${agent.id}`, undefined],
       [
         "PATCH",
-        `/api/agents/${agent.id}`,
-        { name: "Taken", expected_revision: agent.revision },
+        `/v1/agents/${agent.id}`,
+        { name: "Taken", expectedRevision: agent.revision },
       ],
       [
         "POST",
-        `/api/agents/${agent.id}/archive`,
-        { expected_revision: agent.revision },
+        `/v1/agents/${agent.id}/archive`,
+        { expectedRevision: agent.revision },
       ],
       [
         "GET",
-        `/api/agents/${agent.id}/connections/${wiring.id}`,
+        `/v1/agents/${agent.id}/connections/${wiring.id}`,
         undefined,
       ],
     ] as const) {
@@ -1413,7 +1413,7 @@ describe("another organization's agent", () => {
     }
 
     // And Acme's agent is exactly as it was.
-    const read = await browser("GET", `/api/agents/${agent.id}`, ada);
+    const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
     expect(held<AgentBody>(read, "agent").name).toBe("Acme Only");
   });
 });
@@ -1428,12 +1428,12 @@ describe("archiving a connection that work is queued over", () => {
 
     const archived = await browser(
       "POST",
-      `/api/agents/${agentId}/connections/${connectionId}/archive`,
+      `/v1/agents/${agentId}/connections/${connectionId}/archive`,
       ada,
-      { expected_revision: connectionRevision },
+      { expectedRevision: connectionRevision },
     );
     expect(archived.status, JSON.stringify(archived.body)).toBe(200);
-    expect(archived.body.canceled_runs).toEqual([runId]);
+    expect(archived.body.canceledRuns).toEqual([runId]);
 
     // The queued conversation ended here — never dispatched, never claimable —
     // and the run says canceled rather than quietly completing.
@@ -1443,7 +1443,7 @@ describe("archiving a connection that work is queued over", () => {
     );
     expect(simulation?.status).toBe("canceled");
 
-    const run = await browser("GET", `/api/runs/${runId}`, ada);
+    const run = await browser("GET", `/v1/runs/${runId}`, ada);
     expect(run.body.status).toBe("canceled");
   });
 });
@@ -1463,18 +1463,18 @@ async function aQueuedRunFor(who: Customer): Promise<{
   const agent = await anAgent(who, "Front desk");
   const wiring = await aConnection(who, agent.id);
 
-  const written = await browser("POST", "/api/tests", who, {
+  const written = await browser("POST", "/v1/tests", who, {
     name: "Books an appointment",
     scenario: "The caller wants an appointment next week.",
-    expected_behaviors: ["The agent offers a time"],
+    expectedBehaviors: ["The agent offers a time"],
   });
   expect(written.status, JSON.stringify(written.body)).toBe(201);
-  const versionId = String(written.body.version_id);
+  const versionId = String(written.body.versionId);
 
-  const started = await browser("POST", "/api/runs", who, {
-    connection: wiring.id,
-    test_versions: [versionId],
-    idempotency_key: newId("run"),
+  const started = await browser("POST", "/v1/runs", who, {
+    connectionId: wiring.id,
+    testVersionIds: [versionId],
+    idempotencyKey: newId("run"),
   });
   expect(started.status, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as readonly { id: string }[];

@@ -63,7 +63,7 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: ["confirms the new time back before finishing"],
+  expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
 /** A test, pushed the way a folder pushes one, and the version a run pins. */
@@ -72,7 +72,7 @@ async function pushTest(
   name: string,
   personas?: readonly string[],
 ): Promise<{ testId: string; versionId: string }> {
-  const created = await request("POST", "/api/tests", key, {
+  const created = await request("POST", "/v1/tests", key, {
     ...RESCHEDULING,
     name,
     ...(personas === undefined ? {} : { personas: [...personas] }),
@@ -80,7 +80,7 @@ async function pushTest(
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
   return {
     testId: String(created.body.id),
-    versionId: String(created.body.version_id),
+    versionId: String(created.body.versionId),
   };
 }
 
@@ -90,7 +90,7 @@ async function registerAgentThrough(
   name: string,
   connection: Record<string, unknown>,
 ): Promise<{ agentId: string; connectionId: string }> {
-  const registered = await request("POST", "/api/agents", key, {
+  const registered = await request("POST", "/v1/agents", key, {
     name,
     connection,
   });
@@ -109,11 +109,11 @@ async function applyTo(
   versionId: string,
   agentIds: readonly string[],
 ): Promise<void> {
-  const version = await request("GET", `/api/test-versions/${versionId}`, key);
+  const version = await request("GET", `/v1/test-versions/${versionId}`, key);
   expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
   const linked = await request(
     "POST",
-    `/api/tests/${String(version.body.test_id)}/agents`,
+    `/v1/tests/${String(version.body.testId)}/agents`,
     key,
     { agents: [...agentIds] },
   );
@@ -121,9 +121,9 @@ async function applyTo(
 }
 
 const RETELL = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -131,9 +131,9 @@ const RETELL = {
 
 /** A number egma dials: the shipped phone adapter's own connection shape. */
 const PHONE = {
-  agent_platform: null,
-  connection_kind: "phone_number",
-  access_variant: "phone_number.public_e164",
+  agentPlatform: null,
+  connectionKind: "phone_number",
+  accessVariant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
@@ -217,46 +217,46 @@ describe("starting a run", () => {
     const { key, agentId, connectionId, oneCaller, twoCallers } =
       await aCustomerReadyToRun("runs_create");
 
-    const started = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [oneCaller, twoCallers],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [oneCaller, twoCallers],
+      idempotencyKey: newId("run"),
       label: "the whole folder",
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
       status: "pending",
-      agent_id: agentId,
-      connection_id: connectionId,
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
-      product_label: "Retell chat",
+      agentId: agentId,
+      connectionId: connectionId,
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      productLabel: "Retell chat",
       modality: "chat",
       label: "the whole folder",
-      test_versions: [oneCaller, twoCallers],
+      testVersions: [oneCaller, twoCallers],
       // Two tests, three people between them: three conversations, counted
       // before anything was written and frozen from then on.
-      expected_simulation_count: 3,
+      expectedSimulationCount: 3,
       // Null until the three of them land together at the finish.
-      completed_count: null,
-      failed_count: null,
-      canceled_count: null,
-      finished_at: null,
+      completedCount: null,
+      failedCount: null,
+      canceledCount: null,
+      finishedAt: null,
     });
     expect(String(started.body.id)).toMatch(/^run_/u);
 
     const simulations = started.body.simulations as Record<string, unknown>[];
     expect(simulations).toHaveLength(3);
-    expect(simulations.map((one) => one.test_version_id)).toEqual([
+    expect(simulations.map((one) => one.testVersionId)).toEqual([
       oneCaller,
       twoCallers,
       twoCallers,
     ]);
     expect(
-      simulations.map((one) => `${String(one.test_name)}/${String(one.persona_name)}`),
+      simulations.map((one) => `${String(one.testName)}/${String(one.personaName)}`),
     ).toEqual([
       "Reschedules/Impatient Rita",
       "Cancels/Impatient Rita",
@@ -267,8 +267,8 @@ describe("starting a run", () => {
       expect(one.status).toBe("queued");
       expect(one.verdict).toBeNull();
       expect(one.reason).toBeNull();
-      expect(String(one.persona_name)).not.toBe("");
-      expect(String(one.test_name)).not.toBe("");
+      expect(String(one.personaName)).not.toBe("");
+      expect(String(one.testName)).not.toBe("");
     }
   });
 
@@ -277,31 +277,31 @@ describe("starting a run", () => {
       "runs_results_url",
     );
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
-    expect(started.body.results_url).toBe(
+    expect(started.body.resultsUrl).toBe(
       `${api.config.baseUrl}/runs/${String(started.body.id)}`,
     );
-    expect(String(started.body.results_url)).not.toContain("?");
-    expect(String(started.body.results_url)).not.toContain(key);
+    expect(String(started.body.resultsUrl)).not.toContain("?");
+    expect(String(started.body.resultsUrl)).not.toContain(key);
   });
 
   it("takes the connection's own agent when the request names none", async () => {
     const { key, agentId, connectionId, oneCaller } =
       await aCustomerReadyToRun("runs_agent_implied");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.agent_id).toBe(agentId);
+    expect(started.body.agentId).toBe(agentId);
   });
 
   it("refuses one unknown or doubled version and writes nothing at all", async () => {
@@ -309,10 +309,10 @@ describe("starting a run", () => {
       await aCustomerReadyToRun("runs_create_refusals");
 
     const missing = newId("tstv");
-    const unknown = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller, missing, twoCallers],
-      idempotency_key: newId("run"),
+    const unknown = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller, missing, twoCallers],
+      idempotencyKey: newId("run"),
     });
     expect(unknown.statusCode).toBe(422);
     expect(unknown.body).toEqual({
@@ -322,10 +322,10 @@ describe("starting a run", () => {
         `first, or read the test and pin the version_id it names now.`,
     });
 
-    const doubled = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller, oneCaller],
-      idempotency_key: newId("run"),
+    const doubled = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller, oneCaller],
+      idempotencyKey: newId("run"),
     });
     expect(doubled.statusCode).toBe(422);
     expect(doubled.body).toEqual({
@@ -338,24 +338,24 @@ describe("starting a run", () => {
 
     // An entry that is not a version id takes the whole run with it: running
     // the rest would be a green result about a shortened selection.
-    const unusable = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller, 7],
-      idempotency_key: newId("run"),
+    const unusable = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller, 7],
+      idempotencyKey: newId("run"),
     });
     expect(unusable.statusCode).toBe(422);
     expect(unusable.body).toEqual({
       error: "unprocessable",
       message:
-        "a run pins each test version as text — the version_id a push or a " +
-        "read answered with — and one entry in test_versions is neither. " +
+        "a run pins each test version as text — the versionId a push or a " +
+        "read answered with — and one entry in testVersionIds is neither. " +
         "Send them all, or none of them runs.",
     });
 
-    const none = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [],
-      idempotency_key: newId("run"),
+    const none = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [],
+      idempotencyKey: newId("run"),
     });
     expect(none.statusCode).toBe(422);
     expect(none.body).toEqual({
@@ -384,10 +384,10 @@ describe("starting a run", () => {
     });
 
     const missing = newId("con");
-    const nowhere = await request("POST", "/api/runs", key, {
-      connection: missing,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const nowhere = await request("POST", "/v1/runs", key, {
+      connectionId: missing,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     expect(nowhere.statusCode).toBe(404);
     expect(nowhere.body).toEqual({
@@ -397,11 +397,11 @@ describe("starting a run", () => {
         `or read your agents to see how each one is reached.`,
     });
 
-    const mismatched = await request("POST", "/api/runs", key, {
-      agent: other.agentId,
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const mismatched = await request("POST", "/v1/runs", key, {
+      agentId: other.agentId,
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     expect(mismatched.statusCode).toBe(404);
     expect(mismatched.body).toEqual({
@@ -414,11 +414,11 @@ describe("starting a run", () => {
 
     // A string that could not be an agent id at all is the same mistake one
     // step earlier, and it says which of the two ids it could not read.
-    const misread = await request("POST", "/api/runs", key, {
-      agent: connectionId,
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const misread = await request("POST", "/v1/runs", key, {
+      agentId: connectionId,
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     expect(misread.statusCode).toBe(404);
     expect(misread.body).toEqual({
@@ -430,10 +430,10 @@ describe("starting a run", () => {
     });
 
     // And a connection id that could not be one either.
-    const unreadable = await request("POST", "/api/runs", key, {
-      connection: other.agentId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const unreadable = await request("POST", "/v1/runs", key, {
+      connectionId: other.agentId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     expect(unreadable.statusCode).toBe(404);
     expect(unreadable.body).toEqual({
@@ -450,19 +450,19 @@ describe("starting a run", () => {
     // Absent and blank are the same mistake, and "no connection of yours has
     // that id" would be a sentence about an id the request never sent.
     for (const body of [
-      { test_versions: [oneCaller], idempotency_key: newId("run") },
+      { testVersionIds: [oneCaller], idempotencyKey: newId("run") },
       {
-        connection: "",
-        test_versions: [oneCaller],
-        idempotency_key: newId("run"),
+        connectionId: "",
+        testVersionIds: [oneCaller],
+        idempotencyKey: newId("run"),
       },
       {
-        connection: "   ",
-        test_versions: [oneCaller],
-        idempotency_key: newId("run"),
+        connectionId: "   ",
+        testVersionIds: [oneCaller],
+        idempotencyKey: newId("run"),
       },
     ]) {
-      const refused = await request("POST", "/api/runs", key, body);
+      const refused = await request("POST", "/v1/runs", key, body);
       expect(refused.statusCode, JSON.stringify(body)).toBe(422);
       expect(refused.body).toEqual({
         error: "unprocessable",
@@ -507,10 +507,10 @@ describe("starting a run", () => {
       versions.push(edited?.versionId ?? "");
     }
 
-    const refused = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: versions,
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: versions,
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode).toBe(422);
@@ -548,10 +548,10 @@ describe("starting a run", () => {
     });
     await archivePersona(auth, leaving.id);
 
-    const refused = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [pinned.versionId],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [pinned.versionId],
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode).toBe(422);
@@ -573,10 +573,10 @@ describe("starting a run", () => {
     // may pair the two.
     await applyTo(key, oneCaller, [dialled.agentId]);
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: dialled.connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: dialled.connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     // This used to be the `no_adapter` refusal. The adapter is in the shipped
@@ -585,11 +585,11 @@ describe("starting a run", () => {
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
       status: "pending",
-      connection_id: dialled.connectionId,
-      agent_platform: null,
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
-      product_label: "Phone number",
+      connectionId: dialled.connectionId,
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      productLabel: "Phone number",
       modality: "voice",
     });
 
@@ -613,10 +613,10 @@ describe("starting a run", () => {
     const { key, oneCaller } = await aCustomerReadyToRun("runs_phone_unset");
     const dialled = await registerAgentThrough(key, "Front desk line", PHONE);
 
-    const refused = await request("POST", "/api/runs", key, {
-      connection: dialled.connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", key, {
+      connectionId: dialled.connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
@@ -650,18 +650,18 @@ describe("starting a run", () => {
       "runs_unset_phone_lets_chat_through",
     );
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
-      product_label: "Retell chat",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      productLabel: "Retell chat",
     });
   });
 
@@ -680,10 +680,10 @@ describe("starting a run", () => {
       PHONE,
     );
 
-    const refused = await request("POST", "/api/runs", key, {
-      connection: theirs.connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", key, {
+      connectionId: theirs.connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode).toBe(404);
@@ -699,10 +699,10 @@ describe("starting a run", () => {
     );
     const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
 
-    const refused = await request("POST", "/api/runs", quentin.secret, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", quentin.secret, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode).toBe(403);
@@ -717,10 +717,10 @@ describe("starting a run", () => {
       "runs_unknown_key",
     );
 
-    const refused = await request("POST", "/api/runs", "egma_not_a_key", {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", "egma_not_a_key", {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode).toBe(401);
@@ -743,10 +743,10 @@ describe("the project a run lands in", () => {
       slug: "outbound",
     });
 
-    const refused = await request("POST", "/api/runs", ada.secret, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", ada.secret, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     expect(refused.statusCode).toBe(400);
@@ -765,11 +765,11 @@ describe("the project a run lands in", () => {
     );
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
-    const refused = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
-      project: grace.projectId,
+    const refused = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
+      projectId: grace.projectId,
     });
 
     expect(refused.statusCode).toBe(403);
@@ -792,11 +792,11 @@ describe("the project a run lands in", () => {
       slug: "outbound",
     });
 
-    const refused = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
-      project: outbound.id,
+    const refused = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
+      projectId: outbound.id,
     });
 
     expect(refused.statusCode).toBe(403);
@@ -818,21 +818,21 @@ describe("reading one run", () => {
     );
     const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
     // A read-only auditor reads everything, which is what read-only means.
-    const read = await request("GET", `/api/runs/${runId}`, quentin.secret);
+    const read = await request("GET", `/v1/runs/${runId}`, quentin.secret);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     // Everything the start answered, unchanged — and the reading of one run
     // carries three things a start cannot: what it froze to judge itself by,
     // and the two identities it executed against, read as they now stand.
     expect(read.body).toMatchObject(started.body as Record<string, unknown>);
-    expect(read.body.grading_plan).toMatchObject({ state: "run_start" });
+    expect(read.body.gradingPlan).toMatchObject({ state: "run_start" });
     expect(read.body.agent).toMatchObject({ archived: false });
     expect(read.body.connection).toMatchObject({ archived: false });
   });
@@ -843,18 +843,18 @@ describe("reading one run", () => {
     );
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
 
     const theirs = await request(
       "GET",
-      `/api/runs/${String(started.body.id)}`,
+      `/v1/runs/${String(started.body.id)}`,
       grace.secret,
     );
-    const invented = await request("GET", `/api/runs/${newId("run")}`, key);
+    const invented = await request("GET", `/v1/runs/${newId("run")}`, key);
 
     for (const answer of [theirs, invented]) {
       expect(answer.statusCode).toBe(404);
@@ -862,7 +862,7 @@ describe("reading one run", () => {
         error: "not_found",
         message:
           "no run of yours has that id. Check the id, or start a run with " +
-          "POST /api/runs.",
+          "POST /v1/runs.",
       });
     }
   });
@@ -874,10 +874,10 @@ describe("following a run", () => {
       await aCustomerReadyToRun("runs_follow");
     const auth = contextFor(ada, "member");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller, twoCallers],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller, twoCallers],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -899,7 +899,7 @@ describe("following a run", () => {
     const follow = async (): Promise<Feed> => {
       const page = await request(
         "GET",
-        `/api/runs/${runId}/events?after=${String(cursor)}`,
+        `/v1/runs/${runId}/events?after=${String(cursor)}`,
         key,
       );
       expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
@@ -963,10 +963,10 @@ describe("following a run", () => {
     );
     const auth = contextFor(ada, "member");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -974,7 +974,7 @@ describe("following a run", () => {
     if (only === undefined) throw new Error("the claim missed the run");
     await failSimulation(auth, only.id, CLAIMANT, { reason: "not_answered" });
 
-    const page = await request("GET", `/api/runs/${runId}/events`, key);
+    const page = await request("GET", `/v1/runs/${runId}/events`, key);
     const events = page.body.events as Record<string, unknown>[];
 
     // The status says how far it got; the verdict says what the graders made
@@ -984,13 +984,13 @@ describe("following a run", () => {
       (event) => event.kind === "simulation" && event.status === "failed",
     );
     expect(landed).toMatchObject({
-      simulation_id: only.id,
+      simulationId: only.id,
       status: "failed",
       reason: "not_answered",
       verdict: null,
     });
-    expect(landed).toHaveProperty("test_name");
-    expect(landed).toHaveProperty("persona_name");
+    expect(landed).toHaveProperty("testName");
+    expect(landed).toHaveProperty("personaName");
 
     // A run event is about the header, and says nothing about a conversation.
     const header = events.find((event) => event.kind === "run");
@@ -1003,12 +1003,12 @@ describe("following a run", () => {
 
     // And the counts keep the three apart, because a conversation that never
     // ran is not one that passed and not one that was stopped.
-    const read = await request("GET", `/api/runs/${runId}`, key);
+    const read = await request("GET", `/v1/runs/${runId}`, key);
     expect(read.body).toMatchObject({
       status: "completed",
-      completed_count: 0,
-      failed_count: 1,
-      canceled_count: 0,
+      completedCount: 0,
+      failedCount: 1,
+      canceledCount: 0,
     });
   });
 
@@ -1019,16 +1019,16 @@ describe("following a run", () => {
     const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
     const audited = await request(
       "GET",
-      `/api/runs/${runId}/events`,
+      `/v1/runs/${runId}/events`,
       quentin.secret,
     );
     expect(audited.statusCode).toBe(200);
@@ -1036,7 +1036,7 @@ describe("following a run", () => {
 
     const theirs = await request(
       "GET",
-      `/api/runs/${runId}/events`,
+      `/v1/runs/${runId}/events`,
       grace.secret,
     );
     expect(theirs.statusCode).toBe(404);
@@ -1044,7 +1044,7 @@ describe("following a run", () => {
       error: "not_found",
       message:
         "no run of yours has that id. Check the id, or start a run with " +
-        "POST /api/runs.",
+        "POST /v1/runs.",
     });
   });
 
@@ -1053,10 +1053,10 @@ describe("following a run", () => {
       "runs_follow_cursor",
     );
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
@@ -1081,7 +1081,7 @@ describe("following a run", () => {
     ]) {
       const refused = await request(
         "GET",
-        `/api/runs/${runId}/events?after=${encodeURIComponent(after)}`,
+        `/v1/runs/${runId}/events?after=${encodeURIComponent(after)}`,
         key,
       );
       expect(refused.statusCode, after).toBe(400);
@@ -1097,7 +1097,7 @@ describe("following a run", () => {
     // A parameter that arrived empty is a parameter nobody set — the rule
     // every query in this API shares — so `?after=` starts at the beginning
     // rather than being refused for a value it does not have.
-    const blank = await request("GET", `/api/runs/${runId}/events?after=`, key);
+    const blank = await request("GET", `/v1/runs/${runId}/events?after=`, key);
     expect(blank.statusCode).toBe(200);
     expect(blank.body).toEqual({ events: [], next: 0, done: false });
   });
@@ -1108,32 +1108,32 @@ describe("stopping a run", () => {
     const { key, connectionId, oneCaller, twoCallers } =
       await aCustomerReadyToRun("runs_cancel");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller, twoCallers],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller, twoCallers],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
-    const canceled = await request("POST", `/api/runs/${runId}/cancel`, key);
+    const canceled = await request("POST", `/v1/runs/${runId}/cancel`, key);
 
     expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
     // Nothing ran, so nothing passed. Two conversations were stopped, and the
     // counts say exactly that rather than an empty green.
     expect(canceled.body).toMatchObject({
       status: "canceled",
-      completed_count: 0,
-      failed_count: 0,
-      canceled_count: 3,
+      completedCount: 0,
+      failedCount: 0,
+      canceledCount: 3,
     });
-    expect(canceled.body.finished_at).toBeTypeOf("string");
+    expect(canceled.body.finishedAt).toBeTypeOf("string");
     expect(
       (canceled.body.simulations as { status: string }[]).map(
         (one) => one.status,
       ),
     ).toEqual(["canceled", "canceled", "canceled"]);
 
-    const feed = await request("GET", `/api/runs/${runId}/events`, key);
+    const feed = await request("GET", `/v1/runs/${runId}/events`, key);
     expect(feed.body.done).toBe(true);
     expect(
       (feed.body.events as { kind: string; status: string }[]).map(
@@ -1153,37 +1153,37 @@ describe("stopping a run", () => {
     );
     const auth = contextFor(ada, "member");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
     const [only] = await claimOwn(runId);
     if (only === undefined) throw new Error("the claim missed the run");
 
-    const canceled = await request("POST", `/api/runs/${runId}/cancel`, key);
+    const canceled = await request("POST", `/v1/runs/${runId}/cancel`, key);
     expect(canceled.body).toMatchObject({
       status: "canceled",
-      completed_count: null,
-      failed_count: null,
-      canceled_count: null,
-      finished_at: null,
+      completedCount: null,
+      failedCount: null,
+      canceledCount: null,
+      finishedAt: null,
     });
-    expect((await request("GET", `/api/runs/${runId}/events`, key)).body.done).toBe(
+    expect((await request("GET", `/v1/runs/${runId}/events`, key)).body.done).toBe(
       false,
     );
 
     // The straggler lands, and only then are the counts honest.
     await markSimulationCanceled(auth, only.id, CLAIMANT);
-    const settled = await request("GET", `/api/runs/${runId}`, key);
+    const settled = await request("GET", `/v1/runs/${runId}`, key);
     expect(settled.body).toMatchObject({
       status: "canceled",
-      completed_count: 0,
-      failed_count: 0,
-      canceled_count: 1,
+      completedCount: 0,
+      failedCount: 0,
+      canceledCount: 1,
     });
-    expect((await request("GET", `/api/runs/${runId}/events`, key)).body.done).toBe(
+    expect((await request("GET", `/v1/runs/${runId}/events`, key)).body.done).toBe(
       true,
     );
   });
@@ -1193,23 +1193,23 @@ describe("stopping a run", () => {
       await aCustomerReadyToRun("runs_cancel_twice");
     const auth = contextFor(ada, "member");
 
-    const stopped = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const stopped = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const stoppedId = String(stopped.body.id);
-    await request("POST", `/api/runs/${stoppedId}/cancel`, key);
-    const again = await request("POST", `/api/runs/${stoppedId}/cancel`, key);
+    await request("POST", `/v1/runs/${stoppedId}/cancel`, key);
+    const again = await request("POST", `/v1/runs/${stoppedId}/cancel`, key);
     expect(again.statusCode).toBe(200);
-    expect(again.body).toMatchObject({ status: "canceled", canceled_count: 1 });
+    expect(again.body).toMatchObject({ status: "canceled", canceledCount: 1 });
 
     // One that finished by itself has nothing left to stop, and the caller
     // hears so rather than being told the cancel worked.
-    const ran = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [twoCallers],
-      idempotency_key: newId("run"),
+    const ran = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [twoCallers],
+      idempotencyKey: newId("run"),
     });
     const ranId = String(ran.body.id);
     for (const one of await claimOwn(ranId)) {
@@ -1219,7 +1219,7 @@ describe("stopping a run", () => {
       });
     }
 
-    const missed = await request("POST", `/api/runs/${ranId}/cancel`, key);
+    const missed = await request("POST", `/v1/runs/${ranId}/cancel`, key);
     expect(missed.statusCode).toBe(409);
     expect(missed.body).toEqual({
       error: "conflict",
@@ -1236,16 +1236,16 @@ describe("stopping a run", () => {
     );
     const quentin = await colleagueOf(api.app, ada, "quentin@acme.example", "viewer");
 
-    const started = await request("POST", "/api/runs", key, {
-      connection: connectionId,
-      test_versions: [oneCaller],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      connectionId: connectionId,
+      testVersionIds: [oneCaller],
+      idempotencyKey: newId("run"),
     });
     const runId = String(started.body.id);
 
     const refused = await request(
       "POST",
-      `/api/runs/${runId}/cancel`,
+      `/v1/runs/${runId}/cancel`,
       quentin.secret,
     );
     expect(refused.statusCode).toBe(403);
@@ -1254,13 +1254,13 @@ describe("stopping a run", () => {
       message: "a viewer may not start_and_cancel_runs",
     });
 
-    const invented = await request("POST", `/api/runs/${newId("run")}/cancel`, key);
+    const invented = await request("POST", `/v1/runs/${newId("run")}/cancel`, key);
     expect(invented.statusCode).toBe(404);
     expect(invented.body).toEqual({
       error: "not_found",
       message:
         "no run of yours has that id. Check the id, or start a run with " +
-        "POST /api/runs.",
+        "POST /v1/runs.",
     });
   });
 });

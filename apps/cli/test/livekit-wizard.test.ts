@@ -14,7 +14,7 @@ import {
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
 import { connectLiveKitStep } from "../src/wizard/livekit-connect-step.ts";
-import { alreadyAsked } from "../src/wizard/login-step.ts";
+import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -48,46 +48,46 @@ function catalog(): Record<string, unknown> {
   return {
     items: [
       {
-        agent_platform: "livekit_agents",
-        agent_platform_label: "LiveKit Agents",
-        connection_kind: "livekit_room",
-        access_variant: LIVEKIT_KEY_PAIR_VARIANT,
-        access_variant_label: "LiveKit project credentials — Recommended",
+        agentPlatform: "livekit_agents",
+        agentPlatformLabel: "LiveKit Agents",
+        connectionKind: "livekit_room",
+        accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
+        accessVariantLabel: "LiveKit project credentials — Recommended",
         modality: "voice",
-        product_label: "LiveKit project credentials",
+        productLabel: "LiveKit project credentials",
         topology: "agent-dials-out",
-        simulator_adapter: true,
-        capability_discovery: false,
+        simulatorAdapter: true,
+        capabilityDiscovery: false,
         fields: [
-          { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
-          { key: "agentName", label: "Agent name", kind: "text", required: false, help: "Optional dispatch name." },
-          { key: "metadata", label: "Room metadata", kind: "json", required: false, help: "Optional JSON metadata." },
+          { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server.", afterCredentials: false },
+          { key: "agentName", label: "Agent name", kind: "text", required: false, help: "Optional dispatch name.", afterCredentials: false },
+          { key: "metadata", label: "Room metadata", kind: "json", required: false, help: "Optional JSON metadata.", afterCredentials: true },
         ],
-        credential_rule: "required",
-        credential_help: "Egma stores this pair sealed.",
-        credential_fields: [
+        credentialRule: "required",
+        credentialHelp: "Egma stores this pair sealed.",
+        credentialFields: [
           { field: "apiKey", label: "API key", kind: "secret", required: true, help: "The project key." },
           { field: "apiSecret", label: "API secret", kind: "secret", required: true, help: "The project secret." },
         ],
       },
       {
-        agent_platform: "livekit_agents",
-        agent_platform_label: "LiveKit Agents",
-        connection_kind: "livekit_room",
-        access_variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-        access_variant_label: "Customer token endpoint — Advanced",
+        agentPlatform: "livekit_agents",
+        agentPlatformLabel: "LiveKit Agents",
+        connectionKind: "livekit_room",
+        accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+        accessVariantLabel: "Customer token endpoint — Advanced",
         modality: "voice",
-        product_label: "LiveKit token endpoint",
+        productLabel: "LiveKit token endpoint",
         topology: "agent-dials-out",
-        simulator_adapter: true,
-        capability_discovery: false,
+        simulatorAdapter: true,
+        capabilityDiscovery: false,
         fields: [
-          { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server." },
-          { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Where Egma requests one token." },
+          { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server.", afterCredentials: false },
+          { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Where Egma requests one token.", afterCredentials: false },
         ],
-        credential_rule: "required",
-        credential_help: "Endpoint auth headers, stored sealed.",
-        credential_fields: [
+        credentialRule: "required",
+        credentialHelp: "Endpoint auth headers, stored sealed.",
+        credentialFields: [
           { field: "headers", label: "Auth headers", kind: "json", required: true, help: "JSON headers." },
         ],
       },
@@ -98,7 +98,7 @@ function catalog(): Record<string, unknown> {
 function connectionFetch(): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.endsWith("/api/connection-options")) {
+    if (url.endsWith("/v1/connection-options")) {
       return new Response(JSON.stringify(catalog()), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -153,7 +153,6 @@ function connectStep(ui: HeadlessUI) {
     ui,
     platform: {
       url: platform.url,
-      instanceId: platform.instanceId,
       credentialsFile: workspace.credentialsFile,
     },
     cwd: workspace.dir,
@@ -229,9 +228,8 @@ describe("LiveKit in the wizard", () => {
         launch: { ...workspace.launch(script), id: "codex-acp", name: "Codex" },
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: alreadyAsked({
+        platform: selectedPlatform({
           url: platform.url,
-          instanceId: platform.instanceId,
           credentialsFile: workspace.credentialsFile,
         }),
         connectionFetchImpl: connectionFetch(),

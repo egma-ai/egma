@@ -109,9 +109,9 @@ beforeAll(async () => {
   // differently and only one of them is exercised by the capture.
   const minted = await api.app.inject({
     method: "POST",
-    url: "/api/keys",
+    url: "/v1/keys",
     headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
-    payload: { name: "the outbound agent", project_id: projectId },
+    payload: { name: "the outbound agent", projectId: projectId },
   });
   expect(minted.statusCode).toBe(201);
   secret = (minted.json() as { secret: string }).secret;
@@ -1043,11 +1043,11 @@ describe("the role the key's holder acts at", () => {
 
     const minted = await api.app.inject({
       method: "POST",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
       payload: {
         name: "the read-only terminal",
-        project_id: landed.project.id,
+        projectId: landed.project.id,
       },
     });
     expect(minted.statusCode).toBe(201);

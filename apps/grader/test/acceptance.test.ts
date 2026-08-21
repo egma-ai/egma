@@ -219,7 +219,7 @@ describe("a latency copy", () => {
     /**
      * **And the run read path shows it**, which is the grain a results page and
      * a CI gate actually read. `readRunVerdicts` is the function behind
-     * `GET /api/runs/:runId`; asserting only the per-conversation read would
+     * `GET /v1/runs/:runId`; asserting only the per-conversation read would
      * leave the last join between a latency verdict and the page somebody looks
      * at unexercised by anything but hand-written rows.
      */

@@ -6,6 +6,7 @@ import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/tr
 import type { Me } from "../lib/me.ts";
 import { COLUMNS, LIST, QUIET } from "../lib/transcript-copy.ts";
 import type { Facts, Listed } from "../lib/transcripts.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * **Monitoring**, rendered and driven the way somebody with a keyboard drives
@@ -61,25 +62,25 @@ const ME: Me = {
 };
 
 const FACTS: Facts = {
-  trace_id: "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d",
-  started_at: "2026-08-02T18:04:40.281989Z",
-  ended_at: "2026-08-02T18:05:53.776865Z",
-  duration_ns: "73494876403",
-  span_count: 133,
-  turn_counts: { human: 5, agent: 8 },
-  tool_span_count: 2,
-  errored_span_count: 0,
+  traceId: "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d",
+  startedAt: "2026-08-02T18:04:40.281989Z",
+  endedAt: "2026-08-02T18:05:53.776865Z",
+  durationNs: "73494876403",
+  spanCount: 133,
+  turnCounts: { human: 5, agent: 8 },
+  toolSpanCount: 2,
+  erroredSpanCount: 0,
   source: "production",
   emitter: "agent",
   environment: "default",
-  connection_kind: "",
-  provider_call_id: "egma-fixture-capture-1",
-  agent_platform: "livekit_agents",
-  platform_agent_id: "",
-  platform_agent_name: "kelly",
-  platform_agent_version: "",
-  run_id: "",
-  agent_id: "",
+  connectionKind: "",
+  providerCallId: "egma-fixture-capture-1",
+  agentPlatform: "livekit_agents",
+  platformAgentId: "",
+  platformAgentName: "kelly",
+  platformAgentVersion: "",
+  runId: "",
+  agentId: "",
 };
 
 const ONE_ROW: Listed = { ...FACTS, preview: "I need to move my appointment" };
@@ -88,16 +89,20 @@ const ONE_ROW: Listed = { ...FACTS, preview: "I need to move my appointment" };
 function grader(scope: string) {
   return {
     id: "grd_1",
-    library_id: "gld_1",
+    libraryId: "gld_1",
+    projectId: "prj_2",
     name: "Expected behaviors",
     description: null,
     type: "llm_as_judge",
     required: true,
     scope,
-    production_sample_rate: 100,
+    productionSampleRate: 100,
+    version: 1,
+    versionId: "grv_1",
     config: null,
-    created_at: "2026-08-01T00:00:00.000000Z",
-    updated_at: "2026-08-01T00:00:00.000000Z",
+    judgeModel: null,
+    createdAt: "2026-08-01T00:00:00.000000Z",
+    updatedAt: "2026-08-01T00:00:00.000000Z",
   };
 }
 
@@ -106,12 +111,15 @@ function key(projectId: string | null) {
   return {
     id: "key_1",
     name: "livekit-agent",
-    prefix: "egma_sk",
-    last_four: "9f2a",
-    project_id: projectId,
-    created_at: "2026-08-01T00:00:00.000000Z",
-    created_by: "usr_1",
-    revoked_at: null,
+    scope: projectId === null ? "organization" : "project",
+    organizationId: "org_1",
+    projectId,
+    looksLike: "egma_sk_…9f2a",
+    createdByUserId: "usr_1",
+    createdAt: "2026-08-01T00:00:00.000000Z",
+    lastUsedAt: null,
+    revokedAt: null,
+    createdByEmail: "ada@acme.example",
   };
 }
 
@@ -138,8 +146,8 @@ function apiAnswers(
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string) => {
-      const at = new URL(String(input), "http://egma.test");
+    vi.fn(async (input: FetchInput) => {
+      const { address: at } = await observeRequest(input);
       asked.push(`${at.pathname}${at.search}`);
       const held = answers[at.pathname];
       if (held === undefined) {
@@ -161,7 +169,7 @@ const REFUSED = {
 function page(rows: readonly Listed[]): Stubbed {
   return {
     status: 200,
-    body: { traces: rows, next_cursor: null, window: { from: "", to: "" } },
+    body: { traces: rows, nextPageToken: null },
   };
 }
 
@@ -190,19 +198,19 @@ function stub(options: {
     "/api/me": { status: 200, body: ME },
     // One path, two questions. The probe is the one asking for a single row.
     "/v1/traces": (at) =>
-      at.searchParams.get("limit") === "1"
+      at.searchParams.get("pageSize") === "1"
         ? ever === "refused"
           ? REFUSED
           : page(ever)
         : page(rows),
-    "/api/graders":
+    "/v1/graders":
       options.graders === "refused"
         ? REFUSED
         : {
             status: 200,
-            body: { items: options.graders ?? [], next_cursor: null },
+            body: { graders: options.graders ?? [], nextPageToken: null },
           },
-    "/api/keys":
+    "/v1/keys":
       options.keys === "refused"
         ? REFUSED
         : { status: 200, body: { keys: options.keys ?? [] } },
@@ -212,7 +220,7 @@ function stub(options: {
 /** Whether the widest-window probe was fired at all. */
 function probed(asked: readonly string[]): readonly string[] {
   return asked.filter(
-    (one) => one.startsWith("/v1/traces?") && one.includes("limit=1"),
+    (one) => one.startsWith("/v1/traces?") && one.includes("pageSize=1"),
   );
 }
 
@@ -267,7 +275,7 @@ describe("what the Monitoring list asks egma for", () => {
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByRole("heading", { level: 1, name: LIST.title });
-    expect(listedAt(asked).get("project_id")).toBe("prj_1");
+    expect(listedAt(asked).get("projectId")).toBe("prj_1");
   });
 
   /**
@@ -330,8 +338,8 @@ describe("what the Monitoring list shows", () => {
       rows: [
         {
           ...ONE_ROW,
-          started_at: startedAt,
-          ended_at: new Date(Date.parse(startedAt) + 60_000).toISOString(),
+          startedAt: startedAt,
+          endedAt: new Date(Date.parse(startedAt) + 60_000).toISOString(),
         },
       ],
     });
@@ -349,7 +357,7 @@ describe("what the Monitoring list shows", () => {
 
     expect(
       href.startsWith(
-        `/projects/prj_2/monitoring/transcripts/${FACTS.trace_id}?`,
+        `/projects/prj_2/monitoring/transcripts/${FACTS.traceId}?`,
       ),
     ).toBe(true);
     const carried = new URLSearchParams(href.slice(href.indexOf("?")));
@@ -360,40 +368,32 @@ describe("what the Monitoring list shows", () => {
   it("shows one cached page at a time inside one fixed time window", async () => {
     const second = {
       ...ONE_ROW,
-      trace_id: "6d2f5c1a9e3b4d7f8a0b1c2d3e4f5061",
+      traceId: "6d2f5c1a9e3b4d7f8a0b1c2d3e4f5061",
       preview: "The older conversation",
     };
     const { asked } = apiAnswers({
       "/api/me": { status: 200, body: ME },
       "/v1/traces": (at) =>
-        at.searchParams.get("cursor") === "older"
+        at.searchParams.get("pageToken") === "older"
           ? {
               status: 200,
               body: {
                 traces: [second],
-                next_cursor: null,
-                window: {
-                  from: at.searchParams.get("from"),
-                  to: at.searchParams.get("to"),
-                },
+                nextPageToken: null,
               },
             }
           : {
               status: 200,
               body: {
                 traces: [ONE_ROW],
-                next_cursor: "older",
-                window: {
-                  from: at.searchParams.get("from"),
-                  to: at.searchParams.get("to"),
-                },
+                nextPageToken: "older",
               },
             },
-      "/api/graders": {
+      "/v1/graders": {
         status: 200,
-        body: { items: [grader("both")], next_cursor: null },
+        body: { graders: [grader("both")], nextPageToken: null },
       },
-      "/api/keys": { status: 200, body: { keys: [key("prj_2")] } },
+      "/v1/keys": { status: 200, body: { keys: [key("prj_2")] } },
     });
     render(<MonitoringTranscriptsPage />);
 
@@ -414,7 +414,7 @@ describe("what the Monitoring list shows", () => {
       .filter((one) => one.startsWith("/v1/traces?"))
       .map((one) => new URLSearchParams(one.slice(one.indexOf("?"))));
     expect(listReads).toHaveLength(2);
-    expect(listReads[1]?.get("cursor")).toBe("older");
+    expect(listReads[1]?.get("pageToken")).toBe("older");
     expect(listReads[1]?.get("from")).toBe(listReads[0]?.get("from"));
     expect(listReads[1]?.get("to")).toBe(listReads[0]?.get("to"));
   });

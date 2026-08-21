@@ -51,7 +51,7 @@ export function describedMockTool(
   return {
     tool: one.toolName,
     ...answerAsWritten(one.answer),
-    delay_ms: one.delayMilliseconds,
+    delayMs: one.delayMilliseconds,
   };
 }
 

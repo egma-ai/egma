@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MASKED, RetellKey } from "../src/retell/key.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
-import { alreadyAsked } from "../src/wizard/login-step.ts";
+import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -148,9 +148,8 @@ describe("a whole run, swept afterwards", () => {
         launch: workspace.launch(script),
         cwd: workspace.dir,
         signal: new AbortController().signal,
-        platform: alreadyAsked({
+        platform: selectedPlatform({
           url: platform.url,
-          instanceId: platform.instanceId,
           credentialsFile: workspace.credentialsFile,
         }),
         retell: { url: retell.url },
@@ -218,7 +217,7 @@ describe("a whole run, swept afterwards", () => {
     // And nothing that comes back out of egma carries it.
     const key = platform.device.keys[0] as string;
     const read = await fetch(
-      `${platform.url}/api/agents/${platform.registered.agents[0]?.id ?? ""}`,
+      `${platform.url}/v1/agents/${platform.registered.agents[0]?.id ?? ""}`,
       { headers: { authorization: `Bearer ${key}` } },
     );
     expect(await read.text()).not.toContain(KEY);

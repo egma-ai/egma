@@ -64,7 +64,7 @@ export function cannotActIn(projectId: string): string {
   return (
     `this credential may not act in project ${projectId}. A credential ` +
     `authorized for one project acts in that one, and a key for the whole ` +
-    `organization acts in any project of that organization. Leave project out ` +
+    `organization acts in any project of that organization. Leave projectId out ` +
     `to use the project this credential already acts in.`
   );
 }

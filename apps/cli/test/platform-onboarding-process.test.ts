@@ -1,6 +1,6 @@
 /**
  * First repository onboarding, through the built CLI rather than an injected
- * access object: explicit address, public identity, then a committed binding.
+ * access object: explicit address, login, then a committed URL binding.
  */
 
 import { spawn } from "node:child_process";
@@ -31,7 +31,7 @@ const PROVIDER_KEY = "synthetic-retell-key-for-first-onboarding";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
 
-it("verifies an explicitly selected platform and commits its identity on first onboarding", async () => {
+it("uses an explicitly selected platform and commits its URL on first onboarding", async () => {
   const [platform, retell, workspace] = await Promise.all([
     startPlatform(),
     startFakeRetell({
@@ -125,10 +125,10 @@ it("verifies an explicitly selected platform and commits its identity on first o
     expect(code, stderr).toBe(0);
     expect(stdout).toMatch(/^first-verdict: /mu);
     expect(platform.records[0]).toMatchObject({
-      method: "GET",
-      path: "/api/platform",
+      method: "POST",
+      path: "/v1/agents",
     });
-    for (const expectedPath of ["/api/agents", "/api/tests", "/api/runs"]) {
+    for (const expectedPath of ["/v1/agents", "/v1/tests", "/v1/runs"]) {
       expect(
         platform.records.some((request) => request.path === expectedPath),
         expectedPath,
@@ -138,13 +138,12 @@ it("verifies an explicitly selected platform and commits its identity on first o
     const config = await readConfig(paths.config);
     expect(config.platform).toEqual({
       origin: platform.url,
-      instance: platform.instanceId,
     });
     expect(config.agent?.id).toMatch(/^agt_/u);
     expect(config.connection?.id).toMatch(/^con_/u);
 
     // The binding is committed, so what is written beside it is read by
-    // everybody who clones this repository. It carries identity and no key:
+    // everybody who clones this repository. It carries the URL and no key:
     // not the key this machine signs in to egma with, and not the provider key
     // the wizard was handed on the way through.
     const committed = await readFile(paths.config, "utf8");

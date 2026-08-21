@@ -368,9 +368,11 @@ type Selected = {
  *
  * **Text is only a direct connection to a genuine Retell chat agent.** A voice
  * agent cannot take this branch until the Agent Playground Completion adapter
- * exists. **Phone carries the destination number and no credential.** The
- * connection remains provider-blind, while the separate agent-platform field
- * records that this onboarding flow found the agent in Retell.
+ * exists. **Phone carries the destination number and no durable connection
+ * credential.** Its request-only platform selection carries the Retell key so
+ * the API can confirm the routing during the write, then discard the key. The
+ * separate agent-platform field records that this onboarding flow found the
+ * agent in Retell.
  */
 function selectionFor(
   reach: Reach,
@@ -389,6 +391,10 @@ function selectionFor(
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: number ?? "" },
+        agentPlatformSelection: {
+          platformAgentId: config.agentId,
+          credentials: ConnectionCredentials.defer(() => ({ apiKey: key.reveal() })),
+        },
       },
       number,
     };

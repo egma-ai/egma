@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LEARN_CARDS, CARD_WIDTH, cardAt } from "../src/wizard/teaching.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { exitLines } from "../src/wizard/exit-line.ts";
-import { alreadyAsked } from "../src/wizard/login-step.ts";
+import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
@@ -271,9 +271,8 @@ describe("the pane, while the files land", () => {
           launch: second.launch(await scriptFor(second)),
           cwd: second.dir,
           signal: new AbortController().signal,
-          platform: alreadyAsked({
+          platform: selectedPlatform({
             url: elsewhere.url,
-            instanceId: elsewhere.instanceId,
             credentialsFile: second.credentialsFile,
           }),
           retell: { url: retell.url },

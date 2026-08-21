@@ -2,19 +2,25 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
+import {
+  archivePersona,
+  forkPersona,
+  getPersona,
+  getPersonaForm,
+  listPersonas,
+  listPersonaVersions,
+  restorePersona,
+  setDefaultPersona,
+  updatePersona,
+} from "@egma/platform-api/client";
 
-import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   describedTraits,
   draftOf,
   modelsDraftOf,
   modelsFrom,
-  PERSONA_FORM_PATH,
-  personaDefaultPath,
-  personaPath,
-  personaVersionsPath,
-  personasPath,
   sameModelsDraft,
   sameTraitsDraft,
   traitsFrom,
@@ -28,6 +34,11 @@ import {
   type PersonaVersionPage,
   type TraitsDraft,
 } from "../../../../../lib/personas.ts";
+import {
+  platformAnswer,
+  platformClient,
+  type PlatformRequest,
+} from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { Badge } from "@/components/ui/badge";
@@ -264,16 +275,30 @@ function PersonaDetail({
   const historyButton = useRef<HTMLButtonElement>(null);
 
   const { answer, reload } = useProjectRead<Persona>(
-    personaPath(personaId),
+    (projectId) =>
+      platformAnswer(
+        getPersona({ personaId, projectId }, { client: platformClient }),
+      ),
     projectId,
+    personaId,
   );
   const { answer: history, reload: reloadHistory } =
     useProjectRead<PersonaVersionPage>(
-      personaVersionsPath(personaId),
+      (projectId) =>
+        platformAnswer(
+          listPersonaVersions(
+            { personaId, projectId },
+            { client: platformClient },
+          ),
+        ),
       projectId,
+      personaId,
     );
   const { answer: form, reload: reloadForm } = useProjectRead<PersonaForm>(
-    PERSONA_FORM_PATH,
+    (projectId) =>
+      platformAnswer(
+        getPersonaForm({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
 
@@ -380,9 +405,7 @@ function PersonaDetail({
    * a write that carries none of the editable fields.
    */
   async function write(
-    path: string,
-    method: "POST" | "PATCH",
-    body: Record<string, unknown>,
+    request: PlatformRequest<Persona>,
     what: "changes" | "lifecycle",
     submitted?: Submitted,
   ): Promise<Persona | null> {
@@ -390,10 +413,7 @@ function PersonaDetail({
     setSaving(what);
     setRefusal(null);
 
-    const written = await writeJson<Persona>(path, {
-      method,
-      body: { project: asked.projectId, ...body },
-    });
+    const written = await platformAnswer(request);
 
     // Whatever came back is not this view's to show if the view has moved.
     if (
@@ -467,8 +487,8 @@ function PersonaDetail({
           <Loading what="this persona's history" />
         ) : history.status === "ready" ? (
           <ol className="m-0 list-none p-0">
-            {history.value.items.map((version) => {
-              const current = version.id === one.version_id;
+            {history.value.versions.map((version) => {
+              const current = version.id === one.versionId;
               return (
                 <li className={VERSION_ROW} key={version.id}>
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -484,7 +504,7 @@ function PersonaDetail({
                     ) : null}
                   </div>
                   <span className={VERSION_TIME}>
-                    <RelativeInstant instant={version.created_at} now={now} />
+                    <RelativeInstant instant={version.createdAt} now={now} />
                   </span>
                   {/* The control spans both lines of the row it belongs to. */}
                   <Button
@@ -634,7 +654,7 @@ function PersonaDetail({
                 {
                   label: "Written",
                   value: (
-                    <RelativeInstant instant={reading.created_at} now={now} />
+                    <RelativeInstant instant={reading.createdAt} now={now} />
                   ),
                 },
                 ...versionFacts(reading.traits, reading.models),
@@ -687,20 +707,21 @@ function PersonaDetail({
 
       const submittedEditVersion = editVersion.current;
       const written = await write(
-        personaPath(one.id),
-        "PATCH",
-        {
-          expected_revision: one.revision,
-          ...(nameChanged ? { name: held.name } : {}),
-          ...(descriptionChanged ? { description: held.description } : {}),
-          ...(traitsChanged || modelsChanged
-            ? {
-                expected_version_id: one.version_id,
-              }
-            : {}),
-          ...(traitsChanged ? { traits: traitsFrom(held.traits) } : {}),
-          ...(modelsChanged ? { models: modelsFrom(held.models) } : {}),
-        },
+        updatePersona(
+          {
+            personaId: one.id,
+            projectId,
+            expectedRevision: one.revision,
+            ...(nameChanged ? { name: held.name } : {}),
+            ...(descriptionChanged ? { description: held.description } : {}),
+            ...(traitsChanged || modelsChanged
+              ? { expectedVersionId: one.versionId }
+              : {}),
+            ...(traitsChanged ? { traits: traitsFrom(held.traits) } : {}),
+            ...(modelsChanged ? { models: modelsFrom(held.models) } : {}),
+          },
+          { client: platformClient },
+        ),
         "changes",
         {
           personaId: one.id,
@@ -720,14 +741,17 @@ function PersonaDetail({
 
     async function archive(replacement: string | undefined): Promise<void> {
       const done = await write(
-        `${personaPath(one.id)}/archive`,
-        "POST",
-        {
-          expected_revision: one.revision,
-          ...(replacement === undefined
-            ? {}
-            : { replacement_persona_id: replacement }),
-        },
+        archivePersona(
+          {
+            personaId: one.id,
+            projectId,
+            expectedRevision: one.revision,
+            ...(replacement === undefined
+              ? {}
+              : { replacementPersonaId: replacement }),
+          },
+          { client: platformClient },
+        ),
         "lifecycle",
       );
       if (done !== null) setArchiving(false);
@@ -737,9 +761,14 @@ function PersonaDetail({
   async function restore(): Promise<void> {
     if (persona === null) return;
     await write(
-      `${personaPath(persona.id)}/restore`,
-      "POST",
-      { expected_revision: persona.revision },
+      restorePersona(
+        {
+          personaId: persona.id,
+          projectId,
+          expectedRevision: persona.revision,
+        },
+        { client: platformClient },
+      ),
       "lifecycle",
     );
   }
@@ -747,9 +776,10 @@ function PersonaDetail({
   async function fork(): Promise<void> {
     if (persona === null) return;
     const made = await write(
-      `${personaPath(persona.id)}/fork`,
-      "POST",
-      {},
+      forkPersona(
+        { personaId: persona.id, projectId },
+        { client: platformClient },
+      ),
       "lifecycle",
     );
     if (made !== null) {
@@ -758,13 +788,19 @@ function PersonaDetail({
   }
 
   async function makeDefault(): Promise<void> {
-    if (persona === null || persona.archived_at !== null || persona.is_default) {
+    if (persona === null || persona.archivedAt !== null || persona.isDefault) {
       return;
     }
-    await write(personaDefaultPath(persona.id), "POST", {}, "lifecycle");
+    await write(
+      setDefaultPersona(
+        { personaId: persona.id, projectId },
+        { client: platformClient },
+      ),
+      "lifecycle",
+    );
   }
 
-  const archived = persona?.archived_at != null;
+  const archived = persona?.archivedAt != null;
 
   const actions =
     persona === null ? undefined : (
@@ -781,7 +817,7 @@ function PersonaDetail({
         </Button>
         {role === null ? null : (
           <>
-            {!archived && !persona.is_default ? (
+            {!archived && !persona.isDefault ? (
               <Button
                 type="button"
                 disabled={!mayAuthor || saving !== null}
@@ -855,7 +891,7 @@ function PersonaDetail({
                 Type: {persona.owner === "egma" ? "Egma-provided" : "Custom"}
               </span>
               <span className={HEADER_META}>
-                Project default: {persona.is_default ? "Yes" : "No"}
+                Project default: {persona.isDefault ? "Yes" : "No"}
               </span>
               {archived ? <Badge variant="warning">Archived</Badge> : null}
               {persona.owner === "organization" ? (
@@ -865,7 +901,7 @@ function PersonaDetail({
                   </span>
                   <span className={HEADER_META}>
                     Updated{" "}
-                    <RelativeInstant instant={persona.updated_at} now={now} />
+                    <RelativeInstant instant={persona.updatedAt} now={now} />
                   </span>
                 </>
               ) : null}
@@ -924,13 +960,13 @@ function ArchiveDialog({
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (!persona.is_default) return undefined;
+    if (!persona.isDefault) return undefined;
     let current = true;
     setUnread(null);
 
-    void readJson<PersonaPage>(personasPath(false), {
-      project: projectId,
-    }).then((answer) => {
+    void platformAnswer(
+      listPersonas({ projectId }, { client: platformClient }),
+    ).then((answer) => {
       if (!current) return;
 
       if (answer.status === "signed-out") {
@@ -942,7 +978,7 @@ function ArchiveDialog({
         return;
       }
 
-      const rest = answer.value.items.filter((one) => one.id !== persona.id);
+      const rest = answer.value.personas.filter((one) => one.id !== persona.id);
       setOthers(rest);
       setChosen(rest[0]?.id ?? "");
     });
@@ -950,13 +986,13 @@ function ArchiveDialog({
     return () => {
       current = false;
     };
-  }, [persona.id, persona.is_default, projectId, attempt]);
+  }, [persona.id, persona.isDefault, projectId, attempt]);
 
   const nobodyToTakeIt =
-    persona.is_default && others !== null && others.length === 0;
+    persona.isDefault && others !== null && others.length === 0;
   /** Nothing may be archived until a default has somebody to hand the pointer to. */
   const cannotChoose =
-    persona.is_default &&
+    persona.isDefault &&
     (unread !== null || others === null || nobodyToTakeIt);
 
   return (
@@ -969,7 +1005,7 @@ function ArchiveDialog({
             Restore is on this page.
           </p>
 
-          {persona.is_default ? (
+          {persona.isDefault ? (
             <Field
               label="Replacement default persona"
               htmlFor="persona-replacement"
@@ -1020,14 +1056,14 @@ function ArchiveDialog({
               type="button"
               variant="destructive"
               disabled={
-                busy || cannotChoose || (persona.is_default && chosen === "")
+                busy || cannotChoose || (persona.isDefault && chosen === "")
               }
               {...(cannotChoose
                 ? {
                     why: "Egma has not been able to read this project's personas, so there is nobody to hand the default pointer to yet.",
                   }
                 : {})}
-              onClick={() => onArchive(persona.is_default ? chosen : undefined)}
+              onClick={() => onArchive(persona.isDefault ? chosen : undefined)}
             >
               {busy ? "Archiving…" : "Archive persona"}
             </Button>

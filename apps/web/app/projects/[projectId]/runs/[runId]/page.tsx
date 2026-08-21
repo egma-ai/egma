@@ -3,22 +3,25 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  cancelRun,
+  getRun,
+  listRunEvents,
+  rerunSimulation as requestSimulationRerun,
+} from "@egma/platform-api/client";
 
-import { readJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
-  runCancelPath,
-  runEventsPath,
-  runPath,
   type RunDetail,
   type RunEventFeed,
   type RunSimulation,
   type SimulationStatusWord,
   type VerdictWord,
 } from "../../../../../lib/runs.ts";
-import { simulationRerunPath } from "../../../../../lib/simulations.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -130,7 +133,7 @@ const WHY = "block whitespace-normal text-sm text-muted-foreground";
 type Moved = {
   readonly status: SimulationStatusWord;
   readonly verdict: VerdictWord | null;
-  readonly reason: string | null;
+  readonly reason: RunSimulation["reason"];
 };
 
 function RunDetailView({
@@ -148,7 +151,12 @@ function RunDetailView({
   const mayControl = role !== null && canAuthor(role);
   const now = useMinuteClock();
 
-  const { answer, reload } = useProjectRead<RunDetail>(runPath(runId), projectId);
+  const { answer, reload } = useProjectRead<RunDetail>(
+    (projectId) =>
+      platformAnswer(getRun({ runId, projectId }, { client: platformClient })),
+    projectId,
+    runId,
+  );
 
   /**
    * What the feed has changed since the run was read, by conversation, plus the
@@ -219,8 +227,8 @@ function RunDetailView({
   const stillMoving =
     run !== null &&
     !finishedByFeed &&
-    (run.finished_at === null ||
-      run.graded_count < run.gradable_count ||
+    (run.finishedAt === null ||
+      run.gradedCount < run.gradableCount ||
       run.simulations.some((one) => one.grading === "pending"));
 
   /**
@@ -232,9 +240,11 @@ function RunDetailView({
    * one poll stale rather than one poll early.
    */
   const follow = useCallback(async () => {
-    const asked = await readJson<RunEventFeed>(
-      `${runEventsPath(runId)}?after=${String(applied.current)}`,
-      { project: projectId },
+    const asked = await platformAnswer(
+      listRunEvents(
+        { runId, projectId, after: applied.current },
+        { client: platformClient },
+      ),
     );
     if (asked.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -263,11 +273,11 @@ function RunDetailView({
       setMoved((held) => {
         const now = new Map(held);
         for (const event of fresh) {
-          if (event.kind !== "simulation" || event.simulation_id === undefined) {
+          if (event.kind !== "simulation" || event.simulationId === undefined) {
             continue;
           }
-          now.set(event.simulation_id, {
-            status: event.status as SimulationStatusWord,
+          now.set(event.simulationId, {
+            status: event.status,
             verdict: event.verdict ?? null,
             reason: event.reason ?? null,
           });
@@ -325,10 +335,15 @@ function RunDetailView({
     // the address was not read at all and the write narrowed to the session's
     // own project — the organization's first — and a run in any other project
     // answered "no such run" to a page that is looking straight at it.
-    const answered = await writeJson<RunDetail>(runCancelPath(runId), {
-      method: "POST",
-      project: projectId,
-    });
+    const answered = await platformAnswer(
+      cancelRun(
+        {
+          runId,
+          projectId,
+        },
+        { client: platformClient },
+      ),
+    );
     setWorking(false);
     setConfirmingCancel(false);
     if (answered.status === "signed-out") {
@@ -371,13 +386,16 @@ function RunDetailView({
 
     setRerunRefused(null);
     setRerunWorking(true);
-    const answered = await writeJson<{ readonly id: string }>(
-      simulationRerunPath(rerunSimulation.id),
-      {
-        method: "POST",
-        project: projectId,
-        body: { label, idempotency_key: rerunKey },
-      },
+    const answered = await platformAnswer(
+      requestSimulationRerun(
+        {
+          simulationId: rerunSimulation.id,
+          projectId,
+          label,
+          idempotencyKey: rerunKey,
+        },
+        { client: platformClient },
+      ),
     );
     setRerunWorking(false);
     if (answered.status === "signed-out") {
@@ -504,12 +522,12 @@ function RunDetailView({
             <div className={FACT}>
               <dt>Started</dt>
               <dd>
-                <RelativeInstant instant={read.created_at} now={now} />
-                {read.retry_of_run_id === null ? null : (
+                <RelativeInstant instant={read.createdAt} now={now} />
+                {read.retryOfRunId === null ? null : (
                   <>
                     {" · retry of "}
                     <Link
-                      href={projectPath(projectId, "runs", read.retry_of_run_id)}
+                      href={projectPath(projectId, "runs", read.retryOfRunId)}
                     >
                       the earlier run
                     </Link>
@@ -526,7 +544,7 @@ function RunDetailView({
             <div className={FACT}>
               <dt>Grading</dt>
               <dd>
-                {read.graded_count} of {read.gradable_count} judged
+                {read.gradedCount} of {read.gradableCount} judged
               </dd>
             </div>
             <div className={FACT}>
@@ -563,7 +581,7 @@ function RunDetailView({
                       href={projectPath(
                         projectId,
                         "agents",
-                        read.agent_id,
+                        read.agentId,
                         "connections",
                         read.connection.id,
                       )}
@@ -737,7 +755,7 @@ function simulationColumns(
             <Link
               href={projectPath(projectId, "runs", runId, "simulations", one.id)}
             >
-              <strong>{one.test_name ?? "No stored test"}</strong>
+              <strong>{one.testName ?? "No stored test"}</strong>
             </Link>
           </span>
         </span>
@@ -748,7 +766,7 @@ function simulationColumns(
       header: "Persona",
       width: "22%",
       /* A name is a name: it wraps rather than ending in an ellipsis. */
-      cell: (one) => <span className={WRAPS}>{one.persona_name}</span>,
+      cell: (one) => <span className={WRAPS}>{one.personaName}</span>,
     },
     {
       key: "status",
@@ -811,10 +829,10 @@ function SimulationReason({
 }: {
   readonly simulation: RunSimulation;
 }) {
-  if (simulation.skip_reason !== null) {
-    const capabilities = (simulation.skipped_capabilities ?? []).join(", ");
+  if (simulation.skipReason !== null) {
+    const capabilities = (simulation.skippedCapabilities ?? []).join(", ");
     const decision =
-      simulation.skip_reason === "required_capability_unsupported"
+      simulation.skipReason === "required_capability_unsupported"
         ? `This connection does not support ${capabilities}.`
         : `Support for ${capabilities} was not measured.`;
     return (

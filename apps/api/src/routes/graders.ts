@@ -12,11 +12,13 @@ import {
   type Grader,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { graderOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   invalid,
   notFound,
@@ -24,7 +26,7 @@ import {
   unprocessable,
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, projectNamed, text } from "../http/reading.ts";
+import { given, text } from "../http/reading.ts";
 
 /**
  * The running graders: the copies a project actually judges with, the act that
@@ -75,7 +77,7 @@ import { given, projectNamed, text } from "../http/reading.ts";
  *
  * **A copy's executable definition never crosses this door.** What a read
  * answers is the stable library identity, the filled-in values, and where the
- * grader applies. `/api/grader-library` shows the library's current immutable
+ * grader applies. `/v1/grader-library` shows the library's current immutable
  * definition revision. The engine instead executes the exact revision pinned
  * by the selected grader version, so a later catalog change cannot alter an
  * old run.
@@ -91,33 +93,30 @@ export type GraderRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const GRADERS_PATH = "/api/graders";
-export const GRADER_PATH = "/api/graders/:graderId";
-
 type Body = Record<string, unknown>;
 
 type Query = {
-  readonly project?: string;
-  readonly cursor?: string;
+  readonly projectId?: string;
+  readonly pageToken?: string;
 };
 
 const USE_KEYS = [
-  "library_id",
+  "libraryId",
   "params",
   "name",
   "description",
   "required",
   "scope",
-  "production_sample_rate",
-  "judge_model",
-  "project",
+  "productionSampleRate",
+  "judgeModel",
+  "projectId",
 ] as const;
 
 /**
  * What an edit may carry: everything Use takes except the pointer, which is the
  * one thing about a copy that can never move.
  */
-const EDIT_KEYS = USE_KEYS.filter((key) => key !== "library_id");
+const EDIT_KEYS = USE_KEYS.filter((key) => key !== "libraryId");
 
 /**
  * The unknown-key gate, the agent group's for the agent group's reason — and
@@ -140,7 +139,7 @@ function unknownKeyIn(
 /**
  * The one key an edit refuses in its own words rather than as an unknown one.
  *
- * `library_id` is not a key an edit forgot to support — it is the pointer, and
+ * `libraryId` is not a key an edit forgot to support — it is the pointer, and
  * every version behind this copy holds values shaped by that library's stable
  * type. A copy that could be moved to another entry would be a different
  * grader wearing the old one's history, and its verdicts would name assertion
@@ -148,7 +147,7 @@ function unknownKeyIn(
  * because somebody sending it wants a copy of the other entry and Use makes one.
  */
 function repointing(body: Body): string | undefined {
-  if (!("library_id" in body)) return undefined;
+  if (!("libraryId" in body)) return undefined;
   return (
     "a grader cannot be moved to another library entry: the entry owns its " +
     "stable type, and every version behind the copy holds values that type " +
@@ -160,7 +159,7 @@ function repointing(body: Body): string | undefined {
 /**
  * One running copy as every read of one describes it.
  *
- * `library_id` rides at the front because it is what this row *is*: the stable
+ * `libraryId` rides at the front because it is what this row *is*: the stable
  * identity of the definition family it runs. The config is the copy's own
  * filled-in values and nothing else. Each immutable grader version stores the
  * exact library-definition revision it executes; the copy does not duplicate
@@ -169,20 +168,20 @@ function repointing(body: Body): string | undefined {
 function described(one: Grader): Record<string, unknown> {
   return {
     id: one.id,
-    library_id: one.libraryId,
-    project_id: one.projectId,
+    libraryId: one.libraryId,
+    projectId: one.projectId,
     name: one.name,
     description: one.description,
     type: one.type,
     required: one.required,
     scope: one.scope,
-    production_sample_rate: one.productionSampleRate,
+    productionSampleRate: one.productionSampleRate,
     version: one.version,
-    version_id: one.versionId,
+    versionId: one.versionId,
     config: one.config,
-    judge_model: one.judgeModel,
-    created_at: one.createdAt.toISOString(),
-    updated_at: one.updatedAt.toISOString(),
+    judgeModel: one.judgeModel,
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
   };
 }
 
@@ -228,21 +227,18 @@ type WrittenJudgeModel =
 
 /** A grader version's exact non-secret model selection. */
 function judgeModelIn(body: Body): WrittenJudgeModel {
-  if (!("judge_model" in body) || body.judge_model === undefined) {
+  if (!("judgeModel" in body) || body.judgeModel === undefined) {
     return { value: undefined };
   }
-  if (body.judge_model === null) return { value: null };
-  if (
-    typeof body.judge_model !== "object" ||
-    Array.isArray(body.judge_model)
-  ) {
+  if (body.judgeModel === null) return { value: null };
+  if (typeof body.judgeModel !== "object" || Array.isArray(body.judgeModel)) {
     return {
       refusal:
-        'judge_model is an object with exactly "provider" and "model" text fields',
+        'judgeModel is an object with exactly "provider" and "model" text fields',
     };
   }
 
-  const held = body.judge_model as Record<string, unknown>;
+  const held = body.judgeModel as Record<string, unknown>;
   const keys = Object.keys(held);
   if (
     keys.length !== 2 ||
@@ -253,7 +249,7 @@ function judgeModelIn(body: Body): WrittenJudgeModel {
   ) {
     return {
       refusal:
-        'judge_model is an object with exactly "provider" and "model" text fields',
+        'judgeModel is an object with exactly "provider" and "model" text fields',
     };
   }
   return {
@@ -303,20 +299,20 @@ type WrittenRate =
  */
 function sampleRateIn(body: Body): WrittenRate {
   if (
-    !("production_sample_rate" in body) ||
-    body.production_sample_rate === undefined
+    !("productionSampleRate" in body) ||
+    body.productionSampleRate === undefined
   ) {
     return { value: undefined };
   }
-  if (typeof body.production_sample_rate !== "number") {
+  if (typeof body.productionSampleRate !== "number") {
     return {
       refusal:
-        "production_sample_rate is what share of live traffic this grader " +
+        "productionSampleRate is what share of live traffic this grader " +
         "judges, as a whole percentage between 0 and 100. Send it as a " +
-        `number, and this request sent ${typeof body.production_sample_rate}.`,
+        `number, and this request sent ${typeof body.productionSampleRate}.`,
     };
   }
-  return { value: body.production_sample_rate };
+  return { value: body.productionSampleRate };
 }
 
 /**
@@ -345,7 +341,7 @@ type WrittenText =
  * then read as though nobody had sent it — so `{"scope": 123}` answered 200
  * with the copy still judging simulations, and the developer who thinks they
  * pointed it at live traffic finds out when nothing is ever judged there. It is
- * `production_sample_rate: "10"` again, one field along: quietly ignoring a key
+ * `productionSampleRate: "10"` again, one field along: quietly ignoring a key
  * is how a project comes to be configured differently from what somebody wrote
  * down, and this group's unknown-key gate exists to refuse exactly that.
  *
@@ -407,6 +403,10 @@ const PROJECT_TAKES =
   "names the project this is about, as its prj_ identifier; leave it out to " +
   "use the one this credential already acts in";
 
+function projectNamed(query: Body, body: Body): string | undefined {
+  return given(text(query.projectId)) ?? given(text(body.projectId));
+}
+
 export async function graderRoutes(
   app: FastifyInstance,
   options: GraderRoutesOptions,
@@ -419,22 +419,22 @@ export async function graderRoutes(
   /**
    * The project's running graders, newest first, one page at a time.
    *
-   * `{ items, next_cursor }` is the envelope every list in this API answers
+   * `{ graders, nextPageToken }` is this list's envelope
    * with, and the cursor is the last id of the page rather than a count of rows
    * to skip.
    */
-  app.get(GRADERS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, graderOperations.listGraders, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
-    const acting = await actingIn(auth, given(query.project));
+    const acting = await actingIn(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
+    const cursor = given(query.pageToken);
     if (cursor !== undefined && !isId("grd", cursor)) {
       return invalid(
         reply,
-        `"${cursor}" is not a cursor this list issued. Send the next_cursor ` +
+        `"${cursor}" is not a cursor this list issued. Send the nextPageToken ` +
           `an earlier page answered with, or leave it out to start at the ` +
           `newest grader.`,
       );
@@ -443,10 +443,10 @@ export async function graderRoutes(
     const page = await listGraders(acting.auth, { cursor });
 
     return reply.send({
-      items: page.items.map(described),
+      graders: page.items.map(described),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -462,7 +462,7 @@ export async function graderRoutes(
    * factory takes for the same reason: a viewer is refused for being a viewer,
    * rather than after a read that tells them what is there.
    */
-  app.post(GRADERS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, graderOperations.createGrader, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const query = (request.query ?? {}) as Body;
@@ -478,11 +478,11 @@ export async function graderRoutes(
     const unknown = unknownKeyIn(body, "Use", USE_KEYS);
     if (unknown !== undefined) return invalid(reply, unknown);
 
-    const libraryId = text(body.library_id);
+    const libraryId = text(body.libraryId);
     if (!isId("grl", libraryId)) {
       return invalid(
         reply,
-        "library_id names the grader on the shelf to start judging with, as " +
+        "libraryId names the grader on the shelf to start judging with, as " +
         "its grl_ identifier. Read the library to see what Egma ships.",
       );
     }
@@ -495,7 +495,7 @@ export async function graderRoutes(
     if (judgeModel.value === null) {
       return unprocessable(
         reply,
-        "judge_model cannot be null when using a library entry; omit it to use the supported default",
+        "judgeModel cannot be null when using a library entry; omit it to use the supported default",
       );
     }
 
@@ -518,7 +518,7 @@ export async function graderRoutes(
     // rather than read as absent — then `projectNamed`'s one rule, the query
     // and the body. **Use** is pressed from a page, which names its project in
     // the address.
-    const project = textIn(body, "project", PROJECT_TAKES);
+    const project = textIn(body, "projectId", PROJECT_TAKES);
     if ("refusal" in project) return unprocessable(reply, project.refusal);
 
     const acting = await actingIn(auth, projectNamed(query, body));
@@ -578,7 +578,7 @@ export async function graderRoutes(
    * see reads exactly as one that is not there, because to this caller those
    * are the same thing.
    */
-  app.patch(GRADER_PATH, async (request, reply) => {
+  registerPlatformOperation(app, graderOperations.updateGrader, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { graderId } = request.params as { graderId: string };
     const body = (request.body ?? {}) as Body;
@@ -621,7 +621,7 @@ export async function graderRoutes(
 
     // The type gate first, then `projectNamed`'s one rule, exactly as **Use**
     // beside this reads them.
-    const project = textIn(body, "project", PROJECT_TAKES);
+    const project = textIn(body, "projectId", PROJECT_TAKES);
     if ("refusal" in project) return unprocessable(reply, project.refusal);
 
     const acting = await actingIn(auth, projectNamed(query, body));
@@ -683,7 +683,7 @@ export async function graderRoutes(
    * run that judged nothing and a run where everything passed look the same on
    * a results page with nothing red on it.
    */
-  app.delete(GRADER_PATH, async (request, reply) => {
+  registerPlatformOperation(app, graderOperations.deleteGrader, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { graderId } = request.params as { graderId: string };
     const query = (request.query ?? {}) as Query;
@@ -696,7 +696,7 @@ export async function graderRoutes(
       projectId: auth.projectId,
     });
 
-    const acting = await actingIn(auth, given(query.project));
+    const acting = await actingIn(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const removed = await deleteGrader(acting.auth, graderId);
@@ -705,7 +705,7 @@ export async function graderRoutes(
     return reply.send({
       id: removed.id,
       name: removed.name,
-      deleted_at: removed.deletedAt.toISOString(),
+      deletedAt: removed.deletedAt.toISOString(),
     });
   });
 

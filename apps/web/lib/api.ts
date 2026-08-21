@@ -1,5 +1,5 @@
 /**
- * One read of the product API, and the four things a page can be told.
+ * One raw account or bootstrap read, and the four things a page can be told.
  *
  * Every product page in this application asks the same question — *give me
  * this, in this project* — and has to answer the same four situations for
@@ -86,109 +86,10 @@ export function unreachable<T>(): Answer<T> {
 }
 
 /** One read, with the project named in it where the caller named one. */
-export async function readJson<T>(
-  path: string,
-  options: { readonly project?: string; readonly signal?: AbortSignal } = {},
-): Promise<Answer<T>> {
-  const address =
-    options.project === undefined
-      ? path
-      : `${path}${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(options.project)}`;
-
+export async function readJson<T>(path: string): Promise<Answer<T>> {
   try {
-    const response = await fetch(address, {
+    const response = await fetch(path, {
       cache: "no-store",
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-    const body = await response.json().catch(() => null);
-    return answerFor<T>(response.status, body);
-  } catch {
-    return unreachable<T>();
-  }
-}
-
-/**
- * One write, with the project named in it and the same four answers a read
- * gets.
- *
- * **A write answers exactly what a read answers**, and that is the whole reason
- * this lives beside `readJson` rather than inside each form. A page that
- * invented its own reading of a 404 on save, or quietly swallowed a 409, would
- * be a page where a stale edit looks like a successful one. The refusal's own
- * sentence is kept and never paraphrased: it names the next move, and the
- * conflict refusals name the revision to retry against.
- *
- * **`project` here means the address, and it is now the only spelling a page
- * has.** There used to be a second helper, `sendJson`, one keystroke away, that
- * put the project in the *body* — and its comment said the body "is where every
- * write route in this API looks for it", while this one said the address was
- * the only spelling a page should use. Both sentences were in the same file,
- * sixty lines apart, and by then only one of them was true of any given door.
- * Six pages were using the wrong one, and nothing at the type level told a
- * reader which door read which.
- *
- * So `sendJson` is gone. Every write door in this API reads `projectNamed`'s
- * one rule — the query, then the body — so a page names its project in the
- * address, a terminal names it in the body, and neither spelling is ignored by
- * anything. There is one helper here because there is one rule there.
- */
-export async function writeJson<T>(
-  path: string,
-  options: {
-    readonly method: "POST" | "PATCH" | "PUT";
-    readonly project?: string;
-    readonly body?: unknown;
-    readonly signal?: AbortSignal;
-  },
-): Promise<Answer<T>> {
-  const address =
-    options.project === undefined
-      ? path
-      : `${path}${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(options.project)}`;
-
-  try {
-    const response = await fetch(address, {
-      method: options.method,
-      cache: "no-store",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(options.body ?? {}),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-    const body = await response.json().catch(() => null);
-    return answerFor<T>(response.status, body);
-  } catch {
-    return unreachable<T>();
-  }
-}
-
-/**
- * One delete, with the project named in it and the same four answers a read
- * gets.
- *
- * **It sends no body at all**, which is what separates it from `writeJson`
- * rather than a shorter spelling of it. A delete says everything it has to say
- * in its address, and a request carrying `content-type: application/json` with
- * nothing after it is refused by the server's own body parser — a refusal about
- * an empty body, in place of the act somebody asked for.
- *
- * A 404 arrives as `missing`, exactly as it does on a read, and that is the
- * honest answer for a delete: the thing is not there, whether it never was,
- * whether it belongs to somebody else, or whether it went a moment ago.
- */
-export async function deleteJson<T>(
-  path: string,
-  options: { readonly project?: string; readonly signal?: AbortSignal } = {},
-): Promise<Answer<T>> {
-  const address =
-    options.project === undefined
-      ? path
-      : `${path}${path.includes("?") ? "&" : "?"}project=${encodeURIComponent(options.project)}`;
-
-  try {
-    const response = await fetch(address, {
-      method: "DELETE",
-      cache: "no-store",
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
     const body = await response.json().catch(() => null);
     return answerFor<T>(response.status, body);

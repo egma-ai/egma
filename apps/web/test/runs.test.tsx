@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NewRunPage from "../app/projects/[projectId]/runs/new/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * Planning a run in the browser.
@@ -65,14 +66,14 @@ function meWith(role: string): Me {
 function agentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "agt_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     name: "Front desk",
     description: null,
     revision: "rev_a",
     archived: false,
-    archived_at: null,
-    created_at: "2026-08-01T10:00:00.000Z",
-    updated_at: "2026-08-01T10:00:00.000Z",
+    archivedAt: null,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    updatedAt: "2026-08-01T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -80,24 +81,24 @@ function agentRow(overrides: Record<string, unknown> = {}) {
 function connectionRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "con_1",
-    agent_id: "agt_1",
-    project_id: "prj_1",
+    agentId: "agt_1",
+    projectId: "prj_1",
     name: "retell-1",
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
-    product_label: "Retell chat",
+    productLabel: "Retell chat",
     topology: "hosted",
     environment: "staging",
     config: {},
-    credential_present: true,
-    credentials_hint: "WXYZ",
+    credentialPresent: true,
+    credentialsHint: "WXYZ",
     capabilities: {
       state: "known",
       measured: ["raw_audio", "dtmf"],
       supported: [],
-      checked_at: "2026-08-01T10:00:00.000Z",
+      checkedAt: "2026-08-01T10:00:00.000Z",
       source: "transport",
       standing: {
         raw_audio: "unsupported",
@@ -107,9 +108,9 @@ function connectionRow(overrides: Record<string, unknown> = {}) {
     },
     revision: "rev_c",
     archived: false,
-    archived_at: null,
-    created_at: "2026-08-01T10:00:00.000Z",
-    updated_at: "2026-08-01T10:00:00.000Z",
+    archivedAt: null,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    updatedAt: "2026-08-01T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -117,40 +118,40 @@ function connectionRow(overrides: Record<string, unknown> = {}) {
 function testRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "tst_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     name: "Reschedules a booked appointment",
     description: null,
     version: 3,
-    version_id: "tstv_1",
+    versionId: "tstv_1",
     scenario: "Their cleaning has to move to next week.",
-    expected_behaviors: ["confirms the new time back"],
-    personas: [{ id: "prs_1", name: "Impatient Rita", archived_at: null }],
-    required_capabilities: [],
-    override_count: 0,
-    agents: [{ id: "agt_1", name: "Front desk", archived_at: null }],
+    expectedBehaviors: ["confirms the new time back"],
+    personas: [{ id: "prs_1", name: "Impatient Rita", archivedAt: null }],
+    requiredCapabilities: [],
+    overrideCount: 0,
+    agents: [{ id: "agt_1", name: "Front desk", archivedAt: null }],
     revision: "rev_1",
-    applicability_revision: "rev_app_1",
-    archived_at: null,
-    archive_reason: null,
-    created_at: "2026-08-01T10:00:00.000Z",
-    updated_at: "2026-08-01T10:00:00.000Z",
+    applicabilityRevision: "rev_app_1",
+    archivedAt: null,
+    archiveReason: null,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    updatedAt: "2026-08-01T10:00:00.000Z",
     ...overrides,
   };
 }
 
 function plannedTest(overrides: Record<string, unknown> = {}) {
   return {
-    test_id: "tst_1",
-    test_version_id: "tstv_1",
-    test_name: "Reschedules a booked appointment",
+    testId: "tst_1",
+    testVersionId: "tstv_1",
+    testName: "Reschedules a booked appointment",
     personas: [
       {
-        persona_id: "prs_1",
-        persona_version_id: "prsv_7",
+        personaId: "prs_1",
+        personaVersionId: "prsv_7",
         name: "Impatient Rita",
       },
     ],
-    required_capabilities: [],
+    requiredCapabilities: [],
     skip: null,
     // Two running copies, and one shape for both. The expected-behaviors
     // grader is a seeded copy of a predefined library entry now, not a rowless
@@ -159,19 +160,19 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
     graders: [
       {
         kind: "authored",
-        grader_id: "grd_seeded",
-        grader_version_id: "grv_1",
+        graderId: "grd_seeded",
+        graderVersionId: "grv_1",
         name: "expected_behaviors",
-        library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+        libraryId: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
         required: true,
         scope: "simulations",
       },
       {
         kind: "authored",
-        grader_id: "grd_1",
-        grader_version_id: "grv_2",
+        graderId: "grd_1",
+        graderVersionId: "grv_2",
         name: "Never promises a price",
-        library_id: "grl_01M01MH8KBE00TESCGQHVH0T8G",
+        libraryId: "grl_01M01MH8KBE00TESCGQHVH0T8G",
         required: false,
         scope: "simulations",
       },
@@ -182,25 +183,25 @@ function plannedTest(overrides: Record<string, unknown> = {}) {
 
 function planBody(overrides: Record<string, unknown> = {}) {
   return {
-    agent_id: "agt_1",
-    connection_id: "con_1",
+    agentId: "agt_1",
+    connectionId: "con_1",
     connection: {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
-      product_label: "Retell chat",
+      productLabel: "Retell chat",
       environment: "staging",
       capabilities: {
         state: "known",
         measured: ["raw_audio", "dtmf"],
         supported: [],
-        checked_at: "2026-08-01T10:00:00.000Z",
+        checkedAt: "2026-08-01T10:00:00.000Z",
         source: "transport",
       },
     },
-    runnable_simulation_count: 1,
-    skipped_simulation_count: 0,
+    runnableSimulationCount: 1,
+    skippedSimulationCount: 0,
     tests: [plannedTest()],
     ...overrides,
   };
@@ -223,15 +224,13 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
-      const url = new URL(input, "http://egma.test");
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const request = await observeRequest(input, init);
+      const { address: url } = request;
       sent.push({
-        url: input,
-        method: init?.method ?? "GET",
-        body:
-          typeof init?.body === "string"
-            ? (JSON.parse(init.body) as unknown)
-            : undefined,
+        url: request.url,
+        method: request.method,
+        body: request.body,
       });
 
       const held = answers[url.pathname];
@@ -286,7 +285,7 @@ function sentTo(path: string): { method: string; body: unknown }[] {
 function planQueries(): string[] {
   return sent
     .filter(
-      (one) => new URL(one.url, "http://egma.test").pathname === "/api/run-plan",
+      (one) => new URL(one.url, "http://egma.test").pathname === "/v1/run-plan",
     )
     .map((one) => one.url);
 }
@@ -302,26 +301,26 @@ function builder(
 ): void {
   apiAnswers({
     "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
-    "/api/agents": { status: 200, body: { items: [agentRow()], next_cursor: null } },
-    "/api/agents/agt_1": {
+    "/v1/agents": { status: 200, body: { agents: [agentRow()], nextPageToken: null } },
+    "/v1/agents/agt_1": {
       status: 200,
       body: { agent: agentRow(), connections: [connectionRow()] },
     },
-    "/api/tests": {
+    "/v1/tests": {
       status: 200,
       body: {
-        items: options.tests ?? [testRow()],
-        next_cursor: null,
+        tests: options.tests ?? [testRow()],
+        nextPageToken: null,
       },
     },
-    "/api/run-plan": options.plan ?? { status: 200, body: planBody() },
-    "/api/runs": options.started ?? {
+    "/v1/run-plan": options.plan ?? { status: 200, body: planBody() },
+    "/v1/runs": options.started ?? {
       status: 201,
       body: {
         id: "run_1",
         status: "pending",
-        expected_simulation_count: 1,
-        skipped_count: null,
+        expectedSimulationCount: 1,
+        skippedCount: null,
       },
     },
   });
@@ -440,13 +439,13 @@ describe("the steps", () => {
 
     await waitFor(() => {
       const asked = sent.filter((one) =>
-        one.url.startsWith("/api/tests?"),
+        one.url.startsWith("/v1/tests?"),
       );
       expect(asked.length).toBeGreaterThan(0);
       // The applicability filter is the server's, in the address of the
       // request — a filter applied to what came back would answer differently
       // depending on what had already been fetched.
-      expect(asked[0]?.url).toContain("agent=agt_1");
+      expect(asked[0]?.url).toContain("agentId=agt_1");
     });
   });
 
@@ -510,7 +509,7 @@ describe("the server-owned run plan", () => {
 
   it("keeps connection and capability facts out of the builder", async () => {
     builder({
-      tests: [testRow({ required_capabilities: ["raw_audio"] })],
+      tests: [testRow({ requiredCapabilities: ["raw_audio"] })],
     });
     render(<NewRunPage />);
     await chooseEverything();
@@ -561,11 +560,11 @@ describe("the server-owned run plan", () => {
       plan: {
         status: 200,
         body: planBody({
-          runnable_simulation_count: 0,
-          skipped_simulation_count: 1,
+          runnableSimulationCount: 0,
+          skippedSimulationCount: 1,
           tests: [
             plannedTest({
-              required_capabilities: ["raw_audio"],
+              requiredCapabilities: ["raw_audio"],
               skip: {
                 reason: "required_capability_unsupported",
                 capabilities: ["raw_audio"],
@@ -588,8 +587,8 @@ describe("the server-owned run plan", () => {
       plan: {
         status: 200,
         body: planBody({
-          runnable_simulation_count: 0,
-          skipped_simulation_count: 1,
+          runnableSimulationCount: 0,
+          skippedSimulationCount: 1,
           tests: [
             plannedTest({
               skip: {
@@ -637,7 +636,7 @@ describe("starting", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
 
     expect(await screen.findByText("Enter a run name.")).toBeDefined();
-    expect(sentTo("/api/runs")).toEqual([]);
+    expect(sentTo("/v1/runs")).toEqual([]);
     expect(screen.queryByRole("dialog", { name: "Start this run?" })).toBeNull();
 
     nameRun("Phone check");
@@ -669,8 +668,8 @@ describe("starting", () => {
           body: {
             id: "run_1",
             status: "pending",
-            expected_simulation_count: 1,
-            skipped_count: null,
+            expectedSimulationCount: 1,
+            skippedCount: null,
           },
         },
       ],
@@ -692,28 +691,28 @@ describe("starting", () => {
     await confirmStart();
 
     await waitFor(() => {
-      expect(sentTo("/api/runs")).toHaveLength(2);
+      expect(sentTo("/v1/runs")).toHaveLength(2);
     });
     nameRun("Evening check");
     await confirmStart();
     await waitFor(() => {
-      expect(sentTo("/api/runs")).toHaveLength(3);
+      expect(sentTo("/v1/runs")).toHaveLength(3);
     });
 
-    const [first, second, renamed] = sentTo("/api/runs");
-    const key = (first?.body as { idempotency_key: string }).idempotency_key;
+    const [first, second, renamed] = sentTo("/v1/runs");
+    const key = (first?.body as { idempotencyKey: string }).idempotencyKey;
     expect(key).not.toBe("");
     expect((first?.body as { label: string }).label).toBe("Morning check");
     // The same selection under the same word: a lost answer becomes the run
     // that already exists rather than a second conversation with the agent.
-    expect((second?.body as { idempotency_key: string }).idempotency_key).toBe(
+    expect((second?.body as { idempotencyKey: string }).idempotencyKey).toBe(
       key,
     );
     expect(
-      (renamed?.body as { idempotency_key: string }).idempotency_key,
+      (renamed?.body as { idempotencyKey: string }).idempotencyKey,
     ).not.toBe(key);
     expect((renamed?.body as { label: string }).label).toBe("Evening check");
-    expect((first?.body as { test_versions: string[] }).test_versions).toEqual([
+    expect((first?.body as { testVersionIds: string[] }).testVersionIds).toEqual([
       "tstv_1",
     ]);
   });
@@ -726,8 +725,8 @@ describe("starting", () => {
           body: {
             id: "run_1",
             status: "pending",
-            expected_simulation_count: 1,
-            skipped_count: null,
+            expectedSimulationCount: 1,
+            skippedCount: null,
           },
         },
         {
@@ -735,8 +734,8 @@ describe("starting", () => {
           body: {
             id: "run_2",
             status: "pending",
-            expected_simulation_count: 1,
-            skipped_count: null,
+            expectedSimulationCount: 1,
+            skippedCount: null,
           },
         },
       ],
@@ -753,14 +752,14 @@ describe("starting", () => {
       ).toBe(false),
     );
     await confirmStart();
-    await waitFor(() => expect(sentTo("/api/runs")).toHaveLength(1));
+    await waitFor(() => expect(sentTo("/v1/runs")).toHaveLength(1));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_1");
     expect(
       screen.getByRole("button", { name: "Starting…" }).getAttribute("aria-busy"),
     ).toBe("true");
     const firstKey = (
-      sentTo("/api/runs")[0]?.body as { idempotency_key: string }
-    ).idempotency_key;
+      sentTo("/v1/runs")[0]?.body as { idempotencyKey: string }
+    ).idempotencyKey;
 
     firstBuilder.unmount();
     render(<NewRunPage />);
@@ -774,11 +773,11 @@ describe("starting", () => {
       ).toBe(false),
     );
     await confirmStart();
-    await waitFor(() => expect(sentTo("/api/runs")).toHaveLength(2));
+    await waitFor(() => expect(sentTo("/v1/runs")).toHaveLength(2));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_2");
     const secondKey = (
-      sentTo("/api/runs")[1]?.body as { idempotency_key: string }
-    ).idempotency_key;
+      sentTo("/v1/runs")[1]?.body as { idempotencyKey: string }
+    ).idempotencyKey;
 
     expect(secondKey).not.toBe(firstKey);
   });
@@ -787,7 +786,7 @@ describe("starting", () => {
     builder({
       tests: [
         testRow(),
-        testRow({ id: "tst_2", name: "Cancels", version_id: "tstv_2" }),
+        testRow({ id: "tst_2", name: "Cancels", versionId: "tstv_2" }),
       ],
       started: [
         {
@@ -799,8 +798,8 @@ describe("starting", () => {
           body: {
             id: "run_1",
             status: "pending",
-            expected_simulation_count: 2,
-            skipped_count: null,
+            expectedSimulationCount: 2,
+            skippedCount: null,
           },
         },
       ],
@@ -818,7 +817,7 @@ describe("starting", () => {
     });
     await confirmStart();
     await waitFor(() => {
-      expect(sentTo("/api/runs")).toHaveLength(1);
+      expect(sentTo("/v1/runs")).toHaveLength(1);
     });
     await screen.findByText("Egma could not answer.");
 
@@ -833,11 +832,11 @@ describe("starting", () => {
     await confirmStart();
 
     await waitFor(() => {
-      expect(sentTo("/api/runs")).toHaveLength(2);
+      expect(sentTo("/v1/runs")).toHaveLength(2);
     });
-    const [first, second] = sentTo("/api/runs");
-    expect((second?.body as { idempotency_key: string }).idempotency_key).not.toBe(
-      (first?.body as { idempotency_key: string }).idempotency_key,
+    const [first, second] = sentTo("/v1/runs");
+    expect((second?.body as { idempotencyKey: string }).idempotencyKey).not.toBe(
+      (first?.body as { idempotencyKey: string }).idempotencyKey,
     );
   });
 
@@ -849,7 +848,7 @@ describe("starting", () => {
     const start = await screen.findByRole("button", { name: "Start run" });
     expect((start as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(start);
-    expect(sentTo("/api/runs")).toEqual([]);
+    expect(sentTo("/v1/runs")).toEqual([]);
   });
 });
 
@@ -858,7 +857,7 @@ describe("test selection", () => {
     builder({
       tests: [
         testRow(),
-        testRow({ id: "tst_2", name: "Cancels", version_id: "tstv_2" }),
+        testRow({ id: "tst_2", name: "Cancels", versionId: "tstv_2" }),
       ],
     });
   }

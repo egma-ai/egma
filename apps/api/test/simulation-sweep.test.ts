@@ -69,12 +69,12 @@ async function anOrphan(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await ask(api.app, "POST", "/api/agents", key, {
+  const registered = await ask(api.app, "POST", "/v1/agents", key, {
     name: "Front desk",
     connection: {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -87,18 +87,18 @@ async function anOrphan(
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
   });
-  const pushed = await ask(api.app, "POST", "/api/tests", key, {
+  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     name: "Reschedules a booked appointment",
     scenario: "Their cleaning is booked for Thursday and has to move.",
-    expected_behaviors: ["confirms the new time back before finishing"],
+    expectedBehaviors: ["confirms the new time back before finishing"],
     personas: ["Impatient Rita"],
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
-  const started = await ask(api.app, "POST", "/api/runs", key, {
-    connection: connectionId,
-    test_versions: [String(pushed.body.version_id)],
-    idempotency_key: newId("run"),
+  const started = await ask(api.app, "POST", "/v1/runs", key, {
+    connectionId: connectionId,
+    testVersionIds: [String(pushed.body.versionId)],
+    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];
@@ -138,7 +138,7 @@ describe("the standing sweep", () => {
       { timeout: 5_000, interval: 100 },
     );
 
-    const header = await ask(running.app, "GET", `/api/runs/${runId}`, key);
+    const header = await ask(running.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
   });
 

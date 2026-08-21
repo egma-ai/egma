@@ -13,6 +13,7 @@ import TestDetailPage from "../app/projects/[projectId]/tests/[testId]/page.tsx"
 import TestsPage from "../app/projects/[projectId]/tests/page.tsx";
 import NewTestPage from "../app/projects/[projectId]/tests/new/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * The Tests area, rendered.
@@ -76,14 +77,14 @@ const CAPABILITIES = {
 function agentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "agt_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     name: "Front desk",
     description: null,
     revision: "rev_a",
     archived: false,
-    archived_at: null,
-    created_at: "2026-08-01T10:00:00.000Z",
-    updated_at: "2026-08-01T10:00:00.000Z",
+    archivedAt: null,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    updatedAt: "2026-08-01T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -92,7 +93,7 @@ function personaChoice(overrides: Record<string, unknown> = {}) {
   return {
     id: "prs_1",
     name: "Impatient Rita",
-    archived_at: null,
+    archivedAt: null,
     ...overrides,
   };
 }
@@ -100,23 +101,23 @@ function personaChoice(overrides: Record<string, unknown> = {}) {
 function testRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "tst_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     name: "Reschedules a booked appointment",
     description: null,
     version: 1,
-    version_id: "tstv_1",
+    versionId: "tstv_1",
     scenario: "Their cleaning has to move to next week.",
-    expected_behaviors: ["confirms the new time back"],
-    personas: [{ id: "prs_1", name: "Impatient Rita", archived_at: null }],
-    required_capabilities: [],
-    override_count: 0,
-    agents: [{ id: "agt_1", name: "Front desk", archived_at: null }],
+    expectedBehaviors: ["confirms the new time back"],
+    personas: [{ id: "prs_1", name: "Impatient Rita", archivedAt: null }],
+    requiredCapabilities: [],
+    overrideCount: 0,
+    agents: [{ id: "agt_1", name: "Front desk", archivedAt: null }],
     revision: "rev_1",
-    applicability_revision: "rev_app_1",
-    archived_at: null,
-    archive_reason: null,
-    created_at: "2026-08-01T10:00:00.000Z",
-    updated_at: "2026-08-01T10:00:00.000Z",
+    applicabilityRevision: "rev_app_1",
+    archivedAt: null,
+    archiveReason: null,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    updatedAt: "2026-08-01T10:00:00.000Z",
     ...overrides,
   };
 }
@@ -142,15 +143,13 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
-      const url = new URL(input, "http://egma.test");
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const request = await observeRequest(input, init);
+      const { address: url } = request;
       sent.push({
-        url: input,
-        method: init?.method ?? "GET",
-        body:
-          typeof init?.body === "string"
-            ? (JSON.parse(init.body) as unknown)
-            : undefined,
+        url: request.url,
+        method: request.method,
+        body: request.body,
       });
 
       const held = answers[url.pathname];
@@ -223,10 +222,10 @@ describe("the list of tests", () => {
   function list(role = "admin", tests: unknown[] = [testRow()]) {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/tests": { status: 200, body: { items: tests, next_cursor: null } },
-      "/api/agents": {
+      "/v1/tests": { status: 200, body: { tests, nextPageToken: null } },
+      "/v1/agents": {
         status: 200,
-        body: { items: [agentRow()], next_cursor: null },
+        body: { agents: [agentRow()], nextPageToken: null },
       },
     });
     render(<TestsPage />);
@@ -243,7 +242,7 @@ describe("the list of tests", () => {
     list("admin", [
       testRow({
         agents: [
-          { id: "agt_1", name: "Front desk", archived_at: "2026-08-02T00:00:00.000Z" },
+          { id: "agt_1", name: "Front desk", archivedAt: "2026-08-02T00:00:00.000Z" },
         ],
       }),
     ]);
@@ -275,7 +274,7 @@ describe("the list of tests", () => {
    * watched for `archived=true` on the wire, so it could not survive the
    * control going. What it proved still holds and is still proven: the server
    * keeps the two lists apart, and `apps/api/test/tests-lifecycle.test.ts`
-   * asks `/api/tests?archived=true` for the archived one and reads it back.
+   * asks `/v1/tests?archived=true` for the archived one and reads it back.
    * `testsPath` still carries the flag, and this page still asks with it —
    * pinned to the active list, which is what the row above now says.
    */
@@ -304,21 +303,21 @@ describe("writing a test", () => {
     routed.pathname = "/projects/prj_1/tests/new";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/agents":
+      "/v1/agents":
         nextAgents.length === 0
-          ? { status: 200, body: { items: agents, next_cursor: null } }
+          ? { status: 200, body: { agents, nextPageToken: null } }
           : [
               {
                 status: 200,
-                body: { items: agents, next_cursor: "older-agents" },
+                body: { agents, nextPageToken: "older-agents" },
               },
               {
                 status: 200,
-                body: { items: nextAgents, next_cursor: null },
+                body: { agents: nextAgents, nextPageToken: null },
               },
               {
                 status: 200,
-                body: { items: nextAgents, next_cursor: null },
+                body: { agents: nextAgents, nextPageToken: null },
               },
               {
                 status: 503,
@@ -328,26 +327,26 @@ describe("writing a test", () => {
                 },
               },
             ],
-      "/api/personas":
+      "/v1/personas":
         nextPersonas.length === 0
-          ? { status: 200, body: { items: personas, next_cursor: null } }
+          ? { status: 200, body: { personas, nextPageToken: null } }
           : [
               {
                 status: 200,
-                body: { items: personas, next_cursor: "older-personas" },
+                body: { personas, nextPageToken: "older-personas" },
               },
               {
                 status: 200,
-                body: { items: nextPersonas, next_cursor: null },
+                body: { personas: nextPersonas, nextPageToken: null },
               },
               {
                 status: 200,
-                body: { items: nextPersonas, next_cursor: null },
+                body: { personas: nextPersonas, nextPageToken: null },
               },
             ],
-      "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
-      "/api/tests": { status: 201, body: testRow() },
+      "/v1/graders": { status: 200, body: { graders: [], nextPageToken: null } },
+      "/v1/capabilities": { status: 200, body: CAPABILITIES },
+      "/v1/tests": { status: 201, body: testRow() },
     });
     render(<NewTestPage />);
   }
@@ -395,12 +394,12 @@ describe("writing a test", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose agents" }));
     await screen.findByRole("checkbox", { name: "Front desk" });
     expect(
-      sent.some((one) => one.url.includes("cursor=older-agents")),
+      sent.some((one) => one.url.includes("pageToken=older-agents")),
     ).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await screen.findByRole("checkbox", { name: "Night desk" });
     expect(
-      sent.some((one) => one.url.includes("cursor=older-agents")),
+      sent.some((one) => one.url.includes("pageToken=older-agents")),
     ).toBe(true);
 
     const search = screen.getByLabelText("Search agents");
@@ -519,17 +518,17 @@ describe("writing a test", () => {
     fireEvent.click(screen.getByRole("button", { name: "Write the test" }));
 
     await waitFor(() => {
-      expect(sentTo("/api/tests").at(-1)?.method).toBe("POST");
+      expect(sentTo("/v1/tests").at(-1)?.method).toBe("POST");
     });
-    const body = sentTo("/api/tests").at(-1)?.body as {
-      expected_behaviors: string[];
+    const body = sentTo("/v1/tests").at(-1)?.body as {
+      expectedBehaviors: string[];
       personas: string[];
     };
     // Plain sentences, in the order the page shows them, and nothing beside
     // them: the write door refuses the `{behavior, priority}` shape by name.
-    expect(body.expected_behaviors).toEqual(["first", "second"]);
+    expect(body.expectedBehaviors).toEqual(["first", "second"]);
     expect(body.personas).toEqual(["prs_2"]);
-    expect("required_capabilities" in body).toBe(false);
+    expect("requiredCapabilities" in body).toBe(false);
   });
 });
 
@@ -545,30 +544,30 @@ describe("one test's page", () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/tests/tst_1":
+      "/v1/tests/tst_1":
         saved === undefined
           ? { status: 200, body: test }
           : [{ status: 200, body: test }, saved],
-      "/api/tests/tst_1/versions": {
+      "/v1/tests/tst_1/versions": {
         status: 200,
         body: {
-          items: [
+          versions: [
             {
               ...testRow(),
               id: "tstv_1",
-              test_id: "tst_1",
-              test_name: "Reschedules a booked appointment",
+              testId: "tst_1",
+              testName: "Reschedules a booked appointment",
               current: true,
             },
           ],
-          next_cursor: null,
+          nextPageToken: null,
         },
       },
-      "/api/tests/tst_1/agents": { status: 200, body: test },
-      "/api/agents": { status: 200, body: { items: agents, next_cursor: null } },
-      "/api/personas": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/v1/tests/tst_1/agents": { status: 200, body: test },
+      "/v1/agents": { status: 200, body: { agents, nextPageToken: null } },
+      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
+      "/v1/graders": { status: 200, body: { graders: [], nextPageToken: null } },
+      "/v1/capabilities": { status: 200, body: CAPABILITIES },
     });
     render(<TestDetailPage />);
   }
@@ -632,7 +631,7 @@ describe("one test's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => {
-      expect(sentWith("/api/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
+      expect(sentWith("/v1/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
     });
     expect(screen.getAllByText("Saving…")).toHaveLength(2);
     fireEvent.change(screen.getByLabelText("Name"), {
@@ -649,20 +648,20 @@ describe("one test's page", () => {
       "Keep this unsaved scenario",
     );
     expect(screen.getAllByText("Unsaved changes")).toHaveLength(2);
-    const body = sentWith("/api/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
+    const body = sentWith("/v1/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
     expect(body.name).toBe("Renamed");
-    expect(body.expected_revision).toBe("rev_1");
+    expect(body.expectedRevision).toBe("rev_1");
     // Sending the version too would make a rename fail because somebody else
     // sharpened a scenario, which is a conflict that never existed.
-    expect(body.expected_version_id).toBeUndefined();
+    expect(body.expectedVersionId).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Clone" }));
     const leave = await screen.findByRole("dialog", {
       name: "Leave without saving?",
     });
-    expect(sentTo("/api/tests/tst_1/clone")).toHaveLength(0);
+    expect(sentTo("/v1/tests/tst_1/clone")).toHaveLength(0);
     fireEvent.click(within(leave).getByRole("button", { name: "Keep editing" }));
-    expect(sentTo("/api/tests/tst_1/clone")).toHaveLength(0);
+    expect(sentTo("/v1/tests/tst_1/clone")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     const lifecycle = await screen.findByRole("dialog", {
@@ -674,17 +673,17 @@ describe("one test's page", () => {
     const discard = await screen.findByRole("dialog", {
       name: "Leave without saving?",
     });
-    expect(sentTo("/api/tests/tst_1/archive")).toHaveLength(0);
+    expect(sentTo("/v1/tests/tst_1/archive")).toHaveLength(0);
     fireEvent.click(
       within(discard).getByRole("button", { name: "Keep editing" }),
     );
-    expect(sentTo("/api/tests/tst_1/archive")).toHaveLength(0);
+    expect(sentTo("/v1/tests/tst_1/archive")).toHaveLength(0);
   });
 
   it("saves content with the version alone and preserves hidden backend fields", async () => {
     detail(
       "admin",
-      testRow({ override_count: 2, required_capabilities: ["raw_audio"] }),
+      testRow({ overrideCount: 2, requiredCapabilities: ["raw_audio"] }),
     );
     await screen.findByLabelText("Scenario");
 
@@ -703,15 +702,15 @@ describe("one test's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save version" }));
 
     await waitFor(() => {
-      expect(sentWith("/api/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
+      expect(sentWith("/v1/tests/tst_1", "PATCH").length).toBeGreaterThan(0);
     });
-    const body = sentWith("/api/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
-    expect(body.expected_version_id).toBe("tstv_1");
-    expect(body.expected_revision).toBeUndefined();
+    const body = sentWith("/v1/tests/tst_1", "PATCH").at(-1)?.body as Record<string, unknown>;
+    expect(body.expectedVersionId).toBe("tstv_1");
+    expect(body.expectedRevision).toBeUndefined();
     // The whole of what stops a partial form erasing hidden versioned content:
     // the form does not edit overrides or capabilities, so it sends neither.
-    expect("mock_tools" in body).toBe(false);
-    expect("required_capabilities" in body).toBe(false);
+    expect("mockTools" in body).toBe(false);
+    expect("requiredCapabilities" in body).toBe(false);
     expect(screen.queryByText("What else this test carries")).toBeNull();
   });
 
@@ -727,16 +726,16 @@ describe("one test's page", () => {
     );
 
     await waitFor(() => {
-      expect(sentWith("/api/tests/tst_1/agents", "POST").length).toBeGreaterThan(0);
+      expect(sentWith("/v1/tests/tst_1/agents", "POST").length).toBeGreaterThan(0);
     });
-    const call = sentWith("/api/tests/tst_1/agents", "POST").at(-1);
+    const call = sentWith("/v1/tests/tst_1/agents", "POST").at(-1);
     expect(call?.method).toBe("POST");
     const body = call?.body as Record<string, unknown>;
     expect(body.agents).toEqual(["agt_1", "agt_2"]);
-    expect(body.expected_applicability_revision).toBe("rev_app_1");
+    expect(body.expectedApplicabilityRevision).toBe("rev_app_1");
     // Target coverage is neither the live identity nor the versioned content.
-    expect(body.expected_revision).toBeUndefined();
-    expect(body.expected_version_id).toBeUndefined();
+    expect(body.expectedRevision).toBeUndefined();
+    expect(body.expectedVersionId).toBeUndefined();
     expect(await screen.findByText("Saved")).toBeTruthy();
   });
 
@@ -761,8 +760,8 @@ describe("one test's page", () => {
       "admin",
       testRow({
         agents: [
-          { id: "agt_1", name: "Front desk", archived_at: null },
-          { id: "agt_9", name: "Retired desk", archived_at: "2026-08-02T00:00:00.000Z" },
+          { id: "agt_1", name: "Front desk", archivedAt: null },
+          { id: "agt_9", name: "Retired desk", archivedAt: "2026-08-02T00:00:00.000Z" },
         ],
       }),
     );
@@ -782,7 +781,7 @@ describe("one test's page", () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/tests/tst_1": [
+      "/v1/tests/tst_1": [
         { status: 200, body: testRow() },
         {
           status: 409,
@@ -792,17 +791,17 @@ describe("one test's page", () => {
           },
         },
       ],
-      "/api/tests/tst_1/versions": {
+      "/v1/tests/tst_1/versions": {
         status: 200,
-        body: { items: [], next_cursor: null },
+        body: { versions: [], nextPageToken: null },
       },
-      "/api/agents": {
+      "/v1/agents": {
         status: 200,
-        body: { items: [agentRow()], next_cursor: null },
+        body: { agents: [agentRow()], nextPageToken: null },
       },
-      "/api/personas": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
+      "/v1/graders": { status: 200, body: { graders: [], nextPageToken: null } },
+      "/v1/capabilities": { status: 200, body: CAPABILITIES },
     });
     render(<TestDetailPage />);
     await screen.findByLabelText("Name");
@@ -828,32 +827,32 @@ describe("one test's page", () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/tests/tst_1": [
+      "/v1/tests/tst_1": [
         { status: 200, body: testRow() },
         {
           status: 409,
           body: { error: "identity_conflict", message: "Test tst_1 moved." },
         },
       ],
-      "/api/tests/tst_2": {
+      "/v1/tests/tst_2": {
         status: 200,
         body: testRow({ id: "tst_2", name: "A different test", revision: "rev_2" }),
       },
-      "/api/tests/tst_1/versions": {
+      "/v1/tests/tst_1/versions": {
         status: 200,
-        body: { items: [], next_cursor: null },
+        body: { versions: [], nextPageToken: null },
       },
-      "/api/tests/tst_2/versions": {
+      "/v1/tests/tst_2/versions": {
         status: 200,
-        body: { items: [], next_cursor: null },
+        body: { versions: [], nextPageToken: null },
       },
-      "/api/agents": {
+      "/v1/agents": {
         status: 200,
-        body: { items: [agentRow()], next_cursor: null },
+        body: { agents: [agentRow()], nextPageToken: null },
       },
-      "/api/personas": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
+      "/v1/graders": { status: 200, body: { graders: [], nextPageToken: null } },
+      "/v1/capabilities": { status: 200, body: CAPABILITIES },
     });
     const view = render(<TestDetailPage />);
     await screen.findByLabelText("Name");
@@ -888,39 +887,39 @@ describe("one test's page", () => {
     routed.pathname = "/projects/prj_1/tests/tst_1";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/tests/tst_1": { status: 200, body: testRow({ version: 2 }) },
-      "/api/tests/tst_1/versions": {
+      "/v1/tests/tst_1": { status: 200, body: testRow({ version: 2 }) },
+      "/v1/tests/tst_1/versions": {
         status: 200,
         body: {
-          items: [
+          versions: [
             {
               ...testRow(),
               id: "tstv_2",
-              test_id: "tst_1",
-              test_name: "Reschedules",
+              testId: "tst_1",
+              testName: "Reschedules",
               version: 2,
               current: true,
             },
             {
               ...testRow(),
               id: "tstv_1",
-              test_id: "tst_1",
-              test_name: "Reschedules",
+              testId: "tst_1",
+              testName: "Reschedules",
               version: 1,
               current: false,
               scenario: "What it used to say.",
             },
           ],
-          next_cursor: null,
+          nextPageToken: null,
         },
       },
-      "/api/agents": {
+      "/v1/agents": {
         status: 200,
-        body: { items: [agentRow()], next_cursor: null },
+        body: { agents: [agentRow()], nextPageToken: null },
       },
-      "/api/personas": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/graders": { status: 200, body: { items: [], next_cursor: null } },
-      "/api/capabilities": { status: 200, body: CAPABILITIES },
+      "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
+      "/v1/graders": { status: 200, body: { graders: [], nextPageToken: null } },
+      "/v1/capabilities": { status: 200, body: CAPABILITIES },
     });
     render(<TestDetailPage />);
 
@@ -961,8 +960,8 @@ describe("one test's page", () => {
     detail(
       "admin",
       testRow({
-        archived_at: "2026-08-02T00:00:00.000Z",
-        archive_reason: "needs_agent",
+        archivedAt: "2026-08-02T00:00:00.000Z",
+        archiveReason: "needs_agent",
         agents: [],
       }),
     );
@@ -981,21 +980,21 @@ describe("one test's page", () => {
     const dialog = await screen.findByRole("dialog", {
       name: "Restore test “Reschedules a booked appointment”?",
     });
-    expect(sentTo("/api/tests/tst_1/restore")).toHaveLength(0);
+    expect(sentTo("/v1/tests/tst_1/restore")).toHaveLength(0);
     fireEvent.click(within(dialog).getByRole("button", { name: "Restore test" }));
 
     const leave = await screen.findByRole("dialog", {
       name: "Leave without saving?",
     });
-    expect(sentTo("/api/tests/tst_1/restore")).toHaveLength(0);
+    expect(sentTo("/v1/tests/tst_1/restore")).toHaveLength(0);
     fireEvent.click(
       within(leave).getByRole("button", { name: "Discard changes" }),
     );
 
     await waitFor(() => {
-      expect(sentTo("/api/tests/tst_1/restore").length).toBeGreaterThan(0);
+      expect(sentTo("/v1/tests/tst_1/restore").length).toBeGreaterThan(0);
     });
-    const body = sentTo("/api/tests/tst_1/restore").at(-1)?.body as Record<
+    const body = sentTo("/v1/tests/tst_1/restore").at(-1)?.body as Record<
       string,
       unknown
     >;

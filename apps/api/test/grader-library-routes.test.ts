@@ -40,13 +40,13 @@ type Listed = {
   readonly name: string;
   readonly type: string;
   readonly owner: string;
-  readonly project_id: string | null;
+  readonly projectId: string | null;
   readonly prompt: string | null;
   readonly params: readonly { readonly name: string }[];
 };
 
 function itemsOf(answer: Answer): readonly Listed[] {
-  return answer.body.items as readonly Listed[];
+  return answer.body.graderLibraryEntries as readonly Listed[];
 }
 
 describe("reading the grader library", () => {
@@ -55,7 +55,7 @@ describe("reading the grader library", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("/api/grader-library", key);
+    const listed = await request("/v1/grader-library", key);
 
     expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
     expect(itemsOf(listed).map((entry) => entry.name).sort()).toEqual(
@@ -65,9 +65,9 @@ describe("reading the grader library", () => {
       // Derived from tenancy, and the tenancy of egma's own entries is nothing
       // at all — which is why there is no project on them either.
       expect(entry.owner, entry.name).toBe("egma");
-      expect(entry.project_id, entry.name).toBeNull();
+      expect(entry.projectId, entry.name).toBeNull();
     }
-    expect(listed.body.next_cursor).toBeNull();
+    expect(listed.body.nextPageToken).toBeNull();
   });
 
   it("hands the judge prompt and the Use form's parameters over with them", async () => {
@@ -75,7 +75,7 @@ describe("reading the grader library", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const items = itemsOf(await request("/api/grader-library", key));
+    const items = itemsOf(await request("/v1/grader-library", key));
     const behaviors = items.find((entry) => entry.name === "expected_behaviors");
     const latency = items.find((entry) => entry.name === "latency");
 
@@ -99,7 +99,7 @@ describe("reading the grader library", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
 
-    const listed = await request("/api/grader-library", grace.secret);
+    const listed = await request("/v1/grader-library", grace.secret);
 
     // The shelf is what a project is judged by. Somebody who may read a run's
     // results and not change anything still has to be able to see it.
@@ -112,10 +112,10 @@ describe("reading the grader library", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("/api/grader-library?cursor=nonsense", key);
+    const listed = await request("/v1/grader-library?pageToken=nonsense", key);
 
     expect(listed.statusCode).toBe(400);
-    expect(String(listed.body.message)).toContain("next_cursor");
+    expect(String(listed.body.message)).toContain("nextPageToken");
   });
 
   it("shows each customer the same shelf, because it is egma's", async () => {
@@ -124,10 +124,10 @@ describe("reading the grader library", () => {
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
     const theirs = itemsOf(
-      await request("/api/grader-library", await projectKeyFor(api.app, ada)),
+      await request("/v1/grader-library", await projectKeyFor(api.app, ada)),
     );
     const others = itemsOf(
-      await request("/api/grader-library", await projectKeyFor(api.app, grace)),
+      await request("/v1/grader-library", await projectKeyFor(api.app, grace)),
     );
 
     // The same identifiers on both, which is what "egma ships this" means: one

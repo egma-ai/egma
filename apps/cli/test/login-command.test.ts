@@ -93,7 +93,7 @@ describe("egma login", () => {
     expect(((await stat(workspace.credentialsFile)).mode & 0o777).toString(8)).toBe("600");
 
     // And it works on a request that needs one.
-    const used = await fetch(`${platform.url}/api/keys`, {
+    const used = await fetch(`${platform.url}/v1/keys`, {
       headers: { authorization: `Bearer ${held.key}` },
     });
     expect(used.status).toBe(200);

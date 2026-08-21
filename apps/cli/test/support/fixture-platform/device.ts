@@ -248,7 +248,7 @@ export function deviceRoutes(origin: () => string): {
         // The first door a minted key opens, which is how the end of login is
         // proved rather than asserted.
         method: "GET",
-        path: "/api/keys",
+        path: "/v1/keys",
         handle: (request) => {
           const offered = (request.headers.authorization ?? "").replace(/^Bearer\s+/iu, "");
           if (offered === "" || !keys.includes(offered)) {

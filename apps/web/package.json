@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --port 3101",
-    "build": "node tools/build.ts",
+    "build": "pnpm --filter @egma/platform-api build && node tools/build.ts",
     "start": "next start --port 3101",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@egma/platform-api": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.33.0",

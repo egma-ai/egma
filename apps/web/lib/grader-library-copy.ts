@@ -16,7 +16,7 @@
  * screen is exactly where somebody arriving from another product would type
  * one.
  *
- * The URL is deliberately not copy. `/api/grader-library` is a machine surface
+ * The URL is deliberately not copy. `/v1/grader-library` is a machine surface
  * — it is the endpoint's own path, and matching it is how somebody reading the
  * network tab finds the request — and no page ever prints it as a word.
  *

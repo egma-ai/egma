@@ -100,7 +100,7 @@ describe("commands after a repository is bound", () => {
     await createEgmaFolder({
       repository: workspace.dir,
       config: {
-        platform: { origin: bound.url, instance: bound.instanceId },
+        platform: { origin: bound.url },
         agent: null,
         connection: null,
         suite: null,
@@ -134,7 +134,6 @@ describe("commands after a repository is bound", () => {
     const requests = bound.records.slice(before);
 
     expect(result.stdout, result.stderr).toContain(`url: ${bound.url}`);
-    expect(requests[0]).toMatchObject({ method: "GET", path: "/api/platform" });
     expect(requests.some((request) => request.path === expectedPath)).toBe(true);
     expect(other.records).toEqual([]);
     return result;
@@ -143,7 +142,7 @@ describe("commands after a repository is bound", () => {
   it("uses the binding for connect, push, pull, run, and the bare wizard", async () => {
     const connected = await reachesBound(
       ["connect"],
-      "/api/agents",
+      "/v1/agents",
       { EGMA_RETELL_API_KEY: PROVIDER_KEY, EGMA_REACH: "text" },
     );
     expect(connected.code).toBe(0);
@@ -161,15 +160,15 @@ describe("commands after a repository is bound", () => {
       }));
     }
 
-    const pushed = await reachesBound(["push"], "/api/tests");
+    const pushed = await reachesBound(["push"], "/v1/tests");
     expect(pushed.code).toBe(0);
     expect(pushed.stdout).toContain("status: pushed");
 
-    const pulled = await reachesBound(["pull"], "/api/tests");
+    const pulled = await reachesBound(["pull"], "/v1/tests");
     expect(pulled.code).toBe(0);
     expect(pulled.stdout).toContain("status: pulled");
 
-    const started = await reachesBound(["run", "--no-follow"], "/api/runs");
+    const started = await reachesBound(["run", "--no-follow"], "/v1/runs");
     expect(started.code).toBe(0);
     expect(started.stdout).toContain("status: started");
     expect(bound.running.runs).toHaveLength(1);
@@ -213,8 +212,7 @@ describe("commands after a repository is bound", () => {
     const wizardRequests = bound.records.slice(beforeRequests);
     expect(wizard.code, wizard.stderr).toBe(0);
     expect(wizard.stdout).toMatch(/^first-verdict: /mu);
-    expect(wizardRequests[0]).toMatchObject({ method: "GET", path: "/api/platform" });
-    for (const expectedPath of ["/api/agents", "/api/tests", "/api/runs"]) {
+    for (const expectedPath of ["/v1/agents", "/v1/tests", "/v1/runs"]) {
       expect(
         wizardRequests.some((request) => request.path === expectedPath),
         expectedPath,
@@ -259,7 +257,7 @@ describe("moving a bound repository to another platform", () => {
     await createEgmaFolder({
       repository: workspace.dir,
       config: {
-        platform: { origin: here.url, instance: here.instanceId },
+        platform: { origin: here.url },
         agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
         connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
         suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },

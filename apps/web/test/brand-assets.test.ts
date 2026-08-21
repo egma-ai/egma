@@ -50,7 +50,7 @@ function sourceFiles(from: string): string[] {
 /**
  * A root-relative path to a file with an extension, which is what a reference
  * into `public/` looks like and what an API route or a page address does not:
- * `/api/graders` and `/projects/prj_1/tests` carry no dot in their last
+ * `/v1/graders` and `/projects/prj_1/tests` carry no dot in their last
  * segment, so they never reach the check below.
  */
 const ASSET = /["'`](\/[A-Za-z0-9._/-]*\/[A-Za-z0-9._-]+\.[A-Za-z0-9]{2,4})["'`]/gu;

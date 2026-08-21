@@ -3,15 +3,20 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-
-import { readJson, type Answer } from "../../../../../lib/api.ts";
-import { GRADERS_PATH, type RunningPage } from "../../../../../lib/graders.ts";
-import { projectPath } from "../../../../../lib/project-context.ts";
 import {
-  API_KEYS_PATH,
-  rowsIn,
-  type ApiKeyList,
-} from "../../../../../lib/settings.ts";
+  listApiKeys,
+  listGraders,
+  listTraces,
+} from "@egma/platform-api/client";
+
+import type { Answer } from "../../../../../lib/api.ts";
+import type { RunningPage } from "../../../../../lib/graders.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
+import { projectPath } from "../../../../../lib/project-context.ts";
+import { rowsIn, type ApiKeyList } from "../../../../../lib/settings.ts";
 import { monitoringSetupPath } from "../../../../../lib/monitoring.ts";
 import {
   COLUMNS,
@@ -23,15 +28,14 @@ import {
 } from "../../../../../lib/transcript-copy.ts";
 import {
   agentPlatformLabel,
-  everRecordedPath,
   howLong,
   isWidestWindow,
   namesWholeOrganization,
-  productionListPath,
   quietState,
   recentWindow,
   transcriptPath,
   watchesProduction,
+  WIDEST_WINDOW,
   WINDOW_PARAMETER,
   windowChoiceOf,
   type Listed,
@@ -155,8 +159,14 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
    * Neither is asked about a window: what each says is true of the project
    * rather than of the last day.
    */
-  const { answer: graders } = useProjectRead<RunningPage>(GRADERS_PATH, projectId);
-  const { answer: keys } = useOrganizationRead<ApiKeyList>(API_KEYS_PATH);
+  const { answer: graders } = useProjectRead<RunningPage>(
+    (projectId) =>
+      platformAnswer(listGraders({ projectId }, { client: platformClient })),
+    projectId,
+  );
+  const { answer: keys } = useOrganizationRead<ApiKeyList>(() =>
+    platformAnswer(listApiKeys({ client: platformClient })),
+  );
 
   useEffect(() => {
     setChoice(
@@ -192,12 +202,17 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
       | { readonly status: "failed"; readonly why: string }
       | null
     > => {
-      const answer = await readJson<ListPage>(
-        productionListPath({
-          window,
-          projectId,
-          cursor: after,
-        }),
+      const answer = await platformAnswer(
+        listTraces(
+          {
+            from: window.from,
+            to: window.to,
+            projectId,
+            source: "production",
+            ...(after === null ? {} : { pageToken: after }),
+          },
+          { client: platformClient },
+        ),
       );
 
       if (answer.status === "signed-out") {
@@ -238,7 +253,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           pages: [
             {
               rows: answer.page.traces,
-              nextCursor: answer.page.next_cursor,
+              nextCursor: answer.page.nextPageToken,
             },
           ],
           page: 0,
@@ -296,7 +311,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
                 ...was.pages,
                 {
                   rows: answer.page.traces,
-                  nextCursor: answer.page.next_cursor,
+                  nextCursor: answer.page.nextPageToken,
                 },
               ],
               page: was.page + 1,
@@ -363,12 +378,22 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
     let current = true;
     setProbed(undefined);
 
-    void readJson<ListPage>(everRecordedPath(projectId, new Date())).then(
-      (answer) => {
-        if (!current) return;
-        setProbed(answer.status === "ready" ? answer.value.traces.length : null);
-      },
-    );
+    const window = recentWindow(WIDEST_WINDOW, new Date());
+    void platformAnswer(
+      listTraces(
+        {
+          from: window.from,
+          to: window.to,
+          projectId,
+          source: "production",
+          pageSize: 1,
+        },
+        { client: platformClient },
+      ),
+    ).then((answer) => {
+      if (!current) return;
+      setProbed(answer.status === "ready" ? answer.value.traces.length : null);
+    });
 
     return () => {
       current = false;
@@ -421,7 +446,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           ),
           watchingProduction: counted(
             graders,
-            (page) => page.items.filter(watchesProduction).length,
+            (page) => page.graders.filter(watchesProduction).length,
           ),
         });
 
@@ -516,7 +541,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
               label={LIST.tableLabel}
               columns={columnsFor(projectId, now)}
               rows={shownRows}
-              keyOf={(row) => row.trace_id}
+              keyOf={(row) => row.traceId}
               stretchPrimaryLink
               pagination={{
                 page: state.page + 1,
@@ -580,19 +605,19 @@ function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
       (row) => (
         <Link href={transcriptPath(projectId, row)}>
           <RelativeInstant
-            instant={row.started_at}
+            instant={row.startedAt}
             now={now}
             precision="second"
           />
         </Link>
       ),
     ],
-    [COLUMNS.duration, (row) => howLong(row.duration_ns)],
+    [COLUMNS.duration, (row) => howLong(row.durationNs)],
     [
       COLUMNS.turns,
       (row) => (
         <>
-          {row.turn_counts.human} {LIST.human} · {row.turn_counts.agent}{" "}
+          {row.turnCounts.human} {LIST.human} · {row.turnCounts.agent}{" "}
           {LIST.agent}
         </>
       ),
@@ -601,28 +626,28 @@ function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
       COLUMNS.preview,
       (row) => (row.preview === "" ? <Nothing /> : <span>{row.preview}</span>),
     ],
-    [COLUMNS.steps, (row) => row.span_count],
+    [COLUMNS.steps, (row) => row.spanCount],
     [
       COLUMNS.tools,
-      (row) => (row.tool_span_count === 0 ? <Nothing /> : row.tool_span_count),
+      (row) => (row.toolSpanCount === 0 ? <Nothing /> : row.toolSpanCount),
     ],
     [
       COLUMNS.errors,
       (row) =>
-        row.errored_span_count === 0 ? (
+        row.erroredSpanCount === 0 ? (
           <Nothing />
         ) : (
-          <strong className="text-failure">{row.errored_span_count}</strong>
+          <strong className="text-failure">{row.erroredSpanCount}</strong>
         ),
     ],
     [COLUMNS.environment, (row) => row.environment],
     [
       COLUMNS.platform,
       (row) =>
-        row.agent_platform === "" ? (
+        row.agentPlatform === "" ? (
           <Nothing />
         ) : (
-          agentPlatformLabel(row.agent_platform)
+          agentPlatformLabel(row.agentPlatform)
         ),
     ],
   ];

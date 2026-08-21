@@ -20,7 +20,7 @@ import {
   readConfig,
   updateConfig,
 } from "../folder/egma-folder.ts";
-import { readCredentials, type VerifiedPlatformAccess } from "../platform/credentials.ts";
+import { readCredentials, type PlatformAccess } from "../platform/credentials.ts";
 import { RetellKey } from "../retell/key.ts";
 import {
   connect,
@@ -122,7 +122,7 @@ export function argumentRefusal(argument: string): string {
 
 export type ConnectCommandOptions = {
   /** Which egma, and where this machine's key is. Resolved once, by the caller. */
-  readonly access: VerifiedPlatformAccess;
+  readonly access: PlatformAccess;
   /** The folder a repository prompt path is resolved against. */
   readonly cwd: string;
   /** `--retell-agent`, when one was named. */
@@ -261,7 +261,6 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       try {
         await bindRepositoryPlatform(options.cwd, {
           origin: options.access.url,
-          instance: options.access.instanceId,
         });
       } catch (cause) {
         // Carried out rather than answered from in here: the flow has no

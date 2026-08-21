@@ -46,13 +46,13 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: ["confirms the new time back before finishing"],
+  expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
 const RETELL = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -89,7 +89,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await ask(api.app, "POST", "/api/agents", key, {
+  const registered = await ask(api.app, "POST", "/v1/agents", key, {
     name: "Front desk",
     connection: RETELL,
   });
@@ -100,7 +100,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
   });
-  const pushed = await ask(api.app, "POST", "/api/tests", key, {
+  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
     personas: ["Impatient Rita"],
   });
@@ -110,7 +110,7 @@ async function aCustomerReadyToRun(label: string): Promise<{
     ada,
     key,
     connectionId,
-    versionId: String(pushed.body.version_id),
+    versionId: String(pushed.body.versionId),
   };
 }
 
@@ -120,10 +120,10 @@ async function aQueuedRun(
   connectionId: string,
   versionId: string,
 ): Promise<{ runId: string; simulationId: string }> {
-  const started = await ask(api.app, "POST", "/api/runs", key, {
-    connection: connectionId,
-    test_versions: [versionId],
-    idempotency_key: newId("run"),
+  const started = await ask(api.app, "POST", "/v1/runs", key, {
+    connectionId: connectionId,
+    testVersionIds: [versionId],
+    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];
@@ -255,7 +255,7 @@ describe("the steering matrix", () => {
     const canceled = await ask(
       api.app,
       "POST",
-      `/api/runs/${runId}/cancel`,
+      `/v1/runs/${runId}/cancel`,
       key,
     );
     expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
@@ -356,13 +356,13 @@ describe("what the heartbeat door never touches", () => {
     }
 
     // The organization's own budget is untouched by all of that…
-    const read = await ask(api.app, "GET", "/api/agents", key);
+    const read = await ask(api.app, "GET", "/v1/agents", key);
     expect(read.statusCode).toBe(200);
 
     // …and once the organization does spend it, the heartbeat door is unmoved.
     let refused = 0;
     for (let i = 0; i < 6; i += 1) {
-      const answer = await ask(api.app, "GET", "/api/agents", key);
+      const answer = await ask(api.app, "GET", "/v1/agents", key);
       if (answer.statusCode === 429) refused += 1;
     }
     expect(refused).toBeGreaterThan(0);

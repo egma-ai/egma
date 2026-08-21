@@ -142,10 +142,10 @@ export function ConnectionFields({
   const setCredential = (field: string, value: string) =>
     onChange({ ...draft, credentials: { ...draft.credentials, [field]: value } });
   const targetFields = option.fields.filter(
-    (field) => field.after_credentials !== true,
+    (field) => field.afterCredentials !== true,
   );
   const afterCredentials = option.fields.filter(
-    (field) => field.after_credentials === true,
+    (field) => field.afterCredentials === true,
   );
 
   return (
@@ -161,10 +161,10 @@ export function ConnectionFields({
 
       {beforeCredentialFields}
 
-      {credentialsEditable && option.credential_rule !== "forbidden" ? (
+      {credentialsEditable && option.credentialRule !== "forbidden" ? (
         <>
-          <Help>{option.credential_help}</Help>
-          {option.credential_fields.map((field) => (
+          <Help>{option.credentialHelp}</Help>
+          {option.credentialFields.map((field) => (
             <CredentialControl
               key={field.field}
               field={field}

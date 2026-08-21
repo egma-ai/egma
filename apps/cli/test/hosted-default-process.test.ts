@@ -186,15 +186,15 @@ describe("a repository that names no platform", () => {
       expect(walked.stdout.indexOf("signed in to")).toBeGreaterThan(named);
 
       const asked = own.records.slice(before);
-      expect(asked[0]).toMatchObject({ method: "GET", path: "/api/platform" });
-      for (const expected of ["/api/agents", "/api/tests", "/api/runs"]) {
+      expect(asked[0]).toMatchObject({ method: "POST", path: "/v1/agents" });
+      for (const expected of ["/v1/agents", "/v1/tests", "/v1/runs"]) {
         expect(asked.some((request) => request.path === expected), expected).toBe(true);
       }
 
       // And the repository is now bound to the platform it reached, so the next
       // command in it needs nothing said either.
       const config = await readConfig(paths.config);
-      expect(config.platform).toEqual({ origin: own.url, instance: own.instanceId });
+      expect(config.platform).toEqual({ origin: own.url });
 
       expect(elsewhere.records).toEqual([]);
     } finally {
@@ -232,19 +232,18 @@ describe("a repository that names no platform", () => {
         mockTools: [],
       }));
 
-      for (const [verb, args] of [
-        ["login", ["login"]],
-        ["push", ["push"]],
-        ["pull", ["pull"]],
+      for (const [verb, args, expectedPath] of [
+        ["login", ["login"], null],
+        ["push", ["push"], "/v1/tests"],
+        ["pull", ["pull"], "/v1/tests"],
       ] as const) {
         const before = own.records.length;
         const result = await egma(workspace, args, seam);
         expect(result.code, `${verb}: ${result.stderr}`).toBe(0);
         expect(result.stdout, verb).toContain(`url: ${own.url}`);
-        expect(own.records.slice(before)[0], verb).toMatchObject({
-          method: "GET",
-          path: "/api/platform",
-        });
+        const reached = own.records.slice(before);
+        if (expectedPath === null) expect(reached, verb).toEqual([]);
+        else expect(reached.some((request) => request.path === expectedPath), verb).toBe(true);
       }
 
       const connected = await egma(workspace, ["connect"], {
@@ -268,7 +267,6 @@ describe("a repository that names no platform", () => {
       // repository to what answered there, so `run` goes to that same egma.
       expect((await readConfig(paths.config)).platform).toEqual({
         origin: own.url,
-        instance: own.instanceId,
       });
       const ran = await egma(workspace, ["run", "--no-follow"], seam);
       expect(ran.code, ran.stderr).toBe(0);
@@ -295,8 +293,6 @@ describe("a repository that names no platform", () => {
       expect(refused.code).toBe(4);
       expect(refused.stdout).toContain("status: unreachable");
       expect(refused.stderr).toContain(NO_DEFAULT_PLATFORM);
-      expect(refused.stderr).toContain("Nothing was sent");
-      expect(refused.stderr).toContain("--url <address>");
 
       // The wizard answers the same way, and says which address it was going to
       // use before it finds out that nothing is there.
@@ -311,10 +307,10 @@ describe("a repository that names no platform", () => {
         script,
       ]);
 
-      expect(wizard.code).toBe(4);
+      expect(wizard.code, wizard.stderr).toBe(1);
       expect(wizard.stdout).toContain(`url: ${NO_DEFAULT_PLATFORM}`);
-      expect(wizard.stdout).toContain("status: unreachable");
-      expect(wizard.stderr).toContain("Nothing was sent");
+      expect(wizard.stdout).toContain("Egma could not finish");
+      expect(wizard.stdout).toContain("did not answer");
     } finally {
       await workspace.remove();
     }
@@ -340,7 +336,7 @@ describe("a repository that names no platform", () => {
       await createEgmaFolder({
         repository: workspace.dir,
         config: {
-          platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+          platform: { origin: elsewhere.url },
           agent: null,
           connection: null,
           suite: null,
@@ -387,7 +383,7 @@ describe("a repository that names no platform", () => {
       await createEgmaFolder({
         repository: workspace.dir,
         config: {
-          platform: { origin: own.url, instance: own.instanceId },
+          platform: { origin: own.url },
           agent: null,
           connection: null,
           suite: null,
@@ -432,7 +428,7 @@ describe("a repository that names no platform", () => {
       await createEgmaFolder({
         repository: workspace.dir,
         config: {
-          platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+          platform: { origin: elsewhere.url },
           agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
           connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
           suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
@@ -521,7 +517,7 @@ describe("a repository that names no platform", () => {
           // platform any more, so the repository is free to reach egma's own —
           // which is the whole point of doing the deletions.
           expect(pulled.stdout).toContain(`url: ${own.url}`);
-          expect(reached.map((request) => request.path)).toContain("/api/platform");
+          expect(reached.map((request) => request.path)).toContain("/v1/tests");
         } else {
           // Part way down the list, and still bound. Every command still goes
           // to the platform that issued these identifiers, and egma's own
@@ -561,7 +557,7 @@ describe("a repository that names no platform", () => {
       await createEgmaFolder({
         repository: workspace.dir,
         config: {
-          platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+          platform: { origin: elsewhere.url },
           agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
           connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
           suite: { name: "first-suite", id: "sui_01K3XQ7M4E8YB2FVN0H9TZQWET" },
@@ -615,7 +611,7 @@ describe("a repository that names no platform", () => {
     const restored = await halfMoved();
     try {
       await updateConfig(folderPathsIn(restored.dir).config, {
-        platform: { origin: elsewhere.url, instance: elsewhere.instanceId },
+        platform: { origin: elsewhere.url },
       });
       const pulled = await egma(restored, ["pull"], { EGMA_TEST_DEFAULT_URL: own.url });
       expect(pulled.code, pulled.stderr).toBe(0);
@@ -656,7 +652,7 @@ describe("a repository that names no platform", () => {
       await createEgmaFolder({
         repository: workspace.dir,
         config: {
-          platform: { origin: closed, instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEP" },
+          platform: { origin: closed },
           agent: null,
           connection: null,
           suite: null,
@@ -666,10 +662,9 @@ describe("a repository that names no platform", () => {
       const before = own.records.length;
       const refused = await egma(workspace, ["push"], { EGMA_TEST_DEFAULT_URL: own.url });
 
-      expect(refused.code).toBe(4);
-      expect(refused.stdout).toContain("status: unreachable");
+      expect(refused.code).toBe(2);
+      expect(refused.stdout).toContain("status: not-signed-in");
       expect(refused.stderr).toContain(closed);
-      expect(refused.stderr).toContain("no repository identifiers were sent");
       // The platform standing where egma's own address is saw nothing at all.
       expect(own.records.slice(before)).toEqual([]);
     } finally {

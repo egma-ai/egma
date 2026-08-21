@@ -1,25 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { deleteGrader, updateGrader } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { NumberField } from "@/ui/number-field.tsx";
-import { deleteJson, writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import {
   EDIT,
   SCOPES,
   SWITCH_OFF,
 } from "../../../../../lib/grader-running-copy.ts";
 import {
+  assertionsOf,
   filledParams,
   firstChoices,
-  graderPath,
   type GraderParameter,
   type RunningGrader,
 } from "../../../../../lib/graders.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
   Field,
@@ -134,12 +139,12 @@ export function EditForm({
 }) {
   const originalName = graderDisplayName(copy.name);
   const [initial] = useState(() => ({
-    filled: filledFrom(params, copy.config?.assertions?.[0]),
+    filled: filledFrom(params, assertionsOf(copy)[0]),
     name: originalName,
     description: copy.description ?? "",
     scope: copy.scope,
     required: copy.required,
-    sampleRate: String(copy.production_sample_rate),
+    sampleRate: String(copy.productionSampleRate),
   }));
   const [filled, setFilled] = useState<Readonly<Record<string, string>>>(
     initial.filled,
@@ -189,10 +194,11 @@ export function EditForm({
     setBusy(true);
     setRefused(null);
 
-    const answer = await writeJson<RunningGrader>(graderPath(copy.id), {
-      method: "PATCH",
-      project: projectId,
-      body: {
+    const answer = await platformAnswer(
+      updateGrader(
+        {
+          graderId: copy.id,
+          projectId,
         // A predefined grader is stored with a machine key but shown with a
         // human name. Keeping that unchanged must not silently rename it when
         // somebody saves a different setting.
@@ -212,12 +218,16 @@ export function EditForm({
           saved. The key being absent means "keep what is there", which is the
           honest reading of a box that says nothing.
         */
-        ...(saidRate === undefined ? {} : { production_sample_rate: saidRate }),
+          ...(saidRate === undefined
+            ? {}
+            : { productionSampleRate: saidRate }),
         ...(params.length === 0
           ? {}
           : { params: filledParams(params, filled) }),
-      },
-    });
+        },
+        { client: platformClient },
+      ),
+    );
 
     setBusy(false);
 
@@ -404,9 +414,12 @@ export function SwitchOffPanel({
     setBusy(true);
     setRefused(null);
 
-    const answer = await deleteJson<unknown>(graderPath(copy.id), {
-      project: projectId,
-    });
+    const answer = await platformAnswer(
+      deleteGrader(
+        { graderId: copy.id, projectId },
+        { client: platformClient },
+      ),
+    );
 
     setBusy(false);
 

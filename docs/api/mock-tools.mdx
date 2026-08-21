@@ -12,7 +12,7 @@ Project-level mock tools apply to every run started in the project unless a test
 
 ## Create a mock tool
 
-`POST /api/mock-tools`
+`POST /v1/mock-tools`
 
 Create a new project-level mock tool. Returns `201 Created` with the full mock tool object. If a mock tool for the same `tool` name already exists in the project, Egma returns `409 Conflict`.
 
@@ -30,7 +30,7 @@ Create a new project-level mock tool. Returns `201 Created` with the full mock t
   An error string to return instead of an answer. Provide either `answer` or `error`, not both.
 </ParamField>
 
-<ParamField body="delay_ms" type="integer">
+<ParamField body="delayMs" type="integer">
   How long Egma holds the answer back, in milliseconds. Use this to test your agent's behavior when a tool call is slow.
 </ParamField>
 
@@ -38,7 +38,7 @@ Create a new project-level mock tool. Returns `201 Created` with the full mock t
   Restrict this mock tool to specific agents, by name or `agt_…` identifier. Omit (or supply an empty array) to apply to every agent in the project.
 </ParamField>
 
-<ParamField body="project" type="string">
+<ParamField body="projectId" type="string">
   Project to create the mock tool in. Defaults to the project your API key belongs to.
 </ParamField>
 
@@ -60,7 +60,7 @@ Create a new project-level mock tool. Returns `201 Created` with the full mock t
   The configured error string. Present only when the mock tool answers with an error.
 </ResponseField>
 
-<ResponseField name="delay_ms" type="integer">
+<ResponseField name="delayMs" type="integer">
   Configured delay in milliseconds. `0` means no delay.
 </ResponseField>
 
@@ -73,18 +73,18 @@ Create a new project-level mock tool. Returns `201 Created` with the full mock t
   </Expandable>
 </ResponseField>
 
-<ResponseField name="created_at" type="string">
+<ResponseField name="createdAt" type="string">
   ISO 8601 timestamp.
 </ResponseField>
 
-<ResponseField name="updated_at" type="string">
+<ResponseField name="updatedAt" type="string">
   ISO 8601 timestamp.
 </ResponseField>
 
 ### Example — answer with a value
 
 ```bash
-curl -X POST https://your-egma-host/api/mock-tools \
+curl -X POST https://your-egma-host/v1/mock-tools \
   -H "Authorization: Bearer <api-key>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -96,13 +96,13 @@ curl -X POST https://your-egma-host/api/mock-tools \
 ### Example — answer with an error and a delay
 
 ```bash
-curl -X POST https://your-egma-host/api/mock-tools \
+curl -X POST https://your-egma-host/v1/mock-tools \
   -H "Authorization: Bearer <api-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "tool": "book_appointment",
     "error": "the calendar service is temporarily unavailable",
-    "delay_ms": 3000,
+    "delayMs": 3000,
     "agents": ["front-desk"]
   }'
 ```
@@ -111,7 +111,7 @@ curl -X POST https://your-egma-host/api/mock-tools \
 
 ## Update a mock tool
 
-`PATCH /api/mock-tools/:mockToolId`
+`PATCH /v1/mock-tools/:mockToolId`
 
 Update one or more fields of an existing mock tool. Fields you omit are kept as-is. There is no version check here — edits overwrite in place and take effect immediately for future runs.
 
@@ -137,7 +137,7 @@ Sending an explicit `agents: []` sets the mock tool back to applying to all agen
   New error string. To switch from a value answer to an error answer, supply `error` in the body.
 </ParamField>
 
-<ParamField body="delay_ms" type="integer">
+<ParamField body="delayMs" type="integer">
   New delay in milliseconds.
 </ParamField>
 
@@ -152,12 +152,12 @@ Same shape as the create response: the full mock tool object after the update.
 ### Example
 
 ```bash
-curl -X PATCH "https://your-egma-host/api/mock-tools/mck_01abc" \
+curl -X PATCH "https://your-egma-host/v1/mock-tools/mck_01abc" \
   -H "Authorization: Bearer <api-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "answer": { "slots": ["10 a.m.", "3 p.m."] },
-    "delay_ms": 0
+    "delayMs": 0
   }'
 ```
 
@@ -165,11 +165,13 @@ curl -X PATCH "https://your-egma-host/api/mock-tools/mck_01abc" \
 
 ## Delete a mock tool
 
-`DELETE /api/mock-tools/:mockToolId`
+`DELETE /v1/mock-tools/:mockToolId`
 
-Remove a mock tool permanently. Runs already in progress keep answering the world they froze at start, so deleting a mock tool never affects an active run.
+Archive a mock tool so it no longer applies to new runs. Egma keeps the record,
+and runs already in progress keep answering the world they froze at start.
 
-Delete a mock tool when you want to stop intercepting a tool call entirely. Editing it to return a benign value is the right move when you want to keep the interception but change the answer.
+Delete a mock tool when you want to stop intercepting a tool call in new runs.
+Edit it instead when the tool should stay active but needs a different answer.
 
 ### Path parameters
 
@@ -187,14 +189,14 @@ Delete a mock tool when you want to stop intercepting a tool call entirely. Edit
   The tool name that was intercepted.
 </ResponseField>
 
-<ResponseField name="deleted_at" type="string">
+<ResponseField name="deletedAt" type="string">
   ISO 8601 timestamp of when the deletion was processed.
 </ResponseField>
 
 ### Example
 
 ```bash
-curl -X DELETE "https://your-egma-host/api/mock-tools/mck_01abc" \
+curl -X DELETE "https://your-egma-host/v1/mock-tools/mck_01abc" \
   -H "Authorization: Bearer <api-key>"
 ```
 
@@ -202,33 +204,33 @@ curl -X DELETE "https://your-egma-host/api/mock-tools/mck_01abc" \
 
 ## List mock tools
 
-`GET /api/mock-tools`
+`GET /v1/mock-tools`
 
 Return a paginated list of project-level mock tools your credential can reach, ordered newest first.
 
 ### Query parameters
 
-<ParamField query="project" type="string">
+<ParamField query="projectId" type="string">
   Filter to a specific project by id or name.
 </ParamField>
 
-<ParamField query="cursor" type="string">
-  The `next_cursor` value from the previous page. Omit to start from the newest mock tool.
+<ParamField query="pageToken" type="string">
+  The `nextPageToken` value from the previous page. Omit to start from the newest mock tool.
 </ParamField>
 
 ### Response fields
 
-<ResponseField name="items" type="array">
+<ResponseField name="mockTools" type="array">
   Array of mock tool objects. Each has the same shape as the create response.
 </ResponseField>
 
-<ResponseField name="next_cursor" type="string | null">
-  Pass as `?cursor` to fetch the next page. `null` means you are on the last page.
+<ResponseField name="nextPageToken" type="string | null">
+  Pass as `?pageToken` to fetch the next page. `null` means you are on the last page.
 </ResponseField>
 
 ### Example
 
 ```bash
-curl "https://your-egma-host/api/mock-tools?project=my-project" \
+curl "https://your-egma-host/v1/mock-tools?projectId=prj_abc123" \
   -H "Authorization: Bearer <api-key>"
 ```

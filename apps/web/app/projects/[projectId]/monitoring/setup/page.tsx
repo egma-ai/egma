@@ -3,25 +3,23 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  configureLiveKitMonitoring,
+  configureRetellMonitoring,
+  deleteMonitoringSource,
+  discoverRetellVoiceAgents,
+  listMonitoringSources,
+  replayMonitoringImportFailure,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
-import {
-  deleteJson,
-  writeJson,
-  type Refusal,
-} from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
-  LIVEKIT_MONITORING_PATH,
-  MONITORING_API_PATH,
-  replayRetellFailurePath,
-  RETELL_DISCOVERY_PATH,
-  RETELL_MONITORING_PATH,
-  removeMonitoringPath,
   type MonitoringPlatform,
   type MonitoringSetup,
   type MonitoringSetups,
@@ -29,6 +27,10 @@ import {
   type RetellAgentChoices,
   type RetellMonitoredAgent,
 } from "../../../../../lib/monitoring.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
@@ -82,7 +84,10 @@ function Setup({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
   const mayConfigure = role !== null && canAuthor(role);
   const { answer, reload, refresh } = useProjectRead<MonitoringSetups>(
-    MONITORING_API_PATH,
+    (projectId) =>
+      platformAnswer(
+        listMonitoringSources({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
   const [platform, setPlatform] = useState<PlatformChoice>("");
@@ -95,7 +100,7 @@ function Setup({ projectId }: { readonly projectId: string }) {
   const [retellFormVersion, setRetellFormVersion] = useState(0);
   const back = projectPath(projectId, "monitoring", "transcripts");
   const shouldRefresh =
-    answer?.status === "ready" && answer.value.setups.length > 0;
+    answer?.status === "ready" && answer.value.monitoringSources.length > 0;
 
   useEffect(() => {
     if (!shouldRefresh) return undefined;
@@ -148,18 +153,18 @@ function Setup({ projectId }: { readonly projectId: string }) {
     );
   }
 
-  const retell = answer.value.setups.find(
-    (setup) => setup.agent_platform === "retell",
+  const retell = answer.value.monitoringSources.find(
+    (setup) => setup.agentPlatform === "retell",
   );
-  const livekit = answer.value.setups.find(
-    (setup) => setup.agent_platform === "livekit_agents",
+  const livekit = answer.value.monitoringSources.find(
+    (setup) => setup.agentPlatform === "livekit_agents",
   );
 
   return (
     <ProductPage>
       {header}
       <PageBody>
-        {answer.value.setups.length === 0 ? null : (
+        {answer.value.monitoringSources.length === 0 ? null : (
           <section
             className="flex max-w-[72ch] flex-col gap-4"
             aria-labelledby="current-setups"
@@ -286,7 +291,7 @@ function statusPresentation(setup: MonitoringSetup): StatusPresentation {
     return { text: "Retell did not answer. Egma will retry.", mark: "error" };
   }
   const unexpected = setup.agents.filter(
-    (agent) => agent.last_error_kind === "provider_contract",
+    (agent) => agent.lastErrorKind === "provider_contract",
   ).length;
   if (unexpected > 0) {
     return {
@@ -317,7 +322,7 @@ function statusPresentation(setup: MonitoringSetup): StatusPresentation {
       moving: true,
     };
   }
-  if (setup.health.last_received_at === null) {
+  if (setup.health.lastReceivedAt === null) {
     return {
       text: "Waiting for the first production conversation.",
       mark: "waiting",
@@ -325,14 +330,14 @@ function statusPresentation(setup: MonitoringSetup): StatusPresentation {
   }
   return {
     text: `Last production conversation received ${new Date(
-      setup.health.last_received_at,
+      setup.health.lastReceivedAt,
     ).toLocaleString()}.`,
     mark: "complete",
   };
 }
 
 function agentProgress(agent: RetellMonitoredAgent): StatusPresentation {
-  if (agent.last_error_kind === "provider_contract") {
+  if (agent.lastErrorKind === "provider_contract") {
     return { text: "Unexpected Retell response", mark: "error" };
   }
   if (agent.state === "degraded") {
@@ -341,7 +346,7 @@ function agentProgress(agent: RetellMonitoredAgent): StatusPresentation {
   if (agent.state === "importing") {
     return { text: "Importing 30 days", mark: "active", moving: true };
   }
-  if (agent.scan_kind === "reconciliation") {
+  if (agent.scanKind === "reconciliation") {
     return { text: "Checking recent history", mark: "active", moving: true };
   }
   return { text: "Active", mark: "complete" };
@@ -362,15 +367,20 @@ function SetupStatus({
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
-  const label = setup.agent_platform === "retell" ? "Retell" : "LiveKit Agents";
+  const label = setup.agentPlatform === "retell" ? "Retell" : "LiveKit Agents";
   const status = statusPresentation(setup);
 
   async function remove(): Promise<void> {
     setRemoving(true);
     setRefused(null);
-    const answer = await deleteJson<null>(
-      removeMonitoringPath(setup.agent_platform),
-      { project: projectId },
+    const answer = await platformAnswer(
+      deleteMonitoringSource(
+        {
+          platform: setup.agentPlatform.replaceAll("_", "-"),
+          projectId,
+        },
+        { client: platformClient },
+      ),
     );
     setRemoving(false);
     if (answer.status === "signed-out") {
@@ -386,16 +396,12 @@ function SetupStatus({
   async function retry(failureId: string): Promise<void> {
     setRetrying(failureId);
     setRefused(null);
-    const answer = await writeJson<{
-      readonly failure: { readonly id: string; readonly status: "resolved" };
-      readonly trace: {
-        readonly id: string;
-        readonly write: "written" | "already";
-      };
-    }>(replayRetellFailurePath(failureId), {
-      method: "POST",
-      project: projectId,
-    });
+    const answer = await platformAnswer(
+      replayMonitoringImportFailure(
+        { failureId, projectId },
+        { client: platformClient },
+      ),
+    );
     setRetrying(null);
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -420,15 +426,15 @@ function SetupStatus({
               {status.text}
             </p>
           </div>
-          {setup.agent_platform === "retell" ? (
+          {setup.agentPlatform === "retell" ? (
             <>
               <p className="mt-1 mb-0 text-sm text-faint">
                 {setup.agents.length === 1
-                  ? setup.agents[0]?.platform_agent_name
+                  ? setup.agents[0]?.platformAgentName
                   : `${setup.agents.length} voice agents`}
-                {setup.credentials_hint === null
+                {setup.credentialsHint === null
                   ? ""
-                  : ` · key ending ${setup.credentials_hint}`}
+                  : ` · key ending ${setup.credentialsHint}`}
               </p>
               <ul className="mt-3 mb-0 flex list-none flex-col gap-2 p-0">
                 {setup.agents.map((agent) => {
@@ -440,10 +446,10 @@ function SetupStatus({
                     >
                       <span className="flex min-w-0 flex-col">
                         <strong className="font-medium text-foreground">
-                          {agent.platform_agent_name}
+                          {agent.platformAgentName}
                         </strong>
                         <code className="overflow-hidden font-mono text-ellipsis whitespace-nowrap text-faint">
-                          {agent.platform_agent_id}
+                          {agent.platformAgentId}
                         </code>
                       </span>
                       <span className="inline-flex min-w-0 items-center gap-2">
@@ -468,7 +474,7 @@ function SetupStatus({
                       <span>
                         Retell conversation{" "}
                         <code className="font-mono wrap-anywhere">
-                          {failure.provider_call_id}
+                          {failure.providerCallId}
                         </code>{" "}
                         could not be imported.
                       </span>
@@ -517,7 +523,7 @@ function SetupStatus({
           {(dismiss) => (
             <>
               <p className="m-0 leading-(--line-normal) text-muted-foreground">
-                {setup.agent_platform === "retell"
+                {setup.agentPlatform === "retell"
                   ? "Egma will stop polling every selected Retell agent. Existing production conversations stay in Monitoring."
                   : "Egma will remove this setup status. Existing production conversations stay, and the LiveKit worker keeps exporting until you remove its Egma SDK configuration."}
               </p>
@@ -573,11 +579,15 @@ function RetellSetup({
     if (apiKey.trim() === "") return;
     setDiscovering(true);
     setRefused(null);
-    const answer = await writeJson<RetellAgentChoices>(RETELL_DISCOVERY_PATH, {
-      method: "POST",
-      project: projectId,
-      body: { api_key: apiKey },
-    });
+    const answer = await platformAnswer(
+      discoverRetellVoiceAgents(
+        {
+          projectId,
+          apiKey,
+        },
+        { client: platformClient },
+      ),
+    );
     setDiscovering(false);
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -586,7 +596,7 @@ function RetellSetup({
     } else {
       setAgents(answer.value.agents);
       const existing = new Set(
-        setup?.agents.map((agent) => agent.platform_agent_id) ?? [],
+        setup?.agents.map((agent) => agent.platformAgentId) ?? [],
       );
       setSelected(
         new Set(
@@ -611,16 +621,15 @@ function RetellSetup({
     if (agents === null || selected.size === 0) return;
     setSaving(true);
     setRefused(null);
-    const answer = await writeJson<{ readonly setup: MonitoringSetup }>(
-      RETELL_MONITORING_PATH,
-      {
-        method: "PUT",
-        project: projectId,
-        body: {
-          api_key: apiKey,
+    const answer = await platformAnswer(
+      configureRetellMonitoring(
+        {
+          projectId,
+          apiKey,
           agents: agents.filter((agent) => selected.has(agent.id)),
         },
-      },
+        { client: platformClient },
+      ),
     );
     setSaving(false);
     if (answer.status === "signed-out") {
@@ -781,9 +790,13 @@ function LiveKitSetup({
   async function save(): Promise<void> {
     setSaving(true);
     setRefused(null);
-    const answer = await writeJson<{ readonly setup: MonitoringSetup }>(
-      LIVEKIT_MONITORING_PATH,
-      { method: "PUT", project: projectId },
+    const answer = await platformAnswer(
+      configureLiveKitMonitoring(
+        {
+          projectId,
+        },
+        { client: platformClient },
+      ),
     );
     setSaving(false);
     if (answer.status === "signed-out") {

@@ -78,13 +78,13 @@ async function colleagueOf(
 ): Promise<Person> {
   const invited = await api.app.inject({
     method: "POST",
-    url: "/api/invitations",
+    url: "/v1/invitations",
     headers: { cookie: host.cookie },
     payload: { email, role },
   });
   expect(invited.statusCode, invited.body).toBe(201);
 
-  const link = (invited.json() as { accept_url: string }).accept_url;
+  const link = (invited.json() as { acceptUrl: string }).acceptUrl;
   const joined = await api.app.inject({
     method: "POST",
     url: "/api/signup",
@@ -142,7 +142,7 @@ async function mint(
 ): Promise<{ id: string; secret: string; status: number; body: never }> {
   const response = await api.app.inject({
     method: "POST",
-    url: "/api/keys",
+    url: "/v1/keys",
     headers: { cookie: person.cookie },
     payload: body,
   });
@@ -166,14 +166,14 @@ describe("minting a key", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: { cookie: ada.cookie },
     });
     const keys = (listed.json() as { keys: Record<string, unknown>[] }).keys;
 
     expect(keys).toHaveLength(1);
     expect(keys[0]).not.toHaveProperty("secret");
-    expect(keys[0]?.looks_like).toBe(`egma_sk_…${minted.secret.slice(-4)}`);
+    expect(keys[0]?.looksLike).toBe(`egma_sk_…${minted.secret.slice(-4)}`);
     expect(keys[0]?.name).toBe("laptop");
   });
 
@@ -218,7 +218,7 @@ describe("minting a key", () => {
     // is allowed to mint one for them.
     const used = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(theirs.secret),
     });
     expect(used.statusCode).toBe(200);
@@ -226,7 +226,7 @@ describe("minting a key", () => {
     // And they can mint another with it, because login does exactly that.
     const another = await api.app.inject({
       method: "POST",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(theirs.secret),
       payload: { name: "second machine" },
     });
@@ -252,7 +252,7 @@ describe("a request carrying a key", () => {
 
     const used = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(minted.secret),
     });
 
@@ -267,13 +267,13 @@ describe("a request carrying a key", () => {
 
     const named = await api.app.inject({
       method: "POST",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(minted.secret),
-      payload: { name: "reaching", organization_id: grace.organizationId },
+      payload: { name: "reaching", organizationId: grace.organizationId },
     });
 
     expect(named.statusCode).toBe(201);
-    expect((named.json() as { organization_id: string }).organization_id).toBe(
+    expect((named.json() as { organizationId: string }).organizationId).toBe(
       ada.organizationId,
     );
   });
@@ -286,9 +286,9 @@ describe("a request carrying a key", () => {
 
     const reaching = await api.app.inject({
       method: "POST",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(minted.secret),
-      payload: { project_id: grace.projectId },
+      payload: { projectId: grace.projectId },
     });
 
     expect(reaching.statusCode).toBe(403);
@@ -310,7 +310,7 @@ describe("a request carrying a key", () => {
 
     await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(minted.secret),
     });
 
@@ -330,7 +330,7 @@ describe("a request carrying a key", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: withKey(minted.secret),
         })
       ).statusCode,
@@ -338,11 +338,11 @@ describe("a request carrying a key", () => {
 
     const revoked = await api.app.inject({
       method: "POST",
-      url: `/api/keys/${minted.id}/revoke`,
+      url: `/v1/keys/${minted.id}/revoke`,
       headers: { cookie: ada.cookie },
     });
     expect(revoked.statusCode).toBe(200);
-    expect((revoked.json() as { revoked_at: string }).revoked_at).toBeTypeOf(
+    expect((revoked.json() as { revokedAt: string }).revokedAt).toBeTypeOf(
       "string",
     );
 
@@ -351,7 +351,7 @@ describe("a request carrying a key", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: withKey(minted.secret),
         })
       ).statusCode,
@@ -372,7 +372,7 @@ describe("a request carrying a key", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: withKey(minted.secret),
         })
       ).statusCode,
@@ -407,7 +407,7 @@ describe("a request carrying a key", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(theirs.secret),
     });
     expect(listed.statusCode).toBe(200);
@@ -418,7 +418,7 @@ describe("a request carrying a key", () => {
       (
         await api.app.inject({
           method: "POST",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: withKey(theirs.secret),
           payload: { name: "still allowed" },
         })
@@ -470,7 +470,7 @@ describe("the project a key acts in", () => {
     // the other answer has to be distinguishable from it.
     const forOutbound = await mint(ada, {
       name: "outbound only",
-      project_id: outbound.id,
+      projectId: outbound.id,
     });
     expect(forOutbound.status).toBe(201);
 
@@ -489,18 +489,18 @@ describe("the list of keys", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: { cookie: ada.cookie },
     });
 
     const keys = (
       listed.json() as {
-        keys: { name: string; created_by_email: string }[];
+        keys: { name: string; createdByEmail: string }[];
       }
     ).keys;
     expect(
       keys
-        .map((key) => ({ name: key.name, owner: key.created_by_email }))
+        .map((key) => ({ name: key.name, owner: key.createdByEmail }))
         .sort((left, right) => left.name.localeCompare(right.name)),
     ).toEqual([
       { name: "ada's terminal", owner: "ada@acme.example" },
@@ -522,7 +522,7 @@ describe("the list of keys", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(theirs.secret),
     });
 
@@ -540,7 +540,7 @@ describe("the list of keys", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(theirs.secret),
     });
 
@@ -558,7 +558,7 @@ describe("revoking", () => {
 
     const revoked = await api.app.inject({
       method: "POST",
-      url: `/api/keys/${theirs.id}/revoke`,
+      url: `/v1/keys/${theirs.id}/revoke`,
       headers: { cookie: ada.cookie },
     });
 
@@ -574,7 +574,7 @@ describe("revoking", () => {
 
     const reaching = await api.app.inject({
       method: "POST",
-      url: `/api/keys/${adas.id}/revoke`,
+      url: `/v1/keys/${adas.id}/revoke`,
       headers: withKey(mine.secret),
     });
 
@@ -595,7 +595,7 @@ describe("revoking", () => {
 
     const reaching = await api.app.inject({
       method: "POST",
-      url: `/api/keys/${theirs.id}/revoke`,
+      url: `/v1/keys/${theirs.id}/revoke`,
       headers: { cookie: ada.cookie },
     });
 
@@ -622,14 +622,14 @@ describe("the request budget", () => {
 
     const third = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(first.secret),
     });
     expect(third.statusCode).toBe(200);
 
     const fourth = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: withKey(second.secret),
     });
     expect(fourth.statusCode).toBe(429);
@@ -652,7 +652,7 @@ describe("the request budget", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: { cookie: ada.cookie },
         })
       ).statusCode,
@@ -663,7 +663,7 @@ describe("the request budget", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: withKey(theirs.secret),
         })
       ).statusCode,
@@ -677,14 +677,14 @@ describe("a request with no credential at all", () => {
     await signUp("ada@acme.example", "Acme");
 
     expect(
-      (await api.app.inject({ method: "GET", url: "/api/keys" })).statusCode,
+      (await api.app.inject({ method: "GET", url: "/v1/keys" })).statusCode,
     ).toBe(401);
 
     expect(
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: withKey("egma_sk_this-was-never-a-key-anybody-was-given"),
         })
       ).statusCode,

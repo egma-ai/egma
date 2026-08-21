@@ -55,25 +55,21 @@ afterEach(async () => {
  */
 function fetchThrough(app: FastifyInstance): Fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const address = new URL(
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
+    const request = new Request(
+      input instanceof URL ? input.href : input,
+      init,
     );
-
-    const sent = init?.headers;
-    const headers: Record<string, string> =
-      sent instanceof Headers
-        ? Object.fromEntries(sent.entries())
-        : ((sent ?? {}) as Record<string, string>);
+    const address = new URL(request.url);
+    const body =
+      request.method === "GET" || request.method === "HEAD"
+        ? ""
+        : await request.text();
 
     const injected = await app.inject({
-      method: (init?.method ?? "GET") as "GET",
+      method: request.method as "GET",
       url: `${address.pathname}${address.search}`,
-      headers,
-      ...(init?.body === undefined ? {} : { payload: String(init.body) }),
+      headers: Object.fromEntries(request.headers.entries()),
+      ...(body === "" ? {} : { payload: body }),
     });
 
     return new Response(injected.body, {
@@ -107,9 +103,9 @@ const PHONE_IS_SET_UP = {
 
 /** A number egma dials, registered the way the wizard registers one. */
 const PHONE_CONNECTION = {
-  agent_platform: null,
-  connection_kind: "phone_number",
-  access_variant: "phone_number.public_e164",
+  agentPlatform: null,
+  connectionKind: "phone_number",
+  accessVariant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
@@ -149,12 +145,12 @@ async function readyToRun(
     return response.json() as Record<string, unknown>;
   };
 
-  const registered = await ask("/api/agents", {
+  const registered = await ask("/v1/agents", {
     name: "Front desk",
     connection: {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -168,13 +164,13 @@ async function readyToRun(
 
   const versions: string[] = [];
   for (const name of ["Reschedules", "Cancels"]) {
-    const test = await ask("/api/tests", {
+    const test = await ask("/v1/tests", {
       name,
       scenario: "Their cleaning is booked for Thursday and has to move.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
       personas: ["Impatient Rita"],
     });
-    versions.push(String(test.version_id));
+    versions.push(String(test.versionId));
   }
 
   return {
@@ -240,14 +236,14 @@ describe("starting a run from the terminal's own code", () => {
 
     const registered = await api.app.inject({
       method: "POST",
-      url: "/api/agents",
+      url: "/v1/agents",
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: {
         name: "Front desk line",
         connection: {
-          agent_platform: null,
-          connection_kind: "phone_number",
-          access_variant: "phone_number.public_e164",
+          agentPlatform: null,
+          connectionKind: "phone_number",
+          accessVariant: "phone_number.public_e164",
           modality: "voice",
           config: { phoneNumber: "+15551234567" },
         },
@@ -264,12 +260,12 @@ describe("starting a run from the terminal's own code", () => {
     // somebody has.
     const version = await api.app.inject({
       method: "GET",
-      url: `/api/test-versions/${versions[0] ?? ""}`,
+      url: `/v1/test-versions/${versions[0] ?? ""}`,
       headers: { authorization: `Bearer ${signedIn.key}` },
     });
     await api.app.inject({
       method: "POST",
-      url: `/api/tests/${String((version.json() as { test_id: string }).test_id)}/agents`,
+      url: `/v1/tests/${String((version.json() as { testId: string }).testId)}/agents`,
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: { agents: [listed.agent.id] },
     });
@@ -310,7 +306,7 @@ describe("starting a run from the terminal's own code", () => {
 
     const registered = await api.app.inject({
       method: "POST",
-      url: "/api/agents",
+      url: "/v1/agents",
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: { name: "Front desk line", connection: PHONE_CONNECTION },
     });
@@ -325,12 +321,12 @@ describe("starting a run from the terminal's own code", () => {
     // somebody has.
     const version = await api.app.inject({
       method: "GET",
-      url: `/api/test-versions/${versions[0] ?? ""}`,
+      url: `/v1/test-versions/${versions[0] ?? ""}`,
       headers: { authorization: `Bearer ${signedIn.key}` },
     });
     await api.app.inject({
       method: "POST",
-      url: `/api/tests/${String((version.json() as { test_id: string }).test_id)}/agents`,
+      url: `/v1/tests/${String((version.json() as { testId: string }).testId)}/agents`,
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: { agents: [listed.agent.id] },
     });

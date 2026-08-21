@@ -10,6 +10,7 @@ import {
   UnprocessableInputError,
   type Project,
 } from "@egma/db";
+import { projectOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -17,6 +18,7 @@ import { cannotActIn } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   invalid,
   notPermitted,
@@ -54,13 +56,10 @@ export type ProjectRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const PROJECTS_PATH = "/api/projects";
-export const PROJECT_PATH = "/api/projects/:projectId";
-
 type Body = Record<string, unknown>;
 
 const CREATE_KEYS = ["name", "slug", "description"] as const;
-const EDIT_KEYS = ["name", "slug", "description", "expected_revision"] as const;
+const EDIT_KEYS = ["name", "slug", "description", "expectedRevision"] as const;
 
 function unknownKeyIn(
   body: Body,
@@ -81,9 +80,9 @@ function described(project: Project): Record<string, unknown> {
     name: project.name,
     slug: project.slug,
     description: project.description,
-    organization_id: project.organizationId,
+    organizationId: project.organizationId,
     revision: project.revision,
-    created_at: project.createdAt.toISOString(),
+    createdAt: project.createdAt.toISOString(),
   };
 }
 
@@ -107,18 +106,18 @@ export async function projectRoutes(
   /**
    * Every project of the caller's organization.
    *
-   * `may_manage_projects` travels with the list so a page can render the
+ * `mayManageProjects` travels with the list so a page can render the
    * controls it is allowed to offer rather than offering everything and finding
    * out. Deciding what to *show* is `permits`; deciding what to allow is the
    * check on each write below, and the data-access module checks it again.
    */
-  app.get(PROJECTS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, projectOperations.listProjects, async (request, reply) => {
     const { auth } = requesterOf(request);
     const projects = await listProjects(auth);
 
     return reply.send({
-      items: projects.map(described),
-      may_manage_projects: permits(auth, "manage_projects", {
+      projects: projects.map(described),
+      mayManageProjects: permits(auth, "manage_projects", {
         organizationId: auth.organizationId,
         projectId: auth.projectId,
       }),
@@ -132,7 +131,7 @@ export async function projectRoutes(
    * selector's own words — following a stranger's link must never reveal
    * whether the thing on the other end exists.
    */
-  app.get(PROJECT_PATH, async (request, reply) => {
+  registerPlatformOperation(app, projectOperations.getProject, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { projectId } = request.params as { projectId: string };
 
@@ -148,14 +147,14 @@ export async function projectRoutes(
 
     return reply.send({
       ...described(found),
-      may_manage_projects: permits(auth, "manage_projects", {
+      mayManageProjects: permits(auth, "manage_projects", {
         organizationId: auth.organizationId,
         projectId: auth.projectId,
       }),
     });
   });
 
-  app.post(PROJECTS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, projectOperations.createProject, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
 
@@ -183,7 +182,7 @@ export async function projectRoutes(
    * does not name is left exactly as it was, so an editor that only shows the
    * description cannot erase a name it never displayed.
    */
-  app.patch(PROJECT_PATH, async (request, reply) => {
+  registerPlatformOperation(app, projectOperations.updateProject, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { projectId } = request.params as { projectId: string };
     const body = (request.body ?? {}) as Body;
@@ -199,9 +198,9 @@ export async function projectRoutes(
       ...("name" in body ? { name: text(body.name) } : {}),
       ...("slug" in body ? { slug: text(body.slug) } : {}),
       ...("description" in body ? { description: text(body.description) } : {}),
-      ...(given(text(body.expected_revision)) === undefined
+      ...(given(text(body.expectedRevision)) === undefined
         ? {}
-        : { expectedRevision: text(body.expected_revision) }),
+        : { expectedRevision: text(body.expectedRevision) }),
     });
 
     if (edited === undefined) {

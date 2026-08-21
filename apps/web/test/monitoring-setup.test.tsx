@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringSetupPage from "../app/projects/[projectId]/monitoring/setup/page.tsx";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/projects/prj_2/monitoring/setup",
@@ -55,38 +56,38 @@ describe("Monitoring setup", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const at = new URL(String(input), "http://egma.test");
+      vi.fn(async (input: FetchInput) => {
+        const { address: at } = await observeRequest(input);
         if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/api/monitoring") {
+        if (at.pathname === "/v1/monitoring") {
           return json(200, {
-            setups: [
+            monitoringSources: [
               {
                 id: "mns_1",
-                project_id: "prj_2",
-                agent_platform: "retell",
+                projectId: "prj_2",
+                agentPlatform: "retell",
                 strategy: "retell_api_polling",
-                credentials_hint: "cdef",
+                credentialsHint: "cdef",
                 health: {
                   state: "healthy",
-                  blocked_until: null,
-                  consecutive_failures: 0,
-                  last_error_at: null,
-                  last_recovered_at: null,
-                  last_received_at: null,
+                  blockedUntil: null,
+                  consecutiveFailures: 0,
+                  lastErrorAt: null,
+                  lastRecoveredAt: null,
+                  lastReceivedAt: null,
                 },
                 agents: [
                   {
                     id: "rma_1",
-                    platform_agent_id: "agent_1",
-                    platform_agent_name: "Front desk",
+                    platformAgentId: "agent_1",
+                    platformAgentName: "Front desk",
                     state: "active",
-                    scan_kind: null,
-                    last_success_at: null,
-                    last_conversation_at: null,
-                    last_error_kind: "provider_contract",
-                    last_error_at: "2026-08-20T00:00:00.000Z",
-                    consecutive_failures: 1,
+                    scanKind: null,
+                    lastSuccessAt: null,
+                    lastConversationAt: null,
+                    lastErrorKind: "provider_contract",
+                    lastErrorAt: "2026-08-20T00:00:00.000Z",
+                    consecutiveFailures: 1,
                     failures: [],
                   },
                 ],
@@ -114,52 +115,52 @@ describe("Monitoring setup", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const at = new URL(String(input), "http://egma.test");
-        const method = init?.method ?? "GET";
+      vi.fn(async (input: FetchInput, init?: RequestInit) => {
+        const request = await observeRequest(input, init);
+        const { address: at, method } = request;
         asked.push({ method, path: at.pathname });
         if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/api/monitoring" && method === "GET") {
+        if (at.pathname === "/v1/monitoring" && method === "GET") {
           reads += 1;
           return json(200, {
-            setups: [
+            monitoringSources: [
               {
                 id: "mns_1",
-                project_id: "prj_2",
-                agent_platform: "retell",
+                projectId: "prj_2",
+                agentPlatform: "retell",
                 strategy: "retell_api_polling",
-                credentials_hint: "cdef",
+                credentialsHint: "cdef",
                 health: {
                   state: "healthy",
-                  blocked_until: null,
-                  consecutive_failures: 0,
-                  last_error_at: null,
-                  last_recovered_at: null,
-                  last_received_at: null,
+                  blockedUntil: null,
+                  consecutiveFailures: 0,
+                  lastErrorAt: null,
+                  lastRecoveredAt: null,
+                  lastReceivedAt: null,
                 },
                 agents: [
                   {
                     id: "rma_1",
-                    platform_agent_id: "agent_1",
-                    platform_agent_name: "Front desk",
+                    platformAgentId: "agent_1",
+                    platformAgentName: "Front desk",
                     state: reads === 1 ? "degraded" : "active",
-                    scan_kind: null,
-                    last_success_at: null,
-                    last_conversation_at: null,
-                    last_error_kind: reads === 1 ? "provider_call_not_found" : null,
-                    last_error_at: null,
-                    consecutive_failures: 0,
+                    scanKind: null,
+                    lastSuccessAt: null,
+                    lastConversationAt: null,
+                    lastErrorKind: reads === 1 ? "provider_call_not_found" : null,
+                    lastErrorAt: null,
+                    consecutiveFailures: 0,
                     failures:
                       reads === 1
                         ? [
                             {
                               id: "rif_1",
-                              provider_call_id: "call_1",
-                              error_kind: "provider_call_not_found",
+                              providerCallId: "call_1",
+                              errorKind: "provider_call_not_found",
                               attempts: 1,
                               status: "open",
-                              last_attempt_at: "2026-08-20T00:00:00.000Z",
-                              created_at: "2026-08-20T00:00:00.000Z",
+                              lastAttemptAt: "2026-08-20T00:00:00.000Z",
+                              createdAt: "2026-08-20T00:00:00.000Z",
                             },
                           ]
                         : [],
@@ -170,7 +171,7 @@ describe("Monitoring setup", () => {
           });
         }
         if (
-          at.pathname === "/api/monitoring/retell/failures/rif_1/replay" &&
+          at.pathname === "/v1/monitoring/retell/failures/rif_1/replay" &&
           method === "POST"
         ) {
           return json(200, {
@@ -196,7 +197,7 @@ describe("Monitoring setup", () => {
     expect(document.querySelector('[data-state-mark="complete"]')).toBeTruthy();
     expect(asked).toContainEqual({
       method: "POST",
-      path: "/api/monitoring/retell/failures/rif_1/replay",
+      path: "/v1/monitoring/retell/failures/rif_1/replay",
     });
   });
 
@@ -205,28 +206,28 @@ describe("Monitoring setup", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const at = new URL(String(input), "http://egma.test");
-        const method = init?.method ?? "GET";
+      vi.fn(async (input: FetchInput, init?: RequestInit) => {
+        const request = await observeRequest(input, init);
+        const { address: at, method } = request;
         if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/api/monitoring" && method === "GET") {
+        if (at.pathname === "/v1/monitoring" && method === "GET") {
           return json(200, {
-            setups:
+            monitoringSources:
               deletes === 0
                 ? [
                     {
                       id: "mns_1",
-                      project_id: "prj_2",
-                      agent_platform: "retell",
+                      projectId: "prj_2",
+                      agentPlatform: "retell",
                       strategy: "retell_api_polling",
-                      credentials_hint: "cdef",
+                      credentialsHint: "cdef",
                       health: {
                         state: "healthy",
-                        blocked_until: null,
-                        consecutive_failures: 0,
-                        last_error_at: null,
-                        last_recovered_at: null,
-                        last_received_at: null,
+                        blockedUntil: null,
+                        consecutiveFailures: 0,
+                        lastErrorAt: null,
+                        lastRecoveredAt: null,
+                        lastReceivedAt: null,
                       },
                       agents: [],
                     },
@@ -234,7 +235,7 @@ describe("Monitoring setup", () => {
                 : [],
           });
         }
-        if (at.pathname === "/api/monitoring/retell" && method === "DELETE") {
+        if (at.pathname === "/v1/monitoring/retell" && method === "DELETE") {
           deletes += 1;
           return new Response(null, { status: 204 });
         }
@@ -269,11 +270,11 @@ describe("Monitoring setup", () => {
     vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const at = new URL(String(input), "http://egma.test");
+      vi.fn(async (input: FetchInput) => {
+        const { address: at } = await observeRequest(input);
         if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/api/monitoring") {
-          return json(200, { setups: [] });
+        if (at.pathname === "/v1/monitoring") {
+          return json(200, { monitoringSources: [] });
         }
         throw new Error(`nothing stubbed for GET ${at.pathname}`);
       }),

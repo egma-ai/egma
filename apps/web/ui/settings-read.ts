@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { readJson, type Answer } from "../lib/api.ts";
+import type { Answer } from "../lib/api.ts";
 
 const DISCARD_DRAFT = "Discard your unsaved changes?";
 let protectedDrafts = 0;
@@ -80,12 +80,14 @@ function beginProtectingDraft(busy: boolean): () => void {
  * `null` is still loading, on the same terms: an answer is something egma said,
  * and "nothing yet" is not.
  */
-export function useOrganizationRead<T>(path: string): {
+export function useOrganizationRead<T>(read: () => Promise<Answer<T>>): {
   readonly answer: Answer<T> | null;
   readonly reload: () => void;
 } {
   const [answer, setAnswer] = useState<Answer<T> | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const readNow = useRef(read);
+  readNow.current = read;
 
   const reload = useCallback(() => {
     setAnswer(null);
@@ -96,14 +98,14 @@ export function useOrganizationRead<T>(path: string): {
     let current = true;
     setAnswer(null);
 
-    void readJson<T>(path).then((next) => {
+    void readNow.current().then((next) => {
       if (current) setAnswer(next);
     });
 
     return () => {
       current = false;
     };
-  }, [path, attempt]);
+  }, [attempt]);
 
   return { answer, reload };
 }

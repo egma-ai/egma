@@ -17,12 +17,12 @@ import {
   type AssertionWords,
   type GradingPlan,
   type MockToolCoverage,
-  type RecordedVerdict,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { simulationOperations } from "@egma/platform-api/contract";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance } from "fastify";
 
@@ -31,7 +31,8 @@ import { actingIn, reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { describedMockTool } from "../http/mock-tools.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, projectNamed, text } from "../http/reading.ts";
+import { given, text } from "../http/reading.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   describedOutcome,
   describedVerdict,
@@ -51,7 +52,7 @@ import {
  *
  * ## One read, and it is bounded by construction
  *
- * `GET /api/simulations/:simulationId` is the **whole page-load contract** for a
+ * `GET /v1/simulations/:simulationId` is the **whole page-load contract** for a
  * conversation's evidence. It is deliberately one request rather than the seven
  * a page would otherwise make, and every one of the reads behind it is bounded
  * before it is issued:
@@ -77,8 +78,8 @@ import {
  * The one thing deliberately **not** in the answer is the recording. A recording
  * link is signed, short-lived and bound to one object, so baking one in would
  * put a credential in an address somebody pastes into a ticket and make the page
- * stale a quarter of an hour after it loaded. `has_recording` says whether there
- * is anything to hear; `GET /api/simulations/:id/recording` is where it becomes
+ * stale a quarter of an hour after it loaded. `hasRecording` says whether there
+ * is anything to hear; `GET /v1/simulations/:id/recording` is where it becomes
  * audible, and it is asked for only when somebody is looking.
  *
  * ## Judging it again, and disagreeing with it
@@ -88,7 +89,7 @@ import {
  * button, and the button's absence is the page agreeing with the server rather
  * than the page being the check.
  *
- * - `POST /api/simulations/:id/regrade` reopens this conversation's grading job.
+ * - `POST /v1/simulations/:id/regrade` reopens this conversation's grading job.
  *   With no grader named it reuses the whole grader set frozen in the run plan;
  *   naming one narrows that set while keeping the immutable version this run
  *   pinned. A grader or catalog edit applies only to a new run. The predefined
@@ -100,7 +101,7 @@ import {
  * disagreement as a whole verdict row beside the machine's. ADR-0009 takes
  * corrections and their calibration data out of v0: the capability returns as
  * the reserved `human` grader type, which writes its own rows under its own
- * grader id and therefore needs no `judged_by` column and no second author on
+ * grader id and therefore needs no `judgedBy` field and no second author on
  * one judgment. Nothing here is a smaller version of it.
  */
 
@@ -109,8 +110,12 @@ export type SimulationRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const SIMULATION_PATH = "/api/simulations/:simulationId";
-export const SIMULATION_REGRADE_PATH = "/api/simulations/:simulationId/regrade";
+function projectNamedByPlatform(
+  query: Record<string, unknown>,
+  body: Record<string, unknown>,
+): string | undefined {
+  return given(text(query.projectId)) ?? given(text(body.projectId));
+}
 
 /**
  * A conversation nobody may see reads exactly like a conversation nobody
@@ -119,7 +124,7 @@ export const SIMULATION_REGRADE_PATH = "/api/simulations/:simulationId/regrade";
  */
 const NO_SUCH_SIMULATION =
   "no simulation of yours has that id. Check the id, or open the run it " +
-  "belongs to with GET /api/runs/{run_id}.";
+  "belongs to with GET /v1/runs/{runId}.";
 
 /**
  * How far either side of the conversation the transcript is read.
@@ -159,18 +164,18 @@ function windowOf(
 /** One span, in the shape the trace read already answers the public API with. */
 function describedSpan(span: TraceSpan): Record<string, unknown> {
   return {
-    span_id: span.spanId,
-    parent_span_id: span.parentSpanId,
+    spanId: span.spanId,
+    parentSpanId: span.parentSpanId,
     name: span.name,
     kind: span.kind,
     status: span.status,
-    started_at: span.startedAt,
-    duration_ns: span.durationNanoseconds,
+    startedAt: span.startedAt,
+    durationNs: span.durationNanoseconds,
     text: span.text,
-    audio_url: span.audioUrl,
-    tool_name: span.toolName,
-    tool_arguments: span.toolArguments,
-    tool_result: span.toolResult,
+    audioUrl: span.audioUrl,
+    toolName: span.toolName,
+    toolArguments: span.toolArguments,
+    toolResult: span.toolResult,
     spans: span.spans.map(describedSpan),
   };
 }
@@ -189,19 +194,19 @@ function describedTranscript(
 ): Record<string, unknown> | null {
   if (detail === undefined) return null;
   return {
-    trace_id: detail.traceId,
-    started_at: detail.startedAt,
-    ended_at: detail.endedAt,
-    duration_ns: detail.durationNanoseconds,
-    span_count: detail.spanCount,
-    turn_counts: { human: detail.humanTurnCount, agent: detail.agentTurnCount },
-    tool_span_count: detail.toolSpanCount,
-    errored_span_count: detail.erroredSpanCount,
+    traceId: detail.traceId,
+    startedAt: detail.startedAt,
+    endedAt: detail.endedAt,
+    durationNs: detail.durationNanoseconds,
+    spanCount: detail.spanCount,
+    turnCounts: { human: detail.humanTurnCount, agent: detail.agentTurnCount },
+    toolSpanCount: detail.toolSpanCount,
+    erroredSpanCount: detail.erroredSpanCount,
     turns: detail.turns.map(describedSpan),
     spans: detail.spans.map(describedSpan),
     // The tree is a prefix and the counts are the whole conversation. A page
     // that did not say so would present a cut-off transcript as a short one.
-    spans_truncated: detail.truncated,
+    spansTruncated: detail.truncated,
   };
 }
 
@@ -246,15 +251,15 @@ function describedPlanForThisConversation(
 
   return {
     state: plan.state,
-    captured_at: plan.capturedAt?.toISOString() ?? null,
+    capturedAt: plan.capturedAt?.toISOString() ?? null,
     items: mine.flatMap((group) =>
       group.items.map((item) =>
         ({
           kind: "authored",
-          grader_id: item.graderId,
-          grader_version_id: item.graderVersionId,
+          graderId: item.graderId,
+          graderVersionId: item.graderVersionId,
           name: item.graderName,
-          library_id: item.libraryId,
+          libraryId: item.libraryId,
           required: item.required,
           scope: item.scope,
         }),
@@ -278,14 +283,14 @@ function describedMeasures(
 ): Record<string, unknown> {
   const measures: Record<string, unknown> = {};
   if (one.startedAt !== null && one.endedAt !== null) {
-    measures.duration_ms = one.endedAt.getTime() - one.startedAt.getTime();
+    measures.durationMs = one.endedAt.getTime() - one.startedAt.getTime();
   }
-  if (one.turnCount !== null) measures.turn_count = one.turnCount;
+  if (one.turnCount !== null) measures.turnCount = one.turnCount;
   if (detail !== undefined) {
-    measures.tool_call_count = detail.toolSpanCount;
-    measures.errored_step_count = detail.erroredSpanCount;
-    measures.human_turn_count = detail.humanTurnCount;
-    measures.agent_turn_count = detail.agentTurnCount;
+    measures.toolCallCount = detail.toolSpanCount;
+    measures.erroredStepCount = detail.erroredSpanCount;
+    measures.humanTurnCount = detail.humanTurnCount;
+    measures.agentTurnCount = detail.agentTurnCount;
   }
   return measures;
 }
@@ -317,7 +322,7 @@ export async function simulationRoutes(
    * store is *no transcript*, which is the shape a conversation that emitted
    * nothing already has. Both correct themselves on the next read.
    */
-  app.get(SIMULATION_PATH, async (request, reply) => {
+  registerPlatformOperation(app, simulationOperations.getSimulation, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Record<string, unknown>;
     const { simulationId } = request.params as { simulationId: string };
@@ -332,7 +337,7 @@ export async function simulationRoutes(
       the transcript refused and the audio served — the same page answering the
       same question two ways.
     */
-    const acting = await reachingIn(auth, projectNamed(query, {}));
+    const acting = await reachingIn(auth, projectNamedByPlatform(query, {}));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const who = acting.auth;
 
@@ -405,9 +410,9 @@ export async function simulationRoutes(
 
     return reply.send({
       id: one.id,
-      project_id: one.projectId,
-      run_id: one.runId,
-      run_label: run.label,
+      projectId: one.projectId,
+      runId: one.runId,
+      runLabel: run.label,
       position: one.position,
       // The four facts, kept apart exactly as a run's own page keeps them: the
       // machinery, where the judging stands, what was decided, and null where
@@ -418,33 +423,33 @@ export async function simulationRoutes(
       score: fold.score ?? null,
       counts: fold.counts,
       reason: one.endingReason,
-      skip_reason: one.skipReason,
-      skipped_capabilities:
+      skipReason: one.skipReason,
+      skippedCapabilities:
         one.skippedCapabilities === null ? null : [...one.skippedCapabilities],
       modality: one.modality,
-      created_at: one.createdAt.toISOString(),
-      started_at: one.startedAt?.toISOString() ?? null,
-      ended_at: one.endedAt?.toISOString() ?? null,
+      createdAt: one.createdAt.toISOString(),
+      startedAt: one.startedAt?.toISOString() ?? null,
+      endedAt: one.endedAt?.toISOString() ?? null,
       // The platform's own identifier for the exchange — the one join between
       // this record and the agent's own telemetry, and the thing somebody takes
       // to their provider's dashboard when they doubt what egma says happened.
-      provider_reference: one.providerReference,
-      has_recording: one.recordingReference !== null,
+      providerReference: one.providerReference,
+      hasRecording: one.recordingReference !== null,
       // What is measured, apart from anything judged, and only where measured.
       measures: describedMeasures(one, detail),
       test: {
         id: one.testId,
         // The pin: what actually executed, which never moves.
-        version_id: one.testVersionId,
+        versionId: one.testVersionId,
         // And the name as it stands today, which is how somebody finds it.
         name: testVersion?.testName ?? null,
         // Null where the pin is unreachable — an upgraded instance's history has
         // conversations that pinned no test, and they executed no stored test
         // rather than an unnamed one.
         scenario: testVersion?.scenario ?? null,
-        expected_behaviors:
+        expectedBehaviors:
           testVersion === undefined ? null : [...testVersion.expectedBehaviors],
-        required_capabilities:
+        requiredCapabilities:
           testVersion === undefined
             ? null
             : [...testVersion.requiredCapabilities],
@@ -454,7 +459,7 @@ export async function simulationRoutes(
         // The name as it stands today, which is how somebody finds them; the
         // version below is exactly who called.
         name: persona?.name ?? null,
-        version_id: one.personaVersionId,
+        versionId: one.personaVersionId,
         // Every authored human fact from the exact version that called. The
         // technical voice is not among these traits; it has one owner in the
         // persona version's model selection.
@@ -479,10 +484,10 @@ export async function simulationRoutes(
       // The connection exactly as this run went over it, frozen at start. There
       // is no field here a credential could ride in: the secret lives in its own
       // sealed column and was never copied into the snapshot.
-      connection_snapshot: {
-        agent_platform: run.connectionSnapshot.agentPlatform,
-        connection_kind: run.connectionSnapshot.connectionKind,
-        access_variant: run.connectionSnapshot.accessVariant,
+      connectionSnapshot: {
+        agentPlatform: run.connectionSnapshot.agentPlatform,
+        connectionKind: run.connectionSnapshot.connectionKind,
+        accessVariant: run.connectionSnapshot.accessVariant,
         modality: run.connectionSnapshot.modality,
         topology: run.connectionSnapshot.topology,
         environment: run.connectionSnapshot.environment,
@@ -491,30 +496,30 @@ export async function simulationRoutes(
       // Which of the agent's tools egma stood in the path of, and which ran for
       // real. Null says nobody ever asked the agent what tools it has, which is
       // a different fact from three empty lists.
-      mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
+      mockToolCoverage: describedMockToolCoverage(one.mockToolCoverage),
       // The mocked answers this conversation's own test version was frozen with,
       // over the run's project defaults. Read here rather than merged, for the
       // reason the run's own read gives: an override replaces a default by tool
       // name, and both halves have to be visible for the merge to be checkable.
-      mock_tools: {
+      mockTools: {
         defaults: run.mockToolSnapshot.defaults.map((its) => ({
           ...describedMockTool(its),
-          mock_tool_id: its.mockToolId,
+          mockToolId: its.mockToolId,
         })),
         overrides: (
           run.mockToolSnapshot.overrides[one.testVersionId ?? ""] ?? []
         ).map(describedMockTool),
       },
-      grading_plan: describedPlanForThisConversation(plan, one.testVersionId),
+      gradingPlan: describedPlanForThisConversation(plan, one.testVersionId),
       // Whether anything is still queued for this conversation, and what it was
       // narrowed to. This is what lets a page say "grading is running" without
       // turning a pending verdict into a failure.
-      grading_jobs: jobs.map((job) => ({
+      gradingJobs: jobs.map((job) => ({
         status: job.status,
-        regrade_grader_id: job.regradeGraderId,
+        regradeGraderId: job.regradeGraderId,
         attempts: job.attempts,
-        last_error: job.lastError,
-        finished_at: job.finishedAt?.toISOString() ?? null,
+        lastError: job.lastError,
+        finishedAt: job.finishedAt?.toISOString() ?? null,
       })),
       // Every row, superseded ones included and in a stable order: an older
       // grading stays underneath the one that replaced it, and the reader
@@ -526,8 +531,8 @@ export async function simulationRoutes(
       // diagnostic lane beside it and never in it.
       outcome: describedOutcome(judged?.outcome),
       diagnostics: describedOutcome(judged?.diagnostics),
-      by_grader: (judged?.byGrader ?? []).map((its) => ({
-        grader_id: its.graderId,
+      byGrader: (judged?.byGrader ?? []).map((its) => ({
+        graderId: its.graderId,
         // `false` marks a diagnostic: judged, shown, never able to fail
         // anything. Without it a red card would read the same either way.
         required: its.required,
@@ -563,21 +568,21 @@ export async function simulationRoutes(
    * the two are told apart here and answered apart: `narrower_grading_in_flight`
    * says nothing happened and says when to ask again.
    */
-  app.post(SIMULATION_REGRADE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, simulationOperations.regradeSimulation, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Record<string, unknown>;
     const query = (request.query ?? {}) as Record<string, unknown>;
     const { simulationId } = request.params as { simulationId: string };
 
-    const acting = await actingIn(auth, projectNamed(query, body));
+    const acting = await actingIn(auth, projectNamedByPlatform(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const who = acting.auth;
 
-    const named = given(text(body.grader_id));
+    const named = given(text(body.graderId));
     if (named !== undefined && !isId("grd", named)) {
       return invalid(
         reply,
-        `"${named}" is not a grader id. Send grader_id as the grd_ id of an ` +
+        `"${named}" is not a grader id. Send graderId as the grd_ id of an ` +
           `active grader to judge with that one alone, or leave it out to ` +
           `judge this conversation with everything that applies.`,
       );
@@ -629,12 +634,12 @@ export async function simulationRoutes(
     }
 
     return reply.send({
-      simulation_id: simulationId,
+      simulationId,
       // What the reopened job actually carries, echoed back rather than what was
       // typed — so a caller sees the ask that was made.
-      grader_id: asked.graderId,
+      graderId: asked.graderId,
       reopened: asked.reopened.length,
-      already_waiting: asked.alreadyWaiting,
+      alreadyWaiting: asked.alreadyWaiting,
     });
   });
 

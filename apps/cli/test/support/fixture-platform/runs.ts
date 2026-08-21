@@ -12,7 +12,7 @@
  *   egma never issued refuses the whole creation rather than quietly running
  *   eleven of twelve.
  * - **A run produces one simulation per test per persona.** The count is
- *   stamped at creation and never moves, exactly as `expected_simulation_count`
+ *   stamped at creation and never moves, exactly as `expectedSimulationCount`
  *   is stamped once and frozen by the real trigger.
  * - **A simulation's lifecycle is a one-way street.** `queued → claimed →
  *   running → completed | failed | canceled`, and a terminal simulation is
@@ -249,7 +249,7 @@ function refuse(status: number, error: string, message: string): FixtureAnswer {
  */
 const NO_SUCH_RUN =
   "no run of yours has that id. Check the id, or start a run with POST " +
-  "/api/runs.";
+  "/v1/runs.";
 
 /**
  * The platform's own words for a connection kind it cannot conduct a run over.
@@ -382,11 +382,11 @@ export function runRoutes(options: {
   const simulationOut = (one: StoredSimulation): Record<string, unknown> => ({
     id: one.id,
     position: one.position,
-    test_id: one.testId,
-    test_name: one.testName,
-    test_version_id: one.testVersionId,
-    persona_id: one.personaId,
-    persona_name: one.personaName,
+    testId: one.testId,
+    testName: one.testName,
+    testVersionId: one.testVersionId,
+    personaId: one.personaId,
+    personaName: one.personaName,
     status: one.status,
     verdict: one.verdict,
     reason: one.reason,
@@ -395,24 +395,24 @@ export function runRoutes(options: {
   const runOut = (run: StoredRun): Record<string, unknown> => ({
     id: run.id,
     status: run.status,
-    agent_id: run.agentId,
-    connection_id: run.connectionId,
-    agent_platform: run.agentPlatform,
-    connection_kind: run.connectionKind,
-    access_variant: run.accessVariant,
+    agentId: run.agentId,
+    connectionId: run.connectionId,
+    agentPlatform: run.agentPlatform,
+    connectionKind: run.connectionKind,
+    accessVariant: run.accessVariant,
     modality: run.modality,
-    product_label: run.productLabel,
+    productLabel: run.productLabel,
     label: run.label,
-    test_versions: [...run.testVersionIds],
-    expected_simulation_count: run.expectedSimulationCount,
-    completed_count: run.completedCount,
-    failed_count: run.failedCount,
-    canceled_count: run.canceledCount,
+    testVersions: [...run.testVersionIds],
+    expectedSimulationCount: run.expectedSimulationCount,
+    completedCount: run.completedCount,
+    failedCount: run.failedCount,
+    canceledCount: run.canceledCount,
     // No token, no key, no query at all. A person opens it and the browser
     // they approved this machine in is already signed in.
-    results_url: `${options.origin()}/runs/${run.id}`,
-    created_at: run.createdAt,
-    finished_at: run.finishedAt,
+    resultsUrl: `${options.origin()}/runs/${run.id}`,
+    createdAt: run.createdAt,
+    finishedAt: run.finishedAt,
   });
 
   const eventOut = (event: StoredEvent): Record<string, unknown> =>
@@ -422,9 +422,9 @@ export function runRoutes(options: {
           seq: event.seq,
           at: event.at,
           kind: "simulation",
-          simulation_id: event.simulationId,
-          test_name: event.testName,
-          persona_name: event.personaName,
+          simulationId: event.simulationId,
+          testName: event.testName,
+          personaName: event.personaName,
           status: event.status,
           verdict: event.verdict,
           reason: event.reason,
@@ -458,14 +458,14 @@ export function runRoutes(options: {
     // it: an entry that is not a version id is refused rather than dropped,
     // because dropping one would start a run over the rest and the caller would
     // read green about a selection egma quietly shortened.
-    const pinnedIn = said.test_versions ?? [];
+    const pinnedIn = said.testVersionIds ?? [];
     if (!Array.isArray(pinnedIn)) {
       return refuse(
         422,
         "unprocessable",
-        "test_versions is the list of frozen versions this run executes, by " +
+        "testVersionIds is the list of frozen versions this run executes, by " +
           'id. Send it as a list of text, like ["tstv_..."], taking each ' +
-          "version_id from the test it belongs to.",
+          "versionId from the test it belongs to.",
       );
     }
     for (const entry of pinnedIn) {
@@ -473,14 +473,14 @@ export function runRoutes(options: {
         return refuse(
           422,
           "unprocessable",
-          "a run pins each test version as text — the version_id a push or a " +
-            "read answered with — and one entry in test_versions is neither. " +
+          "a run pins each test version as text — the versionId a push or a " +
+            "read answered with — and one entry in testVersionIds is neither. " +
             "Send them all, or none of them runs.",
         );
       }
     }
 
-    const agentId = text(said.agent).trim();
+    const agentId = text(said.agentId).trim();
     if (agentId !== "" && !isId("agt", agentId)) {
       return refuse(
         404,
@@ -492,7 +492,7 @@ export function runRoutes(options: {
     // Named nothing at all is its own answer: "no connection of yours has that
     // id" would be a sentence about an id the request never sent, and a coding
     // agent reading it would go looking for a connection nobody named.
-    const connectionId = text(said.connection).trim();
+    const connectionId = text(said.connectionId).trim();
     if (connectionId === "") {
       return refuse(
         422,
@@ -517,7 +517,7 @@ export function runRoutes(options: {
         422,
         "unprocessable",
         "a run needs at least one test version, because a run with no " +
-          "simulations checks nothing. Pin the version_id of each test this " +
+          "simulations checks nothing. Pin the versionId of each test this " +
           "run should execute.",
       );
     }
@@ -570,7 +570,7 @@ export function runRoutes(options: {
           422,
           "unprocessable",
           `there is no test version ${versionId} on this Egma instance. Push the test ` +
-            `first, or read the test and pin the version_id it names now.`,
+            `first, or read the test and pin the versionId it names now.`,
         );
       }
       pinned.push(version);
@@ -647,14 +647,14 @@ export function runRoutes(options: {
         // at a project and the organization is never in the address — both come
         // from the key, exactly as every other write here resolves them.
         method: "POST",
-        path: "/api/runs",
+        path: "/v1/runs",
         handle: (request) => behindAKey(request, () => create(request.body)),
       },
       {
         // The run as it now stands, with every simulation. What a follower
         // seeds itself from when it did not create the run itself.
         method: "GET",
-        path: "/api/runs/:runId",
+        path: "/v1/runs/:runId",
         handle: (request) =>
           behindAKey(request, () => {
             const run = runById(request.params.runId ?? "");
@@ -680,7 +680,7 @@ export function runRoutes(options: {
          * drawn it.
          */
         method: "GET",
-        path: "/api/runs/:runId/events",
+        path: "/v1/runs/:runId/events",
         handle: (request) =>
           behindAKey(request, () => {
             // Digits and nothing else, and answered before the run is looked
@@ -861,8 +861,8 @@ export function runControlRoutes(controls: () => RunControls): RouteGroup {
             runs: controls().runs.map((run) => ({
               id: run.id,
               status: run.status,
-              expected_simulation_count: run.expectedSimulationCount,
-              test_versions: [...run.testVersionIds],
+              expectedSimulationCount: run.expectedSimulationCount,
+              testVersionIds: [...run.testVersionIds],
             })),
           },
         }),

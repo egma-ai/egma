@@ -16,7 +16,6 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { registerAgent, type RegisterOptions } from "../src/platform/agents.ts";
 import {
   INVALID_KEY_LINE,
   KEY_ASK_LINE,
@@ -166,7 +165,6 @@ async function run(options: RunOptions) {
     ui,
     platform: {
       url: platform.url,
-      instanceId: platform.instanceId,
       credentialsFile: workspace.credentialsFile,
     },
     cwd: workspace.dir,
@@ -411,16 +409,16 @@ describe("what lands on the platform", () => {
   it("refuses a registration still carrying what was pulled, by name", async () => {
     const key = platform.device.mint();
 
-    const answer = await fetch(`${platform.url}/api/agents`, {
+    const answer = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "order-line",
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
-          agent_platform: "retell",
-          connection_kind: "retell_chat_api",
-          access_variant: "retell_chat_api.api_key",
+          agentPlatform: "retell",
+          connectionKind: "retell_chat_api",
+          accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001" },
           credentials: { apiKey: KEY },
@@ -434,7 +432,7 @@ describe("what lands on the platform", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "description, project, connection; the agent's content stays at the " +
+        "description, projectId, connection; the agent's content stays at the " +
         "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
@@ -652,15 +650,15 @@ describe("the drift line", () => {
 describe("the platform's own rules, held by the fixture", () => {
   it("refuses a modality the type does not speak, and writes nothing", async () => {
     const key = platform.device.mint();
-    const answer = await fetch(`${platform.url}/api/agents`, {
+    const answer = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "front-desk",
         connection: {
-          agent_platform: null,
-          connection_kind: "phone_number",
-          access_variant: "phone_number.public_e164",
+          agentPlatform: null,
+          connectionKind: "phone_number",
+          accessVariant: "phone_number.public_e164",
           modality: "chat",
           config: { phoneNumber: "+15551234567" },
         },
@@ -676,15 +674,15 @@ describe("the platform's own rules, held by the fixture", () => {
 
   it("refuses a config key the type has no place for", async () => {
     const key = platform.device.mint();
-    const answer = await fetch(`${platform.url}/api/agents`, {
+    const answer = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "front-desk",
         connection: {
-          agent_platform: "retell",
-          connection_kind: "retell_chat_api",
-          access_variant: "retell_chat_api.api_key",
+          agentPlatform: "retell",
+          connectionKind: "retell_chat_api",
+          accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001", retellLlmId: "llm_0001" },
           credentials: { apiKey: KEY },
@@ -700,15 +698,15 @@ describe("the platform's own rules, held by the fixture", () => {
 
   it("refuses a credential where the type takes none", async () => {
     const key = platform.device.mint();
-    const answer = await fetch(`${platform.url}/api/agents`, {
+    const answer = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "front-desk",
         connection: {
-          agent_platform: null,
-          connection_kind: "phone_number",
-          access_variant: "phone_number.public_e164",
+          agentPlatform: null,
+          connectionKind: "phone_number",
+          accessVariant: "phone_number.public_e164",
           modality: "voice",
           config: { phoneNumber: "+15551234567" },
           credentials: { apiKey: KEY },
@@ -729,13 +727,13 @@ describe("the platform's own rules, held by the fixture", () => {
     const agentId = platform.registered.agents[0]?.id as string;
     const key = platform.device.keys[0] as string;
 
-    const second = await fetch(`${platform.url}/api/agents/${agentId}/connections`, {
+    const second = await fetch(`${platform.url}/v1/agents/${agentId}/connections`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0002" },
         credentials: { apiKey: OTHER_KEY },
@@ -747,14 +745,14 @@ describe("the platform's own rules, held by the fixture", () => {
       "retell_chat_api-2",
     );
 
-    const clash = await fetch(`${platform.url}/api/agents/${agentId}/connections`, {
+    const clash = await fetch(`${platform.url}/v1/agents/${agentId}/connections`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         name: "retell_chat_api-1",
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0003" },
         credentials: { apiKey: OTHER_KEY },
@@ -770,7 +768,7 @@ describe("the platform's own rules, held by the fixture", () => {
     const key = platform.device.keys[0] as string;
     const agentId = platform.registered.agents[0]?.id as string;
 
-    for (const where of ["/api/agents", `/api/agents/${agentId}`]) {
+    for (const where of ["/v1/agents", `/v1/agents/${agentId}`]) {
       const answer = await fetch(`${platform.url}${where}`, {
         headers: { authorization: `Bearer ${key}` },
       });
@@ -780,7 +778,7 @@ describe("the platform's own rules, held by the fixture", () => {
   });
 
   it("turns an unknown key away before it reads anything", async () => {
-    const answer = await fetch(`${platform.url}/api/agents`, {
+    const answer = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: "Bearer egma_sk_not-one-of-ours", "content-type": "application/json" },
       body: JSON.stringify({ name: "front-desk" }),
@@ -788,94 +786,5 @@ describe("the platform's own rules, held by the fixture", () => {
 
     expect(answer.status).toBe(401);
     expect(platform.registered.agents).toHaveLength(0);
-  });
-});
-
-/**
- * What the client does with a success it cannot read.
- *
- * Driven at the module's own seam rather than through the fixture, because the
- * fixture answers the contract and what is under test here is an answer that
- * breaks it — a newer egma, a proxy that rewrote something, a half-deployed
- * instance. There is one honest thing to do with any of them and it is the same
- * thing: say egma answered without saying what it wrote, and stop.
- */
-describe("a registration answer this build cannot read", () => {
-  const AGENT = { id: "agt_01K000000000000000000000AA", name: "order-line" };
-  const CONNECTION = {
-    id: "con_01K000000000000000000000BB",
-    name: "retell_chat_api-1",
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
-    modality: "chat",
-    product_label: "Retell chat",
-    credentials_hint: "WXYZ",
-  };
-
-  /** One canned reply, whatever is asked. */
-  function answering(body: Record<string, unknown>, status = 201) {
-    return (() =>
-      Promise.resolve(
-        new Response(JSON.stringify(body), {
-          status,
-          headers: { "content-type": "application/json" },
-        }),
-      )) as unknown as NonNullable<RegisterOptions["fetchImpl"]>;
-  }
-
-  async function register(body: Record<string, unknown>, status?: number) {
-    return registerAgent(
-      {
-        name: "order-line",
-        connection: {
-          agentPlatform: "retell",
-          connectionKind: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
-          modality: "chat",
-          config: { retellAgentId: "agent_0001" },
-        },
-      },
-      {
-        url: "http://egma.test",
-        key: "egma_sk_whatever",
-        fetchImpl: answering(body, status),
-      },
-    );
-  }
-
-  it("refuses a reply that names no outcome instead of decoding an old response", async () => {
-    const answer = await register({ agent: AGENT, connection: CONNECTION });
-
-    expect(answer).toEqual({
-      kind: "refused",
-      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
-    });
-  });
-
-  it("refuses a reply naming an outcome it has never heard of, rather than guessing", async () => {
-    // A fourth outcome can only mean a platform that does something this build
-    // does not know about. Reading it as a creation would be the terminal
-    // inventing a fact — and the fact it would invent is the one that leaves a
-    // developer with two identities and a screen that reported one.
-    const answer = await register({
-      result: "reattached",
-      agent: AGENT,
-      connection: CONNECTION,
-    });
-
-    expect(answer).toEqual({
-      kind: "refused",
-      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
-    });
-  });
-
-  it("says the same thing about a reply missing the agent it claims to have written", async () => {
-    const answer = await register({ result: "created", connection: CONNECTION });
-
-    expect(answer).toEqual({
-      kind: "refused",
-      reason: "Egma answered without saying what it wrote. Check that this Egma instance is up to date.",
-    });
   });
 });

@@ -33,9 +33,9 @@ import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
 
 /** A voice connection that needs no live worker in these route-only tests. */
 const A_VOICE_AGENT = {
-  agent_platform: "livekit_agents",
-  connection_kind: "livekit_room",
-  access_variant: "livekit_room.project_credentials",
+  agentPlatform: "livekit_agents",
+  connectionKind: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -46,9 +46,9 @@ const A_VOICE_AGENT = {
 
 /** The same shape, over chat, for the refusal that a chat has no audio. */
 const A_CHAT_AGENT = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_2" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -57,7 +57,7 @@ const A_CHAT_AGENT = {
 const A_TEST = {
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: ["confirms the new time back before finishing"],
+  expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
 /** Who moved the conversations, as a simulator names itself. */
@@ -336,7 +336,7 @@ export async function aConductedRun(
   const modality = options.modality ?? "voice";
   const runs = (conducted += 1);
 
-  const registered = await ask(app, "POST", "/api/agents", who.key, {
+  const registered = await ask(app, "POST", "/v1/agents", who.key, {
     name: `Front desk ${modality} ${String(runs)}`,
     connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
   });
@@ -358,17 +358,17 @@ export async function aConductedRun(
     });
   }
 
-  const pushed = await ask(app, "POST", "/api/tests", who.key, {
+  const pushed = await ask(app, "POST", "/v1/tests", who.key, {
     ...A_TEST,
     name: `Reschedules a booked appointment ${runs}`,
     personas: callers,
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
-  const started = await ask(app, "POST", "/api/runs", who.key, {
-    connection: connectionId,
-    test_versions: [String(pushed.body.version_id)],
-    idempotency_key: newId("run"),
+  const started = await ask(app, "POST", "/v1/runs", who.key, {
+    connectionId: connectionId,
+    testVersionIds: [String(pushed.body.versionId)],
+    idempotencyKey: newId("run"),
     label: options.label ?? "the whole folder",
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
 import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * The run history and one run's page, rendered and driven.
@@ -78,17 +79,14 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, options?: RequestInit) => {
-      const address = new URL(input, "http://egma.test");
-      const path = address.pathname;
+    vi.fn(async (input: FetchInput, options?: RequestInit) => {
+      const request = await observeRequest(input, options);
+      const { address, path } = request;
       sent.push({
         url: `${path}${address.search}`,
         path,
-        method: options?.method ?? "GET",
-        body:
-          typeof options?.body === "string"
-            ? (JSON.parse(options.body) as Record<string, unknown>)
-            : undefined,
+        method: request.method,
+        body: request.body as Record<string, unknown> | undefined,
       });
 
       const held = answers[path];
@@ -113,7 +111,7 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
  * What the page sent to one address **by one method**.
  *
  * The method is not optional here and the reason is the whole point: this page
- * reads the address it writes to. A wait on "anything sent to `/api/runs/run_1`"
+ * reads the address it writes to. A wait on "anything sent to `/v1/runs/run_1`"
  * is satisfied by the page's own load and says nothing whatever about a cancel
  * or a retry — and under load the assertion then runs against the `GET`, whose
  * body is undefined, and arrives as `Cannot read properties of undefined`.
@@ -140,33 +138,33 @@ const NO_SIMULATIONS = {
 function runRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "run_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     status: "completed",
     label: "Nightly smoke",
-    agent_id: "agt_1",
-    connection_id: "con_1",
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
+    agentId: "agt_1",
+    connectionId: "con_1",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
-    product_label: "Retell chat",
+    productLabel: "Retell chat",
     environment: "staging",
-    retry_of_run_id: null,
-    expected_simulation_count: 2,
-    completed_count: 1,
-    failed_count: 0,
-    canceled_count: 0,
-    skipped_count: 1,
-    simulation_counts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
-    finished_count: 2,
-    gradable_count: 1,
-    graded_count: 1,
+    retryOfRunId: null,
+    expectedSimulationCount: 2,
+    completedCount: 1,
+    failedCount: 0,
+    canceledCount: 0,
+    skippedCount: 1,
+    simulationCounts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
+    finishedCount: 2,
+    gradableCount: 1,
+    gradedCount: 1,
     verdict: "passed",
     score: 1,
-    verdict_counts: { passed: 1, failed: 0, skipped: 1, errored: 0, total: 2 },
-    created_at: "2026-08-15T10:00:00.000Z",
-    started_at: "2026-08-15T10:00:01.000Z",
-    finished_at: "2026-08-15T10:01:00.000Z",
+    verdictCounts: { passed: 1, failed: 0, skipped: 1, errored: 0, total: 2 },
+    createdAt: "2026-08-15T10:00:00.000Z",
+    startedAt: "2026-08-15T10:00:01.000Z",
+    finishedAt: "2026-08-15T10:01:00.000Z",
     ...overrides,
   };
 }
@@ -175,22 +173,22 @@ function simulationRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "sim_1",
     position: 1,
-    test_id: "tst_1",
-    test_name: "Reschedules a booked appointment",
-    test_version_id: "tstv_1",
-    persona_id: "prs_1",
-    persona_name: "Impatient Rita",
-    persona_version_id: "prsv_7",
+    testId: "tst_1",
+    testName: "Reschedules a booked appointment",
+    testVersionId: "tstv_1",
+    personaId: "prs_1",
+    personaName: "Impatient Rita",
+    personaVersionId: "prsv_7",
     status: "completed",
     grading: "graded",
     verdict: "passed",
     score: 1,
     counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
     reason: null,
-    skip_reason: null,
-    skipped_capabilities: null,
+    skipReason: null,
+    skippedCapabilities: null,
     modality: "chat",
-    has_recording: false,
+    hasRecording: false,
     ...overrides,
   };
 }
@@ -198,52 +196,52 @@ function simulationRow(overrides: Record<string, unknown> = {}) {
 function runDetail(overrides: Record<string, unknown> = {}) {
   return {
     id: "run_1",
-    project_id: "prj_1",
+    projectId: "prj_1",
     status: "completed",
     label: "Nightly smoke",
-    agent_id: "agt_1",
-    connection_id: "con_1",
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
+    agentId: "agt_1",
+    connectionId: "con_1",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
-    product_label: "Retell chat",
-    connection_snapshot: {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+    productLabel: "Retell chat",
+    connectionSnapshot: {
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       topology: "hosted-broker",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
     },
-    retry_of_run_id: null,
-    test_versions: ["tstv_1"],
-    mock_tools: { defaults: [], overrides: {} },
-    expected_simulation_count: 1,
-    completed_count: 1,
-    failed_count: 0,
-    canceled_count: 0,
-    skipped_count: 0,
-    simulation_counts: { ...NO_SIMULATIONS, completed: 1 },
-    finished_count: 1,
-    gradable_count: 1,
-    graded_count: 1,
+    retryOfRunId: null,
+    testVersions: ["tstv_1"],
+    mockTools: { defaults: [], overrides: {} },
+    expectedSimulationCount: 1,
+    completedCount: 1,
+    failedCount: 0,
+    canceledCount: 0,
+    skippedCount: 0,
+    simulationCounts: { ...NO_SIMULATIONS, completed: 1 },
+    finishedCount: 1,
+    gradableCount: 1,
+    gradedCount: 1,
     verdict: "passed",
     score: 1,
     counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
-    created_at: "2026-08-15T10:00:00.000Z",
-    finished_at: "2026-08-15T10:01:00.000Z",
+    createdAt: "2026-08-15T10:00:00.000Z",
+    finishedAt: "2026-08-15T10:01:00.000Z",
     simulations: [simulationRow()],
-    grading_plan: {
+    gradingPlan: {
       state: "run_start",
-      captured_at: "2026-08-15T10:00:00.000Z",
+      capturedAt: "2026-08-15T10:00:00.000Z",
       groups: [
         {
           tag: "version",
-          test_id: "tst_1",
-          test_version_id: "tstv_1",
-          test_name: "Reschedules a booked appointment",
+          testId: "tst_1",
+          testVersionId: "tstv_1",
+          testName: "Reschedules a booked appointment",
           items: [
             // A running copy, like every item in a frozen plan: the
             // expected-behaviors grader is a seeded copy of a predefined
@@ -251,10 +249,10 @@ function runDetail(overrides: Record<string, unknown> = {}) {
             // version, so one shape describes the whole plan.
             {
               kind: "authored",
-              grader_id: "grd_seeded",
-              grader_version_id: "grv_1",
+              graderId: "grd_seeded",
+              graderVersionId: "grv_1",
               name: "expected_behaviors",
-              library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+              libraryId: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
               required: true,
               scope: "simulations",
             },
@@ -266,7 +264,7 @@ function runDetail(overrides: Record<string, unknown> = {}) {
     connection: {
       id: "con_1",
       name: "retell-staging",
-      product_label: "Retell chat",
+      productLabel: "Retell chat",
       archived: false,
     },
     ...overrides,
@@ -313,40 +311,40 @@ function history(
   rows: readonly Record<string, unknown>[],
   options: {
     readonly role?: string;
-    readonly nextCursor?: string | null;
+    readonly nextPageToken?: string | null;
     readonly cancel?: Stubbed | readonly Stubbed[];
   } = {},
 ): void {
   apiAnswers({
     "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
-    "/api/agents": {
+    "/v1/agents": {
       status: 200,
       body: {
-        items: [
+        agents: [
           {
             id: "agt_1",
-            project_id: "prj_1",
+            projectId: "prj_1",
             name: "Front desk",
             description: null,
             revision: "rev_a",
             archived: false,
-            archived_at: null,
-            created_at: "2026-08-01T10:00:00.000Z",
-            updated_at: "2026-08-01T10:00:00.000Z",
+            archivedAt: null,
+            createdAt: "2026-08-01T10:00:00.000Z",
+            updatedAt: "2026-08-01T10:00:00.000Z",
           },
         ],
-        next_cursor: null,
+        nextPageToken: null,
       },
     },
-    "/api/runs": {
+    "/v1/runs": {
       status: 200,
-      body: { items: rows, next_cursor: options.nextCursor ?? null },
+      body: { runs: rows, nextPageToken: options.nextPageToken ?? null },
     },
-    "/api/runs/run_1/cancel": options.cancel ?? {
+    "/v1/runs/run_1/cancel": options.cancel ?? {
       status: 200,
       body: runRow({ status: "canceled" }),
     },
-    "/api/runs/run_2/cancel": options.cancel ?? {
+    "/v1/runs/run_2/cancel": options.cancel ?? {
       status: 200,
       body: runRow({ id: "run_2", status: "canceled" }),
     },
@@ -358,12 +356,12 @@ describe("the run list", () => {
     const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
     history([
       runRow({
-        created_at: createdAt,
+        createdAt: createdAt,
         status: "completed",
         verdict: "failed",
-        simulation_counts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
-        graded_count: 1,
-        gradable_count: 1,
+        simulationCounts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
+        gradedCount: 1,
+        gradableCount: 1,
       }),
     ]);
     render(<RunsPage />);
@@ -415,9 +413,9 @@ describe("the run list", () => {
       runRow({
         status: "running",
         verdict: null,
-        graded_count: 0,
-        gradable_count: 1,
-        finished_at: null,
+        gradedCount: 0,
+        gradableCount: 1,
+        finishedAt: null,
       }),
     ]);
     render(<RunsPage />);
@@ -442,7 +440,7 @@ describe("the run list", () => {
     );
 
     await waitFor(() => {
-      expect(readsOf("/api/runs").some((one) => one.includes("verdict=failed"))).toBe(
+      expect(readsOf("/v1/runs").some((one) => one.includes("verdict=failed"))).toBe(
         true,
       );
     });
@@ -452,14 +450,14 @@ describe("the run list", () => {
       { target: { value: "canceled" } },
     );
     await waitFor(() => {
-      const latest = readsOf("/api/runs").at(-1) ?? "";
+      const latest = readsOf("/v1/runs").at(-1) ?? "";
       expect(latest).toContain("status=canceled");
       expect(latest).toContain("verdict=failed");
     });
   });
 
   it("offers a viewer no way to stop a run, because the server would refuse it", async () => {
-    history([runRow({ status: "running", finished_at: null })], { role: "viewer" });
+    history([runRow({ status: "running", finishedAt: null })], { role: "viewer" });
     render(<RunsPage />);
 
     await screen.findAllByText("Nightly smoke");
@@ -468,7 +466,7 @@ describe("the run list", () => {
   });
 
   it("sends a cancel for the row it was opened on", async () => {
-    history([runRow({ status: "running", finished_at: null })]);
+    history([runRow({ status: "running", finishedAt: null })]);
     render(<RunsPage />);
 
     fireEvent.click((await screen.findAllByRole("button", { name: "Cancel" }))[0]!);
@@ -477,12 +475,12 @@ describe("the run list", () => {
     // The method is named because this page reads the address it writes to: a
     // wait on "anything sent here" is satisfied by its own load.
     await waitFor(() => {
-      expect(sentWith("/api/runs/run_1/cancel", "POST")).toHaveLength(1);
+      expect(sentWith("/v1/runs/run_1/cancel", "POST")).toHaveLength(1);
     });
     // And which project the run is in, said the one way every write in the
     // product says it.
-    expect(sentWith("/api/runs/run_1/cancel", "POST")[0]?.url).toBe(
-      "/api/runs/run_1/cancel?project=prj_1",
+    expect(sentWith("/v1/runs/run_1/cancel", "POST")[0]?.url).toBe(
+      "/v1/runs/run_1/cancel?projectId=prj_1",
     );
   });
 });
@@ -498,8 +496,8 @@ describe("what belongs to the open run row", () => {
   function twoRuns(): void {
     history(
       [
-        runRow({ id: "run_1", label: "First", status: "running", finished_at: null }),
-        runRow({ id: "run_2", label: "Second", status: "running", finished_at: null }),
+        runRow({ id: "run_1", label: "First", status: "running", finishedAt: null }),
+        runRow({ id: "run_2", label: "Second", status: "running", finishedAt: null }),
       ],
       {
         cancel: {
@@ -553,7 +551,7 @@ describe("what belongs to the open run row", () => {
     // behind dangerous: pressing it would stop the first while the panel
     // reported about the second.
     await screen.findByText("Cancel Second?");
-    expect(sentWith("/api/runs/run_1/cancel", "POST")).toHaveLength(1);
+    expect(sentWith("/v1/runs/run_1/cancel", "POST")).toHaveLength(1);
   });
 });
 
@@ -574,23 +572,23 @@ function detail(
 ): void {
   apiAnswers({
     "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
-    "/api/runs/run_1": Array.isArray(options.run)
+    "/v1/runs/run_1": Array.isArray(options.run)
       ? options.run.map((body) => ({ status: 200, body }))
       : { status: 200, body: (options.run as Record<string, unknown>) ?? runDetail() },
-    "/api/runs/run_1/events": options.events ?? NO_EVENTS,
-    "/api/runs/run_1/cancel": options.cancel ?? {
+    "/v1/runs/run_1/events": options.events ?? NO_EVENTS,
+    "/v1/runs/run_1/cancel": options.cancel ?? {
       status: 200,
       body: runDetail({ status: "canceled" }),
     },
-    "/api/simulations/sim_1/rerun": options.rerun ?? {
+    "/v1/simulations/sim_1/rerun": options.rerun ?? {
       status: 201,
       body: runDetail({ id: "run_9", label: "LiveKit retry" }),
     },
-    "/api/runs/run_2": {
+    "/v1/runs/run_2": {
       status: 200,
       body: options.secondRun ?? runDetail({ id: "run_2", label: "Second" }),
     },
-    "/api/runs/run_2/events": NO_EVENTS,
+    "/v1/runs/run_2/events": NO_EVENTS,
   });
 }
 
@@ -624,14 +622,14 @@ describe("one run's page", () => {
     fireEvent.click(submit);
 
     await waitFor(() => {
-      expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toHaveLength(1);
+      expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toHaveLength(1);
     });
-    const request = sentWith("/api/simulations/sim_1/rerun", "POST")[0];
+    const request = sentWith("/v1/simulations/sim_1/rerun", "POST")[0];
     expect(request?.url).toBe(
-      "/api/simulations/sim_1/rerun?project=prj_1",
+      "/v1/simulations/sim_1/rerun?projectId=prj_1",
     );
     expect(request?.body?.label).toBe("LiveKit retry");
-    expect(request?.body?.idempotency_key).toMatch(/^run:/u);
+    expect(request?.body?.idempotencyKey).toMatch(/^run:/u);
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
 
     // Re-running creates a new run. The original row and its evidence link are
@@ -682,12 +680,12 @@ describe("one run's page", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
     await waitFor(() => {
-      expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toHaveLength(2);
+      expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toHaveLength(2);
     });
-    const firstKey = sentWith("/api/simulations/sim_1/rerun", "POST")[0]?.body
-      ?.idempotency_key;
-    const retryKey = sentWith("/api/simulations/sim_1/rerun", "POST")[1]?.body
-      ?.idempotency_key;
+    const firstKey = sentWith("/v1/simulations/sim_1/rerun", "POST")[0]?.body
+      ?.idempotencyKey;
+    const retryKey = sentWith("/v1/simulations/sim_1/rerun", "POST")[1]?.body
+      ?.idempotencyKey;
     expect(retryKey).toBe(firstKey);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -706,16 +704,16 @@ describe("one run's page", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
     await waitFor(() => {
-      expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toHaveLength(3);
+      expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toHaveLength(3);
     });
-    const reopenedKey = sentWith("/api/simulations/sim_1/rerun", "POST")[2]?.body
-      ?.idempotency_key;
+    const reopenedKey = sentWith("/v1/simulations/sim_1/rerun", "POST")[2]?.body
+      ?.idempotencyKey;
     expect(reopenedKey).not.toBe(firstKey);
   });
 
   it("uses the shared parent trail and shows no terminal action", async () => {
     const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    detail({ run: runDetail({ created_at: createdAt }) });
+    detail({ run: runDetail({ createdAt: createdAt }) });
     render(<RunDetailPage />);
 
     const breadcrumb = await screen.findByRole("navigation", {
@@ -748,8 +746,8 @@ describe("one run's page", () => {
     detail({
       run: runDetail({
         status: "completed",
-        expected_simulation_count: 3,
-        simulation_counts: {
+        expectedSimulationCount: 3,
+        simulationCounts: {
           ...NO_SIMULATIONS,
           completed: 1,
           failed: 1,
@@ -757,7 +755,7 @@ describe("one run's page", () => {
         },
         verdict: null,
         simulations: [
-          simulationRow({ persona_name: "Starter" }),
+          simulationRow({ personaName: "Starter" }),
           simulationRow({
             id: "sim_2",
             position: 2,
@@ -776,8 +774,8 @@ describe("one run's page", () => {
             verdict: "skipped",
             counts: null,
             score: null,
-            skip_reason: "required_capability_unsupported",
-            skipped_capabilities: ["raw_audio"],
+            skipReason: "required_capability_unsupported",
+            skippedCapabilities: ["raw_audio"],
           }),
         ],
       }),
@@ -834,7 +832,7 @@ describe("one run's page", () => {
         connection: {
           id: "con_1",
           name: "retell-staging",
-          product_label: "Retell chat",
+          productLabel: "Retell chat",
           archived: true,
         },
       }),
@@ -865,11 +863,11 @@ describe("one run's page", () => {
     detail({
       run: runDetail({
         status: "running",
-        finished_at: null,
-        expected_simulation_count: 1,
-        simulation_counts: { ...NO_SIMULATIONS, running: 1 },
-        graded_count: 0,
-        gradable_count: 0,
+        finishedAt: null,
+        expectedSimulationCount: 1,
+        simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+        gradedCount: 0,
+        gradableCount: 0,
         verdict: null,
         simulations: [
           simulationRow({
@@ -888,7 +886,7 @@ describe("one run's page", () => {
     await screen.findByRole("table", { name: "Simulations in this run" });
     await screen.findAllByText("running");
     expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
-    expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toEqual([]);
+    expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toEqual([]);
   });
 
   /**
@@ -899,11 +897,11 @@ describe("one run's page", () => {
     detail({
       run: runDetail({
         status: "running",
-        finished_at: null,
-        expected_simulation_count: 1,
-        simulation_counts: { ...NO_SIMULATIONS, running: 1 },
-        graded_count: 0,
-        gradable_count: 0,
+        finishedAt: null,
+        expectedSimulationCount: 1,
+        simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+        gradedCount: 0,
+        gradableCount: 0,
         verdict: null,
         simulations: [
           simulationRow({
@@ -924,9 +922,9 @@ describe("one run's page", () => {
                 seq: 1,
                 at: "2026-08-15T10:00:30.000Z",
                 kind: "simulation",
-                simulation_id: "sim_1",
-                test_name: "Reschedules a booked appointment",
-                persona_name: "Impatient Rita",
+                simulationId: "sim_1",
+                testName: "Reschedules a booked appointment",
+                personaName: "Impatient Rita",
                 status: "completed",
                 verdict: "failed",
                 reason: "persona_concluded",
@@ -948,9 +946,9 @@ describe("one run's page", () => {
     // …and the feed moves it, with no second read of the run.
     await screen.findAllByText("failed");
     await waitFor(() => {
-      expect(sentWith("/api/runs/run_1", "GET").length).toBeGreaterThanOrEqual(1);
+      expect(sentWith("/v1/runs/run_1", "GET").length).toBeGreaterThanOrEqual(1);
     });
-    expect(readsOf("/api/runs/run_1")).toHaveLength(1);
+    expect(readsOf("/v1/runs/run_1")).toHaveLength(1);
   });
 
   it("offers a viewer no Cancel and no Retry, and still lets them read everything", async () => {
@@ -966,9 +964,9 @@ describe("one run's page", () => {
     expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
-    expect(sentWith("/api/simulations/sim_1/rerun", "POST")).toEqual([]);
-    expect(sentWith("/api/runs/run_1/retry", "POST")).toEqual([]);
-    expect(sentWith("/api/runs/run_1/cancel", "POST")).toEqual([]);
+    expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toEqual([]);
+    expect(sentWith("/v1/runs/run_1/retry", "POST")).toEqual([]);
+    expect(sentWith("/v1/runs/run_1/cancel", "POST")).toEqual([]);
 
     await screen.findByText("Front desk");
     await screen.findByText("retell-staging");
@@ -978,11 +976,11 @@ describe("one run's page", () => {
   it("cancels an active run, and never reports it completed afterwards", async () => {
     const stopped = runDetail({
       status: "canceled",
-      finished_at: "2026-08-15T10:00:30.000Z",
-      expected_simulation_count: 1,
-      simulation_counts: { ...NO_SIMULATIONS, canceled: 1 },
-      gradable_count: 0,
-      graded_count: 0,
+      finishedAt: "2026-08-15T10:00:30.000Z",
+      expectedSimulationCount: 1,
+      simulationCounts: { ...NO_SIMULATIONS, canceled: 1 },
+      gradableCount: 0,
+      gradedCount: 0,
       verdict: "skipped",
       simulations: [
         simulationRow({
@@ -1000,11 +998,11 @@ describe("one run's page", () => {
       run: [
         runDetail({
           status: "running",
-          finished_at: null,
-          expected_simulation_count: 1,
-          simulation_counts: { ...NO_SIMULATIONS, running: 1 },
-          gradable_count: 0,
-          graded_count: 0,
+          finishedAt: null,
+          expectedSimulationCount: 1,
+          simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+          gradableCount: 0,
+          gradedCount: 0,
           verdict: null,
           simulations: [
             simulationRow({
@@ -1041,14 +1039,14 @@ describe("one run's page", () => {
     );
 
     await waitFor(() => {
-      expect(sentWith("/api/runs/run_1/cancel", "POST")).toHaveLength(1);
+      expect(sentWith("/v1/runs/run_1/cancel", "POST")).toHaveLength(1);
     });
     // **And it says which project it is stopping a run in.** A cancel that
     // named none was answered from the session's own project — the
     // organization's first — so this page could not stop a run it was looking
     // straight at anywhere else.
-    expect(sentWith("/api/runs/run_1/cancel", "POST")[0]?.url).toBe(
-      "/api/runs/run_1/cancel?project=prj_1",
+    expect(sentWith("/v1/runs/run_1/cancel", "POST")[0]?.url).toBe(
+      "/v1/runs/run_1/cancel?projectId=prj_1",
     );
     await screen.findAllByText("canceled");
     // Stopping early never reads as a suite that went green.
@@ -1060,11 +1058,11 @@ describe("one run's page", () => {
     detail({
       run: runDetail({
         status: "running",
-        finished_at: null,
-        expected_simulation_count: 1,
-        simulation_counts: { ...NO_SIMULATIONS, running: 1 },
-        gradable_count: 0,
-        graded_count: 0,
+        finishedAt: null,
+        expectedSimulationCount: 1,
+        simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+        gradableCount: 0,
+        gradedCount: 0,
         verdict: null,
         simulations: [
           simulationRow({
@@ -1085,9 +1083,9 @@ describe("one run's page", () => {
                 seq: 1,
                 at: "2026-08-15T10:00:30.000Z",
                 kind: "simulation",
-                simulation_id: "sim_1",
-                test_name: "Reschedules a booked appointment",
-                persona_name: "Impatient Rita",
+                simulationId: "sim_1",
+                testName: "Reschedules a booked appointment",
+                personaName: "Impatient Rita",
                 status: "failed",
                 verdict: "errored",
                 reason: "not_answered",

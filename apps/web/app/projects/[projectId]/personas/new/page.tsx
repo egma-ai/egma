@@ -2,17 +2,16 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createPersona, getPersonaForm } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import {
   BLANK_TRAITS,
   modelsDraftOf,
   modelsFrom,
-  PERSONA_FORM_PATH,
-  PERSONAS_PATH,
   sameModelsDraft,
   traitsFrom,
   type ModelsDraft,
@@ -20,6 +19,10 @@ import {
   type PersonaForm,
   type TraitsDraft,
 } from "../../../../../lib/personas.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { Field, Form, FormActions, Refused } from "../../../../../ui/form.tsx";
@@ -70,7 +73,10 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const { answer: form, reload: reloadForm } = useProjectRead<PersonaForm>(
-    PERSONA_FORM_PATH,
+    (projectId) =>
+      platformAnswer(
+        getPersonaForm({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
 
@@ -80,7 +86,7 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
 
   useEffect(() => {
     if (form?.status !== "ready") return;
-    setModels((held) => held ?? modelsDraftOf(form.value.recommended_models));
+    setModels((held) => held ?? modelsDraftOf(form.value.recommendedModels));
   }, [form]);
 
   useEffect(() => {
@@ -95,7 +101,7 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
     ) ||
     (models !== null &&
       form?.status === "ready" &&
-      !sameModelsDraft(models, modelsDraftOf(form.value.recommended_models)));
+      !sameModelsDraft(models, modelsDraftOf(form.value.recommendedModels)));
   useUnsavedChanges(changed && !saving, saving);
 
   const mayAuthor =
@@ -113,16 +119,18 @@ function NewPersona({ projectId }: { readonly projectId: string }) {
     setSaving(true);
     setRefusal(null);
 
-    const answer = await writeJson<Persona>(PERSONAS_PATH, {
-      method: "POST",
-      body: {
-        project: projectId,
-        name,
-        description,
-        traits: traitsFrom(traits),
-        models: modelsFrom(models),
-      },
-    });
+    const answer = await platformAnswer(
+      createPersona(
+        {
+          projectId,
+          name,
+          description,
+          traits: traitsFrom(traits),
+          models: modelsFrom(models),
+        },
+        { client: platformClient },
+      ),
+    );
 
     setSaving(false);
 

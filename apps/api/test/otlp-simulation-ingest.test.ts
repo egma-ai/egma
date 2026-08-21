@@ -369,12 +369,12 @@ describe("the contract's golden flushes, posted with the service token", () => {
      * rests on, right until the day a grader reduces some other way.
      */
     for (const measured of detail.measures) {
-      expect(measured.span_ids).toHaveLength(measured.samples.length);
-      for (const spanId of measured.span_ids) expect(spanId).not.toBe("");
+      expect(measured.spanIds).toHaveLength(measured.samples.length);
+      for (const spanId of measured.spanIds) expect(spanId).not.toBe("");
 
       expect(measured.worst?.value).toBe(Math.max(...measured.samples));
       // And where it happened, which is what a judgment about it cites.
-      expect(measured.span_ids).toContain(measured.worst?.span_id);
+      expect(measured.spanIds).toContain(measured.worst?.spanId);
       // A whole reading, so the figure is the exchange's rather than a prefix's.
       expect(measured.partial).toBe(false);
     }

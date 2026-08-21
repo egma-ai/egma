@@ -1,6 +1,7 @@
 /**
  * Secret fields that may cross exactly one seam: into an Egma connection
- * request, where the platform seals them.
+ * request. The platform either seals a durable connection credential or uses
+ * a request-only platform selection credential and discards it.
  *
  * The values live behind a private field. String conversion, JSON conversion,
  * and Node inspection all return a mask, so passing this object through a log
@@ -44,7 +45,7 @@ export class ConnectionCredentials {
     return new ConnectionCredentials(reveal);
   }
 
-  /** Read once, while building the request body that Egma seals. */
+  /** Read once, while building the request body that Egma receives. */
   reveal(): Readonly<Record<string, string>> {
     return { ...this.#reveal() };
   }

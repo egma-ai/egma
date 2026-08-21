@@ -3,19 +3,20 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createTest } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   behaviorsAreUsable,
   whyBehaviorsRefuse,
   type ExpectedBehavior,
-  type ListedTest,
 } from "../../../../../lib/tests.ts";
 import {
   Field,
@@ -114,20 +115,22 @@ function NewTest({ projectId }: { readonly projectId: string }) {
   async function write(): Promise<void> {
     setRefused(null);
     setSaving(true);
-    const written = await writeJson<ListedTest>("/api/tests", {
-      method: "POST",
-      project: projectId,
-      body: {
+    const written = await platformAnswer(
+      createTest(
+        {
+          projectId,
         name: name.trim(),
         ...(description.trim() === "" ? {} : { description: description.trim() }),
         scenario: scenario.trim(),
-        expected_behaviors: behaviors
+          expectedBehaviors: behaviors
           .map((one) => one.trim())
           .filter((one) => one !== ""),
         personas: [...chosenPersonas],
         agents: [...chosenAgents],
-      },
-    });
+        },
+        { client: platformClient },
+      ),
+    );
     setSaving(false);
 
     if (written.status === "signed-out") {

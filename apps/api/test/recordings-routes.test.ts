@@ -99,8 +99,8 @@ describe("who may hear a recording", () => {
     const resolved = await request("GET", recordingPathFor(run.heard), who.key);
 
     expect(resolved.statusCode, JSON.stringify(resolved.body)).toBe(200);
-    expect(resolved.body.simulation_id).toBe(run.heard);
-    expect(resolved.body).not.toHaveProperty("measured_audio_band_hertz");
+    expect(resolved.body.simulationId).toBe(run.heard);
+    expect(resolved.body).not.toHaveProperty("measuredAudioBandHertz");
 
     // The link is against the address a browser was given, and it carries its
     // own proof — no key of the reader's, and nothing that would let a client
@@ -152,7 +152,7 @@ describe("who may hear a recording", () => {
     // And egma's copy of it, which is what lets a page tell "the link went
     // stale" from "the recording is gone" and ask again rather than leaving
     // somebody looking at a scrubber that stopped working.
-    const expiresAt = Date.parse(String(resolved.body.expires_at));
+    const expiresAt = Date.parse(String(resolved.body.expiresAt));
     expect(expiresAt).toBeGreaterThanOrEqual(
       before + RECORDING_LINK_SECONDS * 1000,
     );
@@ -210,7 +210,7 @@ describe("who may hear a recording", () => {
     const theirs = await request("GET", recordingPathFor(run.heard), bob.secret);
 
     expect(theirs.statusCode, JSON.stringify(theirs.body)).toBe(200);
-    expect(theirs.body.simulation_id).toBe(run.heard);
+    expect(theirs.body.simulationId).toBe(run.heard);
   });
 
   it("refuses an unauthenticated request before it reads anything at all", async () => {
@@ -345,15 +345,15 @@ describe("what the run's own results say about audio", () => {
   it("marks which conversations have a recording, and never says where one is", async () => {
     const { who, run } = await aCustomerWhoHasRecorded("recording_run_shape");
 
-    const read = await request("GET", `/api/runs/${run.runId}`, who.key);
+    const read = await request("GET", `/v1/runs/${run.runId}`, who.key);
 
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     const simulations = read.body.simulations as Record<string, unknown>[];
     const heard = simulations.find((one) => one.id === run.heard);
     const silent = simulations.find((one) => one.id === run.silent);
 
-    expect(heard).toMatchObject({ modality: "voice", has_recording: true });
-    expect(silent).toMatchObject({ modality: "voice", has_recording: false });
+    expect(heard).toMatchObject({ modality: "voice", hasRecording: true });
+    expect(silent).toMatchObject({ modality: "voice", hasRecording: false });
 
     // The reference itself never travels. It is opaque, it means something only
     // to whoever resolves it, and a page that carried one would be a page whose
@@ -410,18 +410,18 @@ describe("what a transcript says about audio", () => {
     expect(read.statusCode, read.body).toBe(200);
     const transcript = read.json() as TraceDetailBody;
     expect(transcript.trace.source).toBe("simulation");
-    expect(transcript.simulation_id).toBe(run.heard);
+    expect(transcript.simulationId).toBe(run.heard);
 
     // Which is the whole ticket: the id that came back off the transcript's own
     // read goes straight at the route a run's results use, and comes back with
     // a link to the same audio.
     const resolved = await request(
       "GET",
-      recordingPathFor(String(transcript.simulation_id)),
+      recordingPathFor(String(transcript.simulationId)),
       who.key,
     );
     expect(resolved.statusCode, JSON.stringify(resolved.body)).toBe(200);
-    expect(resolved.body.simulation_id).toBe(run.heard);
+    expect(resolved.body.simulationId).toBe(run.heard);
     expect(new URL(String(resolved.body.url)).origin).toBe(
       A_BROWSERS_STORE.publicUrl,
     );
@@ -437,7 +437,7 @@ describe("what a transcript says about audio", () => {
       { from: silent.from, to: silent.to },
     );
     expect(nothingToHear.statusCode, nothingToHear.body).toBe(200);
-    const quiet = (nothingToHear.json() as TraceDetailBody).simulation_id;
+    const quiet = (nothingToHear.json() as TraceDetailBody).simulationId;
     expect(quiet).toBe(run.silent);
 
     const refused = await request(

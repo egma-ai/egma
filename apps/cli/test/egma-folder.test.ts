@@ -575,18 +575,9 @@ describe("the test file format", () => {
 });
 
 describe("the egma folder", () => {
-  /**
-   * A binding that is already here is never rewritten, in either field.
-   *
-   * This file is committed and every clone of the repository reads it, so a run
-   * that quietly changed it would be moving other people's target for them —
-   * and the origin is the field that would do the most damage, because a
-   * platform that names `http://localhost:3101` as its own address would send
-   * every teammate to their own laptop.
-   */
+  /** A committed URL is stable until a developer removes it on purpose. */
   it("never rewrites a platform binding that is already committed", async () => {
-    const instance = "pf_01K3XQ7M4E8YB2FVN0H9TZQWEP";
-    const platform = { origin: "https://old.example", instance };
+    const platform = { origin: "https://old.example" };
     const paths = folderPathsIn(workspace.dir);
     await createEgmaFolder({
       repository: workspace.dir,
@@ -600,19 +591,9 @@ describe("the egma folder", () => {
     );
     expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
 
-    // The same platform reached at another address is refused, not recorded.
-    await expect(
-      bindRepositoryPlatform(workspace.dir, {
-        origin: "https://canonical.example",
-        instance,
-      }),
-    ).rejects.toThrow("will not move a committed platform address");
-
-    // And another platform entirely is the refusal it always was — which now
-    // teaches the whole move, because nothing performs it.
+    // Another URL is refused and the committed file stays unchanged.
     const moving = await bindRepositoryPlatform(workspace.dir, {
-      origin: "https://old.example",
-      instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ",
+      origin: "https://new.example",
     }).then(
       () => null,
       (refusal: Error) => refusal,
@@ -620,46 +601,7 @@ describe("the egma folder", () => {
 
     expect(moving).not.toBeNull();
     const said = moving?.message ?? "";
-    expect(said).toContain("Egma does not move a repository between platforms");
-    expect(said).toContain("nothing was sent");
-
-    // All four things a developer deletes, named at once. A refusal naming one
-    // at a time is a second failure after the first.
-    expect(said).toContain("the whole platform: block in egma/config.yaml");
-    expect(said).toContain("the id: line under agent: in egma/config.yaml");
-    expect(said).toContain("the id: line under connection: in egma/config.yaml");
-    expect(said).toContain("the id: line under suite: in egma/config.yaml");
-    expect(said).toContain("the version: line at the top of every file in egma/tests/");
-
-    // What moving costs, said plainly rather than found out afterwards.
-    expect(said).toContain("Your tests move with you");
-    expect(said).toContain("stay on the platform that ran them");
-
-    // One plain block of lines, so a coding agent can act on it without a
-    // person reading the message out to it.
-    const deletions = said
-      .split("\n")
-      .filter((line) => line.startsWith("  - "));
-    expect(deletions).toHaveLength(5);
-
-    // **And in that order.** Deleting the platform block is what unbinds the
-    // repository, and an unbound repository falls back to egma's own platform
-    // — so a list that named it first would have somebody working top-down
-    // arrive, one line in, at a repository still holding another platform's
-    // identifiers and nothing left to keep them there. Identifiers and pins
-    // come out first, the binding last, and the list says so out loud.
-    expect(deletions.map((line) => line.slice(4))).toEqual([
-      "the id: line under agent: in egma/config.yaml",
-      "the id: line under connection: in egma/config.yaml",
-      "the id: line under suite: in egma/config.yaml",
-      "the version: line at the top of every file in egma/tests/",
-      "last of all, the whole platform: block in egma/config.yaml",
-    ]);
-    expect(said).toContain("Delete the platform block last");
-
-    // And no command that does it: the refusal teaches the move and nothing
-    // offers to perform it.
-    expect(said).not.toMatch(/egma rebind|--rebind|Egma move/u);
+    expect(said).toContain("will not move a committed platform address");
 
     expect(await readFile(paths.config, "utf8")).toBe(asCommitted);
   });
@@ -670,7 +612,6 @@ describe("the egma folder", () => {
       config: {
         platform: {
           origin: "http://127.0.0.1:3101",
-          instance: "pf_01K3XQ7M4E8YB2FVN0H9TZQWEP",
         },
         agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
         connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
@@ -709,7 +650,6 @@ describe("the egma folder", () => {
         "# beside each name once it has registered one.",
         "platform:",
         "  origin: http://127.0.0.1:3101",
-        "  instance: pf_01K3XQ7M4E8YB2FVN0H9TZQWEP",
         "agent:",
         "  name: receptionist",
         "  id: agt_01K3XQ7M4E8YB2FVN0H9TZQWER",
@@ -832,7 +772,7 @@ describe("the egma folder", () => {
       "  https://egma.acme.example  ",
     ]) {
       const config = parseConfig(
-        `platform:\n  origin: ${JSON.stringify(written)}\n  instance: pf_01K3XQ7M4E8YB2FVN0H9TZQWEP\n`,
+        `platform:\n  origin: ${JSON.stringify(written)}\n`,
         "config.yaml",
       );
       expect(config.platform?.origin, written).toBe("https://egma.acme.example");
@@ -843,7 +783,7 @@ describe("the egma folder", () => {
     // here would hide which line in the file is the wrong one.
     expect(
       parseConfig(
-        "platform:\n  origin: not-an-address\n  instance: pf_01K3XQ7M4E8YB2FVN0H9TZQWEP\n",
+        "platform:\n  origin: not-an-address\n",
         "config.yaml",
       ).platform?.origin,
     ).toBe("not-an-address");

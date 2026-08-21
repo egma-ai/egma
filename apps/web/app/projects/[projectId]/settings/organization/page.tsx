@@ -2,13 +2,12 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
+import { getOrganization, updateOrganization } from "@egma/platform-api/client";
 
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import {
-  ORGANIZATION_PATH,
-  type OrganizationSettings,
-} from "../../../../../lib/settings.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
+import type { OrganizationSettings } from "../../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -52,10 +51,10 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   const { me, refresh: refreshSession } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const { answer, reload } = useOrganizationRead<OrganizationSettings>(
-    ORGANIZATION_PATH,
+    () => platformAnswer(getOrganization({ client: platformClient })),
   );
   const settled = answer?.status === "ready" ? answer.value : null;
-  const mayAdminister = settled?.may_manage_organization === true;
+  const mayAdminister = settled?.mayManageOrganization === true;
 
   /* The field's hint, named so the input can point at it. */
   const nameHint = useId();
@@ -102,10 +101,9 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
     setSaved(false);
     setSaving(true);
 
-    const written = await writeJson<OrganizationSettings>(ORGANIZATION_PATH, {
-      method: "PATCH",
-      body: { name: name.trim() },
-    });
+    const written = await platformAnswer(
+      updateOrganization({ name: name.trim() }, { client: platformClient }),
+    );
 
     setSaving(false);
     if (written.status === "signed-out") {

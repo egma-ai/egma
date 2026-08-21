@@ -31,7 +31,7 @@ Egma is the open-source platform purpose-built for teams shipping voice agents. 
     ```
   </Step>
   <Step title="Connect your agent">
-    Egma signs this machine in with a short browser approval, then asks for your Retell or LiveKit credentials to register your agent. Your key is sent once, sealed on the platform, and never written to a file.
+    Egma signs this machine in with a short browser approval, then asks for your Retell or LiveKit credentials to register your agent. Egma uses the credential for discovery and seals it on the platform only when the selected connection needs it. It is never written to a repository file.
 
     ```bash
     egma connect

@@ -14,77 +14,26 @@
  * **The browser decides almost nothing here.** Which versions were pinned, which
  * graders judged, which verdict the conversation folds to, which of them only
  * report, and whether it has been judged at all are all answered by
- * `GET /api/simulations/{id}`. The two things this module works out are the two
+ * `GET /v1/simulations/{id}`. The two things this module works out are the two
  * the *page* is about: which of several gradings of one assertion counts, and
  * which turns a judgment is pointing at.
  */
 
 import type {
-  GradingWord,
-  SimulationStatusWord,
-  VerdictCounts,
-  VerdictWord,
-} from "./runs.ts";
+  GetSimulationResponse,
+  RegradeSimulationResponse,
+  TraceSpan,
+} from "@egma/platform-api/client";
 
 /** One judgment as the evidence read carries it. */
-export type EvidenceVerdict = {
-  readonly grader_id: string;
-  /**
-   * Which 0-or-1 check inside the grader this answers, as its **key** — a
-   * behavior's position in the pinned test version, a measure's own name.
-   * Opaque here: it is what a page groups and filters by.
-   */
-  readonly assertion: string;
-  /**
-   * The words behind that key, resolved from the version this conversation was
-   * pinned to — or null where nothing could place it, in which case a page
-   * shows the key rather than a guess.
-   */
-  readonly assertion_text: string | null;
-  /** `false` for a diagnostic copy's row: shown, and never able to fail this. */
-  readonly required: boolean;
-  readonly verdict: VerdictWord;
-  readonly score: number;
-  readonly rationale: string;
-  /** The spans this judgment is about, by their own ids. */
-  readonly cited_turns: readonly string[];
-  readonly judged_at: string;
-};
+export type EvidenceVerdict = GetSimulationResponse["verdicts"][number];
 
 /** One timed thing inside the conversation, with whatever happened under it. */
-export type EvidenceStep = {
-  readonly span_id: string;
-  readonly parent_span_id: string;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly started_at: string;
-  /** Nanoseconds, as a decimal string: a count that passes what JSON holds. */
-  readonly duration_ns: string;
-  readonly text: string;
-  readonly audio_url: string;
-  readonly tool_name: string;
-  readonly tool_arguments: string;
-  readonly tool_result: string;
-  readonly spans: readonly EvidenceStep[];
-};
+export type EvidenceStep = TraceSpan;
 
-export type EvidenceTranscript = {
-  readonly trace_id: string;
-  readonly started_at: string;
-  readonly ended_at: string;
-  readonly duration_ns: string;
-  readonly span_count: number;
-  readonly turn_counts: { readonly human: number; readonly agent: number };
-  readonly tool_span_count: number;
-  readonly errored_span_count: number;
-  /** The turns in the order they happened, each holding what happened inside it. */
-  readonly turns: readonly EvidenceStep[];
-  /** Everything top-level that is not a turn — the system's own bookkeeping. */
-  readonly spans: readonly EvidenceStep[];
-  /** The tree is a prefix and the counts are the whole conversation. */
-  readonly spans_truncated: boolean;
-};
+export type EvidenceTranscript = NonNullable<
+  GetSimulationResponse["transcript"]
+>;
 
 /**
  * One running copy as the run's frozen plan named it for this conversation.
@@ -92,16 +41,8 @@ export type EvidenceTranscript = {
  * One shape, where there used to be two: the expected-behaviors built-in is an
  * ordinary running copy now and arrives here like everything else.
  */
-export type EvidencePlanItem = {
-  readonly kind: "authored";
-  readonly grader_id: string;
-  readonly grader_version_id: string;
-  readonly name: string;
-  readonly library_id: string;
-  /** `false` makes it a diagnostic: judged, shown, never able to fail a test. */
-  readonly required: boolean;
-  readonly scope: string;
-};
+export type EvidencePlan = NonNullable<GetSimulationResponse["gradingPlan"]>;
+export type EvidencePlanItem = EvidencePlan["items"][number];
 
 /**
  * When this run's grading plan was decided, and whether one was decided at all.
@@ -111,26 +52,12 @@ export type EvidencePlanItem = {
  * the run began, and `not_recorded` has no plan at all — nothing reconstructs
  * one from today's graders, because that would be a claim nobody can check.
  */
-export type EvidencePlan = {
-  readonly state: "run_start" | "migration_snapshot" | "not_recorded";
-  readonly captured_at: string | null;
-  readonly items: readonly EvidencePlanItem[];
-};
-
 /** Where the judging of this conversation stands, job by job. */
-export type EvidenceGradingJob = {
-  readonly status: string;
-  readonly regrade_grader_id: string | null;
-  readonly attempts: number;
-  readonly last_error: string | null;
-  readonly finished_at: string | null;
-};
+export type EvidenceGradingJob = GetSimulationResponse["gradingJobs"][number];
 
 /** One mocked answer this conversation was conducted against. */
-export type EvidenceMockTool = {
-  readonly tool_name: string;
-  readonly mock_tool_id?: string;
-};
+export type EvidenceMockTool =
+  GetSimulationResponse["mockTools"]["defaults"][number];
 
 /**
  * Which of the agent's own tools egma stood in the path of.
@@ -139,138 +66,18 @@ export type EvidenceMockTool = {
  * what tools it has, so nothing was learned and nothing is claimed; three empty
  * lists mean the asking happened and nothing came back.
  */
-export type EvidenceCoverage = {
-  readonly discovered: readonly string[];
-  readonly covered: readonly string[];
-  readonly uncovered: readonly string[];
-};
+export type EvidenceCoverage = NonNullable<
+  GetSimulationResponse["mockToolCoverage"]
+>;
 
 /** One folded answer, at whichever grain answers it. */
-export type EvidenceOutcome = {
-  readonly verdict: VerdictWord;
-  readonly score: number | null;
-  readonly counts: VerdictCounts;
-};
+export type EvidenceOutcome = NonNullable<GetSimulationResponse["outcome"]>;
 
 /** One conversation, whole — everything one page load reads. */
-export type SimulationEvidence = {
-  readonly id: string;
-  readonly project_id: string;
-  readonly run_id: string;
-  readonly run_label: string | null;
-  readonly position: number;
-  /** The machinery. Never a judgement of what the agent did. */
-  readonly status: SimulationStatusWord;
-  /** Where the judging stands. Never what it decided. */
-  readonly grading: GradingWord;
-  /** What was decided — and null for *nobody has decided yet*. */
-  readonly verdict: VerdictWord | null;
-  readonly score: number | null;
-  readonly counts: VerdictCounts | null;
-  readonly reason: string | null;
-  readonly skip_reason: string | null;
-  readonly skipped_capabilities: readonly string[] | null;
-  readonly modality: string | null;
-  readonly created_at: string;
-  readonly started_at: string | null;
-  readonly ended_at: string | null;
-  /** The platform's own name for the exchange — the join to their telemetry. */
-  readonly provider_reference: string | null;
-  readonly has_recording: boolean;
-  /** Only what was actually measured. A measure nobody emitted is absent. */
-  readonly measures: Readonly<Record<string, number>>;
-  readonly test: {
-    readonly id: string | null;
-    readonly version_id: string | null;
-    readonly name: string | null;
-    readonly scenario: string | null;
-    /** Plain sentences, in the order they were written. */
-    readonly expected_behaviors: readonly string[] | null;
-    readonly required_capabilities: readonly string[] | null;
-  };
-  readonly persona: {
-    readonly id: string;
-    readonly name: string | null;
-    readonly version_id: string;
-    readonly traits: unknown;
-  };
-  readonly agent: {
-    readonly id: string;
-    readonly name: string | null;
-    readonly archived: boolean | null;
-  };
-  readonly connection: {
-    readonly id: string;
-    readonly name: string | null;
-    readonly archived: boolean | null;
-  };
-  readonly connection_snapshot: {
-    readonly agent_platform: string | null;
-    readonly connection_kind: string;
-    readonly access_variant: string;
-    readonly modality: string;
-    readonly topology: string;
-    readonly environment: string | null;
-    readonly config: unknown;
-  };
-  readonly mock_tool_coverage: EvidenceCoverage | null;
-  readonly mock_tools: {
-    readonly defaults: readonly EvidenceMockTool[];
-    readonly overrides: readonly EvidenceMockTool[];
-  };
-  readonly grading_plan: EvidencePlan | null;
-  readonly grading_jobs: readonly EvidenceGradingJob[];
-  readonly verdicts: readonly EvidenceVerdict[];
-  /** The required lane's answer for this conversation, and the other lane. */
-  readonly outcome: EvidenceOutcome | null;
-  readonly diagnostics: EvidenceOutcome | null;
-  readonly by_grader: readonly {
-    readonly grader_id: string;
-    /** `false` marks a diagnostic: judged, shown, never able to fail. */
-    readonly required: boolean;
-    readonly verdict: VerdictWord;
-    readonly score: number | null;
-    readonly counts: VerdictCounts;
-  }[];
-  readonly transcript: EvidenceTranscript | null;
-};
+export type SimulationEvidence = GetSimulationResponse;
 
 /** What a re-grade answers: what was asked, and what it reached. */
-export type RegradeAsked = {
-  readonly simulation_id: string;
-  readonly grader_id: string | null;
-  readonly reopened: number;
-  readonly already_waiting: number;
-};
-
-/**
- * Where one conversation's own paths begin.
- *
- * Deliberately not exported as a collection address, because there is no
- * collection route: conversations are listed by the run that holds them, and a
- * constant claiming `/api/simulations` answers something would be a promise
- * nothing keeps.
- */
-const ONE_SIMULATION = "/api/simulations";
-
-export function simulationPath(simulationId: string): string {
-  return `${ONE_SIMULATION}/${encodeURIComponent(simulationId)}`;
-}
-
-export function simulationRegradePath(simulationId: string): string {
-  return `${simulationPath(simulationId)}/regrade`;
-}
-
-/**
- * Start one new run from one finished conversation.
- *
- * The earlier simulation stays immutable. The server uses its pinned test
- * version and persona identity, then resolves the rest of the new run under
- * current conditions.
- */
-export function simulationRerunPath(simulationId: string): string {
-  return `${simulationPath(simulationId)}/rerun`;
-}
+export type RegradeAsked = RegradeSimulationResponse;
 
 /** Where one conversation's evidence lives inside its run, inside its project. */
 export function simulationSection(runId: string): readonly string[] {
@@ -313,11 +120,11 @@ export type JudgedAssertion = {
  * source file binary to git and to grep.
  */
 function assertionKey(row: EvidenceVerdict): string {
-  return JSON.stringify([row.grader_id, row.assertion]);
+  return JSON.stringify([row.graderId, row.assertion]);
 }
 
 function whenJudged(row: EvidenceVerdict): number {
-  const at = Date.parse(row.judged_at);
+  const at = Date.parse(row.judgedAt);
   return Number.isNaN(at) ? 0 : at;
 }
 
@@ -360,9 +167,9 @@ export function judgedAssertions(
 
     return {
       key,
-      graderId: speaking.grader_id,
+      graderId: speaking.graderId,
       assertion: speaking.assertion,
-      assertionText: speaking.assertion_text,
+      assertionText: speaking.assertionText,
       required: speaking.required,
       speaking,
       superseded,
@@ -389,7 +196,7 @@ export function citedTurnPositions(
   const positionOf = new Map<string, number>();
   turns.forEach((turn, at) => {
     const mark = (step: EvidenceStep): void => {
-      positionOf.set(step.span_id, at + 1);
+      positionOf.set(step.spanId, at + 1);
       for (const child of step.spans) mark(child);
     };
     mark(turn);

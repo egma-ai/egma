@@ -15,14 +15,15 @@
  *
  * Three shapes are load-bearing and none of them is this file's to change:
  *
- * - **No resource is rooted at a project.** An agent is `/api/agents/:agentId`
- *   and never `/api/projects/:projectId/agents/…`. A write may *name* a project
+ * - **No resource is rooted at a project.** An agent is `/v1/agents/:agentId`
+ *   and never `/v1/projects/:projectId/agents/…`. A write may *name* a project
  *   in its body; a read filters by one in the query.
  * - **The organization never appears in an address.** Which customer this is
  *   comes from the key and from nowhere else, which is what stops a copied key
  *   writing into somebody else's account by asking nicely.
- * - **A sealed secret never comes back.** What a caller sends is stored sealed
- *   and answered as its last four characters and nothing more.
+ * - **A sealed secret never comes back.** A durable connection credential is
+ *   stored sealed and answered as its last four characters and nothing more.
+ *   A request-only platform selection credential is not stored at all.
  *
  * Two more are the public API's rather than the factory's, and both are here
  * because a client that guessed at either would fail in somebody's terminal:
@@ -330,7 +331,7 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     // **This fixture stands for a platform whose carrier is set up**, which is
     // why it starts a phone run rather than refusing one. The real API asks a
     // second question this fixture has no answer to — `phone_setup_required`,
-    // refused at `POST /api/runs` before a row is written when that
+    // refused at `POST /v1/runs` before a row is written when that
     // deployment's phone half was never configured — because the answer is a
     // deployment's own environment and a fixture has no deployment. A client
     // reading a refusal from a real platform therefore meets a code this
@@ -502,16 +503,17 @@ export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_KINDS.filter(
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
-const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
+const AGENT_KEYS = ["name", "description", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
-  "agent_platform",
-  "connection_kind",
-  "access_variant",
+  "agentPlatform",
+  "connectionKind",
+  "accessVariant",
   "modality",
   "environment",
   "config",
   "credentials",
+  "agentPlatformSelection",
 ] as const;
 
 /** A refusal with a sentence in it, turned into an answer at the door. */
@@ -769,11 +771,11 @@ type StoredAgent = {
 function agentOut(agent: StoredAgent): Record<string, unknown> {
   return {
     id: agent.id,
-    project_id: agent.projectId,
+    projectId: agent.projectId,
     name: agent.name,
     description: agent.description,
-    created_at: agent.createdAt,
-    updated_at: agent.updatedAt,
+    createdAt: agent.createdAt,
+    updatedAt: agent.updatedAt,
   };
 }
 
@@ -781,27 +783,27 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
  * A connection, as every read of one describes it.
  *
  * The sealed envelope has no line here, so there is no serializer to remember
- * to strip it in. `credentials_hint` is the whole of what comes back: enough to
+ * to strip it in. `credentialsHint` is the whole of what comes back: enough to
  * tell one provider key from another, and enough to see that a rotation landed.
  */
 function connectionOut(connection: StoredConnection): Record<string, unknown> {
   return {
     id: connection.id,
-    agent_id: connection.agentId,
-    project_id: connection.projectId,
+    agentId: connection.agentId,
+    projectId: connection.projectId,
     name: connection.name,
-    agent_platform: connection.agentPlatform,
-    connection_kind: connection.connectionKind,
-    access_variant: connection.accessVariant,
+    agentPlatform: connection.agentPlatform,
+    connectionKind: connection.connectionKind,
+    accessVariant: connection.accessVariant,
     modality: connection.modality,
-    product_label: connection.productLabel,
+    productLabel: connection.productLabel,
     topology: connection.topology,
     environment: connection.environment,
     config: connection.config,
-    credentials_hint: connection.credentialsHint,
+    credentialsHint: connection.credentialsHint,
     capabilities: null,
-    created_at: connection.createdAt,
-    updated_at: connection.updatedAt,
+    createdAt: connection.createdAt,
+    updatedAt: connection.updatedAt,
   };
 }
 
@@ -837,7 +839,7 @@ function credentialActsElsewhere(
   return new Refusal(
     `this credential acts in project ${scoped}, and the request named ` +
       `${named}. A key minted for one product area ${verb} that one; drop ` +
-      "the project, or use a key for the whole organization.",
+      "projectId, or use a key for the whole organization.",
     { status: 403, code: "not_permitted" },
   );
 }
@@ -918,7 +920,7 @@ export function agentRoutes(options: {
       error: "not_found",
       message:
         "no agent of yours has that id. Check the id, or list your agents with " +
-        "GET /api/agents.",
+        "GET /v1/agents.",
     },
   };
 
@@ -979,17 +981,17 @@ export function agentRoutes(options: {
    */
   const admitConnection = (input: Record<string, unknown>): Admitted => {
     const agentPlatform =
-      input["agent_platform"] === null
+      input["agentPlatform"] === null
         ? null
-        : typeof input["agent_platform"] === "string"
-          ? input["agent_platform"]
+        : typeof input["agentPlatform"] === "string"
+          ? input["agentPlatform"]
           : "";
     const connectionKind =
-      typeof input["connection_kind"] === "string"
-        ? input["connection_kind"]
+      typeof input["connectionKind"] === "string"
+        ? input["connectionKind"]
         : "";
     const accessVariant =
-      typeof input["access_variant"] === "string" ? input["access_variant"] : "";
+      typeof input["accessVariant"] === "string" ? input["accessVariant"] : "";
     const descriptor = descriptorOf(connectionKind);
     const modality = validModality(connectionKind, input["modality"]);
     const productLabel = productLabelOf(
@@ -998,6 +1000,17 @@ export function agentRoutes(options: {
       accessVariant,
       modality,
     );
+    if (
+      agentPlatform === "retell" &&
+      connectionKind === "phone_number" &&
+      accessVariant === "phone_number.public_e164" &&
+      modality === "voice" &&
+      input["agentPlatformSelection"] === undefined
+    ) {
+      throw new Refusal(
+        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+      );
+    }
     const config = validConfig(connectionKind, accessVariant, input["config"]);
     const credentials = validCredentials(
       connectionKind,
@@ -1101,7 +1114,7 @@ export function agentRoutes(options: {
          * credential rotated whole; no match writes both. `result` says which.
          */
         method: "POST",
-        path: "/api/agents",
+        path: "/v1/agents",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           return answering(() => {
@@ -1119,7 +1132,7 @@ export function agentRoutes(options: {
 
             // A write may name a project in its body. It never names one in
             // its address, and it never names an organization anywhere.
-            const named = typeof body["project"] === "string" ? body["project"] : null;
+            const named = typeof body["projectId"] === "string" ? body["projectId"] : null;
             projectsNamed.push(named);
             const projectId = projectNamed(given(named), "writes into");
 
@@ -1220,19 +1233,19 @@ export function agentRoutes(options: {
          * carries a reader through the rest.
          */
         method: "GET",
-        path: "/api/agents",
+        path: "/v1/agents",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           return answering(() => {
             const project = projectNamed(
-              given(request.url.searchParams.get("project")),
+              given(request.url.searchParams.get("projectId")),
               "reads",
             );
-            const cursor = given(request.url.searchParams.get("cursor"));
+            const cursor = given(request.url.searchParams.get("pageToken"));
             if (cursor !== undefined && !isId("agt", cursor)) {
               throw new Refusal(
                 `"${cursor}" is not an agent id, so it cannot be a cursor. Send ` +
-                  "back the next_cursor from the page before this one, or leave it " +
+                  "back the nextPageToken from the page before this one, or leave it " +
                   "out to start at the newest.",
               );
             }
@@ -1250,8 +1263,13 @@ export function agentRoutes(options: {
             return {
               status: 200,
               body: {
-                items: page.map(agentOut),
-                next_cursor: more ? (page.at(-1)?.id ?? null) : null,
+                agents: page.map((agent) => ({
+                  ...agentOut(agent),
+                  connections: connections
+                    .filter((connection) => connection.agentId === agent.id)
+                    .map(connectionOut),
+                })),
+                nextPageToken: more ? (page.at(-1)?.id ?? null) : null,
               },
             };
           });
@@ -1261,7 +1279,7 @@ export function agentRoutes(options: {
         // The agent, and every living way of reaching it. A connection is only
         // ever reached through its agent.
         method: "GET",
-        path: "/api/agents/:agentId",
+        path: "/v1/agents/:agentId",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           const agent = agents.find((held) => held.id === request.params["agentId"]);
@@ -1281,7 +1299,7 @@ export function agentRoutes(options: {
         // Another way of reaching an agent that already exists. Same body,
         // and the same defaulted name one number further along.
         method: "POST",
-        path: "/api/agents/:agentId/connections",
+        path: "/v1/agents/:agentId/connections",
         handle: (request) => {
           if (!authorized(request.headers)) return notAuthenticated;
           const agent = agents.find((held) => held.id === request.params["agentId"]);

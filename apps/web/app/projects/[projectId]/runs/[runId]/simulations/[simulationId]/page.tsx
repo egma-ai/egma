@@ -3,16 +3,22 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  getSimulation,
+  regradeSimulation,
+} from "@egma/platform-api/client";
 
-import { writeJson, type Refusal } from "../../../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../../../lib/api.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
   judgedAssertions,
   REGRADE_IS_NOT_A_REPLAY,
-  simulationPath,
-  simulationRegradePath,
   type RegradeAsked,
   type SimulationEvidence,
 } from "../../../../../../../lib/simulations.ts";
@@ -52,7 +58,7 @@ import {
  * which run they wanted. The address is project-scoped and stable, so it can be
  * pasted into a ticket and open the same simulation next month.
  *
- * **One read supplies the whole page.** `GET /api/simulations/{id}` answers the
+ * **One read supplies the whole page.** `GET /v1/simulations/{id}` answers the
  * pins, the identities, the frozen plan, the measures, the verdicts and the
  * transcript together, with the transcript's window worked out on the server
  * from the simulation's own stamps. The only second request this page ever
@@ -116,8 +122,15 @@ function EvidenceView({
   const mayRevisit = role !== null && canAuthor(role);
 
   const { answer, reload } = useProjectRead<SimulationEvidence>(
-    simulationPath(simulationId),
+    (projectId) =>
+      platformAnswer(
+        getSimulation(
+          { simulationId, projectId },
+          { client: platformClient },
+        ),
+      ),
     projectId,
+    simulationId,
   );
 
   const [refused, setRefused] = useState<Refusal | null>(null);
@@ -150,7 +163,7 @@ function EvidenceView({
    */
   const stillJudging =
     evidence !== null &&
-    evidence.grading_jobs.some((job) =>
+    evidence.gradingJobs.some((job) =>
       ["pending", "claimed"].includes(job.status),
     );
 
@@ -170,9 +183,14 @@ function EvidenceView({
     setRefused(null);
     setAsked(null);
     setWorking(true);
-    const answered = await writeJson<RegradeAsked>(
-      simulationRegradePath(simulationId),
-      { method: "POST", project: projectId, body: {} },
+    const answered = await platformAnswer(
+      regradeSimulation(
+        {
+          simulationId,
+          projectId,
+        },
+        { client: platformClient },
+      ),
     );
     setWorking(false);
     setConfirming(false);
@@ -261,7 +279,7 @@ function EvidenceView({
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
           {
-            label: read.run_label ?? "Run",
+            label: read.runLabel ?? "Run",
             href: projectPath(projectId, "runs", runId),
           },
           { label: `Simulation ${String(read.position).padStart(2, "0")}` },
@@ -276,10 +294,10 @@ function EvidenceView({
               {read.agent.name ?? "the agent"}
             </Link>
             {` through ${read.connection.name ?? "the connection"}`}
-            {read.started_at === null ? null : (
+            {read.startedAt === null ? null : (
               <>
                 {" · started "}
-                <RelativeInstant instant={read.started_at} now={now} />
+                <RelativeInstant instant={read.startedAt} now={now} />
               </>
             )}
           </>
@@ -323,11 +341,11 @@ function EvidenceView({
           </Problem>
         )}
 
-        {read.skip_reason === null ? null : (
+        {read.skipReason === null ? null : (
           <Problem>
-            {read.skip_reason === "required_capability_unsupported"
-              ? `This connection was measured and does not support ${(read.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`
-              : `Nobody has measured whether this connection supports ${(read.skipped_capabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`}
+            {read.skipReason === "required_capability_unsupported"
+              ? `This connection was measured and does not support ${(read.skippedCapabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`
+              : `Nobody has measured whether this connection supports ${(read.skippedCapabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`}
           </Problem>
         )}
 

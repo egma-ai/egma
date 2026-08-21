@@ -191,21 +191,24 @@ describe("the token-endpoint shape", () => {
 describe("the server-owned connection form", () => {
   it("reads LiveKit's two variants instead of keeping a CLI field list", async () => {
     const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      expect(init?.headers).toEqual({ authorization: "Bearer machine-key" });
+      const headers = _input instanceof Request
+        ? _input.headers
+        : new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer machine-key");
       return new Response(
         JSON.stringify({
           items: [
             {
-              agent_platform: "livekit_agents",
-              agent_platform_label: "LiveKit Agents",
-              connection_kind: "livekit_room",
-              access_variant: LIVEKIT_KEY_PAIR_VARIANT,
-              access_variant_label: "LiveKit project credentials — Recommended",
+              agentPlatform: "livekit_agents",
+              agentPlatformLabel: "LiveKit Agents",
+              connectionKind: "livekit_room",
+              accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
+              accessVariantLabel: "LiveKit project credentials — Recommended",
               modality: "voice",
-              product_label: "LiveKit project credentials",
+              productLabel: "LiveKit project credentials",
               topology: "agent-dials-out",
-              simulator_adapter: true,
-              capability_discovery: false,
+              simulatorAdapter: true,
+              capabilityDiscovery: false,
               fields: [
                 {
                   key: "url",
@@ -213,11 +216,12 @@ describe("the server-owned connection form", () => {
                   kind: "url",
                   required: true,
                   help: "The server.",
+                  afterCredentials: false,
                 },
               ],
-              credential_rule: "required",
-              credential_help: "Stored sealed.",
-              credential_fields: [
+              credentialRule: "required",
+              credentialHelp: "Stored sealed.",
+              credentialFields: [
                 {
                   field: "apiKey",
                   label: "API key",
@@ -228,20 +232,20 @@ describe("the server-owned connection form", () => {
               ],
             },
             {
-              agent_platform: "livekit_agents",
-              agent_platform_label: "LiveKit Agents",
-              connection_kind: "livekit_room",
-              access_variant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
-              access_variant_label: "Customer token endpoint — Advanced",
+              agentPlatform: "livekit_agents",
+              agentPlatformLabel: "LiveKit Agents",
+              connectionKind: "livekit_room",
+              accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+              accessVariantLabel: "Customer token endpoint — Advanced",
               modality: "voice",
-              product_label: "LiveKit token endpoint",
+              productLabel: "LiveKit token endpoint",
               topology: "agent-dials-out",
-              simulator_adapter: true,
-              capability_discovery: false,
+              simulatorAdapter: true,
+              capabilityDiscovery: false,
               fields: [],
-              credential_rule: "required",
-              credential_help: "Required auth headers.",
-              credential_fields: [
+              credentialRule: "required",
+              credentialHelp: "Required auth headers.",
+              credentialFields: [
                 {
                   field: "headers",
                   label: "Auth headers",
@@ -264,8 +268,9 @@ describe("the server-owned connection form", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
-      "https://egma.example/api/connection-options",
+    const requested = fetchImpl.mock.calls[0]?.[0];
+    expect(requested instanceof Request ? requested.url : String(requested)).toBe(
+      "https://egma.example/v1/connection-options",
     );
     expect(result.kind).toBe("catalog");
     if (result.kind !== "catalog") return;

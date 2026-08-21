@@ -1,162 +1,64 @@
-import { connect, disconnect } from "@egma/db";
-import type { FastifyInstance } from "fastify";
-import { expect, it } from "vitest";
+import { platformOperations } from "@egma/platform-api/contract";
+import { afterEach, expect, it } from "vitest";
 
-import { REPOSITORY_CONTRACT } from "../src/routes/platform.ts";
-import { buildApi } from "../src/server.ts";
-import {
-  createMigratedDatabase,
-  TEST_ENCRYPTION_KEY,
-} from "../../../packages/db/test/support/database.ts";
-import { testConfig } from "./support/api.ts";
+import { fastifyPath } from "../src/http/platform-operation.ts";
+import { createApi, type TestApi } from "./support/api.ts";
 
-/**
- * What an instance with no carrier answers about its optional phone half. The
- * platform itself is ready because chat simulations can run.
- */
-const NO_CARRIER = {
-  state: "setup_required",
-  missing: ["the carrier trunk", "the source number"],
-};
+let api: TestApi;
 
-/**
- * The public identity survives the API object that first read it.
- *
- * Both objects use the same real Postgres database. Closing the first object
- * before building the second makes this a restart proof, not two reads from
- * one process-local value.
- */
-it("keeps one public platform identity across an API restart", async () => {
-  const database = await createMigratedDatabase("platform_info_restart");
-  connect({
-    databaseUrl: database.url,
-    maxConnections: 4,
-    encryptionKey: TEST_ENCRYPTION_KEY,
-  });
-  const config = testConfig({ databaseUrl: database.url });
-  let app: FastifyInstance | undefined;
-
-  try {
-    app = buildApi({ config }).app;
-    await app.ready();
-    const first = await app.inject({ method: "GET", url: "/api/platform" });
-    expect(first.statusCode).toBe(200);
-    const identity = first.json<Record<string, unknown>>();
-    expect(Object.keys(identity).sort()).toEqual([
-      "instance_id",
-      "origin",
-      "phone",
-      "repository_contract",
-    ]);
-    expect(identity).toEqual({
-      instance_id: expect.stringMatching(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u),
-      origin: config.baseUrl,
-      repository_contract: REPOSITORY_CONTRACT,
-      // Carrier setup is one optional capability. It does not make the whole
-      // platform unready when chat simulations can run.
-      phone: NO_CARRIER,
-    });
-
-    await app.close();
-    app = buildApi({ config }).app;
-    await app.ready();
-    const afterRestart = await app.inject({ method: "GET", url: "/api/platform" });
-
-    expect(afterRestart.statusCode).toBe(200);
-    expect(afterRestart.json()).toEqual(identity);
-    expect(JSON.stringify(identity)).not.toMatch(/secret|token|credential|cloud/iu);
-  } finally {
-    await app?.close();
-    await disconnect();
-    await database.drop();
-  }
+afterEach(async () => {
+  await api?.close();
 });
 
-/**
- * The route is public and unauthenticated, so an insert on every request is an
- * open invitation: a conflicting speculative insert still writes a tuple, an
- * index entry and a log record before discarding them, and anybody who can
- * reach the platform could grow dead rows on this table for nothing.
- *
- * Both halves of the fix are proved the same way — by making the write
- * impossible and by making the read impossible, and asking anyway.
- */
-it("reads its identity rather than writing on every public request", async () => {
-  const database = await createMigratedDatabase("platform_info_read_only");
-  connect({
-    databaseUrl: database.url,
-    maxConnections: 4,
-    encryptionKey: TEST_ENCRYPTION_KEY,
-  });
-  const config = testConfig({ databaseUrl: database.url });
-  let app: FastifyInstance | undefined;
+it("does not expose the retired platform identity route", async () => {
+  api = await createApi("platform_identity_retired");
 
-  try {
-    app = buildApi({ config }).app;
-    await app.ready();
-    const minted = (
-      await app.inject({ method: "GET", url: "/api/platform" })
-    ).json<{ instance_id: string }>();
-    expect(minted.instance_id).toMatch(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u);
+  const response = await api.app.inject({ method: "GET", url: "/api/platform" });
 
-    // Every later request on this process answers from what it already knows.
-    // With the row gone, an answer can only have come from memory — so this
-    // proves the requests after the first touch the table neither way.
-    await database.sql("delete from platform_instance");
-    for (let asked = 0; asked < 5; asked += 1) {
-      const again = await app.inject({ method: "GET", url: "/api/platform" });
-      expect(again.json()).toEqual({
-        instance_id: minted.instance_id,
-        origin: config.baseUrl,
-        // The shape this platform speaks to a repository. It is a constant of
-        // the build rather than anything in the store, so it is here on every
-        // answer including the ones served entirely from memory.
-        repository_contract: REPOSITORY_CONTRACT,
-        // A platform with no carrier says so here rather than making a
-        // developer discover it during a phone run. Chat still works.
-        phone: NO_CARRIER,
-      });
-    }
+  expect(response.statusCode).toBe(404);
+});
+
+it("publishes the platform API contract without account or system routes", async () => {
+  api = await createApi("platform_openapi");
+
+  const response = await api.app.inject({ method: "GET", url: "/openapi.json" });
+
+  expect(response.statusCode).toBe(200);
+  expect(response.headers["content-type"]).toMatch(/^application\/json/);
+
+  const document = response.json() as {
+    openapi: string;
+    paths: Record<string, unknown>;
+  };
+  expect(document.openapi).toBe("3.1.0");
+  expect(Object.keys(document.paths).length).toBeGreaterThan(0);
+  expect(Object.keys(document.paths).every((path) => path.startsWith("/v1/"))).toBe(
+    true,
+  );
+  expect(document.paths).toHaveProperty("/v1/projects");
+  expect(document.paths).not.toHaveProperty("/api/signup");
+  expect(document.paths).not.toHaveProperty("/api/platform/settings");
+  expect(document.paths).not.toHaveProperty("/health");
+  expect(document.paths).not.toHaveProperty("/v1/claims");
+});
+
+it("registers every contract operation only at its v1 Fastify route", async () => {
+  api = await createApi("platform_route_closure");
+
+  const operations = Object.values(platformOperations);
+  expect(operations).toHaveLength(80);
+
+  for (const operation of operations) {
+    const v1Route = fastifyPath(operation.path);
+    const retiredRoute = v1Route.replace(/^\/v1/u, "/api");
+
     expect(
-      (await database.sql<{ count: string }>("select count(*) from platform_instance")).rows,
-    ).toEqual([{ count: "0" }]);
-
-    // And a process that has to go and look reads before it writes. The guard
-    // fires on a speculative insert too: a BEFORE INSERT trigger runs before
-    // Postgres discovers the conflict, so an insert-first implementation would
-    // fail this request instead of answering it.
-    await app.close();
-    await disconnect();
-    await database.sql(
-      "insert into platform_instance (singleton, id) values (true, $1)",
-      [minted.instance_id],
-    );
-    await database.sql(`
-      create function refuse_any_insert() returns trigger language plpgsql as $$
-      begin raise exception 'platform_instance was written to on a public read'; end $$;
-      create trigger no_write_on_read before insert on platform_instance
-        for each row execute function refuse_any_insert();
-    `);
-
-    connect({
-      databaseUrl: database.url,
-      maxConnections: 4,
-      encryptionKey: TEST_ENCRYPTION_KEY,
-    });
-    app = buildApi({ config }).app;
-    await app.ready();
-    const cold = await app.inject({ method: "GET", url: "/api/platform" });
-
-    expect(cold.statusCode).toBe(200);
-    expect(cold.json()).toEqual({
-      instance_id: minted.instance_id,
-      origin: config.baseUrl,
-      repository_contract: REPOSITORY_CONTRACT,
-      phone: NO_CARRIER,
-    });
-  } finally {
-    await app?.close();
-    await disconnect();
-    await database.drop();
+      api.app.hasRoute({ method: operation.method, url: v1Route }),
+      `${operation.method} ${v1Route}`,
+    ).toBe(true);
+    expect(
+      api.app.hasRoute({ method: operation.method, url: retiredRoute }),
+      `${operation.method} ${retiredRoute}`,
+    ).toBe(false);
   }
 });

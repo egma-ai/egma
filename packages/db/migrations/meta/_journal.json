@@ -274,6 +274,13 @@
       "when": 1787215007592,
       "tag": "0038_parched_goblin_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787296213863,
+      "tag": "0039_lean_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

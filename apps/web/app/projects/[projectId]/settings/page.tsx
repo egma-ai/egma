@@ -2,13 +2,12 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { getProject, updateProject } from "@egma/platform-api/client";
 
-import { IDENTITY_CONFLICT, writeJson, type Refusal } from "../../../../lib/api.ts";
+import { IDENTITY_CONFLICT, type Refusal } from "../../../../lib/api.ts";
 import { roleOf } from "../../../../lib/me.ts";
-import {
-  projectSettingsPath,
-  type ProjectSettings,
-} from "../../../../lib/settings.ts";
+import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
+import type { ProjectSettings } from "../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,14 +70,14 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
 
   const { answer, reload } = useOrganizationRead<ProjectSettings>(
-    projectSettingsPath(projectId),
+    () => platformAnswer(getProject({ projectId }, { client: platformClient })),
   );
   const settled = answer?.status === "ready" ? answer.value : null;
 
   /**
    * The server's own answer, not this page's reading of a role.
    *
-   * `may_manage_projects` travels with the project because the API computed it
+   * `mayManageProjects` travels with the project because the API computed it
    * from `permits(auth, "manage_projects", …)` — the same check that decides
    * whether the write lands. Deriving it here from `role === "admin"` would
    * make this page a second opinion about what `manage_projects` means, and the
@@ -90,7 +89,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
    * the same rule the role above follows, and the reason the disabled controls
    * carry no sentence until there is one to give.
    */
-  const mayAdminister = settled?.may_manage_projects ?? false;
+  const mayAdminister = settled?.mayManageProjects ?? false;
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -159,11 +158,10 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
     setSaved(false);
     setSaving(true);
 
-    const written = await writeJson<ProjectSettings>(
-      projectSettingsPath(projectId),
-      {
-        method: "PATCH",
-        body: {
+    const written = await platformAnswer(
+      updateProject(
+        {
+          projectId,
           name: name.trim(),
           // The slug remains part of the server contract and existing links.
           // It is not an authoring choice on this screen, so every save sends
@@ -171,9 +169,10 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
           // one from hidden form state.
           slug: settled.slug,
           description: description.trim(),
-          expected_revision: settled.revision,
+          expectedRevision: settled.revision,
         },
-      },
+        { client: platformClient },
+      ),
     );
 
     setSaving(false);

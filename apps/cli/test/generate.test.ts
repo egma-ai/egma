@@ -28,7 +28,7 @@ import {
   convertTask as buildConvertTask,
   generateTask as buildGenerateTask,
 } from "../src/wizard/test-generation.ts";
-import { alreadyAsked } from "../src/wizard/login-step.ts";
+import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
@@ -176,9 +176,8 @@ async function runWalk(options: {
       launch: workspace.launch(options.script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
-      platform: alreadyAsked({
+      platform: selectedPlatform({
         url: platform.url,
-        instanceId: platform.instanceId,
         credentialsFile: workspace.credentialsFile,
       }),
       retell: { url: retell.url },

@@ -55,11 +55,11 @@ async function signUpWithAKey(
 
   const minted = await api.app.inject({
     method: "POST",
-    url: "/api/keys",
+    url: "/v1/keys",
     headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
     payload: {
       name: `${organizationName}'s agent`,
-      project_id: landed.project.id,
+      projectId: landed.project.id,
     },
   });
   expect(minted.statusCode).toBe(201);

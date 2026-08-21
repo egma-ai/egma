@@ -34,7 +34,7 @@ describe("platform logging", () => {
     });
     await api.app.inject({
       method: "GET",
-      url: "/api/platform?private_token=must-not-reach-the-log",
+      url: "/v1/agents?private_token=must-not-reach-the-log",
     });
 
     const beforeHealth = lines.filter((line) =>
@@ -50,7 +50,7 @@ describe("platform logging", () => {
         record["otel.event.name"] === "egma.http.server.request.finished",
     );
     const platformRequest = requests.find(
-      (record) => record["http.route"] === "/api/platform",
+      (record) => record["http.route"] === "/v1/agents",
     );
 
     expect(platformRequest).toMatchObject({
@@ -59,12 +59,12 @@ describe("platform logging", () => {
       "egma.log_schema_version": 1,
       body: "HTTP request finished",
       "http.request.method": "GET",
-      "http.route": "/api/platform",
-      "http.response.status_code": 200,
+      "http.route": "/v1/agents",
+      "http.response.status_code": 401,
       duration_ms: expect.any(Number),
     });
     expect(
-      requests.filter((record) => record["http.route"] === "/api/platform"),
+      requests.filter((record) => record["http.route"] === "/v1/agents"),
     ).toHaveLength(1);
     expect(
       lines.filter((line) =>

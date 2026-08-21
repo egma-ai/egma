@@ -1,3 +1,14 @@
+import type {
+  CreateApiKeyResponse,
+  CreateProjectResponse,
+  GetOrganizationResponse,
+  GetProjectResponse,
+  ListApiKeysResponse,
+  ListInvitationsResponse,
+  ListMembersResponse,
+  ListProjectsResponse,
+} from "@egma/platform-api/client";
+
 /**
  * What the Settings pages read: the organization, the projects in it, the
  * people, and the keys.
@@ -11,55 +22,20 @@
  * that minted it, and is never readable again from any route.
  */
 
-export type ProjectSettings = {
-  readonly id: string;
-  readonly name: string;
-  readonly slug: string;
-  readonly description: string | null;
-  readonly organization_id: string;
-  /** The token an edit has to name. Sent back with every save. */
-  readonly revision: string;
-  readonly created_at: string;
-  /** Present on the single-project read, absent on a row of the list. */
-  readonly may_manage_projects?: boolean;
-};
+export type ProjectSettings = CreateProjectResponse &
+  Partial<Pick<GetProjectResponse, "mayManageProjects">>;
 
-export type ProjectList = {
-  readonly items: readonly ProjectSettings[];
-  readonly may_manage_projects: boolean;
-};
+export type ProjectList = ListProjectsResponse;
 
-export type OrganizationSettings = {
-  readonly id: string;
-  readonly name: string;
-  readonly slug: string;
-  readonly created_at: string;
-  readonly may_manage_organization: boolean;
-};
+export type OrganizationSettings = GetOrganizationResponse;
 
-export type Member = {
-  readonly user_id: string;
-  readonly email: string;
-  readonly name: string | null;
-  readonly role: string;
-  readonly joined_at: string;
-  readonly deactivated_at: string | null;
-};
+export type Member = ListMembersResponse["members"][number];
 
-export type Roster = {
-  readonly members: readonly Member[];
-  readonly may_manage_members: boolean;
-};
+export type Roster = ListMembersResponse;
 
-export type Invitation = {
-  readonly id: string;
-  readonly email: string;
-  readonly role: string;
-  readonly expires_at: string;
-  readonly created_at: string;
-};
+export type Invitation = ListInvitationsResponse["invitations"][number];
 
-export type InvitationList = { readonly invitations: readonly Invitation[] };
+export type InvitationList = ListInvitationsResponse;
 
 /**
  * Whether an invitation can still be accepted.
@@ -83,32 +59,18 @@ export function standingOf(
   invitation: Invitation,
   now: number = Date.now(),
 ): InvitationStanding {
-  return Date.parse(invitation.expires_at) <= now ? "expired" : "pending";
+  return Date.parse(invitation.expiresAt) <= now ? "expired" : "pending";
 }
 
-export type ApiKey = {
-  readonly id: string;
-  readonly name: string | null;
-  readonly scope: string;
-  readonly organization_id: string;
-  readonly project_id: string | null;
-  /** Enough to tell one key from another, and not enough to be one. */
-  readonly looks_like: string;
-  readonly created_by_user_id: string;
-  readonly created_at: string;
-  readonly last_used_at: string | null;
-  readonly revoked_at: string | null;
-};
+export type ApiKey = ListApiKeysResponse["keys"][number];
 
 /** A key returned by the list route, with a human owner label. */
-export type ListedApiKey = ApiKey & {
-  readonly created_by_email: string;
-};
+export type ListedApiKey = ApiKey;
 
-export type ApiKeyList = { readonly keys: readonly ListedApiKey[] };
+export type ApiKeyList = ListApiKeysResponse;
 
 /** A minted key, and the one moment its secret exists outside the server. */
-export type MintedApiKey = ApiKey & { readonly secret: string };
+export type MintedApiKey = CreateApiKeyResponse;
 
 /**
  * Where a project is made.
@@ -118,27 +80,6 @@ export type MintedApiKey = ApiKey & { readonly secret: string };
  * a project called `new` and point the navigation into one.
  */
 export const NEW_PROJECT_PATH = "/new-project";
-
-export const PROJECTS_PATH = "/api/projects";
-export const ORGANIZATION_PATH = "/api/organization";
-export const MEMBERS_PATH = "/api/members";
-export const INVITATIONS_PATH = "/api/invitations";
-export const API_KEYS_PATH = "/api/keys";
-
-export function projectSettingsPath(projectId: string): string {
-  return `${PROJECTS_PATH}/${encodeURIComponent(projectId)}`;
-}
-
-export function memberActionPath(
-  userId: string,
-  action: "role" | "remove" | "deactivate",
-): string {
-  return `${MEMBERS_PATH}/${encodeURIComponent(userId)}/${action}`;
-}
-
-export function revokeApiKeyPath(apiKeyId: string): string {
-  return `${API_KEYS_PATH}/${encodeURIComponent(apiKeyId)}/revoke`;
-}
 
 /**
  * The roles somebody can be given, in the order the permission table reads
@@ -178,7 +119,7 @@ export function keysOwnedBy<Key extends ApiKey>(
   const mine: Key[] = [];
   const others: Key[] = [];
   for (const key of rowsIn(keys)) {
-    if (userId !== undefined && key.created_by_user_id === userId) mine.push(key);
+    if (userId !== undefined && key.createdByUserId === userId) mine.push(key);
     else others.push(key);
   }
   return { mine, others };
@@ -189,7 +130,7 @@ export function scopeOf(
   key: ApiKey,
   projects: readonly { readonly id: string; readonly name: string }[],
 ): string {
-  if (key.project_id === null) return "Whole organization";
-  const named = projects.find((project) => project.id === key.project_id);
-  return named === undefined ? key.project_id : `Project · ${named.name}`;
+  if (key.projectId === null) return "Whole organization";
+  const named = projects.find((project) => project.id === key.projectId);
+  return named === undefined ? key.projectId : `Project · ${named.name}`;
 }

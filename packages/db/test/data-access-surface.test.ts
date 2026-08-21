@@ -63,17 +63,12 @@ const CONTEXT_ESTABLISHING = [
 
 /**
  * What answers a question about the deployment rather than about a customer.
- * None takes an argument. One returns whether signup is claimed; one returns
- * the platform's own public, non-secret id; and the third returns what this
- * deployment has been configured with, with every secret in it reduced to
- * `null`. The build rule pins all three exact return types and refuses any of
- * them if it grows an argument.
+ * None takes an argument. One returns whether signup is claimed, and one
+ * returns what this deployment has been configured with, with every secret in
+ * it reduced to `null`. The build rule pins both exact return types and refuses
+ * either if it grows an argument.
  */
-const INSTANCE_SCOPED = [
-  "instanceIsClaimed",
-  "platformFacts",
-  "platformInstanceId",
-];
+const INSTANCE_SCOPED = ["instanceIsClaimed", "platformFacts"];
 
 /**
  * What hands egma's own services their work, and what keeps a dispatch honest

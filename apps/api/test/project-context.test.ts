@@ -48,7 +48,7 @@ async function listAgentsAs(
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const response = await api.app.inject({
     method: "GET",
-    url: `/api/agents?project=${project}`,
+    url: `/v1/agents?projectId=${project}`,
     headers: cookieOrKey,
   });
   return {
@@ -60,11 +60,11 @@ async function listAgentsAs(
 function registration(name: string, project: string): Record<string, unknown> {
   return {
     name,
-    project,
+    projectId: project,
     connection: {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_for_${name.replace(/\W/g, "")}` },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -74,9 +74,9 @@ function registration(name: string, project: string): Record<string, unknown> {
 
 /** A voice connection that starts without carrier configuration in this API. */
 const LIVEKIT_VOICE = {
-  agent_platform: "livekit_agents",
-  connection_kind: "livekit_room",
-  access_variant: "livekit_room.project_credentials",
+  agentPlatform: "livekit_agents",
+  connectionKind: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
   credentials: {
@@ -96,20 +96,20 @@ describe("a browser naming a project", () => {
 
     await api.app.inject({
       method: "POST",
-      url: "/api/agents",
+      url: "/v1/agents",
       headers: { authorization: `Bearer ${ada.secret}` },
       payload: registration("Front desk", ada.projectId),
     });
     await api.app.inject({
       method: "POST",
-      url: "/api/agents",
+      url: "/v1/agents",
       headers: { authorization: `Bearer ${ada.secret}` },
       payload: registration("Outbound desk", outbound.id),
     });
 
     const first = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
     expect(first.status).toBe(200);
-    expect((first.body.items as { name: string }[]).map((one) => one.name)).toEqual([
+    expect((first.body.agents as { name: string }[]).map((one) => one.name)).toEqual([
       "Front desk",
     ]);
 
@@ -117,12 +117,12 @@ describe("a browser naming a project", () => {
     const second = await listAgentsAs({ cookie: ada.cookie }, outbound.id);
     expect(second.status).toBe(200);
     expect(
-      (second.body.items as { name: string }[]).map((one) => one.name),
+      (second.body.agents as { name: string }[]).map((one) => one.name),
     ).toEqual(["Outbound desk"]);
 
     // And the first tab still reads its own project afterwards.
     const again = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
-    expect((again.body.items as { name: string }[]).map((one) => one.name)).toEqual([
+    expect((again.body.agents as { name: string }[]).map((one) => one.name)).toEqual([
       "Front desk",
     ]);
   });
@@ -222,7 +222,7 @@ describe("a browser working in a project that is not the first", () => {
     // grader copy. A project made through this door is ready for its first run.
     const made = await api.app.inject({
       method: "POST",
-      url: "/api/projects",
+      url: "/v1/projects",
       headers: { cookie: ada.cookie },
       payload: { name: "Outbound" },
     });
@@ -248,9 +248,9 @@ describe("a browser working in a project that is not the first", () => {
     // project in the body, which is where this door reads one.
     const registered = await api.app.inject({
       method: "POST",
-      url: "/api/agents",
+      url: "/v1/agents",
       headers: { cookie: ada.cookie },
-      payload: { name: "Outbound desk", project: outbound },
+      payload: { name: "Outbound desk", projectId: outbound },
     });
     expect(registered.statusCode, registered.body).toBe(201);
 
@@ -261,11 +261,11 @@ describe("a browser working in a project that is not the first", () => {
     // names.
     const inOutbound = await listAgentsAs({ cookie: ada.cookie }, outbound);
     expect(
-      (inOutbound.body.items as { name: string }[]).map((one) => one.name),
+      (inOutbound.body.agents as { name: string }[]).map((one) => one.name),
     ).toEqual(["Outbound desk"]);
 
     const inDefault = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
-    expect(inDefault.body.items).toEqual([]);
+    expect(inDefault.body.agents).toEqual([]);
   });
 
   /**
@@ -273,9 +273,9 @@ describe("a browser working in a project that is not the first", () => {
    *
    * The case above proves the caller that exists today. This one proves the
    * *door*, and it is the half that was missing: the first fix moved the
-   * register form to the body and left `POST /api/agents` reading nothing else,
+   * register form to the body and left `POST /v1/agents` reading nothing else,
    * so a request naming the project the way every other write in this group
-   * names it — `?project=` — was still answered from the session's own project,
+   * names it — `?projectId=` — was still answered from the session's own project,
    * with a 201 and an agent in the wrong place. The next caller written to the
    * group's own pattern would have reproduced the fault exactly.
    *
@@ -287,7 +287,7 @@ describe("a browser working in a project that is not the first", () => {
 
     const registered = await api.app.inject({
       method: "POST",
-      url: `/api/agents?project=${outbound}`,
+      url: `/v1/agents?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
       payload: { name: "Outbound desk" },
     });
@@ -295,11 +295,11 @@ describe("a browser working in a project that is not the first", () => {
 
     const inOutbound = await listAgentsAs({ cookie: ada.cookie }, outbound);
     expect(
-      (inOutbound.body.items as { name: string }[]).map((one) => one.name),
+      (inOutbound.body.agents as { name: string }[]).map((one) => one.name),
     ).toEqual(["Outbound desk"]);
 
     const inDefault = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
-    expect(inDefault.body.items).toEqual([]);
+    expect(inDefault.body.agents).toEqual([]);
   });
 
   /**
@@ -315,12 +315,12 @@ describe("a browser working in a project that is not the first", () => {
       "browser_run_elsewhere",
     );
 
-    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_outbound" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -329,17 +329,17 @@ describe("a browser working in a project that is not the first", () => {
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
     const connectionId = (registered.body.connection as { id: string }).id;
 
-    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
-    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
-      connection: connectionId,
-      test_versions: [String(pushed.body.version_id)],
-      idempotency_key: newId("run"),
+    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      connectionId: connectionId,
+      testVersionIds: [String(pushed.body.versionId)],
+      idempotencyKey: newId("run"),
       label: "The first run in Outbound",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -350,7 +350,7 @@ describe("a browser working in a project that is not the first", () => {
     // about a run the list beside it had just shown.
     const read = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}?project=${outbound}`,
+      url: `/v1/runs/${runId}?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
     });
     expect(read.statusCode, read.body).toBe(200);
@@ -361,7 +361,7 @@ describe("a browser working in a project that is not the first", () => {
     // The feed the same page follows it with.
     const followed = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}/events?after=0&project=${outbound}`,
+      url: `/v1/runs/${runId}/events?after=0&projectId=${outbound}`,
       headers: { cookie: ada.cookie },
     });
     expect(followed.statusCode, followed.body).toBe(200);
@@ -373,7 +373,7 @@ describe("a browser working in a project that is not the first", () => {
     // first.
     const stopped = await api.app.inject({
       method: "POST",
-      url: `/api/runs/${runId}/cancel?project=${outbound}`,
+      url: `/v1/runs/${runId}/cancel?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
       payload: {},
     });
@@ -386,7 +386,7 @@ describe("a browser working in a project that is not the first", () => {
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
     const foreign = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}?project=${outbound}`,
+      url: `/v1/runs/${runId}?projectId=${outbound}`,
       headers: { cookie: grace.cookie },
     });
     expect(foreign.statusCode).toBe(404);
@@ -411,7 +411,7 @@ describe("a browser working in a project that is not the first", () => {
       "browser_recording_elsewhere",
     );
 
-    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       // Voice, because a chat has no audio and would be refused for that
       // reason instead — which is a different sentence and would not say
@@ -420,15 +420,15 @@ describe("a browser working in a project that is not the first", () => {
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
-    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
     });
-    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
-      connection: (registered.body.connection as { id: string }).id,
-      test_versions: [String(pushed.body.version_id)],
-      idempotency_key: newId("run"),
+    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      connectionId: (registered.body.connection as { id: string }).id,
+      testVersionIds: [String(pushed.body.versionId)],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -456,7 +456,7 @@ describe("a browser working in a project that is not the first", () => {
 
     const asked = await api.app.inject({
       method: "GET",
-      url: `/api/simulations/${conversation}/recording?project=${outbound}`,
+      url: `/v1/simulations/${conversation}/recording?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
     });
     expect((asked.json() as { error: string }).error, asked.body).toBe(
@@ -467,7 +467,7 @@ describe("a browser working in a project that is not the first", () => {
     // project is still the session's own, where this conversation is not.
     const unnamed = await api.app.inject({
       method: "GET",
-      url: `/api/simulations/${conversation}/recording`,
+      url: `/v1/simulations/${conversation}/recording`,
       headers: { cookie: ada.cookie },
     });
     expect(unnamed.statusCode).toBe(404);
@@ -477,7 +477,7 @@ describe("a browser working in a project that is not the first", () => {
    * **What an unnamed read still means, pinned rather than fixed.**
    *
    * `/runs/{runId}` is the address a terminal prints, it carries no project,
-   * and it forwards by reading the run's own `project_id` — a read rather than
+   * and it forwards by reading the run's own `projectId` — a read rather than
    * a guess, which is the right design. What the design needs and does not have
    * is a read that spans the organization: a request naming no project acts in
    * the session's own, which is the organization's first, and `getRun` narrows
@@ -496,33 +496,33 @@ describe("a browser working in a project that is not the first", () => {
       "browser_unnamed_run_read",
     );
 
-    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_unnamed" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
     });
-    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
     });
-    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
-      connection: (registered.body.connection as { id: string }).id,
-      test_versions: [String(pushed.body.version_id)],
-      idempotency_key: newId("run"),
+    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      connectionId: (registered.body.connection as { id: string }).id,
+      testVersionIds: [String(pushed.body.versionId)],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
 
     const unnamed = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}`,
+      url: `/v1/runs/${runId}`,
       headers: { cookie: ada.cookie },
     });
     expect(unnamed.statusCode).toBe(404);
@@ -531,7 +531,7 @@ describe("a browser working in a project that is not the first", () => {
     // the whole of the difference.
     const named = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}?project=${outbound}`,
+      url: `/v1/runs/${runId}?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
     });
     expect(named.statusCode, named.body).toBe(200);
@@ -572,12 +572,12 @@ describe("a browser working in a project that is not the first", () => {
       });
 
     /* An agent and a connection to run against, in Outbound. */
-    const registered = await asBrowser("POST", `/api/agents?project=${outbound}`, {
+    const registered = await asBrowser("POST", `/v1/agents?projectId=${outbound}`, {
       name: "Outbound desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_by_address" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -588,89 +588,89 @@ describe("a browser working in a project that is not the first", () => {
       registered.json() as { connection: { id: string } }
     ).connection.id;
 
-    /* POST /api/tests */
-    const authored = await asBrowser("POST", `/api/tests?project=${outbound}`, {
+    /* POST /v1/tests */
+    const authored = await asBrowser("POST", `/v1/tests?projectId=${outbound}`, {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
     });
     expect(authored.statusCode, authored.body).toBe(201);
     const testId = (authored.json() as { id: string }).id;
 
-    /* PATCH /api/tests/{id} */
+    /* PATCH /v1/tests/{id} */
     const edited = await asBrowser(
       "PATCH",
-      `/api/tests/${testId}?project=${outbound}`,
+      `/v1/tests/${testId}?projectId=${outbound}`,
       { name: "Reschedules a booked appointment, politely" },
     );
     expect(edited.statusCode, edited.body).toBe(200);
-    const versionId = (edited.json() as { version_id: string }).version_id;
+    const versionId = (edited.json() as { versionId: string }).versionId;
 
-    /* POST /api/graders */
-    const used = await asBrowser("POST", `/api/graders?project=${outbound}`, {
-      library_id: PREDEFINED_GRADERS.latency,
+    /* POST /v1/graders */
+    const used = await asBrowser("POST", `/v1/graders?projectId=${outbound}`, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_response_latency", bound: 2000 },
       name: "Answers inside two seconds",
     });
     expect(used.statusCode, used.body).toBe(201);
     const graderId = (used.json() as { id: string }).id;
 
-    /* PATCH /api/graders/{id} */
+    /* PATCH /v1/graders/{id} */
     const retuned = await asBrowser(
       "PATCH",
-      `/api/graders/${graderId}?project=${outbound}`,
+      `/v1/graders/${graderId}?projectId=${outbound}`,
       { name: "Answers inside a second and a half" },
     );
     expect(retuned.statusCode, retuned.body).toBe(200);
 
-    /* POST /api/runs */
-    const started = await asBrowser("POST", `/api/runs?project=${outbound}`, {
-      connection: connectionId,
-      test_versions: [versionId],
-      idempotency_key: newId("run"),
+    /* POST /v1/runs */
+    const started = await asBrowser("POST", `/v1/runs?projectId=${outbound}`, {
+      connectionId: connectionId,
+      testVersionIds: [versionId],
+      idempotencyKey: newId("run"),
       label: "Started from the address",
     });
     expect(started.statusCode, started.body).toBe(201);
-    expect((started.json() as { project_id: string }).project_id).toBe(outbound);
+    expect((started.json() as { projectId: string }).projectId).toBe(outbound);
 
     /* Everything landed in Outbound... */
-    const outboundTests = await asBrowser("GET", `/api/tests?project=${outbound}`);
+    const outboundTests = await asBrowser("GET", `/v1/tests?projectId=${outbound}`);
     expect(
-      (outboundTests.json() as { items: { name: string }[] }).items.map(
+      (outboundTests.json() as { tests: { name: string }[] }).tests.map(
         (one) => one.name,
       ),
     ).toEqual(["Reschedules a booked appointment, politely"]);
 
     const outboundGraders = await asBrowser(
       "GET",
-      `/api/graders?project=${outbound}`,
+      `/v1/graders?projectId=${outbound}`,
     );
     expect(
-      (outboundGraders.json() as { items: { name: string }[] }).items.map(
+      (outboundGraders.json() as { graders: { name: string }[] }).graders.map(
         (one) => one.name,
       ),
     ).toContain("Answers inside a second and a half");
 
-    const outboundRuns = await asBrowser("GET", `/api/runs?project=${outbound}`);
+    const outboundRuns = await asBrowser("GET", `/v1/runs?projectId=${outbound}`);
     expect(
-      (outboundRuns.json() as { items: { label: string }[] }).items,
+      (outboundRuns.json() as { runs: { label: string }[] }).runs,
     ).toHaveLength(1);
 
     /* ...and nothing landed in the project the session is standing in. */
-    const firstTests = await asBrowser("GET", `/api/tests?project=${ada.projectId}`);
-    expect((firstTests.json() as { items: unknown[] }).items).toEqual([]);
+    const firstTests = await asBrowser("GET", `/v1/tests?projectId=${ada.projectId}`);
+    expect((firstTests.json() as { tests: unknown[] }).tests).toEqual([]);
 
-    const firstRuns = await asBrowser("GET", `/api/runs?project=${ada.projectId}`);
-    expect((firstRuns.json() as { items: unknown[] }).items).toEqual([]);
+    const firstRuns = await asBrowser("GET", `/v1/runs?projectId=${ada.projectId}`);
+    expect((firstRuns.json() as { runs: unknown[] }).runs).toEqual([]);
 
     // The seeded expected-behaviors copy and nothing else: the latency copy was
     // made in Outbound and the first project never heard about it.
     const firstGraders = await asBrowser(
       "GET",
-      `/api/graders?project=${ada.projectId}`,
+      `/v1/graders?projectId=${ada.projectId}`,
     );
     expect(
-      (firstGraders.json() as { items: { name: string }[] }).items.map(
+      (firstGraders.json() as { graders: { name: string }[] }).graders.map(
         (one) => one.name,
       ),
     ).toEqual(["expected_behaviors"]);
@@ -689,12 +689,12 @@ describe("a browser working in a project that is not the first", () => {
       "browser_retry_elsewhere",
     );
 
-    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_retry" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -702,26 +702,26 @@ describe("a browser working in a project that is not the first", () => {
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
-    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
     });
-    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
-      connection: (registered.body.connection as { id: string }).id,
-      test_versions: [String(pushed.body.version_id)],
-      idempotency_key: newId("run"),
+    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      connectionId: (registered.body.connection as { id: string }).id,
+      testVersionIds: [String(pushed.body.versionId)],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
     const again = await api.app.inject({
       method: "POST",
-      url: `/api/runs/${String(started.body.id)}/retry`,
+      url: `/v1/runs/${String(started.body.id)}/retry`,
       headers: { cookie: ada.cookie },
-      payload: { project: outbound, idempotency_key: newId("run") },
+      payload: { projectId: outbound, idempotencyKey: newId("run") },
     });
     expect(again.statusCode, again.body).toBe(201);
-    expect((again.json() as { retry_of_run_id: string }).retry_of_run_id).toBe(
+    expect((again.json() as { retryOfRunId: string }).retryOfRunId).toBe(
       String(started.body.id),
     );
 
@@ -733,12 +733,12 @@ describe("a browser working in a project that is not the first", () => {
     // first, and the answer is a confident 201 about the wrong place.
     const byAddress = await api.app.inject({
       method: "POST",
-      url: `/api/runs/${String(started.body.id)}/retry?project=${outbound}`,
+      url: `/v1/runs/${String(started.body.id)}/retry?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
-      payload: { idempotency_key: newId("run") },
+      payload: { idempotencyKey: newId("run") },
     });
     expect(byAddress.statusCode, byAddress.body).toBe(201);
-    expect((byAddress.json() as { project_id: string }).project_id).toBe(
+    expect((byAddress.json() as { projectId: string }).projectId).toBe(
       outbound,
     );
   });
@@ -786,7 +786,7 @@ describe("a key for the whole organization, where the organization holds two pro
     // — default persona and seeded grader included — rather than a bare row.
     const made = await api.app.inject({
       method: "POST",
-      url: "/api/projects",
+      url: "/v1/projects",
       headers: { cookie: ada.cookie },
       payload: { name: "Outbound" },
     });
@@ -802,15 +802,15 @@ describe("a key for the whole organization, where the organization holds two pro
       outbound,
     );
 
-    const registered = await ask(api.app, "POST", "/api/agents", keyForOutbound, {
+    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       connection:
         modality === "voice"
           ? LIVEKIT_VOICE
           : {
-              agent_platform: "retell",
-              connection_kind: "retell_chat_api",
-              access_variant: "retell_chat_api.api_key",
+              agentPlatform: "retell",
+              connectionKind: "retell_chat_api",
+              accessVariant: "retell_chat_api.api_key",
               modality: "chat",
               config: { retellAgentId: `agent_in_retell_${label}` },
               credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -818,17 +818,17 @@ describe("a key for the whole organization, where the organization holds two pro
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
-    const pushed = await ask(api.app, "POST", "/api/tests", keyForOutbound, {
+    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
-    const started = await ask(api.app, "POST", "/api/runs", keyForOutbound, {
-      connection: (registered.body.connection as { id: string }).id,
-      test_versions: [String(pushed.body.version_id)],
-      idempotency_key: newId("run"),
+    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      connectionId: (registered.body.connection as { id: string }).id,
+      testVersionIds: [String(pushed.body.versionId)],
+      idempotencyKey: newId("run"),
       label: "The first run in Outbound",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -854,7 +854,7 @@ describe("a key for the whole organization, where the organization holds two pro
 
     const read = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}`,
+      url: `/v1/runs/${runId}`,
       headers: asTheOrganization,
     });
     expect(read.statusCode, read.body).toBe(200);
@@ -864,14 +864,14 @@ describe("a key for the whole organization, where the organization holds two pro
 
     const followed = await api.app.inject({
       method: "GET",
-      url: `/api/runs/${runId}/events?after=0`,
+      url: `/v1/runs/${runId}/events?after=0`,
       headers: asTheOrganization,
     });
     expect(followed.statusCode, followed.body).toBe(200);
 
     const stopped = await api.app.inject({
       method: "POST",
-      url: `/api/runs/${runId}/cancel`,
+      url: `/v1/runs/${runId}/cancel`,
       headers: asTheOrganization,
       payload: {},
     });
@@ -917,7 +917,7 @@ describe("a key for the whole organization, where the organization holds two pro
 
     const asked = await api.app.inject({
       method: "GET",
-      url: `/api/simulations/${conversation}/recording`,
+      url: `/v1/simulations/${conversation}/recording`,
       headers: { authorization: `Bearer ${ada.secret}` },
     });
     expect(asked.statusCode, asked.body).toBe(503);
@@ -935,7 +935,7 @@ describe("a key for the whole organization, where the organization holds two pro
     */
     const conversationRead = await api.app.inject({
       method: "GET",
-      url: `/api/simulations/${conversation}`,
+      url: `/v1/simulations/${conversation}`,
       headers: { authorization: `Bearer ${ada.secret}` },
     });
     expect(conversationRead.statusCode, conversationRead.body).toBe(200);

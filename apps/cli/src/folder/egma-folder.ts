@@ -32,7 +32,7 @@ import {
   writeMockTools,
   type MockToolEntry,
 } from "./mock-tools.ts";
-import { normalizePlatformOrigin } from "../platform/identity.ts";
+import { normalizePlatformOrigin } from "../platform/url.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
 import { mappingAtKey, readYaml, textAt, yamlScalar } from "./yaml.ts";
 
@@ -84,12 +84,10 @@ export type NamedThing = {
   readonly id: string | null;
 };
 
-/** The non-secret identity of the one Egma platform that owns this folder. */
+/** The non-secret URL of the Egma platform that owns this folder. */
 export type PlatformBinding = {
-  /** The platform's canonical, normalized web origin. */
+  /** The platform's normalized web origin. */
   readonly origin: string;
-  /** The stable platform-instance identifier read from that origin. */
-  readonly instance: string;
 };
 
 /**
@@ -128,7 +126,6 @@ export function serializeConfig(config: FolderConfig): string {
   } else {
     lines.push("platform:");
     lines.push(`  origin: ${yamlScalar(config.platform.origin)}`);
-    lines.push(`  instance: ${yamlScalar(config.platform.instance)}`);
   }
   for (const key of CONFIG_KEYS) {
     const named = config[key];
@@ -175,20 +172,19 @@ export function parseConfig(document: string, where: string): FolderConfig {
       ? (() => {
           if (platformScalar !== null) {
             throw new Error(
-              `${where} has a platform value without an origin and instance. Run the Egma wizard to repair the repository binding.`,
+              `${where} has a platform value without an origin. Run the Egma wizard to repair the repository binding.`,
             );
           }
           return null;
         })()
       : (() => {
           const origin = textAt(platformMapping, "origin");
-          const instance = textAt(platformMapping, "instance");
-          if (origin === null || instance === null) {
+          if (origin === null) {
             throw new Error(
-              `${where} has an incomplete platform binding. Run the Egma wizard to repair it.`,
+              `${where} has a platform binding without an origin. Run the Egma wizard to repair it.`,
             );
           }
-          return { origin: committedOrigin(origin), instance };
+          return { origin: committedOrigin(origin) };
         })();
   const read = (key: (typeof CONFIG_KEYS)[number]): NamedThing | null => {
     const under = mappingAtKey(mapping, key);
@@ -313,15 +309,12 @@ export function teachingTheMove(refusal: string): string {
 }
 
 /**
- * Commit the verified platform before anything creates platform-owned resource
+ * Commit the selected platform before anything creates platform-owned resource
  * identifiers.
  *
- * A retry is byte-stable. **A binding that is already here is never rewritten,
- * not in either field.** The instance is the identity boundary, and the origin
- * is the address every clone of this repository will use — so a run that
- * quietly changed either would be moving other people's repository for them.
- * Both differences are refused and say what to do about it, and the address one
- * is normally caught earlier still, before any address is asked anything.
+ * A retry is byte-stable. A binding that is already here is never rewritten.
+ * The origin is the address every clone of this repository will use, so a run
+ * that quietly changed it would move other people's repository for them.
  */
 export async function bindRepositoryPlatform(
   repository: string,
@@ -342,16 +335,9 @@ export async function bindRepositoryPlatform(
   }
 
   if (held.platform !== null) {
-    if (held.platform.instance !== binding.instance) {
-      throw new Error(
-        teachingTheMove(
-          `This repository is already bound to Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached Egma platform ${binding.instance} at ${binding.origin}. Egma does not move a repository between platforms, and nothing was sent.`,
-        ),
-      );
-    }
     if (held.platform.origin !== binding.origin) {
       throw new Error(
-        `This repository records Egma platform ${held.platform.instance} at ${held.platform.origin}, and this run reached it at ${binding.origin}. Egma will not move a committed platform address for you. Use ${held.platform.origin}, or edit egma/config.yaml on purpose.`,
+        `This repository records the Egma platform at ${held.platform.origin}, and this run selected ${binding.origin}. Egma will not move a committed platform address for you. Use ${held.platform.origin}, or edit egma/config.yaml on purpose.`,
       );
     }
     return held;

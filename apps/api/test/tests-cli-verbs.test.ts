@@ -61,27 +61,21 @@ afterEach(async () => {
  */
 function fetchThrough(app: FastifyInstance): Fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const address = new URL(
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
+    const request = new Request(
+      input instanceof URL ? input.href : input,
+      init,
     );
-
-    const sent = init?.headers;
-    const headers: Record<string, string> =
-      sent instanceof Headers
-        ? Object.fromEntries(sent.entries())
-        : ((sent ?? {}) as Record<string, string>);
+    const address = new URL(request.url);
+    const body =
+      request.method === "GET" || request.method === "HEAD"
+        ? ""
+        : await request.text();
 
     const injected = await app.inject({
-      method: (init?.method ?? "GET") as "GET",
+      method: request.method as "GET",
       url: `${address.pathname}${address.search}`,
-      headers,
-      ...(init?.body === undefined
-        ? {}
-        : { payload: String(init.body) }),
+      headers: Object.fromEntries(request.headers.entries()),
+      ...(body === "" ? {} : { payload: body }),
     });
 
     return new Response(injected.body, {
@@ -138,7 +132,7 @@ function fileAt(name: string): string {
 async function boundAgent(signedIn: SignedIn): Promise<string> {
   const registered = await api.app.inject({
     method: "POST",
-    url: "/api/agents",
+    url: "/v1/agents",
     headers: { authorization: `Bearer ${signedIn.key}` },
     payload: { name: "Front desk" },
   });
@@ -172,10 +166,10 @@ describe("push, against a real instance", () => {
     // default persona standing in for the file naming nobody.
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/tests",
+      url: "/v1/tests",
       headers: { authorization: `Bearer ${signedIn.key}` },
     });
-    const items = (listed.json() as { items: Record<string, unknown>[] }).items;
+    const items = (listed.json() as { tests: Record<string, unknown>[] }).tests;
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({
       name: FILE.name,
@@ -183,7 +177,7 @@ describe("push, against a real instance", () => {
       // The wire carries plain sentences in both directions. A folder's file
       // writes statements and the platform answers statements — the priority
       // that once rode beside each one retired with the P0/P1/P2 ladder.
-      expected_behaviors: [...STATEMENTS],
+      expectedBehaviors: [...STATEMENTS],
     });
     expect((items[0]?.personas as unknown[]).length).toBe(1);
   });
@@ -252,19 +246,19 @@ describe("push, against a real instance", () => {
     // The teammate in the dashboard, editing while this developer works.
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/tests",
+      url: "/v1/tests",
       headers: { authorization: `Bearer ${signedIn.key}` },
     });
     const [onPlatform] = (
-      listed.json() as { items: { id: string; version_id: string }[] }
-    ).items;
+      listed.json() as { tests: { id: string; versionId: string }[] }
+    ).tests;
     const moved = await api.app.inject({
       method: "PATCH",
-      url: `/api/tests/${String(onPlatform?.id)}`,
+      url: `/v1/tests/${String(onPlatform?.id)}`,
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: {
         scenario: "The dashboard's own words.",
-        expected_version_id: onPlatform?.version_id,
+        expectedVersionId: onPlatform?.versionId,
       },
     });
     expect(moved.statusCode, moved.body).toBe(200);
@@ -331,31 +325,31 @@ describe("push, against a real instance", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/tests",
+      url: "/v1/tests",
       headers: { authorization: `Bearer ${signedIn.key}` },
     });
     const [onPlatform] = (
-      listed.json() as { items: { id: string; version_id: string }[] }
-    ).items;
+      listed.json() as { tests: { id: string; versionId: string }[] }
+    ).tests;
     if (onPlatform === undefined) throw new Error("the push wrote no test");
 
     const moved = await api.app.inject({
       method: "PATCH",
-      url: `/api/tests/${onPlatform.id}`,
+      url: `/v1/tests/${onPlatform.id}`,
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: {
         scenario: "The dashboard's own words.",
-        expected_version_id: onPlatform.version_id,
+        expectedVersionId: onPlatform.versionId,
       },
     });
-    const current = (moved.json() as { version_id: string }).version_id;
+    const current = (moved.json() as { versionId: string }).versionId;
 
     // The write the platform's own door refuses — what a second writer arriving
     // after the push's own check looks like from the client's side.
     const answer = await editTestOnPlatform(
       signedIn,
       onPlatform.id,
-      { versionId: onPlatform.version_id, revision: "", agentId: null },
+      { versionId: onPlatform.versionId, revision: "", agentId: null },
       {
         name: FILE.name,
         description: "",
@@ -415,17 +409,17 @@ describe("pull, against a real instance", () => {
 
     const authored = await api.app.inject({
       method: "POST",
-      url: "/api/tests",
+      url: "/v1/tests",
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: {
         name: FILE.name,
         scenario: FILE.scenario,
-        expected_behaviors: [...STATEMENTS],
+        expectedBehaviors: [...STATEMENTS],
       },
     });
     expect(authored.statusCode, authored.body).toBe(201);
     const onPlatform = authored.json() as {
-      version_id: string;
+      versionId: string;
       personas: { id: string; name: string }[];
     };
 
@@ -437,7 +431,7 @@ describe("pull, against a real instance", () => {
     const [written] = await readFolderTests(folder);
     expect(written?.test.name).toBe(FILE.name);
     expect(written?.test.scenario).toBe(FILE.scenario);
-    expect(written?.test.version).toBe(onPlatform.version_id);
+    expect(written?.test.version).toBe(onPlatform.versionId);
     // Personas cross the wire by name, so the file a team reads holds names.
     // Personas travel by identity with the display name beside them: the id is
     // what a push resolves and the name is what a reviewer reads.
@@ -477,19 +471,19 @@ describe("pull, against a real instance", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/tests",
+      url: "/v1/tests",
       headers: { authorization: `Bearer ${signedIn.key}` },
     });
     const [onPlatform] = (
-      listed.json() as { items: { id: string; version_id: string }[] }
-    ).items;
+      listed.json() as { tests: { id: string; versionId: string }[] }
+    ).tests;
     await api.app.inject({
       method: "PATCH",
-      url: `/api/tests/${String(onPlatform?.id)}`,
+      url: `/v1/tests/${String(onPlatform?.id)}`,
       headers: { authorization: `Bearer ${signedIn.key}` },
       payload: {
         scenario: "The dashboard's own words.",
-        expected_version_id: onPlatform?.version_id,
+        expectedVersionId: onPlatform?.versionId,
       },
     });
 

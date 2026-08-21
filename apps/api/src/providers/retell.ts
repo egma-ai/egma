@@ -1,3 +1,4 @@
+import { productLabelOf } from "@egma/db";
 import {
   confirmNumber,
   listAgents,
@@ -11,35 +12,62 @@ import {
  * The small, read-only Retell account seam used by provider setup.
  *
  * It accepts a key in memory, reads through the shared provider client, and
- * returns only the identities and routed numbers the setup screen needs.
+ * returns only normalized connection candidates. Product labels come from the
+ * connection registry, so discovery cannot create a second naming rule.
  */
 
-export type RetellRoutedNumber = {
-  readonly number: string;
-  readonly label: string;
-};
+export type RetellConnectionCandidate =
+  | {
+      readonly agentPlatform: "retell";
+      readonly connectionKind: "retell_chat_api";
+      readonly accessVariant: "retell_chat_api.api_key";
+      readonly modality: "chat";
+      readonly productLabel: string;
+      readonly config: { readonly retellAgentId: string };
+    }
+  | {
+      readonly agentPlatform: "retell";
+      readonly connectionKind: "phone_number";
+      readonly accessVariant: "phone_number.public_e164";
+      readonly modality: "voice";
+      readonly productLabel: string;
+      readonly config: { readonly phoneNumber: string };
+    };
 
-export type RetellVoiceAgent = {
-  readonly id: string;
+export type RetellDiscoveredAgent = {
+  readonly platformAgentId: string;
   readonly name: string;
-  readonly numbers: readonly RetellRoutedNumber[];
+  readonly connectionCandidates: readonly RetellConnectionCandidate[];
 };
 
-export type RetellVoiceDiscovery =
-  | { readonly kind: "ready"; readonly agents: readonly RetellVoiceAgent[] }
+export type RetellAgentDiscovery =
+  | { readonly kind: "ready"; readonly agents: readonly RetellDiscoveredAgent[] }
   | { readonly kind: "invalid_key" }
   | { readonly kind: "unavailable"; readonly message: string };
+
+export type RetellCandidateConfirmation =
+  | {
+      readonly kind: "ready";
+      readonly candidate: RetellConnectionCandidate;
+    }
+  | { readonly kind: "invalid_key" }
+  | { readonly kind: "rejected"; readonly message: string }
+  | { readonly kind: "unavailable"; readonly message: string };
+
+type RetellCandidateToConfirm =
+  | {
+      readonly connectionKind: "retell_chat_api";
+      readonly config: { readonly retellAgentId: string };
+    }
+  | {
+      readonly connectionKind: "phone_number";
+      readonly config: { readonly phoneNumber: string };
+    };
 
 export type RetellDirectTargetCheck =
   | { readonly kind: "ready" }
   | { readonly kind: "blocked"; readonly message: string }
   | { readonly kind: "retryable"; readonly message: string };
-
-export type RetellVoiceRouteCheck =
-  | { readonly kind: "ready"; readonly number: string }
-  | { readonly kind: "invalid_key" }
-  | { readonly kind: "rejected"; readonly message: string }
-  | { readonly kind: "unavailable"; readonly message: string };
 
 function credential(value: string): RetellCredential {
   return { reveal: () => value };
@@ -47,7 +75,7 @@ function credential(value: string): RetellCredential {
 
 function discoveryFailure(
   result: { readonly kind: string },
-): Exclude<RetellVoiceDiscovery, { readonly kind: "ready" }> {
+): Exclude<RetellAgentDiscovery, { readonly kind: "ready" }> {
   return result.kind === "invalid-key"
     ? { kind: "invalid_key" }
     : {
@@ -56,85 +84,147 @@ function discoveryFailure(
       };
 }
 
-export async function discoverRetellVoiceAgents(
+function chatCandidate(platformAgentId: string): RetellConnectionCandidate {
+  return {
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
+    modality: "chat",
+    productLabel: productLabelOf(
+      "retell",
+      "retell_chat_api",
+      "retell_chat_api.api_key",
+      "chat",
+    ),
+    config: { retellAgentId: platformAgentId },
+  };
+}
+
+function phoneCandidate(phoneNumber: string): RetellConnectionCandidate {
+  return {
+    agentPlatform: "retell",
+    connectionKind: "phone_number",
+    accessVariant: "phone_number.public_e164",
+    modality: "voice",
+    productLabel: productLabelOf(
+      "retell",
+      "phone_number",
+      "phone_number.public_e164",
+      "voice",
+    ),
+    config: { phoneNumber },
+  };
+}
+
+export async function discoverRetellAgents(
   apiKey: string,
   fetchImpl: ProviderFetch = fetch,
-): Promise<RetellVoiceDiscovery> {
+): Promise<RetellAgentDiscovery> {
   const key = credential(apiKey);
   const reach = { fetchImpl, signal: AbortSignal.timeout(15_000) };
-  const [agents, numbers] = await Promise.all([
-    listAgents(key, reach),
-    listNumbers(key, reach),
-  ]);
+  const agents = await listAgents(key, reach);
   if (agents.kind !== "agents") return discoveryFailure(agents);
-  if (numbers.kind !== "numbers") return discoveryFailure(numbers);
+
+  // Chat setup is complete from the agent listing alone. Phone-number access
+  // only adds candidates for voice agents, so its failure must not discard a
+  // usable chat connection discovered by the successful account read.
+  const listedNumbers = agents.agents.some((agent) => agent.modality === "voice")
+    ? await listNumbers(key, reach)
+    : undefined;
+  const numbers = listedNumbers?.kind === "numbers" ? listedNumbers.numbers : [];
 
   return {
     kind: "ready",
-    agents: agents.agents
-      .filter((agent) => agent.modality === "voice")
-      .map((agent) => ({
-        id: agent.id,
-        name: agent.name,
-        numbers: numbersAnswering(numbers.numbers, agent.id).map(
-          ({ number, label }) => ({ number, label }),
-        ),
-      })),
+    agents: agents.agents.map((agent) => ({
+      platformAgentId: agent.id,
+      name: agent.name,
+      connectionCandidates:
+        agent.modality === "chat"
+          ? [chatCandidate(agent.id)]
+          : numbersAnswering(numbers, agent.id).map(({ number }) =>
+              phoneCandidate(number),
+            ),
+    })),
   };
 }
 
 /**
- * Re-read the chosen agent and the chosen number immediately before Egma
- * writes a provider-blind phone connection.
+ * Re-read one candidate immediately before the generic connection write.
+ *
+ * Discovery is only a snapshot. This check keeps provider-specific routing
+ * behind the provider seam while the public mutation remains the ordinary
+ * agent-rooted connection create.
  */
-export async function verifyRetellVoiceRoute(
+export async function confirmRetellCandidate(
   apiKey: string,
-  agentId: string,
-  phoneNumber: string,
+  platformAgentId: string,
+  candidate: RetellCandidateToConfirm,
   fetchImpl: ProviderFetch = fetch,
-): Promise<RetellVoiceRouteCheck> {
+): Promise<RetellCandidateConfirmation> {
   const key = credential(apiKey);
   const reach = { fetchImpl, signal: AbortSignal.timeout(15_000) };
-  const [agents, number] = await Promise.all([
-    listAgents(key, reach),
-    confirmNumber(key, phoneNumber, reach),
-  ]);
-  if (agents.kind === "invalid-key" || number.kind === "invalid-key") {
-    return { kind: "invalid_key" };
-  }
-  if (agents.kind !== "agents" || number.kind === "refused" || number.kind === "unreachable") {
+  const agents = await listAgents(key, reach);
+  if (agents.kind === "invalid-key") return { kind: "invalid_key" };
+  if (agents.kind !== "agents") {
     return {
       kind: "unavailable",
-      message: "Retell could not confirm this route. Check its network and try again.",
+      message: "Retell could not confirm this connection. Check its network and try again.",
     };
   }
 
-  const agent = agents.agents.find((candidate) => candidate.id === agentId);
+  const agent = agents.agents.find((one) => one.id === platformAgentId);
   if (agent === undefined) {
     return {
       kind: "rejected",
-      message: "Retell no longer lists that agent. Load the account again and choose another agent.",
+      message:
+        "Retell no longer lists that agent. Load the account again and choose another agent.",
     };
   }
+
+  if (candidate.connectionKind === "retell_chat_api") {
+    if (
+      candidate.config.retellAgentId !== platformAgentId ||
+      agent.modality !== "chat"
+    ) {
+      return {
+        kind: "rejected",
+        message:
+          "That Retell agent is no longer available through the Chat API. Load the account again and choose an available connection.",
+      };
+    }
+    return { kind: "ready", candidate: chatCandidate(platformAgentId) };
+  }
+
   if (agent.modality !== "voice") {
     return {
       kind: "rejected",
       message: "That Retell agent is chat-only. Choose a voice agent.",
     };
   }
+
+  const number = await confirmNumber(key, candidate.config.phoneNumber, reach);
+  if (number.kind === "invalid-key") return { kind: "invalid_key" };
+  if (number.kind === "refused" || number.kind === "unreachable") {
+    return {
+      kind: "unavailable",
+      message: "Retell could not confirm this route. Check its network and try again.",
+    };
+  }
   if (number.kind === "gone") {
     return {
       kind: "rejected",
-      message: "Retell no longer lists that phone number. Load the account again and choose another number.",
+      message:
+        "Retell no longer lists that phone number. Load the account again and choose another number.",
     };
   }
-  if (!number.number.answeredBy.includes(agent.id)) {
+  if (!number.number.answeredBy.includes(platformAgentId)) {
     return {
       kind: "rejected",
-      message: "That phone number is no longer routed to the selected agent. Load the account again.",
+      message:
+        "That phone number is no longer routed to the selected agent. Load the account again.",
     };
   }
-  return { kind: "ready", number: number.number.number };
+  return { kind: "ready", candidate: phoneCandidate(number.number.number) };
 }
 
 /**

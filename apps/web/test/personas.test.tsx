@@ -13,6 +13,7 @@ import NewPersonaPage from "../app/projects/[projectId]/personas/new/page.tsx";
 import PersonasPage from "../app/projects/[projectId]/personas/page.tsx";
 import type { Me } from "../lib/me.ts";
 import type { Persona, PersonaForm, PersonaModels } from "../lib/personas.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * The Personas pages, rendered and driven the way somebody with a keyboard
@@ -81,7 +82,7 @@ const RECOMMENDED_MODELS: PersonaModels = {
 };
 
 const PERSONA_FORM: PersonaForm = {
-  model_catalog: [
+  modelCatalog: [
     { provider: "openai", job: "llm", model: "gpt-4o-mini", label: "OpenAI" },
     {
       provider: "openai",
@@ -100,18 +101,18 @@ const PERSONA_FORM: PersonaForm = {
       job: "tts",
       model: "sonic-3.5",
       label: "Cartesia",
-      recommended_voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+      recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
     },
     {
       provider: "openai",
       job: "tts",
       model: "gpt-4o-mini-tts",
       label: "OpenAI",
-      recommended_voice_id: "alloy",
+      recommendedVoiceId: "alloy",
     },
   ],
-  recommended_models: RECOMMENDED_MODELS,
-  speed_range: { slowest: 0.6, fastest: 1.5 },
+  recommendedModels: RECOMMENDED_MODELS,
+  speedRange: { slowest: 0.6, fastest: 1.5 },
 };
 
 function meWith(role: string): Me {
@@ -134,7 +135,7 @@ type Stubbed = { status: number; body: unknown } | "never";
 /**
  * Whatever egma is standing in for, keyed by **method and path** — because
  * these pages read and write the same address, and a stub that could not tell
- * `GET /api/personas/prs_1` from `PATCH /api/personas/prs_1` would prove
+ * `GET /v1/personas/prs_1` from `PATCH /v1/personas/prs_1` would prove
  * nothing about either.
  *
  * A key may be given a list, answered in order and then repeating its last
@@ -148,22 +149,19 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
-      const at = new URL(String(input), "http://egma.test");
-      const method = init?.method ?? "GET";
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const request = await observeRequest(input, init);
+      const { address: at, method } = request;
       const key = `${method} ${at.pathname}`;
       asked.push({
         method,
         path: `${at.pathname}${at.search}`,
-        body:
-          typeof init?.body === "string"
-            ? (JSON.parse(init.body) as unknown)
-            : undefined,
+        body: request.body,
       });
 
       const held =
         answers[key] ??
-        (key === "GET /api/persona-form"
+        (key === "GET /v1/persona-form"
           ? { status: 200, body: PERSONA_FORM }
           : undefined);
       if (held === undefined) throw new Error(`nothing stubbed for ${key}`);
@@ -184,12 +182,12 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
 
 const RITA: Persona = {
   id: "prs_1",
-  project_id: "prj_1",
+  projectId: "prj_1",
   owner: "organization",
   name: "Impatient Rita",
   description: "Somebody in a hurry.",
   version: 1,
-  version_id: "prsv_1",
+  versionId: "prsv_1",
   traits: {
     personality: "Seventy, hard of hearing, and gets louder when she mishears.",
     language: "en-US",
@@ -201,16 +199,16 @@ const RITA: Persona = {
   },
   models: RECOMMENDED_MODELS,
   revision: "revision-one",
-  archived_at: null,
-  is_default: false,
-  created_at: "2026-08-15T10:00:00.000Z",
-  updated_at: "2026-08-15T10:00:00.000Z",
+  archivedAt: null,
+  isDefault: false,
+  createdAt: "2026-08-15T10:00:00.000Z",
+  updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
 const DEFAULT_PERSONA: Persona = {
   ...RITA,
   id: "prs_0",
-  project_id: null,
+  projectId: null,
   owner: "egma",
   name: "Default Persona",
   description: "Regular conversationalist persona",
@@ -226,7 +224,7 @@ const DEFAULT_PERSONA: Persona = {
       "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
   },
   revision: "revision-default-persona",
-  is_default: true,
+  isDefault: true,
 };
 
 beforeEach(() => {
@@ -248,9 +246,9 @@ describe("the Personas list", () => {
   it("shows Type and Project default as separate facts", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/personas": {
+      "GET /v1/personas": {
         status: 200,
-        body: { items: [RITA, DEFAULT_PERSONA], next_cursor: null },
+        body: { personas: [RITA, DEFAULT_PERSONA], nextPageToken: null },
       },
     });
     render(<PersonasPage />);
@@ -258,7 +256,7 @@ describe("the Personas list", () => {
     // Once, because the table changes layout without cloning the row.
     expect(await screen.findAllByText("Impatient Rita")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain(
-      "/api/personas?project=prj_1",
+      "/v1/personas?projectId=prj_1",
     );
 
     const table = screen.getByRole("table", {
@@ -292,7 +290,7 @@ describe("the Personas list", () => {
    *
    * - *The archive is asked for separately.* Still true and still proven, on
    *   the side that owns it: `apps/api/test/personas-routes.test.ts` asks
-   *   `/api/personas?archived=true` and reads the archived half back, keyset
+   *   `/v1/personas?archived=true` and reads the archived half back, keyset
    *   cursor and all. `personasPath` and `personasAfter` still carry the flag.
    * - *An empty archive says it is empty rather than saying the project has no
    *   personas.* The branch is still written and still reachable the moment the
@@ -311,9 +309,9 @@ describe("the Personas list", () => {
   it("offers no authoring control at all while the session is still in flight", async () => {
     apiAnswers({
       "GET /api/me": "never",
-      "GET /api/personas": {
+      "GET /v1/personas": {
         status: 200,
-        body: { items: [RITA], next_cursor: null },
+        body: { personas: [RITA], nextPageToken: null },
       },
     });
     render(<PersonasPage />);
@@ -327,9 +325,9 @@ describe("the Personas list", () => {
   it("offers a member the way to author, and a viewer the same control genuinely disabled", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/personas": {
+      "GET /v1/personas": {
         status: 200,
-        body: { items: [RITA], next_cursor: null },
+        body: { personas: [RITA], nextPageToken: null },
       },
     });
     const { unmount } = render(<PersonasPage />);
@@ -340,9 +338,9 @@ describe("the Personas list", () => {
 
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /api/personas": {
+      "GET /v1/personas": {
         status: 200,
-        body: { items: [RITA], next_cursor: null },
+        body: { personas: [RITA], nextPageToken: null },
       },
     });
     render(<PersonasPage />);
@@ -361,8 +359,8 @@ describe("the Personas list", () => {
   it("says so when the next page fails, and lets somebody ask again on purpose", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/personas": [
-        { status: 200, body: { items: [RITA], next_cursor: "prs_1" } },
+      "GET /v1/personas": [
+        { status: 200, body: { personas: [RITA], nextPageToken: "prs_1" } },
         {
           status: 503,
           body: {
@@ -373,8 +371,8 @@ describe("the Personas list", () => {
         {
           status: 200,
           body: {
-            items: [{ ...RITA, id: "prs_2", name: "Patient Pat" }],
-            next_cursor: null,
+            personas: [{ ...RITA, id: "prs_2", name: "Patient Pat" }],
+            nextPageToken: null,
           },
         },
       ],
@@ -409,21 +407,21 @@ describe("the Personas list", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string) => {
-        const at = new URL(String(input), "http://egma.test");
+      vi.fn(async (input: FetchInput) => {
+        const { address: at } = await observeRequest(input);
         if (at.pathname === "/api/me") return json(200, meWith("admin"));
-        if (at.searchParams.has("cursor")) return pending;
-        const project = at.searchParams.get("project");
+        if (at.searchParams.has("pageToken")) return pending;
+        const project = at.searchParams.get("projectId");
         return json(200, {
-          items: [
+          personas: [
             {
               ...RITA,
               id: `prs_${String(project)}`,
-              project_id: String(project),
+              projectId: String(project),
               name: project === "prj_1" ? "Impatient Rita" : "Night-shift Nell",
             },
           ],
-          next_cursor: "prs_cursor",
+          nextPageToken: "prs_cursor",
         });
       }),
     );
@@ -441,8 +439,8 @@ describe("the Personas list", () => {
 
     release(
       json(200, {
-        items: [{ ...RITA, id: "prs_stale", name: "Somebody else's project" }],
-        next_cursor: null,
+        personas: [{ ...RITA, id: "prs_stale", name: "Somebody else's project" }],
+        nextPageToken: null,
       }),
     );
     await new Promise((settle) => setTimeout(settle, 0));
@@ -459,8 +457,8 @@ describe("authoring a persona", () => {
   it("sends identity and complete human traits, and lands on the persona it made", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/persona-form": { status: 200, body: PERSONA_FORM },
-      "POST /api/personas": {
+      "GET /v1/persona-form": { status: 200, body: PERSONA_FORM },
+      "POST /v1/personas": {
         status: 201,
         body: { ...RITA, id: "prs_new" },
       },
@@ -505,7 +503,7 @@ describe("authoring a persona", () => {
 
     const written = asked.find((one) => one.method === "POST");
     expect(written?.body).toMatchObject({
-      project: "prj_1",
+      projectId: "prj_1",
       name: "Impatient Rita",
       description: "Somebody in a hurry.",
       traits: {
@@ -529,7 +527,7 @@ describe("authoring a persona", () => {
       "underFriction",
     ]);
     expect(asked.map((one) => one.path)).toContain(
-      "/api/persona-form?project=prj_1",
+      "/v1/persona-form?projectId=prj_1",
     );
     expect(routed.push).toHaveBeenCalledWith(
       "/projects/prj_1/personas/prs_new",
@@ -539,8 +537,8 @@ describe("authoring a persona", () => {
   it("keeps everything typed when egma refuses, and shows what it said", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/persona-form": { status: 200, body: PERSONA_FORM },
-      "POST /api/personas": {
+      "GET /v1/persona-form": { status: 200, body: PERSONA_FORM },
+      "POST /v1/personas": {
         status: 422,
         body: { error: "unprocessable", message: "a persona needs a name" },
       },
@@ -570,7 +568,7 @@ describe("authoring a persona", () => {
   it("leaves a viewer the form to read and no way to submit it", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /api/persona-form": { status: 200, body: PERSONA_FORM },
+      "GET /v1/persona-form": { status: 200, body: PERSONA_FORM },
     });
     render(<NewPersonaPage />);
 
@@ -587,22 +585,22 @@ describe("authoring a persona", () => {
 describe("one persona's page", () => {
   const reads = (persona: Persona = RITA) => ({
     "GET /api/me": { status: 200, body: meWith("member") },
-    "GET /api/persona-form": { status: 200, body: PERSONA_FORM },
-    "GET /api/personas/prs_1": { status: 200, body: persona },
-    "GET /api/personas/prs_1/versions": {
+    "GET /v1/persona-form": { status: 200, body: PERSONA_FORM },
+    "GET /v1/personas/prs_1": { status: 200, body: persona },
+    "GET /v1/personas/prs_1/versions": {
       status: 200,
       body: {
-        items: [
+        versions: [
           {
             id: "prsv_1",
-            persona_id: "prs_1",
+            personaId: "prs_1",
             version: 1,
             traits: persona.traits,
             models: persona.models,
-            created_at: "2026-08-15T10:00:00.000Z",
+            createdAt: "2026-08-15T10:00:00.000Z",
           },
         ],
-        next_cursor: null,
+        nextPageToken: null,
       },
     },
   });
@@ -610,7 +608,7 @@ describe("one persona's page", () => {
   it("keeps one save disabled until a live field changes, then sends no version expectation", async () => {
     const { asked } = apiAnswers({
       ...reads(),
-      "PATCH /api/personas/prs_1": {
+      "PATCH /v1/personas/prs_1": {
         status: 200,
         body: { ...RITA, name: "Rita", revision: "revision-two" },
       },
@@ -634,13 +632,13 @@ describe("one persona's page", () => {
       Record<string, unknown> | undefined;
 
     expect(written).toMatchObject({
-      project: "prj_1",
-      expected_revision: "revision-one",
+      projectId: "prj_1",
+      expectedRevision: "revision-one",
       name: "Rita",
     });
     // A rename is not a content change, so it names no version — sending one
     // would make a rename fail because somebody else edited the traits.
-    expect(written).not.toHaveProperty("expected_version_id");
+    expect(written).not.toHaveProperty("expectedVersionId");
     expect(written).not.toHaveProperty("traits");
     expect(written).not.toHaveProperty("description");
 
@@ -654,9 +652,9 @@ describe("one persona's page", () => {
   it("saves personality with both expectations, because it mints a version", async () => {
     const { asked } = apiAnswers({
       ...reads(),
-      "PATCH /api/personas/prs_1": {
+      "PATCH /v1/personas/prs_1": {
         status: 200,
-        body: { ...RITA, version: 2, version_id: "prsv_2" },
+        body: { ...RITA, version: 2, versionId: "prsv_2" },
       },
     });
     render(<PersonaPage />);
@@ -676,8 +674,8 @@ describe("one persona's page", () => {
       Record<string, unknown> | undefined;
 
     expect(written).toMatchObject({
-      expected_revision: "revision-one",
-      expected_version_id: "prsv_1",
+      expectedRevision: "revision-one",
+      expectedVersionId: "prsv_1",
       traits: {
         ...RITA.traits,
         personality: "Patient at first, then asks for a person.",
@@ -700,13 +698,13 @@ describe("one persona's page", () => {
     };
     const { asked } = apiAnswers({
       ...reads(),
-      "PATCH /api/personas/prs_1": {
+      "PATCH /v1/personas/prs_1": {
         status: 200,
         body: {
           ...RITA,
           models: changedModels,
           version: 2,
-          version_id: "prsv_2",
+          versionId: "prsv_2",
         },
       },
     });
@@ -730,9 +728,9 @@ describe("one persona's page", () => {
       expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
     });
     expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
-      project: "prj_1",
-      expected_revision: "revision-one",
-      expected_version_id: "prsv_1",
+      projectId: "prj_1",
+      expectedRevision: "revision-one",
+      expectedVersionId: "prsv_1",
       models: changedModels,
     });
   });
@@ -741,7 +739,7 @@ describe("one persona's page", () => {
     const personality = "Patient at first, then asks for a person.";
     const { asked } = apiAnswers({
       ...reads(),
-      "PATCH /api/personas/prs_1": {
+      "PATCH /v1/personas/prs_1": {
         status: 200,
         body: {
           ...RITA,
@@ -749,7 +747,7 @@ describe("one persona's page", () => {
           description: "Wants a quick answer.",
           traits: { ...RITA.traits, personality },
           version: 2,
-          version_id: "prsv_2",
+          versionId: "prsv_2",
           revision: "revision-two",
         },
       },
@@ -771,9 +769,9 @@ describe("one persona's page", () => {
       expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
     });
     expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
-      project: "prj_1",
-      expected_revision: "revision-one",
-      expected_version_id: "prsv_1",
+      projectId: "prj_1",
+      expectedRevision: "revision-one",
+      expectedVersionId: "prsv_1",
       name: "Rita",
       description: "Wants a quick answer.",
       traits: { ...RITA.traits, personality },
@@ -788,7 +786,7 @@ describe("one persona's page", () => {
   it("keeps the edit when a stale write is refused, and offers the way back", async () => {
     apiAnswers({
       ...reads(),
-      "PATCH /api/personas/prs_1": {
+      "PATCH /v1/personas/prs_1": {
         status: 409,
         body: {
           error: "version_conflict",
@@ -825,7 +823,7 @@ describe("one persona's page", () => {
     const current = {
       ...RITA,
       version: 2,
-      version_id: "prsv_2",
+      versionId: "prsv_2",
       traits: {
         ...RITA.traits,
         personality: "Patient now, but still hard of hearing.",
@@ -833,28 +831,28 @@ describe("one persona's page", () => {
     };
     apiAnswers({
       ...reads(current),
-      "GET /api/personas/prs_1/versions": {
+      "GET /v1/personas/prs_1/versions": {
         status: 200,
         body: {
-          items: [
+          versions: [
             {
               id: "prsv_2",
-              persona_id: "prs_1",
+              personaId: "prs_1",
               version: 2,
               traits: current.traits,
               models: current.models,
-              created_at: "2026-08-16T10:00:00.000Z",
+              createdAt: "2026-08-16T10:00:00.000Z",
             },
             {
               id: "prsv_1",
-              persona_id: "prs_1",
+              personaId: "prs_1",
               version: 1,
               traits: RITA.traits,
               models: RITA.models,
-              created_at: "2026-08-15T10:00:00.000Z",
+              createdAt: "2026-08-15T10:00:00.000Z",
             },
           ],
-          next_cursor: null,
+          nextPageToken: null,
         },
       },
     });
@@ -893,25 +891,25 @@ describe("one persona's page", () => {
 
   it("asks who takes the pointer before archiving the project's default", async () => {
     const { asked } = apiAnswers({
-      ...reads({ ...RITA, is_default: true }),
-      "GET /api/personas": {
+      ...reads({ ...RITA, isDefault: true }),
+      "GET /v1/personas": {
         status: 200,
         body: {
-          items: [
-            { ...RITA, is_default: true },
+          personas: [
+            { ...RITA, isDefault: true },
             {
               ...RITA,
               id: "prs_2",
               name: "Taking-Over Tam",
-              is_default: false,
+              isDefault: false,
             },
           ],
-          next_cursor: null,
+          nextPageToken: null,
         },
       },
-      "POST /api/personas/prs_1/archive": {
+      "POST /v1/personas/prs_1/archive": {
         status: 200,
-        body: { ...RITA, archived_at: "2026-08-15T12:00:00.000Z" },
+        body: { ...RITA, archivedAt: "2026-08-15T12:00:00.000Z" },
       },
     });
     render(<PersonaPage />);
@@ -935,17 +933,17 @@ describe("one persona's page", () => {
     await screen.findByRole("button", { name: "Archive" });
     const written = asked.find((one) => one.path.endsWith("/archive"))?.body;
     expect(written).toMatchObject({
-      expected_revision: "revision-one",
-      replacement_persona_id: "prs_2",
+      expectedRevision: "revision-one",
+      replacementPersonaId: "prs_2",
     });
   });
 
   it("asks nobody anything before archiving a persona that is not the default", async () => {
     const { asked } = apiAnswers({
       ...reads(),
-      "POST /api/personas/prs_1/archive": {
+      "POST /v1/personas/prs_1/archive": {
         status: 200,
-        body: { ...RITA, archived_at: "2026-08-15T12:00:00.000Z" },
+        body: { ...RITA, archivedAt: "2026-08-15T12:00:00.000Z" },
       },
     });
     render(<PersonaPage />);
@@ -963,19 +961,19 @@ describe("one persona's page", () => {
     await screen.findByRole("button", { name: "Archive" });
     const written = asked.find((one) => one.path.endsWith("/archive"))?.body as
       Record<string, unknown> | undefined;
-    expect(written).toMatchObject({ expected_revision: "revision-one" });
-    expect(written).not.toHaveProperty("replacement_persona_id");
+    expect(written).toMatchObject({ expectedRevision: "revision-one" });
+    expect(written).not.toHaveProperty("replacementPersonaId");
   });
 
   it("makes any active available persona the project default", async () => {
-    const selected = { ...RITA, is_default: true };
+    const selected = { ...RITA, isDefault: true };
     const { asked } = apiAnswers({
       ...reads(),
-      "GET /api/personas/prs_1": [
+      "GET /v1/personas/prs_1": [
         { status: 200, body: RITA },
         { status: 200, body: selected },
       ],
-      "POST /api/personas/prs_1/default": {
+      "POST /v1/personas/prs_1/default": {
         status: 200,
         body: selected,
       },
@@ -988,8 +986,8 @@ describe("one persona's page", () => {
 
     await vi.waitFor(() => {
       expect(
-        asked.find((one) => one.path === "/api/personas/prs_1/default")?.body,
-      ).toEqual({ project: "prj_1" });
+        asked.find((one) => one.path === "/v1/personas/prs_1/default")?.body,
+      ).toEqual({ projectId: "prj_1" });
     });
     expect(
       await screen.findByText("Project default: Yes"),
@@ -1000,7 +998,7 @@ describe("one persona's page", () => {
   });
 
   it("offers Restore rather than Archive once somebody is archived", async () => {
-    apiAnswers(reads({ ...RITA, archived_at: "2026-08-14T09:00:00.000Z" }));
+    apiAnswers(reads({ ...RITA, archivedAt: "2026-08-14T09:00:00.000Z" }));
     render(<PersonaPage />);
 
     expect(
@@ -1017,7 +1015,7 @@ describe("one persona's page", () => {
     };
     const { asked } = apiAnswers({
       ...reads(egmaProvided),
-      "POST /api/personas/prs_1/fork": {
+      "POST /v1/personas/prs_1/fork": {
         status: 201,
         body: { ...RITA, id: "prs_fork" },
       },
@@ -1118,7 +1116,7 @@ describe("one persona's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fork" }));
 
     await vi.waitFor(() => {
-      expect(asked.some((one) => one.path === "/api/personas/prs_1/fork")).toBe(
+      expect(asked.some((one) => one.path === "/v1/personas/prs_1/fork")).toBe(
         true,
       );
       expect(routed.push).toHaveBeenCalledWith(
@@ -1165,7 +1163,7 @@ describe("one persona's page", () => {
   it("shows a persona this project has not got as an absence, in egma's words", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/personas/prs_1": {
+      "GET /v1/personas/prs_1": {
         status: 404,
         body: {
           error: "not_found",
@@ -1173,7 +1171,7 @@ describe("one persona's page", () => {
             "There is no persona prs_1 available in this project. Check the link, or choose it from the current project.",
         },
       },
-      "GET /api/personas/prs_1/versions": {
+      "GET /v1/personas/prs_1/versions": {
         status: 404,
         body: { error: "not_found", message: "There is no persona prs_1." },
       },
@@ -1188,7 +1186,7 @@ describe("one persona's page", () => {
   it("says a failed read failed, and offers a deliberate retry", async () => {
     apiAnswers({
       ...reads(),
-      "GET /api/personas/prs_1": [
+      "GET /v1/personas/prs_1": [
         {
           status: 503,
           body: {
@@ -1235,21 +1233,21 @@ describe("driving the Personas area without a pointer", () => {
   it("traps focus in version history, closes it with Escape, and restores its trigger", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/personas/prs_1": { status: 200, body: RITA },
-      "GET /api/personas/prs_1/versions": {
+      "GET /v1/personas/prs_1": { status: 200, body: RITA },
+      "GET /v1/personas/prs_1/versions": {
         status: 200,
         body: {
-          items: [
+          versions: [
             {
               id: "prsv_1",
-              persona_id: "prs_1",
+              personaId: "prs_1",
               version: 1,
               traits: RITA.traits,
               models: RITA.models,
-              created_at: "2026-08-15T10:00:00.000Z",
+              createdAt: "2026-08-15T10:00:00.000Z",
             },
           ],
-          next_cursor: null,
+          nextPageToken: null,
         },
       },
     });
@@ -1286,9 +1284,9 @@ describe("driving the Personas area without a pointer", () => {
 describe("what this page does when something goes wrong underneath it", () => {
   const reading = {
     "GET /api/me": { status: 200, body: meWith("member") },
-    "GET /api/personas/prs_1/versions": {
+    "GET /v1/personas/prs_1/versions": {
       status: 200,
-      body: { items: [], next_cursor: null },
+      body: { versions: [], nextPageToken: null },
     },
   } as const;
 
@@ -1300,11 +1298,11 @@ describe("what this page does when something goes wrong underneath it", () => {
   it("says why the replacements could not be read, and lets somebody ask again", async () => {
     apiAnswers({
       ...reading,
-      "GET /api/personas/prs_1": {
+      "GET /v1/personas/prs_1": {
         status: 200,
-        body: { ...RITA, is_default: true },
+        body: { ...RITA, isDefault: true },
       },
-      "GET /api/personas": [
+      "GET /v1/personas": [
         {
           status: 503,
           body: {
@@ -1315,16 +1313,16 @@ describe("what this page does when something goes wrong underneath it", () => {
         {
           status: 200,
           body: {
-            items: [
-              { ...RITA, is_default: true },
+            personas: [
+              { ...RITA, isDefault: true },
               {
                 ...RITA,
                 id: "prs_2",
                 name: "Taking-Over Tam",
-                is_default: false,
+                isDefault: false,
               },
             ],
-            next_cursor: null,
+            nextPageToken: null,
           },
         },
       ],
@@ -1365,11 +1363,11 @@ describe("what this page does when something goes wrong underneath it", () => {
     vi.stubGlobal("location", { replace: replaced, assign: vi.fn() });
     apiAnswers({
       ...reading,
-      "GET /api/personas/prs_1": {
+      "GET /v1/personas/prs_1": {
         status: 200,
-        body: { ...RITA, is_default: true },
+        body: { ...RITA, isDefault: true },
       },
-      "GET /api/personas": {
+      "GET /v1/personas": {
         status: 401,
         body: { error: "not_authenticated", message: "sign in" },
       },
@@ -1404,15 +1402,16 @@ describe("what this page does when something goes wrong underneath it", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        const at = new URL(String(input), "http://egma.test");
+      vi.fn(async (input: FetchInput, init?: RequestInit) => {
+        const request = await observeRequest(input, init);
+        const { address: at } = request;
         if (at.pathname === "/api/me") return json(200, meWith("member"));
-        if (at.pathname === "/api/persona-form") {
+        if (at.pathname === "/v1/persona-form") {
           return json(200, PERSONA_FORM);
         }
-        if ((init?.method ?? "GET") !== "GET") return pending;
+        if (request.method !== "GET") return pending;
         if (at.pathname.endsWith("/versions")) {
-          return json(200, { items: [], next_cursor: null });
+          return json(200, { versions: [], nextPageToken: null });
         }
         return personaFor(at.pathname.split("/").pop() ?? "prs_1");
       }),
@@ -1454,7 +1453,7 @@ describe("what this page does when something goes wrong underneath it", () => {
     apiAnswers({
       ...reading,
       "GET /api/me": "never",
-      "GET /api/personas/prs_1": { status: 200, body: RITA },
+      "GET /v1/personas/prs_1": { status: 200, body: RITA },
     });
     render(<PersonaPage />);
 
@@ -1475,7 +1474,7 @@ describe("what this page does when something goes wrong underneath it", () => {
     apiAnswers({
       ...reading,
       "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /api/personas/prs_1": { status: 200, body: RITA },
+      "GET /v1/personas/prs_1": { status: 200, body: RITA },
     });
     render(<PersonaPage />);
 
@@ -1508,17 +1507,17 @@ describe("after a save lands", () => {
   it("shows what egma kept, not what was typed at it", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/personas/prs_1": { status: 200, body: RITA },
-      "GET /api/personas/prs_1/versions": {
+      "GET /v1/personas/prs_1": { status: 200, body: RITA },
+      "GET /v1/personas/prs_1/versions": {
         status: 200,
-        body: { items: [], next_cursor: null },
+        body: { versions: [], nextPageToken: null },
       },
-      "PATCH /api/personas/prs_1": {
+      "PATCH /v1/personas/prs_1": {
         status: 200,
         body: {
           ...RITA,
           version: 2,
-          version_id: "prsv_2",
+          versionId: "prsv_2",
           revision: "revision-two",
           traits: { ...RITA.traits, personality: "calm" },
         },
@@ -1535,6 +1534,9 @@ describe("after a save lands", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     // Sent as typed, because what may be trimmed is the server's rule.
+    await vi.waitFor(() => {
+      expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
+    });
     const written = asked.find((one) => one.method === "PATCH")?.body as
       { traits: Record<string, unknown> } | undefined;
     expect(written?.traits.personality).toBe("  calm  ");
@@ -1575,15 +1577,16 @@ describe("a save answering while the author is still typing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: string, init?: RequestInit) => {
-        const at = new URL(String(input), "http://egma.test");
+      vi.fn(async (input: FetchInput, init?: RequestInit) => {
+        const request = await observeRequest(input, init);
+        const { address: at } = request;
         if (at.pathname === "/api/me") return json(200, meWith("member"));
-        if (at.pathname === "/api/persona-form") {
+        if (at.pathname === "/v1/persona-form") {
           return json(200, PERSONA_FORM);
         }
-        if ((init?.method ?? "GET") !== "GET") return pending;
+        if (request.method !== "GET") return pending;
         if (at.pathname.endsWith("/versions")) {
-          return json(200, { items: [], next_cursor: null });
+          return json(200, { versions: [], nextPageToken: null });
         }
         return json(200, RITA);
       }),
