@@ -141,4 +141,14 @@ describe("where the proof for each kind of thing lives", () => {
     );
     expect(config).toContain("LOCAL_AGENT_WORKTREES,");
   });
+
+  it("builds the generated platform client before Next starts", async () => {
+    const manifest = JSON.parse(
+      await readFile(path.join(ROOT, "package.json"), "utf8"),
+    ) as { readonly scripts?: Readonly<Record<string, string>> };
+
+    expect(manifest.scripts?.["test:browser"]).toMatch(
+      /^pnpm --filter @egma\/platform-api build && /u,
+    );
+  });
 });

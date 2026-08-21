@@ -19,7 +19,7 @@
     "db:generate": "pnpm --filter @egma/db generate",
     "test": "{ pnpm test:fast; fast=$?; pnpm test:browser; browser=$?; pnpm test:simulator; sim=$?; pnpm test:sdk; sdk=$?; pnpm test:fixture; fix=$?; exit $(( fast || browser || sim || sdk || fix )); }",
     "test:fast": "pnpm db:up && echo \"\\nlane: fast — every test except the real-browser proof\\n\" && vitest run --project fast",
-    "test:browser": "pnpm db:up && echo \"\\nlane: browser — the real-browser proof, and nothing else\\n\" && vitest run --project browser",
+    "test:browser": "pnpm --filter @egma/platform-api build && pnpm db:up && echo \"\\nlane: browser — the real-browser proof, and nothing else\\n\" && vitest run --project browser",
     "test:simulator": "pnpm --filter @egma/simulator test",
     "test:sdk": "pnpm --filter @egma/sdk-python test",
     "test:fixture": "pnpm --filter @egma/livekit-dumb-agent test",
