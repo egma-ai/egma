@@ -146,6 +146,82 @@ async function fakeClickHouse(
   };
 }
 
+async function clickHouseThatTimesOutAfterApplyingStatement(): Promise<{
+  readonly url: string;
+  readonly state: {
+    statementAttempts: number;
+    statementApplications: number;
+    ledgerWrites: number;
+  };
+  readonly close: () => Promise<void>;
+}> {
+  const state = {
+    statementAttempts: 0,
+    statementApplications: 0,
+    ledgerWrites: 0,
+  };
+  let retryProbeExists = false;
+  let responseTimedOut = false;
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      const url = new URL(request.url ?? "/", "http://clickhouse.test");
+      const query = url.searchParams.get("query") ?? body;
+
+      if (query.includes("CREATE TABLE IF NOT EXISTS retry_probe")) {
+        state.statementAttempts += 1;
+        if (!retryProbeExists) {
+          retryProbeExists = true;
+          state.statementApplications += 1;
+        }
+
+        // The schema change lands before the caller learns whether it worked.
+        // The timeout is wrapped by the migration error, so this also proves
+        // that the complete Error.cause chain is recognised as retryable.
+        if (!responseTimedOut) {
+          responseTimedOut = true;
+          setTimeout(() => {
+            response.statusCode = 200;
+            response.end();
+          }, 75);
+          return;
+        }
+      }
+
+      if (query.includes("ALTER TABLE retry_probe") && !retryProbeExists) {
+        response.statusCode = 500;
+        response.end("retry_probe does not exist");
+        return;
+      }
+
+      if (query.includes("INSERT INTO egma_meta_migration")) {
+        state.ledgerWrites += 1;
+      }
+
+      response.statusCode = 200;
+      response.end();
+    });
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+
+  return {
+    url: `http://127.0.0.1:${port}?request_timeout=25`,
+    state,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
 /**
  * The statements of one file, split on the marker the runner splits on, with
  * the comments off and the whitespace collapsed. The guards below judge each
@@ -482,6 +558,26 @@ describe("a replicated ALTER whose metadata is still catching up", () => {
     },
     15_000,
   );
+});
+
+describe("a ClickHouse request that times out after applying a statement", () => {
+  it("retries the complete idempotent migration and records it once", async () => {
+    const clickhouse = await clickHouseThatTimesOutAfterApplyingStatement();
+
+    try {
+      const result = await runClickHouseMigrations(
+        clickhouse.url,
+        fixture("clickhouse-transient"),
+      );
+
+      expect(result.applied).toEqual(["0000_retry_replicated_alter.sql"]);
+      expect(clickhouse.state.statementAttempts).toBe(2);
+      expect(clickhouse.state.statementApplications).toBe(1);
+      expect(clickhouse.state.ledgerWrites).toBe(1);
+    } finally {
+      await clickhouse.close();
+    }
+  });
 });
 
 describe("the schema a boot leaves behind", () => {

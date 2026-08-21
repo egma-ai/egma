@@ -66,17 +66,47 @@ const REPLICA_CATCHUP_ATTEMPTS = 8;
 const REPLICA_CATCHUP_FIRST_WAIT_MS = 250;
 const REPLICA_CATCHUP_MAX_WAIT_MS = 2_000;
 
+/**
+ * ClickHouse Cloud may need one request to wake after an idle period. The
+ * client gives that request a precise timeout error. Every migration statement
+ * is idempotent, so a bounded rerun can finish whatever the timed-out request
+ * may already have applied without hiding a different startup failure.
+ */
+const CLOUD_WAKE_ATTEMPTS = 3;
+const CLOUD_WAKE_WAIT_MS = 1_000;
+
 export async function runClickHouseMigrations(
   clickhouseUrl: string,
   directory: string = CLICKHOUSE_MIGRATIONS_DIRECTORY,
 ): Promise<MigrationResult> {
   const migrations = await readMigrations(directory);
-  const client = createClient({ url: clickhouseUrl, max_open_connections: 1 });
-  try {
-    return await apply(client, migrations);
-  } finally {
-    await client.close();
+
+  for (let attempt = 1; attempt <= CLOUD_WAKE_ATTEMPTS; attempt += 1) {
+    const client = createClient({
+      url: clickhouseUrl,
+      max_open_connections: 1,
+    });
+    try {
+      return await apply(client, migrations);
+    } catch (cause) {
+      if (!requestTimedOut(cause) || attempt === CLOUD_WAKE_ATTEMPTS) {
+        throw cause;
+      }
+    } finally {
+      await client.close();
+    }
+
+    await sleep(CLOUD_WAKE_WAIT_MS);
   }
+
+  throw new Error("unreachable ClickHouse migration retry state");
+}
+
+function requestTimedOut(cause: unknown): boolean {
+  return (
+    cause instanceof Error &&
+    (cause.message === "Timeout error." || requestTimedOut(cause.cause))
+  );
 }
 
 /** The statements of one file, in order, with the trailing semicolons off. */
