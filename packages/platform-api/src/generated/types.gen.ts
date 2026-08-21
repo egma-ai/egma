@@ -301,6 +301,9 @@ export type RegisterAgentData = {
             credentials?: {
                 [key: string]: unknown;
             };
+            /**
+             * Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.
+             */
             agentPlatformSelection?: {
                 platformAgentId: string;
                 credentials: {
@@ -642,6 +645,9 @@ export type AddConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
+        /**
+         * Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.
+         */
         agentPlatformSelection?: {
             platformAgentId: string;
             credentials: {

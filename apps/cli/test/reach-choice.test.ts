@@ -208,8 +208,9 @@ describe("choosing the phone", () => {
     expect(connection?.credentialsHint).toBeNull();
     expect(platform.registered.sealed).toEqual([]);
 
-    // And the key never reached egma at all — it went to Retell, and stayed
-    // there, because a phone connection has nowhere to put one.
+    // The key reached the API only in the request-only platform selection. It
+    // was discarded after confirmation because a phone connection has nowhere
+    // to store one.
     const written = JSON.stringify(platform.registered);
     expect(written).not.toContain(KEY);
     expect(written).not.toContain("agent_0001");

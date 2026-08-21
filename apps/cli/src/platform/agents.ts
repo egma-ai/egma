@@ -42,6 +42,16 @@ export type NewConnection = {
   readonly config: Readonly<Record<string, string>>;
   /** Sealed by the platform. Never answered back and never stored here. */
   readonly credentials?: ConnectionCredentials | undefined;
+  /**
+   * The external agent selected during provider discovery. The platform checks
+   * it again inside the create request, then discards it.
+   */
+  readonly agentPlatformSelection?:
+    | {
+        readonly platformAgentId: string;
+        readonly credentials: ConnectionCredentials;
+      }
+    | undefined;
 };
 
 export type Registration = {
@@ -133,6 +143,8 @@ function cleanConnection(connection: AnsweredConnection): RegisteredConnection {
 }
 
 function connectionParameters(connection: NewConnection): ConnectionInput {
+  const selectionCredentials =
+    connection.agentPlatformSelection?.credentials.reveal();
   return {
     ...(connection.name === undefined ? {} : { name: connection.name }),
     agentPlatform: connection.agentPlatform,
@@ -146,6 +158,14 @@ function connectionParameters(connection: NewConnection): ConnectionInput {
     ...(connection.credentials === undefined
       ? {}
       : { credentials: connection.credentials.reveal() }),
+    ...(connection.agentPlatformSelection === undefined
+      ? {}
+      : {
+          agentPlatformSelection: {
+            platformAgentId: connection.agentPlatformSelection.platformAgentId,
+            credentials: { apiKey: selectionCredentials?.["apiKey"] ?? "" },
+          },
+        }),
   };
 }
 

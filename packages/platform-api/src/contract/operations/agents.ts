@@ -156,6 +156,8 @@ const listedAgent = {
  */
 const agentPlatformSelection = {
   type: "object",
+  description:
+    "Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.",
   properties: {
     platformAgentId: { type: "string" },
     credentials: {

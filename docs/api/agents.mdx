@@ -217,7 +217,9 @@ The `result` field in the response tells you exactly what happened:
       through `POST /v1/agents:discover`. Egma revalidates this selection during
       creation and never stores the selection object. For Retell chat, the API
       key is retained separately as the sealed connection credential. For a
-      Retell phone number, the key is discarded after validation.
+      Retell phone number, this field is required and the key is discarded
+      after validation. A generic phone connection with `agentPlatform: null`
+      does not use this field.
     </ParamField>
   </Expandable>
 </ParamField>

@@ -424,7 +424,7 @@ describe("which connection egma creates", () => {
 
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
-    // No Retell, Twilio, LiveKit, SIP or OpenAI credential is anywhere near it.
+    // No durable Retell, Twilio, LiveKit, SIP or OpenAI credential is stored on it.
     expect(platform.registered.sealed).toEqual([]);
     expect(JSON.stringify(platform.registered)).not.toContain(KEY);
 

@@ -351,15 +351,16 @@ describe("discovering simulation agents", () => {
     expect(JSON.stringify(answer.body)).not.toContain(retellKey);
   });
 
-  it("creates a selected phone candidate through the ordinary connection route", async () => {
-    api = await createApi("retell_discovery_generic_connection");
+  it("refuses a Retell phone connection that omits its platform selection", async () => {
+    api = await createApi("retell_discovery_selection_required");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const created = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
     });
+    const agentId = String(agentOf(created).id);
 
-    const connected = await post(
-      `/v1/agents/${String(agentOf(created).id)}/connections?projectId=${ada.projectId}`,
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
       withKey(ada.secret),
       {
         name: "Retell main number",
@@ -371,17 +372,38 @@ describe("discovering simulation agents", () => {
       },
     );
 
-    expect(connected.status).toBe(201);
-    expect(connectionOf(connected)).toMatchObject({
-      name: "Retell main number",
-      agentPlatform: "retell",
-      connectionKind: "phone_number",
-      accessVariant: "phone_number.public_e164",
-      modality: "voice",
-      productLabel: "Retell phone",
-      config: { phoneNumber: "+14155550100" },
-      credentialPresent: false,
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
     });
+    const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(read.body.connections).toEqual([]);
+  });
+
+  it("leaves no partial agent when an inline Retell phone omits its selection", async () => {
+    api = await createApi("retell_inline_selection_required");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+      connection: {
+        agentPlatform: "retell",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+      },
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+    });
+    expect(await agentRowCount()).toBe(0);
   });
 
   it("rechecks a discovered phone candidate inside the ordinary connection write", async () => {

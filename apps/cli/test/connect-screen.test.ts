@@ -323,8 +323,8 @@ describe("the choice between text and phone", () => {
     grading.stop();
     expect(exited).toBe(0);
 
-    // The phone connection, and nothing else. No retell connection was made
-    // alongside it, and the key never reached egma at all.
+    // The phone connection, and nothing else. No Retell connection was made
+    // alongside it, and the request-only confirmation key was not stored.
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.agentPlatform).toBe("retell");
     expect(platform.registered.connections[0]?.connectionKind).toBe("phone_number");

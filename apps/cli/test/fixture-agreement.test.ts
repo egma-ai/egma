@@ -1308,7 +1308,7 @@ describe("registering the same vendor agent again", () => {
     expect(envelopeFirst.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
     });
 
     // And the agent's name is answered before anything the registry checks,
@@ -1376,7 +1376,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionKind, accessVariant, modality, environment, config, credentials; the agent's content " +
+        "connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1406,7 +1406,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(onTheConnection.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
     });
   });
 });

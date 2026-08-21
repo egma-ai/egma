@@ -21,8 +21,9 @@
  * - **The organization never appears in an address.** Which customer this is
  *   comes from the key and from nowhere else, which is what stops a copied key
  *   writing into somebody else's account by asking nicely.
- * - **A sealed secret never comes back.** What a caller sends is stored sealed
- *   and answered as its last four characters and nothing more.
+ * - **A sealed secret never comes back.** A durable connection credential is
+ *   stored sealed and answered as its last four characters and nothing more.
+ *   A request-only platform selection credential is not stored at all.
  *
  * Two more are the public API's rather than the factory's, and both are here
  * because a client that guessed at either would fail in somebody's terminal:
@@ -512,6 +513,7 @@ const CONNECTION_KEYS = [
   "environment",
   "config",
   "credentials",
+  "agentPlatformSelection",
 ] as const;
 
 /** A refusal with a sentence in it, turned into an answer at the door. */
@@ -998,6 +1000,17 @@ export function agentRoutes(options: {
       accessVariant,
       modality,
     );
+    if (
+      agentPlatform === "retell" &&
+      connectionKind === "phone_number" &&
+      accessVariant === "phone_number.public_e164" &&
+      modality === "voice" &&
+      input["agentPlatformSelection"] === undefined
+    ) {
+      throw new Refusal(
+        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+      );
+    }
     const config = validConfig(connectionKind, accessVariant, input["config"]);
     const credentials = validCredentials(
       connectionKind,

@@ -528,7 +528,19 @@ async function confirmAgentPlatformSelection(
   selected: AgentPlatformSelection | undefined,
   fetchImpl: typeof fetch | undefined,
 ): Promise<NewConnection | Refusal> {
-  if (selected === undefined) return wanted;
+  if (selected === undefined) {
+    if (
+      wanted.agentPlatform === "retell" &&
+      wanted.connectionKind === "phone_number" &&
+      wanted.accessVariant === "phone_number.public_e164" &&
+      wanted.modality === "voice"
+    ) {
+      return invalid(
+        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+      );
+    }
+    return wanted;
+  }
   if (wanted.credentials !== undefined) {
     return invalid(
       "a discovered connection puts account credentials in agentPlatformSelection, not credentials",
