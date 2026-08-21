@@ -48,8 +48,8 @@ describe("which screen is on", () => {
         {
           name: "price-question",
           persona: "default persona",
-          shown: "egma/tests/price-question.md",
-          file: "/tmp/egma/tests/price-question.md",
+          shown: "egma/tests/release/price-question.md",
+          file: "/tmp/egma/tests/release/price-question.md",
         },
       ],
       heldBack: [],
@@ -58,7 +58,7 @@ describe("which screen is on", () => {
       productLabel: "Retell chat",
       modality: "chat",
       destination: null,
-      suite: "first-suite",
+      suite: "Release contract",
     });
     store.setPhase("review");
     // The list is the thing to deal with, even while the pane is still set.
@@ -103,58 +103,13 @@ describe("which screen is on", () => {
     await expect(second).resolves.toBe("correct-key");
   });
 
-  /**
-   * The platform can turn a test away after the keystroke, and what comes back
-   * is a different list. Agreement is to the list that was on the screen, so the
-   * same key is asked for again rather than the old answer being reused.
-   */
-  it("asks again when a second list goes up over the first", async () => {
-    const store = new WizardStore();
-    const listOf = (name: string) => ({
-      rows: [
-        {
-          name,
-          persona: "default persona",
-          shown: `egma/tests/${name}.md`,
-          file: `/tmp/egma/tests/${name}.md`,
-        },
-      ],
-      heldBack: [],
-      agentName: "order-line",
-      connectionName: "retell-1",
-      productLabel: "Retell chat",
-      modality: "chat",
-      destination: null,
-      suite: "first-suite",
-    });
-
-    store.setGate(listOf("both-of-them"));
-    const first = store.getGate("run-tests");
-    store.runTests();
-    await first;
-
-    store.setGate(listOf("only-one-of-them"));
-    let past = false;
-    const second = store.getGate("run-tests");
-    void second.then(() => {
-      past = true;
-    });
-
-    await Promise.resolve();
-    expect(past).toBe(false);
-
-    store.runTests();
-    await second;
-    expect(past).toBe(true);
-  });
-
   it("keeps the gate's selection inside the list, however far it is pushed", () => {
     const store = new WizardStore();
     const row = (name: string) => ({
       name,
       persona: "default persona",
-      shown: `egma/tests/${name}.md`,
-      file: `/tmp/egma/tests/${name}.md`,
+      shown: `egma/tests/release/${name}.md`,
+      file: `/tmp/egma/tests/release/${name}.md`,
     });
     store.setGate({
       rows: [row("one"), row("two")],
@@ -164,7 +119,7 @@ describe("which screen is on", () => {
       productLabel: "Retell chat",
       modality: "chat",
       destination: null,
-      suite: "first-suite",
+      suite: "Release contract",
     });
 
     expect(store.snapshot.gateAt).toBe(0);

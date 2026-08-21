@@ -8,6 +8,7 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
   disconnect,
   disconnectClickHouse,
   failSimulation,
@@ -15,6 +16,7 @@ import {
   getSimulation,
   getTest,
   listGradingJobsForSimulation,
+  listSimulations,
   readVerdicts,
   recordProductionTraces,
   PREDEFINED_GRADERS,
@@ -79,12 +81,10 @@ export type World = {
   readonly connectionId: string;
   readonly personaId: string;
   /**
-   * A version naming the world's persona and nothing else, so a conduct that
-   * has no opinion about the test still has something for a run to execute.
-   * A run pins frozen versions now, and there is no such thing as a run that
-   * names none.
+   * One test in its own suite, so a conduct with no test opinion can still run
+   * one complete suite.
    */
-  readonly bareTestVersionId: string;
+  readonly bareTestId: string;
   drop(): Promise<void>;
 };
 
@@ -162,7 +162,9 @@ export async function makeWorld(label: string): Promise<World> {
     traits: { personality: "Speaks plainly.", language: "en-US" },
   });
 
+  const bareSuite = await createTestSuite(auth, { name: "Grader fixture" });
   const bare = await createTest(auth, {
+    suiteId: bareSuite.id,
     name: "A minimal conversation",
     scenario: "Their cleaning has to move to any afternoon next week.",
     expectedBehaviors: ["finishes the conversation"],
@@ -178,7 +180,7 @@ export async function makeWorld(label: string): Promise<World> {
     agentId: agent.id,
     connectionId: agent.connection?.id ?? "",
     personaId: persona.id,
-    bareTestVersionId: bare.versionId,
+    bareTestId: bare.id,
     async drop() {
       await disconnect();
       await disconnectClickHouse();
@@ -311,17 +313,18 @@ export async function conductSimulation(
   } = {},
 ): Promise<ConductedSimulation> {
   const claimant = "simulator-1";
-  const pinned =
-    landing.testId === undefined
-      ? world.bareTestVersionId
-      : ((await getTest(world.auth, landing.testId))?.versionId ??
-        world.bareTestVersionId);
+  const testId = landing.testId ?? world.bareTestId;
+  const test = await getTest(world.auth, testId);
+  if (test === undefined) throw new Error(`test ${testId} does not exist`);
   const started = await startRun(world.auth, {
     agentId: world.agentId,
     connectionId: world.connectionId,
-    testVersionIds: [pinned],
+    suiteId: test.suiteId,
+    idempotencyKey: `grader-${newId("run")}`,
   });
-  const [only] = started.simulations;
+  const simulations = await listSimulations(world.auth, started.id);
+  if (simulations === undefined) throw new Error(`run ${started.id} does not exist`);
+  const [only] = simulations.items;
   if (only === undefined) throw new Error("the run has no simulation");
   await landing.afterRunStarted?.(started.id, only.id);
 
@@ -897,7 +900,11 @@ export async function seedTest(
     "confirms the new time back before finishing",
   ],
 ): Promise<string> {
+  const suite = await createTestSuite(world.auth, {
+    name: `Grader case ${newId("ste").slice(-8)}`,
+  });
   const test = await createTest(world.auth, {
+    suiteId: suite.id,
     name: `Reschedules a booked appointment ${newId("tst").slice(-8)}`,
     scenario: "Their cleaning has to move to any afternoon next week.",
     expectedBehaviors: [...expectedBehaviors],

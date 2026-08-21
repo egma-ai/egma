@@ -314,7 +314,12 @@ describe("the skill that gets installed", () => {
     // A guard that matched nothing would pass forever.
     expect(new Set(typed).size).toBeGreaterThan(2);
     for (const verb of new Set(typed)) {
-      expect(help, verb).toContain(`egma ${verb} [options]`);
+      const usage = verb === "run"
+        ? "egma run <suite-directory> [options]"
+        : verb === "suite"
+          ? "egma suite create <directory> --name <name>"
+          : `egma ${verb} [options]`;
+      expect(help, verb).toContain(usage);
     }
     // And the one flag it names, spelt the way the command spells it.
     expect(content).toContain("--no-follow");

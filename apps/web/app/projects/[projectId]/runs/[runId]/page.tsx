@@ -1,32 +1,34 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelRun,
   getRun,
   listRunEvents,
-  rerunSimulation as requestSimulationRerun,
+  listRunSimulations,
 } from "@egma/platform-api/client";
 
 import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   type RunDetail,
-  type RunEventFeed,
   type RunSimulation,
+  type RunSimulationPage,
   type SimulationStatusWord,
   type VerdictWord,
 } from "../../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Actions, Section } from "../../../../../ui/section.tsx";
-import { Field, Refused } from "../../../../../ui/form.tsx";
+import { Refused } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import {
@@ -59,9 +61,8 @@ import {
  *
  * **Four facts, kept apart, everywhere on this page.** The run's machinery, each
  * conversation's machinery, where the grading work stands, and the verdict. A
- * conversation egma declined to conduct is `skipped` and says nothing about the
- * agent. A conversation egma could not conduct is `failed` and is egma's own
- * problem, not the agent's. And a verdict nobody has reached yet is blank rather
+ * conversation egma could not conduct is `failed` and is egma's own problem,
+ * not the agent's. And a verdict nobody has reached yet is blank rather
  * than red — pending grading drawn as failure is the single worst thing a page
  * like this can do.
  *
@@ -121,11 +122,11 @@ const IDENTITY = "inline-flex flex-wrap items-center gap-2";
 const WRAPS = "block min-w-0 whitespace-normal";
 
 /**
- * Why a conversation never happened, or could not be conducted.
+ * Why a conversation could not be conducted.
  *
  * It wraps rather than truncating. The whole value of this column is the
- * sentence, and half a sentence about a skip is how somebody comes to believe
- * their agent failed.
+ * sentence, and half a sentence is how somebody comes to believe their agent
+ * failed.
  */
 const WHY = "block whitespace-normal text-sm text-muted-foreground";
 
@@ -143,7 +144,6 @@ function RunDetailView({
   readonly projectId: string;
   readonly runId: string;
 }) {
-  const router = useRouter();
   const { me } = useShellSession();
   // Null until the session read answers. A page that guessed would offer a
   // viewer Cancel, which the server refuses, on every load.
@@ -153,10 +153,27 @@ function RunDetailView({
 
   const { answer, reload } = useProjectRead<RunDetail>(
     (projectId) =>
-      platformAnswer(getRun({ runId, projectId }, { client: platformClient })),
+      platformAnswer(
+        getRun({ runId, projectId }, { client: platformClient }),
+      ),
     projectId,
     runId,
   );
+  const { answer: simulationPage, reload: reloadSimulations } =
+    useProjectRead<RunSimulationPage>(
+      (projectId) =>
+        platformAnswer(
+          listRunSimulations(
+            { runId, projectId },
+            { client: platformClient },
+          ),
+        ),
+      projectId,
+      runId,
+    );
+  const [laterSimulations, setLaterSimulations] = useState<RunSimulationPage | null>(null);
+  const [loadingMoreSimulations, setLoadingMoreSimulations] = useState(false);
+  const [moreSimulationsRefused, setMoreSimulationsRefused] = useState<Refusal | null>(null);
 
   /**
    * What the feed has changed since the run was read, by conversation, plus the
@@ -177,12 +194,6 @@ function RunDetailView({
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [working, setWorking] = useState(false);
-  const [rerunSimulation, setRerunSimulation] =
-    useState<RunSimulation | null>(null);
-  const [rerunName, setRerunName] = useState("");
-  const [rerunKey, setRerunKey] = useState<string | null>(null);
-  const [rerunRefused, setRerunRefused] = useState<Refusal | null>(null);
-  const [rerunWorking, setRerunWorking] = useState(false);
 
   const run = answer?.status === "ready" ? answer.value : null;
 
@@ -199,6 +210,8 @@ function RunDetailView({
     setMoved(new Map());
     setRunStatus(null);
     setFinishedByFeed(false);
+    setLaterSimulations(null);
+    setMoreSimulationsRefused(null);
   }, [runId, projectId]);
 
   /**
@@ -213,23 +226,19 @@ function RunDetailView({
   useEffect(() => {
     setRefused(null);
     setConfirmingCancel(false);
-    setRerunSimulation(null);
-    setRerunName("");
-    setRerunKey(null);
-    setRerunRefused(null);
-    setRerunWorking(false);
   }, [runId, projectId]);
 
   useEffect(() => {
-    if (answer?.status === "signed-out") window.location.replace("/sign-in");
-  }, [answer]);
+    if (answer?.status === "signed-out" || simulationPage?.status === "signed-out") {
+      window.location.replace("/sign-in");
+    }
+  }, [answer, simulationPage]);
 
   const stillMoving =
     run !== null &&
     !finishedByFeed &&
     (run.finishedAt === null ||
-      run.gradedCount < run.gradableCount ||
-      run.simulations.some((one) => one.grading === "pending"));
+      run.gradedCount < run.gradableCount);
 
   /**
    * One page of the feed, applied.
@@ -273,11 +282,11 @@ function RunDetailView({
       setMoved((held) => {
         const now = new Map(held);
         for (const event of fresh) {
-          if (event.kind !== "simulation" || event.simulationId === undefined) {
+          if (event.kind !== "simulation") {
             continue;
           }
           now.set(event.simulationId, {
-            status: event.status,
+            status: event.status as SimulationStatusWord,
             verdict: event.verdict ?? null,
             reason: event.reason ?? null,
           });
@@ -337,10 +346,7 @@ function RunDetailView({
     // answered "no such run" to a page that is looking straight at it.
     const answered = await platformAnswer(
       cancelRun(
-        {
-          runId,
-          projectId,
-        },
+        { runId, projectId },
         { client: platformClient },
       ),
     );
@@ -357,56 +363,29 @@ function RunDetailView({
     reload();
   }
 
-  function openRerun(simulation: RunSimulation): void {
-    setRerunSimulation(simulation);
-    setRerunName("");
-    setRerunKey(`run:${globalThis.crypto.randomUUID()}`);
-    setRerunRefused(null);
-  }
-
-  function closeRerun(): void {
-    if (rerunWorking) return;
-    setRerunSimulation(null);
-    setRerunName("");
-    setRerunKey(null);
-    setRerunRefused(null);
-  }
-
-  async function rerun(): Promise<void> {
-    const label = rerunName.trim();
-    if (
-      !mayControl ||
-      rerunSimulation === null ||
-      rerunKey === null ||
-      label === "" ||
-      rerunWorking
-    ) {
-      return;
-    }
-
-    setRerunRefused(null);
-    setRerunWorking(true);
-    const answered = await platformAnswer(
-      requestSimulationRerun(
-        {
-          simulationId: rerunSimulation.id,
-          projectId,
-          label,
-          idempotencyKey: rerunKey,
-        },
+  async function loadMoreSimulations(cursor: string): Promise<void> {
+    if (loadingMoreSimulations) return;
+    setLoadingMoreSimulations(true);
+    setMoreSimulationsRefused(null);
+    const next = await platformAnswer(
+      listRunSimulations(
+        { runId, projectId, pageToken: cursor },
         { client: platformClient },
       ),
     );
-    setRerunWorking(false);
-    if (answered.status === "signed-out") {
+    setLoadingMoreSimulations(false);
+    if (next.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
     }
-    if (answered.status !== "ready") {
-      setRerunRefused(answered.refusal);
+    if (next.status !== "ready") {
+      setMoreSimulationsRefused(next.refusal);
       return;
     }
-    router.push(projectPath(projectId, "runs", answered.value.id));
+    setLaterSimulations((held) => ({
+      simulations: [...(held?.simulations ?? []), ...next.value.simulations],
+      nextPageToken: next.value.nextPageToken,
+    }));
   }
 
   if (answer === null || answer.status === "signed-out") {
@@ -464,11 +443,21 @@ function RunDetailView({
   }
 
   const read = answer.value;
-  const displayTitle = read.label ?? read.agent?.name ?? "Run";
+  const suiteDisplay = `${read.suiteName}${read.suiteDeleted ? " (deleted)" : ""}`;
+  const displayTitle = read.name ?? suiteDisplay;
   // The run's machinery as the feed last said, falling back to what the read
   // answered. A cancel that has landed says `canceled` here before the next read.
   const status = (runStatus ?? read.status) as RunDetail["status"];
-  const simulations = read.simulations.map((one) => {
+  const loadedSimulations =
+    simulationPage?.status === "ready"
+      ? [...simulationPage.value.simulations, ...(laterSimulations?.simulations ?? [])]
+      : [];
+  const nextSimulationCursor =
+    laterSimulations?.nextPageToken ??
+    (simulationPage?.status === "ready"
+      ? simulationPage.value.nextPageToken
+      : null);
+  const simulations = loadedSimulations.map((one) => {
     const change = moved.get(one.id);
     return change === undefined
       ? one
@@ -523,15 +512,17 @@ function RunDetailView({
               <dt>Started</dt>
               <dd>
                 <RelativeInstant instant={read.createdAt} now={now} />
-                {read.retryOfRunId === null ? null : (
-                  <>
-                    {" · retry of "}
-                    <Link
-                      href={projectPath(projectId, "runs", read.retryOfRunId)}
-                    >
-                      the earlier run
-                    </Link>
-                  </>
+              </dd>
+            </div>
+            <div className={FACT}>
+              <dt>Test suite</dt>
+              <dd>
+                {read.suiteDeleted ? (
+                  suiteDisplay
+                ) : (
+                  <Link href={projectPath(projectId, "tests", "suites", read.suiteId)}>
+                    {suiteDisplay}
+                  </Link>
                 )}
               </dd>
             </div>
@@ -599,7 +590,11 @@ function RunDetailView({
         </section>
 
         <Section title="Simulations">
-          {simulations.length === 0 ? (
+          {simulationPage === null || simulationPage.status === "signed-out" ? (
+            <Loading what="this run's simulations" />
+          ) : simulationPage.status !== "ready" ? (
+            <Failure message={simulationPage.refusal.message} onRetry={reloadSimulations} />
+          ) : simulations.length === 0 ? (
             <Empty
               title="No simulation has been written yet"
               lead="This run's simulations appear here as Egma writes them."
@@ -607,14 +602,30 @@ function RunDetailView({
           ) : (
             <DataTable
               label="Simulations in this run"
-              columns={simulationColumns(
-                projectId,
-                runId,
-                mayControl ? openRerun : undefined,
-              )}
+              columns={simulationColumns(projectId, runId)}
               rows={simulations}
               keyOf={(one) => one.id}
               stretchPrimaryLink
+              {...(nextSimulationCursor === null
+                ? {}
+                : {
+                    more: {
+                      onMore: () => void loadMoreSimulations(nextSimulationCursor),
+                      loading: loadingMoreSimulations,
+                      note: `${String(simulations.length)} simulations so far`,
+                    },
+                  })}
+            />
+          )}
+          {moreSimulationsRefused === null ? null : (
+            <Failure
+              title="Egma could not load more simulations."
+              message={moreSimulationsRefused.message}
+              onRetry={
+                nextSimulationCursor === null
+                  ? undefined
+                  : () => void loadMoreSimulations(nextSimulationCursor)
+              }
             />
           )}
         </Section>
@@ -623,9 +634,9 @@ function RunDetailView({
       {confirmingCancel ? (
         <Dialog
           title={
-            read.label === null
+            read.name === null
               ? "Cancel this run?"
-              : `Cancel run “${read.label}”?`
+              : `Cancel run “${read.name}”?`
           }
           onClose={() => setConfirmingCancel(false)}
         >
@@ -663,60 +674,6 @@ function RunDetailView({
         </Dialog>
       ) : null}
 
-      {rerunSimulation === null ? null : (
-        <Dialog title="Run this simulation again?" onClose={closeRerun}>
-          {(dismiss) => (
-            <form
-              className="flex flex-col gap-5 [&_p]:m-0 [&_p]:text-sm [&_p]:text-muted-foreground"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void rerun();
-              }}
-            >
-              <p>
-                This starts one new run under current conditions for this
-                simulation. Egma uses the same agent, connection, test version,
-                and persona. It then resolves the current persona version,
-                graders, connection settings, and mock tools. The original
-                evidence stays unchanged.
-              </p>
-              <Field label="Run name" htmlFor="rerun-name">
-                <Input
-                  id="rerun-name"
-                  name="label"
-                  type="text"
-                  value={rerunName}
-                  required
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={rerunWorking}
-                  onChange={(event) => setRerunName(event.target.value)}
-                />
-              </Field>
-              {rerunRefused === null ? null : (
-                <Refused message={rerunRefused.message} />
-              )}
-              <Actions>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={rerunWorking}
-                  onClick={() => dismiss()}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  busy={rerunWorking}
-                  disabled={rerunName.trim() === ""}
-                >
-                  {rerunWorking ? "Starting…" : "Run again"}
-                </Button>
-              </Actions>
-            </form>
-          )}
-        </Dialog>
-      )}
     </ProductPage>
   );
 }
@@ -732,9 +689,8 @@ function RunDetailView({
 function simulationColumns(
   projectId: string,
   runId: string,
-  onRerun?: (simulation: RunSimulation) => void,
 ): readonly Column<RunSimulation>[] {
-  const result: Column<RunSimulation>[] = [
+  return [
     {
       key: "test",
       header: "Simulation",
@@ -792,36 +748,6 @@ function simulationColumns(
       cell: (one) => <VerdictBadge verdict={one.verdict} compact />,
     },
   ];
-
-  if (onRerun !== undefined) {
-    result.push({
-      key: "rerun",
-      header: "",
-      action: true,
-      width: "128px",
-      cell: (one) =>
-        !isTerminalSimulation(one.status) ? null : (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => onRerun(one)}
-          >
-            Run again
-          </Button>
-        ),
-    });
-  }
-
-  return result;
-}
-
-function isTerminalSimulation(status: SimulationStatusWord): boolean {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "canceled" ||
-    status === "skipped"
-  );
 }
 
 function SimulationReason({
@@ -829,19 +755,6 @@ function SimulationReason({
 }: {
   readonly simulation: RunSimulation;
 }) {
-  if (simulation.skipReason !== null) {
-    const capabilities = (simulation.skippedCapabilities ?? []).join(", ");
-    const decision =
-      simulation.skipReason === "required_capability_unsupported"
-        ? `This connection does not support ${capabilities}.`
-        : `Support for ${capabilities} was not measured.`;
-    return (
-      <span className={WHY}>
-        {decision} Egma did not conduct this simulation. This says nothing about
-        the agent.
-      </span>
-    );
-  }
   if (simulation.status !== "failed") return null;
   return (
     <span className={WHY}>

@@ -6,6 +6,8 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
+  listSimulations,
   resolveSimulationStanding,
   startRun,
   sweepOrphanedSimulations,
@@ -101,8 +103,13 @@ async function oneQueuedSimulation(
     })
   ).id;
 
+  const suite = await createTestSuite(auth, {
+    name: `Telemetry ${label}`,
+  });
+
   const testVersionId = (
     await createTest(auth, {
+      suiteId: suite.id,
       name: `Reschedules ${label}`,
       scenario:
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
@@ -112,11 +119,12 @@ async function oneQueuedSimulation(
   ).versionId;
 
   const started = await startRun(auth, {
+    suiteId: suite.id,
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    testVersionIds: [testVersionId],
+    idempotencyKey: newId("run"),
   });
-  const simulation = started.simulations[0];
+  const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");
 
   return {

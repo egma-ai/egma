@@ -22,10 +22,11 @@
  * A list, however it was written: `[a, b]` gives text, and a block of `- `
  * lines gives text or a small mapping depending on what each item says.
  */
-export type YamlSequence = readonly (string | YamlMapping)[];
+export type YamlScalar = string | number | boolean;
+export type YamlSequence = readonly (YamlScalar | YamlMapping)[];
 
 /** Everything a value in one of egma's files can be. */
-export type YamlValue = string | YamlSequence | YamlMapping | null;
+export type YamlValue = YamlScalar | YamlSequence | YamlMapping | null;
 
 export type YamlMapping = { readonly [key: string]: YamlValue };
 
@@ -62,6 +63,19 @@ function withoutComment(raw: string): string {
   for (let at = 0; at < raw.length; at += 1) {
     const character = raw[at] as string;
     if (quote !== null) {
+      if (quote === '"' && character === "\\") {
+        // Egma writes double-quoted YAML through JSON.stringify. The byte
+        // after a backslash is part of that quoted scalar, even when it is a
+        // quote. Skipping it keeps a later `#` inside the same scalar instead
+        // of mistaking it for a comment.
+        at += 1;
+        continue;
+      }
+      if (quote === "'" && character === "'" && raw[at + 1] === "'") {
+        // YAML escapes a quote inside a single-quoted scalar by doubling it.
+        at += 1;
+        continue;
+      }
       if (character === quote) quote = null;
       continue;
     }
@@ -105,20 +119,27 @@ function unquote(raw: string, where: string, line: number): string {
   }
 }
 
-function scalar(raw: string, where: string, line: number): string {
+function scalar(raw: string, where: string, line: number): YamlScalar {
   const trimmed = raw.trim();
   if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
     return unquote(trimmed, where, line);
+  }
+  if (/^(?:true|false)$/iu.test(trimmed)) return trimmed.toLowerCase() === "true";
+  if (
+    /^[+-]?(?:(?:0|[1-9]\d*)(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/iu.test(trimmed)
+  ) {
+    const number = Number(trimmed);
+    if (Number.isFinite(number)) return number;
   }
   return trimmed;
 }
 
 /** `[a, b, c]`, which is the only kind of list these files hold. */
-function flowList(raw: string, where: string, line: number): readonly string[] {
+function flowList(raw: string, where: string, line: number): readonly YamlScalar[] {
   const inside = raw.slice(1, -1).trim();
   if (inside === "") return [];
 
-  const items: string[] = [];
+  const items: YamlScalar[] = [];
   let start = 0;
   let quote: string | null = null;
   for (let at = 0; at <= inside.length; at += 1) {
@@ -183,7 +204,7 @@ function blockSequenceAt(
   indent: number,
   where: string,
 ): { readonly sequence: YamlSequence; readonly next: number } {
-  const sequence: (string | YamlMapping)[] = [];
+  const sequence: (YamlScalar | YamlMapping)[] = [];
   let at = from;
 
   while (at < lines.length) {
@@ -219,7 +240,7 @@ function blockSequenceAt(
           "Egma reads these files as plain name: value lines, and this line is not one",
         );
       }
-      sequence.push(valueOf(opening, where, line.number) === null ? "" : opening);
+      sequence.push(opening === "" ? "" : scalar(opening, where, line.number));
       continue;
     }
 
@@ -273,6 +294,9 @@ function mappingAt(
 
     const key = line.text.slice(0, separator).trim();
     const rest = line.text.slice(separator + 1);
+    if (Object.prototype.hasOwnProperty.call(mapping, key)) {
+      throw new YamlProblem(where, line.number, `the key ${key} is written more than once`);
+    }
     at += 1;
 
     const nested = lines[at];
@@ -308,7 +332,16 @@ export function readYaml(document: string, where: string): YamlMapping {
   const lines = meaningfulLines(document);
   if (lines.length === 0) return {};
   const first = lines[0] as Line;
-  return mappingAt(lines, 0, first.indent, where).mapping;
+  const read = mappingAt(lines, 0, first.indent, where);
+  if (read.next !== lines.length) {
+    const unconsumed = lines[read.next] as Line;
+    throw new YamlProblem(
+      where,
+      unconsumed.number,
+      "this line is outside the top-level mapping that begins the file",
+    );
+  }
+  return read.mapping;
 }
 
 /** The values that mean something other than themselves when written bare. */

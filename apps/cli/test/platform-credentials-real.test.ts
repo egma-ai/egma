@@ -94,7 +94,7 @@ async function approve(
 async function keyWorks(instance: Instance, key: string): Promise<boolean> {
   const asked = await instance.api.inject({
     method: "GET",
-    url: "/v1/tests",
+    url: "/v1/projects",
     headers: { authorization: `Bearer ${key}` },
   });
   return asked.statusCode === 200;

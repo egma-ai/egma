@@ -112,9 +112,9 @@ async function wizard(): Promise<TerminalRun> {
         steps: [
           {
             kind: "write-file",
-            path: "egma/tests/price-question.md",
+            path: "egma/tests/generated/price-question.md",
             content:
-              "---\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+              "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
           },
           { kind: "say", text: "egma:wrote price-question\n" },
           { kind: "stop", reason: "end_turn" },

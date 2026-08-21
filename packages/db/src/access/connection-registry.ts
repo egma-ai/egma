@@ -9,7 +9,6 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
-import { hasCapabilityDiscovery } from "./capabilities.ts";
 import { AgentWriteRefusedError } from "./errors.ts";
 
 /**
@@ -358,7 +357,6 @@ export type ConnectionOptionMetadata = {
   /** Whether a claimed work order for this kind needs the platform carrier. */
   readonly usesPlatformCarrier: boolean;
   /** Whether egma ships something that can measure this connection's target. */
-  readonly capabilityDiscovery: boolean;
   readonly fields: AccessVariantMetadata["fields"];
   readonly credentialRule: CredentialRuleName;
   readonly credentialHelp: string;
@@ -508,7 +506,6 @@ export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] 
       accessVariantLabel: variant.label,
       simulatorAdapter: descriptor.simulatorAdapter,
       usesPlatformCarrier: descriptor.usesPlatformCarrier,
-      capabilityDiscovery: hasCapabilityDiscovery(option.connectionKind),
       fields: variant.fields,
       credentialRule: variant.credentialRule,
       credentialHelp: variant.credentialHelp,

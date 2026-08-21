@@ -9,8 +9,7 @@ import {
   createAgent,
   createPersona,
   createTest,
-  getTest,
-  setTestAgents,
+  createTestSuite,
   failSimulationDispatch,
   getPersonaVersion,
   getRun,
@@ -18,6 +17,7 @@ import {
   getSimulationTestVersion,
   listGradingJobsForSimulation,
   listRunEvents,
+  listSimulations,
   recordSimulationHeartbeat,
   archiveConnection,
   resolveSimulationConnection,
@@ -89,7 +89,7 @@ type Seeded = {
   readonly agentId: string;
   readonly connectionId: string;
   readonly personaId: string;
-  readonly testId: string;
+  readonly suiteId: string;
   readonly testVersionId: string;
 };
 
@@ -117,7 +117,12 @@ async function seedCustomer(
     })
   ).id;
 
+  const suite = await createTestSuite(auth, {
+    name: "Simulation claims",
+  });
+
   const authored = await createTest(auth, {
+    suiteId: suite.id,
     name: "Reschedules",
     scenario: SCENARIO,
     expectedBehaviors: ["confirms the new time back before finishing"],
@@ -128,7 +133,7 @@ async function seedCustomer(
     agentId: created.id,
     connectionId: created.connection?.id ?? "",
     personaId,
-    testId: authored.id,
+    suiteId: suite.id,
     testVersionId: authored.versionId,
   };
 }
@@ -141,11 +146,12 @@ async function oneQueuedSimulation(
   seed: Seeded,
 ): Promise<{ runId: string; simulationId: string }> {
   const started = await startRun(auth, {
+    suiteId: seed.suiteId,
     agentId: seed.agentId,
     connectionId: seed.connectionId,
-    testVersionIds: [seed.testVersionId],
+    idempotencyKey: newId("run"),
   });
-  const simulation = started.simulations[0];
+  const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");
   return { runId: started.id, simulationId: simulation.id };
 }
@@ -441,12 +447,6 @@ describe("the connection door", () => {
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
     });
-    // The seeded test applied to the agent that has just been left behind, and
-    // a run may only pair an agent with a test linked to it — so the coverage
-    // moves with the connection.
-    await setTestAgents(actingAsAcme(), acmeSeed.testId, {
-      agentIds: [restored.id],
-    });
     acmeSeed = {
       ...acmeSeed,
       agentId: restored.id,
@@ -519,26 +519,32 @@ describe("the dispatch-failure landing", () => {
       name: "Retired Rosa",
       traits: NEUTRAL_TRAITS,
     });
-    const twoCallers = (
-      await createTest(actingAsAcme(), {
-        name: "Reschedules, twice over",
-        scenario: SCENARIO,
-        expectedBehaviors: ["confirms the new time back before finishing"],
-        personaIds: [acmeSeed.personaId, rosa.id],
-      })
-    ).versionId;
+    const suite = await createTestSuite(actingAsAcme(), {
+      name: "Two-persona dispatch",
+    });
+    await createTest(actingAsAcme(), {
+      suiteId: suite.id,
+      name: "Reschedules, twice over",
+      scenario: SCENARIO,
+      expectedBehaviors: ["confirms the new time back before finishing"],
+      personaIds: [acmeSeed.personaId, rosa.id],
+    });
 
     const started = await startRun(actingAsAcme(), {
+      suiteId: suite.id,
+      agentId: acmeSeed.agentId,
       connectionId: acmeSeed.connectionId,
-      testVersionIds: [twoCallers],
+      idempotencyKey: newId("run"),
     });
-    expect(started.simulations).toHaveLength(2);
+    const simulations =
+      (await listSimulations(actingAsAcme(), started.id))?.items ?? [];
+    expect(simulations).toHaveLength(2);
 
     const claims = await claimSimulations({
       claimant: "simulator-blue-1",
       capacity: 50,
     });
-    const [conducted, unbuildable] = started.simulations.map((simulation) =>
+    const [conducted, unbuildable] = simulations.map((simulation) =>
       claims.find((claim) => claim.id === simulation.id),
     );
     if (conducted === undefined || unbuildable === undefined) {
@@ -744,18 +750,6 @@ describe("archiving a target out from under work", () => {
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
     });
-    // The seeded test was authored before this agent existed, so nothing yet
-    // says it is worth running against it — and a run may only pair the two
-    // once somebody has. Added rather than replaced, so the blocks that run
-    // against the seed's own agent keep working.
-    const applying = await getTest(actingAsAcme(), acmeSeed.testId);
-    await setTestAgents(actingAsAcme(), acmeSeed.testId, {
-      agentIds: [
-        ...(applying?.agents ?? []).map((applies) => applies.id),
-        created.id,
-      ],
-    });
-
     return { agentId: created.id, connectionId: created.connection?.id ?? "" };
   }
 
@@ -839,7 +833,7 @@ describe("archiving a target out from under work", () => {
       acmeSeed.agentId,
       connectionId,
     );
-    expect(archived?.canceledRuns).toEqual([runId]);
+    expect(archived?.canceledRunCount).toBe(1);
 
     await expectAskedToStop(runId, simulationId, claim.claimedBy, "claimed");
   });
@@ -858,7 +852,7 @@ describe("archiving a target out from under work", () => {
       acmeSeed.agentId,
       connectionId,
     );
-    expect(archived?.canceledRuns).toEqual([runId]);
+    expect(archived?.canceledRunCount).toBe(1);
 
     await expectAskedToStop(runId, simulationId, claim.claimedBy, "running");
   });
@@ -875,7 +869,7 @@ describe("archiving a target out from under work", () => {
       acmeSeed.agentId,
       connectionId,
     );
-    expect(archived?.canceledRuns).toEqual([runId]);
+    expect(archived?.canceledRunCount).toBe(1);
 
     await expectSettled(runId, simulationId);
   });
@@ -895,7 +889,7 @@ describe("archiving a target out from under work", () => {
     // caused.
     const archived = await archiveAgent(actingAsAcme(), agentId);
     expect(archived?.connections).toEqual([connectionId]);
-    expect(archived?.canceledRuns).toEqual([runId]);
+    expect(archived?.canceledRunCount).toBe(1);
 
     await expectSettled(runId, simulationId);
   });

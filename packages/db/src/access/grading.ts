@@ -534,9 +534,9 @@ export async function recordProductionTraces(
  * egma ever supports — and a trace completed early is judged on what arrived,
  * while a trace completed by nobody is judged by the idle window anyway.
  *
- * Simulations are skipped rather than absent: they reach the queue through the
- * transaction that ends them, so even when egma's own runtime starts exporting
- * through this door its spans must not make a second job.
+ * Simulation traces are excluded rather than treated as production: their
+ * grading job is created by the transaction that ends the simulation, so spans
+ * arriving through this door must not create a second job.
  *
  * Nothing here decides whether a trace *should* be graded. It reports what
  * arrived; which graders apply, and whether this trace is their turn, are
@@ -610,7 +610,7 @@ export type GradingClaimRequest = {
  *
  * Up to `capacity` of the oldest outstanding jobs move to `claimed` in one
  * transaction, stamped with the claimant and their first heartbeat; whatever
- * another copy holds locked is skipped rather than waited on, so two copies
+ * another copy holds locked is passed over rather than waited on, so two copies
  * drain one queue without ever taking the same conversation. `SKIP LOCKED`,
  * exactly as `claimSimulations` does it, because it is exactly the same
  * problem.

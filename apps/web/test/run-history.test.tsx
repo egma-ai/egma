@@ -1,12 +1,5 @@
 // @vitest-environment jsdom
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RunDetailPage from "../app/projects/[projectId]/runs/[runId]/page.tsx";
@@ -14,31 +7,15 @@ import RunsPage from "../app/projects/[projectId]/runs/page.tsx";
 import type { Me } from "../lib/me.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
-/**
- * The run history and one run's page, rendered and driven.
- *
- * **Every test here is about the same thing said four ways**: machinery is not
- * judgment. A run that finished is not a run that went well; a conversation egma
- * declined to conduct is not a conversation that failed; a conversation egma
- * could not conduct is egma's problem and not the agent's; and a verdict nobody
- * has reached is nothing at all rather than a red mark.
- *
- * Nothing here asserts that a component exists or that a source file contains a
- * string. Each drives the real page the way somebody with a keyboard would and
- * reads what the DOM then says.
- */
-
 const routed = vi.hoisted(() => ({
-  push: vi.fn(),
-  replace: vi.fn(),
   pathname: "/projects/prj_1/runs",
   params: { projectId: "prj_1", runId: "run_1" } as Record<string, string>,
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
-  useRouter: () => ({ push: routed.push, replace: routed.replace, back: vi.fn() }),
   useParams: () => routed.params,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
 vi.mock("next/link", () => ({
@@ -53,76 +30,49 @@ vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
 
-function meWith(role: string): Me {
-  return {
-    user: { id: "usr_1", email: "ada@acme.example" },
-    organizations: [{ id: "org_1", name: "Acme", slug: "acme", role }],
-    projects: [{ id: "prj_1", name: "Default", slug: "default" }],
-  };
-}
-
-type Stubbed = { status: number; body: unknown } | "never";
-
-type Recorded = {
-  readonly url: string;
-  readonly path: string;
-  readonly method: string;
-  readonly body: Record<string, unknown> | undefined;
+const ME: Me = {
+  user: { id: "usr_1", email: "ada@acme.example" },
+  organizations: [{ id: "org_1", name: "Acme", slug: "acme", role: "admin" }],
+  projects: [{ id: "prj_1", name: "Receptionists", slug: "receptionists" }],
 };
 
-/** Every request the page made, in the order it made them. */
-let sent: Recorded[] = [];
+type Stub = { readonly status: number; readonly body: unknown } | "never";
+type Sent = {
+  readonly path: string;
+  readonly url: string;
+  readonly method: string;
+  readonly body: unknown;
+};
 
-function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void {
-  const asked: Record<string, number> = {};
+let sent: Sent[] = [];
+
+function answers(stubs: Record<string, Stub | readonly Stub[]>): void {
+  const turns: Record<string, number> = {};
   sent = [];
-
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: FetchInput, options?: RequestInit) => {
-      const request = await observeRequest(input, options);
-      const { address, path } = request;
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const request = await observeRequest(input, init);
       sent.push({
-        url: `${path}${address.search}`,
-        path,
+        path: request.path,
+        url: request.url,
         method: request.method,
-        body: request.body as Record<string, unknown> | undefined,
+        body: request.body,
       });
-
-      const held = answers[path];
-      if (held === undefined) throw new Error(`nothing stubbed for ${path}`);
-
-      const turn = asked[path] ?? 0;
-      asked[path] = turn + 1;
+      const held = stubs[request.path];
+      if (held === undefined) throw new Error(`nothing stubbed for ${request.path}`);
+      const turn = turns[request.path] ?? 0;
+      turns[request.path] = turn + 1;
       const answer = Array.isArray(held)
-        ? ((held[Math.min(turn, held.length - 1)] ?? "never") as Stubbed)
-        : (held as Stubbed);
-
+        ? (held[Math.min(turn, held.length - 1)] ?? "never")
+        : held;
       if (answer === "never") return new Promise<Response>(() => undefined);
-      return new Response(JSON.stringify(answer.body), {
+      return new Response(answer.status === 204 ? null : JSON.stringify(answer.body), {
         status: answer.status,
         headers: { "content-type": "application/json" },
       });
     }),
   );
-}
-
-/**
- * What the page sent to one address **by one method**.
- *
- * The method is not optional here and the reason is the whole point: this page
- * reads the address it writes to. A wait on "anything sent to `/v1/runs/run_1`"
- * is satisfied by the page's own load and says nothing whatever about a cancel
- * or a retry — and under load the assertion then runs against the `GET`, whose
- * body is undefined, and arrives as `Cannot read properties of undefined`.
- */
-function sentWith(path: string, method: string): Recorded[] {
-  return sent.filter((one) => one.path === path && one.method === method);
-}
-
-/** Every address asked for by GET, so a filter can be read out of one. */
-function readsOf(path: string): string[] {
-  return sent.filter((one) => one.path === path && one.method === "GET").map((one) => one.url);
 }
 
 const NO_SIMULATIONS = {
@@ -132,15 +82,17 @@ const NO_SIMULATIONS = {
   completed: 0,
   failed: 0,
   canceled: 0,
-  skipped: 0,
 };
 
-function runRow(overrides: Record<string, unknown> = {}) {
+function runHeader(overrides: Record<string, unknown> = {}) {
   return {
     id: "run_1",
     projectId: "prj_1",
     status: "completed",
-    label: "Nightly smoke",
+    suiteId: "ste_1",
+    suiteName: "Northside Ford",
+    suiteDeleted: false,
+    name: "Release check",
     agentId: "agt_1",
     connectionId: "con_1",
     agentPlatform: "retell",
@@ -149,63 +101,28 @@ function runRow(overrides: Record<string, unknown> = {}) {
     modality: "chat",
     productLabel: "Retell chat",
     environment: "staging",
-    retryOfRunId: null,
-    expectedSimulationCount: 2,
+    expectedSimulationCount: 1,
     completedCount: 1,
     failedCount: 0,
     canceledCount: 0,
-    skippedCount: 1,
-    simulationCounts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
-    finishedCount: 2,
+    simulationCounts: { ...NO_SIMULATIONS, completed: 1 },
+    finishedCount: 1,
     gradableCount: 1,
     gradedCount: 1,
     verdict: "passed",
     score: 1,
-    verdictCounts: { passed: 1, failed: 0, skipped: 1, errored: 0, total: 2 },
-    createdAt: "2026-08-15T10:00:00.000Z",
-    startedAt: "2026-08-15T10:00:01.000Z",
-    finishedAt: "2026-08-15T10:01:00.000Z",
-    ...overrides,
-  };
-}
-
-function simulationRow(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "sim_1",
-    position: 1,
-    testId: "tst_1",
-    testName: "Reschedules a booked appointment",
-    testVersionId: "tstv_1",
-    personaId: "prs_1",
-    personaName: "Impatient Rita",
-    personaVersionId: "prsv_7",
-    status: "completed",
-    grading: "graded",
-    verdict: "passed",
-    score: 1,
-    counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
-    reason: null,
-    skipReason: null,
-    skippedCapabilities: null,
-    modality: "chat",
-    hasRecording: false,
+    verdictCounts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
+    resultsUrl: "/projects/prj_1/runs/run_1",
+    createdAt: "2026-08-21T10:00:00.000Z",
+    startedAt: "2026-08-21T10:00:01.000Z",
+    finishedAt: "2026-08-21T10:01:00.000Z",
     ...overrides,
   };
 }
 
 function runDetail(overrides: Record<string, unknown> = {}) {
   return {
-    id: "run_1",
-    projectId: "prj_1",
-    status: "completed",
-    label: "Nightly smoke",
-    agentId: "agt_1",
-    connectionId: "con_1",
-    agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
-    accessVariant: "retell_chat_api.api_key",
-    modality: "chat",
-    productLabel: "Retell chat",
+    ...runHeader(),
     connectionSnapshot: {
       agentPlatform: "retell",
       connectionKind: "retell_chat_api",
@@ -215,51 +132,7 @@ function runDetail(overrides: Record<string, unknown> = {}) {
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
     },
-    retryOfRunId: null,
-    testVersions: ["tstv_1"],
-    mockTools: { defaults: [], overrides: {} },
-    expectedSimulationCount: 1,
-    completedCount: 1,
-    failedCount: 0,
-    canceledCount: 0,
-    skippedCount: 0,
-    simulationCounts: { ...NO_SIMULATIONS, completed: 1 },
-    finishedCount: 1,
-    gradableCount: 1,
-    gradedCount: 1,
-    verdict: "passed",
-    score: 1,
     counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
-    createdAt: "2026-08-15T10:00:00.000Z",
-    finishedAt: "2026-08-15T10:01:00.000Z",
-    simulations: [simulationRow()],
-    gradingPlan: {
-      state: "run_start",
-      capturedAt: "2026-08-15T10:00:00.000Z",
-      groups: [
-        {
-          tag: "version",
-          testId: "tst_1",
-          testVersionId: "tstv_1",
-          testName: "Reschedules a booked appointment",
-          items: [
-            // A running copy, like every item in a frozen plan: the
-            // expected-behaviors grader is a seeded copy of a predefined
-            // library entry now, not a rowless sentinel with an engine
-            // version, so one shape describes the whole plan.
-            {
-              kind: "authored",
-              graderId: "grd_seeded",
-              graderVersionId: "grv_1",
-              name: "expected_behaviors",
-              libraryId: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
-              required: true,
-              scope: "simulations",
-            },
-          ],
-        },
-      ],
-    },
     agent: { id: "agt_1", name: "Front desk", archived: false },
     connection: {
       id: "con_1",
@@ -271,24 +144,38 @@ function runDetail(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const NO_EVENTS = { status: 200, body: { events: [], next: 0, done: true } };
+function simulation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "sim_1",
+    position: 1,
+    testId: "tst_1",
+    testName: "Books service",
+    testVersionId: "tstv_1",
+    personaId: "prs_1",
+    personaName: "Patient caller",
+    personaVersionId: "prsv_1",
+    status: "completed",
+    grading: "graded",
+    verdict: "passed",
+    score: 1,
+    counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
+    reason: null,
+    modality: "chat",
+    hasRecording: false,
+    mockToolCoverage: { discovered: [], covered: [], uncovered: [] },
+    ...overrides,
+  };
+}
 
-/**
- * The two sentences a verdict badge and a conversation-status badge carry.
- *
- * Asserted by sentence rather than by the word on the badge, because the words
- * overlap on purpose: `failed` is a legitimate thing for a conversation's
- * *machinery* to say — egma could not conduct it — and is also an option in the
- * verdict filter. Only the sentence says which of the four facts is speaking.
- */
-const JUDGED_THE_AGENT = "At least one check failed. This is a judgement about the agent.";
-const COULD_NOT_CONDUCT =
-  "Egma could not conduct this simulation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.";
+function shellStubs(): Record<string, Stub> {
+  return {
+    "/api/me": { status: 200, body: ME },
+    "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
+  };
+}
 
 beforeEach(() => {
   sent = [];
-  routed.push.mockReset();
-  routed.replace.mockReset();
   routed.pathname = "/projects/prj_1/runs";
   routed.params = { projectId: "prj_1", runId: "run_1" };
   Object.defineProperty(window, "location", {
@@ -303,820 +190,225 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/* ------------------------------------------------------------------------ *
- * The list.
- * ------------------------------------------------------------------------ */
-
-function history(
-  rows: readonly Record<string, unknown>[],
-  options: {
-    readonly role?: string;
-    readonly nextPageToken?: string | null;
-    readonly cancel?: Stubbed | readonly Stubbed[];
-  } = {},
-): void {
-  apiAnswers({
-    "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
-    "/v1/agents": {
-      status: 200,
-      body: {
-        agents: [
-          {
-            id: "agt_1",
-            projectId: "prj_1",
-            name: "Front desk",
-            description: null,
-            revision: "rev_a",
-            archived: false,
-            archivedAt: null,
-            createdAt: "2026-08-01T10:00:00.000Z",
-            updatedAt: "2026-08-01T10:00:00.000Z",
-          },
-        ],
-        nextPageToken: null,
+describe("run history after suites", () => {
+  it("shows the run name and the suite's current name as separate facts", async () => {
+    answers({
+      ...shellStubs(),
+      "/v1/runs": {
+        status: 200,
+        body: { runs: [runHeader()], nextPageToken: null },
       },
-    },
-    "/v1/runs": {
-      status: 200,
-      body: { runs: rows, nextPageToken: options.nextPageToken ?? null },
-    },
-    "/v1/runs/run_1/cancel": options.cancel ?? {
-      status: 200,
-      body: runRow({ status: "canceled" }),
-    },
-    "/v1/runs/run_2/cancel": options.cancel ?? {
-      status: 200,
-      body: runRow({ id: "run_2", status: "canceled" }),
-    },
-  });
-}
-
-describe("the run list", () => {
-  it("keeps the four facts apart on one row", async () => {
-    const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    history([
-      runRow({
-        createdAt: createdAt,
-        status: "completed",
-        verdict: "failed",
-        simulationCounts: { ...NO_SIMULATIONS, completed: 1, skipped: 1 },
-        gradedCount: 1,
-        gradableCount: 1,
-      }),
-    ]);
+    });
     render(<RunsPage />);
 
-    expect(screen.getByRole("heading", { name: "Simulation runs" })).toBeTruthy();
-    expect(screen.queryByText("Project")).toBeNull();
+    const table = await screen.findByRole("table", { name: "Runs in this project" });
+    expect(within(table).getByRole("link", { name: "Release check" }).getAttribute("href")).toBe(
+      "/projects/prj_1/runs/run_1",
+    );
     expect(
-      screen.queryByText(/Every execution of a selection of tests/u),
-    ).toBeNull();
-
-    const table = await screen.findByRole("table", {
-      name: "Runs in this project",
-    });
+      within(table).getByRole("link", { name: "Northside Ford" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/tests/suites/ste_1");
     expect(
       within(table)
         .getAllByRole("columnheader")
         .map((header) => header.textContent),
-    ).toEqual([
-      "Run",
-      "Started",
-      "Status",
-      "Simulations",
-      "Grading",
-      "Verdict",
-      "",
-    ]);
-
-    // The machinery finished, and what it found was bad. Both are on the row,
-    // and neither is the other.
-    await screen.findAllByText("completed");
-    await screen.findAllByText("failed");
-    expect(within(table).getByText("1 of 1 judged")).toBeTruthy();
-    // The skipped conversation is counted as itself and never as a failure.
-    const tallies = await screen.findAllByText(/1 completed · 1 skipped/u);
-    expect(tallies.length).toBeGreaterThan(0);
-    for (const tally of tallies) {
-      expect(tally.textContent).not.toContain("failed");
-    }
-
-    // The list scans by age, while the machine instant and exact local moment
-    // stay on the semantic time element.
-    const started = await screen.findByText("5 minutes ago");
-    expect(started.closest("time")?.dateTime).toBe(createdAt);
-    expect(started.closest("time")?.title).toMatch(/^\d{4}-\d{2}-\d{2} /u);
+    ).toContain("Test suite");
   });
 
-  it("says a run nobody has judged has no verdict, rather than showing a failure", async () => {
-    history([
-      runRow({
-        status: "running",
-        verdict: null,
-        gradedCount: 0,
-        gradableCount: 1,
-        finishedAt: null,
-      }),
-    ]);
-    render(<RunsPage />);
-
-    const said = await screen.findAllByText("Not judged yet");
-    expect(said.length).toBeGreaterThan(0);
-    // Nothing on the row claims a judgement about the agent. Asked by the
-    // verdict badge's own sentence rather than by the word "failed", which the
-    // verdict filter also offers as an option and which a machinery badge is
-    // entitled to say.
-    expect(screen.queryAllByTitle(JUDGED_THE_AGENT)).toEqual([]);
-  });
-
-  it("puts every filter in the address of the request, never in the browser", async () => {
-    history([runRow()]);
-    render(<RunsPage />);
-    await screen.findAllByText("Nightly smoke");
-
-    fireEvent.change(
-      screen.getByLabelText("Show only runs with one verdict"),
-      { target: { value: "failed" } },
-    );
-
-    await waitFor(() => {
-      expect(readsOf("/v1/runs").some((one) => one.includes("verdict=failed"))).toBe(
-        true,
-      );
+  it("keeps historical runs readable after their suite is deleted", async () => {
+    answers({
+      ...shellStubs(),
+      "/v1/runs": {
+        status: 200,
+        body: {
+          runs: [runHeader({ suiteName: "Northside Ford", suiteDeleted: true })],
+          nextPageToken: null,
+        },
+      },
     });
-
-    fireEvent.change(
-      screen.getByLabelText("Show only runs whose machinery is in one state"),
-      { target: { value: "canceled" } },
-    );
-    await waitFor(() => {
-      const latest = readsOf("/v1/runs").at(-1) ?? "";
-      expect(latest).toContain("status=canceled");
-      expect(latest).toContain("verdict=failed");
-    });
-  });
-
-  it("offers a viewer no way to stop a run, because the server would refuse it", async () => {
-    history([runRow({ status: "running", finishedAt: null })], { role: "viewer" });
     render(<RunsPage />);
 
-    await screen.findAllByText("Nightly smoke");
-    expect(screen.queryAllByRole("button", { name: "Cancel" })).toEqual([]);
-    expect(screen.queryAllByRole("link", { name: "Create a run" })).toEqual([]);
+    const table = await screen.findByRole("table", { name: "Runs in this project" });
+    expect(within(table).getByText("Northside Ford (deleted)")).toBeTruthy();
+    expect(within(table).queryByRole("link", { name: "Northside Ford (deleted)" })).toBeNull();
   });
 
-  it("sends a cancel for the row it was opened on", async () => {
-    history([runRow({ status: "running", finishedAt: null })]);
+  it("loads the next bounded page from the runs field", async () => {
+    answers({
+      ...shellStubs(),
+      "/v1/runs": [
+        {
+          status: 200,
+          body: { runs: [runHeader()], nextPageToken: "run_next" },
+        },
+        {
+          status: 200,
+          body: {
+            runs: [runHeader({ id: "run_2", name: "Second release check" })],
+            nextPageToken: null,
+          },
+        },
+      ],
+    });
     render(<RunsPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Cancel" }))[0]!);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
-
-    // The method is named because this page reads the address it writes to: a
-    // wait on "anything sent here" is satisfied by its own load.
-    await waitFor(() => {
-      expect(sentWith("/v1/runs/run_1/cancel", "POST")).toHaveLength(1);
-    });
-    // And which project the run is in, said the one way every write in the
-    // product says it.
-    expect(sentWith("/v1/runs/run_1/cancel", "POST")[0]?.url).toBe(
-      "/v1/runs/run_1/cancel?projectId=prj_1",
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    expect(await screen.findByRole("link", { name: "Second release check" })).toBeTruthy();
+    expect(
+      sent.some(
+        (request) =>
+          request.path === "/v1/runs" && request.url.includes("pageToken=run_next"),
+      ),
+    ).toBe(true);
   });
 });
 
-/**
- * The panel is drawn once under the table, for whichever row is open, so
- * everything it holds is shared by every row. These are two defects and not one:
- * clearing the sentence does not clear the retry, and the retry is the one that
- * stops a run nobody is looking at.
- */
-describe("what belongs to the open run row", () => {
-  /** Two runs, the first one's cancel refused, so the panel holds a failure. */
-  function twoRuns(): void {
-    history(
-      [
-        runRow({ id: "run_1", label: "First", status: "running", finishedAt: null }),
-        runRow({ id: "run_2", label: "Second", status: "running", finishedAt: null }),
-      ],
-      {
-        cancel: {
-          status: 409,
-          body: {
-            error: "conflict",
-            message: "Egma could not stop run_1.",
-          },
-        },
-      },
-    );
+describe("one run after suites", () => {
+  function detailStubs(
+    detail: Record<string, unknown> = runDetail(),
+    pages: Stub | readonly Stub[] = {
+      status: 200,
+      body: { simulations: [simulation()], nextPageToken: null },
+    },
+  ): Record<string, Stub | readonly Stub[]> {
+    return {
+      "/api/me": { status: 200, body: ME },
+      "/v1/runs/run_1": { status: 200, body: detail },
+      "/v1/runs/run_1/simulations": pages,
+      "/v1/runs/run_1/cancel": { status: 200, body: detail },
+    };
   }
 
-  it("empties a refused cancel's sentence when a different row opens", async () => {
-    twoRuns();
-    render(<RunsPage />);
-
-    const stops = await screen.findAllByRole("button", { name: "Cancel" });
-    fireEvent.click(stops[0]!);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
-    // **Wait for the write that produces the sentence** before asserting it is
-    // gone. Asserting an absence before the request has answered would pass for
-    // the wrong reason and keep passing after the behaviour was deleted.
-    await screen.findByText("Egma could not stop run_1.");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Cancel" })[1]!);
-
-    await waitFor(() => {
-      expect(screen.queryByText("Egma could not stop run_1.")).toBeNull();
-    });
-    // The heading is the only thing on screen saying which run the panel is
-    // about, so a sentence left behind would be read as being about this one.
-    await screen.findByText("Cancel Second?");
-  });
-
-  it("drops a refused cancel's Try again when a different row opens", async () => {
-    twoRuns();
-    render(<RunsPage />);
-
-    const stops = await screen.findAllByRole("button", { name: "Cancel" });
-    fireEvent.click(stops[0]!);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
-    await screen.findByRole("button", { name: "Try again" });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Cancel" })[1]!);
-
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
-    });
-    // The panel is open on the second run, which is what makes a retry left
-    // behind dangerous: pressing it would stop the first while the panel
-    // reported about the second.
-    await screen.findByText("Cancel Second?");
-    expect(sentWith("/v1/runs/run_1/cancel", "POST")).toHaveLength(1);
-  });
-});
-
-/* ------------------------------------------------------------------------ *
- * One run.
- * ------------------------------------------------------------------------ */
-
-function detail(
-  options: {
-    readonly role?: string;
-    /** One answer, or a list answered in order — a cancel is read back after. */
-    readonly run?: Record<string, unknown> | readonly Record<string, unknown>[];
-    readonly events?: Stubbed | readonly Stubbed[];
-    readonly cancel?: Stubbed;
-    readonly rerun?: Stubbed | readonly Stubbed[];
-    readonly secondRun?: Record<string, unknown>;
-  } = {},
-): void {
-  apiAnswers({
-    "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
-    "/v1/runs/run_1": Array.isArray(options.run)
-      ? options.run.map((body) => ({ status: 200, body }))
-      : { status: 200, body: (options.run as Record<string, unknown>) ?? runDetail() },
-    "/v1/runs/run_1/events": options.events ?? NO_EVENTS,
-    "/v1/runs/run_1/cancel": options.cancel ?? {
-      status: 200,
-      body: runDetail({ status: "canceled" }),
-    },
-    "/v1/simulations/sim_1/rerun": options.rerun ?? {
-      status: 201,
-      body: runDetail({ id: "run_9", label: "LiveKit retry" }),
-    },
-    "/v1/runs/run_2": {
-      status: 200,
-      body: options.secondRun ?? runDetail({ id: "run_2", label: "Second" }),
-    },
-    "/v1/runs/run_2/events": NO_EVENTS,
-  });
-}
-
-describe("one run's page", () => {
-  it("starts one new run from a terminal simulation and keeps the original evidence", async () => {
-    detail();
+  it("reads simulations from their bounded endpoint and offers no rerun control", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs());
     render(<RunDetailPage />);
 
-    const table = await screen.findByRole("table", {
-      name: "Simulations in this run",
-    });
-    const rowAction = within(table).getByRole("button", { name: "Run again" });
-    expect(rowAction.closest("td")?.dataset.action).toBe("true");
-    fireEvent.click(rowAction);
-
-    const dialog = await screen.findByRole("dialog", {
-      name: "Run this simulation again?",
-    });
+    expect(await screen.findByRole("heading", { name: "Release check" })).toBeTruthy();
+    const suite = screen.getByRole("link", { name: "Northside Ford" });
+    expect(suite.getAttribute("href")).toBe("/projects/prj_1/tests/suites/ste_1");
+    expect(await screen.findByRole("link", { name: "Books service" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
     expect(
-      within(dialog).getByText(/starts one new run under current conditions/u),
-    ).toBeTruthy();
-    expect(
-      within(dialog).getByText(/original evidence stays unchanged/u),
-    ).toBeTruthy();
-
-    const submit = within(dialog).getByRole("button", { name: "Run again" });
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Run name" }), {
-      target: { value: "LiveKit retry" },
-    });
-    fireEvent.click(submit);
-
-    await waitFor(() => {
-      expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toHaveLength(1);
-    });
-    const request = sentWith("/v1/simulations/sim_1/rerun", "POST")[0];
-    expect(request?.url).toBe(
-      "/v1/simulations/sim_1/rerun?projectId=prj_1",
-    );
-    expect(request?.body?.label).toBe("LiveKit retry");
-    expect(request?.body?.idempotencyKey).toMatch(/^run:/u);
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/runs/run_9");
-
-    // Re-running creates a new run. The original row and its evidence link are
-    // still on this page until navigation completes. `hidden` because the
-    // confirmation is still open and a dialog puts the page behind it out of
-    // reach, which is what makes it a dialog.
-    expect(
-      within(table).getByRole("link", {
-        name: "Reschedules a booked appointment",
-        hidden: true,
-      }),
-    ).toBeTruthy();
+      sent.some(
+        (request) =>
+          request.method === "GET" && request.path === "/v1/runs/run_1/simulations",
+      ),
+    ).toBe(true);
   });
 
-  it("reuses one rerun intent after a refusal and mints another after the dialog closes", async () => {
-    detail({
-      rerun: [
-        {
-          status: 409,
-          body: { error: "busy", message: "Try this same request again." },
-        },
-        {
-          status: 409,
-          body: { error: "busy", message: "Try this same request again." },
-        },
-        {
-          status: 201,
-          body: runDetail({ id: "run_9", label: "Second intent" }),
-        },
-      ],
-    });
+  it("uses the suite name as the title when the optional run name is absent", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs(runDetail({ name: null })));
     render(<RunDetailPage />);
 
-    const table = await screen.findByRole("table", {
-      name: "Simulations in this run",
-    });
-    const rowAction = within(table).getByRole("button", { name: "Run again" });
-    rowAction.focus();
-    fireEvent.click(rowAction);
-    let dialog = await screen.findByRole("dialog", {
-      name: "Run this simulation again?",
-    });
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Run name" }), {
-      target: { value: "First intent" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
-    await within(dialog).findByText("Try this same request again.");
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
-    await waitFor(() => {
-      expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toHaveLength(2);
-    });
-    const firstKey = sentWith("/v1/simulations/sim_1/rerun", "POST")[0]?.body
-      ?.idempotencyKey;
-    const retryKey = sentWith("/v1/simulations/sim_1/rerun", "POST")[1]?.body
-      ?.idempotencyKey;
-    expect(retryKey).toBe(firstKey);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Run this simulation again?" }),
-      ).toBeNull();
-    });
-    expect(document.activeElement).toBe(rowAction);
-    fireEvent.click(rowAction);
-    dialog = await screen.findByRole("dialog", {
-      name: "Run this simulation again?",
-    });
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Run name" }), {
-      target: { value: "Second intent" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
-    await waitFor(() => {
-      expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toHaveLength(3);
-    });
-    const reopenedKey = sentWith("/v1/simulations/sim_1/rerun", "POST")[2]?.body
-      ?.idempotencyKey;
-    expect(reopenedKey).not.toBe(firstKey);
+    expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
   });
 
-  it("uses the shared parent trail and shows no terminal action", async () => {
-    const createdAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    detail({ run: runDetail({ createdAt: createdAt }) });
-    render(<RunDetailPage />);
-
-    const breadcrumb = await screen.findByRole("navigation", {
-      name: "Breadcrumb",
-    });
-    const runs = within(breadcrumb).getByRole("link", { name: "Runs" });
-    const current = within(breadcrumb).getByText("Nightly smoke");
-
-    expect(runs.getAttribute("href")).toBe("/projects/prj_1/runs");
-    expect(current.getAttribute("aria-current")).toBe("page");
-    expect(screen.queryByRole("link", { name: "All runs" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.queryByText(/already finished/u)).toBeNull();
-
-    const summary = screen.getByRole("group", { name: "Run summary" });
-    const started = within(summary).getByText("5 minutes ago");
-    expect(started.closest("time")?.dateTime).toBe(createdAt);
-    expect(started.closest("time")?.title).toMatch(/^\d{4}-\d{2}-\d{2} /u);
-    expect(within(summary).getByText("Status")).toBeTruthy();
-    expect(within(summary).getByText("completed")).toBeTruthy();
-    expect(within(summary).getByText("Verdict")).toBeTruthy();
-    expect(within(summary).getByText("passed")).toBeTruthy();
-    // The summary reads as one compact line of facts. Status and verdict are
-    // text with symbols, not chips that change the line's height.
-    expect(summary.querySelector('[class*="badge"]')).toBeNull();
-  });
-
-  it("keeps compact execution and verdict states apart on every simulation", async () => {
-    detail({
-      run: runDetail({
-        status: "completed",
-        expectedSimulationCount: 3,
-        simulationCounts: {
-          ...NO_SIMULATIONS,
-          completed: 1,
-          failed: 1,
-          skipped: 1,
-        },
-        verdict: null,
-        simulations: [
-          simulationRow({ personaName: "Starter" }),
-          simulationRow({
-            id: "sim_2",
-            position: 2,
-            status: "failed",
-            grading: "pending",
-            verdict: null,
-            counts: null,
-            score: null,
-            reason: "not_answered",
-          }),
-          simulationRow({
-            id: "sim_3",
-            position: 3,
-            status: "skipped",
-            grading: "not_required",
-            verdict: "skipped",
-            counts: null,
-            score: null,
-            skipReason: "required_capability_unsupported",
-            skippedCapabilities: ["raw_audio"],
-          }),
-        ],
-      }),
-    });
-    render(<RunDetailPage />);
-
-    await screen.findAllByText("skipped");
-    const table = await screen.findByRole("table", {
-      name: "Simulations in this run",
-    });
-    expect(
-      within(table)
-        .getAllByRole("columnheader")
-        .map((header) => header.textContent),
-    ).toEqual([
-      "Simulation",
-      "Persona",
-      "Execution",
-      "Grading",
-      "Verdict",
-      "",
-    ]);
-    expect(within(table).getByText("Starter")).toBeTruthy();
-    expect(within(table).queryByText("Persona: Starter")).toBeNull();
-    expect(within(table).queryByText("Not judged yet")).toBeNull();
-    expect(within(table).getByText("Not judged")).toBeTruthy();
-
-    // Egma could not conduct one of them, and the page says so in those words
-    // rather than calling it a failed verdict.
-    const execution = await screen.findAllByText(/not a failed grader verdict/u);
-    expect(execution.length).toBeGreaterThan(0);
-
-    // And it declined to conduct another, naming what decided it.
-    const declined = await screen.findAllByText(/does not support raw_audio/u);
-    expect(declined.length).toBeGreaterThan(0);
-    for (const said of declined) {
-      expect(said.textContent).toContain("says nothing about the agent");
-    }
-
-    /*
-     * The machinery genuinely says `failed` about one conversation — egma could
-     * not conduct it — and that word is allowed to be on the page. What must
-     * never be on it is a **verdict** saying the agent failed, and that is what
-     * this asks, by the verdict badge's own sentence.
-     */
-    expect((await screen.findAllByTitle(COULD_NOT_CONDUCT)).length).toBeGreaterThan(0);
-    expect(screen.queryAllByTitle(JUDGED_THE_AGENT)).toEqual([]);
-  });
-
-  it("puts the agent before the connection and keeps archived names readable", async () => {
-    detail({
-      run: runDetail({
-        agent: { id: "agt_1", name: "Front desk", archived: true },
-        connection: {
-          id: "con_1",
-          name: "retell-staging",
-          productLabel: "Retell chat",
-          archived: true,
-        },
-      }),
-    });
+  it("shows a deleted suite as history, not as a live link", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs(runDetail({ suiteDeleted: true, name: null })));
     render(<RunDetailPage />);
 
     const summary = await screen.findByRole("group", { name: "Run summary" });
-    await within(summary).findByText("Front desk");
-    await within(summary).findByText("retell-staging");
-    expect(
-      within(summary)
-        .getAllByRole("term")
-        .map((term) => term.textContent),
-    ).toEqual([
-      "Started",
-      "Status",
-      "Grading",
-      "Verdict",
-      "Agent",
-      "Connection",
-    ]);
-    expect(within(summary).queryByText("retell · chat")).toBeNull();
-    expect((await screen.findAllByText("Archived")).length).toBe(2);
-    expect(summary.querySelector('[class*="badge"]')).toBeNull();
+    expect(within(summary).getByText("Northside Ford (deleted)")).toBeTruthy();
+    expect(within(summary).queryByRole("link", { name: /Northside Ford/u })).toBeNull();
   });
 
-  it("does not offer Run again while a simulation is active", async () => {
-    detail({
-      run: runDetail({
-        status: "running",
-        finishedAt: null,
-        expectedSimulationCount: 1,
-        simulationCounts: { ...NO_SIMULATIONS, running: 1 },
-        gradedCount: 0,
-        gradableCount: 0,
-        verdict: null,
-        simulations: [
-          simulationRow({
-            status: "running",
-            grading: "waiting",
-            verdict: null,
-            counts: null,
-            score: null,
-          }),
-        ],
-      }),
-      events: "never",
-    });
-    render(<RunDetailPage />);
-
-    await screen.findByRole("table", { name: "Simulations in this run" });
-    await screen.findAllByText("running");
-    expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
-    expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toEqual([]);
-  });
-
-  /**
-   * The page follows the numbered feed rather than re-reading the run, so a
-   * conversation landing has to reach the screen with no reload at all.
-   */
-  it("moves a conversation from the feed without reading the run again", async () => {
-    detail({
-      run: runDetail({
-        status: "running",
-        finishedAt: null,
-        expectedSimulationCount: 1,
-        simulationCounts: { ...NO_SIMULATIONS, running: 1 },
-        gradedCount: 0,
-        gradableCount: 0,
-        verdict: null,
-        simulations: [
-          simulationRow({
-            status: "running",
-            grading: "waiting",
-            verdict: null,
-            counts: null,
-            score: null,
-          }),
-        ],
-      }),
-      events: [
+  it("loads more simulations with the cursor and keeps the first page", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      detailStubs(runDetail(), [
+        {
+          status: 200,
+          body: { simulations: [simulation()], nextPageToken: "sim_next" },
+        },
         {
           status: 200,
           body: {
-            events: [
-              {
-                seq: 1,
-                at: "2026-08-15T10:00:30.000Z",
-                kind: "simulation",
-                simulationId: "sim_1",
-                testName: "Reschedules a booked appointment",
-                personaName: "Impatient Rita",
-                status: "completed",
-                verdict: "failed",
-                reason: "persona_concluded",
-              },
+            simulations: [
+              simulation({ id: "sim_2", position: 2, testName: "Reschedules service" }),
             ],
-            next: 1,
-            done: false,
+            nextPageToken: null,
           },
         },
-        NO_EVENTS,
-      ],
-    });
+      ]),
+    );
     render(<RunDetailPage />);
 
-    // It starts as the read described it…
-    await screen.findAllByText("running");
-    // A live simulation uses the shared active mark, not the old static arrow.
-    expect(document.querySelector('[data-motion="active"]')).toBeTruthy();
-    // …and the feed moves it, with no second read of the run.
-    await screen.findAllByText("failed");
-    await waitFor(() => {
-      expect(sentWith("/v1/runs/run_1", "GET").length).toBeGreaterThanOrEqual(1);
-    });
-    expect(readsOf("/v1/runs/run_1")).toHaveLength(1);
+    fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+    expect(await screen.findByRole("link", { name: "Reschedules service" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Books service" })).toBeTruthy();
+    expect(
+      sent.some(
+        (request) =>
+          request.path === "/v1/runs/run_1/simulations" &&
+          request.url.includes("pageToken=sim_next"),
+      ),
+    ).toBe(true);
   });
 
-  it("offers a viewer no Cancel and no Retry, and still lets them read everything", async () => {
-    detail({ role: "viewer" });
-    render(<RunDetailPage />);
-
-    // **Wait for the read that would supply the controls** before asserting
-    // they are absent. Asserting the absence first would pass because nothing
-    // had rendered yet, and would keep passing after the rule was deleted.
-    await screen.findByRole("heading", { name: "Nightly smoke" });
-    await screen.findByRole("table", { name: "Simulations in this run" });
-
-    expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Run again" })).toBeNull();
-    expect(sentWith("/v1/simulations/sim_1/rerun", "POST")).toEqual([]);
-    expect(sentWith("/v1/runs/run_1/retry", "POST")).toEqual([]);
-    expect(sentWith("/v1/runs/run_1/cancel", "POST")).toEqual([]);
-
-    await screen.findByText("Front desk");
-    await screen.findByText("retell-staging");
-    expect(screen.queryByText(/tstv_1|prsv_7/u)).toBeNull();
-  });
-
-  it("cancels an active run, and never reports it completed afterwards", async () => {
-    const stopped = runDetail({
-      status: "canceled",
-      finishedAt: "2026-08-15T10:00:30.000Z",
-      expectedSimulationCount: 1,
-      simulationCounts: { ...NO_SIMULATIONS, canceled: 1 },
-      gradableCount: 0,
-      gradedCount: 0,
-      verdict: "skipped",
-      simulations: [
-        simulationRow({
-          status: "canceled",
-          grading: "not_required",
-          verdict: "skipped",
-          counts: null,
-          score: null,
-        }),
-      ],
-    });
-    detail({
-      // The page reads the run again after the cancel lands, so the second
-      // answer is the run as the cancel left it.
-      run: [
-        runDetail({
-          status: "running",
-          finishedAt: null,
-          expectedSimulationCount: 1,
-          simulationCounts: { ...NO_SIMULATIONS, running: 1 },
-          gradableCount: 0,
-          gradedCount: 0,
-          verdict: null,
+  it("keeps execution failure separate from agent judgment without capability text", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      detailStubs(runDetail({ verdict: null }), {
+        status: 200,
+        body: {
           simulations: [
-            simulationRow({
-              status: "running",
-              grading: "waiting",
+            simulation({
+              status: "failed",
+              grading: "pending",
               verdict: null,
-              counts: null,
               score: null,
+              counts: null,
+              reason: "not_answered",
             }),
           ],
-        }),
-        stopped,
-      ],
-      /*
-       * **A feed that is not finished**, and that matters here.
-       * `done: true` is the server saying the run has ended, and the page
-       * answers it by reading the run again — which would consume the second
-       * answer above before anybody pressed anything, and leave this test
-       * clicking a control that had already become inert. One run in five.
-       */
-      events: { status: 200, body: { events: [], next: 0, done: false } },
-      cancel: { status: 200, body: stopped },
+          nextPageToken: null,
+        },
+      }),
+    );
+    render(<RunDetailPage />);
+
+    expect(await screen.findByText(/execution problem, not a failed grader verdict/u)).toBeTruthy();
+    expect(screen.queryByText(/capabilit/u)).toBeNull();
+  });
+
+  it("still cancels an active run but offers no retry or rerun", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    const active = runDetail({
+      status: "running",
+      finishedAt: null,
+      gradedCount: 0,
+      gradableCount: 1,
+      verdict: null,
+      simulationCounts: { ...NO_SIMULATIONS, running: 1 },
+    });
+    answers({
+      ...detailStubs(active, {
+        status: 200,
+        body: {
+          simulations: [
+            simulation({ status: "running", grading: "waiting", verdict: null }),
+          ],
+          nextPageToken: null,
+        },
+      }),
+      "/v1/runs/run_1/events": "never",
     });
     render(<RunDetailPage />);
 
-    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
-    // Wait for the dialog itself before reaching for its control: the header
-    // carries a button of the same name, so taking "the last one" before the
-    // dialog has rendered would press the header again and send nothing.
-    await screen.findByRole("dialog", { name: "Cancel run “Nightly smoke”?" });
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Cancel run" })).at(-1)!,
-    );
-
+    const dialog = await screen.findByRole("dialog", { name: "Cancel run “Release check”?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     await waitFor(() => {
-      expect(sentWith("/v1/runs/run_1/cancel", "POST")).toHaveLength(1);
+      expect(
+        sent.some(
+          (request) =>
+            request.method === "POST" && request.path === "/v1/runs/run_1/cancel",
+        ),
+      ).toBe(true);
     });
-    // **And it says which project it is stopping a run in.** A cancel that
-    // named none was answered from the session's own project — the
-    // organization's first — so this page could not stop a run it was looking
-    // straight at anywhere else.
-    expect(sentWith("/v1/runs/run_1/cancel", "POST")[0]?.url).toBe(
-      "/v1/runs/run_1/cancel?projectId=prj_1",
-    );
-    await screen.findAllByText("canceled");
-    // Stopping early never reads as a suite that went green.
-    expect(screen.queryAllByText("completed")).toEqual([]);
-    expect(screen.queryAllByText("passed")).toEqual([]);
-  });
-
-  it("drops what one run's feed moved when a different run is opened", async () => {
-    detail({
-      run: runDetail({
-        status: "running",
-        finishedAt: null,
-        expectedSimulationCount: 1,
-        simulationCounts: { ...NO_SIMULATIONS, running: 1 },
-        gradableCount: 0,
-        gradedCount: 0,
-        verdict: null,
-        simulations: [
-          simulationRow({
-            status: "running",
-            grading: "waiting",
-            verdict: null,
-            counts: null,
-            score: null,
-          }),
-        ],
-      }),
-      events: [
-        {
-          status: 200,
-          body: {
-            events: [
-              {
-                seq: 1,
-                at: "2026-08-15T10:00:30.000Z",
-                kind: "simulation",
-                simulationId: "sim_1",
-                testName: "Reschedules a booked appointment",
-                personaName: "Impatient Rita",
-                status: "failed",
-                verdict: "errored",
-                reason: "not_answered",
-              },
-            ],
-            next: 1,
-            done: false,
-          },
-        },
-        NO_EVENTS,
-      ],
-      // The second run holds a conversation of the same id, which is exactly how
-      // a leaked feed would be invisible: it would draw the first run's landing
-      // under the second run's row.
-      secondRun: runDetail({
-        id: "run_2",
-        label: "Second",
-        simulations: [simulationRow()],
-      }),
-    });
-    const view = render(<RunDetailPage />);
-
-    await screen.findAllByText("errored");
-
-    routed.params = { projectId: "prj_1", runId: "run_2" };
-    view.rerender(<RunDetailPage />);
-
-    await screen.findByRole("heading", { name: "Second" });
-    await waitFor(() => {
-      expect(screen.queryAllByText("errored")).toEqual([]);
-    });
-    expect((await screen.findAllByText("passed")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
   });
 });

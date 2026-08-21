@@ -143,14 +143,36 @@ This creates:
 egma/
   config.yaml       what this folder points at — instance URL and IDs
   mock-tools.md     default tool mock responses for simulations
-  tests/            one .md file per test scenario
+  tests/            direct child directories for test suites
 ```
 
 Everything in this folder is committed to version control. No secrets ever land here.
 
 ## Step 5 — Generate your first test suite
 
-Back in the full wizard flow, once your agent is connected and the folder is initialized, the wizard asks your coding agent to read your repository — the prompt, tools, and framework — and write a first suite of tests into `egma/tests/`. Tests arrive one file at a time on screen while the coding agent works.
+Back in the full wizard flow, Egma creates the suite on the platform first. It
+then writes a manifest and the generated tests under one direct child of
+`egma/tests/`:
+
+```text
+egma/tests/receptionist-core/
+  suite.yaml
+  missed-appointment-reschedule.md
+  after-hours-emergency.md
+```
+
+The manifest contains only the stable suite ID and its current name:
+
+```yaml
+id: ste_01JXMK8P2QN4R6S9T1UV3WX5Y
+name: Receptionist core
+```
+
+You can also create an empty suite before you write tests:
+
+```bash
+egma suite create receptionist-core --name "Receptionist core"
+```
 
 If you already have test cases written down in a spreadsheet or document, pass the path and the wizard converts them first:
 
@@ -162,8 +184,8 @@ Each generated test file looks like this:
 
 ```markdown
 ---
+format: 4
 name: missed-appointment-reschedule
-personas: [impatient-caller]
 ---
 ## Scenario
 The caller missed yesterday's appointment and wants to
@@ -178,7 +200,7 @@ reschedule this week. They are short on time and irritated.
 Before starting the run, the wizard shows you the full list of generated tests and pauses:
 
 ```
-12 tests generated · suite "first-suite"
+12 tests generated · suite "Receptionist core"
 
   › quoted-a-price          default persona
     lost-the-order-number   default persona
@@ -190,15 +212,19 @@ Run these against order-line over text-1?
 [enter] run   [e] edit first   [q] quit
 ```
 
-Press `[e]` to open any test in `$EDITOR` before committing to the run. Press `[q]` to exit with all files saved to your repository — you can push and run them later with `egma push` and `egma run`.
+Press `[e]` to open any test in `$EDITOR` before committing to the run. Press
+`[q]` to exit with all files saved to your repository. You can push and run the
+suite later with `egma push` and `egma run <suite-directory>`.
 
 ## Step 6 — Run tests with `egma run`
 
-Press `[enter]` in the wizard, or run the command directly after pushing your tests:
+Press `[enter]` in the wizard, or run the command directly after pushing your
+repository. The run argument is the local suite directory, not the display name
+or suite ID:
 
 ```bash
 egma push   # sync local files to Egma
-egma run    # start a run and follow it
+egma run receptionist-core   # run this complete suite and follow it
 ```
 
 The simulator claims each simulation, conducts the conversation, and the grader writes one verdict per expected behavior after each simulation ends. The wizard follows the run live:
@@ -213,7 +239,7 @@ run run_01K7QXV2M8  ·  12 simulations
 
 ✓ First verdict: quoted-a-price passed
 
-passed 1  ·  failed 0  ·  skipped 0  ·  errored 0  ·  waiting 11
+passed 1  ·  failed 0  ·  errored 0  ·  waiting 11
 ```
 
 The wizard closes after the first verdict arrives. The run continues on Egma — closing your terminal never stops a run.
@@ -234,7 +260,6 @@ verdict: quoted-a-price default-persona passed
 first-verdict: quoted-a-price default-persona passed
 passed: 1
 failed: 0
-skipped: 0
 errored: 0
 pending: 11
 ```
@@ -243,7 +268,7 @@ pending: 11
   | Code | Meaning |
   |------|---------|
   | `0` | Run finished with no failures or errors |
-  | `1` | No tests found in the Egma folder |
+  | `1` | The selected suite has no tests |
   | `2` | Not signed in to Egma |
   | `3` | At least one test failed |
   | `4` | Egma did not answer, or refused |
@@ -256,7 +281,7 @@ pending: 11
   Pass `--no-follow` to start a run and return immediately without waiting for verdicts. The run carries on on Egma and you can read results in the dashboard at the URL printed on the `results:` line.
 
   ```bash
-  egma run --no-follow
+  egma run receptionist-core --no-follow
   ```
 </Note>
 

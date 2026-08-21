@@ -30,10 +30,16 @@ import { seedOrganization, seedUser } from "./tenancy.ts";
 export const acme = {
   organization: newId("org"),
   project: newId("prj"),
+  suite: newId("ste"),
   /** A second project of Acme's, so a read can be narrowed past its sibling. */
   outbound: newId("prj"),
+  outboundSuite: newId("ste"),
 };
-export const globex = { organization: newId("org"), project: newId("prj") };
+export const globex = {
+  organization: newId("org"),
+  project: newId("prj"),
+  suite: newId("ste"),
+};
 
 const ada = newId("usr");
 const gene = newId("usr");
@@ -62,14 +68,7 @@ export function actingAsGlobex(role: Role = "member"): AuthContext {
 }
 
 /**
- * An agent for a test to apply to, and the whole of what these files need one
- * for.
- *
- * **Every test in every one of these files needs a target**, because a test with
- * no applicable agent is a specification nothing can execute and the factory
- * refuses to write one. Naming none on a create takes the project's active
- * agents, so seeding one per project is what lets the fixture below stay a
- * fixture about the scenario rather than about agents.
+ * An agent for run fixtures to execute against, and no ownership link to tests.
  */
 export async function seedAgent(
   auth: AuthContext,
@@ -81,6 +80,7 @@ export async function seedAgent(
 
 /** The scenario these files author, whole enough to be worth reading back. */
 export const rescheduling = {
+  suiteId: acme.suite,
   name: "Reschedules a booked appointment",
   description: "The bread-and-butter front-desk call",
   scenario:
@@ -156,11 +156,11 @@ export type SeededWorld = {
   readonly rita: string;
   /** Globex's, so a cross-project reference has something real to name. */
   readonly grace: string;
-  /** The agent Acme's tests apply to. */
+  /** Acme's agent, used as a run target. */
   readonly frontDesk: string;
-  /** Acme's sibling project's own, so a narrowed create has a target too. */
+  /** Acme's sibling project's run target. */
   readonly outboundDialler: string;
-  /** Globex's, so a cross-customer link has something real to name. */
+  /** Globex's run target. */
   readonly globexDesk: string;
 };
 
@@ -176,6 +176,22 @@ export async function seedTestFactory(label: string): Promise<SeededWorld> {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, gene, "gene@globex.example");
+  await database.sql(
+    `insert into test_suite (id, organization_id, project_id, name)
+     values ($1, $2, $3, 'Regression'),
+            ($4, $2, $5, 'Outbound'),
+            ($6, $7, $8, 'Regression')`,
+    [
+      acme.suite,
+      acme.organization,
+      acme.project,
+      acme.outboundSuite,
+      acme.outbound,
+      globex.suite,
+      globex.organization,
+      globex.project,
+    ],
+  );
 
   const rita = await seedPersona(actingAsAcme(), STARTER_PERSONA);
   const grace = await seedPersona(actingAsGlobex(), "Careful Grace");

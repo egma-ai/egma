@@ -8,6 +8,7 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
   failSimulation,
   getRun,
   listRunEvents,
@@ -79,14 +80,20 @@ const neutralTraits = {
 
 let agentId: string;
 let connectionId: string;
-let oneCaller: string;
+let oneCallerSuite: string;
+let twoCallersSuite: string;
 let twoCallers: string;
 
 const CLAIMANT = "simulator-blue-1";
 
 /** A run of its own, so a test's feed is never something else's leftovers. */
-async function aRun(testVersionIds: readonly string[] = [oneCaller]) {
-  return startRun(actingAsAcme(), { agentId, connectionId, testVersionIds });
+async function aRun(suiteId = oneCallerSuite) {
+  return startRun(actingAsAcme(), {
+    suiteId,
+    agentId,
+    connectionId,
+    idempotencyKey: newId("run"),
+  });
 }
 
 /** Claim for one run under test; the queue is the whole deployment's. */
@@ -182,9 +189,14 @@ beforeAll(async () => {
     })
   ).id;
 
-  const version = async (name: string, personaIds: readonly string[]) =>
+  const version = async (
+    suiteId: string,
+    name: string,
+    personaIds: readonly string[],
+  ) =>
     (
       await createTest(actingAsAcme(), {
+        suiteId,
         name,
         scenario: "Their cleaning is booked for Thursday and has to move.",
         expectedBehaviors: ["confirms the new time back before finishing"],
@@ -192,8 +204,14 @@ beforeAll(async () => {
       })
     ).versionId;
 
-  oneCaller = await version("Reschedules", [rita]);
-  twoCallers = await version("Cancels", [rita, sam]);
+  oneCallerSuite = (
+    await createTestSuite(actingAsAcme(), { name: "One persona" })
+  ).id;
+  twoCallersSuite = (
+    await createTestSuite(actingAsAcme(), { name: "Two personas" })
+  ).id;
+  await version(oneCallerSuite, "Reschedules", [rita]);
+  twoCallers = await version(twoCallersSuite, "Cancels", [rita, sam]);
 });
 
 afterAll(async () => {
@@ -215,7 +233,7 @@ describe("a run that has only just started", () => {
 
 describe("every lifecycle change", () => {
   it("records itself, in the order it happened, numbered densely from one", async () => {
-    const started = await aRun([twoCallers]);
+    const started = await aRun(twoCallersSuite);
     const [first, second] = await claimOwn(started.id);
     if (first === undefined || second === undefined) {
       throw new Error("the claim missed the run under test");
@@ -363,7 +381,7 @@ describe("the change and its event", () => {
 
 describe("a follower that crashes and comes back", () => {
   it("misses nothing and applies nothing twice, and a page served twice is harmless", async () => {
-    const started = await aRun([twoCallers]);
+    const started = await aRun(twoCallersSuite);
 
     /**
      * A follower, written the way the contract says one is: it remembers the
@@ -466,7 +484,7 @@ describe("the feed's done", () => {
   });
 
   it("says the run was canceled exactly once, however late the stragglers land", async () => {
-    const started = await aRun([twoCallers]);
+    const started = await aRun(twoCallersSuite);
     const claimed = await claimOwn(started.id);
     expect(claimed).toHaveLength(2);
 
@@ -491,7 +509,7 @@ describe("the feed's done", () => {
   });
 
   it("is true the moment a cancel catches every conversation still queued", async () => {
-    const started = await aRun([twoCallers]);
+    const started = await aRun(twoCallersSuite);
 
     await cancelRun(actingAsAcme(), started.id);
 
@@ -540,19 +558,17 @@ describe("asking from a number nobody could have issued", () => {
 
 describe("the simulations of a run", () => {
   it("name the version they execute and the person who calls, in pinned order", async () => {
-    const started = await aRun([oneCaller, twoCallers]);
+    const started = await aRun(twoCallersSuite);
 
     const conducted = await listSimulations(actingAsAcme(), started.id);
-    expect(conducted?.map((one) => `${one.testName}/${one.personaName}`)).toEqual([
-      "Reschedules/Impatient Rita",
+    expect(conducted?.items.map((one) => `${one.testName}/${one.personaName}`)).toEqual([
       "Cancels/Impatient Rita",
       "Cancels/Deliberate Sam",
     ]);
-    expect(conducted?.map((one) => one.testVersionId)).toEqual([
-      oneCaller,
+    expect(conducted?.items.map((one) => one.testVersionId)).toEqual([
       twoCallers,
       twoCallers,
     ]);
-    expect(started.expectedSimulationCount).toBe(3);
+    expect(started.expectedSimulationCount).toBe(2);
   });
 });

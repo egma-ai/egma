@@ -279,7 +279,7 @@ function EvidenceView({
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
           {
-            label: read.runLabel ?? "Run",
+            label: read.runName ?? "Run",
             href: projectPath(projectId, "runs", runId),
           },
           { label: `Simulation ${String(read.position).padStart(2, "0")}` },
@@ -338,14 +338,6 @@ function EvidenceView({
         {role === null || mayRevisit ? null : (
           <Problem>
             {`Your ${String(role)} role can read every piece of evidence here and cannot change a verdict. Ask an organization admin to change your role.`}
-          </Problem>
-        )}
-
-        {read.skipReason === null ? null : (
-          <Problem>
-            {read.skipReason === "required_capability_unsupported"
-              ? `This connection was measured and does not support ${(read.skippedCapabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`
-              : `Nobody has measured whether this connection supports ${(read.skippedCapabilities ?? []).join(", ")}. Egma conducted nothing and says nothing about the agent.`}
           </Problem>
         )}
 

@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 80 current operations", () => {
+  it("contains one unique definition for each of the 79 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(80);
+    expect(operations).toHaveLength(79);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
@@ -120,8 +120,7 @@ describe("the platform API operation registry", () => {
       if (typeof name === "string" && name.includes("_")) underscored.add(name);
     });
 
-    // These are keys in the capability vocabulary map, not JSON field names.
-    expect([...underscored].sort()).toEqual(["barge_in", "raw_audio"]);
+    expect([...underscored].sort()).toEqual([]);
   });
 });
 

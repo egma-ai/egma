@@ -1,38 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { listAgents, listTests } from "@egma/platform-api/client";
+import {
+  createTestSuite,
+  listTestSuites,
+} from "@egma/platform-api/client";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import type { Refusal } from "../../../../lib/api.ts";
-import type { AgentPage } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
-import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
-import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../lib/platform-client.ts";
+import { projectLanding } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
-  activeAgents,
-  availability,
-  type ListedTest,
-  type TestPage,
-} from "../../../../lib/tests.ts";
-import {
-  Toolbar,
-  TOOLBAR_FILTER,
-  TOOLBAR_SEARCH,
-} from "../../../../ui/section.tsx";
+  suitePagePath,
+  shortSuiteId,
+  type TestSuite,
+  type TestSuitePage,
+} from "../../../../lib/test-suites.ts";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
+import { Dialog } from "../../../../ui/dialog.tsx";
+import { Field, Refused } from "../../../../ui/form.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import {
-  RelativeInstant,
-  useMinuteClock,
-} from "../../../../ui/relative-time.tsx";
+import { RelativeInstant, useMinuteClock } from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
+import { Actions } from "../../../../ui/section.tsx";
 import {
   AppShell,
   PageBody,
@@ -41,257 +39,173 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 
-/**
- * Every test this project owns: what each one checks, which agents it applies
- * to, and whether a run could use it right now.
- *
- * **Applicability is on the row, because it is what decides whether a test can
- * run at all.** A test whose every agent has been archived is active and has
- * nowhere to go, and a list that showed only a name would leave somebody
- * choosing it in a run builder and being refused there instead.
- *
- * The project is in the address and in every request. Reload, Back, Forward, a
- * copied link and a second tab on a second project all work for one reason:
- * there is no chosen project anywhere except the address.
- */
 export default function TestsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   return (
     <AppShell>
-      <Tests projectId={projectId} />
+      <Suites projectId={projectId} />
     </AppShell>
   );
 }
 
-/** What a row says about the agents a test applies to. */
-function Applies({ test }: { readonly test: ListedTest }) {
-  const active = activeAgents(test);
-  const { runnable } = availability(test);
-
-  if (test.agents.length === 0) {
-    // Only an upgrade can produce this, and Restore takes an agent to fix it.
-    return <Badge variant="failure">No agent</Badge>;
-  }
-  if (!runnable && test.archivedAt === null) {
-    return (
-      <Badge variant="warning" title="Every agent this test applies to is archived.">
-        {test.agents.length} archived
-      </Badge>
-    );
-  }
-  return (
-    <span title={active.map((one) => one.name).join(", ")}>
-      {active.length === 1
-        ? (active[0]?.name ?? "")
-        : `${String(active.length)} agents`}
-    </span>
-  );
-}
-
-/**
- * The columns, built for one project so the name can be the way in.
- *
- * The name stays a real link for keyboard and assistive technology. The table
- * also gives pointer users the whole row because every row has one clear
- * destination and no competing action.
- */
 function columnsFor(
   projectId: string,
   now: number,
-): readonly Column<ListedTest>[] {
+  duplicateNames: ReadonlySet<string>,
+): readonly Column<TestSuite>[] {
   return [
     {
       key: "name",
-      header: "Test",
+      header: "Test suite",
       primary: true,
-      cell: (test) => (
-        <Link href={projectPath(projectId, "tests", test.id)}>{test.name}</Link>
+      cell: (suite) => (
+        <span className="flex min-w-0 items-baseline gap-2">
+          <Link href={suitePagePath(projectId, suite.id)}>{suite.name}</Link>
+          {duplicateNames.has(suite.name) ? (
+            <span className="flex-none font-mono text-xs text-muted-foreground">
+              {shortSuiteId(suite.id)}
+            </span>
+          ) : null}
+        </span>
       ),
-    },
-    ...restFor(now),
-  ];
-}
-
-function restFor(now: number): readonly Column<ListedTest>[] {
-  return [
-    {
-      key: "agents",
-      header: "Applies to",
-      width: "160px",
-      cell: (test) => <Applies test={test} />,
-    },
-    {
-      key: "behaviors",
-      header: "Expects",
-      hideOnMobile: true,
-      width: "100px",
-      cell: (test) =>
-        `${String(test.expectedBehaviors.length)} ${
-          test.expectedBehaviors.length === 1 ? "behavior" : "behaviors"
-        }`,
-    },
-    {
-      key: "personas",
-      header: "Personas",
-      hideOnMobile: true,
-      width: "110px",
-      cell: (test) => test.personas.map((one) => one.name).join(", "),
-    },
-    {
-      key: "version",
-      header: "Version",
-      hideOnMobile: true,
-      mono: true,
-      width: "90px",
-      cell: (test) => `v${test.version}`,
     },
     {
       key: "changed",
       header: "Changed",
       mono: true,
       width: "120px",
-      cell: (test) => <RelativeInstant instant={test.updatedAt} now={now} />,
+      cell: (suite) => <RelativeInstant instant={suite.updatedAt} now={now} />,
     },
   ];
 }
 
-function Tests({ projectId }: { readonly projectId: string }) {
+function CreateSuiteDialog({
+  projectId,
+  onClose,
+}: {
+  readonly projectId: string;
+  readonly onClose: () => void;
+}) {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [refused, setRefused] = useState<Refusal | null>(null);
+
+  async function create(): Promise<void> {
+    if (name.trim() === "") return;
+    setSaving(true);
+    setRefused(null);
+    const answer = await platformAnswer(
+      createTestSuite(
+        { projectId, name: name.trim() },
+        { client: platformClient },
+      ),
+    );
+    setSaving(false);
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answer.status !== "ready") {
+      setRefused(answer.refusal);
+      return;
+    }
+    onClose();
+    router.push(suitePagePath(projectId, answer.value.id));
+  }
+
+  return (
+    <Dialog title="Create a test suite" onClose={onClose}>
+      {(dismiss) => (
+        <form
+          className="flex flex-col gap-5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+        >
+          <p className="m-0 text-sm text-muted-foreground">
+            A test suite is a folder of tests that you normally review and run together.
+          </p>
+          {refused === null ? null : <Refused message={refused.message} />}
+          <Field label="Suite name" htmlFor="suite-name">
+            <Input
+              id="suite-name"
+              value={name}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="Northside Ford"
+              disabled={saving}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+          <Actions>
+            <Button type="button" variant="secondary" disabled={saving} onClick={dismiss}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving || name.trim() === ""}>
+              {saving ? "Creating…" : "Create suite"}
+            </Button>
+          </Actions>
+        </form>
+      )}
+    </Dialog>
+  );
+}
+
+function Suites({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
-  // Null until the session read answers. A page that guessed would tell a
-  // member their role cannot do something it can, on every load.
   const role = me === null ? null : roleOf(me);
+  const mayAuthor = role !== null && canAuthor(role);
   const now = useMinuteClock();
-
-  /** Which shelf is being looked at: what can run, or what was taken out. */
-  /**
-   * Which list this page asks the server for, and for now it is always the
-   * active one.
-   *
-   * **The archive filter's control came off every list page in this batch.**
-   * The developer wants a filter row to hold what somebody reaches for daily,
-   * and the archive is not that. Nothing under the control moved: the server
-   * still keeps the two lists apart, `testsPath` still carries the flag, and
-   * every branch below that draws the archive still draws it. Putting the
-   * control back is handing a `Choice` the setter this deliberately does not
-   * take.
-   */
-  const [archived] = useState(false);
-  /** Narrowed to one agent's coverage, or to none. */
-  const [agent, setAgent] = useState("");
-  /** What somebody typed in the search box, and what has been asked for. */
-  const [typed, setTyped] = useState("");
-  const [searching, setSearching] = useState("");
-
-  const question = `${String(archived)}:${agent}:${searching}`;
-  const { answer, reload } = useProjectRead<TestPage>(
+  const { answer, reload } = useProjectRead<TestSuitePage>(
     (projectId) =>
       platformAnswer(
-        listTests(
-          {
-            projectId,
-            ...(archived ? { archived: "true" } : {}),
-            ...(agent === "" ? {} : { agentId: agent }),
-            ...(searching === "" ? {} : { name: searching }),
-          },
-          { client: platformClient },
-        ),
-      ),
-    projectId,
-    question,
-  );
-  const { answer: agents } = useProjectRead<AgentPage>(
-    (projectId) =>
-      platformAnswer(
-        listAgents({ projectId }, { client: platformClient }),
+        listTestSuites({ projectId }, { client: platformClient }),
       ),
     projectId,
   );
-
-  /**
-   * Pages fetched after the first, kept beside it rather than folded into it —
-   * **and each one remembers what it was fetched for.**
-   *
-   * Changing project or filter does not remount this page, so this state
-   * outlives the change and a read still in flight comes back into a view that
-   * has moved on. Carrying the question in the value means a page fetched for
-   * another one can never be *rendered* here, whatever wrote it and whenever it
-   * landed.
-   */
-  const [after, setAfter] = useState<{
-    readonly asked: string;
-    readonly project: string;
-    readonly page: TestPage;
-  } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [after, setAfter] = useState<TestSuitePage | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  /** Why the next page did not arrive, until somebody asks for it again. */
   const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
-
-  const carried =
-    after !== null && after.project === projectId && after.asked === question
-      ? after.page
-      : null;
-
-  /** Which project this view is showing, readable from inside an await. */
   const showing = useRef(projectId);
+
+  const isEmpty =
+    answer?.status === "ready" &&
+    answer.value.testSuites.length === 0 &&
+    answer.value.nextPageToken === null &&
+    (after?.testSuites.length ?? 0) === 0;
 
   useEffect(() => {
     showing.current = projectId;
     setAfter(null);
     setMoreRefused(null);
-    setLoadingMore(false);
+    setCreating(false);
   }, [projectId]);
-
-  useEffect(() => {
-    setAfter(null);
-    setMoreRefused(null);
-  }, [answer]);
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
-  /**
-   * One page for every role, and the control that changes data is disabled
-   * rather than removed. A viewer sees what egma can do here and is told
-   * plainly that this part is not theirs; the server refuses their write either
-   * way, which is where the boundary actually is.
-   *
-   * **While the role is unknown there is no control at all.** A disabled one
-   * would have to say why, and every sentence it could say would be a claim
-   * about somebody egma has not identified yet.
-   */
-  const mayAuthor = role !== null && canAuthor(role) && answer?.status !== "missing";
-  const whyNot =
-    role !== null && canAuthor(role)
-      ? "There is no project here to write a test in."
-      : `Your ${String(role)} role cannot write tests. Ask an organization admin to change your role.`;
-
-  /**
-   * The way to write a test, and what it becomes when it is not this
-   * person's.
-   *
-   * **A disabled control is genuinely inert or it is a lie.** A link cannot be
-   * disabled: `aria-disabled` on an anchor greys it out and it still follows on
-   * click and still takes the keyboard. So when this is not available it stops
-   * being a link and becomes a disabled button, which carries the reason where
-   * a keyboard and a screen reader can reach it.
-   */
-  const author = () =>
-    role === null ? undefined : mayAuthor ? (
-      <Button asChild>
-        <Link href={projectPath(projectId, "tests", "new")}>Write a test</Link>
-      </Button>
-    ) : (
-      <Button type="button" disabled why={whyNot}>
-        Write a test
+  const createAction =
+    role === null ? undefined : (
+      <Button
+        type="button"
+        disabled={!mayAuthor}
+        why={
+          mayAuthor
+            ? undefined
+            : `Your ${String(role)} role cannot create test suites. Ask an organization admin to change your role.`
+        }
+        onClick={() => setCreating(true)}
+      >
+        Create suite
       </Button>
     );
 
   function body() {
-    if (answer === null || answer.status === "signed-out") {
-      return <Loading what="tests" />;
-    }
-
+    if (answer === null || answer.status === "signed-out") return <Loading what="test suites" />;
     if (answer.status === "missing") {
       const elsewhere = me === null ? undefined : firstProjectOf(me);
       return (
@@ -300,95 +214,63 @@ function Tests({ projectId }: { readonly projectId: string }) {
           action={
             elsewhere === undefined ? undefined : (
               <Button asChild variant="secondary">
-                <Link href={projectLanding(elsewhere.id)}>
-                  Open {elsewhere.name}
-                </Link>
+                <Link href={projectLanding(elsewhere.id)}>Open {elsewhere.name}</Link>
               </Button>
             )
           }
         />
       );
     }
+    if (answer.status === "failed") return <Failure message={answer.refusal.message} onRetry={reload} />;
 
-    if (answer.status === "failed") {
-      return <Failure message={answer.refusal.message} onRetry={reload} />;
+    const items = [
+      ...answer.value.testSuites,
+      ...(after?.testSuites ?? []),
+    ];
+    const cursor = after?.nextPageToken ?? answer.value.nextPageToken;
+    const nameCounts = new Map<string, number>();
+    for (const suite of items) {
+      nameCounts.set(suite.name, (nameCounts.get(suite.name) ?? 0) + 1);
     }
+    const duplicateNames = new Set(
+      [...nameCounts].filter(([, count]) => count > 1).map(([name]) => name),
+    );
 
-    const items = [...answer.value.tests, ...(carried?.tests ?? [])];
-    const cursor =
-      carried === null ? answer.value.nextPageToken : carried.nextPageToken;
-
-    /**
-     * The next page, and everything that can happen instead of one.
-     *
-     * A next page that does not arrive is still something that happened.
-     * Returning quietly would re-enable the control, say nothing, and leave
-     * somebody pressing it — and a session that has expired would leave them
-     * pressing it forever, on a page that can no longer read anything.
-     */
     async function showMore(): Promise<void> {
       if (cursor === null) return;
-
-      const asked = projectId;
-      const askedQuestion = question;
-      setMoreRefused(null);
       setLoadingMore(true);
-
+      setMoreRefused(null);
       const next = await platformAnswer(
-        listTests(
-          {
-            projectId: asked,
-            pageToken: cursor,
-            ...(archived ? { archived: "true" } : {}),
-            ...(agent === "" ? {} : { agentId: agent }),
-            ...(searching === "" ? {} : { name: searching }),
-          },
+        listTestSuites(
+          { projectId, pageToken: cursor },
           { client: platformClient },
         ),
       );
-
       setLoadingMore(false);
-      if (showing.current !== asked) return;
-
+      if (showing.current !== projectId) return;
       if (next.status === "signed-out") {
         window.location.replace("/sign-in");
         return;
       }
-
       if (next.status !== "ready") {
         setMoreRefused(next.refusal);
         return;
       }
-
       setAfter({
-        project: asked,
-        asked: askedQuestion,
-        page: {
-          tests: [...(carried?.tests ?? []), ...next.value.tests],
-          nextPageToken: next.value.nextPageToken,
-        },
+        testSuites: [
+          ...(after?.testSuites ?? []),
+          ...next.value.testSuites,
+        ],
+        nextPageToken: next.value.nextPageToken,
       });
     }
 
     if (items.length === 0) {
-      const narrowed = searching !== "" || agent !== "";
       return (
         <Empty
-          title={
-            narrowed
-              ? "No test here matches that"
-              : archived
-                ? "No archived tests in this project"
-                : "No tests yet"
-          }
-          lead={
-            narrowed
-              ? "Clear the search and the agent filter to see everything this project holds."
-              : archived
-                ? "Tests you archive keep every version and every run that used them, and stay readable here."
-                : "A test describes a situation to put an agent in, who calls about it, and what should happen."
-          }
-          action={narrowed || archived ? undefined : author()}
+          title="No test suites yet"
+          lead="Create a test suite before you write the first test. A suite is the folder of tests you normally review and run together."
+          action={createAction}
         />
       );
     }
@@ -396,10 +278,10 @@ function Tests({ projectId }: { readonly projectId: string }) {
     return (
       <>
         <DataTable
-          label={archived ? "Archived tests" : "Tests in this project"}
-          columns={columnsFor(projectId, now)}
+          label="Test suites in this project"
+          columns={columnsFor(projectId, now, duplicateNames)}
           rows={items}
-          keyOf={(test) => test.id}
+          keyOf={(suite) => suite.id}
           stretchPrimaryLink
           {...(cursor === null
             ? {}
@@ -407,13 +289,13 @@ function Tests({ projectId }: { readonly projectId: string }) {
                 more: {
                   onMore: () => void showMore(),
                   loading: loadingMore,
-                  note: `${String(items.length)} tests so far`,
+                  note: `${String(items.length)} suites so far`,
                 },
               })}
         />
         {moreRefused === null ? null : (
           <Failure
-            title="Egma could not load more tests."
+            title="Egma could not load more test suites."
             message={moreRefused.message}
             onRetry={() => void showMore()}
           />
@@ -422,55 +304,16 @@ function Tests({ projectId }: { readonly projectId: string }) {
     );
   }
 
-  const choosable =
-    agents?.status === "ready"
-      ? agents.value.agents.filter((one) => one.archivedAt === null)
-      : [];
-
   return (
     <ProductPage>
       <PageHeader
         eyebrow="Project"
         title="Tests"
-        lead="One authored specification each: the situation, who calls about it, and what should happen."
-        action={author()}
+        lead="Test suites are the folders of behavior you review and run together."
+        action={isEmpty ? undefined : createAction}
       />
-      <PageBody>
-        <Toolbar>
-          <Input
-            id="tests-search"
-            className={TOOLBAR_SEARCH}
-            value={typed}
-            aria-label="Search tests by name"
-            placeholder="Search by name"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setTyped(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") setSearching(typed);
-              if (event.key === "Escape") {
-                setTyped("");
-                setSearching("");
-              }
-            }}
-          />
-          <Select
-            id="tests-agent"
-            className={TOOLBAR_FILTER}
-            value={agent}
-            aria-label="Show only tests that apply to one agent"
-            onChange={(event) => setAgent(event.target.value)}
-          >
-            <option value="">Any agent</option>
-            {choosable.map((one) => (
-              <option key={one.id} value={one.id}>
-                {one.name}
-              </option>
-            ))}
-          </Select>
-        </Toolbar>
-        {body()}
-      </PageBody>
+      <PageBody>{body()}</PageBody>
+      {creating ? <CreateSuiteDialog projectId={projectId} onClose={() => setCreating(false)} /> : null}
     </ProductPage>
   );
 }

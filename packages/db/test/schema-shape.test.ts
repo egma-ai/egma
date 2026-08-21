@@ -58,11 +58,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // The scope's junction, pinning the mock tool it narrows — the shape the
   // persona junction has, for the same reason.
   mock_tool_agent: "mck",
+  test_suite: "ste",
   test: "tst",
-  // The applicability junction, pinning the test it links — the shape the mock
-  // tool's scope junction has, for the same reason: the row's identity is the
-  // pair, and its leading half is the one this table owns.
-  test_agent: "tst",
   test_version: "tstv",
   test_persona: "tstv",
   run: "run",
@@ -243,11 +240,7 @@ describe("every table", () => {
     // went with the redesign. A copy is made by pressing **Use** and deleted
     // whole; there is no live edit for a revision to guard.
     project: 1,
-    // Two, because a test carries two live tokens that guard two different
-    // losses: the identity revision an edit to the name is written against, and
-    // the applicability revision a link edit is written against. A count rather
-    // than a list, because one table can carry more than one.
-    test: 2,
+    test: 1,
   };
 
   it("pins a prefix that is one of the ones egma mints", () => {
@@ -279,8 +272,8 @@ describe("every table", () => {
 
 /**
  * The pin the runs schema was shaped for. It is asserted here rather than only
- * in the runs tests because it is a structural claim: two nullable columns, a
- * check that keeps them one fact, and the paired keys that make a cross-project
+ * in the runs tests because it is a structural claim: two required columns
+ * and paired keys that make a cross-project
  * pin unrepresentable — the persona pin's shape, edge for edge.
  */
 describe("the simulation's test pin", () => {
@@ -290,24 +283,14 @@ describe("the simulation's test pin", () => {
         column.table_name === "simulation" && column.column_name === name,
     );
 
-  it("is two identifier columns, both nullable, because a run can be born from no test", () => {
+  it("is two required identifier columns after the clean suite cutover", () => {
     for (const name of ["test_id", "test_version_id"]) {
       const live = pinned(name);
       expect(live, `simulation.${name}`).toBeDefined();
       expect(live?.type_name, `simulation.${name} type`).toBe("text");
       expect(live?.collation_name, `simulation.${name} collation`).toBe("C");
-      expect(live?.not_null, `simulation.${name} nullable`).toBe(false);
+      expect(live?.not_null, `simulation.${name} required`).toBe(true);
     }
-  });
-
-  it("arrives whole or not at all, held by a check rather than by convention", async () => {
-    const { rows } = await database.sql<{ definition: string }>(
-      `select pg_get_constraintdef(oid) as definition
-         from pg_constraint where conname = 'simulation_test_pin_columns_agree'`,
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.definition).toContain("test_id IS NULL");
-    expect(rows[0]?.definition).toContain("test_version_id IS NULL");
   });
 
   it("closes the tenancy triangle at both edges, so no raw write can pin across projects", async () => {
@@ -343,6 +326,75 @@ describe("the simulation's test pin", () => {
       "test_id_project_id_unique",
       "test_version_id_test_id_unique",
     ]);
+  });
+});
+
+describe("test suite ownership", () => {
+  it("keeps one required immutable home on every test and one suite on every run", async () => {
+    for (const { table, column } of [
+      { table: "test", column: "suite_id" },
+      { table: "run", column: "suite_id" },
+    ]) {
+      const live = columns.find(
+        (candidate) =>
+          candidate.table_name === table && candidate.column_name === column,
+      );
+      expect(live?.not_null, `${table}.${column}`).toBe(true);
+    }
+
+    const { rows } = await database.sql<{ tgname: string }>(
+      `select tgname from pg_trigger
+        where not tgisinternal and tgname = 'test_suite_membership_immutable'`,
+    );
+    expect(rows).toEqual([{ tgname: "test_suite_membership_immutable" }]);
+  });
+
+  it("removes the retired applicability, capability-skip, retry, and archive shapes", () => {
+    for (const { table, column } of [
+      { table: "test", column: "applicability_revision" },
+      { table: "test", column: "archived_at" },
+      { table: "test", column: "archive_reason" },
+      { table: "connection", column: "capability_state" },
+      { table: "run", column: "pinned_test_versions" },
+      { table: "run", column: "retry_of_run_id" },
+      { table: "run", column: "skipped_count" },
+      { table: "simulation", column: "skip_reason" },
+      { table: "simulation", column: "skipped_capabilities" },
+    ]) {
+      expect(
+        columns.some(
+          (candidate) =>
+            candidate.table_name === table &&
+            candidate.column_name === column,
+        ),
+        `${table}.${column}`,
+      ).toBe(false);
+    }
+  });
+
+  it("removes skipped from the installed simulation lifecycle and event status checks", async () => {
+    const { rows: functions } = await database.sql<{ definition: string }>(
+      `select pg_get_functiondef(p.oid) as definition
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public' and p.proname = 'guard_simulation_lifecycle'`,
+    );
+    expect(functions).toHaveLength(1);
+    expect(functions[0]?.definition).not.toContain("'skipped'");
+
+    const { rows: constraints } = await database.sql<{
+      conname: string;
+      definition: string;
+    }>(
+      `select conname, pg_get_constraintdef(oid) as definition
+        from pg_constraint
+        where conname in ('run_event_simulation_shape', 'run_event_verdict_agrees')
+        order by conname`,
+    );
+    expect(constraints).toHaveLength(2);
+    for (const constraint of constraints) {
+      expect(constraint.definition).not.toContain("status = 'skipped'");
+    }
   });
 });
 

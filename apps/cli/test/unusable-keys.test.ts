@@ -19,11 +19,10 @@ import process from "node:process";
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { createEgmaFolder, writeTestFile } from "../src/folder/egma-folder.ts";
+import { createEgmaFolder } from "../src/folder/egma-folder.ts";
 import { KEYS_UNUSABLE } from "../src/platform/credentials.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { CLI_ENTRY, makeWorkspace, type Workspace } from "./support/workspace.ts";
-import { aTestFile, blocking } from "./support/test-file.ts";
 
 /** Truncated mid-key, which is what an interrupted write leaves behind. */
 const DAMAGED = '{\n  "version": 1,\n  "platforms": {\n    "https://one.example": {"ke';
@@ -41,19 +40,11 @@ beforeEach(async () => {
     repository: workspace.dir,
     config: {
       platform: { origin: platform.url },
+      project: null,
       agent: { name: "receptionist", id: "agt_01K3XQ7M4E8YB2FVN0H9TZQWER" },
       connection: { name: "retell-1", id: "con_01K3XQ7M4E8YB2FVN0H9TZQWES" },
-      suite: { name: "first-suite", id: null },
     },
   });
-  await writeTestFile(path.join(workspace.dir, "egma", "tests", "moves-a-booking.md"), aTestFile({
-    name: "moves-a-booking",
-    personas: [],
-    version: null,
-    scenario: "The persona asks to move an appointment.",
-    expectedBehaviors: blocking("The agent confirms the new time."),
-    mockTools: [],
-  }));
 
   await mkdir(workspace.egmaFolder, { recursive: true });
   await writeFile(workspace.credentialsFile, DAMAGED, "utf8");
@@ -90,10 +81,11 @@ async function egma(args: readonly string[]): Promise<{
   return { stdout, stderr, code };
 }
 
-it.each([["login"], ["connect"], ["push"], ["pull"], ["run"]])(
+it.each([["login"], ["connect"], ["push"], ["pull"], ["run", "release"]])(
   "tells %s's caller what is wrong with the keys file instead of throwing at them",
-  async (verb) => {
-    const result = await egma([verb, "--cwd", workspace.dir]);
+  async (...command) => {
+    const result = await egma([...command, "--cwd", workspace.dir]);
+    const verb = command[0] as string;
     const shown = `${result.stdout}${result.stderr}`;
 
     expect(result.code).toBe(1);
@@ -112,8 +104,8 @@ it.each([["login"], ["connect"], ["push"], ["pull"], ["run"]])(
 );
 
 it("leaves the damaged file exactly as it was, on every one of them", async () => {
-  for (const verb of ["login", "connect", "push", "pull", "run"]) {
-    await egma([verb, "--cwd", workspace.dir]);
+  for (const command of [["login"], ["connect"], ["push"], ["pull"], ["run", "release"]]) {
+    await egma([...command, "--cwd", workspace.dir]);
   }
   expect(await readFile(workspace.credentialsFile, "utf8")).toBe(DAMAGED);
 });

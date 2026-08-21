@@ -127,15 +127,15 @@ describe("creating a test", () => {
       await connection.sql("begin");
       await connection.sql(
         `insert into test
-           (id, organization_id, project_id, name, current_version_id,
-            revision, applicability_revision)
-         values ($1, $2, $3, 'Halfway', $4, $5, $6)`,
+           (id, organization_id, project_id, suite_id, name,
+            current_version_id, revision)
+         values ($1, $2, $3, $4, 'Halfway', $5, $6)`,
         [
           orphan,
           acme.organization,
           acme.project,
+          acme.suite,
           newId("tstv"),
-          newId("rev"),
           newId("rev"),
         ],
       );
@@ -314,7 +314,10 @@ describe("a test naming no persona", () => {
       column: "default_persona_id",
     });
 
-    const created = await createTest(actingAsGlobex(), rescheduling);
+    const created = await createTest(actingAsGlobex(), {
+      ...rescheduling,
+      suiteId: globex.suite,
+    });
     expect(created.personas.map((named) => named.id)).toEqual([
       defaultPersonaId,
     ]);
@@ -379,15 +382,15 @@ describe("tenancy", () => {
     await expect(
       database.sql(
         `insert into test
-           (id, organization_id, project_id, name, current_version_id,
-            revision, applicability_revision)
-         values ($1, $2, $3, 'Smuggled', $4, $5, $6)`,
+           (id, organization_id, project_id, suite_id, name,
+            current_version_id, revision)
+         values ($1, $2, $3, $4, 'Smuggled', $5, $6)`,
         [
           newId("tst"),
           acme.organization,
           globex.project,
+          acme.suite,
           newId("tstv"),
-          newId("rev"),
           newId("rev"),
         ],
       ),

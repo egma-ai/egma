@@ -11,6 +11,7 @@
 
 import { readConfig, folderPathsIn, type FolderPaths } from "../folder/egma-folder.ts";
 import type { PlatformAccess } from "../platform/credentials.ts";
+import type { Fetch } from "../platform/device-flow.ts";
 import { notSignedInRefusal, signedInAt, type SignedIn } from "../platform/signed-in.ts";
 
 export const FOLDER_EXIT = {
@@ -26,6 +27,8 @@ export const FOLDER_EXIT = {
   moved: 5,
   /** egma turned a test away at its door. */
   turnedAway: 6,
+  /** The platform write succeeded, but this attempt could not materialize it locally. */
+  localWriteFailed: 8,
   /** Stopped part way through. */
   interrupted: 130,
 } as const;
@@ -37,6 +40,8 @@ export type FolderCommandOptions = {
   readonly cwd: string;
   readonly out: (line: string) => void;
   readonly fail: (line: string) => void;
+  /** The network boundary, replaced only by command-level tests. */
+  readonly fetchImpl?: Fetch;
 };
 
 /** The folder and the key, or the number to exit with instead. */

@@ -6,7 +6,9 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
   getSimulation,
+  listSimulations,
   startRun,
   type AuthContext,
 } from "@egma/db";
@@ -42,15 +44,16 @@ const auth: AuthContext = {
 let agentId: string;
 let connectionId: string;
 let personaId: string;
-let testVersionId: string;
+let suiteId: string;
 
 async function oneQueuedSimulation(): Promise<string> {
   const started = await startRun(auth, {
+    suiteId,
     agentId,
     connectionId,
-    testVersionIds: [testVersionId],
+    idempotencyKey: newId("run"),
   });
-  const simulation = started.simulations[0];
+  const simulation = (await listSimulations(auth, started.id))?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");
   return simulation.id;
 }
@@ -87,14 +90,14 @@ beforeAll(async () => {
     })
   ).id;
 
-  testVersionId = (
-    await createTest(auth, {
-      name: "Reschedules",
-      scenario: "Their cleaning is booked for Thursday and has to move.",
-      expectedBehaviors: ["confirms the new time back before finishing"],
-      personaIds: [personaId],
-    })
-  ).versionId;
+  suiteId = (await createTestSuite(auth, { name: "Claim race" })).id;
+  await createTest(auth, {
+    suiteId,
+    name: "Reschedules",
+    scenario: "Their cleaning is booked for Thursday and has to move.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [personaId],
+  });
 });
 
 afterAll(async () => {

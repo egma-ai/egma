@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
  * this process forwards the paths they use, that two independent tabs keep two
  * projects apart, that a real Chrome makes audio of a signed link, and that
  * clicking through in order gets somebody where they were going. **A matrix is
- * never one of those.** Every combination of role, archive state, revision,
- * refusal, retry, idempotency key, migration and repository format is proved at
+ * never one of those.** Every combination of role, lifecycle state, revision,
+ * refusal, idempotency key, migration and repository format is proved at
  * a seam where one case costs nothing, and the browser walks one path through
  * it.
  *
@@ -52,9 +52,9 @@ const PROVED_IN_THE_FAST_LANE: readonly {
     says: /archiv/iu,
   },
   {
-    concern: "the archive matrix for tests",
-    file: "apps/api/test/tests-lifecycle.test.ts",
-    says: /archiv/iu,
+    concern: "suite CRUD, permanent deletion, and immutable test membership",
+    file: "apps/api/test/test-suites-cutover.test.ts",
+    says: /immutable test membership/iu,
   },
   {
     concern: "what each role may do",
@@ -72,13 +72,8 @@ const PROVED_IN_THE_FAST_LANE: readonly {
     says: /revision/iu,
   },
   {
-    concern: "Retry, and what it refuses rather than substituting",
-    file: "apps/api/test/run-history-routes.test.ts",
-    says: /retry/iu,
-  },
-  {
     concern: "idempotency keys on a run",
-    file: "apps/api/test/runs-routes.test.ts",
+    file: "apps/api/test/runs-suite-contract.test.ts",
     says: /idempotency/iu,
   },
   {
@@ -92,14 +87,14 @@ const PROVED_IN_THE_FAST_LANE: readonly {
     says: /migration/iu,
   },
   {
-    concern: "repository synchronization, and what it refuses",
-    file: "apps/api/test/tests-repository-sync.test.ts",
-    says: /repository_agent/u,
+    concern: "repository synchronization, atomicity, and what it refuses",
+    file: "apps/api/test/test-suites-cutover.test.ts",
+    says: /repository\/change-set/iu,
   },
   {
-    concern: "the repository folder's own format, as the CLI writes it",
-    file: "apps/api/test/tests-cli-verbs.test.ts",
-    says: /pull|push/iu,
+    concern: "the CLI and API suite contract for repository push and run",
+    file: "apps/api/test/cli-platform-contract.test.ts",
+    says: /atomic repository change/iu,
   },
 ];
 

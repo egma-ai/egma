@@ -1,9 +1,5 @@
 import { newId } from "@egma/ids";
-import {
-  getSimulation,
-  registerCapabilityDiscovery,
-  type CapabilityDiscovery,
-} from "@egma/db";
+import { getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -20,10 +16,10 @@ import {
  *
  * These are the promises the Agents pages are built on, and they are proved
  * here rather than in a browser because none of them is about a browser: a
- * refusal code, a stale-write conflict, a credential that never comes back, a
- * capability record that says `unknown` rather than pretending, and an Archive
- * that settles work already queued. Every one of those is the same whoever
- * asked, and a real Chrome would prove nothing extra while costing a minute.
+ * refusal code, a stale-write conflict, a credential that never comes back, and
+ * an Archive that settles work already queued. Every one of those is the same
+ * whoever asked, and a real Chrome would prove nothing extra while costing a
+ * minute.
  *
  * Refusal codes are asserted exactly. The code is the contract a client
  * branches on; the sentences are asserted where the product's own refusal table
@@ -65,11 +61,6 @@ function held<T>(answer: Answer, key: string): T {
   return answer.body[key] as T;
 }
 
-/** The capability record of the connection an answer carries. */
-function held0(answer: Answer): ConnectionBody["capabilities"] {
-  return held<ConnectionBody>(answer, "connection").capabilities;
-}
-
 type AgentBody = {
   readonly id: string;
   readonly name: string;
@@ -90,30 +81,9 @@ type ConnectionBody = {
   readonly credentialPresent: boolean;
   readonly credentialsHint: string | null;
   readonly config: Record<string, string>;
-  readonly capabilities: {
-    readonly state: string;
-    readonly measured: readonly string[] | null;
-    readonly supported: readonly string[] | null;
-    readonly checkedAt: string | null;
-    readonly source: string | null;
-    readonly standing: Readonly<Record<string, string>>;
-  };
 };
 
 const RETELL_KEY = "retell-secret-A1B2C3D4WXYZ";
-
-/** A voice connection that needs no carrier configuration in this test API. */
-const LIVEKIT_VOICE = {
-  agentPlatform: "livekit_agents",
-  connectionKind: "livekit_room",
-  accessVariant: "livekit_room.project_credentials",
-  modality: "voice",
-  config: { url: "wss://acme.livekit.cloud" },
-  credentials: {
-    apiKey: "livekit-key-A1B2C3D4WXYZ",
-    apiSecret: "livekit-secret-E5F6G7H8QRST",
-  },
-} as const;
 
 async function anAgent(who: Customer, name: string): Promise<AgentBody> {
   const created = await browser("POST", "/v1/agents", who, { name });
@@ -570,7 +540,6 @@ describe("a connection's stored credential", () => {
         readonly connectionKind: string;
         readonly accessVariant: string;
         readonly simulatorAdapter: boolean;
-        readonly capabilityDiscovery: boolean;
         readonly credentialRule: string;
         readonly fields: readonly { readonly key: string; readonly kind: string }[];
         readonly credentialFields: readonly { readonly field: string }[];
@@ -994,305 +963,6 @@ describe("a key minted for the whole organization", () => {
   });
 });
 
-describe("a connection's capability record", () => {
-  it("starts unknown, which is not the same as unsupported", async () => {
-    api = await createApi("agents_browser_capabilities_unknown");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id);
-
-    expect(wiring.capabilities.state).toBe("unknown");
-    // Never an empty list: nobody has looked, and a reader who saw `[]` would
-    // read it as a target measured and found bare.
-    expect(wiring.capabilities.supported).toBeNull();
-    expect(wiring.capabilities.checkedAt).toBeNull();
-  });
-
-  it("answers what egma's own transport settles: audio on voice, none on chat", async () => {
-    api = await createApi("agents_browser_capabilities_transport");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const spoken = await aConnection(ada, agent.id, {
-      name: "by-voice",
-      ...LIVEKIT_VOICE,
-    });
-    const typed = await aConnection(ada, agent.id, {
-      name: "by-chat",
-      modality: "chat",
-    });
-
-    const measure = async (connectionId: string) => {
-      const done = await browser(
-        "POST",
-        `/v1/agents/${agent.id}/connections/${connectionId}/capabilities/refresh`,
-        ada,
-      );
-      expect(done.status, JSON.stringify(done.body)).toBe(200);
-      return held<ConnectionBody>(done, "connection").capabilities;
-    };
-
-    // A voice simulation holds PCM both ways, so there is audio for an audio
-    // grader to read. This is a fact about egma's own transport rather than
-    // about the provider's name, which is why an adapter is allowed to state
-    // it at all.
-    const voice = await measure(spoken.id);
-    expect(voice.state).toBe("known");
-    expect(voice.supported).toEqual(["raw_audio"]);
-
-    // A chat simulation is text end to end. Not "not yet" — none.
-    const chat = await measure(typed.id);
-    expect(chat.state).toBe("known");
-    expect(chat.supported).toEqual([]);
-
-    // And DTMF is absent from both, which under this record means measured and
-    // unsupported: nothing in the simulator can press a digit over any
-    // transport. Saying so is worth more than leaving it unknown, because a
-    // test that needs a phone menu is then skipped with a reason somebody can
-    // act on rather than because nobody has looked.
-    // Measured either way, so its absence is a fact rather than a gap.
-    expect(voice.standing.dtmf).toBe("unsupported");
-    expect(chat.standing.dtmf).toBe("unsupported");
-    expect(chat.standing.raw_audio).toBe("unsupported");
-  });
-
-  it("answers each capability one of three ways, never two", async () => {
-    api = await createApi("agents_browser_capability_standing");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const spoken = await aConnection(ada, agent.id, {
-      name: "by-voice",
-      ...LIVEKIT_VOICE,
-    });
-
-    // Before anything looks, every key is unmeasured — including the two the
-    // adapter can speak to.
-    for (const key of ["raw_audio", "dtmf", "barge_in"]) {
-      expect(spoken.capabilities.standing[key], key).toBe("not_measured");
-    }
-
-    const done = await browser(
-      "POST",
-      `/v1/agents/${agent.id}/connections/${spoken.id}/capabilities/refresh`,
-      ada,
-    );
-    expect(done.status, JSON.stringify(done.body)).toBe(200);
-    const held = held0(done);
-
-    // The three answers, one per capability, after one refresh.
-    expect(held.standing).toEqual({
-      // Measured and found: a voice simulation holds PCM both ways.
-      raw_audio: "supported",
-      // Measured and absent: nothing in the simulator can send a digit.
-      dtmf: "unsupported",
-      // Not measured: barge-in is a question about the customer's agent, and
-      // no shipped adapter asks it. This is the answer that used to be lost.
-      barge_in: "not_measured",
-    });
-
-    expect(held.measured).toEqual(["raw_audio", "dtmf"]);
-    expect(held.supported).toEqual(["raw_audio"]);
-  });
-
-  it("never reads a capability nobody measured as one the target lacks", async () => {
-    api = await createApi("agents_browser_capability_not_measured");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id, LIVEKIT_VOICE);
-
-    /**
-     * The property, taken past the shipped adapter: whatever an adapter
-     * reports, a key it did not measure is never `unsupported`.
-     *
-     * This is the confusion the ticket exists to prevent. Run eligibility is
-     * built on this record, and a test needing barge-in must be skipped with
-     * `required_capability_unknown` — go and measure it — rather than
-     * `required_capability_unsupported`, which says the target cannot and sends
-     * somebody to rewrite a test that was fine.
-     */
-    const before = registerCapabilityDiscovery("livekit_room", async () => ({
-      measured: ["raw_audio"],
-      supported: ["raw_audio"],
-    }));
-
-    try {
-      const done = await browser(
-        "POST",
-        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-        ada,
-      );
-      expect(done.status).toBe(200);
-      const capabilities = held0(done);
-
-      expect(capabilities.state).toBe("known");
-      expect(capabilities.standing.raw_audio).toBe("supported");
-      // Both absent from `supported`, and neither is a claim about the target.
-      expect(capabilities.standing.dtmf).toBe("not_measured");
-      expect(capabilities.standing.barge_in).toBe("not_measured");
-      expect(Object.values(capabilities.standing)).not.toContain("unsupported");
-    } finally {
-      registerCapabilityDiscovery("livekit_room", before);
-    }
-  });
-
-  it("is refused a Refresh for a type egma ships no adapter for", async () => {
-    api = await createApi("agents_browser_capabilities_no_adapter");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id);
-
-    // Every shipped type carries the transport adapter, so this is the state a
-    // type added ahead of its adapter would be in — taken by removing the one
-    // that is there.
-    const before = registerCapabilityDiscovery("retell_chat_api", undefined);
-    try {
-      const asked = await browser(
-        "POST",
-        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-        ada,
-      );
-      expect(asked.status).toBe(422);
-      expect(asked.body.error).toBe("no_capability_adapter");
-      // The refusal says the state is unchanged, so nobody reads it as having
-      // cleared a measurement.
-      expect(String(asked.body.message)).toContain("stays unknown");
-    } finally {
-      registerCapabilityDiscovery("retell_chat_api", before);
-    }
-  });
-
-  it("records what an adapter measured, and forgets it when the target moves", async () => {
-    api = await createApi("agents_browser_capabilities_known");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id);
-
-    const found: CapabilityDiscovery = async () => ({
-      measured: ["dtmf", "raw_audio"],
-      supported: ["dtmf", "raw_audio"],
-    });
-    const before = registerCapabilityDiscovery("retell_chat_api", found);
-
-    try {
-      const measured = await browser(
-        "POST",
-        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-        ada,
-      );
-      expect(measured.status).toBe(200);
-      const known = held<ConnectionBody>(measured, "connection").capabilities;
-      expect(known.state).toBe("known");
-      expect(known.supported).toEqual(["dtmf", "raw_audio"]);
-      expect(known.checkedAt).toBeTypeOf("string");
-      expect(known.source).toBe("retell_chat_api adapter");
-
-      // Changing where the connection points changes which target this is, so
-      // a measurement of the old one stops being evidence about it.
-      const edited = await browser(
-        "PATCH",
-        `/v1/agents/${agent.id}/connections/${wiring.id}`,
-        ada,
-        {
-          config: { retellAgentId: "agent_in_retell_2" },
-          expectedRevision: held<ConnectionBody>(measured, "connection").revision,
-        },
-      );
-      expect(edited.status).toBe(200);
-      expect(held<ConnectionBody>(edited, "connection").capabilities.state).toBe(
-        "unknown",
-      );
-    } finally {
-      registerCapabilityDiscovery("retell_chat_api", before);
-    }
-  });
-
-  it("leaves the record alone when the adapter could not establish anything", async () => {
-    api = await createApi("agents_browser_capabilities_failed");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id);
-
-    const before = registerCapabilityDiscovery("retell_chat_api", async () => {
-      throw new Error("the provider did not answer");
-    });
-
-    try {
-      const asked = await browser(
-        "POST",
-        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-        ada,
-      );
-      expect(asked.status).toBe(502);
-      expect(asked.body.error).toBe("capability_check_failed");
-      expect(asked.body.message).toBe(
-        `Egma could not check capabilities for connection ${wiring.id}. Its ` +
-          `capability state remains unknown; check the connection settings ` +
-          `and try Refresh capabilities again.`,
-      );
-
-      const read = await browser(
-        "GET",
-        `/v1/agents/${agent.id}/connections/${wiring.id}`,
-        ada,
-      );
-      expect(held<ConnectionBody>(read, "connection").capabilities.state).toBe(
-        "unknown",
-      );
-    } finally {
-      registerCapabilityDiscovery("retell_chat_api", before);
-    }
-  });
-});
-
-describe("the capability catalog", () => {
-  it("is one server-owned list, and a key outside it is refused", async () => {
-    api = await createApi("agents_browser_capability_catalog");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const catalog = await browser("GET", "/v1/capabilities", ada);
-    expect(catalog.status).toBe(200);
-    const keys = held<readonly { readonly key: string }[]>(
-      catalog,
-      "items",
-    ).map((one) => one.key);
-    expect(keys).toContain("dtmf");
-
-    // An adapter answering a key the catalog has not got is a bug in the
-    // adapter, and the measurement is refused rather than stored — a
-    // capability nobody could ever require would be a fact nothing reads.
-    const agent = await anAgent(ada, "Front desk");
-    const wiring = await aConnection(ada, agent.id);
-    const before = registerCapabilityDiscovery("retell_chat_api", async () => ({
-      measured: ["telepathy"],
-      supported: ["telepathy"],
-    }));
-    try {
-      const asked = await browser(
-        "POST",
-        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-        ada,
-      );
-      expect(asked.status).toBe(500);
-      const read = await browser(
-        "GET",
-        `/v1/agents/${agent.id}/connections/${wiring.id}`,
-        ada,
-      );
-      expect(held<ConnectionBody>(read, "connection").capabilities.state).toBe(
-        "unknown",
-      );
-    } finally {
-      registerCapabilityDiscovery("retell_chat_api", before);
-    }
-  });
-});
-
 describe("what a viewer may do here", () => {
   it("reads everything and is refused every write, with no browser involved", async () => {
     api = await createApi("agents_browser_viewer");
@@ -1349,11 +1019,6 @@ describe("what a viewer may do here", () => {
         "POST",
         `/v1/agents/${agent.id}/connections/${wiring.id}/archive`,
         { expectedRevision: wiring.revision },
-      ],
-      [
-        "POST",
-        `/v1/agents/${agent.id}/connections/${wiring.id}/capabilities/refresh`,
-        {},
       ],
     ];
 
@@ -1433,7 +1098,7 @@ describe("archiving a connection that work is queued over", () => {
       { expectedRevision: connectionRevision },
     );
     expect(archived.status, JSON.stringify(archived.body)).toBe(200);
-    expect(archived.body.canceledRuns).toEqual([runId]);
+    expect(archived.body.canceledRunCount).toBe(1);
 
     // The queued conversation ended here — never dispatched, never claimable —
     // and the run says canceled rather than quietly completing.
@@ -1463,21 +1128,34 @@ async function aQueuedRunFor(who: Customer): Promise<{
   const agent = await anAgent(who, "Front desk");
   const wiring = await aConnection(who, agent.id);
 
+  const suite = await browser("POST", "/v1/test-suites", who, {
+    name: "Front desk regression",
+  });
+  expect(suite.status, JSON.stringify(suite.body)).toBe(201);
+  const suiteId = String(suite.body.id);
+
   const written = await browser("POST", "/v1/tests", who, {
+    suiteId,
     name: "Books an appointment",
     scenario: "The caller wants an appointment next week.",
     expectedBehaviors: ["The agent offers a time"],
   });
   expect(written.status, JSON.stringify(written.body)).toBe(201);
-  const versionId = String(written.body.versionId);
 
   const started = await browser("POST", "/v1/runs", who, {
+    suiteId,
+    agentId: agent.id,
     connectionId: wiring.id,
-    testVersionIds: [versionId],
     idempotencyKey: newId("run"),
   });
   expect(started.status, JSON.stringify(started.body)).toBe(201);
-  const simulations = started.body.simulations as readonly { id: string }[];
+  const page = await browser(
+    "GET",
+    `/v1/runs/${String(started.body.id)}/simulations?pageSize=1`,
+    who,
+  );
+  expect(page.status, JSON.stringify(page.body)).toBe(200);
+  const simulations = page.body.simulations as readonly { id: string }[];
 
   return {
     agentId: agent.id,

@@ -9,11 +9,13 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
   failSimulation,
   finishGradingJob,
   getGradingJob,
   getGradingJobForTrace,
   listGradingJobsForSimulation,
+  listSimulations,
   recordGradingHeartbeat,
   recordProductionTraces,
   releaseGradingJob,
@@ -79,17 +81,17 @@ const auth = actingAsAcme();
 let agentId: string;
 let connectionId: string;
 let personaId: string;
-/** What a run executes: a run pins frozen versions, and never names none. */
-let testVersionId: string;
+let suiteId: string;
 
 /** One conversation, conducted as far as the caller asks and no further. */
 async function aSimulation(): Promise<string> {
   const started = await startRun(auth, {
+    suiteId,
     agentId,
     connectionId,
-    testVersionIds: [testVersionId],
+    idempotencyKey: newId("run"),
   });
-  const [only] = started.simulations;
+  const [only] = (await listSimulations(auth, started.id))?.items ?? [];
   if (only === undefined) throw new Error("the run has no simulation");
   return only.id;
 }
@@ -165,14 +167,15 @@ beforeAll(async () => {
     })
   ).id;
 
-  testVersionId = (
-    await createTest(auth, {
-      name: "Reschedules a booked appointment",
-      scenario: "Their cleaning has to move to any afternoon next week.",
-      expectedBehaviors: ["confirms the new time back before finishing"],
-      personaIds: [personaId],
-    })
-  ).versionId;
+  suiteId = (await createTestSuite(auth, { name: "Core grading" })).id;
+
+  await createTest(auth, {
+    suiteId,
+    name: "Reschedules a booked appointment",
+    scenario: "Their cleaning has to move to any afternoon next week.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [personaId],
+  });
 });
 
 afterAll(async () => {
@@ -292,11 +295,12 @@ describe("a terminal transition", () => {
 
   it("makes none of a canceled simulation, which nobody asked to be judged", async () => {
     const started = await startRun(auth, {
+      suiteId,
       agentId,
       connectionId,
-      testVersionIds: [testVersionId],
+      idempotencyKey: newId("run"),
     });
-    const [only] = started.simulations;
+    const [only] = (await listSimulations(auth, started.id))?.items ?? [];
     if (only === undefined) throw new Error("the run has no simulation");
 
     await cancelRun(auth, started.id);
@@ -638,18 +642,24 @@ describe("the claim", () => {
       name: "Careful Grace",
       traits: { personality: "Speaks slowly.", language: "en-US" },
     });
-    const globexTest = await createTest(globexAuth, {
+    const globexSuite = await createTestSuite(globexAuth, {
+      name: "Globex grading",
+    });
+    await createTest(globexAuth, {
+      suiteId: globexSuite.id,
       name: "Cancels a booking",
       scenario: "Their cleaning has to be called off.",
       expectedBehaviors: ["confirms the booking is gone before finishing"],
       personaIds: [grace.id],
     });
     const started = await startRun(globexAuth, {
+      suiteId: globexSuite.id,
       agentId: globexAgent.id,
       connectionId: globexAgent.connection?.id ?? "",
-      testVersionIds: [globexTest.versionId],
+      idempotencyKey: newId("run"),
     });
-    const [conversation] = started.simulations;
+    const [conversation] =
+      (await listSimulations(globexAuth, started.id))?.items ?? [];
     if (conversation === undefined) throw new Error("no simulation");
     await claimSimulations({ claimant: "sim", capacity: 50 });
     await startSimulation(globexAuth, conversation.id, "sim");

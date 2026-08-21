@@ -593,9 +593,17 @@ describe("the shipped simulator against the real API", () => {
       // expected-behaviors copy; its immutable version owns the model and the
       // worker resolves the deployment credential at claim time.
 
+      const suite = await call("POST", "/v1/test-suites", {
+        key,
+        body: { name: "Appointment changes" },
+      });
+      expect(suite.status, JSON.stringify(suite.body)).toBe(201);
+      const suiteId = String(suite.body.id);
+
       const pushed = await call("POST", "/v1/tests", {
         key,
         body: {
+          suiteId,
           name: "Reschedules a booked appointment",
           scenario:
             "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
@@ -604,7 +612,6 @@ describe("the shipped simulator against the real API", () => {
         },
       });
       expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
-      const versionId = String(pushed.body.versionId);
 
       // Both runs queued before the simulator exists, so the walk starts
       // from the resting state a trigger leaves behind.
@@ -612,13 +619,20 @@ describe("the shipped simulator against the real API", () => {
         const started = await call("POST", "/v1/runs", {
           key,
           body: {
+            suiteId,
+            agentId,
             connectionId: connection,
-            testVersionIds: [versionId],
             idempotencyKey: newId("run"),
           },
         });
         expect(started.status, JSON.stringify(started.body)).toBe(201);
-        const simulations = started.body.simulations as { id: string }[];
+        const page = await call(
+          "GET",
+          `/v1/runs/${String(started.body.id)}/simulations?pageSize=1`,
+          { key },
+        );
+        expect(page.status, JSON.stringify(page.body)).toBe(200);
+        const simulations = page.body.simulations as { id: string }[];
         const first = simulations[0];
         if (first === undefined) throw new Error("the run has no simulation");
         return { runId: String(started.body.id), simulationId: first.id };

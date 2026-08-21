@@ -7,7 +7,7 @@ import {
   getPersonaVersion,
   getRun,
   getSimulation,
-  getSimulationTestVersion,
+  getSimulationExecutionEvidence,
   listGradingJobsForSimulation,
   NotPermittedError,
   readTrace,
@@ -239,20 +239,14 @@ function describedMockToolCoverage(
  */
 function describedPlanForThisConversation(
   plan: GradingPlan | undefined,
-  testVersionId: string | null,
+  _testVersionId: string,
 ): Record<string, unknown> | null {
   if (plan === undefined) return null;
 
-  const mine = plan.groups.filter((group) =>
-    group.tag === "version"
-      ? group.testVersionId === testVersionId
-      : testVersionId === null,
-  );
-
   return {
     state: plan.state,
-    capturedAt: plan.capturedAt?.toISOString() ?? null,
-    items: mine.flatMap((group) =>
+    capturedAt: plan.capturedAt.toISOString(),
+    items: plan.groups.flatMap((group) =>
       group.items.map((item) =>
         ({
           kind: "authored",
@@ -348,7 +342,7 @@ export async function simulationRoutes(
     if (run === undefined) return notFound(reply, NO_SUCH_SIMULATION);
 
     const [
-      testVersion,
+      executionEvidence,
       persona,
       personaVersion,
       agent,
@@ -356,7 +350,7 @@ export async function simulationRoutes(
       plan,
       jobs,
     ] = await Promise.all([
-      getSimulationTestVersion(who, one.id),
+      getSimulationExecutionEvidence(who, one.id),
       getPersona(who, one.personaId),
       getPersonaVersion(who, one.personaVersionId),
       // Both come back as they now stand, archived or not. That is what keeps
@@ -368,6 +362,8 @@ export async function simulationRoutes(
       getGradingPlan(who, one.runId),
       listGradingJobsForSimulation(who, one.id),
     ]);
+    const testVersion = executionEvidence?.testVersion;
+    const mockToolSnapshot = executionEvidence?.mockToolSnapshot;
 
     const judged = await readVerdicts(who, one.id).catch(() => undefined);
 
@@ -412,7 +408,7 @@ export async function simulationRoutes(
       id: one.id,
       projectId: one.projectId,
       runId: one.runId,
-      runLabel: run.label,
+      runName: run.name,
       position: one.position,
       // The four facts, kept apart exactly as a run's own page keeps them: the
       // machinery, where the judging stands, what was decided, and null where
@@ -423,9 +419,6 @@ export async function simulationRoutes(
       score: fold.score ?? null,
       counts: fold.counts,
       reason: one.endingReason,
-      skipReason: one.skipReason,
-      skippedCapabilities:
-        one.skippedCapabilities === null ? null : [...one.skippedCapabilities],
       modality: one.modality,
       createdAt: one.createdAt.toISOString(),
       startedAt: one.startedAt?.toISOString() ?? null,
@@ -449,10 +442,6 @@ export async function simulationRoutes(
         scenario: testVersion?.scenario ?? null,
         expectedBehaviors:
           testVersion === undefined ? null : [...testVersion.expectedBehaviors],
-        requiredCapabilities:
-          testVersion === undefined
-            ? null
-            : [...testVersion.requiredCapabilities],
       },
       persona: {
         id: one.personaId,
@@ -502,12 +491,12 @@ export async function simulationRoutes(
       // reason the run's own read gives: an override replaces a default by tool
       // name, and both halves have to be visible for the merge to be checkable.
       mockTools: {
-        defaults: run.mockToolSnapshot.defaults.map((its) => ({
+        defaults: (mockToolSnapshot?.defaults ?? []).map((its) => ({
           ...describedMockTool(its),
           mockToolId: its.mockToolId,
         })),
         overrides: (
-          run.mockToolSnapshot.overrides[one.testVersionId ?? ""] ?? []
+          mockToolSnapshot?.overrides[one.testVersionId] ?? []
         ).map(describedMockTool),
       },
       gradingPlan: describedPlanForThisConversation(plan, one.testVersionId),

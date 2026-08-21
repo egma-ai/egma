@@ -1,19 +1,13 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  NO_ENVIRONMENT,
-  type Capabilities,
-  type ListedConnection,
-} from "@/lib/agents.ts";
-import { RelativeInstant } from "@/ui/relative-time.tsx";
+import { NO_ENVIRONMENT, type ListedConnection } from "@/lib/agents.ts";
 
 /**
  * How egma reaches an agent, said on the row rather than one click away.
  *
  * **These are the four facts somebody brings to a list of agents.** Which
- * supported setup, which modality, which environment, and whether anybody has
- * measured what that target can do. A staging chat connection and a production
+ * supported setup, which modality, and which environment. A staging chat connection and a production
  * phone number are different enough that telling them apart should not cost a
  * page load, and an agent egma cannot reach at all should be visible here
  * rather than discovered when a run refuses to start.
@@ -43,40 +37,6 @@ export function modalityLabel(modality: string): string {
 }
 
 /**
- * The state of a capability record, which is never a verdict.
- *
- * `unknown` and `known` are two different sentences and they lead somewhere
- * different: one is a measurement away from an answer, the other is a settled
- * fact about the target. Both are neutral chips on purpose. A green one would
- * read as *this connection is good*, and a measured connection can be measured
- * and found wanting — `DESIGN.md` keeps verdict colour for verdicts.
- */
-export function CapabilityState({
-  capabilities,
-  now,
-}: {
-  readonly capabilities: Capabilities;
-  readonly now: number;
-}) {
-  const checked =
-    capabilities.state === "known" && capabilities.checkedAt !== null;
-
-  return (
-    <span className="inline-flex min-w-0 items-center gap-2">
-      <Badge variant="neutral">
-        <CapabilityMark checked={checked} />
-        {checked ? "Checked" : "Not checked"}
-      </Badge>
-      {checked && capabilities.checkedAt !== null ? (
-        <span className="truncate text-sm text-muted-foreground">
-          <RelativeInstant instant={capabilities.checkedAt} now={now} />
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
-/**
  * One connection, in one line of reading.
  *
  * The environment label leads because it is what somebody scans for — an
@@ -85,17 +45,13 @@ export function CapabilityState({
  */
 export function ConnectionFacts({
   connection,
-  now,
 }: {
   readonly connection: ListedConnection;
-  readonly now: number;
 }) {
   return (
     /*
      * It wraps rather than clips. On a narrow screen the table restyles into
-     * labelled rows and this cell gets about seventy per cent of a phone, which
-     * is not enough for four facts on one line — and the one that would fall
-     * off the end is the capability state, which is the fact somebody came for.
+     * labelled rows and this cell gets about seventy per cent of a phone.
      * On a wide screen there is room and it never wraps.
      */
     <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -105,7 +61,6 @@ export function ConnectionFacts({
       <span className="truncate text-sm text-muted-foreground">
         {connection.productLabel} · {modalityLabel(connection.modality)}
       </span>
-      <CapabilityState capabilities={connection.capabilities} now={now} />
     </span>
   );
 }
@@ -122,10 +77,8 @@ export function ConnectionFacts({
  */
 export function ConnectionsOnRow({
   connections,
-  now,
 }: {
   readonly connections: readonly ListedConnection[];
-  readonly now: number;
 }) {
   if (connections.length === 0) {
     return (
@@ -140,31 +93,10 @@ export function ConnectionsOnRow({
     <ul className="m-0 flex list-none flex-col gap-2 p-0">
       {connections.map((one) => (
         <li className="min-w-0" key={one.id}>
-          <ConnectionFacts connection={one} now={now} />
+          <ConnectionFacts connection={one} />
         </li>
       ))}
     </ul>
-  );
-}
-
-/**
- * Measured, or not yet — a filled mark against a hollow one.
- *
- * The badge sizes it and `currentColor` takes the badge's own colour, so this
- * carries no value of its own and follows both themes without knowing either.
- */
-function CapabilityMark({ checked }: { readonly checked: boolean }) {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-      <circle
-        cx="6"
-        cy="6"
-        r="4"
-        fill={checked ? "currentColor" : "none"}
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
   );
 }
 

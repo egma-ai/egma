@@ -24,7 +24,6 @@ export class ProjectOutsideOrganizationError extends Error {
     this.projectId = projectId;
   }
 }
-
 /**
  * The agent factory turned a write away, and which rule turned it away is
  * carried beside the sentence rather than hidden inside it.
@@ -91,14 +90,8 @@ export class RunWriteRefusedError extends Error {
  * - `no_adapter` — the connection's type has no shipped simulator adapter, so
  *   the run could never be conducted. Refused at creation rather than left
  *   queued forever for a conductor that does not exist.
- * - `not_admitted` — the selection itself: no versions, a version this egma
- *   never issued, one version named twice, more conversations than a run may
- *   hold, or a persona a pinned version names who has since been deleted.
- * - `test_not_applicable` — the run named an agent and a test that are not
- *   linked. Its own answer rather than `not_admitted`, because the fix is
- *   somewhere specific — link the test to this agent, or choose another test —
- *   and a run builder can offer that fix only if it can tell this apart from a
- *   version it should never have pinned.
+ * - `not_admitted` — the suite is empty, an expected test/version set is stale
+ *   or malformed, or a persona a current version names is unavailable.
  * - `already_finished` — a cancel arrived after the run had finished, so there
  *   was nothing left to cancel and the caller missed.
  */
@@ -107,7 +100,6 @@ export type RunWriteRefusal =
   | "connection_not_on_agent"
   | "no_adapter"
   | "not_admitted"
-  | "test_not_applicable"
   | "already_finished";
 
 /**
@@ -135,7 +127,6 @@ export class AlreadyBelongsToAnOrganizationError extends Error {
     this.here = here;
   }
 }
-
 /**
  * The write would have left the organization with no admin.
  *
@@ -245,136 +236,6 @@ export class VersionConflictError extends Error {
 }
 
 /**
- * A link edit named the applicability revision it was written against, and the
- * test's applicable agents have moved since.
- *
- * **The third of three, and it is genuinely a third thing.**
- * `IdentityConflictError` guards the live half — the name, the description, the
- * archive state. `VersionConflictError` guards the content a run is judged by.
- * This one guards a set that is neither: adding an agent mints no version and
- * makes no repository copy stale, so a link edit must not be refused because
- * somebody renamed the test, and a rename must not be refused because somebody
- * linked an agent. Three losses, three tokens, three refusals.
- */
-export class ApplicabilityConflictError extends Error {
-  readonly testId: string;
-  /** The revision the caller wrote against, and the one it is on now. */
-  readonly expected: string;
-  readonly current: string;
-
-  constructor(
-    testId: string,
-    revisions: { readonly expected: string; readonly current: string },
-  ) {
-    super(
-      `test ${testId}'s applicable agents changed after this edit was written against applicability revision ${revisions.expected}, and are now on ${revisions.current}`,
-    );
-    this.name = "ApplicabilityConflictError";
-    this.testId = testId;
-    this.expected = revisions.expected;
-    this.current = revisions.current;
-  }
-}
-
-/**
- * A write would have left a test with no agent to run against, or named one it
- * cannot have.
- *
- * The reason travels beside the sentence rather than inside it — the agent
- * factory's arrangement, for the agent factory's reason: three rules refuse
- * here, an HTTP layer answers each with its own code, and reading the prose to
- * tell them apart would make the prose load-bearing while the prose is the part
- * deliberately left free to improve.
- */
-export class TestAgentRefusedError extends Error {
-  readonly reason: TestAgentRefusal;
-  readonly testId: string | undefined;
-  /** Whichever agent the sentence named, for a layer that has to relay it. */
-  readonly agentId: string | undefined;
-
-  constructor(
-    reason: TestAgentRefusal,
-    message: string,
-    named: { readonly testId?: string; readonly agentId?: string } = {},
-  ) {
-    super(message);
-    this.name = "TestAgentRefusedError";
-    this.reason = reason;
-    this.testId = named.testId;
-    this.agentId = named.agentId;
-  }
-}
-
-/**
- * Which rule refused.
- *
- * - `test_needs_agent` — the write named no agent at all, and there was none to
- *   fall back on. A test with no target is a specification nothing can execute.
- * - `last_test_agent` — the edit would have removed the only link left. Its own
- *   answer rather than the one above, because the fix is different: link
- *   another agent first, and the refusal names the one being removed.
- * - `agent_not_available` — the named agent is not an active agent of this
- *   project. Archived agents keep the links they already have; they never
- *   receive a new one, because a link nothing can run is a promise egma cannot
- *   keep.
- * - `repository_agent_not_applicable` — the write came from a repository bound
- *   to one agent, and this test no longer applies to it. It is the fourth here
- *   rather than an error of its own because it is the same fact as the three
- *   above — a test and an agent that do not go together — read from the other
- *   side. What differs is only the fix, and the fix is what the reason carries:
- *   relink the test in the browser, or delete the local file. Nothing is
- *   written either way, which is the sentence's last clause.
- */
-export type TestAgentRefusal =
-  | "test_needs_agent"
-  | "last_test_agent"
-  | "agent_not_available"
-  | "repository_agent_not_applicable";
-
-/**
- * A test's Restore was refused because its current version names something
- * archived.
- *
- * Restoring is a promise that the test can run, and it cannot: the personas a
- * version names are who calls about it. Bringing it back over an archived one
- * would produce a test that is active and refuses to start, which is worse
- * than one that is plainly archived.
- *
- * It carries every blocking resource, because the fix is to restore each of
- * them and a refusal that only said "something is archived" would send somebody
- * hunting.
- */
-export class TestDependencyInactiveError extends Error {
-  readonly testId: string;
-  /** What the current version names that is archived, oldest first. */
-  readonly resources: readonly ArchivedDependency[];
-
-  constructor(testId: string, resources: readonly ArchivedDependency[]) {
-    super(
-      `test ${testId} cannot be restored because its current version names ${resources
-        .map((one) => `${one.kind} ${one.id} "${one.name}"`)
-        .join(", ")}, and an archived one cannot call about a test`,
-    );
-    this.name = "TestDependencyInactiveError";
-    this.testId = testId;
-    this.resources = resources;
-  }
-}
-
-/**
- * One archived thing a version still names, as a refusal has to name it.
- *
- * **One word in the union, and it stays a union.** A version named graders too
- * until the junction was dropped; the shape is kept so that the next kind of
- * dependency is a word added here rather than a field invented at the refusal.
- */
-export type ArchivedDependency = {
-  readonly kind: "persona";
-  readonly id: string;
-  readonly name: string;
-};
-
-/**
  * Postgres rolled the write back rather than let it wait forever, and it can
  * be sent again unchanged.
  *
@@ -462,7 +323,7 @@ export class EgmaProvidedPersonaError extends Error {
  *
  * **Only a current version of an active test blocks.** A historical version
  * is already frozen and a run that pinned it is already interpretable, so
- * neither can lose anything; an archived test is not going to run. Blocking on
+ * neither can lose anything; a deleted test is not going to run. Blocking on
  * either would make a persona unarchivable for the rest of the project's life
  * on the strength of a test nobody uses.
  *
@@ -512,30 +373,10 @@ export class UnprocessableInputError extends Error {
 }
 
 /**
- * A write named a capability that is not in egma's catalog.
- *
- * **A subclass rather than a sibling**, because every layer that already relays
- * an `UnprocessableInputError` word for word is right about this one too — it
- * is the caller's body, and the catalog's own sentence is written for whoever
- * has to fix it. What the subclass buys is the one thing the general answer
- * cannot give: a stable code of its own, so a form can put the refusal beside
- * the capability list rather than at the top of the page.
- */
-export class UnknownCapabilityError extends UnprocessableInputError {
-  readonly capability: string;
-
-  constructor(capability: string, message: string) {
-    super(message);
-    this.name = "UnknownCapabilityError";
-    this.capability = capability;
-  }
-}
-
-/**
  * A write named a persona by a name that more than one active persona in the
  * project answers to.
  *
- * **A subclass, for `UnknownCapabilityError`'s reason**: it is the caller's
+ * **A subclass rather than a sibling**: it is the caller's
  * body, and every layer that relays an `UnprocessableInputError` word for word
  * is right about this one too. What the subclass buys is the code, and the code
  * matters here because the reader is usually a repository file rather than a
@@ -906,44 +747,6 @@ export type ConnectionRestoreRefusal =
   | "parent_agent_archived";
 
 /**
- * Egma was asked to measure a target and the adapter could not establish
- * anything.
- *
- * Not a fault and not the caller's mistake: the request was fine and the target
- * did not answer. It is its own class because the honest reply names the
- * connection, says the capability state is unchanged, and points at Refresh
- * again — and because the state genuinely stays as it was, so nothing above may
- * treat this as having cleared a measurement.
- */
-export class CapabilityCheckFailedError extends Error {
-  readonly connectionId: string;
-
-  constructor(connectionId: string, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "CapabilityCheckFailedError";
-    this.connectionId = connectionId;
-  }
-}
-
-/**
- * Egma was asked to measure a type it ships nothing to measure.
- *
- * Its own class rather than the failure above, because the two have different
- * next moves and a caller that could not tell them apart would retry forever.
- * That one is *the target did not answer, try again*; this one is *there is
- * nothing here to try*, and it will stay that way until an adapter ships.
- */
-export class NoCapabilityAdapterError extends Error {
-  readonly connectionKind: string;
-
-  constructor(connectionKind: string, message: string) {
-    super(message);
-    this.name = "NoCapabilityAdapterError";
-    this.connectionKind = connectionKind;
-  }
-}
-
-/**
  * A start action reused an idempotency key over a different request.
  *
  * **The whole value of remembering a key is that it can refuse this.** Answering
@@ -964,132 +767,5 @@ export class IdempotencyConflictError extends Error {
     this.name = "IdempotencyConflictError";
     this.idempotencyKey = idempotencyKey;
     this.resultId = resultId;
-  }
-}
-
-/**
- * A Retry that could not be derived, because something the earlier run used is
- * no longer active or no longer applies.
- *
- * **It refuses rather than substituting, and that is the whole design.** A Retry
- * that quietly swapped an archived connection for a live one, or dropped the
- * test whose agent link was removed, would answer "we ran it again" about a
- * different run — and the person reading the result would compare two numbers
- * that were never about the same thing. So the one honest move is to say which
- * resource stopped it and send them back to the builder, where every choice is
- * theirs to make out loud.
- *
- * The blocking resource travels as a value rather than only inside the sentence,
- * because a page offers a link to it and reading a noun back out of prose is how
- * a sentence becomes load-bearing. The sentence itself is `refuseRetry` below,
- * beside the error rather than at the HTTP door, because the resource it names
- * is decided in the data-access module and two of its files raise it.
- */
-export class RunRetryRefusedError extends Error {
-  readonly runId: string;
-  /** As a sentence names it: `agent agt_1`, `test tst_2`, `persona prs_3`. */
-  readonly resource: string;
-  /** The kind, for a page that wants to link at it. */
-  readonly resourceKind: RetryBlocker;
-  /** The blocking row's own id, or null where the blocker is the selection itself. */
-  readonly resourceId: string | null;
-
-  constructor(input: {
-    readonly runId: string;
-    readonly resource: string;
-    readonly resourceKind: RetryBlocker;
-    readonly resourceId: string | null;
-    readonly message: string;
-  }) {
-    super(input.message);
-    this.name = "RunRetryRefusedError";
-    this.runId = input.runId;
-    this.resource = input.resource;
-    this.resourceKind = input.resourceKind;
-    this.resourceId = input.resourceId;
-  }
-}
-
-/**
- * What can stop a Retry.
- *
- * `selection` is the odd one and is the honest answer for an upgraded
- * instance's history: a run that recorded no test versions has nothing to copy,
- * so there is no resource to name and the selection itself is what is missing.
- * `applicability` is a live link rather than an archived row — the test and the
- * agent are both fine, and the test no longer applies to that agent.
- */
-export type RetryBlocker =
-  | "agent"
-  | "connection"
-  | "test"
-  | "test_version"
-  | "persona"
-  | "grader"
-  | "applicability"
-  | "selection";
-
-/**
- * The sentence a refused Retry answers with, filled in and never composed.
- *
- * It is one string in one place because a sentence assembled twice is a contract
- * that exists nowhere as one string — and this one is now raised from two files:
- * `run-history.ts`, which rechecks before it asks for the run, and `runs.ts`,
- * which rechecks again inside the transaction that freezes the plan. Every
- * refusal is this sentence with a different noun in it, and the last clause is
- * the promise the whole operation rests on: nothing about the earlier run has
- * been touched.
- */
-export function retryUnavailable(runId: string, resource: string): string {
-  return (
-    `Run ${runId} cannot be retried because ${resource} is not active or no ` +
-    `longer applies. Open the run builder and choose active resources; the ` +
-    `original run was not changed.`
-  );
-}
-
-/** Refuse a Retry, naming the resource that stopped it. */
-export function refuseRetry(
-  runId: string,
-  kind: RetryBlocker,
-  resource: string,
-  resourceId: string | null,
-): never {
-  throw new RunRetryRefusedError({
-    runId,
-    resource,
-    resourceKind: kind,
-    resourceId,
-    message: retryUnavailable(runId, resource),
-  });
-}
-
-/** Why one stored simulation cannot be run again. */
-export type SimulationRerunRefusal =
-  | "not_terminal"
-  | "legacy"
-  | "name_required"
-  | "idempotency_key_required";
-
-/**
- * One simulation cannot be used as the source of a new run.
- *
- * The reason is a value so the HTTP door can give an active simulation a
- * conflict and malformed or legacy input an unprocessable answer without
- * reading the prose back. The source is never changed.
- */
-export class SimulationRerunRefusedError extends Error {
-  readonly simulationId: string;
-  readonly reason: SimulationRerunRefusal;
-
-  constructor(
-    simulationId: string,
-    reason: SimulationRerunRefusal,
-    message: string,
-  ) {
-    super(message);
-    this.name = "SimulationRerunRefusedError";
-    this.simulationId = simulationId;
-    this.reason = reason;
   }
 }

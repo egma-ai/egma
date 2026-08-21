@@ -58,6 +58,7 @@ describe("Egma's instruction content", () => {
     const writing = generateInstructions(
       {
         cwd: "/repo",
+        suiteDirectory: "release-contract",
         facts: new Map(),
         prompt: "Help the person with an appointment.",
         toolCount: 1,
@@ -88,6 +89,7 @@ describe("Egma's instruction content", () => {
     const instructions = generateInstructions(
       {
         cwd: "/repo",
+        suiteDirectory: "release-contract",
         facts: new Map(),
         prompt: null,
         toolCount: 0,
@@ -120,7 +122,10 @@ describe("Egma's instruction content", () => {
       "egma/",
       "  config.yaml     what this folder points at — names and ids",
       "  mock-tools.md   what Egma answers for the agent's tools with",
-      "  tests/          one markdown file per test",
+      "  tests/",
+      "    release/      one local directory per suite",
+      "      suite.yaml  stable suite id and mutable display name",
+      "      *.md        zero or more tests in this suite",
     ].join("\n");
 
     expect(installableSkill()).toContain(layout);
@@ -154,7 +159,7 @@ describe("Egma's instruction content", () => {
       [
         "skills/write-egma-tests/SKILL.md",
         publicSkill("write-egma-tests"),
-        "## Handle personas and capabilities carefully",
+        "## Handle personas carefully",
       ],
       [
         "README.md",

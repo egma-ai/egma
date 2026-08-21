@@ -515,8 +515,8 @@ describe("a LiveKit connection that is half of each access variant", () => {
 });
 
 /**
- * Which types egma can conduct a run over, which is the whole of what the
- * capability registry publishes about the simulator.
+ * Which types egma can conduct a run over, which is what the connection
+ * registry publishes about the simulator.
  *
  * It is a fact about the shipped build and never about one deployment: a
  * platform whose carrier has never been configured still holds the phone

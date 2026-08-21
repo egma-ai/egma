@@ -1409,8 +1409,8 @@ describe("registering the same vendor agent again", () => {
   });
 
   /**
-   * A retry storm, which is what an uncertain network failure actually looks
-   * like: several identical registrations in flight at once, none of them
+   * A duplicate-request storm is what an uncertain network failure looks like:
+   * several identical registrations in flight at once, none of them
    * knowing whether any of the others landed.
    *
    * Six rather than two on purpose. Two requests through the whole HTTP path
@@ -1864,14 +1864,6 @@ describe("reading agents", () => {
       productLabel: "Phone number",
       modality: "voice",
       environment: "production",
-    });
-    // Nobody has measured this target, and the row says so rather than
-    // reading as though everything had been checked and found missing.
-    expect(wired?.capabilities).toMatchObject({
-      state: "unknown",
-      measured: null,
-      supported: null,
-      checkedAt: null,
     });
   });
 

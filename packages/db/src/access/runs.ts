@@ -10,10 +10,12 @@ import {
   gt,
   gte,
   inArray,
-  isNull,
   isNotNull,
+  isNull,
   lt,
   max,
+  or,
+  sql,
   type SQL,
 } from "drizzle-orm";
 
@@ -28,8 +30,6 @@ import {
   type Topology,
 } from "../schema/agents.ts";
 import { persona } from "../schema/personas.ts";
-import { openCredentials } from "../sealing.ts";
-import { test, testVersion, testPersona } from "../schema/tests.ts";
 import { idempotentOperation } from "../schema/plans.ts";
 import {
   COMPLETED_ENDING_REASONS,
@@ -41,12 +41,12 @@ import {
   type RunStatus,
   type RunTrigger,
   type SimulationEndingReason,
-  type SimulationSkipReason,
   type SimulationStatus,
   type Verdict,
 } from "../schema/runs.ts";
+import { test, testPersona, testSuite, testVersion } from "../schema/tests.ts";
+import { openCredentials } from "../sealing.ts";
 import {
-  NO_MOCK_TOOLS,
   type MockToolSnapshot,
   type SnapshotDefault,
   type SnapshotEntry,
@@ -58,141 +58,39 @@ import {
   noSimulatorAdapterMessage,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
-import {
-  IdempotencyConflictError,
-  refuseRetry,
-  RunWriteRefusedError,
-} from "./errors.ts";
+import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
 import { enqueueGradingJob } from "./grading.ts";
-import {
-  admitTestsForAgent,
-  capabilitiesFromRow,
-  capabilityDecision,
-  refuseRun,
-  resolvePersonaVersions,
-  resolvePinnedVersions,
-  resolveRunPlan,
-  type PinnedVersion,
-  validPinnedVersions,
-  writeGradingPlan,
-} from "./run-plans.ts";
+import { mockToolsApplyingTo } from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
-import { mockToolsApplyingTo } from "./mock-tools.ts";
 import {
-  getTestVersion,
-  mockOverridesOfVersions,
-  type TestVersion,
+  applicableGraders,
+  planGroupsFor,
+  refuseRun,
+  resolvePersonaVersions,
+  writeGradingPlan,
+} from "./run-plans.ts";
+import {
+  getTestVersionExecutionContent,
+  type TestExecutionContent,
 } from "./tests.ts";
 import { within } from "./within.ts";
 
-/**
- * Reading and writing runs and their simulations — what they are is the schema
- * file's story (`schema/runs.ts`); this file is how they are reached.
- *
- * Two kinds of caller share it. A person starts a run, cancels one, and reads
- * what happened; the simulator claims queued simulations, heartbeats
- * while conducting them, and reports how each one ended. Both come through the
- * same seam on the same terms: every function takes the context, and the run
- * machinery is gated by `start_and_cancel_runs` throughout, because claiming
- * and reporting a simulation *is* conducting the run somebody started.
- *
- * Four exceptions, drawn on the grading queue's precedent and as narrowly:
- * `claimSimulations`, `recordSimulationHeartbeat`, `sweepOrphanedSimulations`
- * and `resolveSimulationStanding` take no context and cannot be given one,
- * because each stands where the simulator does — behind every organization on
- * the deployment at once, with no honest credential to give it. The claim
- * hands work out; the heartbeat keeps one dispatch alive and steers it; the
- * sweep accounts for dispatches whose simulator died; the standing resolver
- * answers where one dispatched row now stands, for the calls that come back
- * about it — its lifecycle claims and its arriving telemetry alike. All four
- * reach only rows egma's own machinery wrote — the queue,
- * and the claims made from it — and carry out identifiers and no content.
- * The claim hands back with every row the context the conducting is then
- * done under, built from the row's own tenancy and from nothing the service
- * said; the standing resolver derives that same context again from the row,
- * and the other two derive their narrowness the same way, from the row
- * rather than from any caller.
- * `resolveSimulationConnection`, `failSimulationDispatch`, and
- * `releaseSimulationClaim` are the doors only such a claim-minted context may
- * open — the secret dispatch needs, its honest terminal failure, and the
- * non-terminal release used when a provider preflight could not answer. Each
- * refuses every other kind. The whole argument is written on the functions.
- *
- * Writers keep to one lock order — simulation rows first, the run header last
- * — so the claim path, the cancel path and the report path do not deadlock
- * each other. (Two bulk simulation writes racing over one set can still, in
- * principle, collide over row order inside a statement; Postgres aborts one
- * and both callers here are retried by their nature — a sweep re-runs, a
- * cancel is re-asked.) The header is finalized under its own row lock by
- * whichever terminal transition lands last, which is what lets the counts be
- * written once, together, and never by two writers at once.
- *
- * **Every lifecycle change writes its numbered event beside itself, in the
- * same transaction.** A follower reads that record rather than the rows, which
- * is what lets it be away and come back: the rows say only where things ended,
- * and the record says everything that happened. The numbering is dense per run
- * and is allocated under the header's own lock, so the one lock order above
- * covers the events too.
- */
+export type ExpectedTestVersion = {
+  readonly testId: string;
+  readonly versionId: string;
+};
 
+/** A run always executes one complete suite at its current versions. */
 export type NewRun = {
-  /**
-   * The agent the connection has to be on, when the caller wants that
-   * checked. Left out, the connection names its own agent — a connection is
-   * only ever reached through one.
-   */
-  readonly agentId?: string | undefined;
+  readonly suiteId: string;
+  readonly agentId: string;
   readonly connectionId: string;
-  /**
-   * The frozen test versions to execute, in the order they should be
-   * conducted. Explicit, never "whatever is current when this runs": what
-   * executed is the whole of what a result means, and it is what every
-   * simulation this run writes pins for the graders to judge against.
-   *
-   * The personas are not named here. Each version already names the people who
-   * call about it, so naming them again would be a second selection free to
-   * disagree with the test's own.
-   */
-  readonly testVersionIds: readonly string[];
-  /** Something to recognise the run by in a list. */
-  readonly label?: string | undefined;
-  /** The run this one retries, when it retries one. */
-  readonly retryOfRunId?: string | undefined;
-  /**
-   * The caller's own word for this attempt, so that sending it twice starts one
-   * run.
-   *
-   * **Optional here and required at the product door.** This seam is also
-   * reached by egma's own fixtures and by the grader's own world, which start a
-   * run once inside a process they control and have no retry to protect against.
-   * Every path a person or a client comes in on — the browser, the CLI, the
-   * public API — carries one, and `POST /api/runs` refuses without it, because
-   * a run is the expensive write and a lost answer must never become a second
-   * conversation with a real agent.
-   *
-   * The scope is the organization, the project, the actor and this operation.
-   * The same key with the same body answers the original run; the same key with
-   * a different body is refused out loud rather than quietly answered with
-   * somebody else's run.
-   */
-  readonly idempotencyKey?: string | undefined;
+  readonly idempotencyKey: string;
+  readonly name?: string | undefined;
+  readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
 };
 
-/**
- * The one conversation a simulation re-run carries forward.
- *
- * It is deliberately not part of `NewRun`: an ordinary start takes every
- * persona named by each test version. Only the server-derived re-run path may
- * narrow that fan-out to the exact persona identity of one source simulation.
- */
-export type SingleSimulationSelection = {
-  readonly sourceSimulationId: string;
-  readonly testVersionId: string;
-  readonly personaId: string;
-};
-
-/** The connection's non-secret shape as the run executed over it. */
 export type ConnectionSnapshot = {
   readonly agentPlatform: AgentPlatform | null;
   readonly connectionKind: ConnectionKind;
@@ -206,43 +104,31 @@ export type ConnectionSnapshot = {
 export type Run = {
   readonly id: string;
   readonly projectId: string;
+  readonly suiteId: string;
+  readonly suiteName: string;
+  readonly suiteDeleted: boolean;
   readonly agentId: string;
   readonly connectionId: string;
-  readonly label: string | null;
+  readonly name: string | null;
   readonly status: RunStatus;
   readonly triggeredVia: RunTrigger;
   readonly triggeredBy: string | null;
-  /** The versions this run was asked to execute, in the order they were named. */
-  readonly pinnedTestVersionIds: readonly string[];
-  /** The personas those versions named — provenance, never the pin. */
-  readonly requestedPersonaIds: readonly string[];
   readonly connectionSnapshot: ConnectionSnapshot;
-  /**
-   * The mocked world this run executes in, frozen at creation: the project's
-   * mock tools that apply to its agent, and what each pinned version overrode.
-   * `resolveMockTools` turns it into what one simulation is served.
-   */
-  readonly mockToolSnapshot: MockToolSnapshot;
   readonly expectedSimulationCount: number;
-  /** Null until the last simulation lands terminal; then written once. */
   readonly completedCount: number | null;
   readonly failedCount: number | null;
   readonly canceledCount: number | null;
-  /**
-   * How many conversations egma declined to conduct, because a test required
-   * something this connection could not be shown to do. Its own number, never
-   * folded into the failures: nothing about the agent is being said.
-   */
-  readonly skippedCount: number | null;
-  readonly retryOfRunId: string | null;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
   readonly createdAt: Date;
 };
 
-export type StartedRun = Run & {
-  /** Born `queued`, one per test per persona, in the order they were named. */
-  readonly simulations: readonly ConductedSimulation[];
+export type StartedRun = Run;
+
+export type MockToolCoverage = {
+  readonly discovered: readonly string[];
+  readonly covered: readonly string[];
+  readonly uncovered: readonly string[];
 };
 
 export type Simulation = {
@@ -251,19 +137,10 @@ export type Simulation = {
   readonly projectId: string;
   readonly agentId: string;
   readonly connectionId: string;
-  /** Who called, by identity… */
   readonly personaId: string;
-  /** …and the pin: exactly as they were, for as long as this row is kept. */
   readonly personaVersionId: string;
-  /**
-   * What is being checked, by identity, and the pin: the frozen version this
-   * conversation executed, which is where a grader's reads start. Both absent
-   * together on a row written before a simulation could carry either — an
-   * upgraded instance's history, saying it executed no stored test rather than
-   * naming one it did not.
-   */
-  readonly testId: string | null;
-  readonly testVersionId: string | null;
+  readonly testId: string;
+  readonly testVersionId: string;
   readonly position: number;
   readonly modality: Modality;
   readonly status: SimulationStatus;
@@ -275,146 +152,52 @@ export type Simulation = {
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
   readonly recordingReference: string | null;
-  /** How many transcript turns the conversation reached, both speakers counted. */
   readonly turnCount: number | null;
-  /** The platform's own identifier for the exchange — the one join to the agent's telemetry. */
   readonly providerReference: string | null;
-  /**
-   * Which of the agent's tools mock tools answered for. Null where the agent
-   * was never asked what tools it has, so nothing was learned and nothing is
-   * claimed — which is what every row written before the stamp existed says.
-   */
   readonly mockToolCoverage: MockToolCoverage | null;
-  /**
-   * Why this conversation was never conducted, on the one status written
-   * terminal at birth. Null everywhere else, including on a failure — a failed
-   * simulation tried and could not, and this one was never tried.
-   */
-  readonly skipReason: SimulationSkipReason | null;
-  /**
-   * The catalog keys that decided the skip, exactly as they were decided. Null
-   * wherever the reason is; kept on the row rather than re-derived, because the
-   * connection's measurements move and this answer must not.
-   */
-  readonly skippedCapabilities: readonly string[] | null;
   readonly createdAt: Date;
 };
 
-/**
- * The coverage stamp as the row holds it: three lists of the agent's own tool
- * names.
- *
- * `covered` may name a tool absent from `discovered` — coverage is registered
- * by name against the whole simulation, while discovery is only what the agent
- * has said about itself — and `uncovered` is written out rather than left to be
- * worked out, because a reader asking "was this simulation isolated" should not
- * have to do set arithmetic to find out.
- */
-export type MockToolCoverage = {
-  readonly discovered: readonly string[];
-  readonly covered: readonly string[];
-  readonly uncovered: readonly string[];
-};
-
-/**
- * One simulation as a reader of a run meets it: the row, plus the two names
- * that make it readable by a person.
- *
- * The names are joined at read time rather than copied onto the row, so a test
- * or a persona renamed today reads under its current name everywhere at once —
- * a stored copy would leave a run's page and its feed disagreeing about what
- * the same conversation is called. What must never move is the *content*, and
- * that is pinned by the version columns rather than by the name.
- */
 export type ConductedSimulation = Simulation & {
-  /** Absent exactly where the pin is: a conversation with no test to name. */
-  readonly testName: string | null;
+  readonly testName: string;
   readonly personaName: string;
 };
 
 export type CompletedEndingReason = (typeof COMPLETED_ENDING_REASONS)[number];
 export type FailedEndingReason = (typeof FAILED_ENDING_REASONS)[number];
 
-/**
- * The summary facts any terminal landing may carry, whatever its status: what
- * the conversation reached, how the platform names it, its recording, and the
- * two moments the conduction itself stamped. Each is optional because a report
- * may honestly hold none — a chat has no recording and a plug may offer no
- * reference — and everything given lands on the row as the terminal record.
- *
- * The moments are the simulator's own, not the arrival's: a report retried
- * through a partition must not stretch the record by however long delivery
- * took, so a landing given them writes them over its own stamps. Given is
- * the caller's word to keep honest: the report door hands a pair over
- * exactly when it can be true — an `ended_at` before its `started_at` is
- * declined there, and the landing's own stamps stand for both.
- */
 export type SimulationSummaryFacts = {
-  /** How many transcript turns were reached, both speakers counted. */
   readonly turnCount?: number | undefined;
-  /** The platform's own identifier for the exchange, verbatim. */
   readonly providerReference?: string | undefined;
   readonly recordingReference?: string | undefined;
-  /**
-   * Which tools were answered by mock tools and which ran for real. Absent
-   * where the report carried no stamp, which is the honest reading of a
-   * conversation whose agent was never asked what tools it has.
-   */
   readonly mockToolCoverage?: MockToolCoverage | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
 };
 
-/**
- * What the simulator reports about a conversation that happened: how it
- * ended, and the summary facts.
- *
- * What was *said* is not here and is not on the row. A conversation is its
- * spans, streamed to the trace store's own ingest while it happens, so a
- * landing records that the conversation is over rather than recording the
- * conversation — and the evidence is already stored by the time it does,
- * because the simulator puts both through one ordered sender.
- */
 export type SimulationReport = SimulationSummaryFacts & {
   readonly endingReason: CompletedEndingReason;
 };
 
-/**
- * What the simulator reports about a simulation that never produced a
- * conversation to grade — or died producing one, in which case whatever it
- * streamed before it died is the honest "started, never finished" record.
- *
- * Two reasons are deliberately not a simulator's to give, because each is
- * the platform's account of its own failure: `orphaned` is the sweep's word
- * for a simulator that stopped answering, and one still answering cannot
- * claim it; `dispatch_failed` is the claim path's word for a spec it never
- * handed over, which a simulator with something to report evidently
- * received.
- */
 export type SimulationFailure = SimulationSummaryFacts & {
   readonly reason: Exclude<FailedEndingReason, "orphaned" | "dispatch_failed">;
 };
 
-/** An answer's columns, and no more — the tenant-free view. */
 const RUN_COLUMNS = {
   id: run.id,
   projectId: run.projectId,
+  suiteId: run.suiteId,
   agentId: run.agentId,
   connectionId: run.connectionId,
-  label: run.label,
+  name: run.name,
   status: run.status,
   triggeredVia: run.triggeredVia,
   triggeredBy: run.triggeredBy,
-  pinnedTestVersions: run.pinnedTestVersions,
-  requestedPersonas: run.requestedPersonas,
   connectionSnapshot: run.connectionSnapshot,
-  mockToolSnapshot: run.mockToolSnapshot,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
   canceledCount: run.canceledCount,
-  skippedCount: run.skippedCount,
-  retryOfRunId: run.retryOfRunId,
   startedAt: run.startedAt,
   finishedAt: run.finishedAt,
   createdAt: run.createdAt,
@@ -444,320 +227,161 @@ const SIMULATION_COLUMNS = {
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   mockToolCoverage: simulation.mockToolCoverage,
-  skipReason: simulation.skipReason,
-  skippedCapabilities: simulation.skippedCapabilities,
   createdAt: simulation.createdAt,
 } as const;
 
-/** What a `RUN_COLUMNS` select answers with, before the jsonb is read. */
 type RunRow = {
   readonly id: string;
   readonly projectId: string;
+  readonly suiteId: string;
   readonly agentId: string;
   readonly connectionId: string;
-  readonly label: string | null;
+  readonly name: string | null;
   readonly status: string;
   readonly triggeredVia: string;
   readonly triggeredBy: string | null;
-  readonly pinnedTestVersions: unknown;
-  readonly requestedPersonas: unknown;
   readonly connectionSnapshot: unknown;
-  readonly mockToolSnapshot: unknown;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
   readonly canceledCount: number | null;
-  readonly skippedCount: number | null;
-  readonly retryOfRunId: string | null;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
   readonly createdAt: Date;
 };
 
-/**
- * More conversations than this in one run is a selection nobody typed by hand,
- * and `expected_simulation_count` is the denominator a progress page divides by
- * — it should be a number a person can watch count up.
- */
-const MOST_SIMULATIONS_PER_RUN = 200;
+type SimulationRow = Omit<Simulation, "status" | "endingReason" | "modality" | "mockToolCoverage"> & {
+  readonly status: string;
+  readonly endingReason: string | null;
+  readonly modality: string;
+  readonly mockToolCoverage: unknown;
+};
 
-/** How many queued simulations one claim may take, however large the fleet. */
 const LARGEST_CLAIM_CAPACITY = 50;
-
-/**
- * How long a claimed or running simulation may go silent before the sweep
- * calls it orphaned.
- *
- * The window is set against the report, not the heartbeat. The simulator's
- * report sender retries a terminal document for up to two minutes before it
- * abandons delivery, so a partition can swallow every heartbeat and still end
- * in time for the report to land — and a window shorter than that deadline
- * would let the sweep write `orphaned` over a conversation that genuinely
- * finished, minutes before its own record arrived to say so. 150 seconds
- * outlasts the retrying with room to spare, and against a beat every few
- * seconds it is dozens of missed beats — never a simulator that is merely
- * slow. The cost, accepted: a truly crashed simulator's rows stay `running`
- * for up to about three minutes before the honest `failed`.
- */
 const DEFAULT_STALE_AFTER_SECONDS = 150;
-
-/**
- * The failure reasons a simulator may give — everything but the platform's
- * own two words: `orphaned` is the sweep's, `dispatch_failed` the claim
- * path's. The types already say so; this is the backstop for the caller the
- * types could not see.
- */
+const SIMULATION_INSERT_BATCH = 500;
+const RUN_EVENT_PAGE_SIZE = 200;
 const REPORTABLE_FAILURE_REASONS: readonly FailedEndingReason[] =
   FAILED_ENDING_REASONS.filter(
     (reason) => reason !== "orphaned" && reason !== "dispatch_failed",
   );
 
-/**
- * The summary facts as one landing will write them: checked, trimmed, and
- * holding only the keys that were actually given — an absent fact must not
- * become a written null over a column another path may already have filled.
- * One helper, because all three landings owe the same facts on the same
- * terms, and three copies of the checks would drift.
- */
-function summaryFactsWrite(
-  facts: SimulationSummaryFacts,
-): Record<string, unknown> {
+function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknown> {
   const write: Record<string, unknown> = {};
-
-  const { turnCount, providerReference } = facts;
-  if (turnCount !== undefined) {
-    if (!Number.isInteger(turnCount) || turnCount < 0) {
-      throw new Error(
-        "a turn count is a whole number of turns, zero or more",
-      );
+  if (facts.turnCount !== undefined) {
+    if (!Number.isInteger(facts.turnCount) || facts.turnCount < 0) {
+      throw new Error("a turn count is a whole number of turns, zero or more");
     }
-    write.turnCount = turnCount;
+    write.turnCount = facts.turnCount;
   }
-  if (providerReference !== undefined) {
-    write.providerReference = providerReference.trim() || null;
+  if (facts.providerReference !== undefined) {
+    write.providerReference = facts.providerReference.trim() || null;
   }
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
   }
   if (facts.mockToolCoverage !== undefined) {
-    // Stored in the shape it is read in, which is the shape the report
-    // carried — three lists of the agent's own names. Copied rather than
-    // referenced so a caller holding the object cannot edit what was landed.
-    const { discovered, covered, uncovered } = facts.mockToolCoverage;
     write.mockToolCoverage = {
-      discovered: [...discovered],
-      covered: [...covered],
-      uncovered: [...uncovered],
+      discovered: [...facts.mockToolCoverage.discovered],
+      covered: [...facts.mockToolCoverage.covered],
+      uncovered: [...facts.mockToolCoverage.uncovered],
     };
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
-
   return write;
 }
 
-/**
- * The shape guards on every read. Stored jsonb comes back `unknown`, and a row
- * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller wearing a type it does not have.
- */
-function idListFromRow(
-  value: unknown,
-  key: string,
-  options: { readonly malformed: () => Error; readonly mayBeEmpty: boolean },
-): readonly string[] {
-  const { malformed } = options;
-  if (typeof value !== "object" || value === null) throw malformed();
-  const held = (value as Record<string, unknown>)[key];
-  if (!Array.isArray(held)) throw malformed();
-  if (held.length === 0 && !options.mayBeEmpty) throw malformed();
-  for (const id of held) {
-    if (typeof id !== "string") throw malformed();
+function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSnapshot {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`run ${runId} holds a malformed connection snapshot`);
   }
-  return held as string[];
-}
-
-function requestedPersonaIdsFromRow(
-  value: unknown,
-  runId: string,
-): readonly string[] {
-  return idListFromRow(value, "personaIds", {
-    mayBeEmpty: false,
-    malformed: () =>
-      new Error(
-        `run ${runId} holds a requested-persona selection in a shape Egma never writes; the row needs repairing before anybody can read it`,
-      ),
-  });
-}
-
-function pinnedTestVersionIdsFromRow(
-  value: unknown,
-  runId: string,
-): readonly string[] {
-  // Empty is readable, and means what the migration that added the column
-  // wrote down: a run from before a run could pin a version at all.
-  return idListFromRow(value, "testVersionIds", {
-    mayBeEmpty: true,
-    malformed: () =>
-      new Error(
-        `run ${runId} holds a pinned-version selection in a shape Egma never writes; the row needs repairing before anybody can read it`,
-      ),
-  });
-}
-
-function connectionSnapshotFromRow(
-  value: unknown,
-  runId: string,
-): ConnectionSnapshot {
-  const malformed = () =>
-    new Error(
-      `run ${runId} holds a connection snapshot in a shape Egma never writes; the row needs repairing before anybody can read it`,
-    );
-
-  if (typeof value !== "object" || value === null) throw malformed();
-  const {
-    agentPlatform,
-    connectionKind,
-    accessVariant,
-    modality,
-    topology,
-    environment,
-    config,
-  } = value as Record<string, unknown>;
-  if (agentPlatform !== null && typeof agentPlatform !== "string") {
-    throw malformed();
-  }
+  const row = value as Record<string, unknown>;
   if (
-    typeof connectionKind !== "string" ||
-    typeof accessVariant !== "string" ||
-    typeof modality !== "string"
+    (row.agentPlatform !== null && typeof row.agentPlatform !== "string") ||
+    typeof row.connectionKind !== "string" ||
+    typeof row.accessVariant !== "string" ||
+    typeof row.modality !== "string" ||
+    typeof row.topology !== "string" ||
+    (row.environment !== null && typeof row.environment !== "string")
   ) {
-    throw malformed();
+    throw new Error(`run ${runId} holds a malformed connection snapshot`);
   }
-  if (typeof topology !== "string") throw malformed();
-  if (environment !== null && typeof environment !== "string") throw malformed();
-
   return {
-    agentPlatform: agentPlatform as AgentPlatform | null,
-    connectionKind: connectionKind as ConnectionKind,
-    accessVariant: accessVariant as AccessVariant,
-    modality: modality as Modality,
-    topology: topology as Topology,
-    environment,
-    config,
+    agentPlatform: row.agentPlatform as AgentPlatform | null,
+    connectionKind: row.connectionKind as ConnectionKind,
+    accessVariant: row.accessVariant as AccessVariant,
+    modality: row.modality as Modality,
+    topology: row.topology as Topology,
+    environment: row.environment as string | null,
+    config: row.config,
   };
 }
 
-/**
- * The frozen mocked world, read back.
- *
- * An older row holds `{}` — the migration wrote it for every run that existed
- * before a run could freeze a world at all — and it reads as a run that mocked
- * nothing, which is exactly what those runs did. Everything else is checked to
- * the shape this file writes, so a hand-edited row fails loudly here rather
- * than reaching a simulator as a world nobody authored.
- */
-function mockToolSnapshotFromRow(
-  value: unknown,
-  runId: string,
-): MockToolSnapshot {
-  const malformed = () =>
-    new Error(
-      `run ${runId} holds a mock tool snapshot in a shape Egma never writes; the row needs repairing before anybody can read it`,
-    );
-
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw malformed();
-  }
+function mockToolSnapshotFromRow(value: unknown, runId: string): MockToolSnapshot {
+  const malformed = () => new Error(`run ${runId} holds a malformed mock-tool snapshot`);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw malformed();
   const { defaults, overrides } = value as Record<string, unknown>;
-  if (defaults === undefined && overrides === undefined) return NO_MOCK_TOOLS;
-  if (!Array.isArray(defaults)) throw malformed();
   if (
+    !Array.isArray(defaults) ||
     typeof overrides !== "object" ||
     overrides === null ||
-    Array.isArray(overrides)
+    Array.isArray(overrides) ||
+    Object.keys(overrides).length !== 0
   ) {
     throw malformed();
   }
-
   const entryFromRow = (entry: unknown): SnapshotEntry => {
     if (typeof entry !== "object" || entry === null) throw malformed();
-    const { toolName, answer, delayMilliseconds } = entry as Record<
-      string,
-      unknown
-    >;
-    if (typeof toolName !== "string" || toolName === "") throw malformed();
-    if (typeof delayMilliseconds !== "number") throw malformed();
-    if (typeof answer !== "object" || answer === null) throw malformed();
+    const { toolName, answer, delayMilliseconds } = entry as Record<string, unknown>;
+    if (typeof toolName !== "string" || typeof delayMilliseconds !== "number" || typeof answer !== "object" || answer === null) throw malformed();
     const held = answer as Record<string, unknown>;
-    if ("error" in held) {
-      if (typeof held.error !== "string" || held.error === "") throw malformed();
-      return { toolName, delayMilliseconds, answer: { error: held.error } };
-    }
-    if (!("answer" in held)) throw malformed();
-    return { toolName, delayMilliseconds, answer: { answer: held.answer } };
+    const read = "error" in held
+      ? { error: held.error as string }
+      : { answer: held.answer };
+    return { toolName, delayMilliseconds, answer: read } as SnapshotEntry;
   };
-
   return {
     defaults: defaults.map((entry): SnapshotDefault => {
-      const { mockToolId } = (entry ?? {}) as Record<string, unknown>;
-      if (typeof mockToolId !== "string" || mockToolId === "") throw malformed();
+      const mockToolId = (entry as Record<string, unknown>).mockToolId;
+      if (typeof mockToolId !== "string") throw malformed();
       return { ...entryFromRow(entry), mockToolId };
     }),
-    overrides: Object.fromEntries(
-      Object.entries(overrides as Record<string, unknown>).map(
-        ([versionId, entries]) => {
-          if (!Array.isArray(entries)) throw malformed();
-          return [versionId, entries.map(entryFromRow)] as const;
-        },
-      ),
-    ),
+    overrides: {},
   };
 }
 
-function runFromRow(row: RunRow): Run {
-  const {
-    pinnedTestVersions,
-    requestedPersonas,
-    connectionSnapshot,
-    mockToolSnapshot,
-    status,
-    triggeredVia,
-    ...rest
-  } = row;
+function mockToolCoverageFromRow(value: unknown, simulationId: string): MockToolCoverage | null {
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
+  }
+  const row = value as Record<string, unknown>;
+  const list = (key: string): readonly string[] => {
+    const held = row[key];
+    if (!Array.isArray(held) || held.some((one) => typeof one !== "string")) {
+      throw new Error(`simulation ${simulationId} holds malformed mock-tool coverage`);
+    }
+    return held as string[];
+  };
+  return { discovered: list("discovered"), covered: list("covered"), uncovered: list("uncovered") };
+}
+
+function runFromRow(
+  row: RunRow,
+  suiteName: string,
+  suiteDeleted: boolean,
+): Run {
+  const { status, triggeredVia, connectionSnapshot, ...rest } = row;
   return {
     ...rest,
+    suiteName,
+    suiteDeleted,
     status: status as RunStatus,
     triggeredVia: triggeredVia as RunTrigger,
-    pinnedTestVersionIds: pinnedTestVersionIdsFromRow(
-      pinnedTestVersions,
-      row.id,
-    ),
-    requestedPersonaIds: requestedPersonaIdsFromRow(requestedPersonas, row.id),
     connectionSnapshot: connectionSnapshotFromRow(connectionSnapshot, row.id),
-    mockToolSnapshot: mockToolSnapshotFromRow(mockToolSnapshot, row.id),
   };
 }
-
-/** What a `SIMULATION_COLUMNS` select answers with: the enumerated columns
- * still wearing `string`. The checks and the trigger keep the stored values
- * inside the vocabulary, so reading one back is a narrowing, not a guess. */
-type SimulationRow = Omit<
-  Simulation,
-  | "status"
-  | "endingReason"
-  | "modality"
-  | "mockToolCoverage"
-  | "skipReason"
-  | "skippedCapabilities"
-> & {
-  readonly status: string;
-  readonly endingReason: string | null;
-  readonly modality: string;
-  readonly mockToolCoverage: unknown;
-  readonly skipReason: string | null;
-  readonly skippedCapabilities: unknown;
-};
 
 function simulationFromRow(row: SimulationRow): Simulation {
   return {
@@ -766,70 +390,9 @@ function simulationFromRow(row: SimulationRow): Simulation {
     endingReason: row.endingReason as SimulationEndingReason | null,
     modality: row.modality as Modality,
     mockToolCoverage: mockToolCoverageFromRow(row.mockToolCoverage, row.id),
-    skipReason: row.skipReason as SimulationSkipReason | null,
-    // Null and an empty list mean different things and both are writable: null
-    // is every conversation that was actually conducted, and a list is the one
-    // that was not. Anything else on the row is a hand edit, and it reads as
-    // no keys rather than as a shape a caller could act on.
-    skippedCapabilities: Array.isArray(row.skippedCapabilities)
-      ? row.skippedCapabilities.filter(
-          (one): one is string => typeof one === "string",
-        )
-      : null,
   };
 }
 
-/**
- * The shape guard the coverage stamp gets on every read, for the reason the
- * jsonb columns beside it get one: stored jsonb comes back `unknown`, and a row
- * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller wearing a type it does not have.
- *
- * Null is not a malformed stamp — it is the honest "nobody ever asked", which
- * every row written before the column existed carries. `undefined` is not that
- * and is not tolerated: it means the column was never selected, and answering
- * a read that did not ask with the sentence for a simulation nobody asked is
- * how a query bug becomes a claim about somebody's agent.
- */
-function mockToolCoverageFromRow(
-  value: unknown,
-  simulationId: string,
-): MockToolCoverage | null {
-  if (value === null) return null;
-
-  const malformed = (): Error =>
-    new Error(
-      `simulation ${simulationId} holds a mock tool coverage stamp in a shape Egma never writes; the row needs repairing before anybody can read it`,
-    );
-
-  if (typeof value !== "object" || Array.isArray(value)) throw malformed();
-  const held = value as Record<string, unknown>;
-
-  const names = (key: keyof MockToolCoverage): readonly string[] => {
-    const list = held[key];
-    if (!Array.isArray(list)) throw malformed();
-    for (const name of list) {
-      if (typeof name !== "string") throw malformed();
-    }
-    return list as string[];
-  };
-
-  return {
-    discovered: names("discovered"),
-    covered: names("covered"),
-    uncovered: names("uncovered"),
-  };
-}
-
-/**
- * One change, as it is about to be written: what moved, and what it now says.
- *
- * A run event is about the header and carries no judgement of a conversation;
- * a simulation event is about one conversation and carries the verdict from
- * the day there is one to carry. The union is what stops an event being
- * written half in one vocabulary and half in the other, and the migration's
- * checks say the same thing again in the database.
- */
 type NewRunEvent =
   | { readonly kind: "run"; readonly status: RunStatus }
   | {
@@ -840,22 +403,6 @@ type NewRunEvent =
       readonly reason?: SimulationEndingReason | null | undefined;
     };
 
-/**
- * The events for one run, appended in the same transaction as the change they
- * describe.
- *
- * **The header's own row lock is what makes the numbers dense.** Two writers
- * landing at the same instant — a report and a cancel, two reports of one run —
- * take that lock in turn and therefore number in turn, so the sequence has no
- * holes and no repeats and a follower asking "everything after 7" can never be
- * handed a 7 later. Taking it here also keeps the module's one lock order:
- * simulation rows first, the run header last, and an append is the last thing
- * every writer does.
- *
- * It is called with every event of one transaction at once rather than once
- * per event, so the lock is taken once and the order inside the transaction is
- * decided by the caller who knows what happened first.
- */
 async function appendRunEvents(
   tx: Transaction,
   runId: string,
@@ -864,8 +411,6 @@ async function appendRunEvents(
 ): Promise<void> {
   if (events.length === 0) return;
 
-  // Bare `eq`: the run id came off a tenancy-checked row in this same
-  // transaction, so this cannot reach further than that check already did.
   const [header] = await tx
     .select({
       organizationId: run.organizationId,
@@ -875,19 +420,15 @@ async function appendRunEvents(
     .where(eq(run.id, runId))
     .limit(1)
     .for("update");
-
   if (header === undefined) {
-    throw new Error(
-      `run ${runId} changed and is not there to record the change against`,
-    );
+    throw new Error(`run ${runId} is missing while recording its event`);
   }
 
-  const [highest] = await tx
+  const [latest] = await tx
     .select({ seq: max(runEvent.seq) })
     .from(runEvent)
     .where(eq(runEvent.runId, runId));
-
-  let seq = highest?.seq ?? 0;
+  let seq = latest?.seq ?? 0;
   await tx.insert(runEvent).values(
     events.map((event) => {
       seq += 1;
@@ -907,56 +448,21 @@ async function appendRunEvents(
   );
 }
 
-/** Acting in a project narrows to it; acting in none reaches the customer. */
 function inActingProject(
   auth: AuthContext,
   table: typeof run | typeof simulation | typeof runEvent,
 ): SQL | undefined {
-  return auth.projectId === undefined
-    ? undefined
-    : eq(table.projectId, auth.projectId);
+  return auth.projectId === undefined ? undefined : eq(table.projectId, auth.projectId);
 }
 
-/** The named run, within the caller's tenancy and scope. */
 function theRun(auth: AuthContext, id: string): SQL {
   return within(auth, run, and(eq(run.id, id), inActingProject(auth, run)));
 }
 
-/**
- * Whether landing in this state makes the conversation something to judge.
- *
- * A conversation happened, or a simulation failed trying to have one: both are
- * graded, and the difference between them is what the verdicts say rather than
- * whether there are any — a simulation that never ran gets `errored` verdicts,
- * because a broken test is never a broken agent. A `canceled` simulation is
- * neither: nobody was told to stop conducting it and then judged for stopping.
- * Nor is a `skipped` one, and for the strongest reason of the four — there is
- * no conversation. Egma declined to conduct it, so there is nothing for a
- * grader to read and a job filed for it would be judged against an empty
- * record and come back errored, turning egma's own capability gap into a red
- * mark against somebody's agent.
- */
 function isGradable(status: SimulationStatus): boolean {
   return status === "completed" || status === "failed";
 }
 
-/**
- * The terminal transition also makes the work.
- *
- * Called inside the transaction that landed it, so the row that says a
- * conversation is over and the row that says it needs judging are one commit —
- * a conversation cannot land and leave no work behind, and there is no window
- * for a sweep of forgotten simulations to exist in. The notification the
- * enqueue raises travels on the same transaction and so reaches a listening
- * grader the moment the transition is visible to it.
- *
- * The tenancy the work is filed under comes in with the row rather than from
- * any context, because not every caller has one: a landing reached its row
- * through `within` and passes the context's organization, which is the row's
- * by construction; the sweep holds no context at all and passes what the row
- * itself says — either way, the job lands inside the customer the simulation
- * belongs to.
- */
 async function makeGradable(
   tx: Transaction,
   row: {
@@ -975,206 +481,143 @@ async function makeGradable(
   });
 }
 
-/**
- * Every refusal this file makes goes through `refuseRun`, which lives in
- * `run-plans.ts` beside the admission rules it raises for.
- *
- * The reason is the whole `RunWriteRefusal` rather than a hand-copied subset:
- * a copy would go stale the first time the vocabulary grew, and it would go
- * stale silently. The sentence is whole too — a layer above relays it word for
- * word, so a half-sentence finished somewhere else would be a contract that
- * exists nowhere as one string.
- */
-
-/** What a caller does instead, when a run named the wrong agent. */
-const NAME_THE_RIGHT_AGENT =
-  "Name the agent that connection is on, or leave the agent out and Egma " +
-  "takes the connection's own.";
-
-/**
- * A completed run has nothing left to cancel, and what to do about it.
- *
- * One builder, because the same sentence is owed at two moments — before the
- * lock and after losing the race for it — and two copies of a contract
- * sentence are two things to keep in step by hand.
- */
 function nothingLeftToCancel(runId: string): string {
-  return (
-    `run ${runId} is completed, and a completed run has nothing left to ` +
-    `cancel. Its counts are final; start a fresh run to conduct those tests ` +
-    `again.`
-  );
+  return `run ${runId} has already finished, so there is nothing left to cancel`;
 }
 
-/**
- * The mocked world this run will execute in, worked out once and frozen.
- *
- * **Resolution happens here and nowhere later.** Mock tools are the one
- * authored thing with no version chain, so an edit landing halfway through a
- * run would answer the first simulations one way and the rest another — and
- * nothing on the record would say the world had moved. Freezing at creation is
- * what makes "every simulation in one run sees one world" a property of the
- * row rather than of how fast somebody types.
- *
- * Two halves, kept apart in the stored shape for the reason the schema file
- * gives: the project's mock tools that apply to this run's agent — scoping
- * already applied, so nothing downstream needs to know which agent this was —
- * and what each pinned version overrides, by version. `resolveMockTools` merges
- * them for one simulation, and is the only thing that does.
- */
 async function freezeMockTools(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
   agentId: string,
-  versionIds: readonly string[],
 ): Promise<MockToolSnapshot> {
-  const applying = await mockToolsApplyingTo(on, auth, projectId, agentId);
-  const overriding = await mockOverridesOfVersions(on, versionIds);
-
-  const overrides: Record<string, readonly SnapshotEntry[]> = {};
-  for (const [versionId, entries] of overriding) {
-    // A version that overrides nothing is left out rather than written as an
-    // empty list: the two mean the same thing, and one of them costs nothing.
-    if (entries.length === 0) continue;
-    overrides[versionId] = entries.map((entry) => ({
-      toolName: entry.toolName,
-      answer: entry.answer,
-      delayMilliseconds: entry.delayMilliseconds,
-    }));
-  }
-
+  const defaults = await mockToolsApplyingTo(on, auth, projectId, agentId);
   return {
-    defaults: applying.map((one) => ({
+    defaults: defaults.map((one) => ({
+      mockToolId: one.id,
       toolName: one.toolName,
       answer: one.answer,
       delayMilliseconds: one.delayMilliseconds,
-      mockToolId: one.id,
     })),
-    overrides,
+    overrides: {},
   };
 }
 
-/**
- * The run, its simulations born `queued`, and the facts stamped at start — the
- * versions it pinned, the personas they named as provenance, the connection's
- * non-secret shape as snapshot, the mocked world it will run in, and every
- * simulation's own two pins — in one transaction, so nothing a team triggers
- * can half-exist.
- *
- * **One simulation per test per persona, counted before anything is written.**
- * Two tests naming three people between them is not two conversations; it is
- * however many the pins add up to, and `expected_simulation_count` is that
- * number, stamped once and frozen by the migration's trigger.
- *
- * **Everything is resolved before anything is written.** One unknown id, one
- * doubled id, one deleted persona, and the whole creation goes — because a run
- * that quietly executed most of what somebody named would report green about a
- * suite that did not run, and that is the exact trust this product sells.
- *
- * **A connection nothing can conduct is refused here, at the door.** A kind
- * whose simulator adapter has not shipped can never be executed, so leaving the
- * run queued would be a promise egma cannot keep; the refusal says so in the
- * registry's own words.
- *
- * The connection is read alive, in the acting project, and on the named agent
- * when one is named; the composite foreign keys re-check the same pairings
- * underneath, for every path that does not come through here.
- *
- * Every simulation carries the frozen version it was written for, so a grader
- * reads what was expected off the conversation itself — and a test edited
- * between the first simulation and the last cannot split a run's meaning in
- * two.
- */
-export async function startRun(
-  auth: AuthContext,
-  input: NewRun,
-): Promise<StartedRun> {
-  return startRunWithSelection(auth, input);
+function validateExpectedVersions(
+  entries: readonly ExpectedTestVersion[] | undefined,
+): readonly ExpectedTestVersion[] | undefined {
+  if (entries === undefined) return undefined;
+  const tests = new Set<string>();
+  const versions = new Set<string>();
+  for (const entry of entries) {
+    if (!isId("tst", entry.testId) || !isId("tstv", entry.versionId)) {
+      refuseRun("not_admitted", "expected_test_versions must contain test and test-version ids");
+    }
+    if (tests.has(entry.testId) || versions.has(entry.versionId)) {
+      refuseRun("not_admitted", "expected_test_versions must name each test and version once");
+    }
+    tests.add(entry.testId);
+    versions.add(entry.versionId);
+  }
+  return entries;
 }
 
-/**
- * Start a run containing exactly the one simulation derived by the caller.
- *
- * This is exported only for the sibling run-history module and is not exported
- * from the package. The public data-access operation remains
- * `rerunSimulation`, which reads every value in `selection` from the source
- * simulation rather than accepting it from a client.
- */
-export async function startRunForSimulation(
-  auth: AuthContext,
-  input: NewRun,
-  selection: SingleSimulationSelection,
-): Promise<StartedRun> {
-  return startRunWithSelection(auth, input, selection);
+function digestOfStart(input: NewRun): string {
+  const expected = [...(input.expectedTestVersions ?? [])]
+    .map((one) => [one.testId, one.versionId] as const)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return createHash("sha256")
+    .update(JSON.stringify({
+      suite: input.suiteId,
+      agent: input.agentId,
+      connection: input.connectionId,
+      name: input.name?.trim() || null,
+      expected,
+    }))
+    .digest("hex");
 }
 
-async function startRunWithSelection(
+function lostToIdempotencyKey(cause: unknown): boolean {
+  const held = cause as { constraint?: unknown; cause?: unknown };
+  if (held.constraint === "idempotent_operation_pk") return true;
+  return (held.cause as { constraint?: unknown } | undefined)?.constraint === "idempotent_operation_pk";
+}
+
+async function originalRunFor(
+  on: Queryable,
   auth: AuthContext,
+  projectId: string,
   input: NewRun,
-  selection?: SingleSimulationSelection,
-): Promise<StartedRun> {
+): Promise<StartedRun | undefined> {
+  const [remembered] = await on
+    .select({ resultId: idempotentOperation.resultId, requestDigest: idempotentOperation.requestDigest })
+    .from(idempotentOperation)
+    .where(and(
+      eq(idempotentOperation.organizationId, auth.organizationId),
+      eq(idempotentOperation.projectId, projectId),
+      eq(idempotentOperation.actorId, auth.userId),
+      eq(idempotentOperation.operation, "start_run"),
+      eq(idempotentOperation.idempotencyKey, input.idempotencyKey.trim()),
+    ))
+    .limit(1);
+  if (remembered === undefined) return undefined;
+  if (remembered.requestDigest !== digestOfStart(input)) {
+    throw new IdempotencyConflictError(input.idempotencyKey, remembered.resultId);
+  }
+  const found = await getRun(auth, remembered.resultId);
+  if (found === undefined) throw new IdempotencyConflictError(input.idempotencyKey, remembered.resultId);
+  return found;
+}
+
+/** Start one complete suite under one exact database lock. */
+export async function startRun(auth: AuthContext, input: NewRun): Promise<StartedRun> {
   authorize(auth, "start_and_cancel_runs", here(auth));
-
   const { projectId } = auth;
-  if (projectId === undefined) {
-    throw new Error(
-      "a run happens inside a project, and this credential is for the whole organization and acting in none",
-    );
-  }
-
-  // Everything answerable without the database is answered first; only an
-  // input worth writing costs the reads below.
-  const onAgentId = input.agentId;
-  if (onAgentId !== undefined && !isId("agt", onAgentId)) {
-    refuseRun(
-      "connection_not_on_agent",
-      `"${onAgentId}" is not an agent id, so no connection is on it. ` +
-        NAME_THE_RIGHT_AGENT,
-    );
-  }
-  // Named nothing at all is its own answer: "no connection of yours has that
-  // id" would be a sentence about an id the request never sent, and a coding
-  // agent reading it would go looking for a connection that was never named.
-  if (input.connectionId.trim() === "") {
-    refuseRun(
-      "not_admitted",
-      "a run is conducted over a connection, and this request named none. " +
-        "Send connection with the con_ id of the way Egma should reach the " +
-        "agent — registering the agent answered with one.",
-    );
-  }
-  if (!isId("con", input.connectionId)) {
-    refuseRun(
-      "no_such_connection",
-      `"${input.connectionId}" is not a connection id. Send the con_ id ` +
-        `registering the agent answered with.`,
-    );
-  }
-  validPinnedVersions(input.testVersionIds);
-  const label = input.label?.trim() || null;
-  const retryOfRunId = input.retryOfRunId ?? null;
-  if (retryOfRunId !== null && !isId("run", retryOfRunId)) {
-    throw new Error(`"${retryOfRunId}" is not a run id`);
-  }
-
-  const idempotencyKey = input.idempotencyKey?.trim() || undefined;
-  const requestDigest =
-    idempotencyKey === undefined ? undefined : digestOfStart(input, selection);
-
-  // Asked before the transaction, because the common repeat is a client that
-  // never learned its first attempt succeeded: the answer is a read, and there
-  // is nothing to write. The insert inside the transaction is what catches the
-  // two attempts that arrive at the same instant.
-  const remembered = await runAlreadyStartedForSelection(auth, input, selection);
+  if (projectId === undefined) throw new Error("a run happens inside a project");
+  if (!isId("ste", input.suiteId)) refuseRun("not_admitted", `"${input.suiteId}" is not a test suite id`);
+  if (!isId("agt", input.agentId)) refuseRun("connection_not_on_agent", `"${input.agentId}" is not an agent id`);
+  if (!isId("con", input.connectionId)) refuseRun("no_such_connection", `"${input.connectionId}" is not a connection id`);
+  const idempotencyKey = input.idempotencyKey.trim();
+  if (idempotencyKey === "") refuseRun("not_admitted", "a run needs an idempotency key");
+  const expected = validateExpectedVersions(input.expectedTestVersions);
+  const expectedInOrder = expected === undefined
+    ? undefined
+    : [...expected].sort((a, b) => a.testId.localeCompare(b.testId));
+  const remembered = await originalRunFor(db(), auth, projectId, input);
   if (remembered !== undefined) return remembered;
 
   const runId = newId("run");
-  const now = new Date();
-
-  let written;
+  const at = new Date();
+  let created: Run | undefined;
   try {
-    written = await db().transaction(async (tx) => {
+    created = await db().transaction(async (tx) => {
+      const [suite] = await tx
+        .select({ id: testSuite.id, name: testSuite.name })
+        .from(testSuite)
+        .where(within(auth, testSuite, and(
+          eq(testSuite.id, input.suiteId),
+          eq(testSuite.projectId, projectId),
+          isNull(testSuite.deletedAt),
+        )))
+        .limit(1)
+        .for("update");
+      if (suite === undefined) refuseRun("not_admitted", `there is no active test suite ${input.suiteId} in this project`);
+
+      const readTestPage = (afterId?: string) => tx
+        .select({ id: test.id, versionId: test.currentVersionId })
+        .from(test)
+        .where(and(
+          eq(test.suiteId, suite.id),
+          eq(test.projectId, projectId),
+          isNull(test.deletedAt),
+          afterId === undefined ? undefined : gt(test.id, afterId),
+        ))
+        .orderBy(asc(test.id))
+        .limit(SIMULATION_INSERT_BATCH)
+        .for("share", { of: test });
+      let currentTests = await readTestPage();
+      if (currentTests.length === 0) refuseRun("not_admitted", `test suite ${suite.id} is empty`);
+
       const [reached] = await tx
         .select({
           agentId: connection.agentId,
@@ -1185,598 +628,255 @@ async function startRunWithSelection(
           topology: connection.topology,
           environment: connection.environment,
           config: connection.config,
-          capabilityState: connection.capabilityState,
-          capabilitiesMeasured: connection.capabilitiesMeasured,
-          capabilitiesSupported: connection.capabilitiesSupported,
-          capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
-          capabilitySource: connection.capabilitySource,
         })
         .from(connection)
         .innerJoin(agent, eq(connection.agentId, agent.id))
-        .where(
-          within(
-            auth,
-            connection,
-            and(
-              eq(connection.id, input.connectionId),
-              eq(connection.projectId, projectId),
-              isNull(connection.archivedAt),
-              isNull(agent.archivedAt),
-            ),
-          ),
-        )
-        .limit(1);
-
-      if (reached === undefined) {
-        refuseRun(
-          "no_such_connection",
-          `there is no connection ${input.connectionId} in this project. ` +
-            `Check the id, or read your agents to see how each one is reached.`,
-        );
-      }
-      // Named, and it has to be the one the connection is actually on. The
-      // caller asked for that check; answering it quietly the other way would be
-      // egma deciding which of the two ids they meant.
-      if (onAgentId !== undefined && reached.agentId !== onAgentId) {
-        refuseRun(
-          "connection_not_on_agent",
-          `connection ${input.connectionId} is not on agent ${onAgentId}. ` +
-            NAME_THE_RIGHT_AGENT,
-        );
-      }
-      if (
-        !connectionIsConductable(
-          reached.connectionKind,
-          reached.accessVariant,
-          reached.modality,
-        )
-      ) {
-        refuseRun(
-          "no_adapter",
-          noSimulatorAdapterMessage(reached.connectionKind, reached.modality),
-        );
+        .where(within(auth, connection, and(
+          eq(connection.id, input.connectionId),
+          eq(connection.agentId, input.agentId),
+          eq(connection.projectId, projectId),
+          isNull(connection.archivedAt),
+          isNull(agent.archivedAt),
+        )))
+        .limit(1)
+        .for("share");
+      if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
+      if (!connectionIsConductable(reached.connectionKind, reached.accessVariant, reached.modality)) {
+        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionKind, reached.modality));
       }
 
-      if (retryOfRunId !== null) {
-        const [retried] = await tx
-          .select({ id: run.id })
-          .from(run)
-          .where(theRun(auth, retryOfRunId))
-          .limit(1);
-        if (retried === undefined) {
-          refuseRun(
-            "not_admitted",
-            `there is no run ${retryOfRunId} in this project, so this run ` +
-              `retries nothing. Leave the retry out, or name a run this ` +
-              `credential can read.`,
-          );
-        }
-      }
-
-      const versions = await resolvePinnedVersions(
-        tx,
-        auth,
-        projectId,
-        input.testVersionIds,
-      );
-      // Inside the transaction, and after the connection has settled which agent
-      // this run reaches: applicability is a fact about that agent, and a check
-      // taken before it would have been about an agent the caller only guessed.
-      await admitTestsForAgent(tx, reached.agentId, versions);
-
-      /**
-       * What will judge this run, resolved before the row is written. Every
-       * selected running copy contributes its immutable grader version; a
-       * project with no running copies freezes an empty plan.
-       *
-       * Provider credentials are not part of this decision and never enter the
-       * plan. The grader resolves the deployment credential for the selected
-       * version's provider when it claims the work.
-       */
-      const { groups } = await resolveRunPlan(tx, auth, projectId, versions);
-
-      /*
-       * **A Retry has no grader recheck here any more, and it had one.** It
-       * asked the plan about to be frozen whether a grader the selection named
-       * *directly* had been archived in the gap, and refused rather than
-       * produce a run judged by less than the one it copies. A test names no
-       * graders now: what judges a run is the project's live copies, so a copy
-       * switched off between two runs is a decision about the project and not
-       * something a Retry may overrule. Every other resource a Retry rechecks
-       * is still re-read inside this transaction by the reads above — an
-       * archived agent or connection, an archived or unlinked test, an
-       * archived persona all refuse in here on their own.
-       */
-
-      /**
-       * Which of these conversations egma can honestly have, decided once against
-       * the connection's own measurements and carried onto each row.
-       *
-       * A version whose requirement this connection was measured not to meet — or
-       * that nobody has measured — produces a terminal `skipped` simulation with
-       * its reason and the capabilities that decided it. It is never claimed,
-       * never conducted, and never enqueued for grading, and the rest of the run
-       * continues around it.
-       */
-      const capabilities = capabilitiesFromRow(reached);
-      const decisions = new Map(
-        versions.map(
-          (version) =>
-            [
-              version.versionId,
-              capabilityDecision(version.requiredCapabilities, capabilities),
-            ] as const,
-        ),
-      );
-
-      // The conversations this selection adds up to, in the order they will sit:
-      // each version in turn, and inside it each persona in the order the test
-      // named them.
-      const wanted =
-        selection === undefined
-          ? versions.flatMap((version) =>
-              version.personaIds.map((personaId) => ({ version, personaId })),
-            )
-          : oneSelectedSimulation(versions, selection);
-      if (wanted.length > MOST_SIMULATIONS_PER_RUN) {
-        refuseRun(
-          "not_admitted",
-          `a run conducts at most ${MOST_SIMULATIONS_PER_RUN} simulations, and ` +
-            `these ${versions.length} versions ask for ${wanted.length}. Split ` +
-            `the selection across runs.`,
-        );
-      }
-
-      // Each distinct persona resolved once, in the order they were first met.
-      const distinctPersonaIds = [
-        ...new Set(wanted.map((one) => one.personaId)),
-      ];
-      const pinnedPersonas = new Map(
-        (
-          await resolvePersonaVersions(tx, auth, projectId, distinctPersonaIds)
-        ).map((one) => [one.personaId, one.personaVersionId] as const),
-      );
-      /**
-       * The version pinned for one of the personas just resolved.
-       *
-       * `resolvePersonaVersions` answers one entry per id or refuses, so a miss
-       * here is this file having lost track of its own input rather than
-       * anything a caller did — and it says so instead of writing a row with a
-       * pin nobody chose.
-       */
-      const versionOf = (personaId: string): string => {
-        const pinned = pinnedPersonas.get(personaId);
-        if (pinned === undefined) {
-          throw new Error(
-            `persona ${personaId} was resolved for this run and then lost before the simulation was written`,
-          );
-        }
-        return pinned;
-      };
-
-      // Frozen inside the same transaction that writes the header, so an edit
-      // landing between the read and the write cannot reach the row: it either
-      // committed before this read and is in the snapshot, or waits behind it and
-      // changes only the runs started afterwards.
+      const groups = planGroupsFor(await applicableGraders(tx, auth, projectId));
       const mockToolSnapshot = await freezeMockTools(
         tx,
         auth,
         projectId,
         reached.agentId,
-        versions.map((one) => one.versionId),
       );
+      const [measured] = await tx
+        .select({ total: count() })
+        .from(test)
+        .innerJoin(testPersona, eq(test.currentVersionId, testPersona.testVersionId))
+        .where(and(
+          eq(test.suiteId, suite.id),
+          eq(test.projectId, projectId),
+          isNull(test.deletedAt),
+        ));
+      const expectedSimulationCount = measured?.total ?? 0;
+      if (expectedSimulationCount <= 0) {
+        refuseRun("not_admitted", `test suite ${suite.id} is empty`);
+      }
 
-      const skippedCount = wanted.filter(
-        ({ version }) => decisions.get(version.versionId)?.runnable === false,
-      ).length;
-
-      /**
-       * A run with nothing left to conduct is finished here, in this transaction.
-       *
-       * **And it completes with no passing headline.** The three conducted counts
-       * are zero and the skipped count is everything, so nothing was judged and
-       * nothing can read as green — which is the whole reason `skipped` is a
-       * count of its own. Leaving such a run `pending` would be worse in both
-       * directions: nothing would ever claim it, and a progress page would show a
-       * run that never moves.
-       *
-       * `started_at` is stamped with `finished_at` because the run genuinely did
-       * begin and end — here, in one transaction, having conducted nothing.
-       */
-      const everythingSkipped = skippedCount === wanted.length;
-
-      const [header] = await tx
-        .insert(run)
-        .values({
-          id: runId,
-          organizationId: auth.organizationId,
-          projectId,
-          agentId: reached.agentId,
-          connectionId: input.connectionId,
-          label,
-          status: everythingSkipped ? "completed" : "pending",
-          triggeredVia: "manual",
-          triggeredBy: auth.userId,
-          pinnedTestVersions: { testVersionIds: input.testVersionIds },
-          requestedPersonas: { personaIds: distinctPersonaIds },
-          connectionSnapshot: {
-            agentPlatform: reached.agentPlatform,
-            connectionKind: reached.connectionKind,
-            accessVariant: reached.accessVariant,
-            modality: reached.modality,
-            topology: reached.topology,
-            environment: reached.environment,
-            config: reached.config,
-          },
-          mockToolSnapshot,
-          expectedSimulationCount: wanted.length,
-          retryOfRunId,
-          createdAt: now,
-          ...(everythingSkipped
-            ? {
-                completedCount: 0,
-                failedCount: 0,
-                canceledCount: 0,
-                skippedCount,
-                startedAt: now,
-                finishedAt: now,
-              }
-            : {}),
-        })
-        .returning(RUN_COLUMNS);
-
+      const [header] = await tx.insert(run).values({
+        id: runId,
+        organizationId: auth.organizationId,
+        projectId,
+        suiteId: suite.id,
+        agentId: reached.agentId,
+        connectionId: input.connectionId,
+        name: input.name?.trim() || null,
+        status: "pending",
+        triggeredVia: "manual",
+        triggeredBy: auth.userId,
+        connectionSnapshot: {
+          agentPlatform: reached.agentPlatform,
+          connectionKind: reached.connectionKind,
+          accessVariant: reached.accessVariant,
+          modality: reached.modality,
+          topology: reached.topology,
+          environment: reached.environment,
+          config: reached.config,
+        },
+        mockToolSnapshot,
+        expectedSimulationCount,
+        createdAt: at,
+      }).returning(RUN_COLUMNS);
       if (header === undefined) throw new Error("the run was not written");
 
-      const simulations = await tx
-        .insert(simulation)
-        .values(
-          wanted.map(({ version, personaId }, index) => {
-            const decision = decisions.get(version.versionId);
-            const skipped = decision !== undefined && !decision.runnable;
-            return {
+      let simulationCount = 0;
+      let expectedIndex = 0;
+      while (currentTests.length > 0) {
+        for (const current of currentTests) {
+          const expectedCurrent = expectedInOrder?.[expectedIndex];
+          if (
+            expectedInOrder !== undefined &&
+            (expectedCurrent?.testId !== current.id || expectedCurrent.versionId !== current.versionId)
+          ) {
+            refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+          }
+          expectedIndex += 1;
+
+          let personaPosition = 0;
+          let namedPersona = false;
+          while (true) {
+            const personaRows = await tx
+              .select({
+                personaId: testPersona.personaId,
+                position: testPersona.position,
+              })
+              .from(testPersona)
+              .where(and(
+                eq(testPersona.testVersionId, current.versionId),
+                gt(testPersona.position, personaPosition),
+              ))
+              .orderBy(asc(testPersona.position))
+              .limit(SIMULATION_INSERT_BATCH);
+            if (personaRows.length === 0) break;
+            namedPersona = true;
+            const pins = await resolvePersonaVersions(
+              tx,
+              auth,
+              projectId,
+              personaRows.map((one) => one.personaId),
+            );
+            await tx.insert(simulation).values(pins.map((pin, index) => ({
               id: newId("sim"),
               runId,
               organizationId: auth.organizationId,
               projectId,
               agentId: reached.agentId,
               connectionId: input.connectionId,
-              personaId,
-              personaVersionId: versionOf(personaId),
-              testId: version.testId,
-              testVersionId: version.versionId,
-              position: index + 1,
+              personaId: pin.personaId,
+              personaVersionId: pin.personaVersionId,
+              testId: current.id,
+              testVersionId: current.versionId,
+              position: simulationCount + index + 1,
               modality: reached.modality,
-              status: skipped ? ("skipped" as const) : ("queued" as const),
-              createdAt: now,
-              ...(skipped && decision !== undefined && !decision.runnable
-                ? {
-                    endedAt: now,
-                    skipReason: decision.reason,
-                    skippedCapabilities: [...decision.capabilities],
-                  }
-                : {}),
-            };
-          }),
-        )
-        .returning(SIMULATION_COLUMNS);
-
-      // The plan is written in the same transaction as the run and its
-      // conversations. A plan with no grader items is valid; the invariant is
-      // that every run records that empty decision instead of having no plan.
+              status: "queued" as const,
+              createdAt: at,
+            })));
+            simulationCount += pins.length;
+            personaPosition = personaRows.at(-1)?.position ?? personaPosition;
+            if (personaRows.length < SIMULATION_INSERT_BATCH) break;
+          }
+          if (!namedPersona) throw new Error(`test version ${current.versionId} names no persona`);
+        }
+        if (currentTests.length < SIMULATION_INSERT_BATCH) break;
+        const afterTestId = currentTests.at(-1)?.id;
+        if (afterTestId === undefined) break;
+        currentTests = await readTestPage(afterTestId);
+      }
+      if (expectedInOrder !== undefined && expectedIndex !== expectedInOrder.length) {
+        refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
+      }
+      if (simulationCount !== expectedSimulationCount) {
+        throw new Error(`test suite ${suite.id} changed while its run was being planned`);
+      }
       await writeGradingPlan(tx, {
         runId,
         organizationId: auth.organizationId,
         projectId,
-        state: "run_start",
-        capturedAt: now,
         groups,
+        capturedAt: at,
       });
-
-      // And the key, last, so that losing the race to another attempt rolls this
-      // whole creation back rather than leaving a second run behind it.
-      if (idempotencyKey !== undefined && requestDigest !== undefined) {
-        await tx.insert(idempotentOperation).values({
-          organizationId: auth.organizationId,
-          projectId,
-          actorId: auth.userId,
-          operation: "start_run",
-          idempotencyKey,
-          requestDigest,
-          resultId: runId,
-        });
-      }
-
-      // The names come from what was just read rather than from a second query:
-      // this transaction already knows what every one of these is called.
-      const testNames = new Map(
-        versions.map((one) => [one.versionId, one.testName] as const),
-      );
-      const personaNames = new Map(
-        (
-          await tx
-            .select({ id: persona.id, name: persona.name })
-            .from(persona)
-            .where(inArray(persona.id, distinctPersonaIds))
-        ).map((row) => [row.id, row.name] as const),
-      );
-
-      return { header, simulations, testNames, personaNames };
+      await tx.insert(idempotentOperation).values({
+        organizationId: auth.organizationId,
+        projectId,
+        actorId: auth.userId,
+        operation: "start_run",
+        idempotencyKey,
+        requestDigest: digestOfStart(input),
+        resultId: runId,
+      });
+      return runFromRow(header, suite.name, false);
     });
   } catch (cause) {
-    // Two attempts arrived at once and this one lost the primary key. The
-    // winner's run is the answer both were promised, so the loser reads it
-    // back rather than reporting a collision nobody caused. Its own whole
-    // creation rolled back with the failed insert, so there is no second run
-    // anywhere.
-    if (
-      idempotencyKey === undefined ||
-      requestDigest === undefined ||
-      !lostToIdempotencyKey(cause)
-    ) {
-      throw cause;
-    }
-    const already = await originalRunFor(
-      db(),
-      auth,
-      projectId,
-      idempotencyKey,
-      requestDigest,
-    );
-    if (already === undefined) throw cause;
-    return already;
+    if (!lostToIdempotencyKey(cause)) throw cause;
+    const winner = await originalRunFor(db(), auth, projectId, input);
+    if (winner === undefined) throw cause;
+    return winner;
   }
-
-  return {
-    ...runFromRow(written.header),
-    simulations: written.simulations
-      .map((row) => ({
-        ...simulationFromRow(row),
-        // Every row this verb writes carries its pin, so every one of them has
-        // a name to answer with; the fallback is the type being honest about a
-        // column that other rows may leave empty.
-        testName:
-          row.testVersionId === null
-            ? null
-            : (written.testNames.get(row.testVersionId) ?? null),
-        personaName: written.personaNames.get(row.personaId) ?? "",
-      }))
-      .sort((a, b) => a.position - b.position),
-  };
+  return created;
 }
 
-/**
- * The run this start has already produced under its own idempotency key, if it
- * has produced one.
- *
- * **It exists so that a caller with work to do in front of `startRun` can ask
- * the shield first.** `retryRun` has six rechecks to make, every one of which
- * can refuse — and a repeat under a key whose first attempt succeeded must be
- * answered with that run rather than refused, because by then the retry it is
- * asking about is already dialing a real agent. Asking here, off the very input
- * `startRun` will be handed, is the only way the two digests cannot drift: a
- * recall computed from a second object that merely looks the same would miss
- * every time and nothing would show it.
- *
- * `startRun` asks it too, so there is one recall and not two.
- *
- * A key remembered against a *different* body throws `IdempotencyConflictError`
- * from in here rather than answering, on the terms `originalRunFor` sets out.
- * The caller is expected to have authorized already; this reads only what the
- * context's own organization, project and actor remembered.
- */
 export async function runAlreadyStartedFor(
   auth: AuthContext,
   input: NewRun,
 ): Promise<StartedRun | undefined> {
-  return runAlreadyStartedForSelection(auth, input);
+  // The API asks this before phone readiness so a lost successful response can
+  // be replayed without consulting external state again. It is still a start
+  // operation: a user whose role was reduced to viewer may neither start a new
+  // run nor replay one they started while they had write access.
+  authorize(auth, "start_and_cancel_runs", here(auth));
+  if (auth.projectId === undefined || input.idempotencyKey.trim() === "") return undefined;
+  return originalRunFor(db(), auth, auth.projectId, input);
 }
 
-/**
- * Recall the one-simulation start produced by this exact derived selection.
- *
- * Exported only for the sibling run-history module, like
- * `startRunForSimulation`. The package's public operation accepts only a source
- * simulation id and derives this selection from stored evidence.
- */
-export async function runAlreadyStartedForSimulation(
-  auth: AuthContext,
-  input: NewRun,
-  selection: SingleSimulationSelection,
-): Promise<StartedRun | undefined> {
-  return runAlreadyStartedForSelection(auth, input, selection);
-}
+const RUN_READ_COLUMNS = {
+  ...RUN_COLUMNS,
+  suiteName: testSuite.name,
+  suiteDeletedAt: testSuite.deletedAt,
+} as const;
 
-async function runAlreadyStartedForSelection(
-  auth: AuthContext,
-  input: NewRun,
-  selection?: SingleSimulationSelection,
-): Promise<StartedRun | undefined> {
-  const { projectId } = auth;
-  if (projectId === undefined) return undefined;
-  const idempotencyKey = input.idempotencyKey?.trim() || undefined;
-  if (idempotencyKey === undefined) return undefined;
-  return originalRunFor(
-    db(),
-    auth,
-    projectId,
-    idempotencyKey,
-    digestOfStart(input, selection),
-  );
-}
-
-/**
- * The request this key is being remembered for, as one short string.
- *
- * **The selection, the connection and the agent — and deliberately not the
- * label.** What must never differ between two attempts under one key is what
- * egma would actually do: which agent, over which connection, executing which
- * versions in which order. Two clients that agreed on all of that and disagreed
- * about a display name have not asked for two runs.
- *
- * The order of the versions is kept rather than sorted, because it is the order
- * the conversations will sit in and a caller who reordered them asked for
- * something different.
- */
-function digestOfStart(
-  input: NewRun,
-  selection?: SingleSimulationSelection,
-): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        agent: input.agentId ?? null,
-        connection: input.connectionId,
-        testVersions: [...input.testVersionIds],
-        retryOf: input.retryOfRunId ?? null,
-        only:
-          selection === undefined
-            ? null
-            : {
-                sourceSimulation: selection.sourceSimulationId,
-                testVersion: selection.testVersionId,
-                persona: selection.personaId,
-              },
-      }),
-    )
-    .digest("hex");
-}
-
-function oneSelectedSimulation(
-  versions: readonly PinnedVersion[],
-  selection: SingleSimulationSelection,
-): readonly {
-  readonly version: PinnedVersion;
-  readonly personaId: string;
-}[] {
-  const version = versions.find(
-    (one) => one.versionId === selection.testVersionId,
-  );
-  if (version === undefined || !version.personaIds.includes(selection.personaId)) {
-    refuseRun(
-      "not_admitted",
-      `The source simulation no longer names persona ${selection.personaId} ` +
-        `on test version ${selection.testVersionId}, so ` +
-        `Egma cannot run that same simulation again. The original simulation ` +
-        `was not changed.`,
-    );
-  }
-  return [{ version, personaId: selection.personaId }];
-}
-
-/**
- * Whether a write failed because another attempt under the same key had already
- * landed.
- *
- * Read off the constraint's own name rather than off the message, so the check
- * survives a driver upgrade rewording its prose — the same shape the agent
- * factory's name collision uses.
- */
-function lostToIdempotencyKey(cause: unknown): boolean {
-  const held = cause as { constraint?: unknown; cause?: unknown };
-  if (held?.constraint === "idempotent_operation_pk") return true;
-  const beneath = held?.cause as { constraint?: unknown } | undefined;
-  return beneath?.constraint === "idempotent_operation_pk";
-}
-
-/**
- * The run a key already started, when this request is the one it started.
- *
- * A key with a different body behind it is refused out loud rather than
- * answered: telling somebody their new selection had started when it had not is
- * the one failure an idempotency key exists to prevent, and it would be
- * invisible — they would go and read a run full of the tests they replaced.
- */
-async function originalRunFor(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-  idempotencyKey: string,
-  requestDigest: string,
-): Promise<StartedRun | undefined> {
-  const [remembered] = await on
-    .select({
-      resultId: idempotentOperation.resultId,
-      requestDigest: idempotentOperation.requestDigest,
-    })
-    .from(idempotentOperation)
-    .where(
-      and(
-        eq(idempotentOperation.organizationId, auth.organizationId),
-        eq(idempotentOperation.projectId, projectId),
-        eq(idempotentOperation.actorId, auth.userId),
-        eq(idempotentOperation.operation, "start_run"),
-        eq(idempotentOperation.idempotencyKey, idempotencyKey),
-      ),
-    )
-    .limit(1);
-
-  if (remembered === undefined) return undefined;
-  if (remembered.requestDigest !== requestDigest) {
-    throw new IdempotencyConflictError(idempotencyKey, remembered.resultId);
-  }
-
-  const header = await getRun(auth, remembered.resultId);
-  if (header === undefined) {
-    // The run was deleted after the key remembered it. There is nothing to
-    // answer with and nothing honest to invent, so the key stops shielding.
-    throw new IdempotencyConflictError(idempotencyKey, remembered.resultId);
-  }
-  const conducted = await listSimulations(auth, remembered.resultId);
-  return { ...header, simulations: conducted ?? [] };
-}
-
-/** One run as it stands — the header; its conversations are `listSimulations`. */
-export async function getRun(
-  auth: AuthContext,
-  id: string,
-): Promise<Run | undefined> {
+export async function getRun(auth: AuthContext, id: string): Promise<Run | undefined> {
   authorize(auth, "read", here(auth));
-
   const [row] = await db()
-    .select(RUN_COLUMNS)
+    .select(RUN_READ_COLUMNS)
     .from(run)
+    .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
     .where(theRun(auth, id))
     .limit(1);
-
-  return row === undefined ? undefined : runFromRow(row);
+  if (row === undefined) return undefined;
+  const { suiteName, suiteDeletedAt, ...header } = row;
+  return runFromRow(header, suiteName, suiteDeletedAt !== null);
 }
 
-/**
- * One page of the runs the caller can reach — the acting project's, or the
- * whole customer's for a credential acting in none — newest first, the id as
- * the whole cursor, exactly as every other list here pages.
- */
-export type RunPage = {
-  readonly items: readonly Run[];
-  /** Hand back as `cursor` to continue; absent on the last page. */
-  readonly nextCursor: string | undefined;
+export type SimulationExecutionEvidence = {
+  readonly testVersion: TestExecutionContent;
+  readonly mockToolSnapshot: MockToolSnapshot;
 };
 
 /**
- * How a run history narrows — every one of these a fact the run table already
- * holds, and each of them optional.
+ * The bounded frozen test and Mock Tool evidence for one Simulation.
  *
- * **The verdict is deliberately not here.** A verdict is folded at read time
- * from rows in another store, so narrowing by one is a question this query
- * cannot answer; `listRunHistory` in `run-history.ts` does it, over what this
- * one hands back.
- *
- * `testId` is the one filter that is not a column of the run header: a run does
- * not record which tests it executed as identities, only as frozen version ids,
- * so this asks whether any conversation of the run pinned that test. It is the
- * question a test's own page asks — *what has this been run against* — and
- * answering it off the pinned versions in the header would go wrong the moment a
- * test gained a second version.
+ * The Simulation already pins one persona. This read therefore never loads the
+ * full persona list on its test version, even when hundreds of Simulations
+ * share that version.
  */
+export async function getSimulationExecutionEvidence(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<SimulationExecutionEvidence | undefined> {
+  authorize(auth, "read", here(auth));
+  const [row] = await db()
+    .select({
+      runId: run.id,
+      testVersionId: simulation.testVersionId,
+      snapshot: run.mockToolSnapshot,
+    })
+    .from(simulation)
+    .innerJoin(run, eq(simulation.runId, run.id))
+    .where(within(auth, simulation, and(
+      eq(simulation.id, simulationId),
+      inActingProject(auth, simulation),
+    )))
+    .limit(1);
+  if (row === undefined) return undefined;
+  const frozen = mockToolSnapshotFromRow(row.snapshot, row.runId);
+  const version = await getTestVersionExecutionContent(auth, row.testVersionId);
+  if (version === undefined) {
+    throw new Error(`simulation ${simulationId} pins unreadable test version ${row.testVersionId}`);
+  }
+  return {
+    testVersion: version,
+    mockToolSnapshot: {
+      defaults: frozen.defaults,
+      overrides: { [row.testVersionId]: version.mockOverrides },
+    },
+  };
+}
+
+export type RunPage = {
+  readonly items: readonly Run[];
+  readonly nextCursor: string | undefined;
+};
+
 export type RunFilter = {
+  readonly suiteId?: string | undefined;
   readonly agentId?: string | undefined;
   readonly connectionId?: string | undefined;
-  /** Runs holding at least one conversation that pinned this test. */
   readonly testId?: string | undefined;
   readonly status?: RunStatus | undefined;
-  /** Runs created at or after this moment. */
   readonly since?: Date | undefined;
-  /** Runs created strictly before this moment. */
   readonly until?: Date | undefined;
 };
 
@@ -1786,234 +886,114 @@ export async function listRuns(
   filter?: RunFilter,
 ): Promise<RunPage> {
   authorize(auth, "read", here(auth));
-
-  const { limit, cursor } = pageWindow(page, {
-    singular: "run",
-    plural: "runs",
-    prefix: "run",
-  });
-  const olderThanCursor = cursor === undefined ? undefined : lt(run.id, cursor);
-
-  // A test is asked for by whether any conversation of the run pinned it, so
-  // the narrowing is a subquery on the simulations rather than a join — a join
-  // would return one row per matching conversation and quietly break the page
-  // size and the cursor with it.
-  const pinnedTheTest =
-    filter?.testId === undefined
-      ? undefined
-      : inArray(
-          run.id,
-          db()
-            .select({ runId: simulation.runId })
-            .from(simulation)
-            .where(
-              within(auth, simulation, eq(simulation.testId, filter.testId)),
-            ),
-        );
-
+  const { limit, cursor } = pageWindow(page, { singular: "run", plural: "runs", prefix: "run" });
+  const pinnedTest = filter?.testId === undefined
+    ? undefined
+    : inArray(run.id, db().select({ runId: simulation.runId }).from(simulation).where(within(auth, simulation, eq(simulation.testId, filter.testId))));
   const rows = await db()
-    .select(RUN_COLUMNS)
+    .select(RUN_READ_COLUMNS)
     .from(run)
-    .where(
-      within(
-        auth,
-        run,
-        and(
-          inActingProject(auth, run),
-          olderThanCursor,
-          filter?.agentId === undefined
-            ? undefined
-            : eq(run.agentId, filter.agentId),
-          filter?.connectionId === undefined
-            ? undefined
-            : eq(run.connectionId, filter.connectionId),
-          filter?.status === undefined
-            ? undefined
-            : eq(run.status, filter.status),
-          filter?.since === undefined
-            ? undefined
-            : gte(run.createdAt, filter.since),
-          filter?.until === undefined
-            ? undefined
-            : lt(run.createdAt, filter.until),
-          pinnedTheTest,
-        ),
-      ),
-    )
+    .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
+    .where(within(auth, run, and(
+      inActingProject(auth, run),
+      cursor === undefined ? undefined : lt(run.id, cursor),
+      filter?.suiteId === undefined ? undefined : eq(run.suiteId, filter.suiteId),
+      filter?.agentId === undefined ? undefined : eq(run.agentId, filter.agentId),
+      filter?.connectionId === undefined ? undefined : eq(run.connectionId, filter.connectionId),
+      filter?.status === undefined ? undefined : eq(run.status, filter.status),
+      filter?.since === undefined ? undefined : gte(run.createdAt, filter.since),
+      filter?.until === undefined ? undefined : lt(run.createdAt, filter.until),
+      pinnedTest,
+    )))
     .orderBy(desc(run.id))
     .limit(limit + 1);
-
   const { items, nextCursor } = pageOf(rows, limit);
-  return { items: items.map(runFromRow), nextCursor };
+  return {
+    items: items.map(({ suiteName, suiteDeletedAt, ...row }) =>
+      runFromRow(row, suiteName, suiteDeletedAt !== null)),
+    nextCursor,
+  };
 }
 
-/**
- * Where every conversation of these runs stands, in one query.
- *
- * The run list needs each row's machinery counts and each row's verdict, and
- * both are per conversation. Asking per run would be a query per row on the one
- * surface somebody scrolls, so the page is asked for at once and grouped here.
- *
- * Ordered by run and then by position, so a caller can rely on the conversations
- * of one run arriving in the order the run pinned them.
- */
-export async function simulationStatusesOfRuns(
+export async function simulationStatusCountsOfRuns(
   auth: AuthContext,
   runIds: readonly string[],
-): Promise<
-  ReadonlyMap<
-    string,
-    readonly { readonly id: string; readonly status: SimulationStatus }[]
-  >
-> {
+): Promise<ReadonlyMap<string, Readonly<Partial<Record<SimulationStatus, number>>>>> {
   authorize(auth, "read", here(auth));
-
-  const byRun = new Map<
-    string,
-    { readonly id: string; readonly status: SimulationStatus }[]
-  >();
+  const byRun = new Map<string, Partial<Record<SimulationStatus, number>>>();
   if (runIds.length === 0) return byRun;
-
-  const rows = await db()
-    .select({
-      runId: simulation.runId,
-      id: simulation.id,
-      status: simulation.status,
-    })
+  const rows = await db().select({
+    runId: simulation.runId,
+    status: simulation.status,
+    total: count(),
+  })
     .from(simulation)
-    .where(
-      within(
-        auth,
-        simulation,
-        and(
-          inArray(simulation.runId, [...runIds]),
-          inActingProject(auth, simulation),
-        ),
-      ),
-    )
-    .orderBy(asc(simulation.runId), asc(simulation.position));
-
+    .where(within(auth, simulation, and(inArray(simulation.runId, [...runIds]), inActingProject(auth, simulation))))
+    .groupBy(simulation.runId, simulation.status);
   for (const row of rows) {
-    const held = byRun.get(row.runId) ?? [];
+    const held = byRun.get(row.runId) ?? {};
+    held[row.status as SimulationStatus] = row.total;
     byRun.set(row.runId, held);
-    held.push({ id: row.id, status: row.status as SimulationStatus });
   }
-
   return byRun;
 }
 
-/**
- * One run's simulations, in the order they were pinned, each carrying the name
- * of the test it executes and of the person who calls about it. The whole
- * list, unpaged, because a run holds at most `MOST_SIMULATIONS_PER_RUN` of
- * them — the cap `startRun` enforces is what makes this read bounded.
- */
+export type SimulationPage = {
+  readonly items: readonly ConductedSimulation[];
+  readonly nextCursor: string | undefined;
+};
+
 export async function listSimulations(
   auth: AuthContext,
   runId: string,
-): Promise<readonly ConductedSimulation[] | undefined> {
+  page?: PageRequest,
+): Promise<SimulationPage | undefined> {
   authorize(auth, "read", here(auth));
-
   if ((await getRun(auth, runId)) === undefined) return undefined;
-
+  const { limit, cursor } = pageWindow(page, { singular: "simulation", plural: "simulations", prefix: "sim" });
   const rows = await db()
-    .select({
-      ...SIMULATION_COLUMNS,
-      testName: test.name,
-      personaName: persona.name,
-    })
+    .select({ ...SIMULATION_COLUMNS, testName: test.name, personaName: persona.name })
     .from(simulation)
-    // Left, not inner: a conversation from before a simulation could carry a
-    // test pin still belongs to its run and still has to appear in it. An
-    // inner join would quietly drop it and leave a run whose page held fewer
-    // rows than its own expected count.
-    .leftJoin(test, eq(simulation.testId, test.id))
+    .innerJoin(test, eq(simulation.testId, test.id))
     .innerJoin(persona, eq(simulation.personaId, persona.id))
-    .where(within(auth, simulation, eq(simulation.runId, runId)))
-    .orderBy(asc(simulation.position));
-
-  return rows.map(({ testName, personaName, ...row }) => ({
-    ...simulationFromRow(row),
-    testName,
-    personaName,
-  }));
+    .where(within(auth, simulation, and(
+      eq(simulation.runId, runId),
+      cursor === undefined ? undefined : gt(simulation.id, cursor),
+    )))
+    .orderBy(asc(simulation.id))
+    .limit(limit + 1);
+  const { items, nextCursor } = pageOf(rows, limit);
+  return {
+    items: items.map(({ testName, personaName, ...row }) => ({
+      ...simulationFromRow(row),
+      testName,
+      personaName,
+    })),
+    nextCursor,
+  };
 }
 
-/** One simulation with everything reported about it. */
-export async function getSimulation(
-  auth: AuthContext,
-  id: string,
-): Promise<Simulation | undefined> {
+export async function getSimulation(auth: AuthContext, id: string): Promise<Simulation | undefined> {
   authorize(auth, "read", here(auth));
-
-  const [row] = await db()
-    .select(SIMULATION_COLUMNS)
-    .from(simulation)
-    .where(
-      within(
-        auth,
-        simulation,
-        and(eq(simulation.id, id), inActingProject(auth, simulation)),
-      ),
-    )
+  const [row] = await db().select(SIMULATION_COLUMNS).from(simulation)
+    .where(within(auth, simulation, and(eq(simulation.id, id), inActingProject(auth, simulation))))
     .limit(1);
-
   return row === undefined ? undefined : simulationFromRow(row);
 }
 
-/**
- * What one simulation was executed against: the frozen test version it pinned
- * at start, with the scenario, the expected behaviors in the order they were
- * authored, and the personas the version named.
- *
- * This is the resolution the pin exists for. Whoever judges a finished
- * conversation asks here what it was supposed to do, and gets the version as
- * it was on the day rather than the test as it is now — which is what keeps a
- * judgement re-readable after the test moves on. The version's own id comes
- * back with it, so anything else the version carries stays reachable from one
- * answer.
- *
- * Three different absences answer alike, with `undefined`: a simulation the
- * caller cannot see, one that pinned no test, and a pin whose version the
- * caller cannot reach. None of them has a version to resolve, and telling them
- * apart at this seam would be telling one customer about another's rows. A
- * caller who needs the distinction has it already — the pin is on the
- * simulation row.
- */
 export async function getSimulationTestVersion(
   auth: AuthContext,
   simulationId: string,
-): Promise<TestVersion | undefined> {
+) {
   authorize(auth, "read", here(auth));
-
-  const pinned = await getSimulation(auth, simulationId);
-  if (pinned === undefined || pinned.testVersionId === null) return undefined;
-
-  return getTestVersion(auth, pinned.testVersionId);
+  const [row] = await db().select({ versionId: simulation.testVersionId }).from(simulation)
+    .where(within(auth, simulation, eq(simulation.id, simulationId))).limit(1);
+  return row === undefined
+    ? undefined
+    : getTestVersionExecutionContent(auth, row.versionId);
 }
 
-/**
- * Whether every conversation of the run has landed, and if so the one write
- * that freezes the header: the three counts, `finished_at`, and the terminal
- * status, together.
- *
- * **Answers a status only when the header actually moved to it.** A run
- * already canceled finishes here without changing status, and the caller must
- * not write a second `canceled` event for it: a follower drawing transitions
- * would draw that one twice, and the second would be a change that never
- * happened. Whether the run has *finished* is the header's own business and is
- * what `done` reads.
- *
- * Called inside the transaction of whichever terminal transition might have
- * been the last, under a lock on the run's own row — so of two reporters
- * landing at once, one waits, recounts, and sees the other's row. The counts
- * are therefore written exactly once, by whoever lands last, and the
- * migration's trigger refuses everything after that.
- *
- * The `where`s start from bare `eq`s rather than `within`: the run id came
- * off a tenancy-checked simulation row in this same transaction, so neither
- * predicate can reach further than that check already did.
- */
+// Worker lifecycle: claim, conduct, report, sweep, and follow.
 async function finalizeRunIfDone(
   tx: Transaction,
   runId: string,
@@ -2052,10 +1032,6 @@ async function finalizeRunIfDone(
       completedCount: byStatus.get("completed") ?? 0,
       failedCount: byStatus.get("failed") ?? 0,
       canceledCount: byStatus.get("canceled") ?? 0,
-      // Terminal from birth, so it is already in this tally — and it lands in
-      // its own column rather than any of the three above, because nothing was
-      // conducted, nothing failed and nobody stopped anything.
-      skippedCount: byStatus.get("skipped") ?? 0,
       finishedAt: now,
     })
     .where(eq(run.id, runId));
@@ -2090,14 +1066,18 @@ export async function cancelRun(
   const now = new Date();
 
   return db().transaction(async (tx) => {
-    const [current] = await tx
-      .select(RUN_COLUMNS)
+    const [selected] = await tx
+      .select(RUN_READ_COLUMNS)
       .from(run)
+      .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
       .where(theRun(auth, id))
       .limit(1);
 
-    if (current === undefined) return undefined;
-    if (current.status === "canceled") return runFromRow(current);
+    if (selected === undefined) return undefined;
+    const { suiteName, suiteDeletedAt, ...current } = selected;
+    if (current.status === "canceled") {
+      return runFromRow(current, suiteName, suiteDeletedAt !== null);
+    }
     if (current.status === "completed") {
       throw new RunWriteRefusedError(
         "already_finished",
@@ -2107,36 +1087,55 @@ export async function cancelRun(
 
     // Simulation rows first, the header last — the one lock order every
     // writer keeps. These `where`s narrow by the run id just checked above.
-    const endedHere = await tx
-      .update(simulation)
-      .set({
-        status: "canceled",
-        cancelRequestedAt: now,
-        endedAt: now,
-      })
-      .where(
-        within(
-          auth,
-          simulation,
-          and(eq(simulation.runId, id), eq(simulation.status, "queued")),
-        ),
-      )
-      .returning({ id: simulation.id });
-
-    await tx
-      .update(simulation)
-      .set({ cancelRequestedAt: now })
-      .where(
-        within(
-          auth,
-          simulation,
-          and(
-            eq(simulation.runId, id),
-            inArray(simulation.status, ["claimed", "running"]),
-            isNull(simulation.cancelRequestedAt),
+    while (true) {
+      const queued = await tx
+        .select({ id: simulation.id })
+        .from(simulation)
+        .where(
+          within(
+            auth,
+            simulation,
+            and(eq(simulation.runId, id), eq(simulation.status, "queued")),
           ),
-        ),
-      );
+        )
+        .orderBy(asc(simulation.id))
+        .limit(SIMULATION_INSERT_BATCH)
+        .for("update", { of: simulation });
+      if (queued.length === 0) break;
+      await tx
+        .update(simulation)
+        .set({
+          status: "canceled",
+          cancelRequestedAt: now,
+          endedAt: now,
+        })
+        .where(inArray(simulation.id, queued.map((row) => row.id)));
+    }
+
+    while (true) {
+      const moving = await tx
+        .select({ id: simulation.id })
+        .from(simulation)
+        .where(
+          within(
+            auth,
+            simulation,
+            and(
+              eq(simulation.runId, id),
+              inArray(simulation.status, ["claimed", "running"]),
+              isNull(simulation.cancelRequestedAt),
+            ),
+          ),
+        )
+        .orderBy(asc(simulation.id))
+        .limit(SIMULATION_INSERT_BATCH)
+        .for("update", { of: simulation });
+      if (moving.length === 0) break;
+      await tx
+        .update(simulation)
+        .set({ cancelRequestedAt: now })
+        .where(inArray(simulation.id, moving.map((row) => row.id)));
+    }
 
     const [canceled] = await tx
       .update(run)
@@ -2155,41 +1154,73 @@ export async function cancelRun(
     // reporter finalized it. Read again and answer as the first read would
     // have — the same idempotence, the same refusal, one race later.
     if (canceled === undefined) {
-      const [moved] = await tx
-        .select(RUN_COLUMNS)
+      const [selectedMoved] = await tx
+        .select(RUN_READ_COLUMNS)
         .from(run)
+        .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
         .where(theRun(auth, id))
         .limit(1);
+      const moved = selectedMoved === undefined
+        ? undefined
+        : (() => {
+            const { suiteName: movedSuiteName, suiteDeletedAt: movedDeletedAt, ...row } = selectedMoved;
+            return runFromRow(row, movedSuiteName, movedDeletedAt !== null);
+          })();
       if (moved !== undefined && moved.status === "canceled") {
-        return runFromRow(moved);
+        return moved;
       }
       throw new RunWriteRefusedError("already_finished", nothingLeftToCancel(id));
     }
 
     await finalizeRunIfDone(tx, id, now);
 
-    // Every conversation that ended here, then the run itself. One run event,
-    // whether or not the counts landed in this same transaction: the header
-    // says `canceled` either way, and the stragglers' own landings are what
-    // write the finish when there are stragglers.
-    await appendRunEvents(tx, id, now, [
-      ...endedHere.map(
-        (row) =>
-          ({
-            kind: "simulation",
-            simulationId: row.id,
-            status: "canceled",
-          }) as const,
-      ),
-      { kind: "run", status: "canceled" },
-    ]);
+    // Event writes page over the rows this cancel ended. No array grows with
+    // the suite, and the final run event follows every conversation event.
+    let after: string | undefined;
+    while (true) {
+      const ended = await tx
+        .select({ id: simulation.id })
+        .from(simulation)
+        .where(
+          within(
+            auth,
+            simulation,
+            and(
+              eq(simulation.runId, id),
+              eq(simulation.status, "canceled"),
+              eq(simulation.cancelRequestedAt, now),
+              eq(simulation.endedAt, now),
+              after === undefined ? undefined : gt(simulation.id, after),
+            ),
+          ),
+        )
+        .orderBy(asc(simulation.id))
+        .limit(SIMULATION_INSERT_BATCH);
+      if (ended.length === 0) break;
+      await appendRunEvents(
+        tx,
+        id,
+        now,
+        ended.map((row) => ({
+          kind: "simulation" as const,
+          simulationId: row.id,
+          status: "canceled" as const,
+        })),
+      );
+      after = ended.at(-1)?.id;
+      if (ended.length < SIMULATION_INSERT_BATCH) break;
+    }
+    await appendRunEvents(tx, id, now, [{ kind: "run", status: "canceled" }]);
 
-    const [settled] = await tx
-      .select(RUN_COLUMNS)
+    const [selectedSettled] = await tx
+      .select(RUN_READ_COLUMNS)
       .from(run)
+      .innerJoin(testSuite, eq(run.suiteId, testSuite.id))
       .where(theRun(auth, id))
       .limit(1);
-    return settled === undefined ? undefined : runFromRow(settled);
+    if (selectedSettled === undefined) return undefined;
+    const { suiteName: settledSuiteName, suiteDeletedAt: settledDeletedAt, ...settled } = selectedSettled;
+    return runFromRow(settled, settledSuiteName, settledDeletedAt !== null);
   });
 }
 
@@ -2213,9 +1244,9 @@ export type SimulationClaim = {
   /** Who calls, by identity, and the pin the traits are read from. */
   readonly personaId: string;
   readonly personaVersionId: string;
-  /** What is being checked; both absent only on an upgraded instance's history. */
-  readonly testId: string | null;
-  readonly testVersionId: string | null;
+  /** What is being checked, by stable identity and exact immutable version. */
+  readonly testId: string;
+  readonly testVersionId: string;
   readonly modality: Modality;
   readonly claimedBy: string;
   readonly claimedAt: Date;
@@ -2494,8 +1525,8 @@ export type SimulationStanding = {
   readonly id: string;
   readonly runId: string;
   readonly agentId: string;
-  /** Absent only on an upgraded instance's history, exactly as on the claim. */
-  readonly testVersionId: string | null;
+  /** The exact immutable test version this conversation executes. */
+  readonly testVersionId: string;
   readonly personaVersionId: string;
   readonly modality: Modality;
   readonly status: SimulationStatus;
@@ -3101,7 +2132,7 @@ export type RunEvent = {
   readonly reason: SimulationEndingReason | null;
 };
 
-/** A page of changes, where to ask from next, and whether there will be more. */
+/** A bounded page of changes, where to ask from next, and whether there will be more. */
 export type RunEventPage = {
   readonly events: readonly RunEvent[];
   /** Hand back as `after` to continue; the same number again on an empty page. */
@@ -3128,9 +2159,9 @@ export type RunEventPage = {
  * way round, the worst case is a `done` that is one poll stale, which costs a
  * poll and loses nothing.
  *
- * The whole tail is answered rather than a page of it: a run holds at most
- * `MOST_SIMULATIONS_PER_RUN` conversations and each of them changes a handful
- * of times, so the tail is bounded by the cap `startRun` already enforces.
+ * One fixed-size page is answered. A run has no simulation limit, so an event
+ * reader must never materialize the whole remaining tail. The extra row read
+ * below proves whether this page has a later event without exposing it early.
  */
 export async function listRunEvents(
   auth: AuthContext,
@@ -3177,9 +2208,11 @@ export async function listRunEvents(
         ),
       ),
     )
-    .orderBy(asc(runEvent.seq));
+    .orderBy(asc(runEvent.seq))
+    .limit(RUN_EVENT_PAGE_SIZE + 1);
 
-  const events = rows.map((row) => ({
+  const hasLater = rows.length > RUN_EVENT_PAGE_SIZE;
+  const events = rows.slice(0, RUN_EVENT_PAGE_SIZE).map((row) => ({
     ...row,
     kind: row.kind as RunEventKind,
     status: row.status as RunStatus | SimulationStatus,
@@ -3190,7 +2223,7 @@ export async function listRunEvents(
   return {
     events,
     next: events.at(-1)?.seq ?? after,
-    done: header.finishedAt !== null,
+    done: header.finishedAt !== null && !hasLater,
   };
 }
 
@@ -3228,81 +2261,71 @@ export async function stopWorkOverConnections(
   auth: AuthContext,
   connectionIds: readonly string[],
   now: Date,
-): Promise<readonly string[]> {
-  if (connectionIds.length === 0) return [];
-
-  const touched = await tx
-    .select({ id: simulation.id, runId: simulation.runId, status: simulation.status })
-    .from(simulation)
-    .where(
-      within(
-        auth,
-        simulation,
-        and(
-          inArray(simulation.connectionId, [...connectionIds]),
-          inArray(simulation.status, ["queued", "claimed", "running"]),
-        ),
-      ),
-    );
-
-  if (touched.length === 0) return [];
-
-  const endedHere = touched.filter((row) => row.status === "queued");
-  const asked = touched.filter((row) => row.status !== "queued");
-
-  if (endedHere.length > 0) {
-    await tx
-      .update(simulation)
-      .set({ status: "canceled", cancelRequestedAt: now, endedAt: now })
-      .where(
-        inArray(
-          simulation.id,
-          endedHere.map((row) => row.id),
-        ),
-      );
-  }
-
-  if (asked.length > 0) {
-    await tx
-      .update(simulation)
-      .set({ cancelRequestedAt: now })
-      .where(
-        and(
-          inArray(
-            simulation.id,
-            asked.map((row) => row.id),
+): Promise<number> {
+  let canceledRunCount = 0;
+  for (let offset = 0; offset < connectionIds.length; offset += SIMULATION_INSERT_BATCH) {
+    const connectionBatch = connectionIds.slice(offset, offset + SIMULATION_INSERT_BATCH);
+    while (connectionBatch.length > 0) {
+      const touched = await tx
+        .select({ id: simulation.id, runId: simulation.runId, status: simulation.status })
+        .from(simulation)
+        .where(
+          within(
+            auth,
+            simulation,
+            and(
+              inArray(simulation.connectionId, connectionBatch),
+              or(
+                eq(simulation.status, "queued"),
+                and(
+                  inArray(simulation.status, ["claimed", "running"]),
+                  isNull(simulation.cancelRequestedAt),
+                ),
+              ),
+            ),
           ),
-          isNull(simulation.cancelRequestedAt),
-        ),
-      );
-  }
+        )
+        .orderBy(asc(simulation.id))
+        .limit(SIMULATION_INSERT_BATCH)
+        .for("update", { of: simulation });
+      if (touched.length === 0) break;
 
-  const runIds = [...new Set(touched.map((row) => row.runId))].sort();
-  const canceled: string[] = [];
+      const endedHere = touched.filter((row) => row.status === "queued");
+      const asked = touched.filter((row) => row.status !== "queued");
+      if (endedHere.length > 0) {
+        await tx
+          .update(simulation)
+          .set({ status: "canceled", cancelRequestedAt: now, endedAt: now })
+          .where(inArray(simulation.id, endedHere.map((row) => row.id)));
+      }
+      if (asked.length > 0) {
+        await tx
+          .update(simulation)
+          .set({ cancelRequestedAt: now })
+          .where(inArray(simulation.id, asked.map((row) => row.id)));
+      }
 
-  for (const runId of runIds) {
-    const [header] = await tx
-      .update(run)
-      .set({ status: "canceled" })
-      .where(and(eq(run.id, runId), inArray(run.status, ["pending", "running"])))
-      .returning({ id: run.id });
-
-    const ended = endedHere.filter((row) => row.runId === runId);
-    await appendRunEvents(tx, runId, now, [
-      ...ended.map(
-        (row) =>
-          ({ kind: "simulation", simulationId: row.id, status: "canceled" }) as const,
-      ),
-      ...(header === undefined
-        ? []
-        : [{ kind: "run", status: "canceled" } as const]),
-    ]);
-
-    if (header !== undefined) {
-      canceled.push(runId);
-      await finalizeRunIfDone(tx, runId, now);
+      const runIds = [...new Set(touched.map((row) => row.runId))].sort();
+      for (const runId of runIds) {
+        const [header] = await tx
+          .update(run)
+          .set({ status: "canceled" })
+          .where(and(eq(run.id, runId), inArray(run.status, ["pending", "running"])))
+          .returning({ id: run.id });
+        const ended = endedHere.filter((row) => row.runId === runId);
+        await appendRunEvents(tx, runId, now, [
+          ...ended.map(
+            (row) =>
+              ({ kind: "simulation", simulationId: row.id, status: "canceled" }) as const,
+          ),
+          ...(header === undefined
+            ? []
+            : [{ kind: "run", status: "canceled" } as const]),
+        ]);
+        if (header !== undefined) canceledRunCount += 1;
+        await finalizeRunIfDone(tx, runId, now);
+      }
     }
   }
-
-  return canceled;
+  return canceledRunCount;
 }

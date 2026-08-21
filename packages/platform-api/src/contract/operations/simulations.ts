@@ -124,11 +124,8 @@ const planItemSchema = {
 const gradingPlanSchema = {
   type: "object",
   properties: {
-    state: {
-      type: "string",
-      enum: ["run_start", "migration_snapshot", "not_recorded"],
-    },
-    capturedAt: nullable(dateTimeSchema),
+    state: { type: "string", enum: ["run_start"] },
+    capturedAt: dateTimeSchema,
     items: arrayOf(planItemSchema),
   },
   required: ["state", "capturedAt", "items"],
@@ -156,7 +153,7 @@ const simulationSchema = {
     id: stringIdSchema,
     projectId: stringIdSchema,
     runId: stringIdSchema,
-    runLabel: nullable(stringSchema),
+    runName: nullable(stringSchema),
     position: integerSchema,
     status: simulationStatusSchema,
     grading: {
@@ -167,8 +164,6 @@ const simulationSchema = {
     score: nullable(numberSchema),
     counts: nullable(verdictCountsSchema),
     reason: nullable(stringSchema),
-    skipReason: nullable(stringSchema),
-    skippedCapabilities: nullable(arrayOf(stringSchema)),
     modality: { type: "string", enum: ["voice", "chat"] },
     createdAt: dateTimeSchema,
     startedAt: nullable(dateTimeSchema),
@@ -190,12 +185,11 @@ const simulationSchema = {
     test: {
       type: "object",
       properties: {
-        id: nullable(stringIdSchema),
-        versionId: nullable(stringIdSchema),
+        id: stringIdSchema,
+        versionId: stringIdSchema,
         name: nullable(stringSchema),
         scenario: nullable(stringSchema),
         expectedBehaviors: nullable(arrayOf(stringSchema)),
-        requiredCapabilities: nullable(arrayOf(stringSchema)),
       },
       required: [
         "id",
@@ -203,7 +197,6 @@ const simulationSchema = {
         "name",
         "scenario",
         "expectedBehaviors",
-        "requiredCapabilities",
       ],
       additionalProperties: false,
     },
@@ -326,7 +319,7 @@ const simulationSchema = {
     "id",
     "projectId",
     "runId",
-    "runLabel",
+    "runName",
     "position",
     "status",
     "grading",
@@ -334,8 +327,6 @@ const simulationSchema = {
     "score",
     "counts",
     "reason",
-    "skipReason",
-    "skippedCapabilities",
     "modality",
     "createdAt",
     "startedAt",

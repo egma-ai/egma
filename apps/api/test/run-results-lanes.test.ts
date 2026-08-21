@@ -95,6 +95,7 @@ async function aJudgedRun(label: string): Promise<{
     },
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+  const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
 
   await createPersona(auth, {
@@ -102,7 +103,14 @@ async function aJudgedRun(label: string): Promise<{
     traits: NEUTRAL_TRAITS,
   });
 
+  const suite = await request("POST", "/v1/test-suites", key, {
+    name: "Appointment changes",
+  });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  const suiteId = String(suite.body.id);
+
   const created = await request("POST", "/v1/tests", key, {
+    suiteId,
     name: "Reschedules a booked appointment",
     scenario:
       "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
@@ -112,8 +120,9 @@ async function aJudgedRun(label: string): Promise<{
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
 
   const started = await request("POST", "/v1/runs", key, {
-    connectionId: connectionId,
-    testVersionIds: [String(created.body.versionId)],
+    suiteId,
+    agentId,
+    connectionId,
     // A start dials a real agent and spends a real judge, so the door takes the
     // caller's own key for the attempt: an answer lost on the way back must
     // never become a second conversation.
@@ -122,7 +131,13 @@ async function aJudgedRun(label: string): Promise<{
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
   const runId = String(started.body.id);
-  const simulations = started.body.simulations as Record<string, unknown>[];
+  const page = await request(
+    "GET",
+    `/v1/runs/${runId}/simulations?pageSize=1`,
+    key,
+  );
+  expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
+  const simulations = page.body.simulations as Record<string, unknown>[];
   const simulationId = String(simulations[0]?.id);
 
   // The conversation is conducted before anything judges it. A `queued` one is
@@ -172,7 +187,7 @@ async function aJudgedRun(label: string): Promise<{
     rationale: `${assertion} was judged ${verdict}.`,
     citedSpanIds: ["turn:3"],
     runId,
-    agentId: String(started.body.agentId),
+    agentId,
     agentVersionId: "",
     judgedAtMicroseconds: BigInt(Date.now()) * 1000n,
   });
@@ -201,29 +216,41 @@ async function aJudgedRun(label: string): Promise<{
 }
 
 describe("a run's results", () => {
-  it("folds the required copies into the outcome and reports the diagnostics apart", async () => {
-    const { key, runId, behaviors, diagnostic } = await aJudgedRun("run_lanes");
+  it("keeps the run header bounded and reports diagnostics on the conversation", async () => {
+    const { key, runId, simulationId, behaviors, diagnostic } =
+      await aJudgedRun("run_lanes");
 
     const read = await request("GET", `/v1/runs/${runId}`, key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
 
-    // The headline is the required lane, and the diagnostic's failure is
-    // nowhere in it — not in the word, not in the counts.
+    // The headline counts the one passed conversation. The diagnostic's
+    // failure is nowhere in that run-level result.
     expect(read.body).toMatchObject({
       verdict: "passed",
       score: 1,
-      counts: { passed: 2, failed: 0, skipped: 0, errored: 0, total: 2 },
+      counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
     });
 
-    // And it is reported, whole, in a lane of its own.
-    expect(read.body.diagnostics).toMatchObject({
+    // Exact grader evidence stays off the bounded run header.
+    expect(read.body).not.toHaveProperty("diagnostics");
+    expect(read.body).not.toHaveProperty("byGrader");
+
+    const conversation = await request(
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(conversation.statusCode, JSON.stringify(conversation.body)).toBe(200);
+
+    // The conversation reports the diagnostic whole, in a lane of its own.
+    expect(conversation.body.diagnostics).toMatchObject({
       verdict: "failed",
       score: 0,
       counts: { passed: 0, failed: 1, skipped: 0, errored: 0, total: 1 },
     });
 
     // Every grader that judged is listed, each saying which lane it is in.
-    const byGrader = read.body.byGrader as Record<string, unknown>[];
+    const byGrader = conversation.body.byGrader as Record<string, unknown>[];
     expect(
       byGrader.map((one) => [one.graderId, one.required, one.verdict]),
     ).toEqual(
@@ -235,9 +262,14 @@ describe("a run's results", () => {
   });
 
   it("says the same thing about the one conversation underneath it", async () => {
-    const { key, runId, diagnostic } = await aJudgedRun("run_lanes_one");
+    const { key, runId, simulationId } = await aJudgedRun("run_lanes_one");
 
-    const read = await request("GET", `/v1/runs/${runId}`, key);
+    const read = await request(
+      "GET",
+      `/v1/runs/${runId}/simulations?pageSize=1`,
+      key,
+    );
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     const one = (read.body.simulations as Record<string, unknown>[])[0];
 
     expect(one).toMatchObject({
@@ -245,15 +277,26 @@ describe("a run's results", () => {
       verdict: "passed",
       score: 1,
       counts: { passed: 2, failed: 0, skipped: 0, errored: 0, total: 2 },
-      diagnostics: {
-        verdict: "failed",
-        counts: { passed: 0, failed: 1, skipped: 0, errored: 0, total: 1 },
-      },
+    });
+
+    // The page stays compact; exact rows and the diagnostic lane are on the
+    // selected conversation.
+    expect(one).not.toHaveProperty("diagnostics");
+    expect(one).not.toHaveProperty("verdicts");
+    const detail = await request(
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
+    expect(detail.body.diagnostics).toMatchObject({
+      verdict: "failed",
+      counts: { passed: 0, failed: 1, skipped: 0, errored: 0, total: 1 },
     });
 
     // And each row says which lane it is in, so a card can be marked without
     // going and matching grader ids.
-    const rows = one?.verdicts as Record<string, unknown>[];
+    const rows = detail.body.verdicts as Record<string, unknown>[];
     expect(
       rows.map((its) => [its.assertion, its.required]),
     ).toEqual([
@@ -270,11 +313,15 @@ describe("a run's results", () => {
    * read itself; what this one holds is that the read is actually made here.
    */
   it("resolves each assertion key into the sentence somebody wrote", async () => {
-    const { key, runId } = await aJudgedRun("run_lanes_words");
+    const { key, simulationId } = await aJudgedRun("run_lanes_words");
 
-    const read = await request("GET", `/v1/runs/${runId}`, key);
-    const one = (read.body.simulations as Record<string, unknown>[])[0];
-    const rows = one?.verdicts as Record<string, unknown>[];
+    const read = await request(
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+    const rows = read.body.verdicts as Record<string, unknown>[];
 
     expect(rows.map((its) => its.assertionText)).toEqual([
       THE_BEHAVIORS[0],
@@ -393,7 +440,7 @@ describe("the same conversation read as a transcript", () => {
  * Three would each be green against a tree where the surfaces disagree.
  */
 describe("one run, read on every surface it appears on", () => {
-  it("passes on run detail, in the run list and on the conversation, with the diagnostic failing on all three", async () => {
+  it("passes on run detail, in the run list and on the conversation, with exact diagnostics on the conversation", async () => {
     const { key, runId, simulationId, diagnostic } =
       await aJudgedRun("run_lanes_every_surface");
 
@@ -421,9 +468,9 @@ describe("one run, read on every surface it appears on", () => {
       conversation.body.verdict,
     ]).toEqual(["passed", "passed", "passed"]);
 
-    // And it is not silence either — the failure is reported, apart, on the two
-    // surfaces that carry a lane of their own.
-    expect(detail.body.diagnostics).toMatchObject({ verdict: "failed" });
+    // The run header stays bounded. Exact evidence is on the selected
+    // conversation, where the diagnostic failure is reported apart.
+    expect(detail.body).not.toHaveProperty("diagnostics");
     expect(conversation.body.diagnostics).toMatchObject({ verdict: "failed" });
 
     // The row that failed is the diagnostic's, and the conversation says so.

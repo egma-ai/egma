@@ -38,7 +38,8 @@ Egma is the open-source platform purpose-built for teams shipping voice agents. 
     ```
   </Step>
   <Step title="Write tests">
-    The wizard drives your existing coding agent to read your repository and generate a first suite of test files in `egma/tests/`. Each test describes a scenario and the behaviors your agent should demonstrate.
+    Create a suite first. The wizard then drives your existing coding agent to
+    write its tests under `egma/tests/<suite-directory>/`.
 
     ```bash
     egma init
@@ -48,7 +49,7 @@ Egma is the open-source platform purpose-built for teams shipping voice agents. 
     Push your tests to Egma and start a run. The simulator conducts real conversations with your agent; the grader writes one verdict per expected behavior as each call finishes.
 
     ```bash
-    egma run
+    egma run <suite-directory>
     ```
   </Step>
 </Steps>

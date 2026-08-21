@@ -9,22 +9,22 @@ import type { FoldedOutcome, VerdictCounts, Verdict } from "./fold.ts";
  *
  * 1. the **run**'s machinery status — `pending`, `running`, `completed`,
  *    `canceled`;
- * 2. each **simulation**'s machinery status — including `skipped`, which is a
- *    conversation egma declined to conduct, and `failed`, which is a
- *    conversation egma tried and could not;
+ * 2. each **simulation**'s machinery status — including `failed`, which is a
+ *    conversation egma tried and could not, and `canceled`, which somebody
+ *    stopped;
  * 3. the state of the **grading work** — whether anybody has looked yet;
  * 4. the **verdict** — what the graders made of what happened.
  *
  * Folding any of those into any other is the defect this module exists to make
  * unwritable. An execution failure shown as a failed verdict tells a team their
  * agent is broken when egma is. Pending grading shown as a failure tells them
- * something failed when nobody has looked. A skipped conversation shown as
- * either says egma judged something it never conducted.
+ * something failed when nobody has looked. A canceled conversation shown as
+ * either says egma judged something that produced no grading evidence.
  *
  * **The rules, from the effort spec, in one place.** For a `completed`
  * simulation the verdict comes from grader verdict rows and from nowhere else.
- * Execution `failed` reads `errored`. Execution `canceled` or `skipped` reads
- * `skipped`. Nothing here invents a grader row for work that produced no
+ * Execution `failed` reads `errored`. Execution `canceled` reads `skipped`.
+ * Nothing here invents a grader row for work that produced no
  * evidence, and nothing here turns an absence into a pass. The run's verdict is
  * folded over its simulations' verdicts, so a completed run may perfectly well
  * hold failed verdicts — the machinery finished, and what it found was bad.
@@ -39,8 +39,8 @@ import type { FoldedOutcome, VerdictCounts, Verdict } from "./fold.ts";
  * Four states, and each is a different sentence to a person waiting:
  *
  * - `not_required` — there is nothing to judge and there never will be. A
- *   skipped conversation was never conducted and a canceled one was stopped, so
- *   no grading job exists for either. Saying `pending` about one would leave a
+ *   canceled conversation was stopped, so no grading job exists for it. Saying
+ *   `pending` about one would leave a
  *   progress bar waiting forever on work nobody filed.
  * - `waiting` — the conversation has not finished, so grading has not begun.
  * - `pending` — the conversation finished and no verdict has landed yet.
@@ -63,7 +63,6 @@ const TERMINAL: ReadonlySet<SimulationStatus> = new Set([
   "completed",
   "failed",
   "canceled",
-  "skipped",
 ]);
 
 /** One conversation's four facts, each as itself. */
@@ -95,10 +94,10 @@ export function foldSimulation(
   status: SimulationStatus,
   graded: FoldedOutcome | undefined,
 ): SimulationFold {
-  // Never conducted, or stopped. There is no conversation to judge, no job was
-  // ever filed, and the honest verdict is that this was skipped — not that the
+  // Stopped. There is no conversation to judge, no job was
+  // filed, and the honest verdict is that grading was skipped — not that the
   // agent failed, and not that egma is still thinking about it.
-  if (status === "skipped" || status === "canceled") {
+  if (status === "canceled") {
     return {
       status,
       grading: "not_required",
@@ -146,6 +145,12 @@ export type SimulationStatusCounts = Readonly<
   Record<SimulationStatus, number>
 >;
 
+/** Bounded summary inputs read with aggregate queries. */
+export type RunSummaryFacts = {
+  readonly simulations: Readonly<Partial<Record<SimulationStatus, number>>>;
+  readonly judged?: FoldedOutcome | undefined;
+};
+
 /** One run's four facts, each as itself. */
 export type RunFold = {
   /** Fact one: the run's own machinery. Carried through untouched. */
@@ -179,7 +184,6 @@ const NO_SIMULATIONS: SimulationStatusCounts = {
   completed: 0,
   failed: 0,
   canceled: 0,
-  skipped: 0,
 };
 
 /**
@@ -234,6 +238,49 @@ export function foldRun(
     score: scored === 0 ? undefined : counts.passed / scored,
     counts,
     simulations: byStatus,
+    finished,
+    gradable,
+    graded,
+    moving: finished < expected || graded < gradable,
+  };
+}
+
+/**
+ * Fold one run header without loading its simulation or verdict rows.
+ * Machinery counts come from Postgres GROUP BY and judged counts come from one
+ * ClickHouse aggregate row per run. Exact evidence stays on the paged
+ * simulation surface.
+ */
+export function foldRunSummary(
+  status: RunStatus,
+  expected: number,
+  facts: RunSummaryFacts,
+): RunFold {
+  const simulations: Record<SimulationStatus, number> = { ...NO_SIMULATIONS };
+  for (const state of Object.keys(simulations) as SimulationStatus[]) {
+    simulations[state] = facts.simulations[state] ?? 0;
+  }
+
+  const judged = facts.judged;
+  const counts = judged?.counts ?? {
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    errored: 0,
+    total: 0,
+  };
+  const finished =
+    simulations.completed + simulations.failed + simulations.canceled;
+  const gradable = simulations.completed + simulations.failed;
+  const graded = Math.min(judged?.counts.total ?? 0, gradable);
+  const decided = finished === expected && graded === gradable;
+
+  return {
+    status,
+    verdict: decided ? (judged?.verdict ?? (gradable === 0 ? "skipped" : null)) : null,
+    score: decided ? judged?.score : undefined,
+    counts,
+    simulations,
     finished,
     gradable,
     graded,

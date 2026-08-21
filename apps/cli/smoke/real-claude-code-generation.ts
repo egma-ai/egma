@@ -20,14 +20,14 @@
  * It needs Claude Code logged in, and the network the first time.
  */
 
-import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
 import { withDrivenAgent } from "../src/acp/driven-agent.ts";
-import { createEgmaFolder } from "../src/folder/egma-folder.ts";
+import { createEgmaFolder, writeSuiteManifest } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { MarkerStream } from "../src/wizard/markers.ts";
@@ -37,6 +37,8 @@ import { RULE, say } from "./support/report.ts";
 
 /** How many tests this check asks for. Fewer than a walk, so it is quicker. */
 const HOW_MANY = 4;
+const SUITE_DIRECTORY = "smoke-generation";
+const SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
 
 /** npx may have to fetch the adapter the first time, so this is generous. */
 const TIMEOUT_MS = 8 * 60_000;
@@ -68,11 +70,17 @@ async function main(): Promise<void> {
   await writeFile(path.join(dir, ".env"), "SMOKE_SECRET=never-read-this\n", "utf8");
 
   const { paths } = await createEgmaFolder({ repository: dir });
+  const suiteRoot = path.join(paths.tests, SUITE_DIRECTORY);
+  await mkdir(suiteRoot);
+  await writeSuiteManifest(path.join(suiteRoot, "suite.yaml"), {
+    id: SUITE_ID,
+    name: "Smoke generation",
+  });
   const prompt = await readFile(path.join(dir, "prompts", "order-line.md"), "utf8");
 
   say(`Folder: ${dir}`);
   say(`Starting: egma, driving ${claude.name} (${claude.id}).`);
-  say(`Asking for: ${HOW_MANY} tests in egma/tests/.`);
+  say(`Asking for: ${HOW_MANY} tests in egma/tests/${SUITE_DIRECTORY}/.`);
   say("");
 
   const ui = new HeadlessUI({ write: (line) => say(line) });
@@ -103,6 +111,7 @@ async function main(): Promise<void> {
         instructions: generateInstructions(
           {
             cwd: dir,
+            suiteDirectory: SUITE_DIRECTORY,
             facts: FACTS,
             prompt,
             toolCount: 2,
@@ -127,7 +136,7 @@ async function main(): Promise<void> {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
 
   // What is on disk is the account of what happened, whatever anybody said.
-  const names = (await readdir(paths.tests).catch(() => [])).filter((name) =>
+  const names = (await readdir(suiteRoot).catch(() => [])).filter((name) =>
     name.endsWith(".md"),
   );
   const problems: string[] = [];
@@ -136,7 +145,7 @@ async function main(): Promise<void> {
   say("");
   say("── what landed ───────────────────────────────────────────");
   for (const name of names.sort()) {
-    const held = await readFile(path.join(paths.tests, name), "utf8");
+    const held = await readFile(path.join(suiteRoot, name), "utf8");
     const test = parseTestFile(held, name, name.replace(/\.md$/u, ""));
     const behaviors = test.expectedBehaviors.length;
     const ok = test.name !== "" && test.scenario.trim() !== "" && behaviors > 0;
@@ -154,7 +163,7 @@ async function main(): Promise<void> {
   if (first !== undefined) {
     say("");
     say("── the first of them ─────────────────────────────────────");
-    say((await readFile(path.join(paths.tests, first), "utf8")).trimEnd());
+    say((await readFile(path.join(suiteRoot, first), "utf8")).trimEnd());
   }
 
   say("");

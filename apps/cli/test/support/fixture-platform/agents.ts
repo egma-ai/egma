@@ -801,7 +801,6 @@ function connectionOut(connection: StoredConnection): Record<string, unknown> {
     environment: connection.environment,
     config: connection.config,
     credentialsHint: connection.credentialsHint,
-    capabilities: null,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
   };

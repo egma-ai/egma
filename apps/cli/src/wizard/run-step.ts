@@ -28,6 +28,7 @@
  */
 
 import {
+  hydrateRun,
   startRun,
   type PlatformRun,
 } from "../platform/runs.ts";
@@ -51,10 +52,12 @@ export type RunStepOptions = {
   /** What the run is against, as connect registered it. */
   readonly agentId: string;
   readonly connectionId: string;
-  /** The versions the push just put on egma. Exactly what this run pins. */
-  readonly testVersionIds: readonly string[];
-  /** What this folder's suite is called, for the run's own label. */
-  readonly suite: string;
+  readonly suiteId: string;
+  /** Exact transient precondition from the complete repository push. */
+  readonly expectedTestVersions: readonly {
+    readonly testId: string;
+    readonly versionId: string;
+  }[];
   /** Which coding agent the skill would be installed into. */
   readonly drivenAgentId: string;
   /** The repository, for the project scope. */
@@ -132,10 +135,10 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   const { ui, signal } = options;
 
   const answer = await startRun(options.signedIn, {
+    suiteId: options.suiteId,
     agentId: options.agentId,
     connectionId: options.connectionId,
-    testVersionIds: options.testVersionIds,
-    label: options.suite,
+    expectedTestVersions: options.expectedTestVersions,
   });
 
   if (answer.kind === "refused") {
@@ -148,8 +151,9 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     return { kind: "failed", reason: answer.reason };
   }
 
-  const follower = new RunFollower(answer.run);
-  announce(ui, answer.run, options.testVersionIds.length);
+  const run = await hydrateRun(options.signedIn, answer.run);
+  const follower = new RunFollower(run);
+  announce(ui, run, options.expectedTestVersions.length);
   ui.setRun(viewOf(follower));
 
   // The follow outlives this await on purpose. The developer is about to be
@@ -162,6 +166,11 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   let firstLanded!: () => void;
   const firstVerdict = new Promise<void>((resolve) => {
     firstLanded = resolve;
+    // The simulator can finish one conversation between the run POST and the
+    // first bounded simulation page. In that case hydration already carries
+    // the first verdict, so there will be no new `change.first` event to open
+    // the offer below.
+    if (follower.firstVerdict !== null) resolve();
   });
 
   const following = followRun({

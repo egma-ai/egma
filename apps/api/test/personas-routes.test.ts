@@ -1,8 +1,8 @@
 import {
   createProject,
-  createAgent,
   createTest,
-  archiveTest,
+  createTestSuite,
+  deleteTest,
   editTest,
   RECOMMENDED_PERSONA_MODELS,
   SPEED_RANGE,
@@ -863,12 +863,10 @@ describe("archiving a persona", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Named Nadia");
 
-    // A test always applies to at least one active agent, so a project that
-    // holds none can hold no test.
-    await createAgent(contextFor(ada, "member"), {
-      name: `Front desk ${newId("agt").slice(-6)}`,
-    });
-    const named = await createTest(contextFor(ada, "member"), {
+    const author = contextFor(ada, "member");
+    const suite = await createTestSuite(author, { name: "Persona use" });
+    const named = await createTest(author, {
+      suiteId: suite.id,
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -887,7 +885,7 @@ describe("archiving a persona", () => {
       error: "persona_in_use",
       message:
         `Persona ${made.id} is used by active tests ${named.id}. Select ` +
-        "another persona on those tests, or archive the tests, then archive " +
+        "another persona on those tests, or delete the tests, then archive " +
         "this persona.",
     });
 
@@ -970,12 +968,9 @@ describe("archiving a persona", () => {
     const leaving = await createPersonaThrough(ada, "Leaving Lena");
     const staying = await createPersonaThrough(ada, "Staying Sam");
 
-    // A test always applies to at least one active agent, so a project that
-    // holds none can hold no test.
-    await createAgent(author, {
-      name: `Front desk ${newId("agt").slice(-6)}`,
-    });
+    const suite = await createTestSuite(author, { name: "Persona history" });
     const named = await createTest(author, {
+      suiteId: suite.id,
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -998,18 +993,15 @@ describe("archiving a persona", () => {
     expect(archived.statusCode).toBe(200);
   });
 
-  it("is not blocked by an archived test, whose current version still names them", async () => {
-    api = await createApi("personas_archived_test_does_not_block");
+  it("is not blocked by a deleted test, whose current version still names them", async () => {
+    api = await createApi("personas_deleted_test_does_not_block");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const author = contextFor(ada, "member");
     const leaving = await createPersonaThrough(ada, "Leaving Lena");
 
-    // A test always applies to at least one active agent, so a project that
-    // holds none can hold no test.
-    await createAgent(author, {
-      name: `Front desk ${newId("agt").slice(-6)}`,
-    });
+    const suite = await createTestSuite(author, { name: "Deleted tests" });
     const named = await createTest(author, {
+      suiteId: suite.id,
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -1028,7 +1020,7 @@ describe("archiving a persona", () => {
     expect(blocked.statusCode).toBe(409);
     expect(blocked.body.error).toBe("persona_in_use");
 
-    await archiveTest(author, named.id);
+    expect(await deleteTest(author, named.id)).toBe(true);
 
     const archived = await browse(
       "POST",
@@ -1174,12 +1166,10 @@ describe("history and usage", () => {
     );
     expect(before.body.tests).toEqual([]);
 
-    // A test always applies to at least one active agent, so a project that
-    // holds none can hold no test.
-    await createAgent(contextFor(ada, "member"), {
-      name: `Front desk ${newId("agt").slice(-6)}`,
-    });
-    const named = await createTest(contextFor(ada, "member"), {
+    const author = contextFor(ada, "member");
+    const suite = await createTestSuite(author, { name: "Usage" });
+    const named = await createTest(author, {
+      suiteId: suite.id,
       name: "Reschedules a booked appointment",
       scenario: "Their Thursday cleaning has to move to next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],

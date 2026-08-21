@@ -10,8 +10,10 @@ import { organizationOperations } from "./operations/organization.ts";
 import { personaOperations } from "./operations/personas.ts";
 import { projectOperations } from "./operations/projects.ts";
 import { recordingOperations } from "./operations/recordings.ts";
+import { repositoryOperations } from "./operations/repository.ts";
 import { runOperations } from "./operations/runs.ts";
 import { simulationOperations } from "./operations/simulations.ts";
+import { testSuiteOperations } from "./operations/test-suites.ts";
 import { testOperations } from "./operations/tests.ts";
 import { traceReadOperations } from "./operations/trace-reads.ts";
 
@@ -35,8 +37,10 @@ export { organizationOperations } from "./operations/organization.ts";
 export { personaOperations } from "./operations/personas.ts";
 export { projectOperations } from "./operations/projects.ts";
 export { recordingOperations } from "./operations/recordings.ts";
+export { repositoryOperations } from "./operations/repository.ts";
 export { runOperations } from "./operations/runs.ts";
 export { simulationOperations } from "./operations/simulations.ts";
+export { testSuiteOperations } from "./operations/test-suites.ts";
 export { testOperations } from "./operations/tests.ts";
 export { traceReadOperations } from "./operations/trace-reads.ts";
 
@@ -52,8 +56,10 @@ export const platformOperations = {
   ...personaOperations,
   ...projectOperations,
   ...recordingOperations,
+  ...repositoryOperations,
   ...runOperations,
   ...simulationOperations,
+  ...testSuiteOperations,
   ...testOperations,
   ...traceReadOperations,
 } as const satisfies PlatformOperationMap;

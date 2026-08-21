@@ -5,15 +5,14 @@ import { eq } from "drizzle-orm";
 
 import { connect, disconnect, db } from "../client.ts";
 import {
-  cloneTest,
   createTest,
-  archiveTest,
+  deleteTest,
   editTest,
   getTest,
   getTestVersion,
   listTests,
-  restoreTest,
 } from "../access/tests.ts";
+import { createTestSuite } from "../access/suites.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
 import { seedGraderLibrary } from "../access/grader-library.ts";
@@ -39,7 +38,6 @@ import { organization, user } from "../schema/index.ts";
  *   node packages/db/dist/scripts/test.js edit tst_… --scenario "…"
  *   node packages/db/dist/scripts/test.js get-version tstv_…
  *   node packages/db/dist/scripts/test.js list [--limit 50] [--cursor tst_…]
- *   node packages/db/dist/scripts/test.js clone tst_…
  *   node packages/db/dist/scripts/test.js delete tst_…
  *
  * Naming no persona takes the project's default, which provisioning
@@ -103,17 +101,16 @@ function usage(): never {
   console.error(
     [
       "usage:",
-      "  test.js create --name <name> --scenario <text>",
+      "  test.js create --suite <ste_id> --name <name> --scenario <text>",
       "    --behavior <text> [--behavior <text> …]",
       "    [--description <text>] [--persona <prs_id> …]",
       "  test.js get <tst_id>",
       "  test.js edit <tst_id> [--name <name>] [--description <text>]",
       "    [--scenario <text>] [--behavior <text> …] [--persona <prs_id> …]",
       "  test.js get-version <tstv_id>",
-      "  test.js list [--limit <n>] [--cursor <tst_id>]",
-      "  test.js clone <tst_id>",
-      "  test.js archive <tst_id>",
-      "  test.js restore <tst_id> [--agent <agt_id> …]",
+      "  test.js list <ste_id> [--limit <n>] [--cursor <tst_id>]",
+      "  test.js delete <tst_id>",
+      "  test.js create-suite --name <name>",
     ].join("\n"),
   );
   process.exit(1);
@@ -152,6 +149,7 @@ async function main(): Promise<void> {
       args: rest,
       options: {
         name: { type: "string" },
+        suite: { type: "string" },
         description: { type: "string" },
         scenario: { type: "string" },
         // Repeatable, and the order they are given is the order they are kept.
@@ -159,9 +157,14 @@ async function main(): Promise<void> {
         "persona": { type: "string", multiple: true },
       },
     });
-    if (values.name === undefined || values.scenario === undefined) usage();
+    if (
+      values.name === undefined ||
+      values.scenario === undefined ||
+      values.suite === undefined
+    ) usage();
 
     const created = await createTest(auth, {
+      suiteId: values.suite,
       name: values.name,
       description: values.description,
       scenario: values.scenario,
@@ -211,36 +214,30 @@ async function main(): Promise<void> {
     }
     console.log(JSON.stringify(found, null, 2));
   } else if (command === "list") {
+    const [suiteId, ...flags] = rest;
+    if (suiteId === undefined) usage();
     const { values } = parseArgs({
-      args: rest,
+      args: flags,
       options: {
         limit: { type: "string" },
         cursor: { type: "string" },
       },
     });
-    const page = await listTests(auth, {
+    const page = await listTests(auth, suiteId, {
       limit: values.limit === undefined ? undefined : Number(values.limit),
       cursor: values.cursor,
     });
     console.log(JSON.stringify(page, null, 2));
-  } else if (command === "clone") {
+  } else if (command === "delete") {
     const id = requiredId(rest);
-    printTest(id, await cloneTest(auth, id));
-  } else if (command === "archive") {
-    const id = requiredId(rest);
-    printTest(id, await archiveTest(auth, id));
-  } else if (command === "restore") {
-    const id = requiredId(rest);
+    console.log(JSON.stringify({ deleted: await deleteTest(auth, id) }, null, 2));
+  } else if (command === "create-suite") {
     const { values } = parseArgs({
-      args: rest.slice(1),
-      options: { agent: { type: "string", multiple: true } },
+      args: rest,
+      options: { name: { type: "string" } },
     });
-    printTest(
-      id,
-      await restoreTest(auth, id, {
-        ...(values.agent === undefined ? {} : { agentIds: values.agent }),
-      }),
-    );
+    if (values.name === undefined) usage();
+    console.log(JSON.stringify(await createTestSuite(auth, { name: values.name }), null, 2));
   } else {
     usage();
   }

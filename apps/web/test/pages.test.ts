@@ -73,7 +73,6 @@ describe("the names the signup form offers", () => {
     expect(DEFAULT_PROJECT_NAME).toBe(API_DEFAULT_PROJECT_NAME);
   });
 });
-
 /** Every source file under the web application, excluding what it did not write. */
 async function pageSources(): Promise<readonly [string, string][]> {
   const found: [string, string][] = [];

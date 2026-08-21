@@ -33,7 +33,6 @@ export type InitCommandOptions = FolderCommandOptions & {
   readonly names: {
     readonly agent: string | null;
     readonly connection: string | null;
-    readonly suite: string | null;
   };
   /** The platform URL to commit, or `null` when the command named none. */
   readonly binding: PlatformBinding | null;
@@ -46,9 +45,9 @@ function named(name: string | null): NamedThing | null {
 export async function runInitCommand(options: InitCommandOptions): Promise<number> {
   const config: FolderConfig = {
     platform: options.binding,
+    project: null,
     agent: named(options.names.agent),
     connection: named(options.names.connection),
-    suite: named(options.names.suite),
   };
 
   // Which egma this command talked to, first and in the shape every other verb
@@ -87,7 +86,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
   // reports is what a teammate cloning the repository will get, not what this
   // one run happened to be handed.
   if (committed.platform !== null) options.out(`platform: ${committed.platform.origin}`);
-  for (const key of ["agent", "connection", "suite"] as const) {
+  for (const key of ["project", "agent", "connection"] as const) {
     const thing = committed[key];
     if (thing !== null) options.out(`${key}: ${thing.name}${thing.id === null ? "" : ` ${thing.id}`}`);
   }

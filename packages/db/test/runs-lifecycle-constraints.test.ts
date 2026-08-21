@@ -24,10 +24,19 @@ import {
 let database: MigratedDatabase;
 let db: SingleConnection;
 
-const acme = { organization: newId("org"), project: newId("prj") };
+const acme = {
+  organization: newId("org"),
+  project: newId("prj"),
+  suite: newId("ste"),
+};
 /** A second project of Acme's, so a cross-project pairing has a real target. */
 const outbound = newId("prj");
-const globex = { organization: newId("org"), project: newId("prj") };
+const outboundSuite = newId("ste");
+const globex = {
+  organization: newId("org"),
+  project: newId("prj"),
+  suite: newId("ste"),
+};
 
 const agentId = newId("agt");
 const connectionId = newId("con");
@@ -60,6 +69,17 @@ async function seedTenancy(): Promise<void> {
     await db.sql(
       "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $3, $4)",
       [project, organization, slug, newId("rev")],
+    );
+  }
+  for (const [suite, organization, project] of [
+    [acme.suite, acme.organization, acme.project],
+    [outboundSuite, acme.organization, outbound],
+    [globex.suite, globex.organization, globex.project],
+  ] as const) {
+    await db.sql(
+      `insert into test_suite (id, organization_id, project_id, name)
+       values ($1, $2, $3, 'Regression')`,
+      [suite, organization, project],
     );
   }
 }
@@ -118,13 +138,14 @@ async function seedTest(
   organization: string,
   project: string,
 ): Promise<void> {
+  const suite = project === acme.project ? acme.suite : globex.suite;
   // The current-version pointer is deferred here too, for the same reason.
   await db.sql("begin");
   await db.sql(
-    `insert into test (id, organization_id, project_id, name, current_version_id,
-                       revision, applicability_revision)
-     values ($1, $2, $3, 'Reschedules a booked appointment', $4, $5, $6)`,
-    [id, organization, project, version, newId("rev"), newId("rev")],
+    `insert into test
+       (id, organization_id, project_id, suite_id, name, current_version_id, revision)
+     values ($1, $2, $3, $4, 'Reschedules a booked appointment', $5, $6)`,
+    [id, organization, project, suite, version, newId("rev")],
   );
   await db.sql(
     `insert into test_version (id, test_id, version, content)
@@ -142,12 +163,11 @@ async function insertRun(overrides: RunOverrides = {}): Promise<string> {
     id: newId("run"),
     organization_id: acme.organization,
     project_id: acme.project,
+    suite_id: acme.suite,
     agent_id: agentId,
     connection_id: connectionId,
     status: "pending",
     triggered_via: "manual",
-    pinned_test_versions: JSON.stringify({ testVersionIds: [testVersionId] }),
-    requested_personas: JSON.stringify({ personaIds: [personaId] }),
     connection_snapshot: JSON.stringify({
       agentPlatform: "retell",
       connectionKind: "retell_chat_api",
@@ -594,21 +614,21 @@ describe("what a simulation cannot name", () => {
     );
   });
 
-  it("half a test pin: an identity without a version, or a version without one", async () => {
+  it("requires both parts of every test pin", async () => {
     await expect(
       insertSimulation("queued", { test_id: testId, test_version_id: null }),
     ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+      (error) => errorCodeOf(error) === "23502",
     );
 
     await expect(
       insertSimulation("queued", { test_id: null, test_version_id: testVersionId }),
     ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+      (error) => errorCodeOf(error) === "23502",
     );
   });
 
-  it("still writes the pin that is real, and the empty pin an upgraded instance holds", async () => {
+  it("writes the required pin and refuses a testless row", async () => {
     await expect(
       insertSimulation("queued", {
         test_id: testId,
@@ -618,7 +638,9 @@ describe("what a simulation cannot name", () => {
 
     await expect(
       insertSimulation("queued", { test_id: null, test_version_id: null }),
-    ).resolves.toBeDefined();
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === "23502",
+    );
   });
 });
 
@@ -647,7 +669,6 @@ describe("the run header", () => {
       completed_count: 0,
       failed_count: 0,
       canceled_count: 1,
-      skipped_count: 0,
     });
 
     await expect(

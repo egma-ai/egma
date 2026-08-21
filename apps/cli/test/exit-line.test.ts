@@ -354,7 +354,7 @@ describe("the exit line", () => {
     expect(lines[1]).toBe("");
     expect(lines.slice(2)).toEqual([...MOVE_TO_ANOTHER_PLATFORM]);
     // One line each, which is what "one plain block of lines" means.
-    expect(lines.filter((line) => line.startsWith("  - "))).toHaveLength(5);
+    expect(lines.filter((line) => line.startsWith("  - "))).toHaveLength(6);
 
     // And a reason that is one paragraph is still one line, however it wrapped.
     expect(

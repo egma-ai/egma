@@ -97,6 +97,7 @@ afterEach(async () => {
 function fileFor(name: string): string {
   return [
     "---",
+    "format: 4",
     `name: ${name}`,
     "---",
     "## Scenario",
@@ -110,7 +111,7 @@ function fileFor(name: string): string {
 function writes(name: string): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
-    { kind: "write-file", path: `egma/tests/${name}.md`, content: fileFor(name) },
+    { kind: "write-file", path: `egma/tests/generated/${name}.md`, content: fileFor(name) },
     { kind: "say", text: `egma:wrote ${name}\n` },
   ];
 }
@@ -245,10 +246,11 @@ describe("the run screen", () => {
   });
 
   /**
-   * The glossary rule, on the screen a developer actually reads: four verdicts,
-   * four words. A test egma could not run is never drawn as a test that failed.
+   * The execution states, on the screen a developer actually reads. A
+   * simulation that stopped is not drawn as one that failed, and an execution
+   * failure is not counted as a failed grader verdict.
    */
-  it("draws skipped and errored as themselves, never as failed", async () => {
+  it("draws each supported terminal execution state without inventing a failed verdict", async () => {
     const run = await toTheRun();
     await showing(run, "run run_");
 
@@ -257,29 +259,26 @@ describe("the run screen", () => {
     platform.running.advance({
       simulation: TESTS[0],
       status: "completed",
-      verdict: "skipped",
-      reason: "this test needs DTMF, and this connection has none",
     });
     platform.running.advance({ simulation: TESTS[1], status: "claimed" });
     platform.running.advance({
       simulation: TESTS[1],
       status: "failed",
-      verdict: "errored",
       reason: "the agent never joined",
     });
+    platform.running.advance({ simulation: TESTS[2], status: "canceled" });
 
     const screen = await showing(
       run,
-      `◼ ${TESTS[0]}`,
-      "skipped",
-      `◼ ${TESTS[1]}`,
-      "errored",
-      "skipped 1",
-      "errored 1",
+      TESTS[0],
+      "done",
+      TESTS[1],
+      "did not run",
+      TESTS[2],
+      "stopped",
     );
     expect(screen).toContain("failed 0");
-    // The first verdict is the first one that landed, whatever it was.
-    expect(screen).toContain(`✓ First verdict: ${TESTS[0]} skipped`);
+    expect(screen).toContain("waiting 3");
   });
 });
 

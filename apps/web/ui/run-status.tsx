@@ -1,15 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import type { ReactNode } from "react";
-import { listRuns } from "@egma/platform-api/client";
 
-import { platformAnswer, platformClient } from "../lib/platform-client.ts";
-import { projectPath } from "../lib/project-context.ts";
 import {
   type GradingWord,
-  type RunHistoryPage,
-  type RunRow,
   type RunStatusWord,
   type SimulationStatusWord,
   type VerdictCounts,
@@ -18,14 +12,8 @@ import {
 import type { VariantProps } from "class-variance-authority";
 
 import { Badge, badgeVariants } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { DataTable, type Column } from "./data-table.tsx";
-import { Empty, Failure, Loading } from "./page-state.tsx";
-import { RelativeInstant, useMinuteClock } from "./relative-time.tsx";
-import { useProjectRead } from "./resource.ts";
-import { Section } from "./section.tsx";
 
 /**
  * The parts every surface that shows a run is built from — and the reason they
@@ -183,9 +171,8 @@ export function RunStatus({
  * One simulation's machinery.
  *
  * `failed` is the only `bad` one, and it is bad about **egma** rather than about
- * the agent: it means the simulation could not be conducted. `skipped` is a
- * simulation egma declined to conduct at all, and `canceled` one that was
- * stopped; neither says anything about the agent, and neither is ever red.
+ * the agent: it means the simulation could not be conducted. A canceled
+ * simulation was stopped; it says nothing about the agent and is never red.
  */
 const SIMULATION_STATUS_TONE: Readonly<
   Record<SimulationStatusWord, StateTone>
@@ -196,7 +183,6 @@ const SIMULATION_STATUS_TONE: Readonly<
   completed: "neutral",
   failed: "failure",
   canceled: "warning",
-  skipped: "warning",
 };
 
 const SIMULATION_STATUS_MEANING: Readonly<
@@ -210,8 +196,6 @@ const SIMULATION_STATUS_MEANING: Readonly<
   failed:
     "Egma could not conduct this simulation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.",
   canceled: "This simulation was stopped before it finished.",
-  skipped:
-    "Egma never conducted this simulation, because the test required something this connection could not be shown to do. Nothing about the agent is being said.",
 };
 
 const SIMULATION_STATUS_MARK: Readonly<
@@ -223,7 +207,6 @@ const SIMULATION_STATUS_MARK: Readonly<
   completed: "complete",
   failed: "failed",
   canceled: "stopped",
-  skipped: "skipped",
 };
 
 export function SimulationStatus({
@@ -593,119 +576,4 @@ export function VerdictTally({ counts }: { readonly counts: VerdictCounts | null
 /** A score between nought and one, or an honest dash where there is none. */
 export function shownScore(score: number | null): string {
   return score === null ? "—" : String(Math.round(score * 1000) / 1000);
-}
-
-/**
- * The last few runs of one agent or one test, and a way through to each.
- *
- * **One component for both pages, because it is one question**: what has this
- * been run against lately, and how did it go. Written twice it would be two
- * chances to fold a machinery word into a verdict, and the second copy is always
- * the one that drifts.
- *
- * It narrows on the server, in the address, and never in the browser: a filter
- * applied to what came back would answer differently depending on how much had
- * already been fetched, and there is no page here to fetch more of — this is
- * deliberately the newest handful with a way through to the whole history.
- */
-export function RecentRuns({
-  projectId,
-  title,
-  lead,
-  filters,
-  limit = 5,
-}: {
-  readonly projectId: string;
-  readonly title: string;
-  readonly lead: string;
-  /** Which runs these are: one agent's, or one test's. */
-  readonly filters: {
-    readonly agentId?: string;
-    readonly connectionId?: string;
-    readonly testId?: string;
-    readonly status?: RunStatusWord;
-    readonly verdict?: VerdictWord;
-    readonly since?: string;
-  };
-  readonly limit?: number;
-}) {
-  const now = useMinuteClock();
-  const requestKey = JSON.stringify({ filters, limit });
-  const { answer, reload } = useProjectRead<RunHistoryPage>(
-    (projectId) =>
-      platformAnswer(
-        listRuns(
-          { projectId, ...filters, pageSize: limit },
-          { client: platformClient },
-        ),
-      ),
-    projectId,
-    requestKey,
-  );
-
-  const columns: readonly Column<RunRow>[] = [
-    {
-      key: "run",
-      header: "Run",
-      primary: true,
-      cell: (run) => (
-        <Link href={projectPath(projectId, "runs", run.id)}>
-          {run.label ?? <RelativeInstant instant={run.createdAt} now={now} />}
-        </Link>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      width: "110px",
-      cell: (run) => <RunStatus status={run.status} />,
-    },
-    {
-      key: "simulations",
-      header: "Simulations",
-      hideOnMobile: true,
-      width: "200px",
-      cell: (run) => <SimulationTally counts={run.simulationCounts} />,
-    },
-    {
-      key: "verdict",
-      header: "Verdict",
-      width: "130px",
-      cell: (run) => <VerdictBadge verdict={run.verdict} />,
-    },
-  ];
-
-  return (
-    <Section
-      title={title}
-      lead={lead}
-      action={
-        <Button asChild variant="secondary">
-          <Link href={projectPath(projectId, "runs")}>All runs</Link>
-        </Button>
-      }
-    >
-      {answer === null || answer.status === "signed-out" ? (
-        <Loading what="recent runs" />
-      ) : answer.status === "ready" ? (
-        answer.value.runs.length === 0 ? (
-          <Empty
-            title="Nothing has been run here yet"
-            lead="Create a run and its results appear here, with a link to each one."
-          />
-        ) : (
-          <DataTable
-            label={title}
-            columns={columns}
-            rows={answer.value.runs}
-            keyOf={(run) => run.id}
-            stretchPrimaryLink
-            stackWhenConstrained
-          />
-        )
-      ) : (
-        <Failure message={answer.refusal.message} onRetry={reload} />
-      )}
-    </Section>
-  );
 }

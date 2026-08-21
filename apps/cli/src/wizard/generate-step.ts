@@ -17,43 +17,36 @@
  * developer scans is built from the files that are really there — which is why
  * a coding agent that says it wrote twelve and wrote nine puts nine on screen.
  *
- * **What runs is what was agreed to.** The push can come back with a refusal
- * egma could not see coming: the platform's own door, on a rule only the
- * platform can check. That is one test off the list the developer just read, so
- * the step does not walk on into a run over a list nobody agreed to — the list
- * goes up again with the refused file held back in the platform's own words,
- * and the same one keystroke is asked for. Pressing it a second time without
- * fixing anything is consent to leave that test out; pressing it after fixing
- * the file puts the test up with the rest.
- *
- * A UI with nobody watching opens every list itself, so `--headless` agrees to
- * the second list the moment it is drawn and goes on with what the platform
- * accepted. That is right rather than a shortcut: consent to a run with nobody
- * watching was given in the command, and what the platform refused is on the
- * output as a named line before the run begins.
+ * **What runs is the complete suite.** One invalid file or one atomic platform
+ * refusal stops the step. The wizard never treats approval as permission to
+ * omit a file, so the reviewed suite, pushed suite, and run suite are one set.
  */
 
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
+import path from "node:path";
 
 import {
   createEgmaFolder,
-  DEFAULT_SUITE_NAME,
-  readConfig,
-  readFolder,
+  readRepository,
   updateConfig,
+  writeSuiteManifest,
   type FolderPaths,
+  type FolderContents,
   type FolderTest,
+  RepositoryValidationError,
 } from "../folder/egma-folder.ts";
 import type { DrivenAgent } from "../acp/driven-agent.ts";
 import type { Registered } from "../platform/agents.ts";
+import { readProject } from "../platform/projects.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
+import { createTestSuite } from "../platform/test-suites.ts";
 import { pushTests } from "../sync/push.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import type { Facts } from "./discovery.ts";
 import { readExistingTests } from "./existing-tests.ts";
-import { destinationOf, gateFrom, type HeldBack } from "./gate.ts";
+import { destinationOf, gateFrom } from "./gate.ts";
 import { MarkerStream, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReasonOf, stopReport, untilAborted } from "./stop.ts";
@@ -69,16 +62,14 @@ import {
  * How the step ended, and what it left behind for the step after it.
  *
  * The versions are here rather than read back off the disk because they are
- * the exact set the developer agreed to at the gate and the exact set the push
- * put on egma. A file that was held back at the gate is still in the folder,
- * and a run that re-read the folder would try to pin it.
+ * the exact complete set the developer agreed to and the atomic push put on
+ * Egma. Any invalid file stops before this set exists.
  */
 export type GenerateOutcome = {
   readonly report: ExitReport;
-  /** What the push put on egma, by version id. Empty when nothing was pushed. */
-  readonly pushed: readonly string[];
-  /** What this folder's suite is called. */
-  readonly suite: string;
+  /** Exact test/version precondition from the complete repository push. */
+  readonly pushed: readonly { readonly testId: string; readonly versionId: string }[];
+  readonly suite: { readonly id: string; readonly name: string; readonly directory: string };
 };
 
 /**
@@ -125,11 +116,11 @@ export type GenerateStepOptions = {
 async function stoppedHere(
   signal: AbortSignal,
   drivenAgentName: string,
-  paths: FolderPaths,
+  suiteRoot: string,
 ): Promise<ExitReport> {
   const report = stopReport(signal, drivenAgentName);
   if (report.kind !== "interrupted") return report;
-  const kept = (await namesInFolder(paths)).length;
+  const kept = (await namesInFolder(suiteRoot)).length;
   return kept === 0 ? report : { ...report, testsKept: kept };
 }
 
@@ -144,6 +135,7 @@ async function stoppedHere(
 async function writeFiles(
   options: GenerateStepOptions,
   paths: FolderPaths,
+  suiteRoot: string,
   what: "converting" | "generating",
   instructions: string,
   goal: number,
@@ -169,11 +161,11 @@ async function writeFiles(
    * Only files that were not already there count. A run that converted the
    * developer's own material first would otherwise count that work twice.
    */
-  const alreadyThere = await namesInFolder(paths);
+  const alreadyThere = await namesInFolder(suiteRoot);
   const seen = new Set(alreadyThere);
   const look = async (): Promise<void> => {
     let moved = false;
-    for (const name of await namesInFolder(paths)) {
+    for (const name of await namesInFolder(suiteRoot)) {
       if (seen.has(name)) continue;
       seen.add(name);
       tally.wrote(name);
@@ -254,7 +246,7 @@ async function writeFiles(
       );
       return null;
     case "interrupted":
-      return stoppedHere(signal, drivenAgent.name, paths);
+      return stoppedHere(signal, drivenAgent.name, suiteRoot);
     case "unreachable":
       return { kind: "no-coding-agent" };
     case "needs-login":
@@ -278,9 +270,9 @@ function namesOf(found: readonly FolderTest[]): readonly string[] {
  * them. It is asked several times a second while an agent works, and what it
  * is asked is only whether a file is there yet.
  */
-async function namesInFolder(paths: FolderPaths): Promise<readonly string[]> {
+async function namesInFolder(suiteRoot: string): Promise<readonly string[]> {
   try {
-    return (await readdir(paths.tests))
+    return (await readdir(suiteRoot))
       .filter((name) => name.endsWith(".md"))
       .map((name) => name.slice(0, -".md".length));
   } catch {
@@ -308,7 +300,13 @@ const PERSONAS_EGMA_HOLDS: readonly string[] = [];
  * committed file — except for the two things egma has just learned and it has
  * not: which agent, and which connection.
  */
-async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
+type GeneratedSuite = {
+  readonly paths: FolderPaths;
+  readonly suite: { readonly id: string; readonly name: string; readonly directory: string };
+  readonly root: string;
+};
+
+async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> {
   const agent = {
     name: options.registered.agent.name,
     id: options.registered.agent.id,
@@ -317,57 +315,102 @@ async function folderFor(options: GenerateStepOptions): Promise<FolderPaths> {
     name: options.registered.connection.name,
     id: options.registered.connection.id,
   };
+  const project = await readProject(
+    options.signedIn,
+    options.registered.agent.projectId,
+  );
+  if (project === null) {
+    throw new Error(`Egma could not read project ${options.registered.agent.projectId}.`);
+  }
 
   const folder = await createEgmaFolder({
     repository: options.cwd,
     config: {
       platform: null,
+      project: { name: project.name, id: project.id },
       agent,
       connection,
-      suite: { name: DEFAULT_SUITE_NAME, id: null },
     },
   });
   if (!folder.created) {
     await updateConfig(folder.paths.config, {
+      project: { name: project.name, id: project.id },
       agent,
       connection,
-      ...(folder.config.suite === null
-        ? { suite: { name: DEFAULT_SUITE_NAME, id: null } }
-        : {}),
     });
   }
-  return folder.paths;
+
+  const repository = await readRepository(folder.paths);
+  const used = new Set(repository.suites.map((suite) => suite.directory));
+  let directory = "generated";
+  for (let suffix = 2; used.has(directory); suffix += 1) directory = `generated-${String(suffix)}`;
+  const name = `${options.registered.agent.name} tests`;
+  const remote = await createTestSuite(
+    options.signedIn,
+    { projectId: project.id, name },
+  );
+  const root = path.join(folder.paths.tests, directory);
+  let createdRoot = false;
+  try {
+    await mkdir(root);
+    createdRoot = true;
+    await writeSuiteManifest(path.join(root, "suite.yaml"), {
+      id: remote.id,
+      name: remote.name,
+    });
+  } catch (cause) {
+    if (createdRoot) {
+      await rm(root, { recursive: true, force: true }).catch(() => undefined);
+    }
+    throw new Error(
+      `Egma created suite ${remote.id}, but the wizard could not write egma/tests/${directory}/suite.yaml. Pull to recover it. ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+  // Parse the complete repository again before any coding agent can write.
+  await readRepository(folder.paths);
+  return {
+    paths: folder.paths,
+    root,
+    suite: { id: remote.id, name: remote.name, directory },
+  };
 }
 
-/** What the folder's config calls this suite, whoever named it. */
-async function suiteNameIn(paths: FolderPaths): Promise<string> {
+async function contentsFor(paths: FolderPaths, suiteId: string): Promise<FolderContents> {
   try {
-    return (await readConfig(paths.config)).suite?.name ?? DEFAULT_SUITE_NAME;
-  } catch {
-    return DEFAULT_SUITE_NAME;
+    const repository = await readRepository(paths);
+    const suite = repository.suites.find((entry) => entry.manifest.id === suiteId);
+    return { found: suite?.tests ?? [], unreadable: [] };
+  } catch (cause) {
+    if (!(cause instanceof RepositoryValidationError)) throw cause;
+    // A complete repository parse has no partial success. Give the gate the
+    // named problems, but no valid subset, so one bad file cannot turn the
+    // developer's approval into permission to push fewer tests.
+    return {
+      found: [],
+      unreadable: cause.issues.map((issue) => {
+        const [named = issue, ...detail] = issue.split(": ");
+        const shown = named.startsWith("egma/") ? named : "egma";
+        return {
+          shown,
+          file: path.join(paths.root, ...shown.split("/").slice(1)),
+          reason: detail.join(": ") || issue,
+        };
+      }),
+    };
   }
 }
 
-/** The push, and what the wizard has to work with afterwards. */
-type Pushed = Omit<GenerateOutcome, "suite"> & {
-  /**
-   * What the platform's own door turned away, for the list to carry back.
-   *
-   * Which refusal is the door's is read off the push and never off the words:
-   * the door's sentence is the door's, and a wizard that recognised it by its
-   * wording would walk past the day the platform said it differently.
-   */
-  readonly refused: readonly HeldBack[];
-};
+/** The complete atomic push, and what the wizard can run afterwards. */
+type Pushed = Omit<GenerateOutcome, "suite">;
 
 async function pushGate(
   options: GenerateStepOptions,
   paths: FolderPaths,
-  only: readonly string[],
+  suiteDirectory: string,
 ): Promise<Pushed> {
   const { ui } = options;
 
-  const report = await pushTests({ signedIn: options.signedIn, paths, only });
+  const report = await pushTests({ signedIn: options.signedIn, paths });
 
   for (const test of report.tests) {
     ui.pushStatus(`${ACTION_MARK} ${test.state} ${test.name}`);
@@ -376,24 +419,22 @@ async function pushGate(
   for (const turned of report.turnedAway) {
     ui.pushStatus(`${FAILURE_MARK} Egma would not take ${turned.shown}: ${turned.reason}`);
   }
-  if (report.conflicts.length > 0) {
-    const names = report.conflicts.map((conflict) => conflict.name).join(", ");
+  if (report.turnedAway.length > 0) {
     return {
       report: {
         kind: "failed",
-        reason: `Egma has a newer version of ${names}. Run egma pull, look at what changed, then egma push.`,
+        reason: "The complete suite was not pushed. Fix every file named above, then run the wizard again.",
       },
       pushed: [],
-      refused: [],
     };
   }
 
+  const selected = report.tests.filter((test) =>
+    test.shown.startsWith(`egma/tests/${suiteDirectory}/`),
+  );
   return {
-    report: { kind: "tests-pushed", count: report.tests.length },
-    pushed: report.tests.map((test) => test.versionId),
-    refused: report.turnedAway
-      .filter((turned) => turned.refusedBy === "platform")
-      .map((turned) => ({ shown: turned.shown, file: turned.file, reason: turned.reason })),
+    report: { kind: "tests-pushed", count: selected.length },
+    pushed: selected.map((test) => ({ testId: test.testId, versionId: test.versionId })),
   };
 }
 
@@ -405,9 +446,9 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   const { ui, cwd, signal } = options;
   const howMany = options.howMany ?? DEFAULT_TEST_COUNT;
 
-  const paths = await folderFor(options);
-  ui.pushStatus(`${ACTION_MARK} Your tests live in ${paths.tests}`);
-  const suite = await suiteNameIn(paths);
+  const generated = await folderFor(options);
+  const { paths, suite } = generated;
+  ui.pushStatus(`${ACTION_MARK} Your tests live in ${generated.root}`);
   /** Any ending that pushed nothing, which is every ending but the last one. */
   const ending = (report: ExitReport): GenerateOutcome => ({ report, pushed: [], suite });
 
@@ -416,7 +457,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   // with the signal and not only with a keystroke.
   const said = await untilAborted(ui.waitForAnswer("existing-tests"), signal);
   if (signal.aborted) {
-    return ending(await stoppedHere(signal, options.drivenAgent.name, paths));
+    return ending(await stoppedHere(signal, options.drivenAgent.name, generated.root));
   }
 
   const existing = await readExistingTests(cwd, said ?? null);
@@ -431,12 +472,14 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     const halted = await writeFiles(
       options,
       paths,
+      generated.root,
       "converting",
       convertInstructions({
         cwd,
+        suiteDirectory: suite.directory,
         shown: existing.shown,
         content: existing.content,
-        taken: namesOf((await readFolder(paths)).found),
+        taken: namesOf((await contentsFor(paths, suite.id)).found),
         personas: PERSONAS_EGMA_HOLDS,
       }),
       // Nobody knows how many rows are in there, least of all egma, so the
@@ -446,7 +489,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     if (halted !== null) return ending(halted);
   }
 
-  const converted = (await readFolder(paths)).found;
+  const converted = (await contentsFor(paths, suite.id)).found;
   const missing = Math.max(howMany - converted.length, 0);
   if (missing === 0) {
     ui.pushStatus(
@@ -455,6 +498,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   } else {
     const context: GenerationContext = {
       cwd,
+      suiteDirectory: suite.directory,
       facts: options.facts,
       prompt: options.source.prompt,
       toolCount: options.source.toolCount,
@@ -465,6 +509,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     const halted = await writeFiles(
       options,
       paths,
+      generated.root,
       "generating",
       generateInstructions(context, missing),
       missing,
@@ -478,82 +523,42 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     productLabel: options.registered.connection.productLabel,
     modality: options.registered.connection.modality,
     destination: destinationOf(options.registered.connection),
-    suite,
+    suite: suite.name,
   };
 
-  /** What the platform's door turned away from the push the last key agreed to. */
-  let refused: readonly HeldBack[] = [];
-  /** Every file a keystroke has already agreed to go without. */
-  const agreedToGoWithout = new Set<string>();
-  /** Said once, however many times the list goes up. */
-  const alreadySaid = new Set<string>();
-
-  for (;;) {
-    // What is really on disk, whatever anybody said about it, and what the
-    // platform said about the files it was handed.
-    const folder = await readFolder(paths);
-    const gate = gateFrom(folder, about, refused);
-
-    for (const held of gate.heldBack) {
-      const line = `${FAILURE_MARK} ${held.shown} was not pushed: ${held.reason}`;
-      if (alreadySaid.has(line)) continue;
-      alreadySaid.add(line);
-      ui.pushStatus(line);
-    }
-
-    // Nothing to put on a list and nothing the platform has refused: the coding
-    // agent wrote nothing egma can use, which is a different ending from the
-    // platform refusing what it wrote.
-    if (gate.rows.length === 0 && refused.length === 0) {
-      return ending({
-        kind: "failed",
-        reason: `${options.drivenAgent.name} wrote no test Egma could use. What it printed is in ${options.log.file}.`,
-      });
-    }
-
-    if (gate.rows.length > 0) options.onReviewReady?.(gate.rows.length);
-    ui.setGate(gate);
-    await untilAborted(ui.waitForGate("run-tests"), signal);
-    ui.setGate(null);
-
-    if (signal.aborted) {
-      // Closing the wizard here is a decision and not a failure: nothing is
-      // running, the files are written, and they are the developer's. So Ctrl-C
-      // and `q` leave the same line about where the files are — an interruption
-      // here shut no coding agent down and stopped no task, and saying it did
-      // would be egma telling a story about itself rather than about the run.
-      return ending({
-        kind: "tests-kept",
-        count: gate.rows.length,
-        stopped: stopReasonOf(signal) !== "quit",
-      });
-    }
-
-    // The keystroke was over this list, held-back files and all. Every one of
-    // them is now a file the developer has agreed to go without, which is what
-    // makes leaving it out of the run consented rather than quiet — and what
-    // stops the same refusal sending them back to the same list forever.
-    for (const held of gate.heldBack) agreedToGoWithout.add(held.file);
-
-    const pushed = await pushGate(options, paths, [
-      ...gate.rows.map((row) => row.file),
-      // What the door refused before goes up again. The developer may have
-      // fixed it at this very list — `e` opens it — and the only way to find
-      // out is to knock. A file it refuses again is refused with the same
-      // sentence, which was on the list this keystroke agreed to.
-      ...refused.map((held) => held.file),
-    ]);
-
-    const unagreed = pushed.refused.filter((held) => !agreedToGoWithout.has(held.file));
-    if (unagreed.length === 0) {
-      if (pushed.pushed.length > 0) options.onReviewApproved?.(pushed.pushed.length);
-      return { report: pushed.report, pushed: pushed.pushed, suite };
-    }
-
-    // The platform refused something nobody agreed to go without, so the list
-    // that would run is not the list the keystroke was over. Round it goes
-    // again, carrying what the platform said, and nothing runs until a key has
-    // been pressed over the real list.
-    refused = pushed.refused;
+  const gate = gateFrom(await contentsFor(paths, suite.id), about);
+  for (const held of gate.heldBack) {
+    ui.pushStatus(`${FAILURE_MARK} ${held.shown} was not pushed: ${held.reason}`);
   }
+  if (gate.rows.length === 0 && gate.heldBack.length === 0) {
+    return ending({
+      kind: "failed",
+      reason: `${options.drivenAgent.name} wrote no test Egma could use. What it printed is in ${options.log.file}.`,
+    });
+  }
+
+  if (gate.rows.length > 0) options.onReviewReady?.(gate.rows.length);
+  ui.setGate(gate);
+  await untilAborted(ui.waitForGate("run-tests"), signal);
+  ui.setGate(null);
+  if (signal.aborted) {
+    return ending({
+      kind: "tests-kept",
+      count: gate.rows.length,
+      stopped: stopReasonOf(signal) !== "quit",
+    });
+  }
+
+  // Re-read the complete repository after the editor returns. Approval never
+  // means permission to omit a held-back file.
+  const approved = gateFrom(await contentsFor(paths, suite.id), about);
+  if (approved.heldBack.length > 0) {
+    return ending({
+      kind: "failed",
+      reason: `The complete suite was not pushed. Fix ${approved.heldBack.map((held) => held.shown).join(", ")}, then run the wizard again.`,
+    });
+  }
+  const pushed = await pushGate(options, paths, suite.directory);
+  if (pushed.pushed.length > 0) options.onReviewApproved?.(pushed.pushed.length);
+  return { report: pushed.report, pushed: pushed.pushed, suite };
 }

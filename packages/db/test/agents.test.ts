@@ -311,56 +311,6 @@ describe("the database itself", () => {
     await expect(staging(newId("con"))).resolves.toBeDefined();
   });
 
-  /**
-   * The state and its evidence are one fact or the row is refused. Half a
-   * measurement — a time with nothing measured, or keys with no time on them —
-   * reads as evidence and is not, and the state is what a run's skip reason is
-   * decided from.
-   */
-  it("refuses a capability record that is half a measurement", async () => {
-    const measured = await createAgent(actingAsAcme(), { name: "Measured" });
-
-    const halfKnown = (
-      state: string,
-      supported: string | null,
-      checkedAt: string | null,
-      source: string | null,
-    ) =>
-      database.sql(
-        `insert into connection
-           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision,
-            capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source)
-         values ($1, $2, $3, $4, $5, 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001',
-            $6, $7, $7, $8, $9)`,
-        [
-          newId("con"),
-          acme.organization,
-          acme.project,
-          measured.id,
-          `half-${state}-${String(supported)}-${String(checkedAt)}`,
-          state,
-          supported,
-          checkedAt,
-          source,
-        ],
-      );
-
-    // Known, with nothing to show for it.
-    await expect(halfKnown("known", null, null, null)).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-    // Known, measured, but with no time on the measurement.
-    await expect(
-      halfKnown("known", '["dtmf"]', null, "retell adapter"),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-    // Unknown, carrying evidence it cannot have.
-    await expect(
-      halfKnown("unknown", '["dtmf"]', "now()", "retell adapter"),
-    ).rejects.toSatisfy((error) => errorCodeOf(error) !== undefined);
-  });
-
   it("carries UNIQUE (id, agent_id) on connection — the future run table's composite-FK target", async () => {
     const { rows } = await database.sql<{ definition: string }>(
       `select pg_get_constraintdef(oid) as definition
@@ -368,34 +318,5 @@ describe("the database itself", () => {
         where conname = 'connection_id_agent_id_unique'`,
     );
     expect(rows[0]?.definition).toBe("UNIQUE (id, agent_id)");
-  });
-});
-
-/**
- * A capability record that says a key is supported without saying it was
- * looked at.
- *
- * The database refuses it, because the three answers this record gives are
- * built from the pair: `unsupported` means measured and absent, and
- * `not_measured` means nobody asked. A supported key outside the measured set
- * is evidence with no observation under it, and it would make the two lists
- * disagree about what actually happened.
- */
-describe("a capability found without being measured", () => {
-  it("is refused by the database, not only by the access layer", async () => {
-    const held = await createAgent(actingAsAcme(), { name: "Half Measured" });
-
-    await expect(
-      database.sql(
-        `insert into connection
-           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision,
-            capability_state, capabilities_measured, capabilities_supported, capabilities_checked_at, capability_source)
-         values ($1, $2, $3, $4, 'impossible', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001',
-            'known', '["raw_audio"]', '["dtmf"]', now(), 'confused adapter')`,
-        [newId("con"), acme.organization, acme.project, held.id],
-      ),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
   });
 });

@@ -21,9 +21,8 @@ command is needed. Use this skill for the stable workflow around the commands.
 
 ## Read the repository state
 
-Read `egma/config.yaml` before acting. It names the **agent** under test, the
-**connection** Egma uses to reach it, and the **test suite** represented by this
-folder.
+Read `egma/config.yaml` before acting. It names the **project**, **agent** under
+test, and **connection** Egma uses to reach it. Suites live below `egma/tests/`.
 
 The folder has this shape:
 
@@ -31,7 +30,10 @@ The folder has this shape:
 egma/
   config.yaml     what this folder points at — names and ids
   mock-tools.md   what Egma answers for the agent's tools with
-  tests/          one markdown file per test
+  tests/
+    release/      one local directory per suite
+      suite.yaml  stable suite id and mutable display name
+      *.md        zero or more tests in this suite
 ```
 
 Everything in the folder is safe to commit. Treat fields such as `format`,
@@ -49,9 +51,11 @@ egma push
 Run `egma pull` to bring the platform's current versions into the repository.
 Run `egma push` to send reviewed local changes back.
 
-`push` refuses a stale file when the platform has moved on. Preserve the other
-person's work: pull, read the change, reconcile it in the file, and push again.
-Keep every sync pin in place during that recovery.
+`push` validates and sends the complete repository as one change. It refuses a
+stale file when the platform has moved on. Preserve the other person's work:
+pull, read the change, reconcile it in the file, and push again. Keep every sync
+pin in place during that recovery. Removing a local file does not delete its
+platform record.
 
 Egma relays platform refusals with the file and reason. Fix the named file and
 repeat the same command. Keep the refusal text intact when reporting it.
@@ -68,11 +72,13 @@ pull restores it. Edit the block when changing its answer.
 ## Start and follow a run
 
 ```sh
-egma run
+egma run <suite-directory>
 ```
 
-A **run** executes this test suite against the agent over the selected
-connection. Each test produces one **simulation** per persona.
+A **run** executes the complete suite in the named direct directory against the
+agent over the selected connection. The local suite must exactly match the
+platform before Egma starts it. Each test produces one **simulation** per
+persona.
 
 The command prints identifiers, a results address, simulation progress, and a
 summary with one count for each verdict. The summary counts simulations, not
@@ -84,7 +90,7 @@ Use `--no-follow` when the developer asks to start the run and return without
 waiting:
 
 ```sh
-egma run --no-follow
+egma run release --no-follow
 ```
 
 The run continues on Egma after the command returns.
@@ -95,8 +101,8 @@ A verdict is one of:
 
 - **`passed`** — the agent did what the test expected.
 - **`failed`** — the agent did not do what the test expected.
-- **`skipped`** — nothing was judged because the test or grader could not
-  apply.
+- **`skipped`** — nothing was judged because the grader did not apply or the
+  simulation was canceled.
 - **`errored`** — the simulation did not complete.
 
 Never report `skipped` or `errored` as `failed`. Report the count of all four.
@@ -114,8 +120,8 @@ when it exposes a real voice-agent problem.
 - If the command says the developer is not signed in, run `egma login`.
 - If no `egma/` folder exists, confirm the working directory. Run `egma init`
   only when the developer asks to onboard this repository.
-- If `egma run` reports `not-pushed` or `unknown`, run `egma push`, resolve any
-  refusal, and then start the run again.
+- If `egma run <suite-directory>` reports `not-pushed` or `unknown`, run
+  `egma push`, resolve any refusal, and then start the run again.
 - If the platform refuses a command, report its sentence as written and fix
   the named input.
 
@@ -127,8 +133,8 @@ when it exposes a real voice-agent problem.
 | `mock tool` | Egma's answer for one of that agent's tools |
 | `persona` | the synthetic person who speaks to it |
 | `test` | one authored situation plus what should happen |
-| `test suite` | a saved selection over a project's tests |
-| `run` | one execution of a selection against one agent |
+| `test suite` | a named container of tests in one project |
+| `run` | one execution of a complete suite against one agent |
 | `simulation` | one test executed once inside a run |
 | `verdict` | `passed`, `failed`, `skipped`, or `errored` |
 | `grader` | the logic that produces a verdict |

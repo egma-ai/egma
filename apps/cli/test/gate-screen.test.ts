@@ -110,6 +110,7 @@ afterEach(async () => {
 function fileFor(name: string): string {
   return [
     "---",
+    "format: 4",
     `name: ${name}`,
     "---",
     "## Scenario",
@@ -123,7 +124,7 @@ function fileFor(name: string): string {
 function writes(name: string): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
-    { kind: "write-file", path: `egma/tests/${name}.md`, content: fileFor(name) },
+    { kind: "write-file", path: `egma/tests/generated/${name}.md`, content: fileFor(name) },
     { kind: "say", text: `egma:wrote ${name}\n` },
   ];
 }
@@ -220,7 +221,9 @@ async function enterAndLeave(run: TerminalRun): Promise<void> {
 }
 
 async function testsInFolder(): Promise<string[]> {
-  return (await readdir(path.join(workspace.dir, "egma", "tests"))).sort();
+  return (await readdir(path.join(workspace.dir, "egma", "tests", "generated")))
+    .filter((name) => name.endsWith(".md"))
+    .sort();
 }
 
 describe("the files arriving", () => {
@@ -270,7 +273,7 @@ describe("the files arriving", () => {
     const list = await showing(
       run,
       "5 tests generated",
-      'suite "first-suite"',
+      'suite "order-line tests"',
       IN_ORDER[0] as string,
       "default persona",
       "more (↑↓ browse · e opens in $EDITOR)",
@@ -298,7 +301,7 @@ describe("the files arriving", () => {
     expect(platform.tests.tests.map((test) => test.name).sort()).toEqual([...TESTS].sort());
     for (const name of TESTS) {
       const held = await readFile(
-        path.join(workspace.dir, "egma", "tests", `${name}.md`),
+        path.join(workspace.dir, "egma", "tests", "generated", `${name}.md`),
         "utf8",
       );
       expect(held, name).toMatch(/^version: tstv_/mu);
@@ -391,13 +394,13 @@ describe("the files arriving", () => {
     const run = await toTheGate({}, [
       {
         kind: "write-file",
-        path: `egma/tests/${IN_ORDER[0] as string}.md`,
+        path: `egma/tests/generated/${IN_ORDER[0] as string}.md`,
         content: fileFor(IN_ORDER[0] as string),
       },
       { kind: "wait-for-file", path: RELEASE_FOLDER },
       ...IN_ORDER.slice(1, 3).map((name) => ({
         kind: "write-file" as const,
-        path: `egma/tests/${name}.md`,
+        path: `egma/tests/generated/${name}.md`,
         content: fileFor(name),
       })),
       { kind: "stop", reason: "end_turn" },
@@ -495,7 +498,7 @@ describe("the gate", () => {
     expect(platform.tests.tests).toHaveLength(0);
     // Nothing was pinned, because nothing was uploaded.
     const held = await readFile(
-      path.join(workspace.dir, "egma", "tests", `${TESTS[0]}.md`),
+      path.join(workspace.dir, "egma", "tests", "generated", `${TESTS[0]}.md`),
       "utf8",
     );
     expect(held).not.toContain("version:");
@@ -504,7 +507,13 @@ describe("the gate", () => {
   it("opens the selected test with editor arguments, then redraws after its alternate screen", async () => {
     const added = "2. The agent thanks the person.";
     const editor = await workspace.editor(added, { alternateScreen: true });
-    const third = path.join(workspace.dir, "egma", "tests", `${IN_ORDER[2] as string}.md`);
+    const third = path.join(
+      workspace.dir,
+      "egma",
+      "tests",
+      "generated",
+      `${IN_ORDER[2] as string}.md`,
+    );
 
     const run = await toTheGate({ EDITOR: `${editor.command} --wait` });
     await showing(run, "5 tests generated", ...GATE_HINTS);
@@ -528,7 +537,7 @@ describe("the gate", () => {
     const back = await showing(
       run,
       "5 tests generated",
-      'suite "first-suite"',
+      'suite "order-line tests"',
       IN_ORDER[0] as string,
       "Run these against order-line over retell_chat_api-1 (Retell chat, chat)?",
       ...GATE_HINTS,
@@ -575,142 +584,4 @@ describe("the gate", () => {
     expect(platform.tests.tests).toHaveLength(5);
   });
 
-  /**
-   * A file egma will not push is not a file egma hides. Both reasons it holds
-   * one back — nothing to check, and nothing it could read — are named on the
-   * same screen, beside the tests that are going up.
-   */
-  it("names the files it is holding back, and pushes the rest", async () => {
-    const unfalsifiable = [
-      "---",
-      "name: nothing-to-check",
-      "---",
-      "## Scenario",
-      "Somebody rings about nothing in particular.",
-      "## Expected behaviors",
-      "",
-    ].join("\n");
-    const broken = [
-      "---",
-      "name: half-written",
-      "personas: [somebody-in-a-hurry",
-      "---",
-      "## Scenario",
-      "Somebody rings and the file was never finished.",
-      "## Expected behaviors",
-      "1. The agent says the workshop's name.",
-      "",
-    ].join("\n");
-
-    const run = await toTheGate({}, [
-      ...writes(TESTS[0]),
-      {
-        kind: "write-file",
-        path: "egma/tests/nothing-to-check.md",
-        content: unfalsifiable,
-      },
-      { kind: "say", text: "egma:wrote nothing-to-check\n" },
-      { kind: "write-file", path: "egma/tests/half-written.md", content: broken },
-      { kind: "say", text: "egma:wrote half-written\n" },
-      { kind: "stop", reason: "end_turn" },
-    ]);
-
-    // One test on the list, and both of the others named under it with what to
-    // do about them.
-    await showing(
-      run,
-      "1 test generated",
-      "egma/tests/half-written.md",
-      "Egma could not read it",
-      "egma/tests/nothing-to-check.md",
-      "no expected behaviors",
-      ...GATE_HINTS,
-    );
-
-    await enterAndLeave(run);
-    expect(await run.exited).toBe(0);
-
-    // The good one went up; neither of the others did, and both are still on
-    // disk exactly as they were written.
-    expect(platform.tests.tests.map((test) => test.name)).toEqual([TESTS[0]]);
-    expect(await testsInFolder()).toEqual([
-      "half-written.md",
-      "nothing-to-check.md",
-      `${TESTS[0]}.md`,
-    ]);
-    const tests = path.join(workspace.dir, "egma", "tests");
-    expect(await readFile(path.join(tests, "half-written.md"), "utf8")).toBe(broken);
-    expect(await readFile(path.join(tests, "nothing-to-check.md"), "utf8")).toBe(unfalsifiable);
-  });
-
-  /**
-   * The one refusal egma cannot see coming, met on a real terminal.
-   *
-   * A file naming a persona reads perfectly well; whether egma holds a persona
-   * of that name is the platform's own business. So the refusal lands after the
-   * keystroke, and the list comes back rather than the run going ahead on a
-   * list nobody agreed to. Every key it offers still does what it says: `e`
-   * opens the file that is holding things up, and enter over the list as it now
-   * stands is consent to run without it.
-   */
-  it("puts the list back when the platform turns a test away, and keeps every key", async () => {
-    const named = [
-      "---",
-      "name: wanted-it-by-friday",
-      "personas: [in-a-hurry]",
-      "---",
-      "## Scenario",
-      "Somebody rings the order line wanting it by Friday.",
-      "## Expected behaviors",
-      "1. The agent says the workshop's name.",
-      "",
-    ].join("\n");
-    const refused = path.join(workspace.dir, "egma", "tests", "wanted-it-by-friday.md");
-    const added = "2. The agent thanks the person.";
-    const editor = await workspace.editor(added);
-
-    const run = await toTheGate({ EDITOR: editor.command }, [
-      ...writes(TESTS[0]),
-      { kind: "write-file", path: "egma/tests/wanted-it-by-friday.md", content: named },
-      { kind: "say", text: "egma:wrote wanted-it-by-friday\n" },
-      { kind: "stop", reason: "end_turn" },
-    ]);
-
-    // Both are ordinary rows: nothing on this side can tell that one of them is
-    // about to be refused.
-    await showing(run, "2 tests generated", TESTS[0], "wanted-it-by-friday", ...GATE_HINTS);
-    run.write("\r");
-
-    // The platform said no, so the list is back — one test on it, and the other
-    // named under it in the platform's own words.
-    await showing(
-      run,
-      "1 test generated",
-      "egma/tests/wanted-it-by-friday.md",
-      'Egma has no persona called "in-a-hurry"',
-      ...GATE_HINTS,
-    );
-
-    // Down onto the file that is holding things up, and `e` opens that one.
-    run.write("\u001B[B");
-    run.write("e");
-    expect(await run.waitFor(() => existsSync(editor.opened))).toBe(true);
-    expect((await readFile(editor.opened, "utf8")).trim().split("\n")).toEqual([refused]);
-
-    // The editor left the persona alone, so enter over this list is agreement
-    // to run without it — and the run starts, over what the platform took.
-    await showing(run, "1 test generated", ...GATE_HINTS);
-    await enterAndLeave(run);
-
-    expect(await run.exited).toBe(0);
-    expect(run.scrollback()).toContain("✓ Your first run is live");
-    expect(platform.tests.tests.map((test) => test.name)).toEqual([TESTS[0]]);
-
-    // Both files are the developer's. The refused one carries their own edit
-    // and no pin, because nothing on egma was ever made from it.
-    expect(await testsInFolder()).toEqual([`${TESTS[0]}.md`, "wanted-it-by-friday.md"]);
-    const kept = await readFile(refused, "utf8");
-    expect(kept).toContain(added);
-    expect(kept).not.toContain("version:");
-  });
 });

@@ -187,12 +187,19 @@ async function aCustomerReadyToRun(
   const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
 
+  const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+    name: "Appointment changes",
+  });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  const suiteId = String(suite.body.id);
+
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
+    suiteId,
     personas: ["Impatient Rita"],
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
@@ -212,13 +219,40 @@ async function aClaimedSimulation(
   connectionId: string,
   versionId: string,
 ): Promise<{ runId: string; simulationId: string }> {
+  const version = await ask(
+    api.app,
+    "GET",
+    `/v1/test-versions/${versionId}`,
+    key,
+  );
+  expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
+  const agents = await ask(api.app, "GET", "/v1/agents?pageSize=200", key);
+  expect(agents.statusCode, JSON.stringify(agents.body)).toBe(200);
+  const agent = (agents.body.agents as Array<{
+    id: string;
+    connections: Array<{ id: string }>;
+  }>).find((one) => one.connections.some((connection) => connection.id === connectionId));
+  if (agent === undefined) throw new Error("the connection has no agent");
+
   const started = await ask(api.app, "POST", "/v1/runs", key, {
-    connectionId: connectionId,
-    testVersionIds: [versionId],
+    suiteId: String(version.body.suiteId),
+    agentId: agent.id,
+    connectionId,
     idempotencyKey: newId("run"),
+    expectedTestVersions: [{
+      testId: String(version.body.testId),
+      versionId,
+    }],
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-  const simulations = started.body.simulations as { id: string }[];
+  const page = await ask(
+    api.app,
+    "GET",
+    `/v1/runs/${String(started.body.id)}/simulations?pageSize=1`,
+    key,
+  );
+  expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
+  const simulations = page.body.simulations as { id: string }[];
   const first = simulations[0];
   if (first === undefined) throw new Error("the run has no simulation");
 
@@ -526,7 +560,13 @@ describe("the lifecycle lands", () => {
 
     // And readable by whoever asks for the run — the different-units rule
     // answered off the conversation itself, without joining anything.
-    const read = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
+    const read = await ask(
+      api.app,
+      "GET",
+      `/v1/runs/${runId}/simulations?pageSize=1`,
+      key,
+    );
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     const [served] = read.body.simulations as {
       readonly mockToolCoverage: unknown;
     }[];

@@ -357,7 +357,7 @@ function NewConnection({
       if (usesAgentDiscovery) setDiscoveryKey("");
       router.push(
         onboarding
-          ? projectPath(projectId, "agents", agentId, "onboarding")
+          ? back
           : projectPath(
               projectId,
               "agents",
@@ -563,12 +563,10 @@ function NewConnection({
             <Button asChild variant="secondary">
               <Link
                 href={
-                  onboarding
-                    ? projectPath(projectId, "agents", agentId, "onboarding")
-                    : back
+                  back
                 }
               >
-                {onboarding ? "Skip connection for now" : "Cancel"}
+                {onboarding ? "Finish without a connection" : "Cancel"}
               </Link>
             </Button>
           </FormActions>

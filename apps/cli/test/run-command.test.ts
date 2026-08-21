@@ -1,909 +1,213 @@
-/**
- * `egma run` as a coding agent runs it: against a fixture of egma's public HTTP
- * API, with the run's whole lifecycle choreographed step by step.
- *
- * Nothing here is a terminal and nothing here answers a question. What is
- * asserted is what something driving this can act on — the lines it prints, in
- * the order it prints them, and the number it exits with.
- *
- * The lifecycle is scripted rather than waited for. A real run has the
- * simulator conduct a simulation against an agent over the selected
- * connection; here a control says "this one is running now, this one passed,
- * this one errored", which lets a check assert on an exact sequence instead of
- * on whatever a machine happened to produce.
- */
+/** Public exit behavior for one followed suite run. */
 
-import { execFile } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
-import { promisify } from "node:util";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runRunCommand, RUN_EXIT } from "../src/commands/run.ts";
-import { createEgmaFolder, folderPathsIn, writeConfig } from "../src/folder/egma-folder.ts";
-import type {
-  PlatformRun,
-  PlatformSimulation,
-  RunEvent,
-  SimulationStatus,
-  Verdict,
-} from "../src/platform/runs.ts";
-import { RunFollower } from "../src/run/follow.ts";
-import { pullTests } from "../src/sync/pull.ts";
+import { runRunCommand } from "../src/commands/run.ts";
 import {
-  startPlatform,
-  type AdvanceStep,
-  type Platform,
-} from "./support/fixture-platform/index.ts";
-import { CLI_ENTRY, makeWorkspace, waitUntil, type Workspace } from "./support/workspace.ts";
+  EMPTY_CONFIG,
+  createEgmaFolder,
+  folderPathsIn,
+  serializeSuiteManifest,
+} from "../src/folder/egma-folder.ts";
+import { serializeTestFile } from "../src/folder/test-file.ts";
+import type { Verdict } from "../src/platform/runs.ts";
+import { aTestFile, blocking } from "./support/test-file.ts";
+import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
-const run = promisify(execFile);
+const URL = "https://egma.example";
+const PROJECT_ID = "prj_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
+const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
 
-// A real server, and for two of these a real subprocess, inside a suite using
-// every core: the budget is generous so that only a broken verb can reach it.
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
-
-/** The key this machine holds, as a login would have left it. */
-const KEY = "egma_sk_held-by-this-machine";
-
-/** Short, because every check here scripts the changes itself. */
-const EVERY_MS = 20;
-
-let platform: Platform;
 let workspace: Workspace;
 
-beforeEach(async () => {
-  platform = await startPlatform();
-  workspace = await makeWorkspace();
-  await workspace.signIn(platform.url, KEY);
-  platform.signedInWith(KEY);
-});
-
-afterEach(async () => {
-  await platform.close();
-  await workspace.remove();
-});
-
-type Registered = { readonly agentId: string; readonly connectionId: string };
-
-/**
- * An agent and a way to reach it, registered through the public API — the
- * same request `egma connect` makes, so the ids a run names are ids the
- * platform really issued.
- */
-async function register(connectionKind = "retell_chat_api"): Promise<Registered> {
-  const response = await fetch(`${platform.url}/v1/agents`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      name: "order-line",
-      connection: {
-        agentPlatform: connectionKind === "retell_chat_api" ? "retell" : null,
-        connectionKind: connectionKind,
-        accessVariant:
-          connectionKind === "retell_chat_api"
-            ? "retell_chat_api.api_key"
-            : "phone_number.public_e164",
-        modality: connectionKind === "retell_chat_api" ? "chat" : "voice",
-        ...(connectionKind === "retell_chat_api"
-          ? {
-              config: { retellAgentId: "agent_0001" },
-              credentials: { apiKey: "key_2e8a4c6b1d09f735a2c4" },
-            }
-          : { config: { phoneNumber: "+15551234567" } }),
-      },
-    }),
-  });
-  const body = (await response.json()) as {
-    agent: { id: string };
-    connection: { id: string };
-  };
-  return { agentId: body.agent.id, connectionId: body.connection.id };
-}
-
-/**
- * The folder, pointing at what was registered, as connect would have left it.
- *
- * With the binding, because that is what connect really writes: it binds the
- * repository at the moment before it registers anything, so an id under `agent`
- * or `connection` never exists in this file without the platform block above it
- * naming who issued it. A folder holding one and not the other is the
- * half-applied move, and egma refuses to resolve a platform from it.
- */
-/**
- * The agent the folder is bound to, once one is registered.
- *
- * A repository sees the tests that apply to its own agent, so a seeded test
- * that is linked to nothing is a test this folder would never pull — which is
- * the platform's rule and not something to work around here.
- */
-let boundAgentId: string | null = null;
-
-async function makeFolder(registered: Registered | null): Promise<void> {
-  boundAgentId = registered?.agentId ?? null;
-  const made = await createEgmaFolder({ repository: workspace.dir });
-  // Written rather than passed to the maker, because the maker deliberately
-  // never rewrites a config that is already there — and a check that changes
-  // what the folder points at is exactly the thing that rule protects against.
-  await writeConfig(made.paths.config, {
-    platform:
-      registered === null
-        ? null
-        : { origin: platform.url },
-    agent: registered === null ? null : { name: "order-line", id: registered.agentId },
-    connection:
-      registered === null
-        ? null
-        : { name: "retell_chat_api-1", id: registered.connectionId },
-    suite: { name: "first-suite", id: null },
-  });
-}
-
-const paths = (): ReturnType<typeof folderPathsIn> => folderPathsIn(workspace.dir);
-
-const signedIn = (): { url: string; key: string } => ({ url: platform.url, key: KEY });
-
-/**
- * Tests on the platform, and the files in the folder written from them.
- *
- * Written by `pull` rather than by hand, so every file pins exactly what the
- * platform holds and says exactly what it says — which is the ordinary state a
- * developer runs from, and the one a check has to start from before it can
- * make a file deliberately out of step.
- */
-async function seed(names: readonly string[], personas?: readonly string[]): Promise<void> {
-  for (const name of names) {
-    platform.tests.add({
-      name,
-      scenario: `Somebody rings the order line about ${name.replaceAll("-", " ")}.`,
-      expectedBehaviors: ["The agent says the workshop's name."],
-      ...(boundAgentId === null ? {} : { agents: [boundAgentId] }),
-      ...(personas === undefined ? {} : { personas }),
-    });
+class JsonResponse extends Response {
+  constructor(body?: string | null, init: ResponseInit = {}) {
+    const headers = new Headers(init.headers);
+    headers.set("content-type", "application/json");
+    super(body, { ...init, headers });
   }
-  await pullTests({ signedIn: signedIn(), paths: paths() });
 }
 
-type Said = { readonly lines: readonly string[]; readonly code: number };
-
-/** Everything the verb printed, in order, and what it answered with. */
-async function egmaRun(
-  options: {
-    readonly noFollow?: boolean;
-    readonly signal?: AbortSignal;
-    readonly during?: () => Promise<void>;
-  } = {},
-): Promise<Said> {
-  const lines: string[] = [];
-  const failures: string[] = [];
-
-  const running = runRunCommand({
-    access: { url: platform.url, credentialsFile: workspace.credentialsFile },
-    cwd: workspace.dir,
-    out: (line) => lines.push(line),
-    fail: (line) => failures.push(line),
-    everyMs: EVERY_MS,
-    ...(options.noFollow === undefined ? {} : { noFollow: options.noFollow }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
+beforeEach(async () => {
+  workspace = await makeWorkspace();
+  await workspace.signIn(URL);
+  await createEgmaFolder({
+    repository: workspace.dir,
+    config: {
+      ...EMPTY_CONFIG,
+      project: { id: PROJECT_ID, name: "Northside" },
+      agent: { id: "agt_one", name: "Receptionist" },
+      connection: { id: "con_one", name: "Phone" },
+    },
   });
-
-  if (options.during !== undefined) await options.during();
-  const code = await running;
-  return { lines: [...lines, ...failures.map((line) => `stderr: ${line}`)], code };
-}
-
-/** Every value printed under one key, in order. */
-function valuesOf(lines: readonly string[], key: string): readonly string[] {
-  return lines.flatMap((line) => (line.startsWith(`${key}: `) ? [line.slice(key.length + 2)] : []));
-}
-
-/** The last value printed under one key — how a single fact is read. */
-function factOf(lines: readonly string[], key: string): string | undefined {
-  return valuesOf(lines, key).at(-1);
-}
-
-/**
- * Wait until the run exists on the platform, then script it.
- *
- * The budget is generous on purpose: on the other side of this is a command
- * signing in, reading a folder, listing tests and creating a run, inside a
- * suite using every core. A budget a busy machine could reach would make this
- * a check on how loaded the machine is.
- */
-async function scriptOnceStarted(steps: readonly AdvanceStep[]): Promise<void> {
-  const started = await waitUntil(() => platform.running.runs.length > 0, 30_000);
-  if (!started) throw new Error("the command never created a run to script");
-  for (const step of steps) platform.running.advance(step);
-}
-
-describe("egma run", () => {
-  it("pins the version of every test it runs, and says which", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "lost-the-order-number"]);
-
-    const said = await egmaRun({ noFollow: true });
-
-    expect(said.code).toBe(RUN_EXIT.done);
-    expect(factOf(said.lines, "status")).toBe("started");
-
-    // What the platform stored is what the terminal said it pinned, and it is
-    // every version the platform currently holds for those tests.
-    const pinned = valuesOf(said.lines, "pin").map((line) => line.split(" ")[1]);
-    const onEgma = platform.running.runs[0];
-    expect(onEgma?.testVersionIds).toEqual(pinned);
-    expect([...(onEgma?.testVersionIds ?? [])].sort()).toEqual(
-      platform.tests.tests.map((test) => test.versionId).sort(),
-    );
-    for (const version of pinned) expect(version).toMatch(/^tstv_/u);
-
-    expect(factOf(said.lines, "run")).toMatch(/^run_/u);
-    expect(factOf(said.lines, "tests")).toBe("2");
-    expect(factOf(said.lines, "simulations")).toBe("2");
-  });
-
-  /**
-   * A run produces one simulation per test per persona. Two personas on every
-   * test is four simulations from two tests, and the count the platform stamps
-   * at creation is the count the terminal prints.
-   */
-  it("produces one simulation per test per persona", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    platform.tests.addPersona("in-a-hurry");
-    platform.tests.addPersona("never-rings-off");
-    await seed(["quoted-a-price", "open-on-sunday"], ["in-a-hurry", "never-rings-off"]);
-
-    const said = await egmaRun({ noFollow: true });
-
-    expect(factOf(said.lines, "tests")).toBe("2");
-    expect(factOf(said.lines, "simulations")).toBe("4");
-    expect(platform.running.simulationsOf().map((one) => one.personaName)).toEqual([
-      "in-a-hurry",
-      "never-rings-off",
-      "in-a-hurry",
-      "never-rings-off",
-    ]);
-  });
-
-  it("streams every status change, in the order the platform reported it", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-
-    const said = await egmaRun({
-      during: () =>
-        scriptOnceStarted([
-          { simulation: "quoted-a-price", status: "claimed" },
-          { simulation: "quoted-a-price", status: "running" },
-          { simulation: "quoted-a-price", status: "completed", verdict: "passed" },
-        ]),
-    });
-
-    expect(valuesOf(said.lines, "simulation")).toEqual([
-      "quoted-a-price default-persona queued",
-      "quoted-a-price default-persona claimed",
-      "quoted-a-price default-persona running",
-      "quoted-a-price default-persona completed",
-    ]);
-    expect(valuesOf(said.lines, "verdict")).toEqual(["quoted-a-price default-persona passed"]);
-    expect(said.code).toBe(RUN_EXIT.done);
-  });
-
-  it("waits for grading after the simulations have finished", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-
-    const said = await egmaRun({
-      during: async () => {
-        const started = await waitUntil(() => platform.running.runs.length > 0, 30_000);
-        if (!started) throw new Error("the command never created a run to grade");
-
-        platform.running.advance({ simulation: "quoted-a-price", status: "claimed" });
-        platform.running.advance({ simulation: "quoted-a-price", status: "running" });
-
-        const pollsBeforeFinish = platform.records.filter(
-          (record) => record.method === "GET" && record.path.endsWith("/events"),
-        ).length;
-        platform.running.advance({ simulation: "quoted-a-price", status: "completed" });
-
-        const sawFinishedRun = await waitUntil(
-          () =>
-            platform.records.filter(
-              (record) => record.method === "GET" && record.path.endsWith("/events"),
-            ).length > pollsBeforeFinish,
-          30_000,
-        );
-        if (!sawFinishedRun) throw new Error("the command never observed the finished run");
-
-        platform.running.grade({ simulation: "quoted-a-price", verdict: "failed" });
-      },
-    });
-
-    expect(valuesOf(said.lines, "verdict")).toEqual([
-      "quoted-a-price default-persona failed",
-    ]);
-    expect(factOf(said.lines, "failed")).toBe("1");
-    expect(factOf(said.lines, "pending")).toBe("0");
-    expect(said.code).toBe(RUN_EXIT.failed);
-  });
-
-  it("marks the first verdict, once, whichever simulation gets there first", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "open-on-sunday", "rang-off-halfway"]);
-
-    const said = await egmaRun({
-      during: () =>
-        scriptOnceStarted([
-          { simulation: "open-on-sunday", status: "claimed" },
-          { simulation: "open-on-sunday", status: "running" },
-          { simulation: "open-on-sunday", status: "completed", verdict: "failed" },
-          { simulation: "quoted-a-price", status: "claimed" },
-          { simulation: "quoted-a-price", status: "running" },
-          { simulation: "quoted-a-price", status: "completed", verdict: "passed" },
-          { simulation: "rang-off-halfway", status: "claimed" },
-          { simulation: "rang-off-halfway", status: "running" },
-          { simulation: "rang-off-halfway", status: "completed", verdict: "passed" },
-        ]),
-    });
-
-    // The second test in the folder finished first, and it is the one marked.
-    expect(valuesOf(said.lines, "first-verdict")).toEqual([
-      "open-on-sunday default-persona failed",
-    ]);
-  });
-
-  /**
-   * The glossary rule, end to end. A test that could not run is not a test that
-   * failed, and neither the lines nor the counts nor the exit number may say it
-   * was.
-   */
-  it("keeps skipped and errored as themselves, never folded into failed", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "open-on-sunday", "rang-off-halfway", "lost-the-order-number"]);
-
-    const said = await egmaRun({
-      during: () =>
-        scriptOnceStarted([
-          { simulation: "quoted-a-price", status: "claimed" },
-          { simulation: "quoted-a-price", status: "running" },
-          { simulation: "quoted-a-price", status: "completed", verdict: "passed" },
-          { simulation: "open-on-sunday", status: "claimed" },
-          { simulation: "open-on-sunday", status: "running" },
-          {
-            simulation: "open-on-sunday",
-            status: "completed",
-            verdict: "skipped",
-            reason: "this test needs DTMF, and this connection has none",
-          },
-          { simulation: "rang-off-halfway", status: "claimed" },
-          {
-            simulation: "rang-off-halfway",
-            status: "failed",
-            verdict: "errored",
-            reason: "the agent never joined",
-          },
-          { simulation: "lost-the-order-number", status: "claimed" },
-          { simulation: "lost-the-order-number", status: "running" },
-          { simulation: "lost-the-order-number", status: "completed", verdict: "failed" },
-        ]),
-    });
-
-    expect(valuesOf(said.lines, "verdict")).toEqual([
-      "quoted-a-price default-persona passed",
-      "open-on-sunday default-persona skipped",
-      "rang-off-halfway default-persona errored",
-      "lost-the-order-number default-persona failed",
-    ]);
-    // The platform's own words about each ending, kept.
-    expect(valuesOf(said.lines, "reason")).toEqual([
-      "this test needs DTMF, and this connection has none",
-      "the agent never joined",
-    ]);
-    // Four counts, four names, and every one of them printed even at zero.
-    expect(factOf(said.lines, "passed")).toBe("1");
-    expect(factOf(said.lines, "failed")).toBe("1");
-    expect(factOf(said.lines, "skipped")).toBe("1");
-    expect(factOf(said.lines, "errored")).toBe("1");
-    expect(factOf(said.lines, "pending")).toBe("0");
-    expect(factOf(said.lines, "simulations")).toBe("4");
-  });
-
-  it("answers with the red-suite number when a test failed", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "open-on-sunday"]);
-
-    const said = await egmaRun({
-      during: () =>
-        scriptOnceStarted([
-          { simulation: "quoted-a-price", status: "claimed" },
-          { simulation: "quoted-a-price", status: "running" },
-          { simulation: "quoted-a-price", status: "completed", verdict: "failed" },
-          { simulation: "open-on-sunday", status: "claimed" },
-          {
-            simulation: "open-on-sunday",
-            status: "failed",
-            verdict: "errored",
-            reason: "the simulator broke",
-          },
-        ]),
-    });
-
-    // A failing test is the louder fact: something in the voice agent is wrong,
-    // and that is what a suite is watched for.
-    expect(said.code).toBe(RUN_EXIT.failed);
-    expect(factOf(said.lines, "failed")).toBe("1");
-    expect(factOf(said.lines, "errored")).toBe("1");
-  });
-
-  it("answers with a different number when nothing failed and something errored", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-
-    const said = await egmaRun({
-      during: () =>
-        scriptOnceStarted([
-          { simulation: "quoted-a-price", status: "claimed" },
-          {
-            simulation: "quoted-a-price",
-            status: "failed",
-            verdict: "errored",
-            reason: "the simulator broke",
-          },
-        ]),
-    });
-
-    // Nothing failed, because nothing was judged. A caller that treated this as
-    // a red suite would go looking for a bug in the voice agent that is not
-    // there — which is the whole reason the two are different numbers.
-    expect(said.code).toBe(RUN_EXIT.errored);
-    expect(factOf(said.lines, "failed")).toBe("0");
-    expect(factOf(said.lines, "errored")).toBe("1");
-  });
-
-  /**
-   * The failure branch the transcript names: a connection whose adapter has not
-   * shipped. The platform refuses at creation and the terminal repeats what it
-   * said, word for word, because egma neither made that decision nor knows a
-   * better way to explain it.
-   */
-  it("repeats egma's refusal to start the run, word for word", async () => {
-    const registered = await register("phone_number");
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-    platform.running.noAdapterFor("phone_number");
-
-    const said = await egmaRun();
-
-    expect(said.code).toBe(RUN_EXIT.refused);
-    expect(factOf(said.lines, "status")).toBe("refused");
-    expect(factOf(said.lines, "reason")).toBe(
-      platform.running.noAdapterMessage("phone_number"),
-    );
-    expect(factOf(said.lines, "stderr")).toBe(
-      platform.running.noAdapterMessage("phone_number"),
-    );
-    // And nothing was queued that could never happen.
-    expect(platform.running.runs).toHaveLength(0);
-  });
-
-  it("starts and returns at once when told not to follow", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-
-    const said = await egmaRun({ noFollow: true });
-
-    expect(said.code).toBe(RUN_EXIT.done);
-    expect(factOf(said.lines, "status")).toBe("started");
-    // Nothing was waited for: every simulation is where the platform left it.
-    expect(valuesOf(said.lines, "verdict")).toEqual([]);
-    expect(platform.running.simulationsOf().map((one) => one.status)).toEqual(["queued"]);
-  });
-
-  it("refuses when a file in the folder is not on egma, and starts nothing", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-    await writeFile(
-      path.join(paths().tests, "never-pushed.md"),
-      [
-        "---",
-        "name: never-pushed",
-        "---",
-        "## Scenario",
-        "Somebody rings about something Egma has never heard of.",
-        "## Expected behaviors",
-        "1. The agent says the workshop's name.",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const said = await egmaRun();
-
-    expect(said.code).toBe(RUN_EXIT.nothing);
-    expect(valuesOf(said.lines, "unknown")).toEqual(["never-pushed"]);
-    // Its own word: `refused` is the platform saying no, and it comes with a
-    // number of its own. One status line, one number.
-    expect(factOf(said.lines, "status")).toBe("not-on-egma");
-    expect(factOf(said.lines, "stderr")).toContain("Run egma push");
-    expect(platform.running.runs).toHaveLength(0);
-  });
-
-  /**
-   * The hard gate, and the case it exists for.
-   *
-   * A developer edits a test this morning, forgets to push, and runs. egma
-   * holds last week's wording; the file says this morning's. A run over what
-   * egma holds would look completely ordinary and would come back green — about
-   * content nobody executed. The developer, or the coding agent reading that
-   * green, would then report an edit verified that never ran.
-   *
-   * So the run is refused, and the refusal names the one verb that fixes it.
-   * Nothing was started.
-   */
-  it("refuses a run over a file it edited and never pushed, and names the push", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-    const file = path.join(paths().tests, "quoted-a-price.md");
-    const pinned = platform.tests.tests[0]?.versionId as string;
-
-    // The edit a developer makes and forgets to push. The pin does not move —
-    // which is exactly why a version number could never answer this question.
-    const held = await readFile(file, "utf8");
-    await writeFile(
-      file,
-      held.replace(
-        "1. The agent says the workshop's name.",
-        "1. The agent says the workshop's name.\n2. The agent never quotes a price.",
-      ),
-      "utf8",
-    );
-
-    const said = await egmaRun({ noFollow: true });
-
-    expect(said.code).toBe(RUN_EXIT.nothing);
-    expect(valuesOf(said.lines, "not-pushed")).toEqual(["quoted-a-price"]);
-    // Its own word, and never `refused`: `refused` is the platform saying no to
-    // a run it will not conduct, and it answers with its own number.
-    expect(factOf(said.lines, "status")).toBe("not-pushed");
-    expect(factOf(said.lines, "stderr")).toBe(
-      "Egma holds something other than what this file says: quoted-a-price. Run egma " +
-        "push to put your edit on Egma, then run this again. Nothing was started.",
-    );
-    // Nothing was started, and nothing was pinned.
-    expect(platform.running.runs).toHaveLength(0);
-    expect(valuesOf(said.lines, "pin")).toEqual([]);
-    // And egma still holds exactly what it held: a refused run writes nothing.
-    expect(platform.tests.tests[0]?.versionId).toBe(pinned);
-  });
-
-  /**
-   * The other direction, refused for the same reason: somebody moved the test
-   * on the platform and this folder has not pulled it. The file says something
-   * egma does not hold, and which side is behind changes nothing about that.
-   */
-  it("refuses a run over a file egma has moved past", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-    const before = platform.tests.tests[0]?.versionId;
-
-    // The QA lead edits it in the dashboard while the developer is looking at
-    // their own copy.
-    const after = platform.tests.editInDashboard("quoted-a-price", {
-      expectedBehaviors: ["The agent says the workshop's name.", "The agent repeats the price."],
-    });
-    expect(after.versionId).not.toBe(before);
-
-    const said = await egmaRun({ noFollow: true });
-
-    expect(said.code).toBe(RUN_EXIT.nothing);
-    expect(factOf(said.lines, "status")).toBe("not-pushed");
-    expect(valuesOf(said.lines, "not-pushed")).toEqual(["quoted-a-price"]);
-    expect(factOf(said.lines, "stderr")).toContain("Run egma push");
-    expect(platform.running.runs).toHaveLength(0);
-  });
-
-  /**
-   * And the ordinary folder, which is the whole point of the two refusals
-   * above: when the two agree, nothing changed at all.
-   */
-  it("runs a folder that agrees with egma, exactly as it always did", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "asked-for-a-refund"]);
-    const versions = platform.tests.tests.map((test) => test.versionId);
-
-    const said = await egmaRun({ noFollow: true });
-
-    expect(said.code).toBe(RUN_EXIT.done);
-    expect(factOf(said.lines, "status")).toBe("started");
-    expect(valuesOf(said.lines, "not-pushed")).toEqual([]);
-    // Every test in the folder, each pinned at the version egma holds for it.
-    // The order is the folder's, so the two lists are compared as sets.
-    expect([...(platform.running.runs[0]?.testVersionIds ?? [])].sort()).toEqual(
-      [...versions].sort(),
-    );
-  });
-
-  it("says which of the things it needs is missing, and does nothing about it", async () => {
-    // No folder at all.
-    const noFolder = await egmaRun();
-    expect(noFolder.code).toBe(RUN_EXIT.nothing);
-    expect(factOf(noFolder.lines, "status")).toBe("no-folder");
-
-    // A folder that has never been connected to anything.
-    await makeFolder(null);
-    const notConnected = await egmaRun();
-    expect(notConnected.code).toBe(RUN_EXIT.nothing);
-    expect(factOf(notConnected.lines, "status")).toBe("not-connected");
-    expect(factOf(notConnected.lines, "stderr")).toContain("egma connect");
-
-    // A folder pointing at something, with no tests in it.
-    const registered = await register();
-    await makeFolder(registered);
-    await mkdir(paths().tests, { recursive: true });
-    const noTests = await egmaRun();
-    expect(noTests.code).toBe(RUN_EXIT.nothing);
-    expect(factOf(noTests.lines, "status")).toBe("no-tests");
-  });
-
-  /**
-   * Stopping a terminal is not stopping a run. The run is on egma, and a verb
-   * that said it had stopped one would be saying something that did not happen
-   * — and would send whoever read it looking for a run that is still going.
-   */
-  it("says the run is still going when it is stopped part way", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "open-on-sunday"]);
-
-    const stopping = new AbortController();
-    const said = await egmaRun({
-      signal: stopping.signal,
-      during: async () => {
-        await scriptOnceStarted([
-          { simulation: "quoted-a-price", status: "claimed" },
-          { simulation: "quoted-a-price", status: "running" },
-          { simulation: "quoted-a-price", status: "completed", verdict: "passed" },
-        ]);
-        await waitUntil(() => false, EVERY_MS * 4);
-        stopping.abort("interrupt");
-      },
-    });
-
-    expect(said.code).toBe(RUN_EXIT.interrupted);
-    expect(factOf(said.lines, "status")).toBe("left-running");
-    // What had landed by then is still counted honestly, and the rest is named
-    // as what it is: not judged yet.
-    expect(factOf(said.lines, "passed")).toBe("1");
-    expect(factOf(said.lines, "pending")).toBe("1");
-    // Nothing is blamed on egma: the stop was the developer's.
-    expect(said.lines.join("\n")).not.toContain("unreachable");
-  });
-
-  it("refuses without a key, and names the command that gets one", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price"]);
-
-    const lines: string[] = [];
-    const failures: string[] = [];
-    const code = await runRunCommand({
-      // A credentials file with nothing in it, which is a machine that has
-      // never logged in.
-      access: {
-        url: platform.url,
-        credentialsFile: path.join(workspace.dir, "no-such-credentials"),
-      },
-      cwd: workspace.dir,
-      out: (line) => lines.push(line),
-      fail: (line) => failures.push(line),
-    });
-
-    expect(code).toBe(RUN_EXIT.notSignedIn);
-    expect(factOf(lines, "status")).toBe("not-signed-in");
-    expect(failures.join("\n")).toContain("egma login");
-    expect(platform.running.runs).toHaveLength(0);
-  });
+  const suite = path.join(folderPathsIn(workspace.dir).tests, "release");
+  await mkdir(suite);
+  await writeFile(
+    path.join(suite, "suite.yaml"),
+    serializeSuiteManifest({ id: SUITE_ID, name: "Release" }),
+  );
+  await writeFile(
+    path.join(suite, "books-a-visit.md"),
+    serializeTestFile(
+      aTestFile({
+        name: "Books a visit",
+        scenario: "The caller asks for Tuesday.",
+        expectedBehaviors: blocking("The agent books Tuesday."),
+        version: VERSION_ID,
+        identityRevision: REVISION,
+      }),
+    ),
+  );
 });
 
-describe("egma run, as the built command", () => {
-  it("prints one fact per line and answers with a number", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "open-on-sunday"]);
+afterEach(async () => workspace.remove());
 
-    const { stdout } = await run(process.execPath, [CLI_ENTRY, "run", "--url", platform.url, "--no-follow"], {
-      cwd: workspace.dir,
-      env: workspace.env(),
-    });
-
-    const lines = stdout.trimEnd().split("\n");
-    expect(factOf(lines, "url")).toBe(platform.url);
-    expect(factOf(lines, "agent")).toBe(registered.agentId);
-    expect(factOf(lines, "connection")).toBe(registered.connectionId);
-    expect(factOf(lines, "run")).toMatch(/^run_/u);
-    expect(factOf(lines, "status")).toBe("started");
-
-    // The address a person opens, with nothing on it but the run.
-    const results = factOf(lines, "results") ?? "";
-    expect(results).toBe(`${platform.url}/runs/${factOf(lines, "run") ?? ""}`);
-    expect(results).not.toContain("?");
-    expect(results).not.toContain(KEY);
-  });
-
-  it("follows to the end and answers with what happened", async () => {
-    const registered = await register();
-    await makeFolder(registered);
-    await seed(["quoted-a-price", "open-on-sunday"]);
-
-    const command = run(process.execPath, [CLI_ENTRY, "run", "--url", platform.url], {
-      cwd: workspace.dir,
-      env: workspace.env(),
-    });
-
-    await scriptOnceStarted([
-      { simulation: "quoted-a-price", status: "claimed" },
-      { simulation: "quoted-a-price", status: "running" },
-      { simulation: "quoted-a-price", status: "completed", verdict: "passed" },
-      { simulation: "open-on-sunday", status: "claimed" },
-      { simulation: "open-on-sunday", status: "running" },
-      {
-        simulation: "open-on-sunday",
-        status: "completed",
-        verdict: "skipped",
-        reason: "this test needs DTMF, and this connection has none",
-      },
-    ]);
-
-    const { stdout } = await command;
-    const lines = stdout.trimEnd().split("\n");
-
-    expect(valuesOf(lines, "first-verdict")).toEqual(["quoted-a-price default-persona passed"]);
-    expect(factOf(lines, "passed")).toBe("1");
-    expect(factOf(lines, "failed")).toBe("0");
-    expect(factOf(lines, "skipped")).toBe("1");
-    expect(factOf(lines, "errored")).toBe("0");
-    expect(factOf(lines, "status")).toBe("completed");
-  });
-});
-
-/**
- * The cursor, on its own.
- *
- * The whole of a follower's resumption story is one number: every ask names
- * where the last one got to. Two things have to be true of it and neither can
- * be seen from the outside of a run that went smoothly — so they are checked
- * here, with the pages handed over by hand rather than by a platform.
- *
- * A run's simulations are laid out when it is created and their number is
- * stamped there, so a change about a simulation the follower has never heard
- * of is a change about somebody else's run. It is ignored rather than invented.
- */
-describe("the cursor a follower resumes from", () => {
-  const SIMULATION = (id: string, position: number): PlatformSimulation => ({
-    id,
-    position,
-    testName: `test-${position}`,
-    testVersionId: `tstv_${position}`,
-    personaName: "default-persona",
-    status: "queued",
-    verdict: null,
-    reason: null,
-  });
-
-  const RUN: PlatformRun = {
-    id: "run_01",
-    status: "running",
-    agentId: "agt_01",
-    connectionId: "con_01",
-    productLabel: "Retell chat",
-    modality: "chat",
-    testVersionIds: ["tstv_1", "tstv_2"],
-    expectedSimulationCount: 2,
-    resultsUrl: "https://app.egma.example/runs/run_01",
-    simulations: [SIMULATION("sim_1", 1), SIMULATION("sim_2", 2)],
+function platformTest(): Record<string, unknown> {
+  return {
+    id: TEST_ID,
+    projectId: PROJECT_ID,
+    suiteId: SUITE_ID,
+    name: "Books a visit",
+    description: "",
+    scenario: "The caller asks for Tuesday.",
+    expectedBehaviors: ["The agent books Tuesday."],
+    personas: [],
+    mockTools: [],
+    versionId: VERSION_ID,
+    version: 1,
+    revision: REVISION,
   };
+}
 
-  const moved = (
-    seq: number,
-    simulationId: string,
-    status: SimulationStatus,
-    verdict: Verdict | null = null,
-  ): RunEvent => ({
-    kind: "simulation",
-    seq,
-    simulationId,
-    testName: simulationId === "sim_1" ? "test-1" : "test-2",
+function runHeader(status = "pending"): Record<string, unknown> {
+  return {
+    id: "run_one",
+    status,
+    agentId: "agt_one",
+    connectionId: "con_one",
+    productLabel: "Fixture",
+    modality: "chat",
+    expectedSimulationCount: 1,
+    resultsUrl: `${URL}/runs/run_one`,
+  };
+}
+
+function simulation(verdict: Verdict | null, status = "queued"): Record<string, unknown> {
+  return {
+    id: "sim_one",
+    position: 1,
+    testName: "Books a visit",
+    testVersionId: VERSION_ID,
     personaName: "default-persona",
     status,
     verdict,
     reason: null,
-  });
+  };
+}
 
-  it("moves forward with the platform, and never backwards", () => {
-    const follower = new RunFollower(RUN);
-    expect(follower.at).toBe(0);
-
-    follower.take([moved(1, "sim_1", "claimed")], 1);
-    expect(follower.at).toBe(1);
-
-    // A page that carried nothing leaves the cursor where it was, so the next
-    // ask covers exactly the same ground rather than stepping over it.
-    follower.take([], 1);
-    expect(follower.at).toBe(1);
-
-    // And a platform that answered with an older cursor cannot rewind one: a
-    // follower that went backwards would hand every change over twice.
-    follower.take([moved(2, "sim_1", "running")], 0);
-    expect(follower.at).toBe(1);
-  });
-
-  it("hands a change over once, however many times a page carries it", () => {
-    const follower = new RunFollower(RUN);
-    const page = [
-      moved(1, "sim_1", "claimed"),
-      moved(2, "sim_1", "running"),
-      moved(3, "sim_1", "completed", "skipped"),
-    ];
-
-    const first = follower.take(page, 3);
-    expect(first.filter((change) => change.verdictLanded)).toHaveLength(1);
-    expect(first.filter((change) => change.first)).toHaveLength(1);
-
-    // The same page again, which is what a platform that re-sent one would
-    // look like. The verdict is not news a second time and the mark does not
-    // move — a run has one first verdict, whatever arrives twice.
-    const again = follower.take(page, 3);
-    expect(again.filter((change) => change.verdictLanded)).toHaveLength(0);
-    expect(again.filter((change) => change.first)).toHaveLength(0);
-    expect(follower.firstVerdict?.id).toBe("sim_1");
-    expect(follower.rows.filter((row) => row.first)).toHaveLength(1);
-    expect(follower.tally).toMatchObject({ skipped: 1, graded: 1, pending: 1, total: 2 });
-  });
-
-  /**
-   * The first verdict is the first one that landed, whatever it was. `skipped`
-   * and `errored` are verdicts, and a wizard that waited past one of them for
-   * something greener would be waiting for the suite it promised not to wait
-   * for.
-   */
-  it("marks a first verdict of skipped or errored exactly as it marks passed", () => {
-    for (const verdict of ["skipped", "errored"] as const) {
-      const follower = new RunFollower(RUN);
-      const changes = follower.take(
-        [moved(1, "sim_1", verdict === "errored" ? "failed" : "completed", verdict)],
-        1,
+async function followedRun(input: {
+  readonly verdict?: Verdict;
+  readonly stop?: AbortController;
+}): Promise<{ readonly code: number; readonly lines: readonly string[] }> {
+  const lines: string[] = [];
+  const fetchImpl: typeof fetch = async (request, init) => {
+    const url = String(request);
+    if (url === `${URL}/v1/test-suites/${SUITE_ID}`) {
+      return new JsonResponse(
+        JSON.stringify({ id: SUITE_ID, projectId: PROJECT_ID, name: "Release" }),
       );
-
-      expect(changes[0]?.first).toBe(true);
-      expect(follower.firstVerdict?.verdict).toBe(verdict);
-      expect(follower.tally.graded).toBe(1);
-      expect(follower.tally.failed).toBe(0);
     }
+    if (url.startsWith(`${URL}/v1/tests?`)) {
+      return new JsonResponse(JSON.stringify({ tests: [platformTest()], nextPageToken: null }));
+    }
+    if (url === `${URL}/v1/runs` && init?.method === "POST") {
+      return new JsonResponse(JSON.stringify(runHeader()), { status: 201 });
+    }
+    if (url === `${URL}/v1/runs/run_one/simulations`) {
+      return new JsonResponse(
+        JSON.stringify({ simulations: [simulation(null)], nextPageToken: null }),
+      );
+    }
+    if (url === `${URL}/v1/runs/run_one/events?after=0`) {
+      if (input.stop !== undefined) {
+        input.stop.abort("developer stopped following");
+        return new JsonResponse(JSON.stringify({ events: [], next: 0, done: false }));
+      }
+      const verdict = input.verdict ?? "passed";
+      return new JsonResponse(
+        JSON.stringify({
+          events: [
+            {
+              seq: 1,
+              kind: "simulation",
+              simulationId: "sim_one",
+              testName: "Books a visit",
+              personaName: "default-persona",
+              status: verdict === "errored" ? "failed" : "completed",
+              verdict,
+              reason: verdict === "errored" ? "the simulator stopped" : null,
+            },
+            { seq: 2, kind: "run", status: "completed" },
+          ],
+          next: 2,
+          done: true,
+        }),
+      );
+    }
+    return new JsonResponse(JSON.stringify({ message: `unexpected request: ${url}` }), {
+      status: 404,
+    });
+  };
+
+  const code = await runRunCommand({
+    access: { url: URL, credentialsFile: workspace.credentialsFile },
+    cwd: workspace.dir,
+    suiteDirectory: "release",
+    out: (line) => lines.push(line),
+    fail: (line) => lines.push(`stderr: ${line}`),
+    everyMs: 0,
+    ...(input.stop === undefined ? {} : { signal: input.stop.signal }),
+    fetchImpl,
+  });
+  return { code, lines };
+}
+
+describe("runRunCommand public exit behavior", () => {
+  it("returns 0 after a followed suite passes", async () => {
+    const answer = await followedRun({ verdict: "passed" });
+
+    expect(answer.code).toBe(0);
+    expect(answer.lines).toContain("status: completed");
+    expect(answer.lines).toContain("passed: 1");
   });
 
-  it("ignores a change about a simulation this run never laid out", () => {
-    const follower = new RunFollower(RUN);
+  it("returns 3 after a followed suite has a failed verdict", async () => {
+    const answer = await followedRun({ verdict: "failed" });
 
-    const changes = follower.take([moved(1, "sim_from_another_run", "completed", "passed")], 1);
+    expect(answer.code).toBe(3);
+    expect(answer.lines).toContain("failed: 1");
+  });
 
-    expect(changes).toEqual([]);
-    expect(follower.firstVerdict).toBeNull();
-    expect(follower.tally).toMatchObject({ graded: 0, total: 2 });
-    // The cursor still moves: the page was read, and asking for it again would
-    // be asking for the same answer forever.
-    expect(follower.at).toBe(1);
+  it("returns 6 when execution errors and no test fails", async () => {
+    const answer = await followedRun({ verdict: "errored" });
+
+    expect(answer.code).toBe(6);
+    expect(answer.lines).toContain("failed: 0");
+    expect(answer.lines).toContain("errored: 1");
+  });
+
+  it("returns 130 and leaves the platform run active when following is interrupted", async () => {
+    const stopping = new AbortController();
+    const answer = await followedRun({ stop: stopping });
+
+    expect(answer.code).toBe(130);
+    expect(answer.lines).toContain("status: left-running");
+    expect(answer.lines).toContain("pending: 1");
   });
 });

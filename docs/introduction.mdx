@@ -10,7 +10,11 @@ Egma is an open-source platform that helps teams gain trust in the voice agents 
 
 Voice agents are hard to test with unit tests alone. The behavior that matters emerges from the full conversation loop — the prompt, the speech stack, the tools, and the real-time interaction between all three. Egma is built around that reality.
 
-**Simulation testing** lets you describe scenarios and expected behaviors in plain Markdown, then run those scenarios as real conversations against your agent. The simulator claims each test, conducts the call, and produces a recording and a transcript. The grader reads both and writes a verdict for every expected behavior you listed — `passed`, `failed`, `skipped`, or `errored` — along with a rationale and the specific turns it cites. You never have to guess why a test failed.
+**Simulation testing** lets you group Markdown scenarios into test suites, then
+run one complete suite as real conversations against your agent. The simulator
+conducts each test and produces a recording and a transcript. The grader reads
+both and writes a verdict for every expected behavior you listed — `passed`,
+`failed`, `skipped`, or `errored` — with a rationale and cited turns.
 
 **Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit Agents, the Egma Python SDK configures OpenTelemetry export inside the running agent. Both paths produce production conversation records. Egma shows a transcript, measures, and grader verdicts when the evidence supports them. Simulation recordings stay with the run that Egma conducted.
 
@@ -43,6 +47,6 @@ completed conversations Egma should poll.
     Run your first simulation test in under ten minutes using the Egma CLI wizard.
   </Card>
   <Card title="Core concepts" icon="layer-group" href="/concepts">
-    Agents, connections, tests, runs, simulations, personas, and verdicts — defined precisely.
+    Agents, connections, test suites, tests, runs, simulations, personas, and verdicts — defined precisely.
   </Card>
 </CardGroup>

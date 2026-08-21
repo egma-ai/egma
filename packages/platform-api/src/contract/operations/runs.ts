@@ -13,6 +13,7 @@ const stringSchema = { type: "string" } as const;
 const integerSchema = { type: "integer" } as const;
 const numberSchema = { type: "number" } as const;
 const booleanSchema = { type: "boolean" } as const;
+const pageSizeSchema = { type: "integer", minimum: 1, maximum: 200 } as const;
 
 export const verdictSchema = {
   type: "string",
@@ -26,15 +27,7 @@ const runStatusSchema = {
 
 export const simulationStatusSchema = {
   type: "string",
-  enum: [
-    "queued",
-    "claimed",
-    "running",
-    "completed",
-    "failed",
-    "canceled",
-    "skipped",
-  ],
+  enum: ["queued", "claimed", "running", "completed", "failed", "canceled"],
 } as const;
 
 const gradingStandingSchema = {
@@ -59,14 +52,6 @@ const endingReasonSchema = {
     "simulator_error",
     "orphaned",
     "dispatch_failed",
-  ],
-} as const;
-
-const skipReasonSchema = {
-  type: "string",
-  enum: [
-    "required_capability_unsupported",
-    "required_capability_unknown",
   ],
 } as const;
 
@@ -139,30 +124,6 @@ export const mockToolSchema = {
   additionalProperties: false,
 } as const;
 
-const mockToolDefaultSchema = {
-  type: "object",
-  properties: { ...mockToolProperties, mockToolId: stringIdSchema },
-  required: ["tool", "delayMs", "mockToolId"],
-  oneOf: [
-    { type: "object", required: ["answer"] },
-    { type: "object", required: ["error"] },
-  ],
-  additionalProperties: false,
-} as const;
-
-const mockToolSnapshotSchema = {
-  type: "object",
-  properties: {
-    defaults: arrayOf(mockToolDefaultSchema),
-    overrides: {
-      type: "object",
-      additionalProperties: arrayOf(mockToolSchema),
-    },
-  },
-  required: ["defaults", "overrides"],
-  additionalProperties: false,
-} as const;
-
 export const mockToolCoverageSchema = {
   type: "object",
   properties: {
@@ -171,134 +132,6 @@ export const mockToolCoverageSchema = {
     uncovered: arrayOf(stringSchema),
   },
   required: ["discovered", "covered", "uncovered"],
-  additionalProperties: false,
-} as const;
-
-const planItemSchema = {
-  type: "object",
-  properties: {
-    kind: { type: "string", enum: ["authored"] },
-    graderId: stringIdSchema,
-    graderVersionId: stringIdSchema,
-    name: stringSchema,
-    libraryId: stringIdSchema,
-    required: booleanSchema,
-    scope: {
-      type: "string",
-      enum: ["simulations", "production", "both"],
-    },
-  },
-  required: [
-    "kind",
-    "graderId",
-    "graderVersionId",
-    "name",
-    "libraryId",
-    "required",
-    "scope",
-  ],
-  additionalProperties: false,
-} as const;
-
-const unknownCapabilitiesSchema = {
-  type: "object",
-  properties: { state: { type: "string", enum: ["unknown"] } },
-  required: ["state"],
-  additionalProperties: false,
-} as const;
-
-const knownCapabilitiesSchema = {
-  type: "object",
-  properties: {
-    state: { type: "string", enum: ["known"] },
-    measured: arrayOf(stringSchema),
-    supported: arrayOf(stringSchema),
-    checkedAt: dateTimeSchema,
-    source: stringSchema,
-  },
-  required: ["state", "measured", "supported", "checkedAt", "source"],
-  additionalProperties: false,
-} as const;
-
-const runPlanSchema = {
-  type: "object",
-  properties: {
-    agentId: stringIdSchema,
-    connectionId: stringIdSchema,
-    connection: {
-      type: "object",
-      properties: {
-        agentPlatform: nullable(stringSchema),
-        connectionKind: stringSchema,
-        accessVariant: stringSchema,
-        modality: modalitySchema,
-        productLabel: stringSchema,
-        environment: nullable(stringSchema),
-        capabilities: {
-          oneOf: [unknownCapabilitiesSchema, knownCapabilitiesSchema],
-        },
-      },
-      required: [
-        "agentPlatform",
-        "connectionKind",
-        "accessVariant",
-        "modality",
-        "productLabel",
-        "environment",
-        "capabilities",
-      ],
-      additionalProperties: false,
-    },
-    runnableSimulationCount: integerSchema,
-    skippedSimulationCount: integerSchema,
-    tests: arrayOf({
-      type: "object",
-      properties: {
-        testId: stringIdSchema,
-        testVersionId: stringIdSchema,
-        testName: stringSchema,
-        personas: arrayOf({
-          type: "object",
-          properties: {
-            personaId: stringIdSchema,
-            personaVersionId: stringIdSchema,
-            name: stringSchema,
-          },
-          required: ["personaId", "personaVersionId", "name"],
-          additionalProperties: false,
-        }),
-        requiredCapabilities: arrayOf(stringSchema),
-        skip: nullable({
-          type: "object",
-          properties: {
-            reason: skipReasonSchema,
-            capabilities: arrayOf(stringSchema),
-          },
-          required: ["reason", "capabilities"],
-          additionalProperties: false,
-        }),
-        graders: arrayOf(planItemSchema),
-      },
-      required: [
-        "testId",
-        "testVersionId",
-        "testName",
-        "personas",
-        "requiredCapabilities",
-        "skip",
-        "graders",
-      ],
-      additionalProperties: false,
-    }),
-  },
-  required: [
-    "agentId",
-    "connectionId",
-    "connection",
-    "runnableSimulationCount",
-    "skippedSimulationCount",
-    "tests",
-  ],
   additionalProperties: false,
 } as const;
 
@@ -311,17 +144,8 @@ const simulationCountsSchema = {
     completed: integerSchema,
     failed: integerSchema,
     canceled: integerSchema,
-    skipped: integerSchema,
   },
-  required: [
-    "queued",
-    "claimed",
-    "running",
-    "completed",
-    "failed",
-    "canceled",
-    "skipped",
-  ],
+  required: ["queued", "claimed", "running", "completed", "failed", "canceled"],
   additionalProperties: false,
 } as const;
 
@@ -348,17 +172,109 @@ const connectionSnapshotSchema = {
   additionalProperties: false,
 } as const;
 
-const byGraderSchema = {
+const identitySchema = {
   type: "object",
   properties: {
-    graderId: stringIdSchema,
-    required: booleanSchema,
-    verdict: verdictSchema,
-    score: nullable(numberSchema),
-    counts: verdictCountsSchema,
+    id: stringIdSchema,
+    name: stringSchema,
+    archived: booleanSchema,
   },
-  required: ["graderId", "required", "verdict", "score", "counts"],
+  required: ["id", "name", "archived"],
   additionalProperties: false,
+} as const;
+
+const runHeaderSchema = {
+  type: "object",
+  properties: {
+    id: stringIdSchema,
+    projectId: stringIdSchema,
+    suiteId: stringIdSchema,
+    suiteName: stringSchema,
+    suiteDeleted: booleanSchema,
+    name: nullable(stringSchema),
+    status: runStatusSchema,
+    agentId: stringIdSchema,
+    connectionId: stringIdSchema,
+    agentPlatform: nullable(stringSchema),
+    connectionKind: stringSchema,
+    accessVariant: stringSchema,
+    modality: modalitySchema,
+    productLabel: stringSchema,
+    environment: nullable(stringSchema),
+    expectedSimulationCount: integerSchema,
+    completedCount: nullable(integerSchema),
+    failedCount: nullable(integerSchema),
+    canceledCount: nullable(integerSchema),
+    simulationCounts: simulationCountsSchema,
+    finishedCount: integerSchema,
+    gradableCount: integerSchema,
+    gradedCount: integerSchema,
+    verdict: nullable(verdictSchema),
+    score: nullable(numberSchema),
+    verdictCounts: verdictCountsSchema,
+    resultsUrl: stringSchema,
+    createdAt: dateTimeSchema,
+    startedAt: nullable(dateTimeSchema),
+    finishedAt: nullable(dateTimeSchema),
+  },
+  required: [
+    "id",
+    "projectId",
+    "suiteId",
+    "suiteName",
+    "suiteDeleted",
+    "name",
+    "status",
+    "agentId",
+    "connectionId",
+    "agentPlatform",
+    "connectionKind",
+    "accessVariant",
+    "modality",
+    "productLabel",
+    "environment",
+    "expectedSimulationCount",
+    "completedCount",
+    "failedCount",
+    "canceledCount",
+    "simulationCounts",
+    "finishedCount",
+    "gradableCount",
+    "gradedCount",
+    "verdict",
+    "score",
+    "verdictCounts",
+    "resultsUrl",
+    "createdAt",
+    "startedAt",
+    "finishedAt",
+  ],
+  additionalProperties: false,
+} as const;
+
+const runDetailSchema = {
+  ...runHeaderSchema,
+  properties: {
+    ...runHeaderSchema.properties,
+    counts: verdictCountsSchema,
+    connectionSnapshot: connectionSnapshotSchema,
+    agent: nullable(identitySchema),
+    connection: nullable({
+      ...identitySchema,
+      properties: {
+        ...identitySchema.properties,
+        productLabel: stringSchema,
+      },
+      required: [...identitySchema.required, "productLabel"],
+    }),
+  },
+  required: [
+    ...runHeaderSchema.required,
+    "counts",
+    "connectionSnapshot",
+    "agent",
+    "connection",
+  ],
 } as const;
 
 const runSimulationSchema = {
@@ -366,9 +282,9 @@ const runSimulationSchema = {
   properties: {
     id: stringIdSchema,
     position: integerSchema,
-    testId: nullable(stringIdSchema),
-    testName: nullable(stringSchema),
-    testVersionId: nullable(stringIdSchema),
+    testId: stringIdSchema,
+    testName: stringSchema,
+    testVersionId: stringIdSchema,
     personaId: stringIdSchema,
     personaName: stringSchema,
     personaVersionId: stringIdSchema,
@@ -377,14 +293,10 @@ const runSimulationSchema = {
     verdict: nullable(verdictSchema),
     score: nullable(numberSchema),
     counts: nullable(verdictCountsSchema),
-    diagnostics: nullable(outcomeSchema),
-    verdicts: arrayOf(recordedVerdictSchema),
     reason: nullable(endingReasonSchema),
-    skipReason: nullable(skipReasonSchema),
-    skippedCapabilities: nullable(arrayOf(stringSchema)),
-    mockToolCoverage: nullable(mockToolCoverageSchema),
     modality: modalitySchema,
     hasRecording: booleanSchema,
+    mockToolCoverage: nullable(mockToolCoverageSchema),
   },
   required: [
     "id",
@@ -400,227 +312,10 @@ const runSimulationSchema = {
     "verdict",
     "score",
     "counts",
-    "diagnostics",
-    "verdicts",
     "reason",
-    "skipReason",
-    "skippedCapabilities",
-    "mockToolCoverage",
     "modality",
     "hasRecording",
-  ],
-  additionalProperties: false,
-} as const;
-
-const runSchema = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    projectId: stringIdSchema,
-    status: runStatusSchema,
-    agentId: stringIdSchema,
-    connectionId: stringIdSchema,
-    agentPlatform: nullable(stringSchema),
-    connectionKind: stringSchema,
-    accessVariant: stringSchema,
-    modality: modalitySchema,
-    productLabel: stringSchema,
-    connectionSnapshot: connectionSnapshotSchema,
-    label: nullable(stringSchema),
-    retryOfRunId: nullable(stringIdSchema),
-    testVersions: arrayOf(stringIdSchema),
-    mockTools: mockToolSnapshotSchema,
-    expectedSimulationCount: integerSchema,
-    completedCount: nullable(integerSchema),
-    failedCount: nullable(integerSchema),
-    canceledCount: nullable(integerSchema),
-    skippedCount: nullable(integerSchema),
-    resultsUrl: stringSchema,
-    createdAt: dateTimeSchema,
-    finishedAt: nullable(dateTimeSchema),
-    gradedCount: integerSchema,
-    finishedCount: integerSchema,
-    gradableCount: integerSchema,
-    simulationCounts: simulationCountsSchema,
-    verdict: nullable(verdictSchema),
-    score: nullable(numberSchema),
-    counts: nullable(verdictCountsSchema),
-    diagnostics: nullable(outcomeSchema),
-    byGrader: arrayOf(byGraderSchema),
-    simulations: arrayOf(runSimulationSchema),
-  },
-  required: [
-    "id",
-    "projectId",
-    "status",
-    "agentId",
-    "connectionId",
-    "agentPlatform",
-    "connectionKind",
-    "accessVariant",
-    "modality",
-    "productLabel",
-    "connectionSnapshot",
-    "label",
-    "retryOfRunId",
-    "testVersions",
-    "mockTools",
-    "expectedSimulationCount",
-    "completedCount",
-    "failedCount",
-    "canceledCount",
-    "skippedCount",
-    "resultsUrl",
-    "createdAt",
-    "finishedAt",
-    "gradedCount",
-    "finishedCount",
-    "gradableCount",
-    "simulationCounts",
-    "verdict",
-    "score",
-    "counts",
-    "diagnostics",
-    "byGrader",
-    "simulations",
-  ],
-  additionalProperties: false,
-} as const;
-
-const gradingPlanSchema = {
-  type: "object",
-  properties: {
-    state: {
-      type: "string",
-      enum: ["run_start", "migration_snapshot", "not_recorded"],
-    },
-    capturedAt: nullable(dateTimeSchema),
-    groups: arrayOf({
-      oneOf: [
-        {
-          type: "object",
-          properties: {
-            tag: { type: "string", enum: ["version"] },
-            testId: stringIdSchema,
-            testVersionId: stringIdSchema,
-            testName: stringSchema,
-            items: arrayOf(planItemSchema),
-          },
-          required: [
-            "tag",
-            "testId",
-            "testVersionId",
-            "testName",
-            "items",
-          ],
-          additionalProperties: false,
-        },
-        {
-          type: "object",
-          properties: {
-            tag: { type: "string", enum: ["legacy_testless"] },
-            items: arrayOf(planItemSchema),
-          },
-          required: ["tag", "items"],
-          additionalProperties: false,
-        },
-      ],
-    }),
-  },
-  required: ["state", "capturedAt", "groups"],
-  additionalProperties: false,
-} as const;
-
-const identitySchema = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    name: stringSchema,
-    archived: booleanSchema,
-  },
-  required: ["id", "name", "archived"],
-  additionalProperties: false,
-} as const;
-
-const runDetailSchema = {
-  ...runSchema,
-  properties: {
-    ...runSchema.properties,
-    gradingPlan: nullable(gradingPlanSchema),
-    agent: nullable(identitySchema),
-    connection: nullable({
-      ...identitySchema,
-      properties: {
-        ...identitySchema.properties,
-        productLabel: stringSchema,
-      },
-      required: [...identitySchema.required, "productLabel"],
-    }),
-  },
-  required: [...runSchema.required, "gradingPlan", "agent", "connection"],
-} as const;
-
-const historyEntrySchema = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    projectId: stringIdSchema,
-    status: runStatusSchema,
-    label: nullable(stringSchema),
-    agentId: stringIdSchema,
-    connectionId: stringIdSchema,
-    agentPlatform: nullable(stringSchema),
-    connectionKind: stringSchema,
-    accessVariant: stringSchema,
-    modality: modalitySchema,
-    productLabel: stringSchema,
-    environment: nullable(stringSchema),
-    retryOfRunId: nullable(stringIdSchema),
-    expectedSimulationCount: integerSchema,
-    completedCount: nullable(integerSchema),
-    failedCount: nullable(integerSchema),
-    canceledCount: nullable(integerSchema),
-    skippedCount: nullable(integerSchema),
-    simulationCounts: simulationCountsSchema,
-    finishedCount: integerSchema,
-    gradableCount: integerSchema,
-    gradedCount: integerSchema,
-    verdict: nullable(verdictSchema),
-    score: nullable(numberSchema),
-    verdictCounts: verdictCountsSchema,
-    createdAt: dateTimeSchema,
-    startedAt: nullable(dateTimeSchema),
-    finishedAt: nullable(dateTimeSchema),
-  },
-  required: [
-    "id",
-    "projectId",
-    "status",
-    "label",
-    "agentId",
-    "connectionId",
-    "agentPlatform",
-    "connectionKind",
-    "accessVariant",
-    "modality",
-    "productLabel",
-    "environment",
-    "retryOfRunId",
-    "expectedSimulationCount",
-    "completedCount",
-    "failedCount",
-    "canceledCount",
-    "skippedCount",
-    "simulationCounts",
-    "finishedCount",
-    "gradableCount",
-    "gradedCount",
-    "verdict",
-    "score",
-    "verdictCounts",
-    "createdAt",
-    "startedAt",
-    "finishedAt",
+    "mockToolCoverage",
   ],
   additionalProperties: false,
 } as const;
@@ -667,19 +362,21 @@ const runEventSchema = {
   ],
 } as const;
 
-const projectQuery = parameters({ projectId: stringIdSchema });
-const runParams = parameters({ runId: stringIdSchema }, ["runId"]);
-const simulationParams = parameters({ simulationId: stringIdSchema }, [
-  "simulationId",
-]);
-
-const idempotentBody = {
+const expectedTestVersionSchema = {
   type: "object",
   properties: {
-    idempotencyKey: stringSchema,
+    testId: stringIdSchema,
+    versionId: stringIdSchema,
   },
-  required: ["idempotencyKey"],
+  required: ["testId", "versionId"],
   additionalProperties: false,
+} as const;
+
+const projectQuery = parameters({ projectId: stringIdSchema });
+const runParams = parameters({ runId: stringIdSchema }, ["runId"]);
+const pageQuery = {
+  pageSize: pageSizeSchema,
+  pageToken: stringIdSchema,
 } as const;
 
 const commonReadRefusals = {
@@ -687,45 +384,21 @@ const commonReadRefusals = {
   401: refusalResponse,
   403: refusalResponse,
   404: refusalResponse,
+  422: refusalResponse,
   429: rateLimitResponse,
 } as const;
 
 const commonWriteRefusals = {
   ...commonReadRefusals,
   409: refusalResponse,
-  422: refusalResponse,
 } as const;
 
 export const runOperations = {
-  getRunPlan: defineOperation({
-    operationId: "getRunPlan",
-    method: "GET",
-    path: "/v1/run-plan",
-    summary: "Preview a run",
-    tag: "Runs",
-    security: "credentialed",
-    request: {
-      query: parameters(
-        {
-          projectId: stringIdSchema,
-          agentId: stringIdSchema,
-          connectionId: stringIdSchema,
-          testVersionIds: stringSchema,
-        },
-        ["connectionId", "testVersionIds"],
-      ),
-    },
-    responses: {
-      200: { description: "The run plan.", schema: runPlanSchema },
-      ...commonWriteRefusals,
-    },
-  }),
-
   createRun: defineOperation({
     operationId: "createRun",
     method: "POST",
     path: "/v1/runs",
-    summary: "Start a run",
+    summary: "Run one complete test suite",
     tag: "Runs",
     security: "credentialed",
     request: {
@@ -733,19 +406,20 @@ export const runOperations = {
       body: {
         type: "object",
         properties: {
+          suiteId: stringIdSchema,
           agentId: stringIdSchema,
           connectionId: stringIdSchema,
-          testVersionIds: arrayOf(stringIdSchema),
           idempotencyKey: stringSchema,
-          label: stringSchema,
+          name: stringSchema,
+          expectedTestVersions: arrayOf(expectedTestVersionSchema),
         },
-        required: ["connectionId", "testVersionIds", "idempotencyKey"],
+        required: ["suiteId", "agentId", "connectionId", "idempotencyKey"],
         additionalProperties: false,
       },
       bodyRequired: true,
     },
     responses: {
-      201: { description: "The new run.", schema: runSchema },
+      201: { description: "The bounded header for the new run.", schema: runHeaderSchema },
       ...commonWriteRefusals,
     },
   }),
@@ -760,6 +434,7 @@ export const runOperations = {
     request: {
       query: parameters({
         projectId: stringIdSchema,
+        suiteId: stringIdSchema,
         agentId: stringIdSchema,
         connectionId: stringIdSchema,
         testId: stringIdSchema,
@@ -767,25 +442,23 @@ export const runOperations = {
         verdict: verdictSchema,
         since: dateTimeSchema,
         until: dateTimeSchema,
-        pageSize: integerSchema,
-        pageToken: stringSchema,
+        ...pageQuery,
       }),
     },
     responses: {
       200: {
-        description: "A page of runs.",
+        description: "A bounded page of run headers.",
         schema: {
           type: "object",
           properties: {
-            runs: arrayOf(historyEntrySchema),
-            nextPageToken: nullable(stringSchema),
+            runs: arrayOf(runHeaderSchema),
+            nextPageToken: nullable(stringIdSchema),
           },
           required: ["runs", "nextPageToken"],
           additionalProperties: false,
         },
       },
       ...commonReadRefusals,
-      422: refusalResponse,
     },
   }),
 
@@ -798,7 +471,35 @@ export const runOperations = {
     security: "credentialed",
     request: { params: runParams, query: projectQuery },
     responses: {
-      200: { description: "The run and its evidence.", schema: runDetailSchema },
+      200: { description: "The bounded run header and target context.", schema: runDetailSchema },
+      ...commonReadRefusals,
+    },
+  }),
+
+  listRunSimulations: defineOperation({
+    operationId: "listRunSimulations",
+    method: "GET",
+    path: "/v1/runs/{runId}/simulations",
+    summary: "List simulations in a run",
+    tag: "Runs",
+    security: "credentialed",
+    request: {
+      params: runParams,
+      query: parameters({ projectId: stringIdSchema, ...pageQuery }),
+    },
+    responses: {
+      200: {
+        description: "A bounded page of simulations.",
+        schema: {
+          type: "object",
+          properties: {
+            simulations: arrayOf(runSimulationSchema),
+            nextPageToken: nullable(stringIdSchema),
+          },
+          required: ["simulations", "nextPageToken"],
+          additionalProperties: false,
+        },
+      },
       ...commonReadRefusals,
     },
   }),
@@ -832,52 +533,6 @@ export const runOperations = {
     },
   }),
 
-  retryRun: defineOperation({
-    operationId: "retryRun",
-    method: "POST",
-    path: "/v1/runs/{runId}/retry",
-    summary: "Retry a run",
-    tag: "Runs",
-    security: "credentialed",
-    request: {
-      params: runParams,
-      query: projectQuery,
-      body: idempotentBody,
-      bodyRequired: true,
-    },
-    responses: {
-      201: { description: "The retry run.", schema: runSchema },
-      ...commonWriteRefusals,
-    },
-  }),
-
-  rerunSimulation: defineOperation({
-    operationId: "rerunSimulation",
-    method: "POST",
-    path: "/v1/simulations/{simulationId}/rerun",
-    summary: "Run one simulation again",
-    tag: "Runs",
-    security: "credentialed",
-    request: {
-      params: simulationParams,
-      query: projectQuery,
-      body: {
-        type: "object",
-        properties: {
-          idempotencyKey: stringSchema,
-          label: stringSchema,
-        },
-        required: ["idempotencyKey", "label"],
-        additionalProperties: false,
-      },
-      bodyRequired: true,
-    },
-    responses: {
-      201: { description: "The new one-simulation run.", schema: runSchema },
-      ...commonWriteRefusals,
-    },
-  }),
-
   cancelRun: defineOperation({
     operationId: "cancelRun",
     method: "POST",
@@ -885,12 +540,9 @@ export const runOperations = {
     summary: "Cancel a run",
     tag: "Runs",
     security: "credentialed",
-    request: {
-      params: runParams,
-      query: projectQuery,
-    },
+    request: { params: runParams, query: projectQuery },
     responses: {
-      200: { description: "The canceled run as it now stands.", schema: runSchema },
+      200: { description: "The bounded header for the canceled run.", schema: runHeaderSchema },
       ...commonWriteRefusals,
     },
   }),

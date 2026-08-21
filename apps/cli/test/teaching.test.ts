@@ -61,6 +61,7 @@ const RELEASE_WRITING = ".fake-agent-release-teaching";
 function fileFor(name: string): string {
   return [
     "---",
+    "format: 4",
     `name: ${name}`,
     "---",
     "## Scenario",
@@ -74,7 +75,7 @@ function fileFor(name: string): string {
 function writes(name: string): FakeStep[] {
   return [
     { kind: "say", text: `egma:writing ${name}\n` },
-    { kind: "write-file", path: `egma/tests/${name}.md`, content: fileFor(name) },
+    { kind: "write-file", path: `egma/tests/generated/${name}.md`, content: fileFor(name) },
     { kind: "say", text: `egma:wrote ${name}\n` },
   ];
 }

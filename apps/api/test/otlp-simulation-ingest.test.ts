@@ -9,7 +9,9 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
   disconnectClickHouse,
+  listSimulations,
   startRun,
   startSimulation,
 } from "@egma/db";
@@ -138,8 +140,12 @@ async function seedSimulationNamed(
       traits: NEUTRAL_TRAITS,
     })
   ).id;
+  const suiteId = (
+    await createTestSuite(auth, { name: `Regression ${label}` })
+  ).id;
   const testVersionId = (
     await createTest(auth, {
+      suiteId,
       name: `Reschedules ${label}`,
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -148,10 +154,13 @@ async function seedSimulationNamed(
   ).versionId;
 
   const started = await startRun(auth, {
+    suiteId,
+    agentId: created.id,
     connectionId: created.connection?.id ?? "",
-    testVersionIds: [testVersionId],
+    idempotencyKey: newId("run"),
   });
-  const simulation = started.simulations[0];
+  const page = await listSimulations(auth, started.id, { limit: 1 });
+  const simulation = page?.items[0];
   if (simulation === undefined) throw new Error("the run has no simulation");
 
   await api.database.sql("update simulation set id = $1 where id = $2", [

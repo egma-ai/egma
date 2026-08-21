@@ -90,10 +90,9 @@ export type ResolvedMockTool = SnapshotEntry & {
  */
 export function resolveMockTools(
   snapshot: MockToolSnapshot,
-  testVersionId: string | null,
+  testVersionId: string,
 ): readonly ResolvedMockTool[] {
-  const overriding =
-    testVersionId === null ? [] : (snapshot.overrides[testVersionId] ?? []);
+  const overriding = snapshot.overrides[testVersionId] ?? [];
   const overridden = new Map(
     overriding.map((entry) => [entry.toolName, entry] as const),
   );

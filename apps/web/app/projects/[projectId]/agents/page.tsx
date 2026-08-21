@@ -19,7 +19,6 @@ import { canAuthor } from "../../../../lib/roles.ts";
 import { Toolbar, TOOLBAR_SEARCH } from "../../../../ui/section.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { useMinuteClock } from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
   AppShell,
@@ -63,10 +62,7 @@ export default function AgentsPage() {
   );
 }
 
-function columnsFor(
-  projectId: string,
-  now: number,
-): readonly Column<ListedAgentWithConnections>[] {
+function columnsFor(projectId: string): readonly Column<ListedAgentWithConnections>[] {
   return [
     {
       key: "name",
@@ -92,7 +88,7 @@ function columnsFor(
       header: "Connections",
       width: "50%",
       cell: (agent) => (
-        <ConnectionsOnRow connections={agent.connections} now={now} />
+        <ConnectionsOnRow connections={agent.connections} />
       ),
     },
     {
@@ -112,8 +108,6 @@ function Agents({ projectId }: { readonly projectId: string }) {
 
   const [typed, setTyped] = useState("");
   const [search, setSearch] = useState("");
-  /** One clock for every relative instant on the page, rather than one per row. */
-  const now = useMinuteClock();
 
   /**
    * The typed text is debounced into the text the request is made from, so
@@ -330,7 +324,7 @@ function Agents({ projectId }: { readonly projectId: string }) {
       <>
         <DataTable
           label="Agents in this project"
-          columns={columnsFor(projectId, now)}
+          columns={columnsFor(projectId)}
           rows={items}
           keyOf={(agent) => agent.id}
           stretchPrimaryLink

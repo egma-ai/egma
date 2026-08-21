@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { newId } from "@egma/ids";
 
 import {
-  getRun,
+  getSimulationExecutionEvidence,
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
   LONGEST_MOCK_TOOL_DELAY_MILLISECONDS,
   resolveMockTools,
@@ -74,12 +74,20 @@ function retellFor(name: string): Record<string, unknown> {
 
 type Pinned = { readonly testId: string; readonly versionId: string };
 
+async function createSuite(key: string, name: string): Promise<string> {
+  const created = await request("POST", "/v1/test-suites", key, { name });
+  expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
+  return String(created.body.id);
+}
+
 async function pushTest(
   key: string,
+  suiteId: string,
   body: Record<string, unknown>,
 ): Promise<Pinned & { body: Record<string, unknown> }> {
   const created = await request("POST", "/v1/tests", key, {
     ...RESCHEDULING,
+    suiteId,
     ...body,
   });
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
@@ -133,9 +141,9 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_content");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
-    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
+    const suiteId = await createSuite(key, "Test content");
 
-    const pushed = await pushTest(key, {
+    const pushed = await pushTest(key, suiteId, {
       mockTools: [{ ...EMPTY_CALENDAR, delayMs: 400 }],
     });
 
@@ -156,8 +164,8 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_versions");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
-    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
-    const pushed = await pushTest(key, { mockTools: [EMPTY_CALENDAR] });
+    const suiteId = await createSuite(key, "Test versions");
+    const pushed = await pushTest(key, suiteId, { mockTools: [EMPTY_CALENDAR] });
 
     const edited = await request("PATCH", `/v1/tests/${pushed.testId}`, key, {
       mockTools: [
@@ -192,8 +200,8 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_identical");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
-    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
-    const pushed = await pushTest(key, { mockTools: [EMPTY_CALENDAR] });
+    const suiteId = await createSuite(key, "No-op edits");
+    const pushed = await pushTest(key, suiteId, { mockTools: [EMPTY_CALENDAR] });
 
     const again = await request("PATCH", `/v1/tests/${pushed.testId}`, key, {
       mockTools: [EMPTY_CALENDAR],
@@ -209,8 +217,8 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_kept");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
-    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
-    const pushed = await pushTest(key, { mockTools: [EMPTY_CALENDAR] });
+    const suiteId = await createSuite(key, "Kept overrides");
+    const pushed = await pushTest(key, suiteId, { mockTools: [EMPTY_CALENDAR] });
 
     const elsewhere = await request(
       "PATCH",
@@ -237,10 +245,11 @@ describe("a test's own overrides", () => {
     api = await createApi("mock_world_test_gates");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
-    await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
+    const suiteId = await createSuite(key, "Override gates");
 
     const blank = await request("POST", "/v1/tests", key, {
       ...RESCHEDULING,
+      suiteId,
       mockTools: [{ tool: "  ", answer: {} }],
     });
     expect(blank.statusCode).toBe(422);
@@ -254,6 +263,7 @@ describe("a test's own overrides", () => {
 
     const slow = await request("POST", "/v1/tests", key, {
       ...RESCHEDULING,
+      suiteId,
       mockTools: [{ ...EMPTY_CALENDAR, delayMs: 60_000 }],
     });
     expect(slow.statusCode).toBe(422);
@@ -267,6 +277,7 @@ describe("a test's own overrides", () => {
 
     const twice = await request("POST", "/v1/tests", key, {
       ...RESCHEDULING,
+      suiteId,
       mockTools: [EMPTY_CALENDAR, { ...EMPTY_CALENDAR, answer: { slots: [1] } }],
     });
     expect(twice.statusCode).toBe(422);
@@ -287,42 +298,80 @@ async function aCustomerReadyToRun(label: string): Promise<{
   key: string;
   agentId: string;
   connectionId: string;
+  suiteId: string;
 }> {
   api = await createApi(label);
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
-  await registerAgent(key, `Front desk ${newId("agt").slice(-6)}`);
   const { agentId, connectionId } = await registerAgent(key, "Front desk");
-  return { ada, key, agentId, connectionId };
+  const suiteId = await createSuite(key, "Front desk regression");
+  return { ada, key, agentId, connectionId, suiteId };
+}
+
+/** Find one simulation through the run's bounded page, not its header. */
+async function simulationFor(
+  key: string,
+  runId: string,
+  testVersionId: string,
+): Promise<string> {
+  let pageToken: string | null = null;
+  do {
+    const query = pageToken === null
+      ? "?pageSize=1"
+      : `?pageSize=1&pageToken=${encodeURIComponent(pageToken)}`;
+    const page = await request(
+      "GET",
+      `/v1/runs/${runId}/simulations${query}`,
+      key,
+    );
+    expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
+    const simulations = page.body.simulations as readonly {
+      readonly id: string;
+      readonly testVersionId: string;
+    }[];
+    const found = simulations.find(
+      (one) => one.testVersionId === testVersionId,
+    );
+    if (found !== undefined) return found.id;
+    pageToken = page.body.nextPageToken as string | null;
+  } while (pageToken !== null);
+  throw new Error(`run ${runId} has no simulation for ${testVersionId}`);
+}
+
+/** Resolve the frozen Mock Tools from one simulation's bounded evidence. */
+async function resolvedMockToolsFor(
+  who: Customer,
+  key: string,
+  runId: string,
+  testVersionId: string,
+) {
+  const simulationId = await simulationFor(key, runId, testVersionId);
+  const evidence = await getSimulationExecutionEvidence(
+    contextFor(who, "member"),
+    simulationId,
+  );
+  if (evidence === undefined) {
+    throw new Error(`simulation ${simulationId} has no execution evidence`);
+  }
+  return resolveMockTools(evidence.mockToolSnapshot, testVersionId);
 }
 
 describe("the world a run freezes", () => {
   it("carries the project's answers, and an edit afterwards reaches none of them", async () => {
-    const { ada, key, connectionId } = await aCustomerReadyToRun(
-      "mock_world_frozen",
-    );
+    const { ada, key, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("mock_world_frozen");
     const mockToolId = await mockTool(key, EMPTY_CALENDAR);
-    const pinned = await pushTest(key, {});
+    const pinned = await pushTest(key, suiteId, {});
 
     const started = await request("POST", "/v1/runs", key, {
-      connectionId: connectionId,
-      testVersionIds: [pinned.versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
-
-    expect(started.body.mockTools).toEqual({
-      defaults: [
-        {
-          tool: "check_availability",
-          mockToolId: mockToolId,
-          answer: { slots: [] },
-          delayMs: 0,
-        },
-      ],
-      overrides: {},
-    });
+    expect(started.body.mockTools).toBeUndefined();
 
     // The world moves, after the run was created.
     const edited = await request("PATCH", `/v1/mock-tools/${mockToolId}`, key, {
@@ -331,12 +380,13 @@ describe("the world a run freezes", () => {
     });
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
 
-    // And the run answers exactly what it froze, in every reading of it.
+    // The run header stays bounded; the simulation answers exactly what this
+    // run froze, after the project world has moved.
     const read = await request("GET", `/v1/runs/${runId}`, key);
-    expect(read.body.mockTools).toEqual(started.body.mockTools);
-
-    const held = await getRun(contextFor(ada, "member"), runId);
-    expect(resolveMockTools(held!.mockToolSnapshot, pinned.versionId)).toEqual([
+    expect(read.body.mockTools).toBeUndefined();
+    expect(
+      await resolvedMockToolsFor(ada, key, runId, pinned.versionId),
+    ).toEqual([
       {
         toolName: "check_availability",
         mockToolId,
@@ -348,28 +398,32 @@ describe("the world a run freezes", () => {
     // A run started now sees the world as it is now, which is the other half:
     // the freeze is per run, never a refusal to move.
     const after = await request("POST", "/v1/runs", key, {
-      connectionId: connectionId,
-      testVersionIds: [pinned.versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
     });
-    expect(
-      (after.body.mockTools as { defaults: { delayMs: number }[] }).defaults[0]
-        ?.delayMs,
-    ).toBe(2_000);
+    expect(after.statusCode, JSON.stringify(after.body)).toBe(201);
+    const moved = await resolvedMockToolsFor(
+      ada,
+      key,
+      String(after.body.id),
+      pinned.versionId,
+    );
+    expect(moved[0]?.delayMilliseconds).toBe(2_000);
   });
 
   it("lets a test's override beat the project's answer for the same tool", async () => {
-    const { ada, key, connectionId } = await aCustomerReadyToRun(
-      "mock_world_override_wins",
-    );
+    const { ada, key, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("mock_world_override_wins");
     const mockToolId = await mockTool(key, EMPTY_CALENDAR);
     await mockTool(key, {
       tool: "book_appointment",
       answer: { booked: true },
     });
 
-    const plain = await pushTest(key, { name: "the ordinary path" });
-    const forcing = await pushTest(key, {
+    const plain = await pushTest(key, suiteId, { name: "the ordinary path" });
+    const forcing = await pushTest(key, suiteId, {
       name: "the calendar is down",
       mockTools: [
         {
@@ -381,20 +435,18 @@ describe("the world a run freezes", () => {
     });
 
     const started = await request("POST", "/v1/runs", key, {
-      connectionId: connectionId,
-      testVersionIds: [plain.versionId, forcing.versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-
-    const held = await getRun(
-      contextFor(ada, "member"),
-      String(started.body.id),
-    );
-    const snapshot = held!.mockToolSnapshot;
+    const runId = String(started.body.id);
 
     // The ordinary test sees the project's world, untouched.
-    expect(resolveMockTools(snapshot, plain.versionId)).toEqual([
+    expect(
+      await resolvedMockToolsFor(ada, key, runId, plain.versionId),
+    ).toEqual([
       {
         toolName: "check_availability",
         mockToolId,
@@ -412,7 +464,9 @@ describe("the world a run freezes", () => {
     // The forcing test sees its own answer in that tool's place, and the
     // project's answer for everything it did not override. The override carries
     // no mock tool id, because an override is the test's own content.
-    expect(resolveMockTools(snapshot, forcing.versionId)).toEqual([
+    expect(
+      await resolvedMockToolsFor(ada, key, runId, forcing.versionId),
+    ).toEqual([
       {
         toolName: "check_availability",
         mockToolId: null,
@@ -429,25 +483,28 @@ describe("the world a run freezes", () => {
   });
 
   it("carries a test's override of a tool the project answers for at all", async () => {
-    const { ada, key, connectionId } = await aCustomerReadyToRun(
-      "mock_world_override_only",
-    );
-    const pinned = await pushTest(key, {
+    const { ada, key, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("mock_world_override_only");
+    const pinned = await pushTest(key, suiteId, {
       mockTools: [{ tool: "lookup_customer", answer: { tier: "gold" } }],
     });
 
     const started = await request("POST", "/v1/runs", key, {
-      connectionId: connectionId,
-      testVersionIds: [pinned.versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
-    const held = await getRun(
-      contextFor(ada, "member"),
-      String(started.body.id),
-    );
-    expect(resolveMockTools(held!.mockToolSnapshot, pinned.versionId)).toEqual([
+    expect(
+      await resolvedMockToolsFor(
+        ada,
+        key,
+        String(started.body.id),
+        pinned.versionId,
+      ),
+    ).toEqual([
       {
         toolName: "lookup_customer",
         mockToolId: null,
@@ -458,7 +515,8 @@ describe("the world a run freezes", () => {
   });
 
   it("keeps a scoped answer out of a run against an agent it does not name", async () => {
-    const { ada, key } = await aCustomerReadyToRun("mock_world_scoping");
+    const { ada, key, suiteId } =
+      await aCustomerReadyToRun("mock_world_scoping");
     const experimental = await registerAgent(key, "Front desk, experimental");
     const stable = await registerAgent(key, "Front desk, stable");
 
@@ -471,54 +529,62 @@ describe("the world a run freezes", () => {
       agents: ["Front desk, experimental"],
     });
 
-    const pinned = await pushTest(key, {});
-    const auth = contextFor(ada, "member");
+    const pinned = await pushTest(key, suiteId, {});
 
-    const against = async (connectionId: string) => {
+    const against = async (target: {
+      readonly agentId: string;
+      readonly connectionId: string;
+    }) => {
       const started = await request("POST", "/v1/runs", key, {
-        connectionId: connectionId,
-        testVersionIds: [pinned.versionId],
+        suiteId,
+        agentId: target.agentId,
+        connectionId: target.connectionId,
         idempotencyKey: newId("run"),
       });
       expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-      const held = await getRun(auth, String(started.body.id));
-      return resolveMockTools(held!.mockToolSnapshot, pinned.versionId).map(
-        (one) => one.toolName,
-      );
+      return (
+        await resolvedMockToolsFor(
+          ada,
+          key,
+          String(started.body.id),
+          pinned.versionId,
+        )
+      ).map((one) => one.toolName);
     };
 
     // The scoped answer applies where it was scoped, and nowhere else. The
     // unscoped one applies everywhere, which is the ordinary case and what
     // keeps two prompt variants comparable.
-    expect(await against(experimental.connectionId)).toEqual([
+    expect(await against(experimental)).toEqual([
       "book_appointment",
       "check_availability",
     ]);
-    expect(await against(stable.connectionId)).toEqual(["book_appointment"]);
+    expect(await against(stable)).toEqual(["book_appointment"]);
     expect(everywhere).toMatch(/^mck_/u);
   });
 
   it("freezes nothing at all for a project that answers for no tool", async () => {
-    const { ada, key, connectionId } = await aCustomerReadyToRun(
-      "mock_world_empty",
-    );
-    const pinned = await pushTest(key, {});
+    const { ada, key, agentId, connectionId, suiteId } =
+      await aCustomerReadyToRun("mock_world_empty");
+    const pinned = await pushTest(key, suiteId, {});
 
     const started = await request("POST", "/v1/runs", key, {
-      connectionId: connectionId,
-      testVersionIds: [pinned.versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.mockTools).toEqual({ defaults: [], overrides: {} });
+    expect(started.body.mockTools).toBeUndefined();
 
-    const held = await getRun(
-      contextFor(ada, "member"),
-      String(started.body.id),
-    );
-    expect(resolveMockTools(held!.mockToolSnapshot, pinned.versionId)).toEqual(
-      [],
-    );
+    expect(
+      await resolvedMockToolsFor(
+        ada,
+        key,
+        String(started.body.id),
+        pinned.versionId,
+      ),
+    ).toEqual([]);
   });
 });
 

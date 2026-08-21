@@ -105,7 +105,9 @@ function startWizard(script: string) {
 
 /** Every test file the folder holds, or none when there is no folder. */
 async function testsInFolder(): Promise<string[]> {
-  return readdir(path.join(workspace.dir, "egma", "tests")).catch(() => [] as string[]);
+  return (await readdir(path.join(workspace.dir, "egma", "tests", "generated")).catch(
+    () => [] as string[],
+  )).filter((name) => name.endsWith(".md"));
 }
 
 /** The fragment only the write-the-tests task has, whatever it asks for. */
@@ -117,9 +119,10 @@ function writes(name: string): FakeStep[] {
     { kind: "say", text: `egma:writing ${name}\n` },
     {
       kind: "write-file",
-      path: `egma/tests/${name}.md`,
+      path: `egma/tests/generated/${name}.md`,
       content: [
         "---",
+        "format: 4",
         `name: ${name}`,
         "---",
         "## Scenario",

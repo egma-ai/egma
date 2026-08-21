@@ -98,15 +98,6 @@ describe("the answers one simulation is served", () => {
     expect(isErrorAnswer(added!.answer)).toBe(true);
   });
 
-  it("are the project's alone for a conversation that names no test", () => {
-    // A simulation written before a run could pin a version carries no test to
-    // override anything, and it still sees the project's world rather than
-    // nothing at all.
-    expect(resolveMockTools(PROJECT_WORLD, null)).toEqual(
-      PROJECT_WORLD.defaults,
-    );
-  });
-
   it("are none at all for a run that froze nothing", () => {
     expect(resolveMockTools(NO_MOCK_TOOLS, "tstv_forcing")).toEqual([]);
   });
@@ -124,7 +115,7 @@ describe("the answers one simulation is served", () => {
       overrides: {},
     };
 
-    const [only] = resolveMockTools(answering, null);
+    const [only] = resolveMockTools(answering, "tstv_with_null_answer");
     expect(isErrorAnswer(only!.answer)).toBe(false);
     expect(only!.answer.answer).toBeNull();
   });

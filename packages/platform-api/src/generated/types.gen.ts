@@ -130,7 +130,6 @@ export type ListConnectionOptionsResponses = {
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
             simulatorAdapter: boolean;
-            capabilityDiscovery: boolean;
             fields: Array<{
                 key: string;
                 label: string;
@@ -153,41 +152,6 @@ export type ListConnectionOptionsResponses = {
 };
 
 export type ListConnectionOptionsResponse = ListConnectionOptionsResponses[keyof ListConnectionOptionsResponses];
-
-export type ListCapabilitiesData = {
-    body?: never;
-    path?: never;
-    query?: never;
-    url: '/v1/capabilities';
-};
-
-export type ListCapabilitiesErrors = {
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type ListCapabilitiesError = ListCapabilitiesErrors[keyof ListCapabilitiesErrors];
-
-export type ListCapabilitiesResponses = {
-    /**
-     * The server-owned capability catalog.
-     */
-    200: {
-        items: Array<{
-            key: 'dtmf' | 'barge_in' | 'raw_audio';
-            label: string;
-            description: string;
-        }>;
-    };
-};
-
-export type ListCapabilitiesResponse = ListCapabilitiesResponses[keyof ListCapabilitiesResponses];
 
 export type ListAgentsData = {
     body?: never;
@@ -259,18 +223,6 @@ export type ListAgentsResponses = {
                 };
                 credentialPresent: boolean;
                 credentialsHint: string | null;
-                capabilities: {
-                    state: 'unknown' | 'known';
-                    measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                    supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                    checkedAt: string | null;
-                    source: string | null;
-                    standing: {
-                        dtmf: 'supported' | 'unsupported' | 'not_measured';
-                        barge_in: 'supported' | 'unsupported' | 'not_measured';
-                        raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                    };
-                };
                 revision: string;
                 archived: boolean;
                 archivedAt: string | null;
@@ -390,18 +342,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -442,18 +382,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -535,18 +463,6 @@ export type GetAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -723,18 +639,6 @@ export type AddConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -813,7 +717,7 @@ export type ArchiveAgentResponses = {
             updatedAt: string;
         };
         archivedConnections: Array<string>;
-        canceledRuns: Array<string>;
+        canceledRunCount: number;
     };
 };
 
@@ -950,18 +854,6 @@ export type GetConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -1054,18 +946,6 @@ export type UpdateConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -1150,25 +1030,13 @@ export type ArchiveConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
             updatedAt: string;
         };
-        canceledRuns: Array<string>;
+        canceledRunCount: number;
     };
 };
 
@@ -1256,18 +1124,6 @@ export type RestoreConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
             revision: string;
             archived: boolean;
             archivedAt: string | null;
@@ -1278,104 +1134,6 @@ export type RestoreConnectionResponses = {
 };
 
 export type RestoreConnectionResponse = RestoreConnectionResponses[keyof RestoreConnectionResponses];
-
-export type RefreshConnectionCapabilitiesData = {
-    body?: never;
-    path: {
-        agentId: string;
-        connectionId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/agents/{agentId}/connections/{connectionId}/capabilities/refresh';
-};
-
-export type RefreshConnectionCapabilitiesErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-    /**
-     * The request was refused.
-     */
-    502: Refusal;
-    /**
-     * The request was refused.
-     */
-    503: Refusal;
-};
-
-export type RefreshConnectionCapabilitiesError = RefreshConnectionCapabilitiesErrors[keyof RefreshConnectionCapabilitiesErrors];
-
-export type RefreshConnectionCapabilitiesResponses = {
-    /**
-     * The refreshed connection.
-     */
-    200: {
-        connection: {
-            id: string;
-            agentId: string;
-            projectId: string;
-            name: string;
-            agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
-            modality: 'voice' | 'chat';
-            productLabel: string;
-            topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
-            environment: string | null;
-            config: {
-                [key: string]: string;
-            };
-            credentialPresent: boolean;
-            credentialsHint: string | null;
-            capabilities: {
-                state: 'unknown' | 'known';
-                measured: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                supported: Array<'dtmf' | 'barge_in' | 'raw_audio'> | null;
-                checkedAt: string | null;
-                source: string | null;
-                standing: {
-                    dtmf: 'supported' | 'unsupported' | 'not_measured';
-                    barge_in: 'supported' | 'unsupported' | 'not_measured';
-                    raw_audio: 'supported' | 'unsupported' | 'not_measured';
-                };
-            };
-            revision: string;
-            archived: boolean;
-            archivedAt: string | null;
-            createdAt: string;
-            updatedAt: string;
-        };
-    };
-};
-
-export type RefreshConnectionCapabilitiesResponse = RefreshConnectionCapabilitiesResponses[keyof RefreshConnectionCapabilitiesResponses];
 
 export type ListApiKeysData = {
     body?: never;
@@ -4240,19 +3998,56 @@ export type GetSimulationRecordingResponses = {
 
 export type GetSimulationRecordingResponse = GetSimulationRecordingResponses[keyof GetSimulationRecordingResponses];
 
-export type GetRunPlanData = {
-    body?: never;
-    path?: never;
-    query: {
-        projectId?: string;
-        agentId?: string;
-        connectionId: string;
-        testVersionIds: string;
+export type ApplyRepositoryChangeSetData = {
+    body: {
+        suites: Array<{
+            id: string;
+            name: string;
+        }>;
+        tests: Array<{
+            clientRef: string;
+            suiteId: string;
+            name: string;
+            description: string;
+            scenario: string;
+            expectedBehaviors: Array<string>;
+            personas: Array<string>;
+            mockTools: Array<{
+                tool: string;
+                delayMs?: number;
+                answer: unknown;
+                error?: never;
+            } | {
+                tool: string;
+                delayMs?: number;
+                answer?: never;
+                error: string;
+            }>;
+            expectedVersionId?: string;
+            expectedRevision?: string;
+        }>;
+        mockTools: Array<{
+            tool: string;
+            delayMs?: number;
+            answer: unknown;
+            error?: never;
+            agents?: Array<string>;
+        } | {
+            tool: string;
+            delayMs?: number;
+            answer?: never;
+            error: string;
+            agents?: Array<string>;
+        }>;
     };
-    url: '/v1/run-plan';
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/repository/change-set';
 };
 
-export type GetRunPlanErrors = {
+export type ApplyRepositoryChangeSetErrors = {
     /**
      * The request was refused.
      */
@@ -4268,10 +4063,6 @@ export type GetRunPlanErrors = {
     /**
      * The request was refused.
      */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
     409: Refusal;
     /**
      * The request was refused.
@@ -4283,68 +4074,58 @@ export type GetRunPlanErrors = {
     429: Refusal;
 };
 
-export type GetRunPlanError = GetRunPlanErrors[keyof GetRunPlanErrors];
+export type ApplyRepositoryChangeSetError = ApplyRepositoryChangeSetErrors[keyof ApplyRepositoryChangeSetErrors];
 
-export type GetRunPlanResponses = {
+export type ApplyRepositoryChangeSetResponses = {
     /**
-     * The run plan.
+     * The tests after the change set was applied.
      */
     200: {
-        agentId: string;
-        connectionId: string;
-        connection: {
-            agentPlatform: string | null;
-            connectionKind: string;
-            accessVariant: string;
-            modality: 'voice' | 'chat';
-            productLabel: string;
-            environment: string | null;
-            capabilities: {
-                state: 'unknown';
-            } | {
-                state: 'known';
-                measured: Array<string>;
-                supported: Array<string>;
-                checkedAt: string;
-                source: string;
-            };
-        };
-        runnableSimulationCount: number;
-        skippedSimulationCount: number;
         tests: Array<{
-            testId: string;
-            testVersionId: string;
-            testName: string;
-            personas: Array<{
-                personaId: string;
-                personaVersionId: string;
+            clientRef: string;
+            test: {
+                id: string;
+                projectId: string;
+                suiteId: string;
                 name: string;
-            }>;
-            requiredCapabilities: Array<string>;
-            skip: {
-                reason: 'required_capability_unsupported' | 'required_capability_unknown';
-                capabilities: Array<string>;
-            } | null;
-            graders: Array<{
-                kind: 'authored';
-                graderId: string;
-                graderVersionId: string;
-                name: string;
-                libraryId: string;
-                required: boolean;
-                scope: 'simulations' | 'production' | 'both';
-            }>;
+                description: string | null;
+                version: number;
+                versionId: string;
+                scenario: string;
+                expectedBehaviors: Array<string>;
+                personas: Array<{
+                    id: string;
+                    name: string;
+                    archivedAt: string | null;
+                }>;
+                mockTools: Array<{
+                    tool: string;
+                    delayMs: number;
+                    answer: unknown;
+                    error?: never;
+                } | {
+                    tool: string;
+                    delayMs: number;
+                    answer?: never;
+                    error: string;
+                }>;
+                overrideCount: number;
+                revision: string;
+                createdAt: string;
+                updatedAt: string;
+            };
         }>;
     };
 };
 
-export type GetRunPlanResponse = GetRunPlanResponses[keyof GetRunPlanResponses];
+export type ApplyRepositoryChangeSetResponse = ApplyRepositoryChangeSetResponses[keyof ApplyRepositoryChangeSetResponses];
 
 export type ListRunsData = {
     body?: never;
     path?: never;
     query?: {
         projectId?: string;
+        suiteId?: string;
         agentId?: string;
         connectionId?: string;
         testId?: string;
@@ -4389,14 +4170,17 @@ export type ListRunsError = ListRunsErrors[keyof ListRunsErrors];
 
 export type ListRunsResponses = {
     /**
-     * A page of runs.
+     * A bounded page of run headers.
      */
     200: {
         runs: Array<{
             id: string;
             projectId: string;
+            suiteId: string;
+            suiteName: string;
+            suiteDeleted: boolean;
+            name: string | null;
             status: 'pending' | 'running' | 'completed' | 'canceled';
-            label: string | null;
             agentId: string;
             connectionId: string;
             agentPlatform: string | null;
@@ -4405,12 +4189,10 @@ export type ListRunsResponses = {
             modality: 'voice' | 'chat';
             productLabel: string;
             environment: string | null;
-            retryOfRunId: string | null;
             expectedSimulationCount: number;
             completedCount: number | null;
             failedCount: number | null;
             canceledCount: number | null;
-            skippedCount: number | null;
             simulationCounts: {
                 queued: number;
                 claimed: number;
@@ -4418,7 +4200,6 @@ export type ListRunsResponses = {
                 completed: number;
                 failed: number;
                 canceled: number;
-                skipped: number;
             };
             finishedCount: number;
             gradableCount: number;
@@ -4432,6 +4213,7 @@ export type ListRunsResponses = {
                 errored: number;
                 total: number;
             };
+            resultsUrl: string;
             createdAt: string;
             startedAt: string | null;
             finishedAt: string | null;
@@ -4444,11 +4226,15 @@ export type ListRunsResponse = ListRunsResponses[keyof ListRunsResponses];
 
 export type CreateRunData = {
     body: {
-        agentId?: string;
+        suiteId: string;
+        agentId: string;
         connectionId: string;
-        testVersionIds: Array<string>;
         idempotencyKey: string;
-        label?: string;
+        name?: string;
+        expectedTestVersions?: Array<{
+            testId: string;
+            versionId: string;
+        }>;
     };
     path?: never;
     query?: {
@@ -4492,11 +4278,15 @@ export type CreateRunError = CreateRunErrors[keyof CreateRunErrors];
 
 export type CreateRunResponses = {
     /**
-     * The new run.
+     * The bounded header for the new run.
      */
     201: {
         id: string;
         projectId: string;
+        suiteId: string;
+        suiteName: string;
+        suiteDeleted: boolean;
+        name: string | null;
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
@@ -4505,54 +4295,11 @@ export type CreateRunResponses = {
         accessVariant: string;
         modality: 'voice' | 'chat';
         productLabel: string;
-        connectionSnapshot: {
-            agentPlatform: string | null;
-            connectionKind: string;
-            accessVariant: string;
-            modality: 'voice' | 'chat';
-            topology: string;
-            environment: string | null;
-            config: unknown;
-        };
-        label: string | null;
-        retryOfRunId: string | null;
-        testVersions: Array<string>;
-        mockTools: {
-            defaults: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-                mockToolId: string;
-            }>;
-            overrides: {
-                [key: string]: Array<({
-                    [key: string]: unknown;
-                } | {
-                    [key: string]: unknown;
-                }) & {
-                    tool: string;
-                    answer?: unknown;
-                    error?: string;
-                    delayMs: number;
-                }>;
-            };
-        };
+        environment: string | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
         canceledCount: number | null;
-        skippedCount: number | null;
-        resultsUrl: string;
-        createdAt: string;
-        finishedAt: string | null;
-        gradedCount: number;
-        finishedCount: number;
-        gradableCount: number;
         simulationCounts: {
             queued: number;
             claimed: number;
@@ -4560,94 +4307,23 @@ export type CreateRunResponses = {
             completed: number;
             failed: number;
             canceled: number;
-            skipped: number;
         };
+        finishedCount: number;
+        gradableCount: number;
+        gradedCount: number;
         verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
         score: number | null;
-        counts: {
+        verdictCounts: {
             passed: number;
             failed: number;
             skipped: number;
             errored: number;
             total: number;
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        byGrader: Array<{
-            graderId: string;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        }>;
-        simulations: Array<{
-            id: string;
-            position: number;
-            testId: string | null;
-            testName: string | null;
-            testVersionId: string | null;
-            personaId: string;
-            personaName: string;
-            personaVersionId: string;
-            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
-            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            } | null;
-            diagnostics: {
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number | null;
-                counts: {
-                    passed: number;
-                    failed: number;
-                    skipped: number;
-                    errored: number;
-                    total: number;
-                };
-            } | null;
-            verdicts: Array<{
-                graderId: string;
-                assertion: string;
-                assertionText: string | null;
-                required: boolean;
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number;
-                rationale: string;
-                citedTurns: Array<string>;
-                judgedAt: string;
-            }>;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
-            skipReason: 'required_capability_unsupported' | 'required_capability_unknown' | null;
-            skippedCapabilities: Array<string> | null;
-            mockToolCoverage: {
-                discovered: Array<string>;
-                covered: Array<string>;
-                uncovered: Array<string>;
-            } | null;
-            modality: 'voice' | 'chat';
-            hasRecording: boolean;
-        }>;
+        };
+        resultsUrl: string;
+        createdAt: string;
+        startedAt: string | null;
+        finishedAt: string | null;
     };
 };
 
@@ -4682,6 +4358,10 @@ export type GetRunErrors = {
      */
     404: Refusal;
     /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
      * The request rate limit was reached.
      */
     429: Refusal;
@@ -4691,11 +4371,15 @@ export type GetRunError = GetRunErrors[keyof GetRunErrors];
 
 export type GetRunResponses = {
     /**
-     * The run and its evidence.
+     * The bounded run header and target context.
      */
     200: {
         id: string;
         projectId: string;
+        suiteId: string;
+        suiteName: string;
+        suiteDeleted: boolean;
+        name: string | null;
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
@@ -4704,6 +4388,42 @@ export type GetRunResponses = {
         accessVariant: string;
         modality: 'voice' | 'chat';
         productLabel: string;
+        environment: string | null;
+        expectedSimulationCount: number;
+        completedCount: number | null;
+        failedCount: number | null;
+        canceledCount: number | null;
+        simulationCounts: {
+            queued: number;
+            claimed: number;
+            running: number;
+            completed: number;
+            failed: number;
+            canceled: number;
+        };
+        finishedCount: number;
+        gradableCount: number;
+        gradedCount: number;
+        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
+        score: number | null;
+        verdictCounts: {
+            passed: number;
+            failed: number;
+            skipped: number;
+            errored: number;
+            total: number;
+        };
+        resultsUrl: string;
+        createdAt: string;
+        startedAt: string | null;
+        finishedAt: string | null;
+        counts: {
+            passed: number;
+            failed: number;
+            skipped: number;
+            errored: number;
+            total: number;
+        };
         connectionSnapshot: {
             agentPlatform: string | null;
             connectionKind: string;
@@ -4713,170 +4433,6 @@ export type GetRunResponses = {
             environment: string | null;
             config: unknown;
         };
-        label: string | null;
-        retryOfRunId: string | null;
-        testVersions: Array<string>;
-        mockTools: {
-            defaults: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-                mockToolId: string;
-            }>;
-            overrides: {
-                [key: string]: Array<({
-                    [key: string]: unknown;
-                } | {
-                    [key: string]: unknown;
-                }) & {
-                    tool: string;
-                    answer?: unknown;
-                    error?: string;
-                    delayMs: number;
-                }>;
-            };
-        };
-        expectedSimulationCount: number;
-        completedCount: number | null;
-        failedCount: number | null;
-        canceledCount: number | null;
-        skippedCount: number | null;
-        resultsUrl: string;
-        createdAt: string;
-        finishedAt: string | null;
-        gradedCount: number;
-        finishedCount: number;
-        gradableCount: number;
-        simulationCounts: {
-            queued: number;
-            claimed: number;
-            running: number;
-            completed: number;
-            failed: number;
-            canceled: number;
-            skipped: number;
-        };
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        counts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        byGrader: Array<{
-            graderId: string;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        }>;
-        simulations: Array<{
-            id: string;
-            position: number;
-            testId: string | null;
-            testName: string | null;
-            testVersionId: string | null;
-            personaId: string;
-            personaName: string;
-            personaVersionId: string;
-            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
-            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            } | null;
-            diagnostics: {
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number | null;
-                counts: {
-                    passed: number;
-                    failed: number;
-                    skipped: number;
-                    errored: number;
-                    total: number;
-                };
-            } | null;
-            verdicts: Array<{
-                graderId: string;
-                assertion: string;
-                assertionText: string | null;
-                required: boolean;
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number;
-                rationale: string;
-                citedTurns: Array<string>;
-                judgedAt: string;
-            }>;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
-            skipReason: 'required_capability_unsupported' | 'required_capability_unknown' | null;
-            skippedCapabilities: Array<string> | null;
-            mockToolCoverage: {
-                discovered: Array<string>;
-                covered: Array<string>;
-                uncovered: Array<string>;
-            } | null;
-            modality: 'voice' | 'chat';
-            hasRecording: boolean;
-        }>;
-        gradingPlan: {
-            state: 'run_start' | 'migration_snapshot' | 'not_recorded';
-            capturedAt: string | null;
-            groups: Array<{
-                tag: 'version';
-                testId: string;
-                testVersionId: string;
-                testName: string;
-                items: Array<{
-                    kind: 'authored';
-                    graderId: string;
-                    graderVersionId: string;
-                    name: string;
-                    libraryId: string;
-                    required: boolean;
-                    scope: 'simulations' | 'production' | 'both';
-                }>;
-            } | {
-                tag: 'legacy_testless';
-                items: Array<{
-                    kind: 'authored';
-                    graderId: string;
-                    graderVersionId: string;
-                    name: string;
-                    libraryId: string;
-                    required: boolean;
-                    scope: 'simulations' | 'production' | 'both';
-                }>;
-            }>;
-        } | null;
         agent: {
             id: string;
             name: string;
@@ -4892,6 +4448,88 @@ export type GetRunResponses = {
 };
 
 export type GetRunResponse = GetRunResponses[keyof GetRunResponses];
+
+export type ListRunSimulationsData = {
+    body?: never;
+    path: {
+        runId: string;
+    };
+    query?: {
+        projectId?: string;
+        pageSize?: number;
+        pageToken?: string;
+    };
+    url: '/v1/runs/{runId}/simulations';
+};
+
+export type ListRunSimulationsErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type ListRunSimulationsError = ListRunSimulationsErrors[keyof ListRunSimulationsErrors];
+
+export type ListRunSimulationsResponses = {
+    /**
+     * A bounded page of simulations.
+     */
+    200: {
+        simulations: Array<{
+            id: string;
+            position: number;
+            testId: string;
+            testName: string;
+            testVersionId: string;
+            personaId: string;
+            personaName: string;
+            personaVersionId: string;
+            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
+            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
+            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
+            score: number | null;
+            counts: {
+                passed: number;
+                failed: number;
+                skipped: number;
+                errored: number;
+                total: number;
+            } | null;
+            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
+            modality: 'voice' | 'chat';
+            hasRecording: boolean;
+            mockToolCoverage: {
+                discovered: Array<string>;
+                covered: Array<string>;
+                uncovered: Array<string>;
+            } | null;
+        }>;
+        nextPageToken: string | null;
+    };
+};
+
+export type ListRunSimulationsResponse = ListRunSimulationsResponses[keyof ListRunSimulationsResponses];
 
 export type ListRunEventsData = {
     body?: never;
@@ -4923,6 +4561,10 @@ export type ListRunEventsErrors = {
      */
     404: Refusal;
     /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
      * The request rate limit was reached.
      */
     429: Refusal;
@@ -4947,7 +4589,7 @@ export type ListRunEventsResponses = {
             simulationId: string;
             testName: string | null;
             personaName: string | null;
-            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
+            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
             verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
         }>;
@@ -4957,425 +4599,6 @@ export type ListRunEventsResponses = {
 };
 
 export type ListRunEventsResponse = ListRunEventsResponses[keyof ListRunEventsResponses];
-
-export type RetryRunData = {
-    body: {
-        idempotencyKey: string;
-    };
-    path: {
-        runId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/runs/{runId}/retry';
-};
-
-export type RetryRunErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type RetryRunError = RetryRunErrors[keyof RetryRunErrors];
-
-export type RetryRunResponses = {
-    /**
-     * The retry run.
-     */
-    201: {
-        id: string;
-        projectId: string;
-        status: 'pending' | 'running' | 'completed' | 'canceled';
-        agentId: string;
-        connectionId: string;
-        agentPlatform: string | null;
-        connectionKind: string;
-        accessVariant: string;
-        modality: 'voice' | 'chat';
-        productLabel: string;
-        connectionSnapshot: {
-            agentPlatform: string | null;
-            connectionKind: string;
-            accessVariant: string;
-            modality: 'voice' | 'chat';
-            topology: string;
-            environment: string | null;
-            config: unknown;
-        };
-        label: string | null;
-        retryOfRunId: string | null;
-        testVersions: Array<string>;
-        mockTools: {
-            defaults: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-                mockToolId: string;
-            }>;
-            overrides: {
-                [key: string]: Array<({
-                    [key: string]: unknown;
-                } | {
-                    [key: string]: unknown;
-                }) & {
-                    tool: string;
-                    answer?: unknown;
-                    error?: string;
-                    delayMs: number;
-                }>;
-            };
-        };
-        expectedSimulationCount: number;
-        completedCount: number | null;
-        failedCount: number | null;
-        canceledCount: number | null;
-        skippedCount: number | null;
-        resultsUrl: string;
-        createdAt: string;
-        finishedAt: string | null;
-        gradedCount: number;
-        finishedCount: number;
-        gradableCount: number;
-        simulationCounts: {
-            queued: number;
-            claimed: number;
-            running: number;
-            completed: number;
-            failed: number;
-            canceled: number;
-            skipped: number;
-        };
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        counts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        byGrader: Array<{
-            graderId: string;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        }>;
-        simulations: Array<{
-            id: string;
-            position: number;
-            testId: string | null;
-            testName: string | null;
-            testVersionId: string | null;
-            personaId: string;
-            personaName: string;
-            personaVersionId: string;
-            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
-            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            } | null;
-            diagnostics: {
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number | null;
-                counts: {
-                    passed: number;
-                    failed: number;
-                    skipped: number;
-                    errored: number;
-                    total: number;
-                };
-            } | null;
-            verdicts: Array<{
-                graderId: string;
-                assertion: string;
-                assertionText: string | null;
-                required: boolean;
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number;
-                rationale: string;
-                citedTurns: Array<string>;
-                judgedAt: string;
-            }>;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
-            skipReason: 'required_capability_unsupported' | 'required_capability_unknown' | null;
-            skippedCapabilities: Array<string> | null;
-            mockToolCoverage: {
-                discovered: Array<string>;
-                covered: Array<string>;
-                uncovered: Array<string>;
-            } | null;
-            modality: 'voice' | 'chat';
-            hasRecording: boolean;
-        }>;
-    };
-};
-
-export type RetryRunResponse = RetryRunResponses[keyof RetryRunResponses];
-
-export type RerunSimulationData = {
-    body: {
-        idempotencyKey: string;
-        label: string;
-    };
-    path: {
-        simulationId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/simulations/{simulationId}/rerun';
-};
-
-export type RerunSimulationErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type RerunSimulationError = RerunSimulationErrors[keyof RerunSimulationErrors];
-
-export type RerunSimulationResponses = {
-    /**
-     * The new one-simulation run.
-     */
-    201: {
-        id: string;
-        projectId: string;
-        status: 'pending' | 'running' | 'completed' | 'canceled';
-        agentId: string;
-        connectionId: string;
-        agentPlatform: string | null;
-        connectionKind: string;
-        accessVariant: string;
-        modality: 'voice' | 'chat';
-        productLabel: string;
-        connectionSnapshot: {
-            agentPlatform: string | null;
-            connectionKind: string;
-            accessVariant: string;
-            modality: 'voice' | 'chat';
-            topology: string;
-            environment: string | null;
-            config: unknown;
-        };
-        label: string | null;
-        retryOfRunId: string | null;
-        testVersions: Array<string>;
-        mockTools: {
-            defaults: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-                mockToolId: string;
-            }>;
-            overrides: {
-                [key: string]: Array<({
-                    [key: string]: unknown;
-                } | {
-                    [key: string]: unknown;
-                }) & {
-                    tool: string;
-                    answer?: unknown;
-                    error?: string;
-                    delayMs: number;
-                }>;
-            };
-        };
-        expectedSimulationCount: number;
-        completedCount: number | null;
-        failedCount: number | null;
-        canceledCount: number | null;
-        skippedCount: number | null;
-        resultsUrl: string;
-        createdAt: string;
-        finishedAt: string | null;
-        gradedCount: number;
-        finishedCount: number;
-        gradableCount: number;
-        simulationCounts: {
-            queued: number;
-            claimed: number;
-            running: number;
-            completed: number;
-            failed: number;
-            canceled: number;
-            skipped: number;
-        };
-        verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-        score: number | null;
-        counts: {
-            passed: number;
-            failed: number;
-            skipped: number;
-            errored: number;
-            total: number;
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        byGrader: Array<{
-            graderId: string;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        }>;
-        simulations: Array<{
-            id: string;
-            position: number;
-            testId: string | null;
-            testName: string | null;
-            testVersionId: string | null;
-            personaId: string;
-            personaName: string;
-            personaVersionId: string;
-            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
-            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            } | null;
-            diagnostics: {
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number | null;
-                counts: {
-                    passed: number;
-                    failed: number;
-                    skipped: number;
-                    errored: number;
-                    total: number;
-                };
-            } | null;
-            verdicts: Array<{
-                graderId: string;
-                assertion: string;
-                assertionText: string | null;
-                required: boolean;
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number;
-                rationale: string;
-                citedTurns: Array<string>;
-                judgedAt: string;
-            }>;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
-            skipReason: 'required_capability_unsupported' | 'required_capability_unknown' | null;
-            skippedCapabilities: Array<string> | null;
-            mockToolCoverage: {
-                discovered: Array<string>;
-                covered: Array<string>;
-                uncovered: Array<string>;
-            } | null;
-            modality: 'voice' | 'chat';
-            hasRecording: boolean;
-        }>;
-    };
-};
-
-export type RerunSimulationResponse = RerunSimulationResponses[keyof RerunSimulationResponses];
 
 export type CancelRunData = {
     body?: never;
@@ -5423,11 +4646,15 @@ export type CancelRunError = CancelRunErrors[keyof CancelRunErrors];
 
 export type CancelRunResponses = {
     /**
-     * The canceled run as it now stands.
+     * The bounded header for the canceled run.
      */
     200: {
         id: string;
         projectId: string;
+        suiteId: string;
+        suiteName: string;
+        suiteDeleted: boolean;
+        name: string | null;
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
@@ -5436,54 +4663,11 @@ export type CancelRunResponses = {
         accessVariant: string;
         modality: 'voice' | 'chat';
         productLabel: string;
-        connectionSnapshot: {
-            agentPlatform: string | null;
-            connectionKind: string;
-            accessVariant: string;
-            modality: 'voice' | 'chat';
-            topology: string;
-            environment: string | null;
-            config: unknown;
-        };
-        label: string | null;
-        retryOfRunId: string | null;
-        testVersions: Array<string>;
-        mockTools: {
-            defaults: Array<({
-                [key: string]: unknown;
-            } | {
-                [key: string]: unknown;
-            }) & {
-                tool: string;
-                answer?: unknown;
-                error?: string;
-                delayMs: number;
-                mockToolId: string;
-            }>;
-            overrides: {
-                [key: string]: Array<({
-                    [key: string]: unknown;
-                } | {
-                    [key: string]: unknown;
-                }) & {
-                    tool: string;
-                    answer?: unknown;
-                    error?: string;
-                    delayMs: number;
-                }>;
-            };
-        };
+        environment: string | null;
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
         canceledCount: number | null;
-        skippedCount: number | null;
-        resultsUrl: string;
-        createdAt: string;
-        finishedAt: string | null;
-        gradedCount: number;
-        finishedCount: number;
-        gradableCount: number;
         simulationCounts: {
             queued: number;
             claimed: number;
@@ -5491,94 +4675,23 @@ export type CancelRunResponses = {
             completed: number;
             failed: number;
             canceled: number;
-            skipped: number;
         };
+        finishedCount: number;
+        gradableCount: number;
+        gradedCount: number;
         verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
         score: number | null;
-        counts: {
+        verdictCounts: {
             passed: number;
             failed: number;
             skipped: number;
             errored: number;
             total: number;
-        } | null;
-        diagnostics: {
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        } | null;
-        byGrader: Array<{
-            graderId: string;
-            required: boolean;
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            };
-        }>;
-        simulations: Array<{
-            id: string;
-            position: number;
-            testId: string | null;
-            testName: string | null;
-            testVersionId: string | null;
-            personaId: string;
-            personaName: string;
-            personaVersionId: string;
-            status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
-            grading: 'not_required' | 'waiting' | 'pending' | 'graded';
-            verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
-            score: number | null;
-            counts: {
-                passed: number;
-                failed: number;
-                skipped: number;
-                errored: number;
-                total: number;
-            } | null;
-            diagnostics: {
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number | null;
-                counts: {
-                    passed: number;
-                    failed: number;
-                    skipped: number;
-                    errored: number;
-                    total: number;
-                };
-            } | null;
-            verdicts: Array<{
-                graderId: string;
-                assertion: string;
-                assertionText: string | null;
-                required: boolean;
-                verdict: 'passed' | 'failed' | 'skipped' | 'errored';
-                score: number;
-                rationale: string;
-                citedTurns: Array<string>;
-                judgedAt: string;
-            }>;
-            reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | null;
-            skipReason: 'required_capability_unsupported' | 'required_capability_unknown' | null;
-            skippedCapabilities: Array<string> | null;
-            mockToolCoverage: {
-                discovered: Array<string>;
-                covered: Array<string>;
-                uncovered: Array<string>;
-            } | null;
-            modality: 'voice' | 'chat';
-            hasRecording: boolean;
-        }>;
+        };
+        resultsUrl: string;
+        createdAt: string;
+        startedAt: string | null;
+        finishedAt: string | null;
     };
 };
 
@@ -5628,9 +4741,9 @@ export type GetSimulationResponses = {
         id: string;
         projectId: string;
         runId: string;
-        runLabel: string | null;
+        runName: string | null;
         position: number;
-        status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
+        status: 'queued' | 'claimed' | 'running' | 'completed' | 'failed' | 'canceled';
         grading: 'not_required' | 'waiting' | 'pending' | 'graded';
         verdict: 'passed' | 'failed' | 'skipped' | 'errored' | null;
         score: number | null;
@@ -5642,8 +4755,6 @@ export type GetSimulationResponses = {
             total: number;
         } | null;
         reason: string | null;
-        skipReason: string | null;
-        skippedCapabilities: Array<string> | null;
         modality: 'voice' | 'chat';
         createdAt: string;
         startedAt: string | null;
@@ -5659,12 +4770,11 @@ export type GetSimulationResponses = {
             agentTurnCount?: number;
         };
         test: {
-            id: string | null;
-            versionId: string | null;
+            id: string;
+            versionId: string;
             name: string | null;
             scenario: string | null;
             expectedBehaviors: Array<string> | null;
-            requiredCapabilities: Array<string> | null;
         };
         persona: {
             id: string;
@@ -5728,8 +4838,8 @@ export type GetSimulationResponses = {
             }>;
         };
         gradingPlan: {
-            state: 'run_start' | 'migration_snapshot' | 'not_recorded';
-            capturedAt: string | null;
+            state: 'run_start';
+            capturedAt: string;
             items: Array<{
                 kind: 'authored';
                 graderId: string;
@@ -5874,15 +4984,300 @@ export type RegradeSimulationResponses = {
 
 export type RegradeSimulationResponse = RegradeSimulationResponses[keyof RegradeSimulationResponses];
 
-export type ListTestsData = {
+export type ListTestSuitesData = {
     body?: never;
     path?: never;
     query?: {
         projectId?: string;
         pageToken?: string;
-        archived?: string;
-        agentId?: string;
-        name?: string;
+        pageSize?: number;
+    };
+    url: '/v1/test-suites';
+};
+
+export type ListTestSuitesErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type ListTestSuitesError = ListTestSuitesErrors[keyof ListTestSuitesErrors];
+
+export type ListTestSuitesResponses = {
+    /**
+     * A page of active test suites.
+     */
+    200: {
+        testSuites: Array<{
+            id: string;
+            projectId: string;
+            name: string;
+            createdAt: string;
+            updatedAt: string;
+        }>;
+        nextPageToken: string | null;
+    };
+};
+
+export type ListTestSuitesResponse = ListTestSuitesResponses[keyof ListTestSuitesResponses];
+
+export type CreateTestSuiteData = {
+    body: {
+        name: string;
+    };
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/test-suites';
+};
+
+export type CreateTestSuiteErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type CreateTestSuiteError = CreateTestSuiteErrors[keyof CreateTestSuiteErrors];
+
+export type CreateTestSuiteResponses = {
+    /**
+     * The new test suite.
+     */
+    201: {
+        id: string;
+        projectId: string;
+        name: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type CreateTestSuiteResponse = CreateTestSuiteResponses[keyof CreateTestSuiteResponses];
+
+export type DeleteTestSuiteData = {
+    body?: never;
+    path: {
+        suiteId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/test-suites/{suiteId}';
+};
+
+export type DeleteTestSuiteErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type DeleteTestSuiteError = DeleteTestSuiteErrors[keyof DeleteTestSuiteErrors];
+
+export type DeleteTestSuiteResponses = {
+    /**
+     * The test suite was deleted.
+     */
+    204: void;
+};
+
+export type DeleteTestSuiteResponse = DeleteTestSuiteResponses[keyof DeleteTestSuiteResponses];
+
+export type GetTestSuiteData = {
+    body?: never;
+    path: {
+        suiteId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/test-suites/{suiteId}';
+};
+
+export type GetTestSuiteErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type GetTestSuiteError = GetTestSuiteErrors[keyof GetTestSuiteErrors];
+
+export type GetTestSuiteResponses = {
+    /**
+     * The test suite.
+     */
+    200: {
+        id: string;
+        projectId: string;
+        name: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type GetTestSuiteResponse = GetTestSuiteResponses[keyof GetTestSuiteResponses];
+
+export type UpdateTestSuiteData = {
+    body: {
+        name: string;
+    };
+    path: {
+        suiteId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/test-suites/{suiteId}';
+};
+
+export type UpdateTestSuiteErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UpdateTestSuiteError = UpdateTestSuiteErrors[keyof UpdateTestSuiteErrors];
+
+export type UpdateTestSuiteResponses = {
+    /**
+     * The renamed test suite.
+     */
+    200: {
+        id: string;
+        projectId: string;
+        name: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UpdateTestSuiteResponse = UpdateTestSuiteResponses[keyof UpdateTestSuiteResponses];
+
+export type ListTestsData = {
+    body?: never;
+    path?: never;
+    query: {
+        projectId?: string;
+        suiteId: string;
+        pageToken?: string;
+        pageSize?: number;
     };
     url: '/v1/tests';
 };
@@ -5924,6 +5319,7 @@ export type ListTestsResponses = {
         tests: Array<{
             id: string;
             projectId: string;
+            suiteId: string;
             name: string;
             description: string | null;
             version: number;
@@ -5935,7 +5331,6 @@ export type ListTestsResponses = {
                 name: string;
                 archivedAt: string | null;
             }>;
-            requiredCapabilities: Array<string>;
             mockTools: Array<{
                 tool: string;
                 delayMs: number;
@@ -5948,15 +5343,7 @@ export type ListTestsResponses = {
                 error: string;
             }>;
             overrideCount: number;
-            agents: Array<{
-                id: string;
-                name: string;
-                archivedAt: string | null;
-            }>;
             revision: string;
-            applicabilityRevision: string;
-            archivedAt: string | null;
-            archiveReason: string | null;
             createdAt: string;
             updatedAt: string;
         }>;
@@ -5968,6 +5355,7 @@ export type ListTestsResponse = ListTestsResponses[keyof ListTestsResponses];
 
 export type CreateTestData = {
     body: {
+        suiteId: string;
         name: string;
         description?: string | null;
         scenario: string;
@@ -5984,8 +5372,6 @@ export type CreateTestData = {
             answer?: never;
             error: string;
         }>;
-        requiredCapabilities?: Array<string>;
-        agents?: Array<string>;
     };
     path?: never;
     query?: {
@@ -6034,6 +5420,7 @@ export type CreateTestResponses = {
     201: {
         id: string;
         projectId: string;
+        suiteId: string;
         name: string;
         description: string | null;
         version: number;
@@ -6045,7 +5432,6 @@ export type CreateTestResponses = {
             name: string;
             archivedAt: string | null;
         }>;
-        requiredCapabilities: Array<string>;
         mockTools: Array<{
             tool: string;
             delayMs: number;
@@ -6058,15 +5444,7 @@ export type CreateTestResponses = {
             error: string;
         }>;
         overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
         revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
         createdAt: string;
         updatedAt: string;
     };
@@ -6121,6 +5499,7 @@ export type GetTestVersionResponses = {
     200: {
         id: string;
         testId: string;
+        suiteId: string;
         testName: string;
         version: number;
         current: boolean;
@@ -6131,7 +5510,6 @@ export type GetTestVersionResponses = {
             name: string;
             archivedAt: string | null;
         }>;
-        requiredCapabilities: Array<string>;
         mockTools: Array<{
             tool: string;
             delayMs: number;
@@ -6149,6 +5527,59 @@ export type GetTestVersionResponses = {
 };
 
 export type GetTestVersionResponse = GetTestVersionResponses[keyof GetTestVersionResponses];
+
+export type DeleteTestData = {
+    body?: never;
+    path: {
+        testId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/tests/{testId}';
+};
+
+export type DeleteTestErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type DeleteTestError = DeleteTestErrors[keyof DeleteTestErrors];
+
+export type DeleteTestResponses = {
+    /**
+     * The test was deleted.
+     */
+    204: void;
+};
+
+export type DeleteTestResponse = DeleteTestResponses[keyof DeleteTestResponses];
 
 export type GetTestData = {
     body?: never;
@@ -6197,6 +5628,7 @@ export type GetTestResponses = {
     200: {
         id: string;
         projectId: string;
+        suiteId: string;
         name: string;
         description: string | null;
         version: number;
@@ -6208,7 +5640,6 @@ export type GetTestResponses = {
             name: string;
             archivedAt: string | null;
         }>;
-        requiredCapabilities: Array<string>;
         mockTools: Array<{
             tool: string;
             delayMs: number;
@@ -6221,15 +5652,7 @@ export type GetTestResponses = {
             error: string;
         }>;
         overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
         revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
         createdAt: string;
         updatedAt: string;
     };
@@ -6255,10 +5678,8 @@ export type UpdateTestData = {
             answer?: never;
             error: string;
         }>;
-        requiredCapabilities?: Array<string>;
         expectedVersionId?: string;
         expectedRevision?: string;
-        repositoryAgentId?: string;
     };
     path: {
         testId: string;
@@ -6290,7 +5711,7 @@ export type UpdateTestErrors = {
      * The test moved after the version the edit was based on.
      */
     409: {
-        error: 'conflict';
+        error: 'version_conflict';
         message: string;
         test: {
             id: string;
@@ -6318,6 +5739,7 @@ export type UpdateTestResponses = {
     200: {
         id: string;
         projectId: string;
+        suiteId: string;
         name: string;
         description: string | null;
         version: number;
@@ -6329,7 +5751,6 @@ export type UpdateTestResponses = {
             name: string;
             archivedAt: string | null;
         }>;
-        requiredCapabilities: Array<string>;
         mockTools: Array<{
             tool: string;
             delayMs: number;
@@ -6342,15 +5763,7 @@ export type UpdateTestResponses = {
             error: string;
         }>;
         overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
         revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
         createdAt: string;
         updatedAt: string;
     };
@@ -6366,6 +5779,7 @@ export type ListTestVersionsData = {
     query?: {
         projectId?: string;
         pageToken?: string;
+        pageSize?: number;
     };
     url: '/v1/tests/{testId}/versions';
 };
@@ -6407,6 +5821,7 @@ export type ListTestVersionsResponses = {
         versions: Array<{
             id: string;
             testId: string;
+            suiteId: string;
             testName: string;
             version: number;
             current: boolean;
@@ -6417,7 +5832,6 @@ export type ListTestVersionsResponses = {
                 name: string;
                 archivedAt: string | null;
             }>;
-            requiredCapabilities: Array<string>;
             mockTools: Array<{
                 tool: string;
                 delayMs: number;
@@ -6437,378 +5851,6 @@ export type ListTestVersionsResponses = {
 };
 
 export type ListTestVersionsResponse = ListTestVersionsResponses[keyof ListTestVersionsResponses];
-
-export type SetTestAgentsData = {
-    body: {
-        agents: Array<string>;
-        expectedApplicabilityRevision?: string;
-    };
-    path: {
-        testId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/tests/{testId}/agents';
-};
-
-export type SetTestAgentsErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type SetTestAgentsError = SetTestAgentsErrors[keyof SetTestAgentsErrors];
-
-export type SetTestAgentsResponses = {
-    /**
-     * The test with its new agent set.
-     */
-    200: {
-        id: string;
-        projectId: string;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        scenario: string;
-        expectedBehaviors: Array<string>;
-        personas: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        requiredCapabilities: Array<string>;
-        mockTools: Array<{
-            tool: string;
-            delayMs: number;
-            answer: unknown;
-            error?: never;
-        } | {
-            tool: string;
-            delayMs: number;
-            answer?: never;
-            error: string;
-        }>;
-        overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type SetTestAgentsResponse = SetTestAgentsResponses[keyof SetTestAgentsResponses];
-
-export type CloneTestData = {
-    body?: never;
-    path: {
-        testId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/tests/{testId}/clone';
-};
-
-export type CloneTestErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type CloneTestError = CloneTestErrors[keyof CloneTestErrors];
-
-export type CloneTestResponses = {
-    /**
-     * The cloned test.
-     */
-    201: {
-        id: string;
-        projectId: string;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        scenario: string;
-        expectedBehaviors: Array<string>;
-        personas: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        requiredCapabilities: Array<string>;
-        mockTools: Array<{
-            tool: string;
-            delayMs: number;
-            answer: unknown;
-            error?: never;
-        } | {
-            tool: string;
-            delayMs: number;
-            answer?: never;
-            error: string;
-        }>;
-        overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type CloneTestResponse = CloneTestResponses[keyof CloneTestResponses];
-
-export type ArchiveTestData = {
-    body?: {
-        expectedRevision?: string;
-    };
-    path: {
-        testId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/tests/{testId}/archive';
-};
-
-export type ArchiveTestErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type ArchiveTestError = ArchiveTestErrors[keyof ArchiveTestErrors];
-
-export type ArchiveTestResponses = {
-    /**
-     * The archived test.
-     */
-    200: {
-        id: string;
-        projectId: string;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        scenario: string;
-        expectedBehaviors: Array<string>;
-        personas: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        requiredCapabilities: Array<string>;
-        mockTools: Array<{
-            tool: string;
-            delayMs: number;
-            answer: unknown;
-            error?: never;
-        } | {
-            tool: string;
-            delayMs: number;
-            answer?: never;
-            error: string;
-        }>;
-        overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type ArchiveTestResponse = ArchiveTestResponses[keyof ArchiveTestResponses];
-
-export type RestoreTestData = {
-    body?: {
-        expectedRevision?: string;
-        agents?: Array<string>;
-    };
-    path: {
-        testId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/tests/{testId}/restore';
-};
-
-export type RestoreTestErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type RestoreTestError = RestoreTestErrors[keyof RestoreTestErrors];
-
-export type RestoreTestResponses = {
-    /**
-     * The restored test.
-     */
-    200: {
-        id: string;
-        projectId: string;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        scenario: string;
-        expectedBehaviors: Array<string>;
-        personas: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        requiredCapabilities: Array<string>;
-        mockTools: Array<{
-            tool: string;
-            delayMs: number;
-            answer: unknown;
-            error?: never;
-        } | {
-            tool: string;
-            delayMs: number;
-            answer?: never;
-            error: string;
-        }>;
-        overrideCount: number;
-        agents: Array<{
-            id: string;
-            name: string;
-            archivedAt: string | null;
-        }>;
-        revision: string;
-        applicabilityRevision: string;
-        archivedAt: string | null;
-        archiveReason: string | null;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type RestoreTestResponse = RestoreTestResponses[keyof RestoreTestResponses];
 
 export type ListTracesData = {
     body?: never;

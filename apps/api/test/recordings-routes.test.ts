@@ -345,7 +345,11 @@ describe("what the run's own results say about audio", () => {
   it("marks which conversations have a recording, and never says where one is", async () => {
     const { who, run } = await aCustomerWhoHasRecorded("recording_run_shape");
 
-    const read = await request("GET", `/v1/runs/${run.runId}`, who.key);
+    const read = await request(
+      "GET",
+      `/v1/runs/${run.runId}/simulations`,
+      who.key,
+    );
 
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     const simulations = read.body.simulations as Record<string, unknown>[];

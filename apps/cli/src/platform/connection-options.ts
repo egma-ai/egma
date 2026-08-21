@@ -46,7 +46,6 @@ export type ConnectionOption = {
   readonly productLabel: string;
   readonly topology: GeneratedOption["topology"];
   readonly simulatorAdapter: boolean;
-  readonly capabilityDiscovery: boolean;
   readonly fields: readonly ConnectionField[];
   readonly credentialRule: CredentialRule;
   readonly credentialHelp: string;
@@ -74,7 +73,6 @@ function cleanOption(option: GeneratedOption): ConnectionOption {
     productLabel: platformText(option.productLabel),
     topology: option.topology,
     simulatorAdapter: option.simulatorAdapter,
-    capabilityDiscovery: option.capabilityDiscovery,
     fields: option.fields.map((field) => ({
       key: platformText(field.key),
       label: platformText(field.label),

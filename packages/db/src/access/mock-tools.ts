@@ -1,7 +1,7 @@
 import { isId, newId } from "@egma/ids";
 import { and, asc, desc, eq, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
 
-import { db, type Queryable } from "../client.ts";
+import { db, type Queryable, type Transaction } from "../client.ts";
 import { agent } from "../schema/agents.ts";
 import {
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
@@ -19,6 +19,7 @@ import {
 import { lostToConstraint } from "./agents.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
+import { lockRepositoryProject } from "./repository-lock.ts";
 import { isProjectOfOrganization } from "./projects.ts";
 import { inActingProject, within } from "./within.ts";
 
@@ -104,6 +105,9 @@ export type MockToolChanges = {
    */
   readonly agentIds?: readonly string[];
 };
+
+/** One project mock tool declared by a complete repository change set. */
+export type RepositoryMockTool = NewMockTool;
 
 export type DeletedMockTool = {
   readonly id: string;
@@ -638,6 +642,7 @@ export async function createMockTool(
 
   const written = await db()
     .transaction(async (tx) => {
+      await lockRepositoryProject(tx, projectId);
       const taken = await answeredAlreadyBy(tx, auth, projectId, toolName);
       if (taken !== undefined) throw new MockToolTakenError(toolName, taken);
       await validateNamedAgents(tx, auth, projectId, agentIds);
@@ -711,6 +716,11 @@ export async function editMockTool(
   let home: string | undefined;
 
   const written = await db().transaction(async (tx) => {
+    const actingProject = auth.projectId;
+    if (actingProject === undefined) {
+      throw new Error("editing a mock tool happens inside its project");
+    }
+    await lockRepositoryProject(tx, actingProject);
     const [locked] = await tx
       .select({ ...COLUMNS, currentToolName: mockTool.toolName })
       .from(mockTool)
@@ -770,6 +780,98 @@ export async function editMockTool(
 
   if (written === undefined) return undefined;
   return { ...written, answer: answerFromRow(written.answer, written.id) };
+}
+
+/**
+ * Reconcile the complete active project mock-tool set inside the repository
+ * transaction. The tool name is the repository identity. Missing server rows
+ * are refused, never inferred as deletions.
+ */
+export async function applyRepositoryMockToolsOn(
+  on: Transaction,
+  auth: AuthContext,
+  wanted: readonly RepositoryMockTool[],
+): Promise<void> {
+  const projectId = auth.projectId;
+  if (projectId === undefined) {
+    throw new Error(
+      "a repository belongs to a project, and this credential is acting in none",
+    );
+  }
+
+  const prepared: Array<{
+    toolName: string;
+    answer: MockToolAnswer;
+    delayMilliseconds: number;
+    agentIds: readonly string[];
+  }> = [];
+  const names = new Set<string>();
+  for (const entry of wanted) {
+    const toolName = validToolName(entry.toolName);
+    if (names.has(toolName)) {
+      throw new UnprocessableInputError(
+        `the repository names mock tool ${JSON.stringify(toolName)} more than once`,
+      );
+    }
+    names.add(toolName);
+    const agentIds = entry.agentIds ?? [];
+    validateAgentIds(agentIds);
+    prepared.push({
+      toolName,
+      answer: validAnswer(entry.answer),
+      delayMilliseconds: validDelay(entry.delayMilliseconds),
+      agentIds,
+    });
+  }
+
+  const existing = await on
+    .select(COLUMNS)
+    .from(mockTool)
+    .where(
+      within(
+        auth,
+        mockTool,
+        and(eq(mockTool.projectId, projectId), notDeleted),
+      ),
+    )
+    .for("update", { of: mockTool });
+  const byName = new Map(existing.map((row) => [row.toolName, row] as const));
+  const unseen = existing.find((row) => !names.has(row.toolName));
+  if (unseen !== undefined) {
+    throw new UnprocessableInputError(
+      `the repository does not include active mock tool ${JSON.stringify(unseen.toolName)}; pull before pushing so no server mock tool is deleted by inference`,
+    );
+  }
+
+  for (const entry of prepared) {
+    await validateNamedAgents(on, auth, projectId, entry.agentIds);
+    const found = byName.get(entry.toolName);
+    if (found === undefined) {
+      const id = newId("mck");
+      await on.insert(mockTool).values({
+        id,
+        organizationId: auth.organizationId,
+        projectId,
+        toolName: entry.toolName,
+        answer: entry.answer,
+        delayMilliseconds: entry.delayMilliseconds,
+        createdBy: auth.userId,
+      });
+      await scopeTo(on, id, projectId, entry.agentIds);
+      continue;
+    }
+
+    await on
+      .update(mockTool)
+      .set({
+        answer: entry.answer,
+        delayMilliseconds: entry.delayMilliseconds,
+        updatedAt: new Date(),
+      })
+      .where(eq(mockTool.id, found.id));
+    await on.delete(mockToolAgent).where(eq(mockToolAgent.mockToolId, found.id));
+    await scopeTo(on, found.id, projectId, entry.agentIds);
+  }
 }
 
 export type MockToolPage = {
@@ -849,22 +951,25 @@ export async function deleteMockTool(
 ): Promise<DeletedMockTool | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
-  if (auth.projectId === undefined) {
+  const projectId = auth.projectId;
+  if (projectId === undefined) {
     throw new Error(
       "deleting a mock tool happens inside its project, and this credential is for the whole organization and acting in none",
     );
   }
 
   const deletedAt = new Date();
-  const [row] = await db()
-    .update(mockTool)
-    .set({ deletedAt, updatedAt: deletedAt })
-    .where(theMockTool(auth, id))
-    .returning({
-      id: mockTool.id,
-      projectId: mockTool.projectId,
-      toolName: mockTool.toolName,
-    });
+  const [row] = await db().transaction(async (tx) => {
+    await lockRepositoryProject(tx, projectId);
+    return tx.update(mockTool)
+      .set({ deletedAt, updatedAt: deletedAt })
+      .where(theMockTool(auth, id))
+      .returning({
+        id: mockTool.id,
+        projectId: mockTool.projectId,
+        toolName: mockTool.toolName,
+      });
+  });
 
   if (row === undefined) return undefined;
   return { ...row, deletedAt };

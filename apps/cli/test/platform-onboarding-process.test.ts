@@ -1,11 +1,10 @@
 /**
  * First repository onboarding, through the built CLI rather than an injected
- * access object: explicit address, login, then a committed URL binding.
+ * access object: explicit address, then a committed URL-only binding.
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile } from "node:fs/promises";
-import path from "node:path";
+import { readFile } from "node:fs/promises";
 import process from "node:process";
 
 import { expect, it, vi } from "vitest";
@@ -13,7 +12,6 @@ import { expect, it, vi } from "vitest";
 import {
   folderPathsIn,
   readConfig,
-  writeTestFile,
 } from "../src/folder/egma-folder.ts";
 import { DEFAULT_TEST_COUNT } from "../src/wizard/test-generation.ts";
 import { startFakeRetell } from "./support/fake-retell.ts";
@@ -24,7 +22,6 @@ import {
   FAKE_AGENT,
   makeWorkspace,
 } from "./support/workspace.ts";
-import { aTestFile, blocking } from "./support/test-file.ts";
 
 const PLATFORM_KEY = "egma_sk_for-first-repository-onboarding";
 const PROVIDER_KEY = "synthetic-retell-key-for-first-onboarding";
@@ -58,27 +55,30 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
     platform.signedInWith(PLATFORM_KEY);
     await workspace.signIn(platform.url, PLATFORM_KEY);
 
-    // Existing tests keep this proof about platform binding, not test
-    // generation. There is deliberately no config file and no binding yet.
+    // There is deliberately no config file and no binding yet.
     const paths = folderPathsIn(workspace.dir);
-    await mkdir(paths.tests, { recursive: true });
-    for (let number = 1; number <= DEFAULT_TEST_COUNT; number += 1) {
-      const name = `first-onboarding-${number}`;
-      await writeTestFile(path.join(paths.tests, `${name}.md`), aTestFile({
-        name,
-        personas: [],
-        version: null,
-        scenario: `The persona needs a different appointment time in case ${number}.`,
-        expectedBehaviors: blocking("The agent confirms the new time."),
-        mockTools: [],
-      }));
-    }
     await expect(readConfig(paths.config)).rejects.toMatchObject({ code: "ENOENT" });
 
     const script = await workspace.script({
       steps: [
         { kind: "say", text: "egma:found framework retell-sdk\n" },
         { kind: "stop", reason: "end_turn" },
+      ],
+      stepsByTask: [
+        {
+          contains: `Write ${DEFAULT_TEST_COUNT} tests`,
+          steps: [
+            ...Array.from({ length: DEFAULT_TEST_COUNT }, (_, index) => {
+              const number = index + 1;
+              return {
+                kind: "write-file" as const,
+                path: `egma/tests/generated/first-onboarding-${number}.md`,
+                content: `---\nformat: 4\nname: first-onboarding-${number}\n---\n## Scenario\nThe caller needs a different appointment time in case ${number}.\n## Expected behaviors\n1. The agent confirms the new time.\n`,
+              };
+            }),
+            { kind: "stop", reason: "end_turn" },
+          ],
+        },
       ],
     });
     const env = workspace.env({
@@ -124,11 +124,15 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
 
     expect(code, stderr).toBe(0);
     expect(stdout).toMatch(/^first-verdict: /mu);
-    expect(platform.records[0]).toMatchObject({
-      method: "POST",
-      path: "/v1/agents",
-    });
-    for (const expectedPath of ["/v1/agents", "/v1/tests", "/v1/runs"]) {
+    expect(platform.records.some((request) => request.path === "/api/platform")).toBe(
+      false,
+    );
+    for (const expectedPath of [
+      "/v1/agents",
+      "/v1/test-suites",
+      "/v1/repository/change-set",
+      "/v1/runs",
+    ]) {
       expect(
         platform.records.some((request) => request.path === expectedPath),
         expectedPath,
@@ -136,9 +140,7 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
     }
 
     const config = await readConfig(paths.config);
-    expect(config.platform).toEqual({
-      origin: platform.url,
-    });
+    expect(config.platform).toEqual({ origin: platform.url });
     expect(config.agent?.id).toMatch(/^agt_/u);
     expect(config.connection?.id).toMatch(/^con_/u);
 

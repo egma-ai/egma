@@ -13,8 +13,9 @@ Configuration lives in `docs.json`. Pages use MDX with YAML front matter.
 ## Product terms
 
 - A **test** describes a situation and its expected behaviors.
-- A **test suite** is a saved selector over tests.
-- A **run** executes selected tests.
+- A **test suite** is a project-owned container of tests that are reviewed and
+  run together.
+- A **run** executes one complete test suite against one agent connection.
 - A **simulation** is one test executed once inside a run.
 - A **persona** is the synthetic person who talks to the customer's **agent**.
 - A **grader** returns verdicts. A **metric** measures facts such as duration or latency.

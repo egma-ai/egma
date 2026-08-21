@@ -6,7 +6,7 @@ import {
   createTest,
   DefaultPersonaReplacementError,
   EGMA_PROVIDED_PERSONAS,
-  archiveTest,
+  deleteTest,
   editTest,
   getPersona,
   getTestVersion,
@@ -32,7 +32,7 @@ import {
 /**
  * Archiving a persona while the current version of an active test names them:
  * refused, and the refusal names those tests. What history names and what an
- * archived test names both archive fine. What a project points at by default
+ * deleted test names both archive fine. What a project points at by default
  * archives too — once somebody has said who takes the pointer.
  *
  * It sits in a file of its own because it belongs to neither factory alone —
@@ -164,6 +164,7 @@ describe("a persona only history names", () => {
 
     // Version 2 does not name them, so version 1 is history and blocks nothing.
     const moved = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       personaIds: [rita],
     });
     expect(moved?.version).toBe(2);
@@ -179,8 +180,8 @@ describe("a persona only history names", () => {
   });
 });
 
-describe("a persona only archived tests name", () => {
-  it("archives fine, and the archived test's version keeps them", async () => {
+describe("a persona only deleted tests name", () => {
+  it("archives fine, and the deleted test's version keeps them", async () => {
     const dana = await seedPersona(actingAsAcme(), "Departing Dana");
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
@@ -189,7 +190,7 @@ describe("a persona only archived tests name", () => {
 
     await refusalFrom(archivePersona(actingAsAcme(), dana));
 
-    await archiveTest(actingAsAcme(), created.id);
+    await deleteTest(actingAsAcme(), created.id);
 
     expect((await archivePersona(actingAsAcme(), dana))?.id).toBe(dana);
 
@@ -242,16 +243,16 @@ async function writeTestNaming(
   const versionId = newId("tstv");
 
   await connection.sql(
-    `insert into test (id, organization_id, project_id, name, current_version_id,
-                       revision, applicability_revision)
+    `insert into test (id, organization_id, project_id, suite_id, name,
+                       current_version_id, revision)
      values ($1, $2, $3, $4, $5, $6, $7)`,
     [
       testId,
       acme.organization,
       named.projectId,
+      named.projectId === acme.outbound ? acme.outboundSuite : acme.suite,
       named.name,
       versionId,
-      newId("rev"),
       newId("rev"),
     ],
   );
@@ -391,9 +392,12 @@ describe("the persona a project points at by default", () => {
     expect(refusal).toBeInstanceOf(DefaultPersonaReplacementError);
 
     // Nothing moved, so a test naming nobody still gets Pia.
-    const taking = await createTest(inOutbound, rescheduling);
+    const taking = await createTest(inOutbound, {
+      ...rescheduling,
+      suiteId: acme.outboundSuite,
+    });
     expect(taking.personas.map((one) => one.id)).toEqual([pia]);
-    await archiveTest(inOutbound, taking.id);
+    await deleteTest(inOutbound, taking.id);
   });
 
   it("takes the replacement in the same write, so the project is never pointing at nobody", async () => {
@@ -409,9 +413,12 @@ describe("the persona a project points at by default", () => {
 
     // The pointer moved with the Archive, so a test naming nobody is written
     // rather than refused — and it is written naming the replacement.
-    const written = await createTest(inOutbound, rescheduling);
+    const written = await createTest(inOutbound, {
+      ...rescheduling,
+      suiteId: acme.outboundSuite,
+    });
     expect(written.personas.map((one) => one.id)).toEqual([taking]);
-    await archiveTest(inOutbound, written.id);
+    await deleteTest(inOutbound, written.id);
   });
 
   it("refuses a replacement that is not an active persona of this project", async () => {

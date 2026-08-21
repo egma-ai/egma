@@ -4,9 +4,6 @@ import {
   authorize,
   archiveAgent,
   archiveConnection,
-  CAPABILITY_CATALOG,
-  capabilityStanding,
-  CapabilityCheckFailedError,
   connectionOptionMetadata,
   ConnectionRestoreRefusedError,
   getAgent,
@@ -14,10 +11,8 @@ import {
   IdentityConflictError,
   listAgents,
   listConnections,
-  NoCapabilityAdapterError,
   NotPermittedError,
   ProjectOutsideOrganizationError,
-  refreshConnectionCapabilities,
   registerAgent,
   restoreAgent,
   restoreConnection,
@@ -673,7 +668,6 @@ function describedConnection(one: Connection): Record<string, unknown> {
     // and never a blank field a serializer could one day be taught to fill.
     credentialPresent: one.credentialsHint !== null,
     credentialsHint: one.credentialsHint,
-    capabilities: describedCapabilities(one),
     revision: one.revision,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
@@ -702,37 +696,6 @@ function describedListedAgent(
   return {
     ...describedAgent(one),
     connections: one.connections.map(describedConnection),
-  };
-}
-
-/**
- * What is known about a target, said so that `unknown` can never be mistaken
- * for `nothing is supported`.
- *
- * The state is always present and the evidence is present only with it. A
- * client reading `state: "unknown"` knows to say so on screen and to offer
- * Refresh; a client reading `state: "known"` with an empty list knows the
- * target was measured and has none of these, which is a different sentence
- * entirely.
- */
-function describedCapabilities(one: Connection): Record<string, unknown> {
-  const held = one.capabilities;
-  return {
-    state: held.state,
-    // What the adapter looked at, beside what it found. Both, because a reader
-    // holding only the second cannot tell a settled absence from an unasked
-    // question — and `standing` below is the answer built from the pair, so a
-    // client never has to work the rule out for itself.
-    measured: held.state === "known" ? held.measured : null,
-    supported: held.state === "known" ? held.supported : null,
-    checkedAt: held.state === "known" ? held.checkedAt.toISOString() : null,
-    source: held.state === "known" ? held.source : null,
-    standing: Object.fromEntries(
-      CAPABILITY_CATALOG.map((entry) => [
-        entry.key,
-        capabilityStanding(held, entry.key),
-      ]),
-    ),
   };
 }
 
@@ -973,7 +936,6 @@ export async function agentRoutes(
           // it ships anything that can measure one of its targets. Two different
           // facts, and a form says both rather than implying either.
           simulatorAdapter: option.simulatorAdapter,
-          capabilityDiscovery: option.capabilityDiscovery,
           fields: option.fields.map((field) => ({
             key: field.key,
             label: field.label,
@@ -991,28 +953,6 @@ export async function agentRoutes(
             required: field.required,
             help: field.help,
           })),
-        })),
-      });
-    },
-  );
-
-  /**
-   * The capability catalog: the stable keys a test may require and a connection
-   * may be found to support.
-   *
-   * One list, server-owned, read by both editors. A free-text capability would
-   * let two people write the same requirement two ways and would make every
-   * comparison between what a test needs and what a target has a guess.
-   */
-  registerPlatformOperation(
-    app,
-    agentOperations.listCapabilities,
-    async (_request, reply) => {
-      return reply.send({
-        items: CAPABILITY_CATALOG.map((entry) => ({
-          key: entry.key,
-          label: entry.label,
-          description: entry.description,
         })),
       });
     },
@@ -1308,7 +1248,7 @@ export async function agentRoutes(
       // What went with it, said plainly, because a person who archives an
       // agent has just stopped work they may have been watching.
       archivedConnections: archived.connections,
-      canceledRuns: archived.canceledRuns,
+      canceledRunCount: archived.canceledRunCount,
     });
   });
 
@@ -1446,7 +1386,7 @@ export async function agentRoutes(
 
       return reply.send({
         connection: describedConnection(archived.connection),
-        canceledRuns: archived.canceledRuns,
+        canceledRunCount: archived.canceledRunCount,
       });
     },
   );
@@ -1490,30 +1430,6 @@ export async function agentRoutes(
       });
       if (restored === undefined) return refused(reply, NO_SUCH_CONNECTION);
       return reply.send({ connection: describedConnection(restored) });
-    },
-  );
-
-  /** Ask this connection's adapter what its target can do, and record it. */
-  registerPlatformOperation(
-    app,
-    agentOperations.refreshConnectionCapabilities,
-    async (request, reply) => {
-      const { auth } = requesterOf(request);
-      const { agentId, connectionId } = request.params as {
-        agentId: string;
-        connectionId: string;
-      };
-
-      const acting = await actingProject(auth, request, "writes into");
-      if (isRefusal(acting)) return refused(reply, acting);
-
-      const refreshed = await refreshConnectionCapabilities(
-        acting,
-        agentId,
-        connectionId,
-      );
-      if (refreshed === undefined) return refused(reply, NO_SUCH_CONNECTION);
-      return reply.send({ connection: describedConnection(refreshed) });
     },
   );
 
@@ -1567,22 +1483,6 @@ export async function agentRoutes(
       return refused(reply, {
         refused: true,
         error: error.reason,
-        message: error.message,
-      });
-    }
-
-    if (error instanceof NoCapabilityAdapterError) {
-      return refused(reply, {
-        refused: true,
-        error: "no_capability_adapter",
-        message: error.message,
-      });
-    }
-
-    if (error instanceof CapabilityCheckFailedError) {
-      return refused(reply, {
-        refused: true,
-        error: "capability_check_failed",
         message: error.message,
       });
     }

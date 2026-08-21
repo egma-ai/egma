@@ -81,6 +81,8 @@ export type Observation = {
   readonly method: string;
   readonly path: string;
   readonly status: number;
+  /** The JSON body exactly as the CLI sent it, or null for a bodyless request. */
+  readonly body: Record<string, unknown> | null;
 };
 
 export type FixturePlatform = {
@@ -109,6 +111,10 @@ export async function startFixturePlatform(
       const at = new URL(incoming.url ?? "/", url === "" ? "http://fixture" : url);
       const raw = await readBody(incoming);
       const type = incoming.headers["content-type"] ?? "";
+      const body =
+        type.includes("application/json") && raw !== ""
+          ? (JSON.parse(raw) as Record<string, unknown>)
+          : null;
 
       // Exact paths first, so a literal route is never shadowed by a pattern
       // that happens to have the same shape.
@@ -131,10 +137,7 @@ export async function startFixturePlatform(
               method: incoming.method ?? "GET",
               url: at,
               headers: incoming.headers as Record<string, string | undefined>,
-              body:
-                type.includes("application/json") && raw !== ""
-                  ? (JSON.parse(raw) as Record<string, unknown>)
-                  : null,
+              body,
               form: type.includes("application/x-www-form-urlencoded")
                 ? new URLSearchParams(raw)
                 : null,
@@ -146,6 +149,7 @@ export async function startFixturePlatform(
         method: incoming.method ?? "GET",
         path: at.pathname,
         status: answer.status,
+        body,
       });
 
       const payload =

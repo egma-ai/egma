@@ -81,9 +81,9 @@ async function wizardInBoundRepository(): Promise<TerminalRun> {
     repository: workspace.dir,
     config: {
       platform: { origin: platform.url },
+      project: null,
       agent: null,
       connection: null,
-      suite: null,
     },
   });
 
@@ -126,11 +126,10 @@ describe("the wizard's first screen", () => {
 
       // And the keystroke is what lets egma speak to it.
       terminal.write("\r");
+      expect(await terminal.waitFor(() => platform.records.length > 0)).toBe(true);
       expect(
-        await terminal.waitFor(() =>
-          platform.records.some((record) => record.path === "/api/device/code"),
-        ),
-      ).toBe(true);
+        platform.records.some((record) => record.path === "/api/platform"),
+      ).toBe(false);
     } finally {
       await terminal.kill();
     }

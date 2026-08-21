@@ -46,6 +46,20 @@ async function insideGit(from: string): Promise<boolean> {
   }
 }
 
+/** Count authored test files inside each direct suite directory. */
+async function testsInSuites(testsRoot: string): Promise<number> {
+  const entries = await readdir(testsRoot, { withFileTypes: true }).catch(() => []);
+  const counts = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const names = await readdir(path.join(testsRoot, entry.name)).catch(() => [] as string[]);
+        return names.filter((name) => name.endsWith(".md")).length;
+      }),
+  );
+  return counts.reduce((total, count) => total + count, 0);
+}
+
 /** Everything egma can see for itself, for the screen to draw. */
 export async function detect(options: {
   readonly cwd: string;
@@ -54,17 +68,17 @@ export async function detect(options: {
   const folder = path.join(options.cwd, FOLDER_NAME);
   const tests = path.join(folder, TESTS_FOLDER_NAME);
 
-  const [gitRepository, egmaFolder, names] = await Promise.all([
+  const [gitRepository, egmaFolder, testsAlreadyHere] = await Promise.all([
     insideGit(options.cwd),
     isFolder(folder),
-    readdir(tests).catch(() => [] as string[]),
+    testsInSuites(tests),
   ]);
 
   return {
     drivenAgentName: options.drivenAgentName,
     gitRepository,
     egmaFolder,
-    testsAlreadyHere: names.filter((name) => name.endsWith(".md")).length,
+    testsAlreadyHere,
   };
 }
 
