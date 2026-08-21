@@ -146,15 +146,22 @@ async function fakeClickHouse(
   };
 }
 
-async function coldStartingClickHouse(): Promise<{
+async function clickHouseThatTimesOutAfterApplyingStatement(): Promise<{
   readonly url: string;
   readonly state: {
-    requests: number;
+    statementAttempts: number;
+    statementApplications: number;
     ledgerWrites: number;
   };
   readonly close: () => Promise<void>;
 }> {
-  const state = { requests: 0, ledgerWrites: 0 };
+  const state = {
+    statementAttempts: 0,
+    statementApplications: 0,
+    ledgerWrites: 0,
+  };
+  let retryProbeExists = false;
+  let responseTimedOut = false;
   const server = createServer((request, response) => {
     let body = "";
     request.setEncoding("utf8");
@@ -162,18 +169,35 @@ async function coldStartingClickHouse(): Promise<{
       body += chunk;
     });
     request.on("end", () => {
-      state.requests += 1;
+      const url = new URL(request.url ?? "/", "http://clickhouse.test");
+      const query = url.searchParams.get("query") ?? body;
 
-      if (state.requests === 1) {
-        setTimeout(() => {
-          response.statusCode = 200;
-          response.end();
-        }, 75);
+      if (query.includes("CREATE TABLE IF NOT EXISTS retry_probe")) {
+        state.statementAttempts += 1;
+        if (!retryProbeExists) {
+          retryProbeExists = true;
+          state.statementApplications += 1;
+        }
+
+        // The schema change lands before the caller learns whether it worked.
+        // The timeout is wrapped by the migration error, so this also proves
+        // that the complete Error.cause chain is recognised as retryable.
+        if (!responseTimedOut) {
+          responseTimedOut = true;
+          setTimeout(() => {
+            response.statusCode = 200;
+            response.end();
+          }, 75);
+          return;
+        }
+      }
+
+      if (query.includes("ALTER TABLE retry_probe") && !retryProbeExists) {
+        response.statusCode = 500;
+        response.end("retry_probe does not exist");
         return;
       }
 
-      const url = new URL(request.url ?? "/", "http://clickhouse.test");
-      const query = url.searchParams.get("query") ?? body;
       if (query.includes("INSERT INTO egma_meta_migration")) {
         state.ledgerWrites += 1;
       }
@@ -536,9 +560,9 @@ describe("a replicated ALTER whose metadata is still catching up", () => {
   );
 });
 
-describe("a ClickHouse Cloud service waking from idle", () => {
-  it("retries the complete idempotent migration after the first request times out", async () => {
-    const clickhouse = await coldStartingClickHouse();
+describe("a ClickHouse request that times out after applying a statement", () => {
+  it("retries the complete idempotent migration and records it once", async () => {
+    const clickhouse = await clickHouseThatTimesOutAfterApplyingStatement();
 
     try {
       const result = await runClickHouseMigrations(
@@ -547,7 +571,8 @@ describe("a ClickHouse Cloud service waking from idle", () => {
       );
 
       expect(result.applied).toEqual(["0000_retry_replicated_alter.sql"]);
-      expect(clickhouse.state.requests).toBeGreaterThan(1);
+      expect(clickhouse.state.statementAttempts).toBe(2);
+      expect(clickhouse.state.statementApplications).toBe(1);
       expect(clickhouse.state.ledgerWrites).toBe(1);
     } finally {
       await clickhouse.close();
