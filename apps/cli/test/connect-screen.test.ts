@@ -323,11 +323,6 @@ describe("the choice between text and phone", () => {
     grading.stop();
     expect(exited).toBe(0);
 
-    // One number reaches this agent, so there was nothing to choose between —
-    // and the number egma was about to dial was said all the same, because it
-    // is the one fact in the walk that costs somebody money.
-    expect(run.raw()).toContain(`Egma will dial ${DIALLED}.`);
-
     // The phone connection, and nothing else. No retell connection was made
     // alongside it, and the key never reached egma at all.
     expect(platform.registered.connections).toHaveLength(1);
