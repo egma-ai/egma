@@ -215,7 +215,7 @@ describe("the pages", () => {
       "utf8",
     );
 
-    expect(people).toContain("accept_url");
+    expect(people).toContain("acceptUrl");
     expect(people).toContain("delivered");
     expect(people).toMatch(/no mail transport is configured/i);
   });
@@ -373,16 +373,20 @@ describe("the pages", () => {
   it("reach the API for invitations at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
-    const settings = await readFile(path.join(WEB, "lib/settings.ts"), "utf8");
+    const people = await readFile(
+      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
+      "utf8",
+    );
 
     // A path a page fetches and the config does not forward would be served by
     // this process, which has no such route, and the flow would 404.
     expect(rewrites).toContain("/api/invitations/:path*");
-    expect(rewrites).toContain("/api/members/:path*");
+    expect(rewrites).not.toContain('source: "/api/invitations",');
+    expect(rewrites).toContain("/v1/:path*");
     expect(invite).toContain("/api/invitations/lookup");
     expect(invite).toContain("/api/invitations/accept");
-    expect(settings).toContain('"/api/members"');
-    expect(settings).toContain('"/api/invitations"');
+    expect(people).toContain("listMembers(");
+    expect(people).toContain("listInvitations(");
   });
 
   /**
@@ -393,133 +397,45 @@ describe("the pages", () => {
   it("reach the API for settings at paths this instance rewrites", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
 
-    expect(rewrites).toContain("/api/organization");
-    expect(rewrites).toContain("/api/projects/:path*");
+    expect(rewrites).toContain("/v1/:path*");
   });
 
-  it("reaches the API for persona form metadata at its exact path", async () => {
+  it("reaches persona form metadata through the versioned platform rewrite", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
 
     expect(rewrites).toContain(
-      '{ source: "/api/persona-form", destination: `${api}/api/persona-form` }',
+      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
     );
   });
 
   /**
-   * Every API path the browser client names, held to a rewrite rule — read from
-   * the client rather than listed here.
-   *
-   * The tests above are the same claim written one feature at a time, and that
-   * is exactly how six paths came to be missing. `beforeFiles` is an allowlist
-   * with no catch-all, so a path with no rule is served by this process, which
-   * has no such route: the page reads Next's 404 **page** — HTML, not JSON,
-   * carrying no sentence — as though egma had refused it.
-   *
-   * Nothing else can catch this. Every component test stubs `fetch`, so it
-   * never meets a rewrite; the real-browser file drives the app under `next
-   * dev`, where a missing rule looks the same as a page nobody visits. It only
-   * appears in a deployment, as a working page that cannot load its own data.
-   *
-   * That is what happened: `/api/personas` and `/api/persona-form` shipped with
-   * ticket 04, `/api/graders` and `/api/grader-registry` with ticket 05, and
-   * `/api/connection-options` and `/api/capabilities` with ticket 03 — all merged,
-   * all unreachable outside a test. This reads the paths out of `lib/` so the
-   * list cannot go stale again, and so the next ticket's path is covered on the
-   * day it is written rather than when somebody remembers to add a line here.
+   * The generated client owns the concrete routes. This one scoped rewrite
+   * keeps every current and future versioned operation on the page's origin.
    */
   it("rewrites every API path the browser client names", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-    const lib = await readdir(path.join(WEB, "lib"));
 
-    const named = new Set<string>();
-    for (const file of lib.filter((one) => one.endsWith(".ts"))) {
-      const source = await readFile(path.join(WEB, "lib", file), "utf8");
-      for (const [, named_] of source.matchAll(
-        /(?:_PATH|_ROUTE)\s*=\s*"(\/api\/[^"]+)"/g,
-      )) {
-        named.add(named_);
-      }
-    }
-
-    // A guard on the guard: if the constants are ever renamed out of this
-    // shape, the loop above finds nothing and every assertion below passes
-    // vacuously. Better to fail here and be rewritten.
-    expect(named.size).toBeGreaterThan(8);
-
-    const unforwarded = [...named]
-      .filter((one) => {
-        // A rule for the collection, or a `:path*` rule on any parent segment,
-        // covers it.
-        if (rewrites.includes(`source: "${one}"`)) return false;
-        const segments = one.split("/").filter(Boolean);
-        for (let depth = segments.length - 1; depth >= 2; depth -= 1) {
-          const parent = `/${segments.slice(0, depth).join("/")}`;
-          if (rewrites.includes(`source: "${parent}/:path*"`)) return false;
-        }
-        return true;
-      })
-      .sort();
-
-    // Named rather than counted: the fix is one rule per path, and a bare count
-    // sends somebody reading a config file to work out which.
-    expect(unforwarded).toEqual([]);
+    // The generated client owns every concrete platform path. One scoped
+    // version rewrite covers both present and future named operations.
+    expect(rewrites).toContain(
+      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
+    );
+    expect(rewrites).toContain(
+      '{ source: "/health", destination: `${api}/health` }',
+    );
+    expect(rewrites).toContain(
+      '{ source: "/openapi.json", destination: `${api}/openapi.json` }',
+    );
+    expect(rewrites).not.toContain('source: "/api/:path*"');
   });
 
-  /**
-   * **And every path the client *builds*, which the guard above cannot see.**
-   *
-   * That one reads `_PATH` constants, so it covers a collection and nothing
-   * under it. A page reaching one row asks at an address built by a function —
-   * `` `${GRADERS_PATH}/${graderId}` `` — and the collection's own rule does not
-   * forward it: `beforeFiles` matches a rule against the whole path, so
-   * `source: "/api/graders"` forwards `/api/graders` and stops there.
-   *
-   * That is not hypothetical. `DELETE /api/graders/:graderId` shipped on this
-   * branch with the screen calling it and no `:path*` rule beside it, and every
-   * test passed: the component tests stub `fetch`, so a rewrite is never in the
-   * path, and the API tests call the route directly. In a deployment the delete
-   * would have reached this process, which has no such route, and the screen
-   * would have shown Next's 404 **page** — HTML, no sentence — as egma refusing
-   * to switch a grader off.
-   *
-   * So the rule is read from the same place: a function under `lib/` that
-   * builds an address beneath a collection means that collection needs a
-   * `:path*` rule, and the day somebody writes the next such function it is
-   * covered without anybody remembering this file.
-   */
+  /** Deep resource routes are covered by the same scoped version rewrite. */
   it("rewrites every path the browser client builds beneath a collection", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-    const lib = await readdir(path.join(WEB, "lib"));
 
-    /** Every collection a `lib/` function builds an address underneath. */
-    const beneath = new Set<string>();
-    for (const file of lib.filter((one) => one.endsWith(".ts"))) {
-      const source = await readFile(path.join(WEB, "lib", file), "utf8");
-
-      const collections = new Map<string, string>();
-      for (const [, named, at] of source.matchAll(
-        /(\w+_PATH)\s*=\s*"(\/api\/[^"]+)"/g,
-      )) {
-        if (named !== undefined && at !== undefined) collections.set(named, at);
-      }
-
-      for (const [, named] of source.matchAll(/`\$\{(\w+_PATH)\}\/\$\{/g)) {
-        const at = named === undefined ? undefined : collections.get(named);
-        if (at !== undefined) beneath.add(at);
-      }
-    }
-
-    // A guard on the guard, the neighbour's: if these functions are ever
-    // written another way the loop finds nothing and this passes vacuously.
-    expect(beneath.size).toBeGreaterThan(4);
-
-    const unforwarded = [...beneath]
-      .filter((one) => !rewrites.includes(`source: "${one}/:path*"`))
-      .sort();
-
-    // Named rather than counted: the fix is one rule per collection, and a bare
-    // count sends somebody reading a config file to work out which.
-    expect(unforwarded).toEqual([]);
+    expect(rewrites).toContain(
+      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
+    );
   });
 
   /**
@@ -559,13 +475,14 @@ describe("the pages", () => {
     // The project comes off the run read. A browser holding only a run id
     // cannot know it, and an organization with two projects makes any default
     // wrong.
-    expect(forwarder).toContain("runPath(runId)");
-    expect(forwarder).toContain("answer.value.project_id");
+    expect(forwarder).toContain("getRun({ runId }");
+    expect(forwarder).toContain("answer.value.projectId");
+    expect(forwarder).toContain("projectPath(");
     expect(forwarder).toContain("router.replace(");
     // And it draws no run: no conversations, no verdicts, no grading counts.
     expect(forwarder).not.toContain("simulations");
     expect(forwarder).not.toContain("verdict");
-    expect(forwarder).not.toContain("graded_count");
+    expect(forwarder).not.toContain("gradedCount");
   });
 
   /**
@@ -620,12 +537,12 @@ describe("the pages", () => {
       expect(page).toContain("not a failed grader verdict");
     }
     // Grading progress is reported apart from execution progress on both.
-    expect(run).toContain("read.graded_count");
-    expect(simulation).toContain("evidence.grading_jobs.some");
+    expect(run).toContain("read.gradedCount");
+    expect(simulation).toContain("evidence.gradingJobs.some");
     // And the rationale and the turns it cites are what a judgement is worth
     // reading for, wherever one is drawn.
     expect(judgment).toContain("judgment.rationale");
-    expect(judgment).toContain("judgment.cited_turns");
+    expect(judgment).toContain("judgment.citedTurns");
   });
 
   it("shows the aggregate trace outcome", async () => {
@@ -638,7 +555,7 @@ describe("the pages", () => {
       "utf8",
     );
 
-    expect(contract).toContain("readonly outcome: Outcome | null");
+    expect(contract).toContain("export type Detail = GetTraceResponse");
     expect(transcript).toContain("<OutcomeSummary");
     expect(transcript).toContain("outcome={detail.outcome}");
     expect(transcript).toContain('aria-label="Grading outcome"');
@@ -664,7 +581,7 @@ describe("the pages", () => {
       "utf8",
     );
 
-    expect(contract).toContain("readonly diagnostics?: Outcome | null");
+    expect(contract).toContain("export type Detail = GetTraceResponse");
     expect(transcript).toContain("diagnostics={detail.diagnostics");
     expect(transcript).toContain("GRADING.diagnosticLane");
     // Never coloured by what it says: `data-verdict` is what paints a fact red,
@@ -914,15 +831,15 @@ describe("a refusal of a recording", () => {
 describe("which verdict speaks", () => {
   function row(overrides: Partial<EvidenceVerdict> = {}): EvidenceVerdict {
     return {
-      grader_id: "grd_1",
+      graderId: "grd_1",
       assertion: "behavior_1",
-      assertion_text: "confirms the new time back",
+      assertionText: "confirms the new time back",
       required: true,
       verdict: "failed",
       score: 0,
       rationale: "the agent never said it back",
-      cited_turns: [],
-      judged_at: "2026-08-15T10:00:00.000000Z",
+      citedTurns: [],
+      judgedAt: "2026-08-15T10:00:00.000000Z",
       ...overrides,
     };
   }
@@ -933,7 +850,7 @@ describe("which verdict speaks", () => {
       row({
         verdict: "failed",
         rationale: "the tightened grader disagrees",
-        judged_at: "2026-08-15T12:00:00.000000Z",
+        judgedAt: "2026-08-15T12:00:00.000000Z",
       }),
     ]);
 
@@ -954,7 +871,7 @@ describe("which verdict speaks", () => {
    * plausible sentence would be unfalsifiable; `behavior_3` is merely terse.
    */
   it("carries the key through when nothing could resolve its words", () => {
-    const [only] = judgedAssertions([row({ assertion_text: null })]);
+    const [only] = judgedAssertions([row({ assertionText: null })]);
     expect(only?.assertionText).toBeNull();
     expect(only?.assertion).toBe("behavior_1");
   });
@@ -969,18 +886,18 @@ describe("which verdict speaks", () => {
 describe("the turns a judgement points at", () => {
   function step(id: string, children: EvidenceStep[] = []): EvidenceStep {
     return {
-      span_id: id,
-      parent_span_id: "",
+      spanId: id,
+      parentSpanId: "",
       name: id,
       kind: "turn:agent",
       status: "ok",
-      started_at: "2026-08-15T10:00:00.000000Z",
-      duration_ns: "1000",
+      startedAt: "2026-08-15T10:00:00.000000Z",
+      durationNs: "1000",
       text: "",
-      audio_url: "",
-      tool_name: "",
-      tool_arguments: "",
-      tool_result: "",
+      audioUrl: "",
+      toolName: "",
+      toolArguments: "",
+      toolResult: "",
       spans: children,
     };
   }

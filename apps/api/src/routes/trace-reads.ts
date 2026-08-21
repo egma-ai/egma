@@ -17,6 +17,7 @@ import {
   type TraceSpan,
   type TraceSummary,
 } from "@egma/db";
+import { traceReadOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import { simulationIdOfTrace } from "@egma/simulation-contract";
@@ -31,6 +32,7 @@ import {
   onlyReporting,
 } from "../http/verdicts.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 
 /**
  * The two v1 read endpoints: the list of a customer's traces, and one trace as a
@@ -48,7 +50,7 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
  *
  * **The project is a filter and never a wall.** Reading across a whole
  * organization is the first-class case, because two projects of one customer are
- * always queryable together; `project_id` narrows to one when a caller wants
+ * always queryable together; `projectId` narrows to one when a caller wants
  * that. A credential that already names a project reads that project and cannot
  * be argued out of it.
  *
@@ -68,20 +70,22 @@ export type TraceReadRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const TRACES_LIST_PATH = "/v1/traces";
-export const TRACE_DETAIL_PATH = "/v1/traces/:traceId";
-
 type Query = {
   readonly from?: string;
   readonly to?: string;
-  readonly project_id?: string;
+  readonly projectId?: string;
   readonly source?: string;
-  readonly limit?: string;
-  readonly cursor?: string;
+  readonly pageSize?: string | number;
+  readonly pageToken?: string;
 };
 
 function invalid(reply: FastifyReply, message: string): FastifyReply {
   return reply.code(400).send({ error: "invalid_request", message });
+}
+
+function queryIntegerText(value: unknown): string | undefined {
+  if (typeof value === "number") return String(value);
+  return given(typeof value === "string" ? value : undefined);
 }
 
 /**
@@ -100,7 +104,7 @@ const FRACTIONAL_SECOND = /^(.*\d{2}:\d{2}:\d{2})\.(\d+)(.*)$/u;
  * `Date` still does the calendar and the offset; only the fraction is read here,
  * because a `Date` holds milliseconds and this store holds microseconds. `to` is
  * exclusive, so a bound rounded down to the millisecond silently drops the 999
- * microseconds after it — paste a trace's own `ended_at` of `…776865Z` in as
+ * microseconds after it — paste a trace's own `endedAt` of `…776865Z` in as
  * `to` and the span that ended at it would be missing, with nothing in the
  * answer to say why.
  *
@@ -196,7 +200,7 @@ const TRAFFIC_SOURCES: readonly SpanSource[] = ["simulation", "production"];
  * not know what the right ones are.
  *
  * An **empty** parameter is a parameter nobody set, on the same terms as
- * `?project_id=` and `?limit=`: it is what a form submits for a field left
+ * `?projectId=` and `?pageSize=`: it is what a form submits for a field left
  * blank, and refusing it would refuse a request nobody meant anything by.
  */
 type ParsedSource =
@@ -248,30 +252,30 @@ function describedWindow(window: TimeWindow): Record<string, string> {
   return { from: format(window.from), to: format(window.to) };
 }
 
-/** A trace, as the list describes one. Snake case, as the rest of the API is. */
+/** A trace, as the list describes one. */
 function describedFacts(facts: TraceFacts): Record<string, unknown> {
   return {
-    trace_id: facts.traceId,
-    started_at: facts.startedAt,
-    ended_at: facts.endedAt,
+    traceId: facts.traceId,
+    startedAt: facts.startedAt,
+    endedAt: facts.endedAt,
     // A decimal string, because a nanosecond count passes what a JSON number
     // holds exactly and a silently rounded latency is worse than no latency.
-    duration_ns: facts.durationNanoseconds,
-    span_count: facts.spanCount,
-    turn_counts: { human: facts.humanTurnCount, agent: facts.agentTurnCount },
-    tool_span_count: facts.toolSpanCount,
-    errored_span_count: facts.erroredSpanCount,
+    durationNs: facts.durationNanoseconds,
+    spanCount: facts.spanCount,
+    turnCounts: { human: facts.humanTurnCount, agent: facts.agentTurnCount },
+    toolSpanCount: facts.toolSpanCount,
+    erroredSpanCount: facts.erroredSpanCount,
     source: facts.source,
     emitter: facts.emitter,
     environment: facts.environment,
-    connection_kind: facts.connectionKind,
-    provider_call_id: facts.providerCallId,
-    agent_platform: facts.agentPlatform,
-    platform_agent_id: facts.platformAgentId,
-    platform_agent_name: facts.platformAgentName,
-    platform_agent_version: facts.platformAgentVersion,
-    run_id: facts.runId,
-    agent_id: facts.agentId,
+    connectionKind: facts.connectionKind,
+    providerCallId: facts.providerCallId,
+    agentPlatform: facts.agentPlatform,
+    platformAgentId: facts.platformAgentId,
+    platformAgentName: facts.platformAgentName,
+    platformAgentVersion: facts.platformAgentVersion,
+    runId: facts.runId,
+    agentId: facts.agentId,
   };
 }
 
@@ -288,18 +292,18 @@ function describedSummary(summary: TraceSummary): Record<string, unknown> {
  */
 function describedSpan(span: TraceSpan): Record<string, unknown> {
   return {
-    span_id: span.spanId,
-    parent_span_id: span.parentSpanId,
+    spanId: span.spanId,
+    parentSpanId: span.parentSpanId,
     name: span.name,
     kind: span.kind,
     status: span.status,
-    started_at: span.startedAt,
-    duration_ns: span.durationNanoseconds,
+    startedAt: span.startedAt,
+    durationNs: span.durationNanoseconds,
     text: span.text,
-    audio_url: span.audioUrl,
-    tool_name: span.toolName,
-    tool_arguments: span.toolArguments,
-    tool_result: span.toolResult,
+    audioUrl: span.audioUrl,
+    toolName: span.toolName,
+    toolArguments: span.toolArguments,
+    toolResult: span.toolResult,
     spans: span.spans.map(describedSpan),
   };
 }
@@ -364,7 +368,7 @@ function describedMeasures(
       // it has always been: false means egma timed it, true means egma did
       // not.** That is all it has ever been able to say. Which of the two
       // untimed sources it was — a derivation off the framework's own spans, or
-      // a number the platform handed egma — is `reported_by` below, present
+      // a number the platform handed egma — is `reportedBy` below, present
       // only on the second. A reader wanting the distinction asks that field;
       // no existing reader's meaning shifts under them.
       derived: measured.origin !== "timed",
@@ -374,10 +378,10 @@ function describedMeasures(
       // present-but-empty on every simulation would be a wire change on traffic
       // nothing new happened to. Present, it names the platform that measured.
       ...(measured.origin === "reported"
-        ? { reported_by: measured.reportedBy }
+        ? { reportedBy: measured.reportedBy }
         : {}),
       samples: measured.samples.map((sample) => sample.value),
-      span_ids: measured.samples.map((sample) => sample.spanId),
+      spanIds: measured.samples.map((sample) => sample.spanId),
       // The one number a bound is held against, and where it happened. Null is
       // unreachable — a measure with no measurements is absent from this list
       // rather than present and empty — and it is sent rather than assumed
@@ -385,7 +389,7 @@ function describedMeasures(
       worst:
         worst === undefined
           ? null
-          : { value: worst.value, span_id: worst.spanId },
+          : { value: worst.value, spanId: worst.spanId },
       // **A reported measure is never partial, however much of the trace was
       // dropped.** The flag says "this number was reduced over a prefix of the
       // conversation" — true of a series taken off spans when the read stopped
@@ -403,7 +407,7 @@ function describedDetail(detail: TraceDetail): Record<string, unknown> {
     trace: describedFacts(detail),
     turns: detail.turns.map(describedSpan),
     spans: detail.spans.map(describedSpan),
-    spans_truncated: detail.truncated,
+    spansTruncated: detail.truncated,
     measures: describedMeasures(detail),
   };
 }
@@ -428,7 +432,7 @@ export async function traceReadRoutes(
    * case and is always refused, because a narrowed window silently answers a
    * different question.
    *
-   * **A parameter that arrived empty is a parameter nobody set.** `?project_id=`
+   * **A parameter that arrived empty is a parameter nobody set.** `?projectId=`
    * is what a form submits for a field left blank, and reading it as a name
    * would answer with the traces of a project that cannot exist; `?limit=` is
    * the same case, and `Number("")` is zero, which would be refused as a page
@@ -441,26 +445,26 @@ export async function traceReadRoutes(
    * token is a position in an ordering and the ordering it was minted in is the
    * narrowed one.
    */
-  app.get(TRACES_LIST_PATH, async (request, reply) => {
+  registerPlatformOperation(app, traceReadOperations.listTraces, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
     const window = windowOf(query);
     if ("refusal" in window) return invalid(reply, window.refusal);
 
-    const projectId = given(query.project_id);
+    const projectId = given(query.projectId);
     const project = await readingProject(auth, projectId);
     if ("refusal" in project) return invalid(reply, project.refusal);
 
     const source = sourceOf(query);
     if ("refusal" in source) return invalid(reply, source.refusal);
 
-    const asked = given(query.limit);
-    const limit = asked === undefined ? undefined : Number(asked);
-    if (limit !== undefined && (!Number.isFinite(limit) || limit < 1)) {
+    const asked = queryIntegerText(query.pageSize);
+    const pageSize = asked === undefined ? undefined : Number(asked);
+    if (pageSize !== undefined && (!Number.isFinite(pageSize) || pageSize < 1)) {
       return invalid(
         reply,
-        `limit is how many traces one page may carry, at most ` +
+        `pageSize is how many traces one page may carry, at most ` +
           `${MAXIMUM_LIST_LIMIT}, and "${asked}" is not a count.`,
       );
     }
@@ -469,15 +473,15 @@ export async function traceReadRoutes(
       window,
       projectId,
       source: source.source,
-      limit,
-      cursor: given(query.cursor),
+      limit: pageSize,
+      cursor: given(query.pageToken),
     });
 
     return reply.send({
       traces: list.traces.map(describedSummary),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
-      next_cursor: list.nextCursor ?? null,
+      nextPageToken: list.nextCursor ?? null,
       window: describedWindow(window),
     });
   });
@@ -491,7 +495,7 @@ export async function traceReadRoutes(
    * fetching one trace cheap. The list that found the trace already knows
    * the answer, so this costs a caller nothing they did not have.
    */
-  app.get(TRACE_DETAIL_PATH, async (request, reply) => {
+  registerPlatformOperation(app, traceReadOperations.getTrace, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
     const { traceId } = request.params as { traceId: string };
@@ -499,7 +503,7 @@ export async function traceReadRoutes(
     const window = windowOf(query);
     if ("refusal" in window) return invalid(reply, window.refusal);
 
-    const projectId = given(query.project_id);
+    const projectId = given(query.projectId);
     const project = await readingProject(auth, projectId);
     if ("refusal" in project) return invalid(reply, project.refusal);
 
@@ -594,7 +598,7 @@ export async function traceReadRoutes(
       // already in hand: no second read, no join, and no second endpoint for
       // the surface that needs it. A transcript then resolves its recording
       // through the one route a run's results use.
-      simulation_id:
+      simulationId:
         detail.source === "simulation"
           ? simulationIdOfTrace(traceId) ?? null
           : null,
@@ -630,7 +634,7 @@ export async function traceReadRoutes(
 }
 
 /**
- * Which project these reads narrow to, once `project_id` has been answered.
+ * Which project these reads narrow to, once `projectId` has been answered.
  *
  * **A session's project is a default; a key's is a scope**, and that one
  * sentence is the whole of this function. Every member of an organization holds
@@ -726,6 +730,6 @@ function projectRefusal(
   return (
     `this credential is scoped to project ${credentialProjectId}, and the ` +
     `request asked for ${asked}. A key minted for one product area reads that ` +
-    `one; drop the project_id, or use a key for the whole organization.`
+    `one; drop projectId, or use a key for the whole organization.`
   );
 }

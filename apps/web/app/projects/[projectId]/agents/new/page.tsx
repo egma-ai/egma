@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import { registerAgent } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
-import { AGENTS_PATH, type ListedAgent } from "../../../../../lib/agents.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
@@ -93,31 +94,19 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
     setRefused(null);
     setSaving(true);
 
-    /**
-     * **The project is named the one way every write in the product names
-     * it** — `writeJson`'s own option, which puts it in the address.
-     *
-     * It was worth a comment when the door only read a body key. Naming it in
-     * the query then was not refused, it was *ignored*: the door found no
-     * project, fell back to the session's own — the organization's **first** —
-     * answered 201, and sent the browser to a detail page for an agent that is
-     * not in the project the address names. Nothing below this line could
-     * catch it, because the request is well formed and the answer is a real
-     * agent. The door now reads the address as well as the body, so the fault
-     * is closed where it was rather than only in this caller.
-     */
-    const answer = await writeJson<{ readonly agent: ListedAgent }>(
-      AGENTS_PATH,
-      {
-        method: "POST",
-        project: projectId,
-        body: {
+    // The named operation keeps the project's query spelling in the generated
+    // contract instead of asking this page to build the address itself.
+    const answer = await platformAnswer(
+      registerAgent(
+        {
+          projectId,
           name: wanted,
           ...(description.trim() === ""
             ? {}
             : { description: description.trim() }),
         },
-      },
+        { client: platformClient },
+      ),
     );
 
     setSaving(false);

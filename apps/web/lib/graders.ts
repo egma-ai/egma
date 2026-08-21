@@ -1,5 +1,10 @@
+import type {
+  ListGraderLibraryResponse,
+  ListGradersResponse,
+} from "@egma/platform-api/client";
+
 /**
- * The graders of one project, as `/api/grader-library` and `/api/graders`
+ * The graders of one project, as `/v1/grader-library` and `/v1/graders`
  * answer them.
  *
  * **Two levels, and keeping them apart is the whole of this file.** A
@@ -47,73 +52,39 @@ export type GraderParameter = {
 };
 
 /** One entry on the shelf. */
-export type LibraryEntry = {
-  readonly id: string;
-  readonly name: string;
-  readonly description: string | null;
-  /** `llm_as_judge` or `code`, as the schema and the API speak it. */
-  readonly type: string;
-  /** `egma` or `organization`, derived from tenancy and stored nowhere. */
-  readonly owner: string;
-  /**
-   * What pressing Use asks for. Absent on an answer from an older platform,
-   * which is an entry whose form asks nothing rather than a page that breaks.
-   */
-  readonly params?: readonly GraderParameter[];
-};
+export type LibraryEntry =
+  ListGraderLibraryResponse["graderLibraryEntries"][number];
 
-export type LibraryPage = {
-  readonly items: readonly LibraryEntry[];
-  readonly next_cursor: string | null;
-};
+export type LibraryPage = ListGraderLibraryResponse;
 
 /**
  * One running copy: what this project is judged by.
  *
- * `library_id` is what the row *is*: the stable definition family, so a renamed
+ * `libraryId` is what the row *is*: the stable definition family, so a renamed
  * copy is still a copy of the same entry. `config` holds only the copy's
  * filled-in values. Each grader version points at one immutable shared
  * definition revision; no prompt or source code is duplicated in this shape.
  */
-export type RunningGrader = {
-  readonly id: string;
-  readonly library_id: string;
-  readonly name: string;
-  readonly description: string | null;
-  readonly type: string;
-  /** `false` is a diagnostic: judged, shown, and never able to fail a test. */
-  readonly required: boolean;
-  /** `simulations`, `production` or `both`. */
-  readonly scope: string;
-  /** What share of live traffic it judges, as a whole percentage. */
-  readonly production_sample_rate: number;
-  readonly config: { readonly assertions?: readonly unknown[] } | null;
-  readonly created_at: string;
-  readonly updated_at: string;
-};
+export type RunningGrader = ListGradersResponse["graders"][number];
 
-export type RunningPage = {
-  readonly items: readonly RunningGrader[];
-  readonly next_cursor: string | null;
-};
-
-export const GRADER_LIBRARY_PATH = "/api/grader-library";
-export const GRADERS_PATH = "/api/graders";
+export type RunningPage = ListGradersResponse;
 
 /**
- * One running copy's own address: where an edit changes what it judges by and
- * a delete switches it off.
+ * The generated contract currently leaves a library entry's parameters as
+ * unknown values. This is the one local refinement the forms still need.
  */
-export function graderPath(graderId: string): string {
-  return `${GRADERS_PATH}/${graderId}`;
+export function parametersOf(
+  entry: LibraryEntry,
+): readonly GraderParameter[] {
+  return entry.params as readonly GraderParameter[];
 }
 
-export function libraryAfter(cursor: string): string {
-  return `${GRADER_LIBRARY_PATH}?cursor=${encodeURIComponent(cursor)}`;
-}
-
-export function gradersAfter(cursor: string): string {
-  return `${GRADERS_PATH}?cursor=${encodeURIComponent(cursor)}`;
+/** Assertions held in a running grader's otherwise open configuration. */
+export function assertionsOf(copy: RunningGrader): readonly unknown[] {
+  if (typeof copy.config !== "object" || copy.config === null) return [];
+  const assertions = (copy.config as { readonly assertions?: unknown })
+    .assertions;
+  return Array.isArray(assertions) ? assertions : [];
 }
 
 /** Where the two grader screens live inside one project. */

@@ -1,23 +1,28 @@
 "use client";
 
 import { useState } from "react";
+import { createGrader } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { NumberField } from "@/ui/number-field.tsx";
-import { writeJson, type Refusal } from "../../../../lib/api.ts";
+import type { Refusal } from "../../../../lib/api.ts";
 import {
   filledParams,
   firstChoices,
-  GRADERS_PATH,
+  parametersOf,
   unitOf,
   type GraderParameter,
   type LibraryEntry,
   type RunningGrader,
 } from "../../../../lib/graders.ts";
 import { USE } from "../../../../lib/grader-library-copy.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../lib/platform-client.ts";
 import {
   Field,
   Form,
@@ -180,7 +185,7 @@ export function UseForm({
   readonly onStarted: (name: string) => void;
   readonly onCancel: () => void;
 }) {
-  const params: readonly GraderParameter[] = entry.params ?? [];
+  const params: readonly GraderParameter[] = parametersOf(entry);
   const [filled, setFilled] = useState<Readonly<Record<string, string>>>(() =>
     firstChoices(params),
   );
@@ -192,17 +197,19 @@ export function UseForm({
     setBusy(true);
     setRefused(null);
 
-    const answer = await writeJson<RunningGrader>(GRADERS_PATH, {
-      method: "POST",
-      project: projectId,
-      body: {
-        library_id: entry.id,
-        required,
-        ...(params.length === 0
-          ? {}
-          : { params: filledParams(params, filled) }),
-      },
-    });
+    const answer = await platformAnswer(
+      createGrader(
+        {
+          projectId,
+          libraryId: entry.id,
+          required,
+          ...(params.length === 0
+            ? {}
+            : { params: filledParams(params, filled) }),
+        },
+        { client: platformClient },
+      ),
+    );
 
     setBusy(false);
 

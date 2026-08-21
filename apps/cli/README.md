@@ -103,7 +103,7 @@ egma --url http://localhost:3101
 
 `--url` is the one way to name an Egma, and it names it for that one command.
 To say it once and be done, bind the repository — `egma init --url
-http://localhost:3101` writes that instance's verified identity into
+http://localhost:3101` writes that platform URL into
 `egma/config.yaml`, and every later command in the repository finds it there.
 `3101` is where `docker compose up` puts an instance; see [Trying it on an instance of your own](#trying-it-on-an-instance-of-your-own),
 which is also where the `egma` in that line comes from today.
@@ -173,7 +173,7 @@ grounded in.
 
 ### LiveKit
 
-For LiveKit, the wizard reads `GET /api/connection-options` from the Egma
+For LiveKit, the wizard reads `GET /v1/connection-options` from the Egma
 platform. The platform supplies the field names, help text, and credential
 rules. You then choose one of two setups:
 
@@ -187,7 +187,7 @@ rules. You then choose one of two setups:
 Secrets are drawn as dots and never enter wizard state, the coding-agent
 context, a repository file, a log, or a command argument. Setup does not contact
 the LiveKit server or token endpoint. Egma sends the completed connection to
-`POST /api/agents`, where the credentials are sealed. If the platform refuses a
+`POST /v1/agents`, where the credentials are sealed. If the platform refuses a
 field, the wizard shows that reason and gives one correction attempt. If an
 agent name is already taken, it asks for another name; it never joins two
 LiveKit targets by URL because a LiveKit URL identifies a server, not an agent.
@@ -626,8 +626,8 @@ egma connect [options]   Register your voice agent and a way to reach it.
                          The key comes in on standard input or from the
                          environment, never as an argument.
 egma init [options]      Make the egma folder this repository's tests live
-                         in. Talks to nobody, unless --url names an Egma to
-                         bind this repository to. Safe to run again.
+                         in. --url can bind the repository to a platform
+                         without contacting it. Safe to run again.
 egma pull [options]      Write Egma's current test versions into it.
 egma push [options]      Upload the tests in it. Refuses, naming names, when
                          Egma has moved on since your last pull.
@@ -639,10 +639,10 @@ egma run [options]       Run this folder's tests, pinning the version of each.
   --cwd <path>         The folder to work in. Default: this folder.
   --url <address>      Which Egma this one command talks to. It is the only
                        way to name one, so a command that should reach that
-                       Egma carries it. With init and with the wizard: Egma
-                       asks that address who it is and records its verified
-                       identity in egma/config.yaml, and every later command
-                       in this repository then needs no address at all.
+                       Egma carries it. With init and with the wizard, Egma
+                       records the normalized URL in egma/config.yaml, and
+                       every later command in this repository then needs no
+                       address at all.
   --force              With login: sign in again even when this machine
                        already holds a key.
   --no-follow          With run: start the run and return at once, without
@@ -729,8 +729,7 @@ Put the deployment's current provider keys in `.env` as
 `EGMA_CARTESIA_API_KEY`. Persona and grader versions choose the models; these
 variables supply credentials only.
 
-The command also prints phone readiness separately. Configure that optional
-carrier route in the same directory:
+Configure the optional carrier route in the same directory:
 
 ```
 npx @egma/cli login --url http://localhost:3101

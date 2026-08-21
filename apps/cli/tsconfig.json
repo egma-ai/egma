@@ -11,5 +11,8 @@
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../../packages/retell" }]
+  "references": [
+    { "path": "../../packages/platform-api" },
+    { "path": "../../packages/retell" }
+  ]
 }

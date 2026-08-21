@@ -60,9 +60,9 @@ function registration(
       ...(overrides.connectionName === undefined
         ? {}
         : { name: overrides.connectionName }),
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -123,9 +123,9 @@ function connectionPayload(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    agent_platform: "retell",
-    connection_kind: "retell_chat_api",
-    access_variant: "retell_chat_api.api_key",
+    agentPlatform: "retell",
+    connectionKind: "retell_chat_api",
+    accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
@@ -133,9 +133,20 @@ function connectionPayload(
   };
 }
 
-describe("reading a Retell account for voice setup", () => {
-  it("returns only sanitized voice agents and their routed numbers, never the key", async () => {
-    api = await createApi("retell_voice_discovery");
+describe("discovering simulation agents", () => {
+  it("does not treat arbitrary text after the agents path as the discover action", async () => {
+    api = await createApi("agent_discovery_literal_action");
+
+    const response = await api.app.inject({
+      method: "POST",
+      url: "/v1/agentsanything",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("returns normalized chat and phone candidates, never provider data or the key", async () => {
+    api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-never-returned-WXYZ";
     vi.stubGlobal(
@@ -156,6 +167,11 @@ describe("reading a Retell account for voice setup", () => {
                   agent_id: "agent_chat_1",
                   agent_name: "Chat only",
                   channel: "chat",
+                },
+                {
+                  agent_id: "agent_voice_without_number",
+                  agent_name: "Not routed",
+                  channel: "voice",
                 },
               ],
               has_more: false,
@@ -184,18 +200,49 @@ describe("reading a Retell account for voice setup", () => {
     );
 
     const answer = await post(
-      `/api/providers/retell/voice-agents?project=${ada.projectId}`,
+      `/v1/agents:discover?projectId=${ada.projectId}`,
       withKey(ada.secret),
-      { api_key: retellKey },
+      {
+        agentPlatform: "retell",
+        credentials: { apiKey: retellKey },
+      },
     );
 
     expect(answer.status).toBe(200);
     expect(answer.body).toEqual({
       agents: [
         {
-          id: "agent_voice_1",
+          platformAgentId: "agent_voice_1",
           name: "Front desk",
-          numbers: [{ number: "+14155550100", label: "Main line" }],
+          connectionCandidates: [
+            {
+              agentPlatform: "retell",
+              connectionKind: "phone_number",
+              accessVariant: "phone_number.public_e164",
+              modality: "voice",
+              productLabel: "Retell phone",
+              config: { phoneNumber: "+14155550100" },
+            },
+          ],
+        },
+        {
+          platformAgentId: "agent_chat_1",
+          name: "Chat only",
+          connectionCandidates: [
+            {
+              agentPlatform: "retell",
+              connectionKind: "retell_chat_api",
+              accessVariant: "retell_chat_api.api_key",
+              modality: "chat",
+              productLabel: "Retell chat",
+              config: { retellAgentId: "agent_chat_1" },
+            },
+          ],
+        },
+        {
+          platformAgentId: "agent_voice_without_number",
+          name: "Not routed",
+          connectionCandidates: [],
         },
       ],
     });
@@ -204,8 +251,81 @@ describe("reading a Retell account for voice setup", () => {
     expect(JSON.stringify(answer.body)).not.toContain("outbound_agent_id");
   });
 
+  it("keeps chat candidates when Retell cannot list phone numbers", async () => {
+    api = await createApi("retell_chat_discovery_without_phone_listing");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const retellKey = "retell-secret-chat-still-works-WXYZ";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/v2/list-agents")) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_chat_1",
+                  agent_name: "Chat agent",
+                  channel: "chat",
+                },
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: "Voice agent",
+                  channel: "voice",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (new URL(url).pathname === "/v2/list-phone-numbers") {
+          return new Response("Retell phone-number service failed", {
+            status: 503,
+          });
+        }
+        throw new Error(`unexpected Retell request ${url}`);
+      }),
+    );
+
+    const answer = await post(
+      `/v1/agents:discover?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        credentials: { apiKey: retellKey },
+      },
+    );
+
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({
+      agents: [
+        {
+          platformAgentId: "agent_chat_1",
+          name: "Chat agent",
+          connectionCandidates: [
+            {
+              agentPlatform: "retell",
+              connectionKind: "retell_chat_api",
+              accessVariant: "retell_chat_api.api_key",
+              modality: "chat",
+              productLabel: "Retell chat",
+              config: { retellAgentId: "agent_chat_1" },
+            },
+          ],
+        },
+        {
+          platformAgentId: "agent_voice_1",
+          name: "Voice agent",
+          connectionCandidates: [],
+        },
+      ],
+    });
+    expect(JSON.stringify(answer.body)).not.toContain(retellKey);
+  });
+
   it("answers an invalid key without reflecting it", async () => {
-    api = await createApi("retell_voice_invalid_key");
+    api = await createApi("retell_discovery_invalid_key");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const retellKey = "retell-secret-invalid-ABCD";
     vi.stubGlobal(
@@ -214,9 +334,12 @@ describe("reading a Retell account for voice setup", () => {
     );
 
     const answer = await post(
-      `/api/providers/retell/voice-agents?project=${ada.projectId}`,
+      `/v1/agents:discover?projectId=${ada.projectId}`,
       withKey(ada.secret),
-      { api_key: retellKey },
+      {
+        agentPlatform: "retell",
+        credentials: { apiKey: retellKey },
+      },
     );
 
     expect(answer.status).toBe(422);
@@ -228,100 +351,37 @@ describe("reading a Retell account for voice setup", () => {
     expect(JSON.stringify(answer.body)).not.toContain(retellKey);
   });
 
-  it("rechecks the selected route, then stores only its phone number", async () => {
-    const lines: string[] = [];
-    api = await createApi("retell_phone_connection", {
-      logTo: { write: (line) => lines.push(line) },
-    });
+  it("creates a selected phone candidate through the ordinary connection route", async () => {
+    api = await createApi("retell_discovery_generic_connection");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const created = await post("/api/agents", withKey(ada.secret), {
+    const created = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
     });
-    const agentId = String(agentOf(created).id);
-    const retellKey = "SENTINEL-retell-key-never-kept-WXYZ";
-    const providerReads: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const url = String(input);
-        providerReads.push(url);
-        if (url.includes("/v2/list-agents")) {
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  agent_id: "agent_voice_1",
-                  agent_name: "Front desk",
-                  channel: "voice",
-                },
-              ],
-              has_more: false,
-            }),
-            { status: 200 },
-          );
-        }
-        if (url.includes("/get-phone-number/")) {
-          return new Response(
-            JSON.stringify({
-              phone_number: "+14155550100",
-              nickname: "Main number",
-              inbound_agents: [{ agent_id: "agent_voice_1" }],
-            }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected Retell request ${url}`);
-      }),
-    );
 
-    const answer = await post(
-      `/api/agents/${agentId}/connections/retell-phone?project=${ada.projectId}`,
+    const connected = await post(
+      `/v1/agents/${String(agentOf(created).id)}/connections?projectId=${ada.projectId}`,
       withKey(ada.secret),
       {
-        api_key: retellKey,
-        retell_agent_id: "agent_voice_1",
-        phone_number: "+14155550100",
         name: "Retell main number",
+        agentPlatform: "retell",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
       },
     );
 
-    expect(answer.status).toBe(201);
-    expect(connectionOf(answer)).toMatchObject({
+    expect(connected.status).toBe(201);
+    expect(connectionOf(connected)).toMatchObject({
       name: "Retell main number",
-      agent_platform: "retell",
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
-      product_label: "Retell phone",
+      agentPlatform: "retell",
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
+      productLabel: "Retell phone",
       config: { phoneNumber: "+14155550100" },
-      credential_present: false,
+      credentialPresent: false,
     });
-    expect(providerReads.some((url) => url.includes("/v2/list-agents"))).toBe(true);
-    expect(
-      providerReads.some((url) => url.includes("/get-phone-number/%2B14155550100")),
-    ).toBe(true);
-    const held = JSON.stringify({ body: answer.body, logs: lines });
-    expect(held).not.toContain(retellKey);
-    expect(held).not.toContain("agent_voice_1");
-    const stored = await api.database.sql<{
-      agent_platform: string;
-      connection_kind: string;
-      access_variant: string;
-      config: Record<string, unknown>;
-      credentials: string | null;
-    }>(
-      "select agent_platform, connection_kind, access_variant, config, credentials from connection where agent_id = $1",
-      [agentId],
-    );
-    expect(stored.rows).toEqual([
-      {
-        agent_platform: "retell",
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
-        config: { phoneNumber: "+14155550100" },
-        credentials: null,
-      },
-    ]);
   });
 });
 
@@ -331,7 +391,7 @@ describe("registering an agent", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
@@ -340,21 +400,21 @@ describe("registering an agent", () => {
     expect(registered.body.result).toBe("created");
     expect(agentOf(registered)).toMatchObject({
       name: "Front desk",
-      project_id: ada.projectId,
+      projectId: ada.projectId,
       description: null,
     });
     expect(connectionOf(registered)).toMatchObject({
-      agent_id: agentOf(registered).id,
+      agentId: agentOf(registered).id,
       name: "retell_chat_api-1",
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
-      product_label: "Retell chat",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
+      productLabel: "Retell chat",
       modality: "chat",
       // Derived from the type, never caller-supplied.
       topology: "hosted-broker",
       config: { retellAgentId: "agent_in_retell_1" },
-      credentials_hint: "WXYZ",
+      credentialsHint: "WXYZ",
     });
 
     const { rows } = await api.database.sql<{
@@ -372,12 +432,12 @@ describe("registering an agent", () => {
     api = await createApi("agents_all_or_nothing");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         // One letter wrong, which is the whole point: a typo dies at the door.
         config: { retellAgentld: "agent_in_retell_1" },
@@ -398,7 +458,7 @@ describe("registering an agent", () => {
     api = await createApi("agents_identity_only");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const claimed = await post("/api/agents", withKey(ada.secret), {
+    const claimed = await post("/v1/agents", withKey(ada.secret), {
       name: "Not wired yet",
       description: "credentials are still with the platform team",
     });
@@ -415,7 +475,7 @@ describe("registering an agent", () => {
     api = await createApi("agents_needs_a_name");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "   ",
     });
 
@@ -438,9 +498,9 @@ describe("a connection payload its kind will not take", () => {
     api = await createApi("agents_unknown_type");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
-      connection: connectionPayload({ connection_kind: "vapi" }),
+      connection: connectionPayload({ connectionKind: "vapi" }),
     });
 
     expect(refused.status).toBe(400);
@@ -456,12 +516,12 @@ describe("a connection payload its kind will not take", () => {
     api = await createApi("agents_unknown_platform");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Reception line",
       connection: {
-        agent_platform: "vapi",
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
+        agentPlatform: "vapi",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
       },
@@ -480,12 +540,12 @@ describe("a connection payload its kind will not take", () => {
     api = await createApi("agents_wrong_modality");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Reception line",
       connection: {
-        agent_platform: null,
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
       },
@@ -503,12 +563,12 @@ describe("a connection payload its kind will not take", () => {
     api = await createApi("agents_no_credentials");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_1" },
       },
@@ -525,7 +585,7 @@ describe("a connection payload its kind will not take", () => {
     api = await createApi("agents_short_credential");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: connectionPayload({ credentials: { apiKey: "short" } }),
     });
@@ -542,7 +602,7 @@ describe("a connection payload its kind will not take", () => {
     api = await createApi("agents_connection_needs_a_name");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: connectionPayload({ name: "   " }),
     });
@@ -574,9 +634,9 @@ describe("a livekit connection", () => {
     overrides: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
       credentials: { apiKey: API_KEY, apiSecret: API_SECRET },
@@ -588,7 +648,7 @@ describe("a livekit connection", () => {
     api = await createApi("agents_livekit_bare");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const registered = await post("/api/agents", withKey(ada.secret), {
+    const registered = await post("/v1/agents", withKey(ada.secret), {
       name: "Quickstart agent",
       connection: livekitPayload(),
     });
@@ -596,16 +656,16 @@ describe("a livekit connection", () => {
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
       name: "livekit_room-1",
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.project_credentials",
-      product_label: "LiveKit project credentials",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
+      productLabel: "LiveKit project credentials",
       modality: "voice",
       // Derived from the type, never caller-supplied.
       topology: "agent-dials-out",
       config: { url: "wss://acme.livekit.cloud" },
       // The last four of the key. The secret has no hint and no line at all.
-      credentials_hint: "WXYZ",
+      credentialsHint: "WXYZ",
     });
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
   });
@@ -614,7 +674,7 @@ describe("a livekit connection", () => {
     api = await createApi("agents_livekit_dispatched");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const registered = await post("/api/agents", withKey(ada.secret), {
+    const registered = await post("/v1/agents", withKey(ada.secret), {
       name: "Dispatched agent",
       connection: livekitPayload({
         config: {
@@ -628,7 +688,7 @@ describe("a livekit connection", () => {
     expect(registered.status).toBe(201);
 
     const one = await get(
-      `/api/agents/${String(agentOf(registered).id)}`,
+      `/v1/agents/${String(agentOf(registered).id)}`,
       withKey(ada.secret),
     );
     const [reached] = one.body.connections as Record<string, unknown>[];
@@ -638,7 +698,7 @@ describe("a livekit connection", () => {
         agentName: "front-desk",
         metadata: '{"tenant":"acme"}',
       },
-      credentials_hint: "WXYZ",
+      credentialsHint: "WXYZ",
     });
     expect(reached).not.toHaveProperty("credentials");
   });
@@ -657,12 +717,12 @@ describe("a livekit connection", () => {
     api = await createApi("agents_livekit_endpoint");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const registered = await post("/api/agents", withKey(ada.secret), {
+    const registered = await post("/v1/agents", withKey(ada.secret), {
       name: "Production agent",
       connection: {
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.customer_token_endpoint",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "wss://acme.livekit.cloud",
@@ -674,17 +734,17 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.customer_token_endpoint",
-      product_label: "LiveKit token endpoint",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
+      productLabel: "LiveKit token endpoint",
       modality: "voice",
       topology: "agent-dials-out",
       config: {
         url: "wss://acme.livekit.cloud",
         tokenEndpoint: "https://acme.example/egma/livekit-token",
       },
-      credentials_hint: "Authorization",
+      credentialsHint: "Authorization",
     });
     expect(connectionOf(registered)).not.toHaveProperty("credentials");
   });
@@ -693,12 +753,12 @@ describe("a livekit connection", () => {
     api = await createApi("agents_livekit_open_endpoint");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Private-network agent",
       connection: {
-        agent_platform: "livekit_agents",
-        connection_kind: "livekit_room",
-        access_variant: "livekit_room.customer_token_endpoint",
+        agentPlatform: "livekit_agents",
+        connectionKind: "livekit_room",
+        accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
           url: "ws://livekit.internal:7880",
@@ -803,7 +863,7 @@ describe("a livekit connection", () => {
       named: "a key pair sent alongside a token endpoint",
       slug: "pair_and_endpoint",
       payload: {
-        access_variant: "livekit_room.customer_token_endpoint",
+        accessVariant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -820,7 +880,7 @@ describe("a livekit connection", () => {
       named: "a token endpoint with no auth headers",
       slug: "endpoint_without_headers",
       payload: {
-        access_variant: "livekit_room.customer_token_endpoint",
+        accessVariant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -852,7 +912,7 @@ describe("a livekit connection", () => {
       named: "a token endpoint in a scheme Egma cannot post to",
       slug: "bad_token_endpoint",
       payload: {
-        access_variant: "livekit_room.customer_token_endpoint",
+        accessVariant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "wss://acme.livekit.cloud",
@@ -868,7 +928,7 @@ describe("a livekit connection", () => {
       named: "an agent to dispatch on a connection that cannot dispatch",
       slug: "agent_name_with_endpoint",
       payload: {
-        access_variant: "livekit_room.customer_token_endpoint",
+        accessVariant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -884,7 +944,7 @@ describe("a livekit connection", () => {
       named: "headers that are not a JSON object of name to value",
       slug: "bad_headers",
       payload: {
-        access_variant: "livekit_room.customer_token_endpoint",
+        accessVariant: "livekit_room.customer_token_endpoint",
         config: {
           url: "wss://acme.livekit.cloud",
           tokenEndpoint: "https://acme.example/egma/livekit-token",
@@ -917,8 +977,8 @@ describe("a livekit connection", () => {
       slug: "supplied_topology",
       payload: { topology: "agent-dials-out" },
       message:
-        'a connection has no key "topology"; it holds name, agent_platform, ' +
-        "connection_kind, access_variant, modality, environment, config, credentials",
+        'a connection has no key "topology"; it holds name, agentPlatform, ' +
+        "connectionKind, accessVariant, modality, environment, config, credentials",
     },
     {
       named: "a credential key that does not belong",
@@ -940,7 +1000,7 @@ describe("a livekit connection", () => {
     api = await createApi(`agents_lk_${refusal.slug}`);
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Quickstart agent",
       connection: livekitPayload(refusal.payload),
     });
@@ -980,14 +1040,14 @@ describe("a livekit connection", () => {
 
     const answers = [
       // The one that works, so the sealing path is walked too.
-      await post("/api/agents", withKey(ada.secret), {
+      await post("/v1/agents", withKey(ada.secret), {
         name: "Quickstart agent",
         connection: livekitPayload(),
       }),
       // And the refusals, each with the secret sitting in the body.
       ...(await Promise.all(
         REFUSED.map((refusal) =>
-          post("/api/agents", withKey(ada.secret), {
+          post("/v1/agents", withKey(ada.secret), {
             name: `Refused ${refusal.named}`,
             connection: livekitPayload(refusal.payload),
           }),
@@ -998,8 +1058,8 @@ describe("a livekit connection", () => {
     const registered = answers[0];
     if (registered === undefined) throw new Error("nothing was registered");
     const agentId = String(agentOf(registered).id);
-    answers.push(await get(`/api/agents/${agentId}`, withKey(ada.secret)));
-    answers.push(await get("/api/agents", withKey(ada.secret)));
+    answers.push(await get(`/v1/agents/${agentId}`, withKey(ada.secret)));
+    answers.push(await get("/v1/agents", withKey(ada.secret)));
 
     for (const answer of answers) {
       expect(JSON.stringify(answer.body)).not.toContain(API_SECRET);
@@ -1039,9 +1099,9 @@ describe("a livekit connection", () => {
     const endpointPayload = (
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> => ({
-      agent_platform: "livekit_agents",
-      connection_kind: "livekit_room",
-      access_variant: "livekit_room.customer_token_endpoint",
+      agentPlatform: "livekit_agents",
+      connectionKind: "livekit_room",
+      accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
         url: "wss://acme.livekit.cloud",
@@ -1062,23 +1122,23 @@ describe("a livekit connection", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const answers = [
-      await post("/api/agents", withKey(ada.secret), {
+      await post("/v1/agents", withKey(ada.secret), {
         name: "Production agent",
         connection: endpointPayload(),
       }),
       // And the refusals, each with the header sitting in the body: a refusal
       // is where a value gets quoted back to explain what was wrong with it.
-      await post("/api/agents", withKey(ada.secret), {
+      await post("/v1/agents", withKey(ada.secret), {
         name: "Refused for a stray credential key",
         connection: endpointPayload({
           credentials: { headers, apiKey: "APIsomethingelse" },
         }),
       }),
-      await post("/api/agents", withKey(ada.secret), {
+      await post("/v1/agents", withKey(ada.secret), {
         name: "Refused for a modality it does not speak",
         connection: endpointPayload({ modality: "chat" }),
       }),
-      await post("/api/agents", withKey(ada.secret), {
+      await post("/v1/agents", withKey(ada.secret), {
         name: "Refused for headers with no endpoint",
         connection: endpointPayload({
           config: { url: "wss://acme.livekit.cloud" },
@@ -1090,8 +1150,8 @@ describe("a livekit connection", () => {
     if (registered === undefined) throw new Error("nothing was registered");
     expect(registered.status).toBe(201);
     const agentId = String(agentOf(registered).id);
-    answers.push(await get(`/api/agents/${agentId}`, withKey(ada.secret)));
-    answers.push(await get("/api/agents", withKey(ada.secret)));
+    answers.push(await get(`/v1/agents/${agentId}`, withKey(ada.secret)));
+    answers.push(await get("/v1/agents", withKey(ada.secret)));
 
     for (const answer of answers) {
       expect(JSON.stringify(answer.body)).not.toContain(HEADER_SECRET);
@@ -1120,14 +1180,14 @@ describe("registering the same vendor agent again", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const first = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration({ apiKey: "retell-secret-first-0000AAAA" }),
     );
     expect(first.body.result).toBe("created");
 
     const again = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration({ apiKey: "retell-secret-second-1111ZZZZ" }),
     );
@@ -1139,8 +1199,8 @@ describe("registering the same vendor agent again", () => {
 
     // The hint is the whole of what a read can see, so it is the whole of what
     // can show that the newly supplied key is the one now stored.
-    expect(connectionOf(first).credentials_hint).toBe("AAAA");
-    expect(connectionOf(again).credentials_hint).toBe("ZZZZ");
+    expect(connectionOf(first).credentialsHint).toBe("AAAA");
+    expect(connectionOf(again).credentialsHint).toBe("ZZZZ");
 
     // And underneath, the envelope was replaced rather than merged into: the
     // old key is not in the row, and neither is the new one in plain text.
@@ -1169,12 +1229,12 @@ describe("registering the same vendor agent again", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const chat = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
     const voice = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration({ modality: "voice" }),
     );
@@ -1187,7 +1247,7 @@ describe("registering the same vendor agent again", () => {
     });
 
     const one = await get(
-      `/api/agents/${String(agentOf(chat).id)}`,
+      `/v1/agents/${String(agentOf(chat).id)}`,
       withKey(ada.secret),
     );
     expect(one.body.connections).toHaveLength(1);
@@ -1212,12 +1272,12 @@ describe("registering the same vendor agent again", () => {
 
     // One request first, so nothing below is measuring a cold path rather
     // than a race.
-    expect((await get("/api/agents", withKey(ada.secret))).status).toBe(200);
+    expect((await get("/v1/agents", withKey(ada.secret))).status).toBe(200);
 
     const racing = await Promise.all(
       Array.from({ length: 6 }, () =>
         post(
-          "/api/agents",
+          "/v1/agents",
           withKey(ada.secret),
           registration({ name: "Racing" }),
         ),
@@ -1249,7 +1309,7 @@ describe("the vendor payload egma no longer keeps", () => {
     api = await createApi("agents_pulled_dropped");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       ...registration(),
       pulled: {
         vendor: "retell",
@@ -1266,7 +1326,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "description, project, connection; the agent's content stays at the " +
+        "description, projectId, connection; the agent's content stays at the " +
         "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
@@ -1279,13 +1339,13 @@ describe("the vendor payload egma no longer keeps", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
 
     const refused = await post(
-      `/api/agents/${String(agentOf(registered).id)}/connections`,
+      `/v1/agents/${String(agentOf(registered).id)}/connections`,
       withKey(ada.secret),
       connectionPayload({ pulled: { vendor: "retell" } }),
     );
@@ -1295,8 +1355,8 @@ describe("the vendor payload egma no longer keeps", () => {
       error: "invalid_request",
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
-        'connection has no "pulled" key. Drop it and send name, agent_platform, ' +
-        "connection_kind, access_variant, modality, environment, config, credentials; the agent's content " +
+        'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
+        "connectionKind, accessVariant, modality, environment, config, credentials; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1306,7 +1366,7 @@ describe("the vendor payload egma no longer keeps", () => {
     api = await createApi("agents_unknown_key");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       organization: "org_somebody_elses",
     });
@@ -1315,7 +1375,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a registration has no key "organization"; it holds name, description, project, connection',
+        'a registration has no key "organization"; it holds name, description, projectId, connection',
     });
   });
 
@@ -1323,7 +1383,7 @@ describe("the vendor payload egma no longer keeps", () => {
     api = await createApi("agents_topology_derived");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/api/agents", withKey(ada.secret), {
+    const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: connectionPayload({ topology: "egma-dials-in" }),
     });
@@ -1332,7 +1392,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agent_platform, connection_kind, access_variant, modality, environment, config, credentials',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials',
     });
   });
 });
@@ -1343,14 +1403,14 @@ describe("a connection's name", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
     const agentId = String(agentOf(registered).id);
 
     const second = await post(
-      `/api/agents/${agentId}/connections`,
+      `/v1/agents/${agentId}/connections`,
       withKey(ada.secret),
       connectionPayload(),
     );
@@ -1365,13 +1425,13 @@ describe("a connection's name", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
 
     const clash = await post(
-      `/api/agents/${String(agentOf(registered).id)}/connections`,
+      `/v1/agents/${String(agentOf(registered).id)}/connections`,
       withKey(ada.secret),
       connectionPayload({ name: "retell_chat_api-1" }),
     );
@@ -1389,12 +1449,12 @@ describe("an agent's name", () => {
     api = await createApi("agents_name_taken");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    await post("/api/agents", withKey(ada.secret), registration());
+    await post("/v1/agents", withKey(ada.secret), registration());
 
     // A different vendor agent, so the reuse rule does not answer this one —
     // the name is the whole of what refuses it.
     const clash = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration({ retellAgentId: "agent_in_retell_9" }),
     );
@@ -1420,20 +1480,20 @@ describe("a sealed credential", () => {
     const secret = "retell-secret-A1B2C3D4WXYZ";
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration({ apiKey: secret }),
     );
     const agentId = String(agentOf(registered).id);
 
     const attached = await post(
-      `/api/agents/${agentId}/connections`,
+      `/v1/agents/${agentId}/connections`,
       withKey(ada.secret),
       connectionPayload({ credentials: { apiKey: secret } }),
     );
 
-    const one = await get(`/api/agents/${agentId}`, withKey(ada.secret));
-    const listed = await get("/api/agents", withKey(ada.secret));
+    const one = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    const listed = await get("/v1/agents", withKey(ada.secret));
 
     for (const shape of [registered, attached, one, listed]) {
       const written = JSON.stringify(shape.body);
@@ -1444,8 +1504,8 @@ describe("a sealed credential", () => {
     for (const held of one.body.connections as Record<string, unknown>[]) {
       expect(
         Object.keys(held).filter((named) => /credential/.test(named)),
-      ).toEqual(["credential_present", "credentials_hint"]);
-      expect(held.credentials_hint).toBe("WXYZ");
+      ).toEqual(["credentialPresent", "credentialsHint"]);
+      expect(held.credentialsHint).toBe("WXYZ");
     }
 
     /*
@@ -1457,15 +1517,15 @@ describe("a sealed credential", () => {
      * secret to search for — so the field list is checked here rather than
      * inferred from the agent's own read happening to agree with it.
      */
-    for (const carried of listed.body.items as {
+    for (const carried of listed.body.agents as {
       readonly connections: Record<string, unknown>[];
     }[]) {
       expect(carried.connections).not.toHaveLength(0);
       for (const held of carried.connections) {
         expect(
           Object.keys(held).filter((named) => /credential/.test(named)),
-        ).toEqual(["credential_present", "credentials_hint"]);
-        expect(held.credentials_hint).toBe("WXYZ");
+        ).toEqual(["credentialPresent", "credentialsHint"]);
+        expect(held.credentialsHint).toBe("WXYZ");
       }
     }
 
@@ -1496,23 +1556,23 @@ describe("reading agents", () => {
       await createAgent(acting, { name: `Agent ${String(n).padStart(2, "0")}` });
     }
 
-    const page = await get("/api/agents", withKey(ada.secret));
+    const page = await get("/v1/agents", withKey(ada.secret));
     expect(page.status).toBe(200);
-    const first = page.body.items as { name: string }[];
+    const first = page.body.agents as { name: string }[];
     expect(first).toHaveLength(50);
     // Newest first, because the agent somebody is looking for is usually the
     // one they just registered.
     expect(first[0]?.name).toBe("Agent 50");
-    expect(page.body.next_cursor).toBeTypeOf("string");
+    expect(page.body.nextPageToken).toBeTypeOf("string");
 
     const rest = await get(
-      `/api/agents?cursor=${String(page.body.next_cursor)}`,
+      `/v1/agents?pageToken=${String(page.body.nextPageToken)}`,
       withKey(ada.secret),
     );
     expect(
-      (rest.body.items as { name: string }[]).map((one) => one.name),
+      (rest.body.agents as { name: string }[]).map((one) => one.name),
     ).toEqual(["Agent 00"]);
-    expect(rest.body.next_cursor).toBeNull();
+    expect(rest.body.nextPageToken).toBeNull();
   });
 
   it("refuses a cursor that is not an agent id", async () => {
@@ -1520,7 +1580,7 @@ describe("reading agents", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await get(
-      "/api/agents?cursor=not-an-id",
+      "/v1/agents?pageToken=not-an-id",
       withKey(ada.secret),
     );
 
@@ -1528,8 +1588,8 @@ describe("reading agents", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"not-an-id" is not an agent id, so it cannot be a cursor. Send back ' +
-        "the next_cursor from the page before this one, or leave it out to " +
+        '"not-an-id" is not an agent id, so it cannot be a page token. Send back ' +
+        "the nextPageToken from the page before this one, or leave it out to " +
         "start at the newest.",
     });
   });
@@ -1539,13 +1599,13 @@ describe("reading agents", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
     const agentId = String(agentOf(registered).id);
 
-    const one = await get(`/api/agents/${agentId}`, withKey(ada.secret));
+    const one = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
 
     expect(one.status).toBe(200);
     expect(agentOf(one).id).toBe(agentId);
@@ -1561,7 +1621,7 @@ describe("reading agents", () => {
    *
    * **Each row's connections are checked against that agent's own read, whole.**
    * Asserting a field or two here would go green on a list that carried a
-   * smaller connection than `GET /api/agents/{agentId}` does — two shapes
+   * smaller connection than `GET /v1/agents/{agentId}` does — two shapes
    * behind one word, which is how a client comes to work against one of them by
    * accident. Comparing the objects is the only assertion that cannot.
    *
@@ -1574,19 +1634,19 @@ describe("reading agents", () => {
     api = await createApi("agents_list_connections");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const desk = await post("/api/agents", withKey(ada.secret), registration());
+    const desk = await post("/v1/agents", withKey(ada.secret), registration());
     const deskId = String(agentOf(desk).id);
     await post(
-      `/api/agents/${deskId}/connections`,
+      `/v1/agents/${deskId}/connections`,
       withKey(ada.secret),
       {
         // A second way into the same agent, with another connection kind and
         // modality, so a row that showed one shape well and another badly
         // would be caught here rather than on screen.
         name: "production",
-        agent_platform: null,
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
+        agentPlatform: null,
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
         modality: "voice",
         environment: "production",
         config: { phoneNumber: "+14155550100" },
@@ -1594,7 +1654,7 @@ describe("reading agents", () => {
     );
 
     const night = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration({ name: "Night line", retellAgentId: "agent_in_retell_9" }),
     );
@@ -1602,11 +1662,11 @@ describe("reading agents", () => {
 
     // An agent nobody has given egma a way into. Its row is the one that has
     // to say so, which it cannot do if the field is simply missing.
-    await post("/api/agents", withKey(ada.secret), { name: "Unwired" });
+    await post("/v1/agents", withKey(ada.secret), { name: "Unwired" });
 
-    const page = await get("/api/agents", withKey(ada.secret));
+    const page = await get("/v1/agents", withKey(ada.secret));
     expect(page.status).toBe(200);
-    const items = page.body.items as Record<string, unknown>[];
+    const items = page.body.agents as Record<string, unknown>[];
     expect(items.map((one) => one.name)).toEqual([
       "Unwired",
       "Night line",
@@ -1618,11 +1678,11 @@ describe("reading agents", () => {
         []) as Record<string, unknown>[];
 
     // Whole objects, against the read that already had them.
-    const deskRead = await get(`/api/agents/${deskId}`, withKey(ada.secret));
+    const deskRead = await get(`/v1/agents/${deskId}`, withKey(ada.secret));
     expect(listedFor("Front desk")).toEqual(deskRead.body.connections);
     expect(listedFor("Front desk")).toHaveLength(2);
 
-    const nightRead = await get(`/api/agents/${nightId}`, withKey(ada.secret));
+    const nightRead = await get(`/v1/agents/${nightId}`, withKey(ada.secret));
     expect(listedFor("Night line")).toEqual(nightRead.body.connections);
     expect(listedFor("Night line")).toHaveLength(1);
 
@@ -1642,12 +1702,12 @@ describe("reading agents", () => {
       (one) => one.name === "production",
     );
     expect(wired).toMatchObject({
-      agent_platform: null,
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       // The registry's customer-facing label travels with the technical facts
       // so list and detail surfaces cannot spell the same setup differently.
-      product_label: "Phone number",
+      productLabel: "Phone number",
       modality: "voice",
       environment: "production",
     });
@@ -1657,7 +1717,7 @@ describe("reading agents", () => {
       state: "unknown",
       measured: null,
       supported: null,
-      checked_at: null,
+      checkedAt: null,
     });
   });
 
@@ -1672,7 +1732,7 @@ describe("reading agents", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
@@ -1680,14 +1740,14 @@ describe("reading agents", () => {
     const connectionId = String(connectionOf(registered).id);
 
     const rowOf = async (query = ""): Promise<Record<string, unknown>[]> => {
-      const page = await get(`/api/agents${query}`, withKey(ada.secret));
-      return page.body.items as Record<string, unknown>[];
+      const page = await get(`/v1/agents${query}`, withKey(ada.secret));
+      return page.body.agents as Record<string, unknown>[];
     };
 
     expect((await rowOf())[0]?.connections).toHaveLength(1);
 
     const archived = await post(
-      `/api/agents/${agentId}/connections/${connectionId}/archive`,
+      `/v1/agents/${agentId}/connections/${connectionId}/archive`,
       withKey(ada.secret),
       {},
     );
@@ -1700,7 +1760,7 @@ describe("reading agents", () => {
     expect(afterConnection[0]?.connections).toEqual([]);
 
     expect(
-      (await post(`/api/agents/${agentId}/archive`, withKey(ada.secret), {}))
+      (await post(`/v1/agents/${agentId}/archive`, withKey(ada.secret), {}))
         .status,
     ).toBe(200);
 
@@ -1716,38 +1776,38 @@ describe("reading agents", () => {
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
     const theirs = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(grace.secret),
       registration(),
     );
     const agentId = String(agentOf(theirs).id);
 
-    const reaching = await get(`/api/agents/${agentId}`, withKey(ada.secret));
+    const reaching = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
     expect(reaching.status).toBe(404);
     expect(reaching.body).toEqual({
       error: "not_found",
       message:
-        "no agent of yours has that id. Check the id, or list your agents with GET /api/agents.",
+        "no agent of yours has that id. Check the id, or list your agents with GET /v1/agents.",
     });
 
     // The same sentence for an id nobody ever minted, so a guess tells the
     // guesser nothing.
     const guessed = await get(
-      `/api/agents/${newId("agt")}`,
+      `/v1/agents/${newId("agt")}`,
       withKey(ada.secret),
     );
     expect(guessed.body).toEqual(reaching.body);
 
     // And attaching through somebody else's agent reads the same way.
     const attaching = await post(
-      `/api/agents/${agentId}/connections`,
+      `/v1/agents/${agentId}/connections`,
       withKey(ada.secret),
       connectionPayload(),
     );
     expect(attaching.status).toBe(404);
     expect(attaching.body).toEqual(reaching.body);
 
-    expect((await get("/api/agents", withKey(ada.secret))).body.items).toEqual(
+    expect((await get("/v1/agents", withKey(ada.secret))).body.agents).toEqual(
       [],
     );
   });
@@ -1760,30 +1820,30 @@ describe("what each role may do here", () => {
     const vic = await colleagueOf(api.app, ada, "vic@acme.example", "viewer");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
 
-    const listed = await get("/api/agents", withKey(vic.secret));
+    const listed = await get("/v1/agents", withKey(vic.secret));
     expect(listed.status).toBe(200);
-    expect(listed.body.items).toHaveLength(1);
+    expect(listed.body.agents).toHaveLength(1);
 
     const one = await get(
-      `/api/agents/${String(agentOf(registered).id)}`,
+      `/v1/agents/${String(agentOf(registered).id)}`,
       withKey(vic.secret),
     );
     expect(one.status).toBe(200);
     expect(one.body.connections).toHaveLength(1);
   });
 
-  it("refuses a viewer every write in this group", async () => {
+  it("refuses a viewer every configuration action in this group", async () => {
     api = await createApi("agents_viewer_writes_nothing");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const vic = await colleagueOf(api.app, ada, "vic@acme.example", "viewer");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
@@ -1799,7 +1859,7 @@ describe("what each role may do here", () => {
     };
 
     const registering = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(vic.secret),
       registration({ name: "Theirs" }),
     );
@@ -1807,7 +1867,7 @@ describe("what each role may do here", () => {
     expect(registering.body).toEqual(refusal);
 
     const attaching = await post(
-      `/api/agents/${String(agentOf(registered).id)}/connections`,
+      `/v1/agents/${String(agentOf(registered).id)}/connections`,
       withKey(vic.secret),
       connectionPayload(),
     );
@@ -1818,17 +1878,16 @@ describe("what each role may do here", () => {
       throw new Error("a viewer must never reach Retell");
     });
     vi.stubGlobal("fetch", providerRead);
-    const retellPhone = await post(
-      `/api/agents/${String(agentOf(registered).id)}/connections/retell-phone`,
+    const discovery = await post(
+      `/v1/agents:discover?projectId=${ada.projectId}`,
       withKey(vic.secret),
       {
-        api_key: "SENTINEL-viewer-key-never-sent",
-        retell_agent_id: "agent_voice_1",
-        phone_number: "+14155550100",
+        agentPlatform: "retell",
+        credentials: { apiKey: "SENTINEL-viewer-key-never-sent" },
       },
     );
-    expect(retellPhone.status).toBe(403);
-    expect(retellPhone.body).toEqual(refusal);
+    expect(discovery.status).toBe(403);
+    expect(discovery.body).toEqual(refusal);
     expect(providerRead).not.toHaveBeenCalled();
 
     expect(await agentRowCount()).toBe(1);
@@ -1840,14 +1899,14 @@ describe("what each role may do here", () => {
     const mia = await colleagueOf(api.app, ada, "mia@acme.example", "member");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(mia.secret),
       registration(),
     );
     expect(registered.status).toBe(201);
 
     const attached = await post(
-      `/api/agents/${String(agentOf(registered).id)}/connections`,
+      `/v1/agents/${String(agentOf(registered).id)}/connections`,
       withKey(mia.secret),
       connectionPayload(),
     );
@@ -1861,13 +1920,13 @@ describe("the project a request names", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const registered = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
 
     expect(registered.status).toBe(201);
-    expect(agentOf(registered).project_id).toBe(ada.projectId);
+    expect(agentOf(registered).projectId).toBe(ada.projectId);
   });
 
   it("writes into the project the body names, when it is one of the customer's", async () => {
@@ -1878,13 +1937,13 @@ describe("the project a request names", () => {
       slug: "outbound",
     });
 
-    const registered = await post("/api/agents", withKey(ada.secret), {
+    const registered = await post("/v1/agents", withKey(ada.secret), {
       ...registration(),
-      project: outbound.id,
+      projectId: outbound.id,
     });
 
     expect(registered.status).toBe(201);
-    expect(agentOf(registered).project_id).toBe(outbound.id);
+    expect(agentOf(registered).projectId).toBe(outbound.id);
   });
 
   it("narrows a read to the project the query names", async () => {
@@ -1899,7 +1958,7 @@ describe("the project a request names", () => {
     // one — the same words the other route groups answer with, because the
     // oldest-project guess is the silent narrowing this codebase refuses.
     const unnamed = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey(ada.secret),
       registration(),
     );
@@ -1912,26 +1971,26 @@ describe("the project a request names", () => {
         "project with the one you mean, or use a key minted for that project.",
     });
 
-    await post("/api/agents", withKey(ada.secret), {
+    await post("/v1/agents", withKey(ada.secret), {
       ...registration(),
-      project: ada.projectId,
+      projectId: ada.projectId,
     });
-    await post("/api/agents", withKey(ada.secret), {
+    await post("/v1/agents", withKey(ada.secret), {
       ...registration({ name: "Outbound desk", retellAgentId: "agent_two" }),
-      project: outbound.id,
+      projectId: outbound.id,
     });
 
-    const whole = await get("/api/agents", withKey(ada.secret));
+    const whole = await get("/v1/agents", withKey(ada.secret));
     expect(
-      (whole.body.items as { name: string }[]).map((one) => one.name),
+      (whole.body.agents as { name: string }[]).map((one) => one.name),
     ).toEqual(["Outbound desk", "Front desk"]);
 
     const narrowed = await get(
-      `/api/agents?project=${outbound.id}`,
+      `/v1/agents?projectId=${outbound.id}`,
       withKey(ada.secret),
     );
     expect(
-      (narrowed.body.items as { name: string }[]).map((one) => one.name),
+      (narrowed.body.agents as { name: string }[]).map((one) => one.name),
     ).toEqual(["Outbound desk"]);
   });
 
@@ -1953,16 +2012,16 @@ describe("the project a request names", () => {
         "which organization this is always comes from the key.",
     };
 
-    const writing = await post("/api/agents", withKey(ada.secret), {
+    const writing = await post("/v1/agents", withKey(ada.secret), {
       ...registration(),
-      project: grace.projectId,
+      projectId: grace.projectId,
     });
     expect(writing.status).toBe(403);
     expect(writing.body).toEqual(refusal);
     expect(await agentRowCount()).toBe(0);
 
     const reading = await get(
-      `/api/agents?project=${grace.projectId}`,
+      `/v1/agents?projectId=${grace.projectId}`,
       withKey(ada.secret),
     );
     expect(reading.status).toBe(403);
@@ -1983,9 +2042,9 @@ describe("the project a request names", () => {
       ada.projectId,
     );
 
-    const writing = await post("/api/agents", withKey(forDefault), {
+    const writing = await post("/v1/agents", withKey(forDefault), {
       ...registration(),
-      project: outbound.id,
+      projectId: outbound.id,
     });
     expect(writing.status).toBe(403);
     expect(writing.body).toEqual({
@@ -1998,7 +2057,7 @@ describe("the project a request names", () => {
     expect(await agentRowCount()).toBe(0);
 
     const reading = await get(
-      `/api/agents?project=${outbound.id}`,
+      `/v1/agents?projectId=${outbound.id}`,
       withKey(forDefault),
     );
     expect(reading.status).toBe(403);
@@ -2027,7 +2086,7 @@ describe("a request egma cannot place", () => {
     // A body that would be refused twice over if anything read it: an unknown
     // key and a connection egma would turn away. It hears about the key.
     const nobody = await post(
-      "/api/agents",
+      "/v1/agents",
       withKey("egma_sk_this-was-never-a-key-anybody-was-given"),
       { ...registration(), pulled: { vendor: "retell" } },
     );
@@ -2036,7 +2095,7 @@ describe("a request egma cannot place", () => {
 
     const anonymous = await api.app.inject({
       method: "GET",
-      url: "/api/agents",
+      url: "/v1/agents",
     });
     expect(anonymous.statusCode).toBe(401);
     expect(anonymous.json()).toEqual(refusal);

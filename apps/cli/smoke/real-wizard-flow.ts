@@ -316,7 +316,7 @@ async function signIn(
   check(held.url === instance.origin, "the key is stored against the egma it signed in to");
   check(held.key.startsWith("egma_sk_"), "the key is one this instance really minted");
 
-  const opened = await ask(instance.origin, held.key, "/api/keys");
+  const opened = await ask(instance.origin, held.key, "/v1/keys");
   check(opened.status === 200, `the key opens a real door (it answered ${opened.status})`);
 
   return held;
@@ -366,20 +366,20 @@ async function register(
   }
 
   // Everything that names the account, before a single line of this is printed.
-  for (const name of ["retell_agent_id", "agent_name", "connection_name"]) {
+  for (const name of ["retell_agentId", "agent_name", "connection_name"]) {
     for (const value of ran.said.get(name) ?? []) secrets.push(value);
   }
 
   exited(ran, "egma connect");
   check(first(ran.said, "status") === "connected", "egma connect said it connected");
   check(first(ran.said, "registration") === "created", "the registration was a fresh one");
-  check(first(ran.said, "agent_platform") === "retell", "the agent platform is Retell");
+  check(first(ran.said, "agentPlatform") === "retell", "the agent platform is Retell");
   check(
-    first(ran.said, "connection_kind") === "retell_chat_api",
+    first(ran.said, "connectionKind") === "retell_chat_api",
     "the connection uses the Retell chat API",
   );
   check(
-    first(ran.said, "access_variant") === "retell_chat_api.api_key",
+    first(ran.said, "accessVariant") === "retell_chat_api.api_key",
     "the connection uses a Retell API key",
   );
   check(
@@ -392,19 +392,19 @@ async function register(
     "a text connection dials nothing, and says so",
   );
 
-  const agentId = first(ran.said, "agent_id");
-  const connectionId = first(ran.said, "connection_id");
+  const agentId = first(ran.said, "agentId");
+  const connectionId = first(ran.said, "connectionId");
   check(agentId.startsWith("agt_"), "egma minted an agent id");
   check(connectionId.startsWith("con_"), "egma minted a connection id");
 
   // And the same thing, read back off the real API rather than off the
   // terminal that printed it.
-  const one = await ask(instance.origin, key, `/api/agents/${agentId}`);
+  const one = await ask(instance.origin, key, `/v1/agents/${agentId}`);
   const connections = itemsOf(one.body, "connections");
   check(one.status === 200, `the agent is on the platform (it answered ${one.status})`);
   check(connections.length === 1, `one connection is attached to it (${connections.length})`);
   check(
-    connections[0]?.credentials_hint === vendor.key.slice(-4),
+    connections[0]?.credentialsHint === vendor.key.slice(-4),
     "the vendor key was sealed, and only its last four characters came back",
   );
   check(
@@ -476,14 +476,14 @@ async function pushTheTests(
     `${pinned} of the ${files.length} files pin a version the platform answered with`,
   );
 
-  const listed = await ask(instance.origin, key, "/api/tests");
-  const items = itemsOf(listed.body, "items");
+  const listed = await ask(instance.origin, key, "/v1/tests");
+  const items = itemsOf(listed.body, "tests");
   check(
     items.length === TESTS.length,
     `the platform lists ${items.length} tests under this key (wanted ${TESTS.length})`,
   );
   check(
-    items.every((test) => versions.includes(String(test.version_id))),
+    items.every((test) => versions.includes(String(test.versionId))),
     "every test the platform lists is at the version the push pinned",
   );
 }
@@ -534,12 +534,12 @@ async function runAndFollow(
   );
   check(new URL(results).search === "", "no token rides the results address");
 
-  const created = await ask(instance.origin, key, `/api/runs/${runId}`);
+  const created = await ask(instance.origin, key, `/v1/runs/${runId}`);
   const simulations = itemsOf(created.body, "simulations");
   check(created.status === 200, `the run is on the platform (it answered ${created.status})`);
   check(
-    created.body.expected_simulation_count === TESTS.length,
-    `the run expects one simulation per test (${String(created.body.expected_simulation_count)})`,
+    created.body.expectedSimulationCount === TESTS.length,
+    `the run expects one simulation per test (${String(created.body.expectedSimulationCount)})`,
   );
   check(
     simulations.length === TESTS.length && simulations.every((one) => one.status === "queued"),
@@ -550,14 +550,14 @@ async function runAndFollow(
   // The follower's own view of the same thing: nothing to report, not done,
   // and a cursor that has not moved. This is what waiting for a verdict that
   // nothing writes actually looks like.
-  const empty = await ask(instance.origin, key, `/api/runs/${runId}/events?after=0`);
+  const empty = await ask(instance.origin, key, `/v1/runs/${runId}/events?after=0`);
   check(
     itemsOf(empty.body, "events").length === 0 && empty.body.next === 0 && empty.body.done === false,
     "the events feed is open and empty: nothing has happened to this run yet",
   );
 
   await new Promise((resolve) => setTimeout(resolve, 3_000));
-  const still = await ask(instance.origin, key, `/api/runs/${runId}/events?after=0`);
+  const still = await ask(instance.origin, key, `/v1/runs/${runId}/events?after=0`);
   check(
     itemsOf(still.body, "events").length === 0 && still.body.done === false,
     "and three seconds later it is still empty — nothing claims a simulation on this machine",
@@ -571,7 +571,7 @@ async function runAndFollow(
   // is watching. What it proves is the feed: the change is numbered, it
   // arrives at the client that was already following, and the client acts on
   // it without being restarted.
-  const canceled = await ask(instance.origin, key, `/api/runs/${runId}/cancel`, "POST");
+  const canceled = await ask(instance.origin, key, `/v1/runs/${runId}/cancel`, "POST");
   check(canceled.status === 200, `the run was canceled through the API (${canceled.status})`);
 
   const ran = await Promise.race([
@@ -596,7 +596,7 @@ async function runAndFollow(
     "nothing passed and nothing failed: a canceled run counts as neither",
   );
 
-  const after = await ask(instance.origin, key, `/api/runs/${runId}/events?after=0`);
+  const after = await ask(instance.origin, key, `/v1/runs/${runId}/events?after=0`);
   const events = itemsOf(after.body, "events");
   const numbers = events.map((one) => Number(one.seq));
   check(
@@ -609,7 +609,7 @@ async function runAndFollow(
   const resumed = await ask(
     instance.origin,
     key,
-    `/api/runs/${runId}/events?after=${numbers.at(-1) ?? 0}`,
+    `/v1/runs/${runId}/events?after=${numbers.at(-1) ?? 0}`,
   );
   check(
     itemsOf(resumed.body, "events").length === 0 &&

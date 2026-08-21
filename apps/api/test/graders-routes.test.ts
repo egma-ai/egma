@@ -51,21 +51,21 @@ function request(
 
 type Listed = {
   readonly id: string;
-  readonly library_id: string;
+  readonly libraryId: string;
   readonly name: string;
   readonly type: string;
   readonly description: string | null;
   readonly required: boolean;
   readonly scope: string;
   readonly version: number;
-  readonly version_id: string;
+  readonly versionId: string;
   readonly config: { readonly assertions: readonly unknown[] };
 };
 
 /** A latency copy on the project, which is the one v0 entry that asks anything. */
 async function aLatencyCopy(key: string): Promise<Listed> {
-  const used = await request("POST", "/api/graders", key, {
-    library_id: PREDEFINED_GRADERS.latency,
+  const used = await request("POST", "/v1/graders", key, {
+    libraryId: PREDEFINED_GRADERS.latency,
     params: { metric: "turn_response_latency", bound: 2000 },
     name: "Answers inside two seconds",
     description: "The number the support team argues about",
@@ -78,7 +78,7 @@ async function aLatencyCopy(key: string): Promise<Listed> {
 const NOBODY_HAS_THIS = "grd_01M01MH8KAE8ZB19B0YJ7ZZZZZ";
 
 function itemsOf(answer: Answer): readonly Listed[] {
-  return answer.body.items as readonly Listed[];
+  return answer.body.graders as readonly Listed[];
 }
 
 describe("reading the running graders", () => {
@@ -87,12 +87,12 @@ describe("reading the running graders", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("GET", "/api/graders", key);
+    const listed = await request("GET", "/v1/graders", key);
 
     expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
     expect(itemsOf(listed)).toHaveLength(1);
     expect(itemsOf(listed)[0]).toMatchObject({
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
       name: "expected_behaviors",
       type: "llm_as_judge",
       required: true,
@@ -101,7 +101,7 @@ describe("reading the running graders", () => {
     // Its assertions are the test's own sentences, so nothing is filled in —
     // and empty is what a correct copy of it holds, forever.
     expect(itemsOf(listed)[0]?.config).toEqual({ assertions: [] });
-    expect(listed.body.next_cursor).toBeNull();
+    expect(listed.body.nextPageToken).toBeNull();
   });
 
   /**
@@ -115,10 +115,10 @@ describe("reading the running graders", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("GET", "/api/graders", key);
+    const listed = await request("GET", "/v1/graders", key);
     const [only] = itemsOf(listed);
 
-    expect(only?.library_id).toBeDefined();
+    expect(only?.libraryId).toBeDefined();
     expect(JSON.stringify(only)).not.toContain("cannot_determine");
     expect(only).not.toHaveProperty("prompt");
   });
@@ -128,7 +128,7 @@ describe("reading the running graders", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
 
-    const listed = await request("GET", "/api/graders", grace.secret);
+    const listed = await request("GET", "/v1/graders", grace.secret);
 
     // Somebody who may read a run's results and change nothing still has to be
     // able to see what those results were decided by.
@@ -141,10 +141,10 @@ describe("reading the running graders", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("GET", "/api/graders?cursor=nonsense", key);
+    const listed = await request("GET", "/v1/graders?pageToken=nonsense", key);
 
     expect(listed.statusCode).toBe(400);
-    expect(String(listed.body.message)).toContain("next_cursor");
+    expect(String(listed.body.message)).toContain("nextPageToken");
   });
 
   it("shows one customer nothing of another's", async () => {
@@ -153,16 +153,16 @@ describe("reading the running graders", () => {
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
 
     const theirs = itemsOf(
-      await request("GET", "/api/graders", await projectKeyFor(api.app, ada)),
+      await request("GET", "/v1/graders", await projectKeyFor(api.app, ada)),
     );
     const others = itemsOf(
-      await request("GET", "/api/graders", await projectKeyFor(api.app, grace)),
+      await request("GET", "/v1/graders", await projectKeyFor(api.app, grace)),
     );
 
     // Each project has its own copy of egma's entry — the same definition, two
     // rows — so the ids never overlap even though the shelf behind them is one.
     expect(theirs.map((one) => one.id)).not.toEqual(others.map((one) => one.id));
-    expect(theirs[0]?.library_id).toBe(others[0]?.library_id);
+    expect(theirs[0]?.libraryId).toBe(others[0]?.libraryId);
   });
 });
 
@@ -172,14 +172,14 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_response_latency", bound: 2000 },
     });
 
     expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
     expect(used.body).toMatchObject({
-      library_id: PREDEFINED_GRADERS.latency,
+      libraryId: PREDEFINED_GRADERS.latency,
       // Defaulted from the entry, so a copy nobody renamed says which grader
       // it is a copy of.
       name: "latency",
@@ -192,7 +192,7 @@ describe("pressing Use on a library entry", () => {
     });
 
     // And it is judging from now on, beside the one the project was born with.
-    const listed = await request("GET", "/api/graders", key);
+    const listed = await request("GET", "/v1/graders", key);
     expect(itemsOf(listed)).toHaveLength(2);
   });
 
@@ -201,14 +201,14 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_response_latency", bound: 2000 },
       name: "Answers inside two seconds",
       description: "Watched, not enforced, while we tune it",
       required: false,
       scope: "both",
-      production_sample_rate: 25,
+      productionSampleRate: 25,
     });
 
     expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
@@ -219,7 +219,7 @@ describe("pressing Use on a library entry", () => {
       // test. The only loudness switch v0 has.
       required: false,
       scope: "both",
-      production_sample_rate: 25,
+      productionSampleRate: 25,
     });
   });
 
@@ -228,8 +228,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_response_latency", bound: 2000, aggregation: "p90" },
     });
 
@@ -250,8 +250,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_responze_latency", bound: 2000 },
     });
 
@@ -265,8 +265,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
       params: { bound: 2000 },
     });
 
@@ -287,18 +287,18 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_response_latency", bound: 2000 },
       scope: "both",
-      production_sample_rate: "10",
+      productionSampleRate: "10",
     });
 
     expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
-    expect(String(used.body.message)).toContain("production_sample_rate");
+    expect(String(used.body.message)).toContain("productionSampleRate");
     // And nothing was written, so nobody is judging anything they did not ask
     // to judge.
-    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
+    expect(itemsOf(await request("GET", "/v1/graders", key))).toHaveLength(1);
   });
 
   it("refuses a required flag that is not a flag, on the same terms", async () => {
@@ -306,8 +306,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
       required: "false",
     });
 
@@ -324,10 +324,10 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_response_latency", bound: 2000 },
-      production_sample_rate: 140,
+      productionSampleRate: 140,
     });
 
     expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
@@ -339,12 +339,12 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
+    const used = await request("POST", "/v1/graders", key, {
       params: { metric: "turn_response_latency", bound: 2000 },
     });
 
     expect(used.statusCode).toBe(400);
-    expect(String(used.body.message)).toContain("library_id");
+    expect(String(used.body.message)).toContain("libraryId");
   });
 
   /**
@@ -357,8 +357,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: "grl_01M01MH8KAE8ZB19B0YJ7ZZZZZ",
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: "grl_01M01MH8KAE8ZB19B0YJ7ZZZZZ",
     });
 
     expect(used.statusCode, JSON.stringify(used.body)).toBe(422);
@@ -370,8 +370,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
       // The retired authoring surface, tried on by somebody who read an older
       // document. Refused by name rather than ignored, so the answer is one a
       // coding agent can act on.
@@ -387,8 +387,8 @@ describe("pressing Use on a library entry", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
 
-    const used = await request("POST", "/api/graders", grace.secret, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    const used = await request("POST", "/v1/graders", grace.secret, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
     });
 
     expect(used.statusCode).toBe(403);
@@ -410,11 +410,11 @@ describe("changing a running copy", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       name: "Watched while we tune it",
       required: false,
       scope: "both",
-      production_sample_rate: 25,
+      productionSampleRate: 25,
     });
 
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
@@ -423,14 +423,14 @@ describe("changing a running copy", () => {
       name: "Watched while we tune it",
       required: false,
       scope: "both",
-      production_sample_rate: 25,
+      productionSampleRate: 25,
       // Version 1 still: nothing a verdict was decided by moved.
       version: 1,
-      version_id: copy.version_id,
+      versionId: copy.versionId,
       config: { assertions: [{ metric: "turn_response_latency", bound: 2000 }] },
     });
 
-    const listed = itemsOf(await request("GET", "/api/graders", key));
+    const listed = itemsOf(await request("GET", "/v1/graders", key));
     expect(listed.find((one) => one.id === copy.id)?.required).toBe(false);
   });
 
@@ -446,7 +446,7 @@ describe("changing a running copy", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       params: { metric: "turn_response_latency", bound: 1200 },
     });
 
@@ -459,7 +459,7 @@ describe("changing a running copy", () => {
       required: true,
       scope: "simulations",
     });
-    expect(edited.body.version_id).not.toBe(copy.version_id);
+    expect(edited.body.versionId).not.toBe(copy.versionId);
   });
 
   /**
@@ -478,11 +478,11 @@ describe("changing a running copy", () => {
 
     const wrong = { metric: "turn_response_latency", bound: 2000, aggregation: "p90" };
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: wrong,
     });
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       params: wrong,
     });
 
@@ -492,7 +492,7 @@ describe("changing a running copy", () => {
     expect(String(edited.body.message)).toContain("aggregation");
 
     // And nothing was written: the copy still judges by what it judged by.
-    const after = await request("GET", "/api/graders", key);
+    const after = await request("GET", "/v1/graders", key);
     expect(itemsOf(after).find((one) => one.id === copy.id)?.config).toEqual({
       assertions: [{ metric: "turn_response_latency", bound: 2000 }],
     });
@@ -512,10 +512,10 @@ describe("changing a running copy", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const [seeded] = itemsOf(await request("GET", "/api/graders", key));
+    const [seeded] = itemsOf(await request("GET", "/v1/graders", key));
     if (seeded === undefined) throw new Error("the project has no graders");
 
-    const edited = await request("PATCH", `/api/graders/${seeded.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${seeded.id}`, key, {
       params: {},
     });
 
@@ -523,7 +523,7 @@ describe("changing a running copy", () => {
     expect(String(edited.body.message)).toContain("asks for nothing");
 
     // Still holding nothing, which is what a correct copy of it holds forever.
-    const after = itemsOf(await request("GET", "/api/graders", key));
+    const after = itemsOf(await request("GET", "/v1/graders", key));
     expect(after.find((one) => one.id === seeded.id)?.config).toEqual({
       assertions: [],
     });
@@ -537,11 +537,11 @@ describe("changing a running copy", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.latency,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.latency,
       params: { metric: "turn_responze_latency", bound: 2000 },
     });
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       params: { metric: "turn_responze_latency", bound: 2000 },
     });
 
@@ -561,8 +561,8 @@ describe("changing a running copy", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
     });
 
     expect(edited.statusCode).toBe(400);
@@ -575,7 +575,7 @@ describe("changing a running copy", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       type: "llm_rubric",
     });
 
@@ -597,13 +597,13 @@ describe("changing a running copy", () => {
     const theirs = await projectKeyFor(api.app, ada);
     const others = await projectKeyFor(api.app, grace);
 
-    const [only] = itemsOf(await request("GET", "/api/graders", theirs));
+    const [only] = itemsOf(await request("GET", "/v1/graders", theirs));
     if (only === undefined) throw new Error("the project has no graders");
 
-    const madeUp = await request("PATCH", `/api/graders/${NOBODY_HAS_THIS}`, others, {
+    const madeUp = await request("PATCH", `/v1/graders/${NOBODY_HAS_THIS}`, others, {
       required: false,
     });
-    const somebodyElses = await request("PATCH", `/api/graders/${only.id}`, others, {
+    const somebodyElses = await request("PATCH", `/v1/graders/${only.id}`, others, {
       required: false,
     });
 
@@ -616,7 +616,7 @@ describe("changing a running copy", () => {
     );
 
     // And Acme's copy is untouched, which is the half a status code cannot say.
-    const untouched = itemsOf(await request("GET", "/api/graders", theirs));
+    const untouched = itemsOf(await request("GET", "/v1/graders", theirs));
     expect(untouched.find((one) => one.id === only.id)?.required).toBe(true);
   });
 
@@ -627,7 +627,7 @@ describe("changing a running copy", () => {
     const copy = await aLatencyCopy(key);
     const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, grace.secret, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, grace.secret, {
       required: false,
     });
 
@@ -644,7 +644,7 @@ describe("changing a running copy", () => {
  * anything but a string into the empty string, which the door then read as
  * silence — so `{"scope": 123}` answered 200 with the copy still judging
  * simulations, and `{"description": 123}` answered 200 having *erased* a note a
- * person had typed. It is `production_sample_rate: "10"` one field along, and
+ * person had typed. It is `productionSampleRate: "10"` one field along, and
  * the group's own unknown-key gate exists to refuse exactly this shape of
  * mistake.
  *
@@ -662,7 +662,7 @@ describe("the fields a body sends as words", () => {
 
   /** What the copy looks like now, read back through the list. */
   async function nowReading(key: string, id: string): Promise<Listed> {
-    const found = itemsOf(await request("GET", "/api/graders", key)).find(
+    const found = itemsOf(await request("GET", "/v1/graders", key)).find(
       (one) => one.id === id,
     );
     if (found === undefined) throw new Error(`${id} is no longer running`);
@@ -675,7 +675,7 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       name: 123,
     });
 
@@ -696,7 +696,7 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       name: "   ",
     });
 
@@ -711,7 +711,7 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       scope: 123,
     });
 
@@ -735,7 +735,7 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       scope: "banana",
     });
 
@@ -755,7 +755,7 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       description: 123,
     });
 
@@ -776,7 +776,7 @@ describe("the fields a body sends as words", () => {
 
     for (const emptied of ["", null]) {
       const copy = await aNamedCopy(key);
-      const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+      const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
         description: emptied,
       });
 
@@ -793,7 +793,7 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
       required: false,
     });
 
@@ -818,12 +818,12 @@ describe("the fields a body sends as words", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aNamedCopy(key);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
-      project: 123,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
+      projectId: 123,
     });
-    const edited = await request("PATCH", `/api/graders/${copy.id}`, key, {
-      project: 123,
+    const edited = await request("PATCH", `/v1/graders/${copy.id}`, key, {
+      projectId: 123,
       required: false,
     });
 
@@ -849,8 +849,8 @@ describe("the fields a body sends as words", () => {
       { scope: 123 },
       { description: 123 },
     ]) {
-      const used = await request("POST", "/api/graders", key, {
-        library_id: PREDEFINED_GRADERS.latency,
+      const used = await request("POST", "/v1/graders", key, {
+        libraryId: PREDEFINED_GRADERS.latency,
         params: { metric: "turn_response_latency", bound: 2000 },
         ...wrong,
       });
@@ -861,7 +861,7 @@ describe("the fields a body sends as words", () => {
 
     // Nothing was switched on: the project still holds only the copy it was
     // created with.
-    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
+    expect(itemsOf(await request("GET", "/v1/graders", key))).toHaveLength(1);
   });
 });
 
@@ -878,15 +878,15 @@ describe("switching a running copy off", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(2);
+    expect(itemsOf(await request("GET", "/v1/graders", key))).toHaveLength(2);
 
-    const removed = await request("DELETE", `/api/graders/${copy.id}`, key);
+    const removed = await request("DELETE", `/v1/graders/${copy.id}`, key);
 
     expect(removed.statusCode, JSON.stringify(removed.body)).toBe(200);
     expect(removed.body).toMatchObject({ id: copy.id, name: copy.name });
-    expect(String(removed.body.deleted_at)).not.toBe("");
+    expect(String(removed.body.deletedAt)).not.toBe("");
 
-    const left = itemsOf(await request("GET", "/api/graders", key));
+    const left = itemsOf(await request("GET", "/v1/graders", key));
     expect(left.map((one) => one.id)).not.toContain(copy.id);
     // The one every project is created with is still judging, because only the
     // copy that was named was switched off.
@@ -903,13 +903,13 @@ describe("switching a running copy off", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const [seeded] = itemsOf(await request("GET", "/api/graders", key));
+    const [seeded] = itemsOf(await request("GET", "/v1/graders", key));
     if (seeded === undefined) throw new Error("the project has no graders");
 
-    const removed = await request("DELETE", `/api/graders/${seeded.id}`, key);
+    const removed = await request("DELETE", `/v1/graders/${seeded.id}`, key);
 
     expect(removed.statusCode, JSON.stringify(removed.body)).toBe(200);
-    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(0);
+    expect(itemsOf(await request("GET", "/v1/graders", key))).toHaveLength(0);
   });
 
   /**
@@ -929,17 +929,17 @@ describe("switching a running copy off", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const [seeded] = itemsOf(await request("GET", "/api/graders", key));
+    const [seeded] = itemsOf(await request("GET", "/v1/graders", key));
     if (seeded === undefined) throw new Error("the project has no graders");
-    await request("DELETE", `/api/graders/${seeded.id}`, key);
+    await request("DELETE", `/v1/graders/${seeded.id}`, key);
 
-    const used = await request("POST", "/api/graders", key, {
-      library_id: PREDEFINED_GRADERS.expectedBehaviors,
+    const used = await request("POST", "/v1/graders", key, {
+      libraryId: PREDEFINED_GRADERS.expectedBehaviors,
     });
 
     expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
     expect(used.body.id).not.toBe(seeded.id);
-    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(1);
+    expect(itemsOf(await request("GET", "/v1/graders", key))).toHaveLength(1);
   });
 
   it("answers a second delete as a grader that is not there", async () => {
@@ -948,11 +948,11 @@ describe("switching a running copy off", () => {
     const key = await projectKeyFor(api.app, ada);
     const copy = await aLatencyCopy(key);
 
-    expect((await request("DELETE", `/api/graders/${copy.id}`, key)).statusCode).toBe(
+    expect((await request("DELETE", `/v1/graders/${copy.id}`, key)).statusCode).toBe(
       200,
     );
 
-    const again = await request("DELETE", `/api/graders/${copy.id}`, key);
+    const again = await request("DELETE", `/v1/graders/${copy.id}`, key);
     expect(again.statusCode).toBe(404);
     expect(String(again.body.message)).toContain("switched off");
   });
@@ -966,12 +966,12 @@ describe("switching a running copy off", () => {
 
     const removed = await request(
       "DELETE",
-      `/api/graders/${copy.id}`,
+      `/v1/graders/${copy.id}`,
       grace.secret,
     );
 
     expect(removed.statusCode).toBe(403);
-    expect(itemsOf(await request("GET", "/api/graders", key))).toHaveLength(2);
+    expect(itemsOf(await request("GET", "/v1/graders", key))).toHaveLength(2);
   });
 
   it("shows one customer nothing of another's, and switches nothing off there", async () => {
@@ -981,12 +981,12 @@ describe("switching a running copy off", () => {
     const theirs = await projectKeyFor(api.app, ada);
     const others = await projectKeyFor(api.app, grace);
 
-    const [only] = itemsOf(await request("GET", "/api/graders", theirs));
+    const [only] = itemsOf(await request("GET", "/v1/graders", theirs));
     if (only === undefined) throw new Error("the project has no graders");
 
-    const removed = await request("DELETE", `/api/graders/${only.id}`, others);
+    const removed = await request("DELETE", `/v1/graders/${only.id}`, others);
 
     expect(removed.statusCode).toBe(404);
-    expect(itemsOf(await request("GET", "/api/graders", theirs))).toHaveLength(1);
+    expect(itemsOf(await request("GET", "/v1/graders", theirs))).toHaveLength(1);
   });
 });

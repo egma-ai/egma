@@ -39,15 +39,6 @@ export type FakePlatform = {
 
 export type FakePlatformOptions = {
   /**
-   * What origin the platform reports about itself, given its own address.
-   *
-   * Its own by default. A test overrides it to build the one disaster `up`
-   * exists to catch: a deployment started on one address whose API reports
-   * another, which makes every later command in every agent repository fail a
-   * directory away from anything that could explain it.
-   */
-  readonly reports?: (own: string) => string;
-  /**
    * The settings this platform already holds, by name.
    *
    * Readiness is computed from these rather than declared beside them, so this
@@ -64,23 +55,6 @@ export type FakePlatformOptions = {
 function hintOf(name: string, value: string): string {
   const definition = PLATFORM_SETTINGS.find((setting) => setting.name === name);
   return definition?.secret === true ? value.slice(-4) : value;
-}
-
-function readinessOf(holds: Readonly<Record<string, string>>): {
-  phone: { state: string; missing: string[] };
-} {
-  const phoneMissing = (["carrier_trunk_address", "carrier_trunk_number"] as const)
-    .filter((name) => holds[name] === undefined)
-    .map(
-      (name) =>
-        PLATFORM_SETTINGS.find((setting) => setting.name === name)?.label ?? name,
-    );
-  return {
-    phone: {
-      state: phoneMissing.length === 0 ? "ready" : "setup_required",
-      missing: phoneMissing,
-    },
-  };
 }
 
 /**
@@ -104,6 +78,11 @@ export async function startPlatform(
       answer.writeHead(status, { "content-type": "application/json" });
       answer.end(JSON.stringify(body));
     };
+
+    if (request.url === "/api/health") {
+      send(200, { status: "ok" });
+      return;
+    }
 
     if ((request.url ?? "").startsWith("/api/platform/settings")) {
       if (request.headers.authorization !== `Bearer ${OWNER_KEY}`) {
@@ -148,12 +127,7 @@ export async function startPlatform(
       return;
     }
 
-    const readiness = readinessOf(holds);
-    send(200, {
-      instance_id: "pf_00000000000000000000000001",
-      origin: options.reports === undefined ? url : options.reports(url),
-      phone: readiness.phone,
-    });
+    send(404, { error: "not_found", message: "not found" });
   });
   await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
   const { port } = server.address() as AddressInfo;

@@ -12,7 +12,7 @@
  */
 
 import { openInBrowser } from "../platform/browser.ts";
-import type { VerifiedPlatformAccess as ResolvedPlatform } from "../platform/credentials.ts";
+import type { PlatformAccess as ResolvedPlatform } from "../platform/credentials.ts";
 import { logIn, type LogInOptions } from "../platform/login.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import type { ExitReport } from "./exit-line.ts";
@@ -28,13 +28,11 @@ export type PlatformAccess = ResolvedPlatform & {
  * Which egma the walk uses, in the two parts the wizard needs it in.
  *
  * The address is here from the start, because the wizard's first screen names
- * it. Who is answering there is asked for by `verify`, which the walk calls
- * once — after the keystroke of consent and never before. That ordering is the
- * whole point of the split: a developer reads which egma their repository is
- * about to talk to before egma has said one word to it.
+ * it. The login step makes the first request after the keystroke of consent.
  */
 export type WizardPlatform = {
   readonly url: string;
+  readonly credentialsFile: string;
   /**
    * True when this address came out of `egma/config.yaml` rather than a flag.
    *
@@ -44,7 +42,6 @@ export type WizardPlatform = {
    * has one answer and one place that works it out.
    */
   readonly bound: boolean;
-  verify(): Promise<PlatformAccess>;
 };
 
 /**
@@ -55,12 +52,12 @@ export type WizardPlatform = {
  * reasons. They hand it over through here rather than each writing a `verify`
  * that asks nobody anything.
  */
-export function alreadyAsked(access: PlatformAccess): WizardPlatform {
+export function selectedPlatform(access: PlatformAccess): WizardPlatform {
   // Not bound: whoever hands a platform over this way resolved it for their own
   // reasons rather than reading it out of a committed file. The one path where
   // a binding really chose the address builds its own, in `main.ts`, from the
   // resolution that read that file.
-  return { url: access.url, bound: false, verify: () => Promise.resolve(access) };
+  return { ...access, bound: false };
 }
 
 /**
@@ -68,8 +65,7 @@ export function alreadyAsked(access: PlatformAccess): WizardPlatform {
  *
  * `null` means the developer is signed in and the walk carries on. Everything
  * else is an ending, and each ending says which one it was: a denial is not a
- * fault, a code that ran out is not a denial, and an instance that never
- * answered is neither.
+ * fault, and a code that ran out is not a denial.
  */
 export async function logInStep(
   platform: PlatformAccess,

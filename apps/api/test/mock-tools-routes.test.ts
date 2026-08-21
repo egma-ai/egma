@@ -54,7 +54,7 @@ async function createMockToolThrough(
   key: string,
   body: Record<string, unknown>,
 ): Promise<Answer> {
-  return request("POST", "/api/mock-tools", key, body);
+  return request("POST", "/v1/mock-tools", key, body);
 }
 
 /** Which project a mock tool landed in — a fact the wire does not say. */
@@ -86,11 +86,11 @@ describe("authoring a mock tool", () => {
     expect(created.body).toMatchObject({
       tool: CALENDAR.tool,
       answer: CALENDAR.answer,
-      delay_ms: 0,
+      delayMs: 0,
       agents: [],
     });
     expect(String(created.body.id)).toMatch(/^mck_/u);
-    expect(created.body.created_at).toBeTypeOf("string");
+    expect(created.body.createdAt).toBeTypeOf("string");
     expect(await projectOf(String(created.body.id))).toBe(ada.projectId);
   });
 
@@ -108,7 +108,7 @@ describe("authoring a mock tool", () => {
     expect(created.body).toMatchObject({
       tool: "book_appointment",
       error: "the booking service is unavailable",
-      delay_ms: 0,
+      delayMs: 0,
     });
     expect(created.body.answer).toBeUndefined();
   });
@@ -120,11 +120,11 @@ describe("authoring a mock tool", () => {
 
     const created = await createMockToolThrough(key, {
       ...CALENDAR,
-      delay_ms: 1_200,
+      delayMs: 1_200,
     });
 
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
-    expect(created.body.delay_ms).toBe(1_200);
+    expect(created.body.delayMs).toBe(1_200);
   });
 
   it("admits an answer that is text, a number or null, because a tool may answer any of them", async () => {
@@ -199,16 +199,16 @@ describe("the gates at the door", () => {
 
     const refused = await createMockToolThrough(key, {
       ...CALENDAR,
-      delay_ms: 30_001,
+      delayMs: 30_001,
     });
 
     expect(refused.statusCode).toBe(422);
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        "delay_ms is 30001, and a mock tool may delay its answer by at most " +
+        "delayMs is 30001, and a mock tool may delay its answer by at most " +
         "30000 milliseconds — the budget the exchange carrying it is given. " +
-        "Send a smaller delay_ms.",
+        "Send a smaller delayMs.",
     });
     expect(await rowCount()).toBe(0);
   });
@@ -287,7 +287,7 @@ describe("the gates at the door", () => {
       error: "invalid_request",
       message:
         'a mock tool has no key "matches"; it holds tool, answer, error, ' +
-        "delay_ms, agents, project",
+        "delayMs, agents, projectId",
     });
     expect(await rowCount()).toBe(0);
   });
@@ -410,7 +410,7 @@ async function agentFor(
   const registered = await ask(
     api.app,
     "POST",
-    "/api/agents",
+    "/v1/agents",
     await mintKey(api.app, person.cookie, `${name} key`, projectId),
     { name },
   );
@@ -426,9 +426,9 @@ describe("editing a mock tool", () => {
     const created = await createMockToolThrough(key, { ...CALENDAR });
     const mockToolId = String(created.body.id);
 
-    const edited = await request("PATCH", `/api/mock-tools/${mockToolId}`, key, {
+    const edited = await request("PATCH", `/v1/mock-tools/${mockToolId}`, key, {
       answer: { slots: [] },
-      delay_ms: 900,
+      delayMs: 900,
     });
 
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
@@ -436,11 +436,11 @@ describe("editing a mock tool", () => {
       id: mockToolId,
       tool: CALENDAR.tool,
       answer: { slots: [] },
-      delay_ms: 900,
+      delayMs: 900,
     });
 
-    const read = await request("GET", "/api/mock-tools", key);
-    expect(read.body.items).toEqual([edited.body]);
+    const read = await request("GET", "/v1/mock-tools", key);
+    expect(read.body.mockTools).toEqual([edited.body]);
     expect(await rowCount()).toBe(1);
   });
 
@@ -451,7 +451,7 @@ describe("editing a mock tool", () => {
     const created = await createMockToolThrough(key, { ...CALENDAR });
     const mockToolId = String(created.body.id);
 
-    const failing = await request("PATCH", `/api/mock-tools/${mockToolId}`, key, {
+    const failing = await request("PATCH", `/v1/mock-tools/${mockToolId}`, key, {
       error: "the calendar is unreachable",
     });
     expect(failing.statusCode, JSON.stringify(failing.body)).toBe(200);
@@ -460,7 +460,7 @@ describe("editing a mock tool", () => {
 
     const answering = await request(
       "PATCH",
-      `/api/mock-tools/${mockToolId}`,
+      `/v1/mock-tools/${mockToolId}`,
       key,
       { answer: { slots: [] } },
     );
@@ -477,21 +477,21 @@ describe("editing a mock tool", () => {
     const created = await createMockToolThrough(key, { ...CALENDAR });
     const mockToolId = String(created.body.id);
 
-    const refused = await request("PATCH", `/api/mock-tools/${mockToolId}`, key, {
-      delay_ms: 45_000,
+    const refused = await request("PATCH", `/v1/mock-tools/${mockToolId}`, key, {
+      delayMs: 45_000,
     });
 
     expect(refused.statusCode).toBe(422);
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        "delay_ms is 45000, and a mock tool may delay its answer by at most " +
+        "delayMs is 45000, and a mock tool may delay its answer by at most " +
         "30000 milliseconds — the budget the exchange carrying it is given. " +
-        "Send a smaller delay_ms.",
+        "Send a smaller delayMs.",
     });
 
-    const still = await request("GET", "/api/mock-tools", key);
-    expect((still.body.items as { delay_ms: number }[])[0]?.delay_ms).toBe(0);
+    const still = await request("GET", "/v1/mock-tools", key);
+    expect((still.body.mockTools as { delayMs: number }[])[0]?.delayMs).toBe(0);
   });
 
   it("is not found for a mock tool this credential could not have read", async () => {
@@ -506,9 +506,9 @@ describe("editing a mock tool", () => {
 
     const refused = await request(
       "PATCH",
-      `/api/mock-tools/${theirs}`,
+      `/v1/mock-tools/${theirs}`,
       await projectKeyFor(api.app, grace),
-      { delay_ms: 10 },
+      { delayMs: 10 },
     );
 
     expect(refused.statusCode).toBe(404);
@@ -531,7 +531,7 @@ describe("removing a mock tool", () => {
 
     const removed = await request(
       "DELETE",
-      `/api/mock-tools/${mockToolId}`,
+      `/v1/mock-tools/${mockToolId}`,
       key,
     );
 
@@ -540,10 +540,10 @@ describe("removing a mock tool", () => {
       id: mockToolId,
       tool: CALENDAR.tool,
     });
-    expect(removed.body.deleted_at).toBeTypeOf("string");
+    expect(removed.body.deletedAt).toBeTypeOf("string");
 
-    const listed = await request("GET", "/api/mock-tools", key);
-    expect(listed.body.items).toEqual([]);
+    const listed = await request("GET", "/v1/mock-tools", key);
+    expect(listed.body.mockTools).toEqual([]);
     expect(await rowCount()).toBe(0);
 
     // The name it held is free again, which is the whole reason the one-answer
@@ -567,7 +567,7 @@ describe("removing a mock tool", () => {
 
     const refused = await request(
       "DELETE",
-      `/api/mock-tools/${theirs}`,
+      `/v1/mock-tools/${theirs}`,
       await projectKeyFor(api.app, grace),
     );
 
@@ -614,7 +614,7 @@ describe("agent scoping", () => {
 
     const widened = await request(
       "PATCH",
-      `/api/mock-tools/${String(created.body.id)}`,
+      `/v1/mock-tools/${String(created.body.id)}`,
       key,
       { agents: [] },
     );
@@ -636,19 +636,19 @@ describe("the list of mock tools", () => {
       error: "the booking service is unavailable",
     });
 
-    const listed = await request("GET", "/api/mock-tools", key);
+    const listed = await request("GET", "/v1/mock-tools", key);
     expect(listed.statusCode).toBe(200);
-    expect((listed.body.items as { id: string }[]).map((one) => one.id)).toEqual(
+    expect((listed.body.mockTools as { id: string }[]).map((one) => one.id)).toEqual(
       [String(second.body.id), String(first.body.id)],
     );
-    expect(listed.body.next_cursor).toBeNull();
+    expect(listed.body.nextPageToken).toBeNull();
 
     const theirs = await request(
       "GET",
-      "/api/mock-tools",
+      "/v1/mock-tools",
       await projectKeyFor(api.app, grace),
     );
-    expect(theirs.body).toEqual({ items: [], next_cursor: null });
+    expect(theirs.body).toEqual({ mockTools: [], nextPageToken: null });
   });
 
   it("reads the project the credential acts in, and no sibling of it", async () => {
@@ -663,10 +663,10 @@ describe("the list of mock tools", () => {
     });
 
     const there = await mintKey(api.app, ada.cookie, "outbound", outbound.id);
-    const listed = await request("GET", "/api/mock-tools", there);
+    const listed = await request("GET", "/v1/mock-tools", there);
 
     expect(listed.statusCode).toBe(200);
-    expect(listed.body.items).toEqual([]);
+    expect(listed.body.mockTools).toEqual([]);
   });
 });
 
@@ -686,9 +686,9 @@ describe("who may do what", () => {
     );
     const theirs = await projectKeyFor(api.app, vic);
 
-    const listed = await request("GET", "/api/mock-tools", theirs);
+    const listed = await request("GET", "/v1/mock-tools", theirs);
     expect(listed.statusCode).toBe(200);
-    expect((listed.body.items as unknown[]).length).toBe(1);
+    expect((listed.body.mockTools as unknown[]).length).toBe(1);
 
     const written = await createMockToolThrough(theirs, {
       tool: "another",
@@ -702,9 +702,9 @@ describe("who may do what", () => {
 
     const edited = await request(
       "PATCH",
-      `/api/mock-tools/${String(authored.body.id)}`,
+      `/v1/mock-tools/${String(authored.body.id)}`,
       theirs,
-      { delay_ms: 5 },
+      { delayMs: 5 },
     );
     expect(edited.statusCode).toBe(403);
     expect(await rowCount()).toBe(1);

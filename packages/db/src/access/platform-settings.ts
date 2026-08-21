@@ -74,13 +74,12 @@ export type PlatformSetting = {
 };
 
 /**
- * What this deployment has been configured with, as anybody may see it.
+ * What this deployment has been configured with, for internal preconditions.
  *
  * A setting the platform holds appears here: its value where that value is not
  * a secret, and `null` where it is. A setting it does not hold is absent
- * entirely. That is the whole of what the unauthenticated readiness answer is
- * built from, which is why a secret's *hint* is not in it either — enough to
- * say a key is there, and never any part of the key.
+ * entirely. A secret's *hint* is not in it either: platform code can decide
+ * whether a setting exists without receiving any part of the secret.
  *
  * Written on one line and keyed by the settings egma knows, both deliberately:
  * the build rule pins this alias's whole body as the text of what
@@ -426,16 +425,14 @@ export async function resolvePlatformSettings(
 }
 
 /**
- * What this deployment has been configured with, for the answer it gives before
- * anybody has logged in.
+ * What this deployment has been configured with, for an internal precondition.
  *
  * It takes nothing, so there is no customer it could be asked about, and it
  * returns non-secret carrier facts only, with `null` standing in for the SIP
- * password. That is what lets it skip the
- * `AuthContext` every read of a customer's data requires: the readiness answer
- * is read by the CLI in front of every command, before login and before a
- * repository identifier is ever sent, exactly as the platform's own identity
- * is.
+ * password. The run-start path uses this answer to refuse phone work before it
+ * creates a run when the deployment has no complete carrier route. It needs no
+ * `AuthContext` because the carrier route belongs to the deployment, not to a
+ * customer.
  */
 export async function platformFacts(): Promise<PlatformFacts> {
   const held = await heldSettings();

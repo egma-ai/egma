@@ -68,9 +68,9 @@ export function JudgmentCard({
   placement?: "inline" | "result";
 }) {
   const cited =
-    placement === "inline" || judgment.cited_turns.length === 0
+    placement === "inline" || judgment.citedTurns.length === 0
       ? ""
-      : judgment.cited_turns.join(", ");
+      : judgment.citedTurns.join(", ");
   const diagnostic = judgment.required === false;
   const tone = toneOf(judgment.verdict);
 

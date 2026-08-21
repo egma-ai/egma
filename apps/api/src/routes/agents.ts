@@ -35,6 +35,7 @@ import {
   type RestoreCredential,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { agentOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -45,11 +46,11 @@ import {
   type ActingRefusal,
 } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, projectNamed, text } from "../http/reading.ts";
+import { given, text } from "../http/reading.ts";
 import {
-  discoverRetellVoiceAgents,
-  verifyRetellVoiceRoute,
+  discoverRetellAgents,
 } from "../providers/retell.ts";
 import {
   CODES,
@@ -63,7 +64,7 @@ import {
  * The group mirrors the factory behind it, and three shapes are load-bearing:
  *
  * - **Agent-rooted, always.** A connection is only ever reached through its
- *   agent, so there is no `/api/connections`. Naming the wrong agent answers
+ *   agent, so there is no `/v1/connections`. Naming the wrong agent answers
  *   exactly what naming a connection that does not exist answers.
  * - **No resource is rooted at a project, and the organization is in no
  *   address at all.** A write may *name* a project in its body and a read may
@@ -144,7 +145,7 @@ const NO_SUCH_AGENT: Refusal = {
   error: "not_found",
   message:
     "no agent of yours has that id. Check the id, or list your agents with " +
-    "GET /api/agents.",
+    "GET /v1/agents.",
 };
 
 /** The same answer, one level down: through the wrong agent, or not at all. */
@@ -153,7 +154,7 @@ const NO_SUCH_CONNECTION: Refusal = {
   error: "not_found",
   message:
     "no connection of yours has that id on that agent. Check both ids, or " +
-    "read the agent with GET /api/agents/{agentId}.",
+    "read the agent with GET /v1/agents/{agentId}.",
 };
 
 /**
@@ -277,6 +278,7 @@ function flagWhenGiven(
   named: string,
 ): boolean | undefined | Refusal {
   if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "boolean") return value;
   if (value === "true") return true;
   if (value === "false") return false;
   return invalid(`${named} is written as true or false`);
@@ -290,8 +292,8 @@ function boundedLimit(value: unknown): number | undefined | Refusal {
   const asked = Number(value);
   if (!Number.isInteger(asked) || asked < 1 || asked > LARGEST_PAGE) {
     return invalid(
-      `limit is a whole number between 1 and ${LARGEST_PAGE}; a page is ` +
-        "carried on with next_cursor rather than made larger.",
+      `pageSize is a whole number between 1 and ${LARGEST_PAGE}; a page is ` +
+        "carried on with nextPageToken rather than made larger.",
     );
   }
   return asked;
@@ -308,7 +310,7 @@ function boundedLimit(value: unknown): number | undefined | Refusal {
  * thing this protects.
  */
 function revisionIn(body: Body, required: boolean): string | undefined | Refusal {
-  const given = textWhenGiven(body.expected_revision, "expected_revision");
+  const given = textWhenGiven(body.expectedRevision, "expectedRevision");
   if (isRefusal(given)) return given;
   if (given === undefined && required) {
     return {
@@ -316,7 +318,7 @@ function revisionIn(body: Body, required: boolean): string | undefined | Refusal
       error: "unprocessable",
       message:
         "this edit did not say which revision it was written against. Read " +
-        "the resource, then send the update with expected_revision set to " +
+        "the resource, then send the update with expectedRevision set to " +
         "the revision it names.",
     };
   }
@@ -355,7 +357,7 @@ async function actingProject(
   verb: "writes into" | "reads",
 ): Promise<AuthContext | Refusal> {
   const query = (request.query ?? {}) as Record<string, string | undefined>;
-  const named = textWhenGiven(query.project, "a project");
+  const named = textWhenGiven(query.projectId, "a project");
   if (isRefusal(named)) return named;
   return verb === "reads" ? readingIn(auth, named) : writingIn(auth, named);
 }
@@ -365,28 +367,28 @@ function fromBrowser(auth: AuthContext): boolean {
   return auth.via === "session";
 }
 
-const AGENT_EDIT_KEYS = ["name", "description", "expected_revision"] as const;
-const ARCHIVE_KEYS = ["expected_revision"] as const;
-const AGENT_RESTORE_KEYS = ["expected_revision", "name"] as const;
+const AGENT_EDIT_KEYS = ["name", "description", "expectedRevision"] as const;
+const ARCHIVE_KEYS = ["expectedRevision"] as const;
+const AGENT_RESTORE_KEYS = ["expectedRevision", "name"] as const;
 const CONNECTION_EDIT_KEYS = [
   "name",
   "environment",
   "config",
   "credentials",
-  "expected_revision",
+  "expectedRevision",
 ] as const;
 const CONNECTION_RESTORE_KEYS = [
-  "expected_revision",
+  "expectedRevision",
   "name",
   "credential",
 ] as const;
 
-const AGENT_KEYS = ["name", "description", "project", "connection"] as const;
+const AGENT_KEYS = ["name", "description", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
-  "agent_platform",
-  "connection_kind",
-  "access_variant",
+  "agentPlatform",
+  "connectionKind",
+  "accessVariant",
   "modality",
   "environment",
   "config",
@@ -431,16 +433,16 @@ function connectionIn(value: unknown): NewConnection | Refusal {
     // config key it has no place for, and a credential that does not belong,
     // each in its own words.
     agentPlatform:
-      body.agent_platform === null
+      body.agentPlatform === null
         ? null
-        : ((typeof body.agent_platform === "string"
-            ? body.agent_platform
+        : ((typeof body.agentPlatform === "string"
+            ? body.agentPlatform
             : "") as AgentPlatform),
-    connectionKind: (typeof body.connection_kind === "string"
-      ? body.connection_kind
+    connectionKind: (typeof body.connectionKind === "string"
+      ? body.connectionKind
       : "") as ConnectionKind,
-    accessVariant: (typeof body.access_variant === "string"
-      ? body.access_variant
+    accessVariant: (typeof body.accessVariant === "string"
+      ? body.accessVariant
       : "") as AccessVariant,
     modality: (typeof body.modality === "string"
       ? body.modality
@@ -469,16 +471,16 @@ function connectionIn(value: unknown): NewConnection | Refusal {
 function describedAgent(one: Agent): Record<string, unknown> {
   return {
     id: one.id,
-    project_id: one.projectId,
+    projectId: one.projectId,
     name: one.name,
     description: one.description,
     // What an edit has to be written against. Absent from no read, so a client
     // never has to make a second request to be able to make a first edit.
     revision: one.revision,
     archived: one.archivedAt !== null,
-    archived_at: one.archivedAt?.toISOString() ?? null,
-    created_at: one.createdAt.toISOString(),
-    updated_at: one.updatedAt.toISOString(),
+    archivedAt: one.archivedAt?.toISOString() ?? null,
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
   };
 }
 
@@ -487,35 +489,35 @@ function describedAgent(one: Agent): Record<string, unknown> {
  *
  * The sealed envelope has no line here and no line in the type this is built
  * from, so there is no serializer to remember to strip it in.
- * `credentials_hint` is the whole of what comes back: enough to tell one
+ * `credentialsHint` is the whole of what comes back: enough to tell one
  * provider key from another, and enough to see that a rotation landed.
  */
 function describedConnection(one: Connection): Record<string, unknown> {
   return {
     id: one.id,
-    agent_id: one.agentId,
-    project_id: one.projectId,
+    agentId: one.agentId,
+    projectId: one.projectId,
     name: one.name,
-    agent_platform: one.agentPlatform,
-    connection_kind: one.connectionKind,
-    access_variant: one.accessVariant,
+    agentPlatform: one.agentPlatform,
+    connectionKind: one.connectionKind,
+    accessVariant: one.accessVariant,
     modality: one.modality,
     // The registry derives this from the four technical facts above. It is the
     // one customer-facing name that agent lists and connection pages share.
-    product_label: one.productLabel,
+    productLabel: one.productLabel,
     topology: one.topology,
     environment: one.environment,
     config: one.config,
     // Whether there is a credential at all, and the hint — never the secret,
     // and never a blank field a serializer could one day be taught to fill.
-    credential_present: one.credentialsHint !== null,
-    credentials_hint: one.credentialsHint,
+    credentialPresent: one.credentialsHint !== null,
+    credentialsHint: one.credentialsHint,
     capabilities: describedCapabilities(one),
     revision: one.revision,
     archived: one.archivedAt !== null,
-    archived_at: one.archivedAt?.toISOString() ?? null,
-    created_at: one.createdAt.toISOString(),
-    updated_at: one.updatedAt.toISOString(),
+    archivedAt: one.archivedAt?.toISOString() ?? null,
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
   };
 }
 
@@ -524,7 +526,7 @@ function describedConnection(one: Connection): Record<string, unknown> {
  * living way egma can reach it.
  *
  * **One shape, not a second dialect.** The connections are the same objects
- * `GET /api/agents/{agentId}` answers, described by the same function, so a
+ * `GET /v1/agents/{agentId}` answers, described by the same function, so a
  * client that can read a connection from one read can read it from the other.
  * The alternative — a smaller connection here, a fuller one there — is how a
  * client comes to work on one path and fail on the other.
@@ -562,7 +564,7 @@ function describedCapabilities(one: Connection): Record<string, unknown> {
     // client never has to work the rule out for itself.
     measured: held.state === "known" ? held.measured : null,
     supported: held.state === "known" ? held.supported : null,
-    checked_at: held.state === "known" ? held.checkedAt.toISOString() : null,
+    checkedAt: held.state === "known" ? held.checkedAt.toISOString() : null,
     source: held.state === "known" ? held.source : null,
     standing: Object.fromEntries(
       CAPABILITY_CATALOG.map((entry) => [
@@ -603,11 +605,8 @@ function refusalOf(acting: ActingRefusal): Refusal {
  * other group's in that module, where the two can be unified in one edit the
  * day the dev picks a winner.
  *
- * **Not to be confused with `projectNamed`, which this group also uses.** That
- * one reads *where* the caller wrote the project down; this one decides whether
- * the credential may reach it. They were both called `projectNamed` — one name
- * for two things, in one directory, in the change whose whole point was one way
- * to say where a project is.
+ * This function decides whether the credential may reach the project. Reading
+ * where the caller wrote the project down is a separate concern in the route.
  */
 async function reachableProject(
   auth: AuthContext,
@@ -691,100 +690,60 @@ export async function agentRoutes(
     rateLimit: options.rateLimit,
   });
 
-  /**
-   * Read the voice agents and routed numbers on one Retell account.
-   *
-   * The key is used for these two provider reads only. The response contains
-   * provider ids, display names, and phone numbers; it never contains the key
-   * or Retell's raw documents. Creating the selected connection remains the
-   * ordinary agent-rooted write below.
-   */
-  app.post("/api/providers/retell/voice-agents", async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const body = (request.body ?? {}) as Body;
-    const unknown = unknownKeyIn(body, ["api_key"], "a Retell account read");
-    if (unknown !== undefined) return refused(reply, unknown);
-
-    const apiKey = textWhenGiven(body.api_key, "a Retell API key");
-    if (isRefusal(apiKey)) return refused(reply, apiKey);
-    if (apiKey === undefined || apiKey.trim().length < 8) {
-      return refused(reply, {
-        refused: true,
-        error: "unprocessable",
-        message: "Paste a Retell API key, then try again.",
-      });
-    }
-
-    const acting = await actingProject(auth, request, "writes into");
-    if (isRefusal(acting)) return refused(reply, acting);
-    authorize(acting, "configure_agents", {
-      organizationId: acting.organizationId,
-      projectId: acting.projectId,
-    });
-
-    const found = await discoverRetellVoiceAgents(
-      apiKey.trim(),
-      options.retellFetch,
-    );
-    if (found.kind === "invalid_key") {
-      return refused(reply, {
-        refused: true,
-        error: "unprocessable",
-        message:
-          "Retell did not accept that API key. Copy it again from Retell, then try again.",
-      });
-    }
-    if (found.kind === "unavailable") {
-      return refused(reply, {
-        refused: true,
-        error: "unavailable",
-        message: found.message,
-      });
-    }
-    return reply.send({ agents: found.agents });
-  });
-
-  /**
-   * Confirm and attach one Retell-routed phone number in one operation.
-   *
-   * The key is used to re-read the chosen agent and number immediately before
-   * the write. Only the provider-blind E.164 number reaches the connection row.
-   */
-  app.post(
-    "/api/agents/:agentId/connections/retell-phone",
+  /** Read supported simulation connection candidates from one agent platform. */
+  registerPlatformOperation(
+    app,
+    agentOperations.discoverAgents,
     async (request, reply) => {
       const { auth } = requesterOf(request);
-      const { agentId } = request.params as { agentId: string };
       const body = (request.body ?? {}) as Body;
       const unknown = unknownKeyIn(
         body,
-        ["api_key", "retell_agent_id", "phone_number", "name"],
-        "a Retell phone connection",
+        ["agentPlatform", "credentials"],
+        "an agent discovery",
       );
       if (unknown !== undefined) return refused(reply, unknown);
 
-      const apiKey = textWhenGiven(body.api_key, "a Retell API key");
-      if (isRefusal(apiKey)) return refused(reply, apiKey);
-      const retellAgentId = textWhenGiven(
-        body.retell_agent_id,
-        "a Retell agent id",
+      const agentPlatform = textWhenGiven(
+        body.agentPlatform,
+        "an agent platform",
       );
-      if (isRefusal(retellAgentId)) return refused(reply, retellAgentId);
-      const phoneNumber = textWhenGiven(body.phone_number, "a phone number");
-      if (isRefusal(phoneNumber)) return refused(reply, phoneNumber);
-      const name = textWhenGiven(body.name, "a connection name");
-      if (isRefusal(name)) return refused(reply, name);
+      if (isRefusal(agentPlatform)) return refused(reply, agentPlatform);
+      if (agentPlatform !== "retell") {
+        return refused(reply, {
+          refused: true,
+          error: "unprocessable",
+          message: "Choose Retell as the agent platform, then try again.",
+        });
+      }
+
       if (
-        apiKey === undefined ||
-        apiKey.trim().length < 8 ||
-        retellAgentId === undefined ||
-        phoneNumber === undefined
+        typeof body.credentials !== "object" ||
+        body.credentials === null ||
+        Array.isArray(body.credentials)
       ) {
         return refused(reply, {
           refused: true,
           error: "unprocessable",
-          message:
-            "Choose a Retell voice agent and one of its phone numbers, then try again.",
+          message: "Paste a Retell API key, then try again.",
+        });
+      }
+      const credentials = body.credentials as Body;
+      const unknownCredential = unknownKeyIn(
+        credentials,
+        ["apiKey"],
+        "Retell account credentials",
+      );
+      if (unknownCredential !== undefined) {
+        return refused(reply, unknownCredential);
+      }
+      const apiKey = textWhenGiven(credentials.apiKey, "a Retell API key");
+      if (isRefusal(apiKey)) return refused(reply, apiKey);
+      if (apiKey === undefined || apiKey.trim().length < 8) {
+        return refused(reply, {
+          refused: true,
+          error: "unprocessable",
+          message: "Paste a Retell API key, then try again.",
         });
       }
 
@@ -794,16 +753,12 @@ export async function agentRoutes(
         organizationId: acting.organizationId,
         projectId: acting.projectId,
       });
-      if ((await getAgent(acting, agentId)) === undefined) {
-        return refused(reply, NO_SUCH_AGENT);
-      }
-      const checked = await verifyRetellVoiceRoute(
+
+      const found = await discoverRetellAgents(
         apiKey.trim(),
-        retellAgentId,
-        phoneNumber,
         options.retellFetch,
       );
-      if (checked.kind === "invalid_key") {
+      if (found.kind === "invalid_key") {
         return refused(reply, {
           refused: true,
           error: "unprocessable",
@@ -811,31 +766,14 @@ export async function agentRoutes(
             "Retell did not accept that API key. Copy it again from Retell, then try again.",
         });
       }
-      if (checked.kind === "rejected") {
-        return refused(reply, {
-          refused: true,
-          error: "unprocessable",
-          message: checked.message,
-        });
-      }
-      if (checked.kind === "unavailable") {
+      if (found.kind === "unavailable") {
         return refused(reply, {
           refused: true,
           error: "unavailable",
-          message: checked.message,
+          message: found.message,
         });
       }
-
-      const added = await addConnection(acting, agentId, {
-        ...(name === undefined ? {} : { name }),
-        agentPlatform: "retell",
-        connectionKind: "phone_number",
-        accessVariant: "phone_number.public_e164",
-        modality: "voice",
-        config: { phoneNumber: checked.number },
-      });
-      if (added === undefined) return refused(reply, NO_SUCH_AGENT);
-      return reply.code(201).send({ connection: describedConnection(added) });
+      return reply.send({ agents: found.agents });
     },
   );
 
@@ -856,42 +794,46 @@ export async function agentRoutes(
    * credential value. It is built by reading the registry rather than by
    * copying it, so nothing can be left behind when an option is added.
    */
-  app.get("/api/connection-options", async (_request, reply) => {
-    return reply.send({
-      items: connectionOptionMetadata().map((option) => ({
-        agent_platform: option.agentPlatform,
-        agent_platform_label: option.agentPlatformLabel,
-        connection_kind: option.connectionKind,
-        access_variant: option.accessVariant,
-        access_variant_label: option.accessVariantLabel,
-        modality: option.modality,
-        product_label: option.productLabel,
-        topology: option.topology,
-        // Whether egma can conduct a run over this option at all, and whether
-        // it ships anything that can measure one of its targets. Two different
-        // facts, and a form says both rather than implying either.
-        simulator_adapter: option.simulatorAdapter,
-        capability_discovery: option.capabilityDiscovery,
-        fields: option.fields.map((field) => ({
-          key: field.key,
-          label: field.label,
-          kind: field.kind,
-          required: field.required,
-          help: field.help,
-          after_credentials: field.afterCredentials === true,
+  registerPlatformOperation(
+    app,
+    agentOperations.listConnectionOptions,
+    async (_request, reply) => {
+      return reply.send({
+        items: connectionOptionMetadata().map((option) => ({
+          agentPlatform: option.agentPlatform,
+          agentPlatformLabel: option.agentPlatformLabel,
+          connectionKind: option.connectionKind,
+          accessVariant: option.accessVariant,
+          accessVariantLabel: option.accessVariantLabel,
+          modality: option.modality,
+          productLabel: option.productLabel,
+          topology: option.topology,
+          // Whether egma can conduct a run over this option at all, and whether
+          // it ships anything that can measure one of its targets. Two different
+          // facts, and a form says both rather than implying either.
+          simulatorAdapter: option.simulatorAdapter,
+          capabilityDiscovery: option.capabilityDiscovery,
+          fields: option.fields.map((field) => ({
+            key: field.key,
+            label: field.label,
+            kind: field.kind,
+            required: field.required,
+            help: field.help,
+            afterCredentials: field.afterCredentials === true,
+          })),
+          credentialRule: option.credentialRule,
+          credentialHelp: option.credentialHelp,
+          credentialFields: option.credentialFields.map((field) => ({
+            field: field.field,
+            label: field.label,
+            kind: field.kind,
+            required: field.required,
+            help: field.help,
+          })),
         })),
-        credential_rule: option.credentialRule,
-        credential_help: option.credentialHelp,
-        credential_fields: option.credentialFields.map((field) => ({
-          field: field.field,
-          label: field.label,
-          kind: field.kind,
-          required: field.required,
-          help: field.help,
-        })),
-      })),
-    });
-  });
+      });
+    },
+  );
 
   /**
    * The capability catalog: the stable keys a test may require and a connection
@@ -901,15 +843,19 @@ export async function agentRoutes(
    * let two people write the same requirement two ways and would make every
    * comparison between what a test needs and what a target has a guess.
    */
-  app.get("/api/capabilities", async (_request, reply) => {
-    return reply.send({
-      items: CAPABILITY_CATALOG.map((entry) => ({
-        key: entry.key,
-        label: entry.label,
-        description: entry.description,
-      })),
-    });
-  });
+  registerPlatformOperation(
+    app,
+    agentOperations.listCapabilities,
+    async (_request, reply) => {
+      return reply.send({
+        items: CAPABILITY_CATALOG.map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          description: entry.description,
+        })),
+      });
+    },
+  );
 
   /**
    * Register an agent, with the first way of reaching it written in the same
@@ -921,7 +867,7 @@ export async function agentRoutes(
    * one vendor agent at the same instant settle to one agent rather than one
    * of them losing a race it should never have been in.
    */
-  app.post("/api/agents", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.registerAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const query = (request.query ?? {}) as Record<string, unknown>;
@@ -934,21 +880,19 @@ export async function agentRoutes(
     const description = textWhenGiven(body.description, "an agent's description");
     if (isRefusal(description)) return refused(reply, description);
     /*
-     * **The query and the body**, which is `projectNamed`'s one rule for the
-     * whole API — see `http/reading.ts` for why a door that reads only one of
-     * the two ignores the other rather than refusing it, and for what that cost
-     * this very route.
+     * **The query and the body**, with the query winning when both name a
+     * project. A door that reads only one of the two ignores the other rather
+     * than refusing it, which once made this route write to the wrong project.
      *
      * The connection gate stays this group's own, and it has to run first: a
-     * `project` that is not text is refused **by name** here, and
-     * `projectNamed` would read it as absent and fall back to the credential's
-     * own project — silently, which is the thing this route already got wrong
-     * once.
+     * `projectId` that is not text is refused **by name** here, and
+     * a permissive reader would treat it as absent and silently fall back to
+     * the credential's own project.
      */
-    const said = textWhenGiven(body.project, "a project");
+    const said = textWhenGiven(body.projectId, "a project");
     if (isRefusal(said)) return refused(reply, said);
 
-    const project = projectNamed(query, body);
+    const project = given(text(query.projectId)) ?? given(text(body.projectId));
 
     const inline =
       body.connection === undefined
@@ -986,9 +930,8 @@ export async function agentRoutes(
    * cursor is the last id of the page: the ids sort by mint time, so a list
    * changing underneath a reader never shows a row twice and never skips one.
    *
-   * There is no page-size parameter. A page is a page, and the cursor is what
-   * carries a reader through the rest — nothing in this API exists because a
-   * surface would look incomplete without it.
+   * `pageSize` chooses up to 200 agents. `pageToken` carries a reader through
+   * the rest without repeating or skipping a row when the list changes.
    *
    * **Each agent carries its living connections.** Which agents egma can reach,
    * and how, is the question a list of agents is opened to answer, and one
@@ -996,21 +939,21 @@ export async function agentRoutes(
    * sometimes carried them and sometimes did not would be two shapes behind one
    * address, and a client would work against one of them by accident.
    */
-  app.get("/api/agents", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.listAgents, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Record<string, string | undefined>;
 
-    const named = textWhenGiven(query.project, "a project");
+    const named = textWhenGiven(query.projectId, "a project");
     if (isRefusal(named)) return refused(reply, named);
 
-    const cursor = textWhenGiven(query.cursor, "a cursor");
-    if (isRefusal(cursor)) return refused(reply, cursor);
-    if (cursor !== undefined && !isId("agt", cursor)) {
+    const pageToken = textWhenGiven(query.pageToken, "a page token");
+    if (isRefusal(pageToken)) return refused(reply, pageToken);
+    if (pageToken !== undefined && !isId("agt", pageToken)) {
       return refused(
         reply,
         invalid(
-          `"${cursor}" is not an agent id, so it cannot be a cursor. Send ` +
-            "back the next_cursor from the page before this one, or leave it " +
+          `"${pageToken}" is not an agent id, so it cannot be a page token. Send ` +
+            "back the nextPageToken from the page before this one, or leave it " +
             "out to start at the newest.",
         ),
       );
@@ -1025,21 +968,21 @@ export async function agentRoutes(
     const archived = flagWhenGiven(query.archived, "archived");
     if (isRefusal(archived)) return refused(reply, archived);
 
-    const limit = boundedLimit(query.limit);
-    if (isRefusal(limit)) return refused(reply, limit);
+    const pageSize = boundedLimit(query.pageSize);
+    if (isRefusal(pageSize)) return refused(reply, pageSize);
 
     const page = await listAgents(reading, {
-      ...(cursor === undefined ? {} : { cursor }),
+      ...(pageToken === undefined ? {} : { cursor: pageToken }),
       ...(search === undefined ? {} : { search }),
       ...(archived === undefined ? {} : { archived }),
-      ...(limit === undefined ? {} : { limit }),
+      ...(pageSize === undefined ? {} : { limit: pageSize }),
     });
 
     return reply.send({
-      items: page.items.map(describedListedAgent),
+      agents: page.items.map(describedListedAgent),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this answer is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -1052,7 +995,7 @@ export async function agentRoutes(
    * archiving takes away is entry into new work, and that is enforced where new
    * work is created.
    */
-  app.get("/api/agents/:agentId", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.getAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
     const query = (request.query ?? {}) as Record<string, string | undefined>;
@@ -1081,7 +1024,7 @@ export async function agentRoutes(
    * inline connection travels in, and the defaulted name one number further
    * along.
    */
-  app.post("/api/agents/:agentId/connections", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.addConnection, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
 
@@ -1106,7 +1049,7 @@ export async function agentRoutes(
    * where the customer configures them, and egma being a second place to edit
    * them would make two answers to one question with no rule to choose between.
    */
-  app.patch("/api/agents/:agentId", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.updateAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
     const body = (request.body ?? {}) as Body;
@@ -1144,7 +1087,7 @@ export async function agentRoutes(
    * Take an agent out of new work, with every active way of reaching it and
    * every piece of work that was going over one.
    */
-  app.post("/api/agents/:agentId/archive", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.archiveAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
     const body = (request.body ?? {}) as Body;
@@ -1166,8 +1109,8 @@ export async function agentRoutes(
       agent: describedAgent(archived.agent),
       // What went with it, said plainly, because a person who archives an
       // agent has just stopped work they may have been watching.
-      archived_connections: archived.connections,
-      canceled_runs: archived.canceledRuns,
+      archivedConnections: archived.connections,
+      canceledRuns: archived.canceledRuns,
     });
   });
 
@@ -1175,7 +1118,7 @@ export async function agentRoutes(
    * Bring an agent back — and only the agent. Its connections stay archived
    * until each is restored on its own access variant's credential terms.
    */
-  app.post("/api/agents/:agentId/restore", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.restoreAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
     const body = (request.body ?? {}) as Body;
@@ -1199,7 +1142,7 @@ export async function agentRoutes(
   });
 
   /** One way of reaching an agent, archived or not. */
-  app.get("/api/agents/:agentId/connections/:connectionId", async (request, reply) => {
+  registerPlatformOperation(app, agentOperations.getConnection, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId, connectionId } = request.params as {
       agentId: string;
@@ -1225,8 +1168,9 @@ export async function agentRoutes(
    * credential, which is why there is no separate rotate verb to keep in step
    * with this one.
    */
-  app.patch(
-    "/api/agents/:agentId/connections/:connectionId",
+  registerPlatformOperation(
+    app,
+    agentOperations.updateConnection,
     async (request, reply) => {
       const { auth } = requesterOf(request);
       const { agentId, connectionId } = request.params as {
@@ -1278,8 +1222,9 @@ export async function agentRoutes(
   );
 
   /** Stop reaching an agent this way, and settle the work that was. */
-  app.post(
-    "/api/agents/:agentId/connections/:connectionId/archive",
+  registerPlatformOperation(
+    app,
+    agentOperations.archiveConnection,
     async (request, reply) => {
       const { auth } = requesterOf(request);
       const { agentId, connectionId } = request.params as {
@@ -1303,7 +1248,7 @@ export async function agentRoutes(
 
       return reply.send({
         connection: describedConnection(archived.connection),
-        canceled_runs: archived.canceledRuns,
+        canceledRuns: archived.canceledRuns,
       });
     },
   );
@@ -1312,8 +1257,9 @@ export async function agentRoutes(
    * Bring a connection back, on the terms its own access variant sets — and never on
    * the credential it was archived with.
    */
-  app.post(
-    "/api/agents/:agentId/connections/:connectionId/restore",
+  registerPlatformOperation(
+    app,
+    agentOperations.restoreConnection,
     async (request, reply) => {
       const { auth } = requesterOf(request);
       const { agentId, connectionId } = request.params as {
@@ -1350,8 +1296,9 @@ export async function agentRoutes(
   );
 
   /** Ask this connection's adapter what its target can do, and record it. */
-  app.post(
-    "/api/agents/:agentId/connections/:connectionId/capabilities/refresh",
+  registerPlatformOperation(
+    app,
+    agentOperations.refreshConnectionCapabilities,
     async (request, reply) => {
       const { auth } = requesterOf(request);
       const { agentId, connectionId } = request.params as {

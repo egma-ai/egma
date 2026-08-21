@@ -217,7 +217,10 @@ describe("reducing the measurements to one number", () => {
     "apps/grader/src/graders/latency.ts": "counts it, for the rationale",
     "apps/grader/src/judge/input.ts": "renders it, as words a judge reads",
     [THE_TRANSCRIPT_PAGE]: "counts it, and prints the reduction it was handed",
-    "apps/web/lib/transcripts.ts": "declares what arrives on the answer",
+    "packages/platform-api/src/contract/operations/trace-reads.ts":
+      "defines it once on the platform wire",
+    "packages/platform-api/src/generated/types.gen.ts":
+      "declares what arrives through the generated client",
   };
 
   it("is held by exactly the files that say what they do with it", async () => {

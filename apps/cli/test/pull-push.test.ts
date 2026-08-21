@@ -267,31 +267,19 @@ describe("egma init", () => {
     }
   });
 
-  /**
-   * The one binding a repository can gain before anybody has signed in.
-   *
-   * The identity contract is unauthenticated by design, so `init` can ask an
-   * address who it is and commit the answer with no key in existence — which is
-   * what lets a developer who knows their platform's address say it once, here,
-   * instead of on every command afterwards.
-   */
-  it("writes the whole binding when the command names an address", async () => {
+  it("writes the platform URL when the command names an address", async () => {
     const result = await runEgma(["init", "--url", platform.url, "--agent", "receptionist"]);
 
     expect(result.code, result.stderr).toBe(0);
     expect(factOf(result.stdout, "url")).toBe(platform.url);
-    expect(factOf(result.stdout, "platform")).toBe(platform.instanceId);
+    expect(factOf(result.stdout, "platform")).toBe(platform.url);
     expect(factOf(result.stdout, "status")).toBe("created");
     expect((await readConfig(configFile())).platform).toEqual({
       origin: platform.url,
-      instance: platform.instanceId,
     });
 
-    // One question, and it is the public one that carries nothing. No key
-    // exists yet and none was needed.
-    expect(platform.records.map((record) => `${record.method} ${record.path}`)).toEqual([
-      "GET /api/platform",
-    ]);
+    // A URL is the complete binding, so init does not need the network.
+    expect(platform.records).toEqual([]);
   });
 
   it("leaves the committed binding byte for byte the same when it is run again", async () => {
@@ -305,7 +293,6 @@ describe("egma init", () => {
     expect(await readFile(configFile(), "utf8")).toBe(before);
     expect((await readConfig(configFile())).platform).toEqual({
       origin: platform.url,
-      instance: platform.instanceId,
     });
   });
 
@@ -325,7 +312,7 @@ describe("egma init", () => {
     const again = await runEgma(["init"]);
 
     expect(again.code, again.stderr).toBe(0);
-    expect(factOf(again.stdout, "platform")).toBe(platform.instanceId);
+    expect(factOf(again.stdout, "platform")).toBe(platform.url);
     expect(factOf(again.stdout, "url")).toBeUndefined();
     expect(platform.records.slice(before)).toEqual([]);
   });
@@ -347,12 +334,11 @@ describe("egma init", () => {
 
     expect(bound.code, bound.stderr).toBe(0);
     expect(factOf(bound.stdout, "status")).toBe("already-there");
-    expect(factOf(bound.stdout, "platform")).toBe(platform.instanceId);
+    expect(factOf(bound.stdout, "platform")).toBe(platform.url);
 
     const held = await readConfig(configFile());
     expect(held.platform).toEqual({
       origin: platform.url,
-      instance: platform.instanceId,
     });
     // And nothing else in the file moved: the name the first run wrote is the
     // name that is still there.
@@ -389,52 +375,6 @@ describe("egma init", () => {
     }
   });
 
-  /**
-   * **Never a partial binding.** `bound` has to keep meaning `verified`, so an
-   * address that cannot say who it is leaves nothing behind at all — not an
-   * origin waiting for an instance, and not an empty folder either. Anything
-   * less would be a state somebody has to reason about for the rest of the
-   * product's life.
-   */
-  it("refuses an address that does not answer, and leaves no folder behind", async () => {
-    const dead = "http://127.0.0.1:1";
-
-    const refused = await runEgma(["init", "--url", dead]);
-
-    expect(refused.code).toBe(4);
-    expect(refused.stdout).toContain("status: unreachable");
-    expect(refused.stderr).toContain(dead);
-    await expect(stat(path.join(workspace.dir, "egma"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
-  /**
-   * The address-check refusal, met at the one moment it costs nothing.
-   *
-   * A platform that answers to an address other than the one it was asked at is
-   * a service door — the API's own origin, or a deployment whose `EGMA_BASE_URL`
-   * is not the address people reach it at. Binding to it would commit an origin
-   * every teammate who clones this repository would fail to reach.
-   */
-  it("refuses a platform that names an address other than the one asked", async () => {
-    const canonicalOrigin = "https://canonical.egma.example";
-    const alias = await startPlatform({ canonicalOrigin });
-    try {
-      const refused = await runEgma(["init", "--url", alias.url]);
-
-      expect(refused.code).toBe(4);
-      expect(refused.stdout).toContain("status: refused");
-      expect(refused.stderr).toContain(canonicalOrigin);
-      expect(refused.stderr).toContain("EGMA_BASE_URL");
-      expect(refused.stderr).toContain("Nothing was sent");
-      await expect(stat(path.join(workspace.dir, "egma"))).rejects.toMatchObject({
-        code: "ENOENT",
-      });
-    } finally {
-      await alias.close();
-    }
-  });
 });
 
 describe("egma pull", () => {
@@ -645,16 +585,16 @@ describe("egma push", () => {
 
     // The version the file used to pin is still there, unchanged, because a run
     // that pinned it has to stay readable.
-    const old = await fetch(`${platform.url}/api/test-versions/${seeded.versionId}`, {
+    const old = await fetch(`${platform.url}/v1/test-versions/${seeded.versionId}`, {
       headers: { authorization: `Bearer ${KEY}` },
     });
     expect(old.status).toBe(200);
-    const held = (await old.json()) as { current: boolean; expected_behaviors: string[] };
+    const held = (await old.json()) as { current: boolean; expectedBehaviors: string[] };
     expect(held.current).toBe(false);
     // Sentences both ways. A frozen version is read past rather than
     // rewritten, so a version stored before the ladder retired still holds the
     // priority beside each sentence — but the wire answers the sentence.
-    expect(held.expected_behaviors).toEqual([
+    expect(held.expectedBehaviors).toEqual([
       "The agent acknowledges it without blame.",
     ]);
   });
@@ -996,11 +936,11 @@ describe("the folder carries mock tools", () => {
 
     // The version the test now stands on carries it, and reads it back.
     const version = factOf(result.stdout, "version") as string;
-    const read = await fetch(`${platform.url}/api/test-versions/${version}`, {
+    const read = await fetch(`${platform.url}/v1/test-versions/${version}`, {
       headers: { authorization: `Bearer ${KEY}` },
     });
-    expect((await read.json()) as { mock_tools: unknown }).toMatchObject({
-      mock_tools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 0 }],
+    expect((await read.json()) as { mockTools: unknown }).toMatchObject({
+      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delayMs: 0 }],
     });
 
     // Pushed again with nothing changed, it mints nothing.
@@ -1066,9 +1006,9 @@ describe("the folder carries mock tools", () => {
     // sentences are the platform's own, which is why they can be trusted to
     // still be right the day the budget moves.
     expect(valuesOf(result.stdout, "reason")).toEqual([
-      `delay_ms is ${tooLong}, and a mock tool may delay its answer by at most ` +
+      `delayMs is ${tooLong}, and a mock tool may delay its answer by at most ` +
         `${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the budget the exchange ` +
-        `carrying it is given. Send a smaller delay_ms.`,
+        `carrying it is given. Send a smaller delayMs.`,
       // The bare string is two bytes of quotes; the wire adds `{"answer":` and
       // the closing brace, which is eleven more and the whole point of the
       // number being counted this way.
@@ -1090,7 +1030,7 @@ describe("the folder carries mock tools", () => {
   it("takes a delay and a scope out when the file stops saying them", async () => {
     // Registered through the door a developer's connect uses, because that is
     // the only way an agent exists for a mock tool to be scoped to.
-    await fetch(`${platform.url}/api/agents`, {
+    await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ name: "front-desk" }),
@@ -1173,7 +1113,7 @@ describe("the folder carries mock tools", () => {
       name: "calendar-is-full",
       scenario: "Nothing is free next week.",
       expectedBehaviors: ["The agent offers to take a message."],
-      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 250 }],
+      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delayMs: 250 }],
     });
     await makeFolder();
     await egma(["pull"]);
@@ -1328,9 +1268,6 @@ describe("both verbs, run with nobody watching", () => {
     expect(help.stdout).toContain("egma push");
     expect(help.stdout).toContain("5 push refused: Egma has moved on, pull first");
     expect(help.stdout).toContain("6 Egma turned a test or a mock tool away at its door");
-    expect(help.stdout).toContain(
-      "7 this Egma instance and this platform read different shapes: upgrade one of them",
-    );
   });
 
   /**

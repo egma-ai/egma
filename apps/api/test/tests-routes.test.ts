@@ -110,7 +110,7 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: [
+  expectedBehaviors: [
     "verifies who it is speaking to before discussing the booking",
     "confirms the new time back before finishing",
   ],
@@ -130,7 +130,7 @@ async function createTestThrough(
   key: string,
   body: Record<string, unknown>,
 ): Promise<Answer> {
-  return request("POST", "/api/tests", key, body);
+  return request("POST", "/v1/tests", key, body);
 }
 
 describe("creating a test", () => {
@@ -147,11 +147,11 @@ describe("creating a test", () => {
       name: RESCHEDULING.name,
       version: 1,
       scenario: RESCHEDULING.scenario,
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expectedBehaviors: [...RESCHEDULING.expectedBehaviors],
     });
     expect(String(created.body.id)).toMatch(/^tst_/u);
-    expect(String(created.body.version_id)).toMatch(/^tstv_/u);
-    expect(created.body.created_at).toBeTypeOf("string");
+    expect(String(created.body.versionId)).toMatch(/^tstv_/u);
+    expect(created.body.createdAt).toBeTypeOf("string");
     expect(await projectOf(String(created.body.id))).toBe(ada.projectId);
   });
 
@@ -168,7 +168,7 @@ describe("creating a test", () => {
     for (const created of [named, absent]) {
       expect(created.statusCode).toBe(201);
       expect(created.body.personas).toEqual([
-        { id: defaultPersonaId, name: expect.any(String), archived_at: null },
+        { id: defaultPersonaId, name: expect.any(String), archivedAt: null },
       ]);
     }
   });
@@ -188,8 +188,8 @@ describe("creating a test", () => {
 
     expect(created.statusCode).toBe(201);
     expect(created.body.personas).toEqual([
-      { id: rita, name: "Impatient Rita", archived_at: null },
-      { id: omar, name: "Omar", archived_at: null },
+      { id: rita, name: "Impatient Rita", archivedAt: null },
+      { id: omar, name: "Omar", archivedAt: null },
     ]);
   });
 
@@ -207,7 +207,7 @@ describe("creating a test", () => {
 
     expect(created.statusCode).toBe(201);
     expect(created.body.personas).toEqual([
-      { id: omar, name: "Omar", archived_at: null },
+      { id: omar, name: "Omar", archivedAt: null },
     ]);
   });
 
@@ -341,7 +341,7 @@ describe("creating a test", () => {
 
     const unfalsifiable = await createTestThrough(key, {
       ...RESCHEDULING,
-      expected_behaviors: [],
+      expectedBehaviors: [],
     });
     expect(unfalsifiable.body).toEqual({
       error: "unprocessable",
@@ -351,7 +351,7 @@ describe("creating a test", () => {
 
     const empty = await createTestThrough(key, {
       ...RESCHEDULING,
-      expected_behaviors: ["   "],
+      expectedBehaviors: ["   "],
     });
     expect(empty.body).toEqual({
       error: "unprocessable",
@@ -364,7 +364,7 @@ describe("creating a test", () => {
     // words for a problem that is in the envelope.
     const retired = await createTestThrough(key, {
       ...RESCHEDULING,
-      expected_behaviors: [
+      expectedBehaviors: [
         { behavior: "confirms the new time back", priority: "P0" },
       ],
     });
@@ -414,11 +414,11 @@ describe("creating a test", () => {
 
     const edited = await request(
       "PATCH",
-      `/api/tests/${String(created.body.id)}`,
+      `/v1/tests/${String(created.body.id)}`,
       key,
       {
         graders: [],
-        expected_version_id: String(created.body.version_id),
+        expectedVersionId: String(created.body.versionId),
       },
     );
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(422);
@@ -450,28 +450,28 @@ describe("the list of tests", () => {
       const seeded = await createTest(auth, {
         name: `test ${String(index).padStart(2, "0")}`,
         scenario: RESCHEDULING.scenario,
-        expectedBehaviors: [...RESCHEDULING.expected_behaviors],
+        expectedBehaviors: [...RESCHEDULING.expectedBehaviors],
       });
       written.push(seeded.id);
     }
 
-    const page = await request("GET", "/api/tests", key);
+    const page = await request("GET", "/v1/tests", key);
     expect(page.statusCode).toBe(200);
-    const items = page.body.items as { id: string; name: string }[];
+    const items = page.body.tests as { id: string; name: string }[];
     expect(items).toHaveLength(A_PAGE);
     // Newest first, so the last one written is the first one read.
     expect(items[0]?.id).toBe(written.at(-1));
-    expect(page.body.next_cursor).toBe(items.at(-1)?.id);
+    expect(page.body.nextPageToken).toBe(items.at(-1)?.id);
 
     const rest = await request(
       "GET",
-      `/api/tests?cursor=${String(page.body.next_cursor)}`,
+      `/v1/tests?pageToken=${String(page.body.nextPageToken)}`,
       key,
     );
-    const remaining = rest.body.items as { id: string }[];
+    const remaining = rest.body.tests as { id: string }[];
     expect(remaining.map((test) => test.id)).toEqual([written[0]]);
     // Null rather than absent, so "no next page" is told from "an older shape".
-    expect(rest.body.next_cursor).toBeNull();
+    expect(rest.body.nextPageToken).toBeNull();
 
     expect(new Set([...items, ...remaining].map((test) => test.id))).toEqual(
       new Set(written),
@@ -491,12 +491,12 @@ describe("the list of tests", () => {
 
     const listed = await request(
       "GET",
-      "/api/tests",
+      "/v1/tests",
       await projectKeyFor(api.app, grace),
     );
 
     expect(listed.statusCode).toBe(200);
-    expect(listed.body).toEqual({ items: [], next_cursor: null });
+    expect(listed.body).toEqual({ tests: [], nextPageToken: null });
   });
 
   it("reads the project the credential acts in, and no sibling of it", async () => {
@@ -514,10 +514,10 @@ describe("the list of tests", () => {
     });
 
     const there = await mintKey(api.app, ada.cookie, "outbound", outbound.id);
-    const listed = await request("GET", "/api/tests", there);
+    const listed = await request("GET", "/v1/tests", there);
 
     expect(listed.statusCode).toBe(200);
-    expect(listed.body.items).toEqual([]);
+    expect(listed.body.tests).toEqual([]);
   });
 
   it("refuses a filter naming another customer's project, confirming nothing about it", async () => {
@@ -529,7 +529,7 @@ describe("the list of tests", () => {
 
     const refused = await request(
       "GET",
-      `/api/tests?project=${grace.projectId}`,
+      `/v1/tests?projectId=${grace.projectId}`,
       ada.secret,
     );
 
@@ -551,7 +551,7 @@ describe("the list of tests", () => {
 
     const refused = await request(
       "GET",
-      "/api/tests?cursor=not-a-cursor",
+      "/v1/tests?pageToken=not-a-cursor",
       await projectKeyFor(api.app, ada),
     );
 
@@ -578,19 +578,19 @@ describe("one frozen version", () => {
 
     const frozen = await request(
       "GET",
-      `/api/test-versions/${String(created.body.version_id)}`,
+      `/v1/test-versions/${String(created.body.versionId)}`,
       key,
     );
 
     expect(frozen.statusCode).toBe(200);
     expect(frozen.body).toMatchObject({
-      id: created.body.version_id,
-      test_id: created.body.id,
-      test_name: RESCHEDULING.name,
+      id: created.body.versionId,
+      testId: created.body.id,
+      testName: RESCHEDULING.name,
       version: 1,
       current: true,
       scenario: RESCHEDULING.scenario,
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expectedBehaviors: [...RESCHEDULING.expectedBehaviors],
     });
   });
 
@@ -600,21 +600,21 @@ describe("one frozen version", () => {
     await agentFor(ada);
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
-    const pinned = String(created.body.version_id);
+    const pinned = String(created.body.versionId);
 
     const edited = await request(
       "PATCH",
-      `/api/tests/${String(created.body.id)}`,
+      `/v1/tests/${String(created.body.id)}`,
       key,
       {
         name: "Reschedules, renamed",
         scenario: "They want the Wednesday slot instead.",
-        expected_version_id: pinned,
+        expectedVersionId: pinned,
       },
     );
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
 
-    const stale = await request("GET", `/api/test-versions/${pinned}`, key);
+    const stale = await request("GET", `/v1/test-versions/${pinned}`, key);
 
     expect(stale.statusCode).toBe(200);
     expect(stale.body).toMatchObject({
@@ -623,7 +623,7 @@ describe("one frozen version", () => {
       version: 1,
       // The name is identity and was never versioned, so a stale pin still
       // names the test somebody has to go and look at.
-      test_name: "Reschedules, renamed",
+      testName: "Reschedules, renamed",
       scenario: RESCHEDULING.scenario,
     });
   });
@@ -636,7 +636,7 @@ describe("one frozen version", () => {
 
     const refused = await request(
       "GET",
-      `/api/test-versions/${missing}`,
+      `/v1/test-versions/${missing}`,
       await projectKeyFor(api.app, ada),
     );
 
@@ -656,11 +656,11 @@ describe("one frozen version", () => {
     const created = await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
     });
-    const theirs = String(created.body.version_id);
+    const theirs = String(created.body.versionId);
 
     const refused = await request(
       "GET",
-      `/api/test-versions/${theirs}`,
+      `/v1/test-versions/${theirs}`,
       await projectKeyFor(api.app, grace),
     );
 
@@ -681,10 +681,10 @@ describe("editing a test", () => {
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
 
-    const edited = await request("PATCH", `/api/tests/${testId}`, key, {
+    const edited = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       scenario: "They want the Wednesday slot instead.",
-      expected_version_id: created.body.version_id,
+      expectedVersionId: created.body.versionId,
     });
 
     expect(edited.statusCode).toBe(200);
@@ -693,7 +693,7 @@ describe("editing a test", () => {
       version: 2,
       scenario: "They want the Wednesday slot instead.",
     });
-    expect(edited.body.version_id).not.toBe(created.body.version_id);
+    expect(edited.body.versionId).not.toBe(created.body.versionId);
     expect(await versionCount(testId)).toBe(2);
   });
 
@@ -716,18 +716,18 @@ describe("editing a test", () => {
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
 
-    const refused = await request("PATCH", `/api/tests/${testId}`, key, {
+    const refused = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
-      expected_version_id: created.body.version_id,
+      expectedVersionId: created.body.versionId,
       agents: [agentId],
     });
 
     expect(refused.statusCode).toBe(422);
     expect(String(refused.body.message)).toContain(
-      `POST /api/tests/${testId}/agents`,
+      `POST /v1/tests/${testId}/agents`,
     );
     expect(String(refused.body.message)).toContain(
-      "expected_applicability_revision",
+      "expectedApplicabilityRevision",
     );
     // Refused whole: no version was minted, so the scenario in the same body
     // did not land either.
@@ -742,7 +742,7 @@ describe("editing a test", () => {
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
 
-    const refused = await request("PATCH", `/api/tests/${testId}`, key, {
+    const refused = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       scenario: "written against nothing at all",
     });
@@ -752,26 +752,26 @@ describe("editing a test", () => {
       error: "unprocessable",
       message:
         "an edit says which version it was written against, and this one " +
-        "named no expected_version_id. Send the version_id you last read " +
+        "named no expectedVersionId. Send the versionId you last read " +
         "for this test, or read the test again and send the version it " +
         "names now.",
     });
     expect(await versionCount(testId)).toBe(1);
 
     // An empty one is a version nobody named, and reads the same way.
-    const blank = await request("PATCH", `/api/tests/${testId}`, key, {
+    const blank = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       scenario: "written against nothing at all",
-      expected_version_id: "",
+      expectedVersionId: "",
     });
     expect(blank.body).toEqual(refused.body);
 
     // And the same edit naming the version goes through, so what was refused
     // was the missing version and nothing else about the body.
-    const named = await request("PATCH", `/api/tests/${testId}`, key, {
+    const named = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       scenario: "written against nothing at all",
-      expected_version_id: created.body.version_id,
+      expectedVersionId: created.body.versionId,
     });
     expect(named.statusCode, JSON.stringify(named.body)).toBe(200);
     expect(await versionCount(testId)).toBe(2);
@@ -784,20 +784,20 @@ describe("editing a test", () => {
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
-    const stale = String(created.body.version_id);
+    const stale = String(created.body.versionId);
 
     // The teammate in the dashboard, who got there first.
-    const moved = await request("PATCH", `/api/tests/${testId}`, key, {
+    const moved = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       scenario: "They want the Wednesday slot instead.",
-      expected_version_id: stale,
+      expectedVersionId: stale,
     });
-    const current = String(moved.body.version_id);
+    const current = String(moved.body.versionId);
 
-    const refused = await request("PATCH", `/api/tests/${testId}`, key, {
+    const refused = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       scenario: "They want the Friday slot instead.",
-      expected_version_id: stale,
+      expectedVersionId: stale,
     });
 
     expect(refused.statusCode).toBe(409);
@@ -806,15 +806,15 @@ describe("editing a test", () => {
       message:
         `this edit was written against version ${stale}, and the test has ` +
         `moved on to ${current}. Read the test again and send the edit with ` +
-        `expected_version_id set to the version it names now.`,
+        `expectedVersionId set to the version it names now.`,
       test: { id: testId, name: RESCHEDULING.name },
-      expected_version_id: stale,
-      current_version_id: current,
+      expectedVersionId: stale,
+      currentVersionId: current,
     });
 
     // Refused and not merged: the refused edit wrote nothing at all.
     expect(await versionCount(testId)).toBe(2);
-    const still = await request("GET", `/api/test-versions/${current}`, key);
+    const still = await request("GET", `/v1/test-versions/${current}`, key);
     expect(still.body.scenario).toBe("They want the Wednesday slot instead.");
   });
 
@@ -826,16 +826,16 @@ describe("editing a test", () => {
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
 
-    const again = await request("PATCH", `/api/tests/${testId}`, key, {
+    const again = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       personas: (created.body.personas as { name: string }[]).map(
         (persona) => persona.name,
       ),
-      expected_version_id: created.body.version_id,
+      expectedVersionId: created.body.versionId,
     });
 
     expect(again.statusCode).toBe(200);
-    expect(again.body.version_id).toBe(created.body.version_id);
+    expect(again.body.versionId).toBe(created.body.versionId);
     expect(again.body.version).toBe(1);
     expect(await versionCount(testId)).toBe(1);
   });
@@ -848,19 +848,19 @@ describe("editing a test", () => {
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
 
-    const renamed = await request("PATCH", `/api/tests/${testId}`, key, {
+    const renamed = await request("PATCH", `/v1/tests/${testId}`, key, {
       ...RESCHEDULING,
       name: "Moves a booked appointment",
       personas: (created.body.personas as { name: string }[]).map(
         (persona) => persona.name,
       ),
-      expected_version_id: created.body.version_id,
+      expectedVersionId: created.body.versionId,
     });
 
     expect(renamed.statusCode).toBe(200);
     expect(renamed.body.name).toBe("Moves a booked appointment");
     expect(renamed.body.version).toBe(1);
-    expect(renamed.body.version_id).toBe(created.body.version_id);
+    expect(renamed.body.versionId).toBe(created.body.versionId);
     expect(await versionCount(testId)).toBe(1);
   });
 
@@ -873,18 +873,18 @@ describe("editing a test", () => {
 
     const edited = await request(
       "PATCH",
-      `/api/tests/${String(created.body.id)}`,
+      `/v1/tests/${String(created.body.id)}`,
       key,
       {
         scenario: "They want the Wednesday slot instead.",
-        expected_version_id: created.body.version_id,
+        expectedVersionId: created.body.versionId,
       },
     );
 
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
     expect(edited.body).toMatchObject({
       name: RESCHEDULING.name,
-      expected_behaviors: [...RESCHEDULING.expected_behaviors],
+      expectedBehaviors: [...RESCHEDULING.expectedBehaviors],
       personas: created.body.personas,
       version: 2,
     });
@@ -903,12 +903,12 @@ describe("editing a test", () => {
 
     const refused = await request(
       "PATCH",
-      `/api/tests/${theirs}`,
+      `/v1/tests/${theirs}`,
       await projectKeyFor(api.app, grace),
       {
         ...RESCHEDULING,
         scenario: "reaching across",
-        expected_version_id: created.body.version_id,
+        expectedVersionId: created.body.versionId,
       },
     );
 
@@ -935,13 +935,13 @@ describe("who may do what", () => {
     });
     const theirs = await projectKeyFor(api.app, vic);
 
-    const listed = await request("GET", "/api/tests", theirs);
+    const listed = await request("GET", "/v1/tests", theirs);
     expect(listed.statusCode).toBe(200);
-    expect((listed.body.items as unknown[]).length).toBe(1);
+    expect((listed.body.tests as unknown[]).length).toBe(1);
 
     const frozen = await request(
       "GET",
-      `/api/test-versions/${String(authored.body.version_id)}`,
+      `/v1/test-versions/${String(authored.body.versionId)}`,
       theirs,
     );
     expect(frozen.statusCode).toBe(200);
@@ -955,12 +955,12 @@ describe("who may do what", () => {
 
     const edited = await request(
       "PATCH",
-      `/api/tests/${String(authored.body.id)}`,
+      `/v1/tests/${String(authored.body.id)}`,
       theirs,
       {
         ...RESCHEDULING,
         scenario: "a viewer's edit",
-        expected_version_id: authored.body.version_id,
+        expectedVersionId: authored.body.versionId,
       },
     );
     expect(edited.statusCode).toBe(403);
@@ -992,7 +992,7 @@ describe("who may do what", () => {
     // A body the door would refuse as unprocessable if it ever looked at one.
     const refused = await createTestThrough(
       "egma_sk_this-was-never-a-key-anybody-was-given",
-      { name: "", scenario: "", expected_behaviors: [] },
+      { name: "", scenario: "", expectedBehaviors: [] },
     );
 
     expect(refused.statusCode).toBe(401);
@@ -1013,7 +1013,7 @@ describe("who may do what", () => {
     // answers who-is-asking before a single byte of the body is looked at.
     const refused = await api.app.inject({
       method: "POST",
-      url: "/api/tests",
+      url: "/v1/tests",
       headers: {
         authorization: "Bearer egma_sk_this-was-never-a-key-anybody-was-given",
         "content-type": "application/json",
@@ -1042,8 +1042,8 @@ describe("the project a write lands in", () => {
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
     expect(await projectOf(String(created.body.id))).toBe(ada.projectId);
 
-    const listed = await request("GET", "/api/tests", ada.secret);
-    expect((listed.body.items as { id: string }[])[0]?.id).toBe(created.body.id);
+    const listed = await request("GET", "/v1/tests", ada.secret);
+    expect((listed.body.tests as { id: string }[])[0]?.id).toBe(created.body.id);
   });
 
   it("is asked for rather than guessed at once the organization holds two", async () => {
@@ -1056,7 +1056,7 @@ describe("the project a write lands in", () => {
     });
 
     const written = await createTestThrough(ada.secret, { ...RESCHEDULING });
-    const listed = await request("GET", "/api/tests", ada.secret);
+    const listed = await request("GET", "/v1/tests", ada.secret);
 
     for (const answer of [written, listed]) {
       expect(answer.statusCode).toBe(400);
@@ -1086,14 +1086,14 @@ describe("the project a write lands in", () => {
 
     const created = await createTestThrough(ada.secret, {
       ...RESCHEDULING,
-      project: outbound.id,
+      projectId: outbound.id,
       personas: ["Omar"],
     });
 
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
     expect(await projectOf(String(created.body.id))).toBe(outbound.id);
     expect(created.body.personas).toEqual([
-      { id: omar, name: "Omar", archived_at: null },
+      { id: omar, name: "Omar", archivedAt: null },
     ]);
   });
 
@@ -1106,7 +1106,7 @@ describe("the project a write lands in", () => {
 
     const refused = await createTestThrough(ada.secret, {
       ...RESCHEDULING,
-      project: grace.projectId,
+      projectId: grace.projectId,
     });
 
     expect(refused.statusCode).toBe(403);
@@ -1134,7 +1134,7 @@ describe("the project a write lands in", () => {
 
     const refused = await createTestThrough(await projectKeyFor(api.app, ada), {
       ...RESCHEDULING,
-      project: outbound.id,
+      projectId: outbound.id,
     });
 
     expect(refused.statusCode).toBe(403);
@@ -1157,7 +1157,7 @@ describe("the concurrency token, under the lock", () => {
     const key = await projectKeyFor(api.app, ada);
     const created = await createTestThrough(key, { ...RESCHEDULING });
     const testId = String(created.body.id);
-    const read = String(created.body.version_id);
+    const read = String(created.body.versionId);
 
     // Both writers hold the version they last read, which is the case the token
     // exists for. They are sent at once, and neither knows about the other.
@@ -1169,9 +1169,9 @@ describe("the concurrency token, under the lock", () => {
         () => ({ refused: false }),
         () => ({ refused: true }),
       ),
-      request("PATCH", `/api/tests/${testId}`, key, {
+      request("PATCH", `/v1/tests/${testId}`, key, {
         scenario: "the file's words",
-        expected_version_id: read,
+        expectedVersionId: read,
       }),
     ]);
 
@@ -1186,10 +1186,10 @@ describe("the concurrency token, under the lock", () => {
       expect(file.statusCode).toBe(409);
       expect(file.body).toMatchObject({
         error: "conflict",
-        expected_version_id: read,
+        expectedVersionId: read,
         test: { id: testId, name: RESCHEDULING.name },
       });
-      expect(file.body.current_version_id).not.toBe(read);
+      expect(file.body.currentVersionId).not.toBe(read);
     }
   });
 });

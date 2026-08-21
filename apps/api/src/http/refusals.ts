@@ -230,7 +230,7 @@ export function projectOutsideOrganization(projectId: string): string {
 export function identityConflict(resource: string, resourceId: string): string {
   return (
     `${resource} ${resourceId} changed after you opened it. Read it again, ` +
-    `keep or reapply your edits, and send the update with expected_revision ` +
+    `keep or reapply your edits, and send the update with expectedRevision ` +
     `set to its new revision.`
   );
 }
@@ -276,7 +276,7 @@ export const REFUSALS = {
   ): string =>
     `this ${resource} edit was written against version ${expected}, and it ` +
     `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
-    `your edits, and send them with expected_version_id set to ${current}.`,
+    `your edits, and send them with expectedVersionId set to ${current}.`,
 
   testNeedsAgent:
     "Every test must apply to at least one active agent. Select an active " +
@@ -327,7 +327,7 @@ export const REFUSALS = {
   applicabilityConflict: (testId: string): string =>
     `Test ${testId}'s applicable agents changed after you opened it. Read the ` +
     "test again, keep or reapply your link changes, and send them with " +
-    "expected_applicability_revision set to its new applicability revision.",
+    "expectedApplicabilityRevision set to its new applicability revision.",
 
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +

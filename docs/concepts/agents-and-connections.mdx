@@ -7,7 +7,7 @@ description: "Understand the separate platform, connection kind, access variant,
 An **agent** is Egma's stable record of the agent you test. A **connection** is
 one way Egma can reach that agent for a simulation.
 
-Connections are separate database records. Each connection has an `agent_id`
+Connections are separate database records. Each connection has an `agentId`
 that links it to one agent. An agent does not store a connection inside its own
 row. Agent API responses can include related connections as a convenience, but
 the two are still separate records with separate identifiers and lifecycles.
@@ -100,9 +100,9 @@ Create an agent with an inline Retell chat connection:
 {
   "name": "order-line",
   "connection": {
-    "agent_platform": "retell",
-    "connection_kind": "retell_chat_api",
-    "access_variant": "retell_chat_api.api_key",
+    "agentPlatform": "retell",
+    "connectionKind": "retell_chat_api",
+    "accessVariant": "retell_chat_api.api_key",
     "modality": "chat",
     "config": { "retellAgentId": "agent_abc123" },
     "credentials": { "apiKey": "key_..." }
@@ -114,18 +114,18 @@ Attach a generic phone connection to an existing agent:
 
 ```json
 {
-  "agent_platform": null,
-  "connection_kind": "phone_number",
-  "access_variant": "phone_number.public_e164",
+  "agentPlatform": null,
+  "connectionKind": "phone_number",
+  "accessVariant": "phone_number.public_e164",
   "modality": "voice",
   "config": { "phoneNumber": "+15551234567" }
 }
 ```
 
-Use `POST /api/agents/:agentId/connections` for this request.
+Use `POST /v1/agents/:agentId/connections` for this request.
 
 <Note>
-A connection is only ever reachable through its agent. There is no `/api/connections` root. To list the connections on one agent, use `GET /api/agents/:agentId`; to see them for every agent at once, `GET /api/agents` carries them on each listed agent.
+A connection is only ever reachable through its agent. There is no `/v1/connections` root. To list the connections on one agent, use `GET /v1/agents/:agentId`; to see them for every agent at once, `GET /v1/agents` carries them on each listed agent.
 </Note>
 
 The response includes the five facts, plus `id`, topology,
@@ -151,15 +151,15 @@ agent: order-line (agt_01K...)
     modality: voice
 ```
 
-Each run names one `connection_id`. The run freezes that connection's facts so
+Each run names one `connectionId`. The run freezes that connection's facts so
 later edits do not rewrite history.
 
-## Monitoring setup is separate
+## Monitoring sources are separate
 
 A simulation connection tells Egma how to contact an agent during a test. A
-**Monitoring setup** tells Egma how to receive evidence from real production
+**monitoring source** tells Egma how to receive evidence from real production
 conversations.
 
 Retell Monitoring uses API polling. LiveKit Agents Monitoring uses OTLP from the
-running agent process. Neither setup creates or changes a simulation
+running agent process. Neither source creates or changes a simulation
 connection. See [Production telemetry](/concepts/telemetry).

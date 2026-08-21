@@ -6,10 +6,12 @@ import {
   updateOrganization,
   type Organization,
 } from "@egma/db";
+import { organizationOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { text } from "../http/reading.ts";
 import {
@@ -41,8 +43,6 @@ export type OrganizationRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const ORGANIZATION_PATH = "/api/organization";
-
 type Body = Record<string, unknown>;
 
 const EDIT_KEYS = ["name"] as const;
@@ -55,11 +55,11 @@ function described(
     id: organization.id,
     name: organization.name,
     slug: organization.slug,
-    created_at: organization.createdAt.toISOString(),
+    createdAt: organization.createdAt.toISOString(),
     // So a page renders the controls it may offer rather than offering
     // everything and finding out. Never the boundary; the write below checks
     // again, and so does the data-access module.
-    may_manage_organization: mayManage,
+    mayManageOrganization: mayManage,
   };
 }
 
@@ -73,62 +73,70 @@ export async function organizationRoutes(
   });
 
   /** Everybody may see which organization they are in. */
-  app.get(ORGANIZATION_PATH, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const organization = await readOrganization(auth);
+  registerPlatformOperation(
+    app,
+    organizationOperations.getOrganization,
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const organization = await readOrganization(auth);
 
-    if (organization === undefined) {
-      return sendRefusal(
-        reply,
-        "not_found",
-        "This session resolves to no organization. Sign in again, and ask an " +
-          "admin if it keeps happening.",
+      if (organization === undefined) {
+        return sendRefusal(
+          reply,
+          "not_found",
+          "This session resolves to no organization. Sign in again, and ask an " +
+            "admin if it keeps happening.",
+        );
+      }
+
+      return reply.send(
+        described(
+          organization,
+          permits(auth, "manage_organization", {
+            organizationId: auth.organizationId,
+            projectId: auth.projectId,
+          }),
+        ),
       );
-    }
+    },
+  );
 
-    return reply.send(
-      described(
-        organization,
-        permits(auth, "manage_organization", {
-          organizationId: auth.organizationId,
-          projectId: auth.projectId,
-        }),
-      ),
-    );
-  });
+  registerPlatformOperation(
+    app,
+    organizationOperations.updateOrganization,
+    async (request, reply) => {
+      const { auth } = requesterOf(request);
+      const body = (request.body ?? {}) as Body;
 
-  app.patch(ORGANIZATION_PATH, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const body = (request.body ?? {}) as Body;
+      if (auth.role !== "admin") {
+        return sendRefusal(
+          reply,
+          "not_permitted",
+          REFUSALS.notPermitted(auth.role, "change organization settings"),
+        );
+      }
 
-    if (auth.role !== "admin") {
-      return sendRefusal(
-        reply,
-        "not_permitted",
-        REFUSALS.notPermitted(auth.role, "change organization settings"),
-      );
-    }
+      for (const key of Object.keys(body)) {
+        if ((EDIT_KEYS as readonly string[]).includes(key)) continue;
+        return invalid(
+          reply,
+          `an organization has no editable key "${key}"; it holds ${EDIT_KEYS.join(", ")}`,
+        );
+      }
 
-    for (const key of Object.keys(body)) {
-      if ((EDIT_KEYS as readonly string[]).includes(key)) continue;
-      return invalid(
-        reply,
-        `an organization has no editable key "${key}"; it holds ${EDIT_KEYS.join(", ")}`,
-      );
-    }
+      const edited = await updateOrganization(auth, { name: text(body.name) });
+      if (edited === undefined) {
+        return sendRefusal(
+          reply,
+          "not_found",
+          "This session resolves to no organization. Sign in again, and ask an " +
+            "admin if it keeps happening.",
+        );
+      }
 
-    const edited = await updateOrganization(auth, { name: text(body.name) });
-    if (edited === undefined) {
-      return sendRefusal(
-        reply,
-        "not_found",
-        "This session resolves to no organization. Sign in again, and ask an " +
-          "admin if it keeps happening.",
-      );
-    }
-
-    return reply.send(described(edited, true));
-  });
+      return reply.send(described(edited, true));
+    },
+  );
 
   app.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof UnprocessableInputError) {

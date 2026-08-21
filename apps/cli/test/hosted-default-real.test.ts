@@ -80,7 +80,7 @@ it("reaches a real local platform with nothing configured anywhere", async () =>
     // non-empty; `egma connect` is what does it for a person.
     const registered = await platform.api.inject({
       method: "POST",
-      url: "/api/agents",
+      url: "/v1/agents",
       headers: { authorization: `Bearer ${customer.secret}` },
       payload: { name: "Receptionist" },
     });
@@ -120,14 +120,7 @@ it("reaches a real local platform with nothing configured anywhere", async () =>
     const stored = await platform.database.sql<{ name: string }>("select name from test");
     expect(stored.rows.map((row) => row.name)).toEqual(["moves-appointment"]);
 
-    // The public identity was read before any of that. The address the CLI
-    // prints is the origin that platform names for itself, which only that read
-    // can supply — a platform naming any other origin is refused rather than
-    // printed. `push` writes no binding; committing one is `connect`'s job.
-    const identity = (await fetch(`${platform.origin}/api/platform`).then((answer) =>
-      answer.json(),
-    )) as { instance_id: string; origin: string };
-    expect(pushed.stdout).toContain(`url: ${identity.origin}`);
+    // `push` writes no binding; committing one is `connect`'s job.
     expect((await readConfig(paths.config)).platform).toBeNull();
   } finally {
     await platform?.close();

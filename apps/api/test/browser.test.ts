@@ -3,7 +3,6 @@ import type { Browser, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { asSecond } from "../../web/lib/instants.ts";
-import { PLATFORM_IDENTITY_PATH } from "../src/routes/platform.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
   capturedRequests,
@@ -189,39 +188,6 @@ describe("entering the app", () => {
   );
 });
 
-describe("what a self-hoster's origin answers before anybody logs in", () => {
-  /**
-   * The address a self-hoster is handed is this one — the pages — and it is the
-   * address they paste into `npx egma --url`. The CLI reads the platform's
-   * identity there before it sends a single repository identifier, so the read
-   * has to survive the trip through this process. Proved here rather than
-   * against the API's own port, because a rewrite that forgot this path would
-   * pass every test that talks straight to the API and would still make a
-   * running platform unusable from an agent repository.
-   */
-  it("serves the platform identity through the pages, at the origin the CLI is given", async () => {
-    const read = await fetch(`${origin}${PLATFORM_IDENTITY_PATH}`, {
-      headers: { accept: "application/json" },
-    });
-    expect(read.status).toBe(200);
-
-    const identity = (await read.json()) as {
-      instance_id: string;
-      origin: string;
-    };
-    expect(identity.instance_id).toMatch(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(identity.origin).toBe(origin);
-
-    // The API's own port answers the same thing. One platform, one identity,
-    // whichever door it is read through.
-    const direct = await instance.api.inject({
-      method: "GET",
-      url: PLATFORM_IDENTITY_PATH,
-    });
-    expect(direct.json()).toEqual(identity);
-  });
-});
-
 describe("logging in from a terminal", () => {
   it(
     "opens a browser on a prefilled code, signs up, approves, and leaves a working key behind",
@@ -297,7 +263,7 @@ describe("logging in from a terminal", () => {
 
       // Which works on a real request, in Acme's account, resolved from the key
       // row and from nothing the terminal said.
-      const used = await fetch(`${origin}/api/keys`, {
+      const used = await fetch(`${origin}/v1/keys`, {
         headers: { authorization: `Bearer ${secret}` },
       });
       expect(used.status).toBe(200);
@@ -447,7 +413,7 @@ describe("adding a colleague, with no mail configured", () => {
       const memberActions: string[] = [];
       const recordMemberAction = (request: Request) => {
         const path = new URL(request.url()).pathname;
-        if (request.method() === "POST" && /\/api\/members\/[^/]+\/(?:deactivate|remove)$/u.test(path)) {
+        if (request.method() === "POST" && /\/v1\/members\/[^/]+\/(?:deactivate|remove)$/u.test(path)) {
           memberActions.push(path);
         }
       };
@@ -569,10 +535,10 @@ async function keyForTheProject(cookie: string, name: string): Promise<string> {
   expect(me.status, await me.clone().text()).toBe(200);
   const projects = ((await me.json()) as { projects: { id: string }[] }).projects;
 
-  const minted = await fetch(`${origin}/api/keys`, {
+  const minted = await fetch(`${origin}/v1/keys`, {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
-    body: JSON.stringify({ name, project_id: projects[0]?.id }),
+    body: JSON.stringify({ name, projectId: projects[0]?.id }),
   });
   expect(minted.status, await minted.clone().text()).toBe(201);
   return ((await minted.json()) as { secret: string }).secret;
@@ -1264,7 +1230,7 @@ describe("what a project recorded in production", () => {
       expect(asked.length, "the list read the store").toBeGreaterThan(0);
       for (const one of asked) {
         expect(one.searchParams.get("source"), one.href).toBe("production");
-        expect(one.searchParams.get("project_id"), one.href).toBe(acme);
+        expect(one.searchParams.get("projectId"), one.href).toBe(acme);
         // And a window on every one of them, because the store is filed by time
         // and refuses a read that bounded nothing.
         expect(one.searchParams.get("from"), one.href).not.toBeNull();
@@ -2056,7 +2022,7 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
        */
       const refused = page.waitForResponse(
         (answer) =>
-          answer.url().includes("/api/simulations/") &&
+          answer.url().includes("/v1/simulations/") &&
           answer.url().endsWith("/recording"),
       );
       await openTranscript(silent);
@@ -2214,7 +2180,7 @@ describe("pressing Use on a second grader while the first one's form is open", (
  * settles that the values come back.
  *
  * It is also the only place the **forwarding rule** for a copy's own address is
- * exercised. `/api/graders/:path*` is a rewrite this Next process resolves at
+ * exercised. `/v1/graders/:path*` is a rewrite this Next process resolves at
  * build time; without it the edit would post into this app's own file routing
  * and read Next's 404 page as though egma had refused it — and every other test
  * in the repository would still pass, because they all speak to the API
@@ -2336,10 +2302,10 @@ describe("recovering when a page cannot load", () => {
   it(
     "shows a retry for People and for an invitation lookup",
     async () => {
-      await page.route("**/api/members", (route) => route.abort());
+      await page.route("**/v1/members", (route) => route.abort());
       await page.goto(`${origin}/members`);
       await page.waitForSelector("text=Egma could not be reached");
-      await page.unroute("**/api/members");
+      await page.unroute("**/v1/members");
       await page.getByRole("button", { name: "Try again" }).click();
       await page.waitForSelector("text=Everybody in this organization");
 
@@ -2625,20 +2591,38 @@ describe("the complete product, walked in order in a second project", () => {
         .selectOption("phone_number.public_e164");
       await walk.fill("#connection-name", "Retell staging");
       await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
+      const discoveryResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/v1/agents:discover",
+      );
       await walk.getByRole("button", { name: "Load Retell agents" }).click();
+      const discovered = await discoveryResponse;
+      expect(discovered.status(), await discovered.text()).toBe(200);
       await walk.waitForSelector("#retell-agent");
       await expect.poll(() => walk.inputValue("#retell-agent")).toBe(
         BROWSER_RETELL_AGENT,
       );
-      await expect.poll(() => walk.inputValue("#retell-number")).toBe(
-        BROWSER_RETELL_NUMBER,
+      await expect.poll(() =>
+        walk
+          .locator("#discovered-connection option:checked")
+          .textContent(),
+      ).toContain(BROWSER_RETELL_NUMBER);
+      const connectionResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          /^\/v1\/agents\/agt_[^/]+\/connections$/u.test(
+            new URL(response.url()).pathname,
+          ),
       );
       await walk.getByRole("button", { name: "Add connection" }).click();
+      const connected = await connectionResponse;
+      expect(connected.status(), await connected.text()).toBe(201);
 
       await walk.waitForURL(/\/agents\/agt_[^/]+\/onboarding$/);
-      // Provider discovery rechecks the route immediately before the write.
-      // The resulting connection is only the public phone destination; the
-      // Retell key and agent id do not enter the stored connection.
+      // The selected discovery candidate goes through the generic connection
+      // write. The stored connection is only the public phone destination; the
+      // Retell key and agent id do not enter it.
       const stored = await instance.database.sql<{
         id: string;
         type: string;
@@ -2870,7 +2854,7 @@ describe("the complete product, walked in order in a second project", () => {
       const startResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
-          new URL(response.url()).pathname === "/api/runs",
+          new URL(response.url()).pathname === "/v1/runs",
       );
       await confirmation.getByRole("button", { name: "Start run" }).click();
       const started = await startResponse;
@@ -3968,7 +3952,7 @@ describe("the complete product, walked in order in a second project", () => {
           // library's business rather than something this test should depend
           // on.
           const theAgentsRead = (asked: URL) =>
-            asked.pathname === "/api/agents";
+            asked.pathname === "/v1/agents";
           const holdTheAgentsRead = async (route: Route) => {
             // The real answer is fetched at once; only its delivery is held.
             // The shorter spelling — await the gate, then `route.continue()`

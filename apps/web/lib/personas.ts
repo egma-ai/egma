@@ -1,5 +1,12 @@
+import type {
+  GetPersonaFormResponse,
+  GetPersonaResponse,
+  ListPersonasResponse,
+  ListPersonaVersionsResponse,
+} from "@egma/platform-api/client";
+
 /**
- * The personas of one project, as `/api/personas` answers them.
+ * The personas of one project, as `/v1/personas` answers them.
  *
  * A **persona** is the synthetic person who speaks with the agent. Egma
  * supplies an Egma-provided persona to every project, and a project can author
@@ -17,126 +24,21 @@
  * the two would drift the first time the API grew a field.
  */
 
-export type PersonaTraits = {
-  readonly personality: string;
-  readonly language: string;
-  readonly manner?: string;
-  readonly patience?: string;
-  readonly accent?: string;
-  readonly backgroundNoise?: string;
-  readonly underFriction?: string;
-};
+export type Persona = GetPersonaResponse;
+export type PersonaTraits = Persona["traits"];
 
-export type ModelSelection = {
-  readonly provider: string;
-  readonly model: string;
-};
-
-export type PersonaModels = {
-  readonly llm: ModelSelection;
-  readonly stt: ModelSelection;
-  readonly tts: ModelSelection & {
-    readonly voiceId: string;
-    readonly speed: number;
-  };
-};
-
-export type Persona = {
-  readonly id: string;
-  /** Null for an Egma-provided persona. */
-  readonly project_id: string | null;
-  /** Who owns the definition and therefore who may edit it. */
-  readonly owner: "egma" | "organization";
-  readonly name: string;
-  readonly description: string | null;
-  readonly version: number;
-  /** The current version's own id — what a traits write is written against. */
-  readonly version_id: string;
-  readonly traits: PersonaTraits;
-  /** Complete, required, and owned by this immutable version. */
-  readonly models: PersonaModels;
-  /** The opaque token an identity write or a lifecycle change has to name. */
-  readonly revision: string;
-  readonly archived_at: string | null;
-  /** Whether the project points at them when a test names nobody. */
-  readonly is_default: boolean;
-  readonly created_at: string;
-  readonly updated_at: string;
-};
-
-export type PersonaPage = {
-  readonly items: readonly Persona[];
-  readonly next_cursor: string | null;
-};
+export type PersonaModels = Persona["models"];
+export type ModelSelection = PersonaModels["llm"];
+export type PersonaPage = ListPersonasResponse;
 
 /** One frozen version, as history and the older-version read show it. */
-export type PersonaVersion = {
-  readonly id: string;
-  readonly persona_id: string;
-  readonly version: number;
-  readonly traits: PersonaTraits;
-  readonly models: PersonaModels;
-  readonly created_at: string;
-};
+export type PersonaVersionPage = ListPersonaVersionsResponse;
+export type PersonaVersion = PersonaVersionPage["versions"][number];
 
-export type PersonaVersionPage = {
-  readonly items: readonly PersonaVersion[];
-  readonly next_cursor: string | null;
-};
-
-export const PERSONAS_PATH = "/api/personas";
-export const PERSONA_FORM_PATH = "/api/persona-form";
-
-export type PersonaModelCatalogEntry = ModelSelection & {
-  readonly job: "llm" | "stt" | "tts";
-  readonly label: string;
-  readonly recommended_voice_id?: string;
-};
+export type PersonaForm = GetPersonaFormResponse;
+export type PersonaModelCatalogEntry = PersonaForm["modelCatalog"][number];
 
 /** The model choices and defaults exported by the server's adapter catalog. */
-export type PersonaForm = {
-  readonly model_catalog: readonly PersonaModelCatalogEntry[];
-  readonly recommended_models: PersonaModels;
-  readonly speed_range: { readonly slowest: number; readonly fastest: number };
-};
-
-/** One server-side search and one cursor page of a lifecycle state. */
-export function personasQuery(options: {
-  readonly archived?: boolean;
-  readonly search?: string;
-  readonly cursor?: string;
-}): string {
-  const query = new URLSearchParams();
-  if (options.archived === true) query.set("archived", "true");
-  const wanted = options.search?.trim() ?? "";
-  if (wanted !== "") query.set("search", wanted);
-  if (options.cursor !== undefined) query.set("cursor", options.cursor);
-  const written = query.toString();
-  return written === "" ? PERSONAS_PATH : `${PERSONAS_PATH}?${written}`;
-}
-
-/** The list of one lifecycle state. Two lists, never one with a column. */
-export function personasPath(archived: boolean): string {
-  return personasQuery({ archived });
-}
-
-/** The next page of the same list, carrying the same filter. */
-export function personasAfter(cursor: string, archived: boolean): string {
-  return personasQuery({ archived, cursor });
-}
-
-export function personaPath(personaId: string): string {
-  return `${PERSONAS_PATH}/${personaId}`;
-}
-
-export function personaDefaultPath(personaId: string): string {
-  return `${personaPath(personaId)}/default`;
-}
-
-export function personaVersionsPath(personaId: string): string {
-  return `${PERSONAS_PATH}/${personaId}/versions`;
-}
-
 /**
  * The versioned field an editor is holding, before anybody decides whether it
  * differs from what is stored.
@@ -243,9 +145,9 @@ export function modelsDraftOf(models: PersonaModels): ModelsDraft {
 }
 
 /** One complete models value, in the exact shape the API validates. */
-export function modelsFrom(draft: ModelsDraft): Record<string, unknown> {
+export function modelsFrom(draft: ModelsDraft): PersonaModels {
   const speed = Number(draft.speed);
-  return {
+  const models = {
     llm: { provider: draft.llmProvider, model: draft.llmModel },
     stt: { provider: draft.sttProvider, model: draft.sttModel },
     tts: {
@@ -257,6 +159,11 @@ export function modelsFrom(draft: ModelsDraft): Record<string, unknown> {
       speed: Number.isNaN(speed) ? draft.speed : speed,
     },
   };
+
+  // The current API accepts invalid speed text so it can return its own range
+  // refusal. The generated contract says this value is always a number. Keep
+  // the existing request behavior until that contract mismatch is resolved.
+  return models as unknown as PersonaModels;
 }
 
 export function sameModelsDraft(

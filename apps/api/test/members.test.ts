@@ -53,13 +53,13 @@ async function colleagueOf(
 ): Promise<Person> {
   const invited = await api.app.inject({
     method: "POST",
-    url: "/api/invitations",
+    url: "/v1/invitations",
     headers: { cookie: host.cookie },
     payload: { email, role },
   });
   expect(invited.statusCode, invited.body).toBe(201);
 
-  const link = (invited.json() as { accept_url: string }).accept_url;
+  const link = (invited.json() as { acceptUrl: string }).acceptUrl;
   const token = new URL(link).searchParams.get("token") ?? "";
 
   const joined = await api.app.inject({
@@ -83,7 +83,7 @@ async function colleagueOf(
 async function mintKey(person: Person, name: string): Promise<string> {
   const minted = await api.app.inject({
     method: "POST",
-    url: "/api/keys",
+    url: "/v1/keys",
     headers: { cookie: person.cookie },
     payload: { name },
   });
@@ -99,7 +99,7 @@ async function act(
 ): Promise<Awaited<ReturnType<TestApi["app"]["inject"]>>> {
   return api.app.inject({
     method: "POST",
-    url: `/api/members/${userId}/${what}`,
+    url: `/v1/members/${userId}/${what}`,
     headers: { cookie: person.cookie },
     payload: body,
   });
@@ -115,19 +115,19 @@ describe("the list of people", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/members",
+      url: "/v1/members",
       headers: { cookie: ada.cookie },
     });
 
     const body = listed.json() as {
       members: { email: string; role: string }[];
-      may_manage_members: boolean;
+      mayManageMembers: boolean;
     };
     expect(body.members.map((one) => one.email).sort()).toEqual([
       "ada@acme.example",
       "mia@acme.example",
     ]);
-    expect(body.may_manage_members).toBe(true);
+    expect(body.mayManageMembers).toBe(true);
   });
 
   it("is readable by everybody, because reading is not what roles are for", async () => {
@@ -137,19 +137,19 @@ describe("the list of people", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/members",
+      url: "/v1/members",
       headers: { cookie: vic.cookie },
     });
 
     expect(listed.statusCode).toBe(200);
     const body = listed.json() as {
       members: unknown[];
-      may_manage_members: boolean;
+      mayManageMembers: boolean;
     };
     expect(body.members).toHaveLength(2);
     // They can see who is here and cannot act on any of them, and the answer
     // says so rather than leaving a page to find out by being refused.
-    expect(body.may_manage_members).toBe(false);
+    expect(body.mayManageMembers).toBe(false);
   });
 });
 
@@ -179,7 +179,7 @@ describe("changing somebody's role", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/members",
+      url: "/v1/members",
       headers: { cookie: ada.cookie },
     });
     const roles = (listed.json() as { members: { role: string }[] }).members;
@@ -200,7 +200,7 @@ describe("changing somebody's role", () => {
     const adas = await mintKey(ada, "ada's terminal");
     const before = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: { authorization: `Bearer ${theirs}` },
     });
     expect((before.json() as { keys: unknown[] }).keys).toHaveLength(2);
@@ -210,7 +210,7 @@ describe("changing somebody's role", () => {
     // No key row was touched, and there was nothing to go looking for.
     const after = await api.app.inject({
       method: "GET",
-      url: "/api/keys",
+      url: "/v1/keys",
       headers: { authorization: `Bearer ${theirs}` },
     });
     const keys = (after.json() as { keys: { name: string }[] }).keys;
@@ -265,7 +265,7 @@ describe("removing somebody", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: { authorization: `Bearer ${theirs}` },
         })
       ).statusCode,
@@ -273,14 +273,14 @@ describe("removing somebody", () => {
 
     const removed = await act(ada, mia.userId, "remove");
     expect(removed.statusCode).toBe(200);
-    expect(removed.json()).toMatchObject({ keys_revoked: 1 });
+    expect(removed.json()).toMatchObject({ keysRevoked: 1 });
 
     // No cache to wait out. The next request is already the one that fails.
     expect(
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: { authorization: `Bearer ${theirs}` },
         })
       ).statusCode,
@@ -321,7 +321,7 @@ describe("removing somebody", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/members",
+      url: "/v1/members",
       headers: { cookie: ada.cookie },
     });
     const emails = (listed.json() as { members: { email: string }[] }).members;
@@ -398,7 +398,7 @@ describe("deactivating an account", () => {
       (
         await api.app.inject({
           method: "GET",
-          url: "/api/keys",
+          url: "/v1/keys",
           headers: { authorization: `Bearer ${theirs}` },
         })
       ).statusCode,
@@ -435,7 +435,7 @@ describe("deactivating an account", () => {
     expect((await act(noor, ada.userId, "deactivate")).statusCode).toBe(200);
 
     // The same cookie, on the very next request, at every surface it reached.
-    for (const url of ["/api/me", "/api/members", "/api/keys"]) {
+    for (const url of ["/api/me", "/v1/members", "/v1/keys"]) {
       const after = await api.app.inject({ method: "GET", url, headers: asAda });
       expect(after.statusCode, url).toBe(401);
     }
@@ -455,16 +455,16 @@ describe("deactivating an account", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: "/api/members",
+      url: "/v1/members",
       headers: { cookie: noor.cookie },
     });
     expect(
       (listed.json() as { members: Record<string, unknown>[] }).members,
     ).toContainEqual(
       expect.objectContaining({
-        user_id: ada.userId,
+        userId: ada.userId,
         role: "admin",
-        deactivated_at: expect.any(String),
+        deactivatedAt: expect.any(String),
       }),
     );
   });

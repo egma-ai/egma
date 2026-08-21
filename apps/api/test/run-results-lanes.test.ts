@@ -83,12 +83,12 @@ async function aJudgedRun(label: string): Promise<{
   const key = await projectKeyFor(api.app, ada);
   const auth = contextFor(ada, "member");
 
-  const registered = await request("POST", "/api/agents", key, {
+  const registered = await request("POST", "/v1/agents", key, {
     name: "Front desk",
     connection: {
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -102,22 +102,22 @@ async function aJudgedRun(label: string): Promise<{
     traits: NEUTRAL_TRAITS,
   });
 
-  const created = await request("POST", "/api/tests", key, {
+  const created = await request("POST", "/v1/tests", key, {
     name: "Reschedules a booked appointment",
     scenario:
       "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-    expected_behaviors: [...THE_BEHAVIORS],
+    expectedBehaviors: [...THE_BEHAVIORS],
     personas: ["Impatient Rita"],
   });
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
 
-  const started = await request("POST", "/api/runs", key, {
-    connection: connectionId,
-    test_versions: [String(created.body.version_id)],
+  const started = await request("POST", "/v1/runs", key, {
+    connectionId: connectionId,
+    testVersionIds: [String(created.body.versionId)],
     // A start dials a real agent and spends a real judge, so the door takes the
     // caller's own key for the attempt: an answer lost on the way back must
     // never become a second conversation.
-    idempotency_key: newId("run"),
+    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -172,7 +172,7 @@ async function aJudgedRun(label: string): Promise<{
     rationale: `${assertion} was judged ${verdict}.`,
     citedSpanIds: ["turn:3"],
     runId,
-    agentId: String(started.body.agent_id),
+    agentId: String(started.body.agentId),
     agentVersionId: "",
     judgedAtMicroseconds: BigInt(Date.now()) * 1000n,
   });
@@ -204,7 +204,7 @@ describe("a run's results", () => {
   it("folds the required copies into the outcome and reports the diagnostics apart", async () => {
     const { key, runId, behaviors, diagnostic } = await aJudgedRun("run_lanes");
 
-    const read = await request("GET", `/api/runs/${runId}`, key);
+    const read = await request("GET", `/v1/runs/${runId}`, key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
 
     // The headline is the required lane, and the diagnostic's failure is
@@ -223,9 +223,9 @@ describe("a run's results", () => {
     });
 
     // Every grader that judged is listed, each saying which lane it is in.
-    const byGrader = read.body.by_grader as Record<string, unknown>[];
+    const byGrader = read.body.byGrader as Record<string, unknown>[];
     expect(
-      byGrader.map((one) => [one.grader_id, one.required, one.verdict]),
+      byGrader.map((one) => [one.graderId, one.required, one.verdict]),
     ).toEqual(
       [
         [behaviors, true, "passed"],
@@ -237,7 +237,7 @@ describe("a run's results", () => {
   it("says the same thing about the one conversation underneath it", async () => {
     const { key, runId, diagnostic } = await aJudgedRun("run_lanes_one");
 
-    const read = await request("GET", `/api/runs/${runId}`, key);
+    const read = await request("GET", `/v1/runs/${runId}`, key);
     const one = (read.body.simulations as Record<string, unknown>[])[0];
 
     expect(one).toMatchObject({
@@ -272,11 +272,11 @@ describe("a run's results", () => {
   it("resolves each assertion key into the sentence somebody wrote", async () => {
     const { key, runId } = await aJudgedRun("run_lanes_words");
 
-    const read = await request("GET", `/api/runs/${runId}`, key);
+    const read = await request("GET", `/v1/runs/${runId}`, key);
     const one = (read.body.simulations as Record<string, unknown>[])[0];
     const rows = one?.verdicts as Record<string, unknown>[];
 
-    expect(rows.map((its) => its.assertion_text)).toEqual([
+    expect(rows.map((its) => its.assertionText)).toEqual([
       THE_BEHAVIORS[0],
       THE_BEHAVIORS[1],
       // A copy that makes exactly one assertion names it by its entry's
@@ -363,12 +363,12 @@ describe("the same conversation read as a transcript", () => {
     expect(rows).toHaveLength(3);
     for (const row of rows) {
       expect(row).toHaveProperty("required");
-      expect(row.required).toBe(row.grader_id !== diagnostic);
+      expect(row.required).toBe(row.graderId !== diagnostic);
     }
     // The failed row is the diagnostic's, and it says so — which is the whole
     // difference between a red card that means something and one that does not.
     const failed = rows.find((row) => row.verdict === "failed");
-    expect(failed?.grader_id).toBe(diagnostic);
+    expect(failed?.graderId).toBe(diagnostic);
     expect(failed?.required).toBe(false);
   });
 });
@@ -397,18 +397,18 @@ describe("one run, read on every surface it appears on", () => {
     const { key, runId, simulationId, diagnostic } =
       await aJudgedRun("run_lanes_every_surface");
 
-    const detail = await request("GET", `/api/runs/${runId}`, key);
+    const detail = await request("GET", `/v1/runs/${runId}`, key);
     expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
 
-    const history = await request("GET", "/api/runs", key);
+    const history = await request("GET", "/v1/runs", key);
     expect(history.statusCode, JSON.stringify(history.body)).toBe(200);
-    const listed = (history.body.items as Record<string, unknown>[]).find(
+    const listed = (history.body.runs as Record<string, unknown>[]).find(
       (one) => one.id === runId,
     );
 
     const conversation = await request(
       "GET",
-      `/api/simulations/${simulationId}`,
+      `/v1/simulations/${simulationId}`,
       key,
     );
     expect(conversation.statusCode, JSON.stringify(conversation.body)).toBe(200);
@@ -429,7 +429,7 @@ describe("one run, read on every surface it appears on", () => {
     // The row that failed is the diagnostic's, and the conversation says so.
     const rows = conversation.body.verdicts as Record<string, unknown>[];
     const failed = rows.find((row) => row.verdict === "failed");
-    expect(failed?.grader_id).toBe(diagnostic);
+    expect(failed?.graderId).toBe(diagnostic);
     expect(failed?.required).toBe(false);
   });
 });

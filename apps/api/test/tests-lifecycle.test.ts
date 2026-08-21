@@ -42,7 +42,7 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: [
+  expectedBehaviors: [
     "verifies who it is speaking to before discussing the booking",
     "confirms the new time back before finishing",
   ],
@@ -80,14 +80,14 @@ async function anAgent(person: Customer, name: string): Promise<string> {
 type WireTest = {
   id: string;
   version: number;
-  version_id: string;
+  versionId: string;
   revision: string;
-  applicability_revision: string;
-  archived_at: string | null;
-  archive_reason: string | null;
-  agents: { id: string; name: string; archived_at: string | null }[];
-  required_capabilities: string[];
-  override_count: number;
+  applicabilityRevision: string;
+  archivedAt: string | null;
+  archiveReason: string | null;
+  agents: { id: string; name: string; archivedAt: string | null }[];
+  requiredCapabilities: string[];
+  overrideCount: number;
 };
 
 function testIn(answer: Answer): WireTest {
@@ -102,9 +102,9 @@ async function aProjectWithATest(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const agentId = await anAgent(ada, "Front desk");
 
-  const created = await browse("POST", "/api/tests", ada, {
+  const created = await browse("POST", "/v1/tests", ada, {
     ...RESCHEDULING,
-    project: ada.projectId,
+    projectId: ada.projectId,
     agents: [agentId],
   });
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
@@ -119,7 +119,7 @@ describe("the capability catalog a test editor draws from", () => {
 
     // The catalog the connection forms already draw from, and deliberately not
     // a second one: a requirement and a measurement have to name the same key.
-    const listed = await browse("GET", "/api/capabilities", ada);
+    const listed = await browse("GET", "/v1/capabilities", ada);
 
     expect(listed.statusCode).toBe(200);
     const items = listed.body.items as { key: string; label: string }[];
@@ -138,12 +138,12 @@ describe("the capability catalog a test editor draws from", () => {
   it("refuses a key that is not on it, and names the key", async () => {
     const { ada, agentId } = await aProjectWithATest("tests_capability_unknown");
 
-    const refused = await browse("POST", "/api/tests", ada, {
+    const refused = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
       name: "Needs telepathy",
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [agentId],
-      required_capabilities: ["telepathy"],
+      requiredCapabilities: ["telepathy"],
     });
 
     expect(refused.statusCode).toBe(422);
@@ -161,9 +161,9 @@ describe("creating a test from a browser", () => {
     api = await createApi("tests_create_needs_agent");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await browse("POST", "/api/tests", ada, {
+    const refused = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [],
     });
 
@@ -180,14 +180,14 @@ describe("creating a test from a browser", () => {
     const { agentId, test } = await aProjectWithATest("tests_create_agents");
 
     expect(test.agents).toEqual([
-      { id: agentId, name: "Front desk", archived_at: null },
+      { id: agentId, name: "Front desk", archivedAt: null },
     ]);
     expect(test.revision).toMatch(/^rev_/u);
-    expect(test.applicability_revision).toMatch(/^rev_/u);
+    expect(test.applicabilityRevision).toMatch(/^rev_/u);
     // Three tokens, never two of one: an edit written against one must not be
     // accepted against another.
-    expect(test.revision).not.toBe(test.applicability_revision);
-    expect(test.archived_at).toBeNull();
+    expect(test.revision).not.toBe(test.applicabilityRevision);
+    expect(test.archivedAt).toBeNull();
   });
 });
 
@@ -198,11 +198,11 @@ describe("the agents a test applies to", () => {
 
     const linked = await browse(
       "POST",
-      `/api/tests/${test.id}/agents?project=${ada.projectId}`,
+      `/v1/tests/${test.id}/agents?projectId=${ada.projectId}`,
       ada,
       {
         agents: [agentId, second],
-        expected_applicability_revision: test.applicability_revision,
+        expectedApplicabilityRevision: test.applicabilityRevision,
       },
     );
 
@@ -212,18 +212,18 @@ describe("the agents a test applies to", () => {
       [agentId, second].sort(),
     );
     // Target coverage is not test content and not the test's live identity.
-    expect(changed.version_id).toBe(test.version_id);
+    expect(changed.versionId).toBe(test.versionId);
     expect(changed.revision).toBe(test.revision);
-    expect(changed.applicability_revision).not.toBe(
-      test.applicability_revision,
+    expect(changed.applicabilityRevision).not.toBe(
+      test.applicabilityRevision,
     );
   });
 
   it("refuses removing the last one, and names the agent going out", async () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_last_link");
 
-    const refused = await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    const refused = await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [],
     });
 
@@ -241,8 +241,8 @@ describe("the agents a test applies to", () => {
     const retiring = await anAgent(ada, "Retiring desk");
     await archiveAgent(author(ada), retiring);
 
-    const refused = await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    const refused = await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [agentId, retiring],
     });
 
@@ -259,16 +259,16 @@ describe("the agents a test applies to", () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_link_stale");
     const second = await anAgent(ada, "Front desk, weekend");
 
-    await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [agentId, second],
-      expected_applicability_revision: test.applicability_revision,
+      expectedApplicabilityRevision: test.applicabilityRevision,
     });
 
-    const refused = await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    const refused = await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [second],
-      expected_applicability_revision: test.applicability_revision,
+      expectedApplicabilityRevision: test.applicabilityRevision,
     });
 
     // Its own code beside the identity and version conflicts, because the
@@ -279,7 +279,7 @@ describe("the agents a test applies to", () => {
       message:
         `Test ${test.id}'s applicable agents changed after you opened it. ` +
         "Read the test again, keep or reapply your link changes, and send " +
-        "them with expected_applicability_revision set to its new " +
+        "them with expectedApplicabilityRevision set to its new " +
         "applicability revision.",
     });
   });
@@ -288,8 +288,8 @@ describe("the agents a test applies to", () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_link_viewer");
     const val = await colleagueOf(api.app, ada, "val@acme.example", "viewer");
 
-    const refused = await browse("POST", `/api/tests/${test.id}/agents`, val, {
-      project: ada.projectId,
+    const refused = await browse("POST", `/v1/tests/${test.id}/agents`, val, {
+      projectId: ada.projectId,
       agents: [agentId],
     });
 
@@ -307,17 +307,17 @@ describe("the two stale-write refusals a test editor can meet", () => {
   it("answers an identity conflict for a rename written against an old revision", async () => {
     const { ada, test } = await aProjectWithATest("tests_identity_conflict");
 
-    const renamed = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const renamed = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       name: "Renamed once",
-      expected_revision: test.revision,
+      expectedRevision: test.revision,
     });
     expect(renamed.statusCode, JSON.stringify(renamed.body)).toBe(200);
 
-    const refused = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const refused = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       name: "Renamed twice",
-      expected_revision: test.revision,
+      expectedRevision: test.revision,
     });
 
     expect(refused.statusCode).toBe(409);
@@ -325,7 +325,7 @@ describe("the two stale-write refusals a test editor can meet", () => {
       error: "identity_conflict",
       message:
         `Test ${test.id} changed after you opened it. Read it again, keep or ` +
-        "reapply your edits, and send the update with expected_revision set " +
+        "reapply your edits, and send the update with expectedRevision set " +
         "to its new revision.",
     });
   });
@@ -334,19 +334,19 @@ describe("the two stale-write refusals a test editor can meet", () => {
     const { ada, test } = await aProjectWithATest("tests_two_tokens");
 
     // One tab sharpens the scenario…
-    const moved = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const moved = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "They call from the station, and the line is poor.",
-      expected_version_id: test.version_id,
+      expectedVersionId: test.versionId,
     });
     expect(moved.statusCode).toBe(200);
 
     // …and the other saves a name typed before that landed. Two tokens is
     // exactly what makes this work: the identity has not moved.
-    const renamed = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const renamed = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       name: "Renamed while the scenario moved",
-      expected_revision: test.revision,
+      expectedRevision: test.revision,
     });
     expect(renamed.statusCode, JSON.stringify(renamed.body)).toBe(200);
     expect(testIn(renamed).version).toBe(2);
@@ -359,34 +359,34 @@ describe("archiving and restoring a test", () => {
 
     const archived = await browse(
       "POST",
-      `/api/tests/${test.id}/archive?project=${ada.projectId}`,
+      `/v1/tests/${test.id}/archive?projectId=${ada.projectId}`,
       ada,
-      { expected_revision: test.revision },
+      { expectedRevision: test.revision },
     );
 
     expect(archived.statusCode, JSON.stringify(archived.body)).toBe(200);
-    expect(testIn(archived).archived_at).toEqual(expect.any(String));
+    expect(testIn(archived).archivedAt).toEqual(expect.any(String));
     // Nobody was owed a reason: a person archiving a test knows why.
-    expect(testIn(archived).archive_reason).toBeNull();
+    expect(testIn(archived).archiveReason).toBeNull();
     expect(testIn(archived).agents.map((applies) => applies.id)).toEqual([
       agentId,
     ]);
 
     const active = await browse(
       "GET",
-      `/api/tests?project=${ada.projectId}`,
+      `/v1/tests?projectId=${ada.projectId}`,
       ada,
     );
-    expect((active.body.items as WireTest[]).map((one) => one.id)).not.toContain(
+    expect((active.body.tests as WireTest[]).map((one) => one.id)).not.toContain(
       test.id,
     );
 
     const shelved = await browse(
       "GET",
-      `/api/tests?project=${ada.projectId}&archived=true`,
+      `/v1/tests?projectId=${ada.projectId}&archived=true`,
       ada,
     );
-    expect((shelved.body.items as WireTest[]).map((one) => one.id)).toEqual([
+    expect((shelved.body.tests as WireTest[]).map((one) => one.id)).toEqual([
       test.id,
     ]);
   });
@@ -398,22 +398,22 @@ describe("archiving and restoring a test", () => {
       traits: NEUTRAL_TRAITS,
     });
 
-    const created = await browse("POST", "/api/tests", ada, {
+    const created = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
       name: "Names somebody who leaves",
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [agentId],
       personas: ["Leaving Lena"],
     });
     const subject = testIn(created);
 
-    await browse("POST", `/api/tests/${subject.id}/archive`, ada, {
-      project: ada.projectId,
+    await browse("POST", `/v1/tests/${subject.id}/archive`, ada, {
+      projectId: ada.projectId,
     });
     await archivePersona(author(ada), leaving.id);
 
-    const refused = await browse("POST", `/api/tests/${subject.id}/restore`, ada, {
-      project: ada.projectId,
+    const refused = await browse("POST", `/v1/tests/${subject.id}/restore`, ada, {
+      projectId: ada.projectId,
     });
 
     expect(refused.statusCode).toBe(409);
@@ -430,8 +430,8 @@ describe("archiving and restoring a test", () => {
   it("brings it back, with a linkless one taking an agent in the same request", async () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_restore_links");
 
-    await browse("POST", `/api/tests/${test.id}/archive`, ada, {
-      project: ada.projectId,
+    await browse("POST", `/v1/tests/${test.id}/archive`, ada, {
+      projectId: ada.projectId,
     });
     // The state only an upgrade can produce: archived, with nothing to run
     // against.
@@ -439,20 +439,20 @@ describe("archiving and restoring a test", () => {
       test.id,
     ]);
 
-    const refused = await browse("POST", `/api/tests/${test.id}/restore`, ada, {
-      project: ada.projectId,
+    const refused = await browse("POST", `/v1/tests/${test.id}/restore`, ada, {
+      projectId: ada.projectId,
     });
     expect(refused.statusCode).toBe(422);
     expect(refused.body.error).toBe("test_needs_agent");
 
     const restored = await browse(
       "POST",
-      `/api/tests/${test.id}/restore?project=${ada.projectId}`,
+      `/v1/tests/${test.id}/restore?projectId=${ada.projectId}`,
       ada,
       { agents: [agentId] },
     );
     expect(restored.statusCode, JSON.stringify(restored.body)).toBe(200);
-    expect(testIn(restored).archived_at).toBeNull();
+    expect(testIn(restored).archivedAt).toBeNull();
     expect(testIn(restored).agents.map((applies) => applies.id)).toEqual([
       agentId,
     ]);
@@ -464,15 +464,15 @@ describe("cloning a test from a browser", () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_clone");
 
     // A second version, so the source has a history for the clone not to copy.
-    await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "They call twice about the same booking.",
-      expected_version_id: test.version_id,
+      expectedVersionId: test.versionId,
     });
 
     const cloned = await browse(
       "POST",
-      `/api/tests/${test.id}/clone?project=${ada.projectId}`,
+      `/v1/tests/${test.id}/clone?projectId=${ada.projectId}`,
       ada,
     );
 
@@ -484,40 +484,40 @@ describe("cloning a test from a browser", () => {
 
     const history = await browse(
       "GET",
-      `/api/tests/${copy.id}/versions?project=${ada.projectId}`,
+      `/v1/tests/${copy.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
-    expect((history.body.items as unknown[]).length).toBe(1);
+    expect((history.body.versions as unknown[]).length).toBe(1);
   });
 
   it("keeps the hidden mock-tool overrides, and says how many there are", async () => {
     const { ada, agentId } = await aProjectWithATest("tests_clone_overrides");
 
-    const created = await browse("POST", "/api/tests", ada, {
+    const created = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
       name: "Forces the calendar's failure branch",
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [agentId],
-      mock_tools: [
+      mockTools: [
         { tool: "check_availability", error: "the calendar is unreachable" },
       ],
     });
     const subject = testIn(created);
-    expect(subject.override_count).toBe(1);
+    expect(subject.overrideCount).toBe(1);
 
     // A browser write never mentions them — the form does not edit them — and
     // leaving the field out has to mean keep.
-    const renamed = await browse("PATCH", `/api/tests/${subject.id}`, ada, {
-      project: ada.projectId,
+    const renamed = await browse("PATCH", `/v1/tests/${subject.id}`, ada, {
+      projectId: ada.projectId,
       name: "Renamed, overrides untouched",
-      expected_revision: subject.revision,
+      expectedRevision: subject.revision,
     });
-    expect(testIn(renamed).override_count).toBe(1);
+    expect(testIn(renamed).overrideCount).toBe(1);
 
-    const cloned = await browse("POST", `/api/tests/${subject.id}/clone`, ada, {
-      project: ada.projectId,
+    const cloned = await browse("POST", `/v1/tests/${subject.id}/clone`, ada, {
+      projectId: ada.projectId,
     });
-    expect(testIn(cloned).override_count).toBe(1);
+    expect(testIn(cloned).overrideCount).toBe(1);
   });
 });
 
@@ -525,20 +525,20 @@ describe("reading a test's history", () => {
   it("answers every version, newest first, saying which one is current", async () => {
     const { ada, test } = await aProjectWithATest("tests_history");
 
-    const second = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const second = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "They call from the station, and the line is poor.",
-      expected_version_id: test.version_id,
+      expectedVersionId: test.versionId,
     });
 
     const history = await browse(
       "GET",
-      `/api/tests/${test.id}/versions?project=${ada.projectId}`,
+      `/v1/tests/${test.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
 
     expect(history.statusCode).toBe(200);
-    const items = history.body.items as {
+    const items = history.body.versions as {
       id: string;
       version: number;
       current: boolean;
@@ -550,7 +550,7 @@ describe("reading a test's history", () => {
     // The older version reads exactly as it was written, which is the whole
     // point of keeping it.
     expect(items[1]?.scenario).toBe(RESCHEDULING.scenario);
-    expect(items[0]?.id).toBe(testIn(second).version_id);
+    expect(items[0]?.id).toBe(testIn(second).versionId);
   });
 
   it("is not found for a test this credential could not have read", async () => {
@@ -559,7 +559,7 @@ describe("reading a test's history", () => {
 
     const refused = await browse(
       "GET",
-      `/api/tests/${test.id}/versions?project=${grace.projectId}`,
+      `/v1/tests/${test.id}/versions?projectId=${grace.projectId}`,
       grace,
     );
 
@@ -578,20 +578,20 @@ describe("filtering the list", () => {
   it("narrows to the tests that apply to one agent", async () => {
     const { ada, agentId, test } = await aProjectWithATest("tests_filter_agent");
     const second = await anAgent(ada, "Front desk, weekend");
-    const elsewhere = await browse("POST", "/api/tests", ada, {
+    const elsewhere = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
       name: "Applies to the weekend desk alone",
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [second],
     });
 
     const page = await browse(
       "GET",
-      `/api/tests?project=${ada.projectId}&agent=${agentId}`,
+      `/v1/tests?projectId=${ada.projectId}&agentId=${agentId}`,
       ada,
     );
 
-    expect((page.body.items as WireTest[]).map((one) => one.id)).toEqual([
+    expect((page.body.tests as WireTest[]).map((one) => one.id)).toEqual([
       test.id,
     ]);
     expect(testIn(elsewhere).id).not.toBe(test.id);
@@ -602,11 +602,11 @@ describe("filtering the list", () => {
 
     const page = await browse(
       "GET",
-      `/api/tests?project=${ada.projectId}&name=${encodeURIComponent("reschedules a")}`,
+      `/v1/tests?projectId=${ada.projectId}&name=${encodeURIComponent("reschedules a")}`,
       ada,
     );
 
-    expect((page.body.items as WireTest[]).map((one) => one.id)).toEqual([
+    expect((page.body.tests as WireTest[]).map((one) => one.id)).toEqual([
       test.id,
     ]);
   });
@@ -614,7 +614,7 @@ describe("filtering the list", () => {
   it("refuses a request that named no project, because a page has a selector", async () => {
     const { ada } = await aProjectWithATest("tests_filter_no_project");
 
-    const refused = await browse("GET", "/api/tests", ada);
+    const refused = await browse("GET", "/v1/tests", ada);
 
     expect(refused.statusCode).toBe(422);
     expect(refused.body).toEqual({
@@ -629,7 +629,7 @@ describe("filtering the list", () => {
     const { ada } = await aProjectWithATest("tests_filter_stranger");
     const stranger = newId("prj");
 
-    const refused = await browse("GET", `/api/tests?project=${stranger}`, ada);
+    const refused = await browse("GET", `/v1/tests?projectId=${stranger}`, ada);
 
     expect(refused.statusCode).toBe(404);
     expect(refused.body).toEqual({
@@ -648,14 +648,14 @@ describe("a viewer", () => {
 
     const read = await browse(
       "GET",
-      `/api/tests/${test.id}?project=${ada.projectId}`,
+      `/v1/tests/${test.id}?projectId=${ada.projectId}`,
       val,
     );
     expect(read.statusCode).toBe(200);
 
     const history = await browse(
       "GET",
-      `/api/tests/${test.id}/versions?project=${ada.projectId}`,
+      `/v1/tests/${test.id}/versions?projectId=${ada.projectId}`,
       val,
     );
     expect(history.statusCode).toBe(200);
@@ -663,12 +663,12 @@ describe("a viewer", () => {
     // Hiding a control is not authorization: the server refuses each of these
     // whether or not a browser was involved.
     for (const [url, action] of [
-      [`/api/tests/${test.id}/clone`, "clone tests"],
-      [`/api/tests/${test.id}/archive`, "archive tests"],
-      [`/api/tests/${test.id}/restore`, "restore tests"],
+      [`/v1/tests/${test.id}/clone`, "clone tests"],
+      [`/v1/tests/${test.id}/archive`, "archive tests"],
+      [`/v1/tests/${test.id}/restore`, "restore tests"],
     ] as const) {
       const refused = await browse("POST", url, val, {
-        project: ada.projectId,
+        projectId: ada.projectId,
       });
       expect(refused.statusCode, url).toBe(403);
       expect(refused.body).toEqual({
@@ -679,10 +679,10 @@ describe("a viewer", () => {
       });
     }
 
-    const created = await browse("POST", "/api/tests", val, {
+    const created = await browse("POST", "/v1/tests", val, {
       ...RESCHEDULING,
       name: "A viewer's test",
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [agentId],
     });
     expect(created.statusCode).toBe(403);

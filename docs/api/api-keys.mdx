@@ -14,13 +14,13 @@ Every role may mint and revoke their own keys. Admins can see and revoke all key
 
 Mints a new API key. Copy the `secret` field immediately — it is shown exactly once and cannot be retrieved again.
 
-**`POST /api/keys`**
+**`POST /v1/keys`**
 
 <ParamField body="name" type="string">
   A label for this key, such as `"CI pipeline"` or `"LiveKit telemetry"`. Helps you identify it later in the key list.
 </ParamField>
 
-<ParamField body="project_id" type="string">
+<ParamField body="projectId" type="string">
   Scope the key to a specific project. Omit to create an organization-scoped key for permitted organization-wide reads and management operations. Customer OTLP production ingest requires a `prj_` identifier and rejects an organization-scoped key.
 </ParamField>
 
@@ -39,49 +39,49 @@ Returns `201 Created` with the new key object including the plaintext secret.
 </ResponseField>
 
 <ResponseField name="scope" type="string">
-  `"organization"` or `"project"`, depending on whether `project_id` was provided.
+  `"organization"` or `"project"`, depending on whether `projectId` was provided.
 </ResponseField>
 
-<ResponseField name="project_id" type="string | null">
+<ResponseField name="projectId" type="string | null">
   The project this key is scoped to, or `null` for organization-scoped keys.
 </ResponseField>
 
-<ResponseField name="organization_id" type="string">
+<ResponseField name="organizationId" type="string">
   The organization this key belongs to.
 </ResponseField>
 
-<ResponseField name="looks_like" type="string">
+<ResponseField name="looksLike" type="string">
   A non-secret hint showing the key's prefix and last few characters — enough to identify which key is which without exposing the secret.
 </ResponseField>
 
-<ResponseField name="created_by_user_id" type="string">
+<ResponseField name="createdByUserId" type="string">
   The user ID of whoever minted this key.
 </ResponseField>
 
-<ResponseField name="created_at" type="string">
+<ResponseField name="createdAt" type="string">
   ISO 8601 timestamp of when the key was created.
 </ResponseField>
 
-<ResponseField name="last_used_at" type="string | null">
+<ResponseField name="lastUsedAt" type="string | null">
   ISO 8601 timestamp of the last request authenticated with this key. `null` if the key has never been used.
 </ResponseField>
 
-<ResponseField name="revoked_at" type="string | null">
+<ResponseField name="revokedAt" type="string | null">
   ISO 8601 timestamp of when the key was revoked. `null` for active keys.
 </ResponseField>
 
 ```bash title="Create an organization-scoped key"
-curl -X POST https://your-egma-instance/api/keys \
+curl -X POST https://your-egma-instance/v1/keys \
   -H "Authorization: Bearer egma_sk_..." \
   -H "Content-Type: application/json" \
   -d '{ "name": "CI pipeline" }'
 ```
 
 ```bash title="Create a project-scoped key"
-curl -X POST https://your-egma-instance/api/keys \
+curl -X POST https://your-egma-instance/v1/keys \
   -H "Authorization: Bearer egma_sk_..." \
   -H "Content-Type: application/json" \
-  -d '{ "name": "LiveKit telemetry", "project_id": "prj_abc123" }'
+  -d '{ "name": "LiveKit telemetry", "projectId": "prj_abc123" }'
 ```
 
 <Note>
@@ -94,14 +94,14 @@ curl -X POST https://your-egma-instance/api/keys \
 
 Returns all API keys you are allowed to see. Admins see every key in the organization. All other roles see only the keys they minted. Secrets are never included in list responses.
 
-**`GET /api/keys`**
+**`GET /v1/keys`**
 
 <ResponseField name="keys" type="array">
   Array of key objects. The `secret` field is absent from every item.
 </ResponseField>
 
 ```bash title="List your keys"
-curl https://your-egma-instance/api/keys \
+curl https://your-egma-instance/v1/keys \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
@@ -111,16 +111,16 @@ curl https://your-egma-instance/api/keys \
 
 Permanently deactivates a key. The key stops working on the very next request — there is no grace period. You can revoke your own keys. Admins can revoke any key in the organization.
 
-**`POST /api/keys/:apiKeyId/revoke`**
+**`POST /v1/keys/:apiKeyId/revoke`**
 
 <ParamField path="apiKeyId" type="string" required>
   The `id` of the key to revoke, from the list or the creation response.
 </ParamField>
 
-Returns the revoked key object with `revoked_at` set.
+Returns the revoked key object with `revokedAt` set.
 
 ```bash title="Revoke a key"
-curl -X POST https://your-egma-instance/api/keys/key_abc123/revoke \
+curl -X POST https://your-egma-instance/v1/keys/key_abc123/revoke \
   -H "Authorization: Bearer egma_sk_..."
 ```
 

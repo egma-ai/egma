@@ -1,0 +1,34 @@
+{
+  "name": "@egma/platform-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The executable Egma platform HTTP contract, its OpenAPI document, and the generated TypeScript client.",
+  "exports": {
+    "./contract": {
+      "types": "./dist/contract/index.d.ts",
+      "default": "./dist/contract/index.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi.d.ts",
+      "default": "./dist/openapi.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist",
+    "openapi"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "generate": "node tools/generate.ts --write",
+    "generate:check": "node tools/generate.ts --check"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
+    "typescript": "^5.9.3"
+  }
+}

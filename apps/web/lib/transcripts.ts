@@ -1,3 +1,9 @@
+import type {
+  GetTraceResponse,
+  ListTracesResponse,
+  TraceSpan,
+} from "@egma/platform-api/client";
+
 import { projectPath } from "./project-context.ts";
 import { DEFAULT_WINDOW, WINDOWS, type WindowChoice } from "./transcript-copy.ts";
 
@@ -5,8 +11,8 @@ import { DEFAULT_WINDOW, WINDOWS, type WindowChoice } from "./transcript-copy.ts
  * What the two v1 read endpoints answer with, and the handful of pure decisions
  * the pages make about it.
  *
- * The types are the contract's own field names — snake case, storage words,
- * durations as decimal strings — because this is the wire and renaming it here
+ * The types use the contract's own lower-camel field names and storage words.
+ * Durations stay as decimal strings because this is the wire; renaming it here
  * would mean two vocabularies to keep in step instead of one. Everything a
  * person reads is decided in `transcript-copy.ts`; nothing below returns a
  * sentence.
@@ -19,101 +25,13 @@ import { DEFAULT_WINDOW, WINDOWS, type WindowChoice } from "./transcript-copy.ts
  * have happened in.
  */
 
-export type TurnCounts = { readonly human: number; readonly agent: number };
-
 /** Trace-level facts, as both endpoints report them. */
-export type Facts = {
-  readonly trace_id: string;
-  readonly started_at: string;
-  readonly ended_at: string;
-  readonly duration_ns: string;
-  readonly span_count: number;
-  readonly turn_counts: TurnCounts;
-  readonly tool_span_count: number;
-  readonly errored_span_count: number;
-  readonly source: string;
-  readonly emitter: string;
-  readonly environment: string;
-  readonly connection_kind: string;
-  readonly provider_call_id: string;
-  readonly agent_platform: string;
-  readonly platform_agent_id: string;
-  readonly platform_agent_name: string;
-  readonly platform_agent_version: string;
-  readonly run_id: string;
-  readonly agent_id: string;
-};
-
-export type Listed = Facts & { readonly preview: string };
-
-export type ListPage = {
-  readonly traces: readonly Listed[];
-  readonly next_cursor: string | null;
-  readonly window: { readonly from: string; readonly to: string };
-};
-
-/** One timed step, with whatever happened inside it. */
-export type Step = {
-  readonly span_id: string;
-  readonly parent_span_id: string;
-  readonly name: string;
-  readonly kind: string;
-  readonly status: string;
-  readonly started_at: string;
-  readonly duration_ns: string;
-  readonly text: string;
-  readonly audio_url: string;
-  readonly tool_name: string;
-  readonly tool_arguments: string;
-  readonly tool_result: string;
-  readonly spans: readonly Step[];
-};
-
-/** One judge's answer about this exchange, as the read hands it over. */
-export type Judgment = {
-  readonly grader_id: string;
-  /**
-   * Which 0-or-1 check inside the grader this answers, as its key — never the
-   * sentence, which is read from the pinned test version.
-   */
-  readonly assertion: string;
-  /**
-   * The words behind that key, resolved by the read from the version this
-   * conversation was executed against.
-   *
-   * `null` where nothing could place the key — a grader whose keys are its own
-   * business, a conversation with no test — and absent from an older answer that
-   * never resolved one. Both mean the same thing here and the key is shown
-   * instead: a bare `behavior_3` is terse, and an invented sentence would be
-   * unfalsifiable.
-   */
-  readonly assertion_text?: string | null;
-  /**
-   * Whether this judgment can fail anything — `false` for a diagnostic copy,
-   * which reports and never decides. Absent on a read that does not carry lanes.
-   */
-  readonly required?: boolean;
-  readonly verdict: string;
-  readonly score: number;
-  readonly rationale: string;
-  /** Turn positions, as `turn:1`. What the judge read, in the judge's terms. */
-  readonly cited_turns: readonly string[];
-  readonly judged_at: string;
-};
-
-export type VerdictCounts = {
-  readonly passed: number;
-  readonly failed: number;
-  readonly skipped: number;
-  readonly errored: number;
-  readonly total: number;
-};
-
-export type Outcome = {
-  readonly verdict: string;
-  readonly score: number | null;
-  readonly counts: VerdictCounts;
-};
+export type Facts = GetTraceResponse["trace"];
+export type Listed = ListTracesResponse["traces"][number];
+export type ListPage = ListTracesResponse;
+export type Step = TraceSpan;
+export type Judgment = GetTraceResponse["verdicts"][number];
+export type Outcome = NonNullable<GetTraceResponse["outcome"]>;
 
 /**
  * One measure this exchange produced, as the read hands it over.
@@ -134,88 +52,8 @@ export type Outcome = {
  * assumed milliseconds would be wrong the moment somebody bounds a measure
  * counted in something else.
  */
-export type Measured = {
-  readonly measure: string;
-  readonly unit: string;
-  /**
-   * True when Egma did not time the number itself — either it worked the figure
-   * out from the framework's own timings, or the agent platform handed it over.
-   * `reported_by` beside this is what tells the two apart.
-   *
-   * Optional because an answer from an older platform does not carry it, which
-   * is a page that says nothing about provenance rather than one that breaks.
-   */
-  readonly derived?: boolean;
-  /**
-   * The agent platform that measured this figure — `retell` — on the figures a
-   * platform reported rather than Egma measured.
-   *
-   * **Absent on everything else, and the page reads it as a gate only.** Egma
-   * working a number out from your framework's spans and a platform reporting
-   * its own number are different claims, and `derived` alone cannot tell them
-   * apart — so this field is what stops the worked-out caveat being said about a
-   * figure Egma never worked out. A figure carrying it renders bare: no mark, no
-   * caveat, the same as a figure Egma timed.
-   *
-   * It stays on the answer whether or not a screen shows it. Who measured is a
-   * fact about the record, and the day a surface asks for it, it is here.
-   */
-  readonly reported_by?: string;
-  /** One sample, or the series a per-turn measure produced. Never empty. */
-  readonly samples: readonly number[];
-  /** The span each sample came off, in the same order. */
-  readonly span_ids: readonly string[];
-  /**
-   * The measurement a bound is held against, reduced by the platform. Null
-   * only on an answer that carried no measurement at all.
-   */
-  readonly worst: { readonly value: number; readonly span_id: string } | null;
-  /**
-   * True when this reading is a prefix of the exchange, so the figure is the
-   * worst of what egma holds rather than the worst of the call.
-   */
-  readonly partial?: boolean;
-};
-
-export type Detail = {
-  readonly trace: Facts;
-  readonly turns: readonly Step[];
-  readonly spans: readonly Step[];
-  readonly spans_truncated: boolean;
-  /**
-   * What this exchange measured. Absent on an answer from an older platform,
-   * which is a page with no measures rather than a page that breaks.
-   */
-  readonly measures?: readonly Measured[];
-  /**
-   * The simulation this exchange is, when egma conducted it, and `null` when a
-   * customer's own agent did.
-   *
-   * The two identifiers are the same 128 bits written two ways, so the read
-   * derives one from the other and says so here rather than making this page
-   * ask a second question. It is what lets a transcript resolve its own
-   * recording: everything else about audio is settled by asking for a link,
-   * which is refused where there is nothing to hear.
-   */
-  readonly simulation_id?: string | null;
-  /** Absent on a trace nothing has judged, and on one whose store is down. */
-  readonly verdicts?: readonly Judgment[];
-  /**
-   * The result folded over the **required** graders, or null before grading
-   * finishes. What a diagnostic said is never in here — see below.
-   */
-  readonly outcome: Outcome | null;
-  /**
-   * The same fold over the graders that only report, or null where none of them
-   * judged this exchange.
-   *
-   * It is carried on the model rather than left to the page to reach for,
-   * because the two are one answer: the outcome above was folded *without*
-   * these, so a page that showed one and not the other would be showing a
-   * headline with a piece of its own arithmetic missing.
-   */
-  readonly diagnostics?: Outcome | null;
-};
+export type Measured = GetTraceResponse["measures"][number];
+export type Detail = GetTraceResponse;
 
 /**
  * Which turn a judgment is about, as a position.
@@ -227,7 +65,7 @@ export type Detail = {
  */
 export function turnsCited(one: Judgment): readonly number[] {
   const at: number[] = [];
-  for (const cited of one.cited_turns) {
+  for (const cited of one.citedTurns) {
     const [prefix, number] = cited.split(":");
     if (prefix !== "turn") continue;
     const parsed = Number(number);
@@ -265,7 +103,7 @@ export function agentPlatformLabel(value: string): string {
  * nobody looking at the page could tell.
  */
 export function assertionHeading(one: Judgment): string {
-  const said = one.assertion_text ?? null;
+  const said = one.assertionText ?? null;
   return said === null || said.trim() === ""
     ? humanizeIdentifier(one.assertion)
     : said;
@@ -368,11 +206,11 @@ export function recentWindow(choice: WindowChoice, now: Date): Window {
 const PADDING = 1000;
 
 export function windowAround(facts: {
-  readonly started_at: string;
-  readonly ended_at: string;
+  readonly startedAt: string;
+  readonly endedAt: string;
 }): Window {
-  const opened = Date.parse(facts.started_at);
-  const closed = Date.parse(facts.ended_at);
+  const opened = Date.parse(facts.startedAt);
+  const closed = Date.parse(facts.endedAt);
   const from = Number.isNaN(opened) ? Date.now() : opened;
   const to = Number.isNaN(closed) ? from : Math.max(closed, from);
 
@@ -412,7 +250,7 @@ export function transcriptsPath(projectId: string): string {
 export function transcriptPath(projectId: string, facts: Facts): string {
   const window = windowAround(facts);
   const query = new URLSearchParams({ from: window.from, to: window.to });
-  return `${transcriptsPath(projectId)}/${encodeURIComponent(facts.trace_id)}?${query.toString()}`;
+  return `${transcriptsPath(projectId)}/${encodeURIComponent(facts.traceId)}?${query.toString()}`;
 }
 
 /**
@@ -426,85 +264,6 @@ export function transcriptPath(projectId: string, facts: Facts): string {
  * request: narrowing what came back would answer differently depending on what
  * had already been fetched, and would quietly break paging.
  */
-export const SOURCE_PARAMETER = "source";
-export const PRODUCTION = "production";
-
-/** Which project a read is about, as the v1 contract spells it. */
-export const PROJECT_PARAMETER = "project_id";
-
-const TRACES_ENDPOINT = "/v1/traces";
-
-/**
- * One page of this project's production conversations.
- *
- * Three things ride in the address and each is load-bearing: the **window**,
- * because the store is filed by time and refuses a read that bounded nothing;
- * the **project**, read from the page's own address rather than assumed from
- * whoever is signed in, so that a copied link opens the project it names; and
- * the **source**, because this surface is production traffic only.
- */
-export function productionListPath(asking: {
-  readonly window: Window;
-  readonly projectId: string;
-  readonly cursor?: string | null;
-  /**
-   * How many rows are wanted at most. Left out for a page of the list, which
-   * takes whatever the endpoint's own page size is; sent as `1` by the probe
-   * below, which only asks whether anything is there.
-   */
-  readonly limit?: number;
-}): string {
-  const asked = new URLSearchParams({
-    from: asking.window.from,
-    to: asking.window.to,
-    [SOURCE_PARAMETER]: PRODUCTION,
-    [PROJECT_PARAMETER]: asking.projectId,
-  });
-  if (asking.cursor != null && asking.cursor !== "") {
-    asked.set("cursor", asking.cursor);
-  }
-  if (asking.limit !== undefined) asked.set("limit", String(asking.limit));
-  return `${TRACES_ENDPOINT}?${asked.toString()}`;
-}
-
-/**
- * The one question a quiet page cannot answer from the window it is on: **has
- * this project ever recorded anything at all?**
- *
- * One row is the whole answer — *some* or *none* is the branch, and a count is
- * not wanted — so it asks for one and reads whether it came back. It is fired
- * only when the window on screen is empty, and not even then when that window
- * is already the widest, because the list read has just answered the same
- * question.
- */
-export function everRecordedPath(projectId: string, now: Date): string {
-  return productionListPath({
-    window: recentWindow(WIDEST_WINDOW, now),
-    projectId,
-    limit: 1,
-  });
-}
-
-/**
- * One conversation, in the window it happened in and the project it belongs to.
- *
- * No source here, and deliberately: the name already picks out one row, and a
- * filter on a lookup could only ever turn a transcript somebody was sent into a
- * page that says it is not there.
- */
-export function transcriptReadPath(asking: {
-  readonly traceId: string;
-  readonly window: Window;
-  readonly projectId: string;
-}): string {
-  const asked = new URLSearchParams({
-    from: asking.window.from,
-    to: asking.window.to,
-    [PROJECT_PARAMETER]: asking.projectId,
-  });
-  return `${TRACES_ENDPOINT}/${encodeURIComponent(asking.traceId)}?${asked.toString()}`;
-}
-
 /* ------------------------------------------------------------------ *
  * What to say when the page is quiet.
  * ------------------------------------------------------------------ */
@@ -598,7 +357,7 @@ export function quietState(seen: {
  * simulations. `simulations` does not, whatever its sampling rate says.
  */
 export function watchesProduction(grader: { readonly scope: string }): boolean {
-  return grader.scope === PRODUCTION || grader.scope === "both";
+  return grader.scope === "production" || grader.scope === "both";
 }
 
 /**
@@ -610,10 +369,10 @@ export function watchesProduction(grader: { readonly scope: string }): boolean {
  * knowledgeable one.
  */
 export function namesWholeOrganization(key: {
-  readonly project_id: string | null;
-  readonly revoked_at: string | null;
+  readonly projectId: string | null;
+  readonly revokedAt: string | null;
 }): boolean {
-  return key.project_id === null && key.revoked_at === null;
+  return key.projectId === null && key.revokedAt === null;
 }
 
 /* ------------------------------------------------------------------ *

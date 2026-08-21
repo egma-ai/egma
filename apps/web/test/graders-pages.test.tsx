@@ -16,6 +16,7 @@ import * as runningCopy from "../lib/grader-running-copy.ts";
 import type { LibraryEntry, RunningGrader } from "../lib/graders.ts";
 import type { Me } from "../lib/me.ts";
 import { graderTabsFor } from "../lib/presentation.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * The two grader screens of one project, rendered and driven the way somebody
@@ -99,17 +100,14 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
-      const at = new URL(String(input), "http://egma.test");
-      const method = init?.method ?? "GET";
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const request = await observeRequest(input, init);
+      const { address: at, method } = request;
       const key = `${method} ${at.pathname}`;
       asked.push({
         method,
         path: `${at.pathname}${at.search}`,
-        body:
-          typeof init?.body === "string"
-            ? (JSON.parse(init.body) as unknown)
-            : undefined,
+        body: request.body,
       });
 
       const held = answers[key];
@@ -136,7 +134,13 @@ const BEHAVIORS: LibraryEntry = {
   description: "Judges a simulation against its test's expected behaviors.",
   type: "llm_as_judge",
   owner: "egma",
+  projectId: null,
+  version: 1,
+  prompt: null,
   params: [],
+  outputDefinition: null,
+  createdAt: "2026-08-15T10:00:00.000Z",
+  updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
 /** egma's latency entry: a measure from the catalog, and a bound. */
@@ -146,6 +150,9 @@ const LATENCY: LibraryEntry = {
   description: "Fails when a measured latency is over the bound.",
   type: "code",
   owner: "egma",
+  projectId: null,
+  version: 1,
+  prompt: null,
   params: [
     {
       name: "metric",
@@ -174,31 +181,38 @@ const LATENCY: LibraryEntry = {
       means: "The most this measure may be.",
     },
   ],
+  outputDefinition: null,
+  createdAt: "2026-08-15T10:00:00.000Z",
+  updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
 const SEEDED: RunningGrader = {
   id: "grd_1",
-  library_id: "grl_behaviors",
+  libraryId: "grl_behaviors",
+  projectId: "prj_1",
   name: "expected_behaviors",
   description: null,
   type: "llm_as_judge",
   required: true,
   scope: "simulations",
-  production_sample_rate: 0,
+  productionSampleRate: 0,
+  version: 1,
+  versionId: "grv_1",
   config: { assertions: [] },
-  created_at: "2026-08-15T10:00:00.000Z",
-  updated_at: "2026-08-15T10:00:00.000Z",
+  judgeModel: null,
+  createdAt: "2026-08-15T10:00:00.000Z",
+  updatedAt: "2026-08-15T10:00:00.000Z",
 };
 
 const DIAGNOSTIC: RunningGrader = {
   ...SEEDED,
   id: "grd_2",
-  library_id: "grl_latency",
+  libraryId: "grl_latency",
   name: "latency",
   type: "code",
   required: false,
   scope: "both",
-  production_sample_rate: 10,
+  productionSampleRate: 10,
   config: { assertions: [{ metric: "turn_response_latency", bound: 2000 }] },
 };
 
@@ -220,9 +234,9 @@ describe("the grader library, in one project", () => {
   it("names its project in the read, and says what each entry is and whose", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS, LATENCY], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
       },
     });
     render(<GraderLibraryPage />);
@@ -230,7 +244,7 @@ describe("the grader library, in one project", () => {
     // Once, because the table changes layout without cloning the row.
     expect(await screen.findAllByText("Expected behaviors")).toHaveLength(1);
     expect(asked.map((one) => one.path)).toContain(
-      "/api/grader-library?project=prj_1",
+      "/v1/grader-library?projectId=prj_1",
     );
 
     // The stored words turned into the ones a person reads, and never shown raw.
@@ -257,11 +271,11 @@ describe("the grader library, in one project", () => {
     routed.projectId = "prj_2";
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
       },
-      "POST /api/graders": { status: 201, body: SEEDED },
+      "POST /v1/graders": { status: 201, body: SEEDED },
     });
     render(<GraderLibraryPage />);
 
@@ -276,9 +290,9 @@ describe("the grader library, in one project", () => {
     // one thing and its test agreed with the other, which is how a spelling
     // nobody meant survives a review.
     const written = asked.find((one) => one.method === "POST");
-    expect(written?.path).toBe("/api/graders?project=prj_2");
+    expect(written?.path).toBe("/v1/graders?projectId=prj_2");
     expect(written?.body).toEqual({
-      library_id: "grl_behaviors",
+      libraryId: "grl_behaviors",
       required: true,
     });
   });
@@ -291,11 +305,11 @@ describe("the grader library, in one project", () => {
   it("draws the form from the entry, and sends a number as a number", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS, LATENCY], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
       },
-      "POST /api/graders": { status: 201, body: DIAGNOSTIC },
+      "POST /v1/graders": { status: 201, body: DIAGNOSTIC },
     });
     render(<GraderLibraryPage />);
 
@@ -310,10 +324,10 @@ describe("the grader library, in one project", () => {
 
     await screen.findByRole("status");
     expect(asked.find((one) => one.method === "POST")?.path).toBe(
-      "/api/graders?project=prj_1",
+      "/v1/graders?projectId=prj_1",
     );
     expect(asked.find((one) => one.method === "POST")?.body).toEqual({
-      library_id: "grl_latency",
+      libraryId: "grl_latency",
       required: true,
       params: { metric: "turn_response_latency", bound: 2000 },
     });
@@ -322,9 +336,9 @@ describe("the grader library, in one project", () => {
   it("asks nothing for an entry that declares no parameters", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
       },
     });
     render(<GraderLibraryPage />);
@@ -356,9 +370,9 @@ describe("the grader library, in one project", () => {
   it("marks the Use column as a row control, at the trailing edge", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS, LATENCY], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
       },
     });
     render(<GraderLibraryPage />);
@@ -373,11 +387,11 @@ describe("the grader library, in one project", () => {
   it("shows a refused Use without clearing the form", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [LATENCY], next_cursor: null },
+        body: { graderLibraryEntries: [LATENCY], nextPageToken: null },
       },
-      "POST /api/graders": {
+      "POST /v1/graders": {
         status: 422,
         body: {
           error: "unprocessable",
@@ -409,9 +423,9 @@ describe("the grader library, in one project", () => {
   it("leaves Use inert for a viewer, with the reason beside it", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
       },
     });
     render(<GraderLibraryPage />);
@@ -426,7 +440,7 @@ describe("the grader library, in one project", () => {
   it("says a project that is not available here is not available", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 404,
         body: {
           error: "not_found",
@@ -452,28 +466,30 @@ describe("the grader library, in one project", () => {
  */
 const SHELF = {
   status: 200,
-  body: { items: [BEHAVIORS, LATENCY], next_cursor: null },
+  body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
 } as const;
 
 describe("the running graders of one project", () => {
   it("names its project in both reads, and says where each copy applies and whether it blocks", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
     expect(await screen.findAllByText("Expected behaviors")).toHaveLength(1);
-    expect(asked.map((one) => one.path)).toContain("/api/graders?project=prj_1");
+    expect(asked.map((one) => one.path)).toContain(
+      "/v1/graders?projectId=prj_1",
+    );
     // The shelf beside the copies, and in the same project: a copy's form is
     // its entry's declaration rendered, and this page cannot draw one without
     // having read the entry.
     expect(asked.map((one) => one.path)).toContain(
-      "/api/grader-library?project=prj_1",
+      "/v1/grader-library?projectId=prj_1",
     );
 
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
@@ -504,17 +520,17 @@ describe("the running graders of one project", () => {
   it("switches a copy off, in the project in the address, and reads the list again", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": [
-        { status: 200, body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null } },
-        { status: 200, body: { items: [SEEDED], next_cursor: null } },
+      "GET /v1/graders": [
+        { status: 200, body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null } },
+        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
       ],
-      "GET /api/grader-library": SHELF,
-      "DELETE /api/graders/grd_2": {
+      "GET /v1/grader-library": SHELF,
+      "DELETE /v1/graders/grd_2": {
         status: 200,
         body: {
           id: "grd_2",
           name: "latency",
-          deleted_at: "2026-08-15T12:00:00.000Z",
+          deletedAt: "2026-08-15T12:00:00.000Z",
         },
       },
     });
@@ -529,12 +545,12 @@ describe("the running graders of one project", () => {
       "Latency is switched off",
     );
     expect(asked.map((one) => one.path)).toContain(
-      "/api/graders/grd_2?project=prj_1",
+      "/v1/graders/grd_2?projectId=prj_1",
     );
     // Read again rather than edited here: what judges this project is the
     // server's answer, and there are two reads of the list for one switch-off.
     expect(
-      asked.filter((one) => one.path === "/api/graders?project=prj_1"),
+      asked.filter((one) => one.path === "/v1/graders?projectId=prj_1"),
     ).toHaveLength(2);
   });
 
@@ -547,11 +563,11 @@ describe("the running graders of one project", () => {
   it("says what stops and, in its own sentence, what stays", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -575,17 +591,17 @@ describe("the running graders of one project", () => {
   it("warns before the last copy goes, and does not refuse it", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": [
-        { status: 200, body: { items: [SEEDED], next_cursor: null } },
-        { status: 200, body: { items: [], next_cursor: null } },
+      "GET /v1/graders": [
+        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
+        { status: 200, body: { graders: [], nextPageToken: null } },
       ],
-      "GET /api/grader-library": SHELF,
-      "DELETE /api/graders/grd_1": {
+      "GET /v1/grader-library": SHELF,
+      "DELETE /v1/graders/grd_1": {
         status: 200,
         body: {
           id: "grd_1",
           name: "Expected behaviors",
-          deleted_at: "2026-08-15T12:00:00.000Z",
+          deletedAt: "2026-08-15T12:00:00.000Z",
         },
       },
     });
@@ -609,12 +625,12 @@ describe("the running graders of one project", () => {
   it("keeps the confirmation open and shows a refused switch-off", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED], next_cursor: null },
+        body: { graders: [SEEDED], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
-      "DELETE /api/graders/grd_1": {
+      "GET /v1/grader-library": SHELF,
+      "DELETE /v1/graders/grd_1": {
         status: 403,
         body: {
           error: "not_permitted",
@@ -640,11 +656,11 @@ describe("the running graders of one project", () => {
   it("leaves both acts inert for a viewer, with the reason beside them", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED], next_cursor: null },
+        body: { graders: [SEEDED], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -678,11 +694,11 @@ describe("changing a running copy", () => {
   it("connects each Edit button to the editor and moves focus to its heading", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -717,11 +733,11 @@ describe("changing a running copy", () => {
   it("opens on what this copy holds, from its entry's own declaration", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -758,11 +774,11 @@ describe("changing a running copy", () => {
   it("draws the second copy's own values when a form is opened over another", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -787,11 +803,11 @@ describe("changing a running copy", () => {
   it("keeps a changed copy when another Edit or Cancel is declined", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -829,11 +845,11 @@ describe("changing a running copy", () => {
   it("protects a changed copy from grader links, product links, project changes, and unload", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -891,12 +907,12 @@ describe("changing a running copy", () => {
   it("keeps the editor and its navigation guard in place while Save is in flight", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_1": "never",
+      "GET /v1/grader-library": SHELF,
+      "PATCH /v1/graders/grd_1": "never",
     });
     const confirm = vi.fn(() => true);
     vi.stubGlobal("confirm", confirm);
@@ -958,12 +974,12 @@ describe("changing a running copy", () => {
     routed.projectId = "prj_2";
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": [
-        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
-        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+      "GET /v1/graders": [
+        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
+        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
       ],
-      "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_2": {
+      "GET /v1/grader-library": SHELF,
+      "PATCH /v1/graders/grd_2": {
         status: 200,
         body: { ...DIAGNOSTIC, config: { assertions: [{ bound: 1200 }] } },
       },
@@ -979,7 +995,7 @@ describe("changing a running copy", () => {
 
     await screen.findByRole("status");
     const written = asked.find((one) => one.method === "PATCH");
-    expect(written?.path).toBe("/api/graders/grd_2?project=prj_2");
+    expect(written?.path).toBe("/v1/graders/grd_2?projectId=prj_2");
     expect(written?.body).toEqual({
       name: "latency",
       // Null rather than the empty string: emptying a note is a real intent and
@@ -987,7 +1003,7 @@ describe("changing a running copy", () => {
       description: null,
       scope: "both",
       required: true,
-      production_sample_rate: 10,
+      productionSampleRate: 10,
       params: { metric: "turn_response_latency", bound: 1200 },
     });
   });
@@ -1001,12 +1017,12 @@ describe("changing a running copy", () => {
   it("claims only that no verdict was rewritten, and reads the list again", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": [
-        { status: 200, body: { items: [SEEDED], next_cursor: null } },
-        { status: 200, body: { items: [SEEDED], next_cursor: null } },
+      "GET /v1/graders": [
+        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
+        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
       ],
-      "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_1": { status: 200, body: SEEDED },
+      "GET /v1/grader-library": SHELF,
+      "PATCH /v1/graders/grd_1": { status: 200, body: SEEDED },
     });
     render(<RunningGradersPage />);
 
@@ -1020,7 +1036,7 @@ describe("changing a running copy", () => {
     expect(said).toContain("no verdict it has already written was rewritten");
     expect(said.toLowerCase()).not.toContain("nothing already judged");
     expect(
-      asked.filter((one) => one.path === "/api/graders?project=prj_1"),
+      asked.filter((one) => one.path === "/v1/graders?projectId=prj_1"),
     ).toHaveLength(2);
     expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
       name: "expected_behaviors",
@@ -1034,11 +1050,11 @@ describe("changing a running copy", () => {
   it("asks nothing of a copy whose assertions are the test's own sentences", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED], next_cursor: null },
+        body: { graders: [SEEDED], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -1054,11 +1070,11 @@ describe("changing a running copy", () => {
   it("keeps the running list beside a grouped editor and shows sampling only for live traffic", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED], next_cursor: null },
+        body: { graders: [SEEDED], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -1108,11 +1124,11 @@ describe("changing a running copy", () => {
   it("gives the edit controls the handles the browser walk reaches them by", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [DIAGNOSTIC], next_cursor: null },
+        body: { graders: [DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
+      "GET /v1/grader-library": SHELF,
     });
     render(<RunningGradersPage />);
 
@@ -1149,12 +1165,12 @@ describe("changing a running copy", () => {
   it("leaves the sample rate out when the box says nothing, rather than sending nought", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": [
-        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
-        { status: 200, body: { items: [DIAGNOSTIC], next_cursor: null } },
+      "GET /v1/graders": [
+        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
+        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
       ],
-      "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_2": { status: 200, body: DIAGNOSTIC },
+      "GET /v1/grader-library": SHELF,
+      "PATCH /v1/graders/grd_2": { status: 200, body: DIAGNOSTIC },
     });
     render(<RunningGradersPage />);
 
@@ -1166,19 +1182,19 @@ describe("changing a running copy", () => {
 
     await screen.findByRole("status");
     const written = asked.find((one) => one.method === "PATCH");
-    expect(written?.body).not.toHaveProperty("production_sample_rate");
+    expect(written?.body).not.toHaveProperty("productionSampleRate");
   });
 
   /** The refusal's own sentence, kept, with the typing still on screen. */
   it("shows a refused edit without clearing the form", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [DIAGNOSTIC], next_cursor: null },
+        body: { graders: [DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_2": {
+      "GET /v1/grader-library": SHELF,
+      "PATCH /v1/graders/grd_2": {
         status: 422,
         body: {
           error: "unprocessable",
@@ -1231,12 +1247,12 @@ describe("changing a running copy", () => {
   it("clears a typed value and a refusal when a different row opens", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/graders": {
+      "GET /v1/graders": {
         status: 200,
-        body: { items: [SEEDED, DIAGNOSTIC], next_cursor: null },
+        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
       },
-      "GET /api/grader-library": SHELF,
-      "PATCH /api/graders/grd_2": {
+      "GET /v1/grader-library": SHELF,
+      "PATCH /v1/graders/grd_2": {
         status: 422,
         body: {
           error: "unprocessable",
@@ -1329,9 +1345,9 @@ describe("the strip between the two screens", () => {
   it("is a compact route navigation with the current view named", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /api/grader-library": {
+      "GET /v1/grader-library": {
         status: 200,
-        body: { items: [BEHAVIORS], next_cursor: null },
+        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
       },
     });
     render(<GraderLibraryPage />);

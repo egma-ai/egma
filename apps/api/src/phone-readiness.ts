@@ -21,9 +21,10 @@ import {
  * the file and restart. They are ordinary settings now: an operator who supplies
  * a missing one is ready on the next request, with nothing restarted.
  *
- * **Everything returned here is non-secret.** The facts are the carrier's
- * hostname and the number a call appears to come from. Speech readiness comes
- * from the pinned persona version plus the deployment credential source.
+ * This is an internal run-start precondition, not a public readiness response.
+ * Everything returned here is non-secret: the carrier hostname and the number
+ * a call appears to come from. Speech configuration comes from the pinned
+ * persona version plus the deployment credential source.
  */
 
 /** What a platform's phone half can be. */
@@ -44,7 +45,7 @@ export type PhoneReadiness = {
 };
 
 /**
- * The two public facts the phone half stands on, as the platform stores them
+ * The two internal facts the phone half stands on, as the platform stores them
  * and as a refusal names them.
  *
  * A trunk with no source number places a call the carrier refuses. The store

@@ -2,13 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createApiKey, listApiKeys, revokeApiKey } from "@egma/platform-api/client";
 
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf, type Project } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import {
-  API_KEYS_PATH,
   keysOwnedBy,
-  revokeApiKeyPath,
   rowsIn,
   scopeOf,
   type ApiKey,
@@ -139,7 +139,9 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   const projects: readonly Project[] = me?.projects ?? [];
   const now = useMinuteClock();
 
-  const { answer, reload } = useOrganizationRead<ApiKeyList>(API_KEYS_PATH);
+  const { answer, reload } = useOrganizationRead<ApiKeyList>(() =>
+    platformAnswer(listApiKeys({ client: platformClient })),
+  );
 
   const [name, setName] = useState("");
   const [scope, setScope] = useState<string>(projectId);
@@ -161,13 +163,15 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     setRefused(null);
     setBusy(true);
 
-    const written = await writeJson<MintedApiKey>(API_KEYS_PATH, {
-      method: "POST",
-      body: {
+    const written = await platformAnswer(
+      createApiKey(
+        {
         name: name.trim(),
-        ...(scope === WHOLE_ORGANIZATION ? {} : { project_id: scope }),
-      },
-    });
+          ...(scope === WHOLE_ORGANIZATION ? {} : { projectId: scope }),
+        },
+        { client: platformClient },
+      ),
+    );
 
     setBusy(false);
     if (written.status === "signed-out") {
@@ -187,10 +191,9 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     if (busy) return;
     setRefused(null);
     setBusy(true);
-    const written = await writeJson<ApiKey>(revokeApiKeyPath(key.id), {
-      method: "POST",
-      body: {},
-    });
+    const written = await platformAnswer(
+      revokeApiKey({ apiKeyId: key.id }, { client: platformClient }),
+    );
     setBusy(false);
     if (written.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -207,7 +210,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     const owner: Column<ListedApiKey> = {
       key: "owner",
       header: "Owner",
-      cell: (key) => key.created_by_email?.trim() || "Owner unavailable",
+      cell: (key) => key.createdByEmail?.trim() || "Owner unavailable",
     };
 
     return [
@@ -218,16 +221,16 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         cell: (key) => key.name ?? "Unnamed key",
       },
       ...(showOwner ? [owner] : []),
-      { key: "looks_like", header: "Key", mono: true, cell: (key) => key.looks_like },
+      { key: "looksLike", header: "Key", mono: true, cell: (key) => key.looksLike },
       { key: "scope", header: "Scope", cell: (key) => scopeOf(key, projects) },
       {
         key: "used",
         header: "Last used",
         cell: (key) =>
-          key.last_used_at === null
+          key.lastUsedAt === null
             ? "Never"
             : (
-                <RelativeInstant instant={key.last_used_at} now={now} />
+                <RelativeInstant instant={key.lastUsedAt} now={now} />
               ),
       },
       {
@@ -264,7 +267,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   // remove it only from this normal working list.
   const activeKeys = rowsIn(
     answer?.status === "ready" ? answer.value.keys : undefined,
-  ).filter((key) => key.revoked_at === null);
+  ).filter((key) => key.revokedAt === null);
   const { mine, others } = keysOwnedBy(
     activeKeys,
     me?.user.id,
@@ -409,7 +412,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
 
       {confirmingRevoke === null ? null : (
         <Dialog
-          title={`Revoke API key “${confirmingRevoke.name ?? confirmingRevoke.looks_like}”?`}
+          title={`Revoke API key “${confirmingRevoke.name ?? confirmingRevoke.looksLike}”?`}
           onClose={() => setConfirmingRevoke(null)}
         >
           {(dismiss) => (

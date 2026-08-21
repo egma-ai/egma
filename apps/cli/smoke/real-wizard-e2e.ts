@@ -378,9 +378,9 @@ async function rememberNames(origin: string, home: string): Promise<void> {
     // is exactly what happened to this once.
     const held = await readCredentials(path.join(home, "credentials"), origin);
     if (held === null) return;
-    const agents = await ask(origin, held.key, "/api/agents");
-    const items = Array.isArray(agents.body.items)
-      ? (agents.body.items as Record<string, unknown>[])
+    const agents = await ask(origin, held.key, "/v1/agents");
+    const items = Array.isArray(agents.body.agents)
+      ? (agents.body.agents as Record<string, unknown>[])
       : [];
     for (const agent of items) {
       if (typeof agent.name === "string") secrets.push(agent.name);
@@ -599,7 +599,7 @@ async function walkOnce(options: {
     const feed = await ask(
       options.instance.origin,
       held.key,
-      `/api/runs/${runId}/events?after=0`,
+      `/v1/runs/${runId}/events?after=0`,
     );
     const arrived = Array.isArray(feed.body.events) ? (feed.body.events as unknown[]) : ["?"];
     check(
@@ -644,13 +644,6 @@ async function walkOnce(options: {
   }
 }
 
-/** The instance's own identity, read the way the CLI reads it. */
-async function platformInstanceOf(origin: string): Promise<string> {
-  const answered = await fetch(`${origin}/api/platform`);
-  const body = (await answered.json().catch(() => ({}))) as { instance_id?: unknown };
-  return typeof body.instance_id === "string" ? body.instance_id : "";
-}
-
 /* ── what landed ─────────────────────────────────────────────────────── */
 
 async function assertWhatLanded(options: {
@@ -673,13 +666,13 @@ async function assertWhatLanded(options: {
   check(held.url === origin, "the key is stored against the egma it signed in to");
   check(held.key.startsWith("egma_sk_"), "the key is one the instance really minted");
 
-  const opened = await fetch(`${origin}/api/keys`, {
+  const opened = await fetch(`${origin}/v1/keys`, {
     headers: { authorization: `Bearer ${held.key}` },
   });
   check(opened.status === 200, `the key works on the real instance (it answered ${opened.status})`);
 
-  const agents = await ask(origin, held.key, "/api/agents");
-  const items = Array.isArray(agents.body.items) ? (agents.body.items as Record<string, unknown>[]) : [];
+  const agents = await ask(origin, held.key, "/v1/agents");
+  const items = Array.isArray(agents.body.agents) ? (agents.body.agents as Record<string, unknown>[]) : [];
   // One, however many times this has walked: registering the same provider
   // agent again answers the registration that already exists rather than
   // minting a second identity for it, which is the rule a retry depends on.
@@ -691,7 +684,7 @@ async function assertWhatLanded(options: {
   secrets.push(agentName);
   check(agentId !== "", "the agent egma registered has an id");
 
-  const one = await ask(origin, held.key, `/api/agents/${agentId}`);
+  const one = await ask(origin, held.key, `/v1/agents/${agentId}`);
   const connections = Array.isArray(one.body.connections)
     ? (one.body.connections as Record<string, unknown>[])
     : [];
@@ -703,11 +696,11 @@ async function assertWhatLanded(options: {
     // choice exists to kill, so the count is asserted rather than the last row.
     check(
       connections.length === 1 &&
-        connection?.agent_platform === "retell" &&
-        connection?.connection_kind === "phone_number" &&
-        connection?.access_variant === "phone_number.public_e164",
+        connection?.agentPlatform === "retell" &&
+        connection?.connectionKind === "phone_number" &&
+        connection?.accessVariant === "phone_number.public_e164",
       `the walk created exactly one connection and it is the phone one (${connections
-        .map((one) => String(one.product_label))
+        .map((one) => String(one.productLabel))
         .join(", ")})`,
     );
     check(
@@ -729,7 +722,7 @@ async function assertWhatLanded(options: {
       `the number is E.164 (${String(config.phoneNumber)})`,
     );
     check(
-      connection?.credentials_hint === null || connection?.credentials_hint === undefined,
+      connection?.credentialsHint === null || connection?.credentialsHint === undefined,
       "no credential was sealed against the phone connection",
     );
     check(
@@ -739,11 +732,11 @@ async function assertWhatLanded(options: {
   } else {
     check(
       connections.length === 1 &&
-        connection?.agent_platform === "retell" &&
-        connection?.connection_kind === "retell_chat_api" &&
-        connection?.access_variant === "retell_chat_api.api_key",
+        connection?.agentPlatform === "retell" &&
+        connection?.connectionKind === "retell_chat_api" &&
+        connection?.accessVariant === "retell_chat_api.api_key",
       `the walk created exactly one connection and it is the retell one (${connections
-        .map((one) => String(one.product_label))
+        .map((one) => String(one.productLabel))
         .join(", ")})`,
     );
     check(
@@ -751,7 +744,7 @@ async function assertWhatLanded(options: {
       `the text connection is a chat one (${String(connection?.modality)})`,
     );
     check(
-      connection?.credentials_hint === options.key.slice(-4),
+      connection?.credentialsHint === options.key.slice(-4),
       "the key was sealed on the platform, and only its last characters came back",
     );
   }
@@ -764,10 +757,6 @@ async function assertWhatLanded(options: {
     `the repository is bound to the platform it walked against (${String(written.platform?.origin)})`,
   );
   check(
-    written.platform?.instance === (await platformInstanceOf(origin)),
-    "and to that platform's own instance identity",
-  );
-  check(
     written.agent?.id === agentId && written.connection?.id === String(connection?.id),
     "the agent and the connection egma made are the ones the file names",
   );
@@ -777,11 +766,11 @@ async function assertWhatLanded(options: {
     "and no supplied secret is anywhere in it",
   );
 
-  const tests = await ask(origin, held.key, "/api/tests");
-  const landed = Array.isArray(tests.body.items)
-    ? (tests.body.items as Record<string, unknown>[])
+  const tests = await ask(origin, held.key, "/v1/tests");
+  const landed = Array.isArray(tests.body.tests)
+    ? (tests.body.tests as Record<string, unknown>[])
     : [];
-  const pinned = landed.filter((test) => String(test.version_id).startsWith("tstv_"));
+  const pinned = landed.filter((test) => String(test.versionId).startsWith("tstv_"));
   check(
     pinned.length >= TESTS_ENOUGH,
     `${pinned.length} tests are on the platform as frozen versions (wanted at least ${TESTS_ENOUGH})`,
@@ -793,7 +782,7 @@ async function assertWhatLanded(options: {
   const files = (await readdir(folder).catch(() => [] as string[])).filter((name) =>
     name.endsWith(".md"),
   );
-  const versions = new Set(landed.map((test) => String(test.version_id)));
+  const versions = new Set(landed.map((test) => String(test.versionId)));
   let pinnedFiles = 0;
   for (const name of files) {
     const test = parseTestFile(
@@ -810,7 +799,7 @@ async function assertWhatLanded(options: {
 
   /* the run the walk ended in, and what it was over */
 
-  const run = await ask(origin, held.key, `/api/runs/${outcome.runId}`);
+  const run = await ask(origin, held.key, `/v1/runs/${outcome.runId}`);
   const inTheRun = Array.isArray(run.body.simulations)
     ? (run.body.simulations as Record<string, unknown>[])
     : [];
@@ -837,7 +826,7 @@ async function assertWhatLanded(options: {
   // The address the platform issued, not one built here out of its parts. A
   // reconstruction would be this check agreeing with itself about where a run
   // lives; what a developer triple-clicks is whatever came back on the run.
-  const address = String(run.body.results_url ?? "");
+  const address = String(run.body.resultsUrl ?? "");
   const lines = outcome.leftBehind;
   check(address.startsWith("http"), `the run came back with an address (${address})`);
   check(

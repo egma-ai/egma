@@ -80,7 +80,7 @@ async function listed(): Promise<ListedPage> {
 
 async function transcript(): Promise<TraceDetailBody> {
   const page = await listed();
-  const traceId = page.traces[0]?.trace_id;
+  const traceId = page.traces[0]?.traceId;
   if (traceId === undefined) throw new Error("the list found no trace");
 
   const response = await readTraceOverHttp(api.app, acme.secret, traceId, WINDOW);
@@ -92,7 +92,7 @@ describe("the captured trace, found in a list", () => {
   it("is one trace inside a window containing it, and the last page of one", async () => {
     const page = await listed();
     expect(page.traces).toHaveLength(1);
-    expect(page.next_cursor).toBeNull();
+    expect(page.nextPageToken).toBeNull();
     // Echoed to the microsecond, which is the precision the window was read at
     // and the precision every other instant in the answer comes back at.
     expect(page.window).toEqual({
@@ -103,13 +103,13 @@ describe("the captured trace, found in a list", () => {
 
   it("counts every span that arrived, and the turns inside them", async () => {
     const [trace] = (await listed()).traces;
-    expect(trace?.span_count).toBe(FIXTURE_TRACE.spans);
-    expect(trace?.turn_counts).toEqual({
+    expect(trace?.spanCount).toBe(FIXTURE_TRACE.spans);
+    expect(trace?.turnCounts).toEqual({
       human: FIXTURE_TRACE.humanTurns,
       agent: FIXTURE_TRACE.agentTurns,
     });
-    expect(trace?.tool_span_count).toBe(FIXTURE_TRACE.toolSpans);
-    expect(trace?.errored_span_count).toBe(FIXTURE_TRACE.erroredSpans);
+    expect(trace?.toolSpanCount).toBe(FIXTURE_TRACE.toolSpans);
+    expect(trace?.erroredSpanCount).toBe(FIXTURE_TRACE.erroredSpans);
   });
 
   /**
@@ -121,9 +121,9 @@ describe("the captured trace, found in a list", () => {
    */
   it("says when the trace happened and how long it ran", async () => {
     const [trace] = (await listed()).traces;
-    expect(trace?.started_at).toBe("2026-08-02T18:04:40.281989Z");
-    expect(trace?.duration_ns).toBe("73494876403");
-    expect(trace?.ended_at).toBe("2026-08-02T18:05:53.776865Z");
+    expect(trace?.startedAt).toBe("2026-08-02T18:04:40.281989Z");
+    expect(trace?.durationNs).toBe("73494876403");
+    expect(trace?.endedAt).toBe("2026-08-02T18:05:53.776865Z");
   });
 
   it("says which platform produced it without inventing a connection kind", async () => {
@@ -131,15 +131,15 @@ describe("the captured trace, found in a list", () => {
     expect(trace?.source).toBe("production");
     expect(trace?.emitter).toBe("agent");
     expect(trace?.environment).toBe("default");
-    expect(trace?.connection_kind).toBe("");
-    expect(trace?.provider_call_id).toBe(FIXTURE_PROVIDER_CALL_ID);
-    expect(trace?.agent_platform).toBe("livekit_agents");
-    expect(trace?.platform_agent_id).toBe("");
-    expect(trace?.platform_agent_name).toBe("");
-    expect(trace?.platform_agent_version).toBe("");
+    expect(trace?.connectionKind).toBe("");
+    expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
+    expect(trace?.agentPlatform).toBe("livekit_agents");
+    expect(trace?.platformAgentId).toBe("");
+    expect(trace?.platformAgentName).toBe("");
+    expect(trace?.platformAgentVersion).toBe("");
     // Nothing started this one, so there is no run and no agent pinned to it.
-    expect(trace?.run_id).toBe("");
-    expect(trace?.agent_id).toBe("");
+    expect(trace?.runId).toBe("");
+    expect(trace?.agentId).toBe("");
   });
 
   /**
@@ -176,9 +176,9 @@ describe("the captured trace, found in a list", () => {
     expect(barely.statusCode, barely.body).toBe(200);
     const inside = (barely.json() as ListedPage).traces;
     expect(inside).toHaveLength(1);
-    expect(inside[0]?.started_at).toBe(opened);
+    expect(inside[0]?.startedAt).toBe(opened);
     // One microsecond of window, and one span of the trace in it.
-    expect(inside[0]?.span_count).toBe(1);
+    expect(inside[0]?.spanCount).toBe(1);
 
     // And at the instant itself, nothing: the end of a window is open.
     const excluded = await listTracesOverHttp(api.app, acme.secret, {
@@ -204,7 +204,7 @@ describe("the captured trace, read as a transcript", () => {
       FIXTURE_TRACE.agentTurns,
     );
 
-    const times = detail.turns.map((turn) => turn.started_at);
+    const times = detail.turns.map((turn) => turn.startedAt);
     expect([...times].sort()).toEqual(times);
   });
 
@@ -309,12 +309,12 @@ describe("the captured trace, read as a transcript", () => {
       everySpan(turn.spans).filter((span) => span.kind === "tool"),
     );
     expect(tools).toHaveLength(FIXTURE_TRACE.toolSpans);
-    expect(tools.map((tool) => tool.tool_name)).toEqual([
+    expect(tools.map((tool) => tool.toolName)).toEqual([
       "lookup_weather",
       "lookup_weather",
     ]);
-    expect(tools[0]?.tool_arguments).toBe('{"location": "Lisbon"}');
-    expect(tools[0]?.tool_result).toBe(
+    expect(tools[0]?.toolArguments).toBe('{"location": "Lisbon"}');
+    expect(tools[0]?.toolResult).toBe(
       "sunny with a temperature of 70 degrees.",
     );
 
@@ -347,8 +347,8 @@ describe("the captured trace, read as a transcript", () => {
     ]);
     // Inside a turn, which is where a person looking for what went wrong looks.
     for (const span of failed) {
-      expect(everySpan(detail.turns).map((each) => each.span_id)).toContain(
-        span.span_id,
+      expect(everySpan(detail.turns).map((each) => each.spanId)).toContain(
+        span.spanId,
       );
     }
   });
@@ -391,7 +391,7 @@ describe("the captured trace, read as a transcript", () => {
 
     expect(detail.spans.map((span) => span.name)).toEqual(["agent_session"]);
     expect(detail.spans[0]?.kind).toBe("root");
-    expect(detail.spans[0]?.parent_span_id).toBe("");
+    expect(detail.spans[0]?.parentSpanId).toBe("");
 
     const beneathTheRoot = everySpan(detail.spans[0]?.spans ?? []);
     expect(beneathTheRoot.filter((span) => span.kind.startsWith("turn:"))).toEqual(
@@ -399,7 +399,7 @@ describe("the captured trace, read as a transcript", () => {
     );
 
     const ids = [...everySpan(detail.turns), ...everySpan(detail.spans)].map(
-      (span) => span.span_id,
+      (span) => span.spanId,
     );
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(FIXTURE_TRACE.spans);
@@ -420,24 +420,24 @@ describe("the captured trace, read as a transcript", () => {
     const detail = await transcript();
 
     expect(detail.trace.source).toBe("production");
-    expect(detail.simulation_id).toBeNull();
+    expect(detail.simulationId).toBeNull();
   });
 
   it("reports the trace's own facts beside the transcript, and no payload with them", async () => {
     const detail = await transcript();
 
-    expect(detail.trace.span_count).toBe(FIXTURE_TRACE.spans);
-    expect(detail.trace.turn_counts).toEqual({
+    expect(detail.trace.spanCount).toBe(FIXTURE_TRACE.spans);
+    expect(detail.trace.turnCounts).toEqual({
       human: FIXTURE_TRACE.humanTurns,
       agent: FIXTURE_TRACE.agentTurns,
     });
-    expect(detail.trace.started_at).toBe("2026-08-02T18:04:40.281989Z");
-    expect(detail.trace.provider_call_id).toBe(FIXTURE_PROVIDER_CALL_ID);
-    expect(detail.trace.agent_platform).toBe("livekit_agents");
-    expect(detail.trace.platform_agent_id).toBe("");
-    expect(detail.trace.platform_agent_name).toBe("");
-    expect(detail.trace.platform_agent_version).toBe("");
-    expect(detail.spans_truncated).toBe(false);
+    expect(detail.trace.startedAt).toBe("2026-08-02T18:04:40.281989Z");
+    expect(detail.trace.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
+    expect(detail.trace.agentPlatform).toBe("livekit_agents");
+    expect(detail.trace.platformAgentId).toBe("");
+    expect(detail.trace.platformAgentName).toBe("");
+    expect(detail.trace.platformAgentVersion).toBe("");
+    expect(detail.spansTruncated).toBe(false);
 
     // The verbatim payload is the largest column on the row and is deliberately
     // not in this response. It is not lost — it is on the span — and reaching it
@@ -451,19 +451,19 @@ describe("the captured trace, read as a transcript", () => {
     ];
     for (const span of everything) {
       expect(Object.keys(span).sort()).toEqual([
-        "audio_url",
-        "duration_ns",
+        "audioUrl",
+        "durationNs",
         "kind",
         "name",
-        "parent_span_id",
-        "span_id",
+        "parentSpanId",
+        "spanId",
         "spans",
-        "started_at",
+        "startedAt",
         "status",
         "text",
-        "tool_arguments",
-        "tool_name",
-        "tool_result",
+        "toolArguments",
+        "toolName",
+        "toolResult",
       ]);
     }
   });
@@ -647,14 +647,14 @@ describe("what one measure looks like on the wire", () => {
       "measure",
       "partial",
       "samples",
-      "span_ids",
+      "spanIds",
       "unit",
       "worst",
     ]);
     expect(only.derived).toBe(false);
     // Absent, not empty and not null — there is nothing on the wire to have to
     // interpret.
-    expect("reported_by" in only).toBe(false);
+    expect("reportedBy" in only).toBe(false);
   });
 
   it("adds the platform's name, and only there, on a measure it reported", async () => {
@@ -664,18 +664,18 @@ describe("what one measure looks like on the wire", () => {
       "derived",
       "measure",
       "partial",
-      "reported_by",
+      "reportedBy",
       "samples",
-      "span_ids",
+      "spanIds",
       "unit",
       "worst",
     ]);
     // `derived` says what it has always said — egma did not time this — and the
     // new field says which of the two untimed sources it was.
     expect(only.derived).toBe(true);
-    expect(only.reported_by).toBe("retell");
+    expect(only.reportedBy).toBe("retell");
     expect(only.samples).toEqual([517, 2145]);
-    expect(only.worst).toEqual({ value: 2145, span_id: "5200000000000001" });
+    expect(only.worst).toEqual({ value: 2145, spanId: "5200000000000001" });
   });
 
   /**

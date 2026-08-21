@@ -140,7 +140,7 @@ export function Transcript({
   showMetadata = true,
 }: TranscriptProps) {
   const marked = new Set(highlighted);
-  const openedAt = transcript.started_at;
+  const openedAt = transcript.startedAt;
 
   if (transcript.turns.length === 0) {
     return (
@@ -162,7 +162,7 @@ export function Transcript({
         const cited = marked.has(at + 1);
         return (
           <div
-            key={turn.span_id}
+            key={turn.spanId}
             id={`transcript-turn-${String(at + 1)}`}
             className={cn(
               "grid grid-cols-[68px_minmax(0,1fr)] items-baseline gap-4 px-5 py-4",
@@ -212,8 +212,8 @@ export function Transcript({
                     "[&>*+*]:before:me-2 [&>*+*]:before:content-['·']",
                   )}
                 >
-                  <span>{howFarIn(turn.started_at, openedAt)}</span>
-                  <span>{howLong(turn.duration_ns)}</span>
+                  <span>{howFarIn(turn.startedAt, openedAt)}</span>
+                  <span>{howLong(turn.durationNs)}</span>
                   {inside.length === 0 ? null : (
                     <span>
                       {inside.length} step{inside.length === 1 ? "" : "s"}
@@ -256,7 +256,7 @@ function containsTurn(
   turnIds: ReadonlySet<string>,
 ): boolean {
   return (
-    turnIds.has(step.span_id) ||
+    turnIds.has(step.spanId) ||
     step.spans.some((inside) => containsTurn(inside, turnIds))
   );
 }
@@ -296,12 +296,12 @@ export function ExecutionTimeline({
 }: {
   readonly transcript: EvidenceTranscript;
 }) {
-  const turnIds = new Set(transcript.turns.map((turn) => turn.span_id));
+  const turnIds = new Set(transcript.turns.map((turn) => turn.spanId));
   const standalone = transcript.spans.filter(
     (step) => !containsTurn(step, turnIds),
   );
   const milestones = [...transcript.turns, ...standalone].sort(
-    (left, right) => Date.parse(left.started_at) - Date.parse(right.started_at),
+    (left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt),
   );
   if (milestones.length === 0) {
     return (
@@ -327,7 +327,7 @@ export function ExecutionTimeline({
         const containsFailedStep = inside.some(
           (nested) => nested.step.status === "error",
         );
-        const detail = step.kind === "tool" ? step.tool_name : "";
+        const detail = step.kind === "tool" ? step.toolName : "";
         return (
           <li
             className={cn(
@@ -335,7 +335,7 @@ export function ExecutionTimeline({
               "not-first:border-t not-first:border-t-border",
               ROW_HOVER,
             )}
-            key={step.span_id}
+            key={step.spanId}
           >
             <div
               className={cn(
@@ -346,7 +346,7 @@ export function ExecutionTimeline({
               )}
             >
               <span className="font-mono text-muted-foreground tabular-nums">
-                {howFarIn(step.started_at, transcript.started_at)}
+                {howFarIn(step.startedAt, transcript.startedAt)}
               </span>
               <span
                 className="size-2 rounded-chip border-2 border-foreground bg-surface"
@@ -370,7 +370,7 @@ export function ExecutionTimeline({
                   failed && "font-medium text-failure",
                 )}
               >
-                <span>{failed ? "Failed" : howLong(step.duration_ns)}</span>
+                <span>{failed ? "Failed" : howLong(step.durationNs)}</span>
                 {containsFailedStep ? (
                   <span className="font-sans text-sm font-medium whitespace-nowrap text-failure">
                     Contains failed step
@@ -400,16 +400,16 @@ export function ExecutionTimeline({
                   {inside.map(({ step: nested, depth }) => (
                     <li
                       className="flex min-w-0 items-baseline justify-between gap-3"
-                      key={nested.span_id}
+                      key={nested.spanId}
                       style={{ paddingInlineStart: `${String(Math.min(depth, 5) * 12)}px` }}
                     >
                       <span className="flex min-w-0 items-baseline gap-2">
                         <strong className="font-medium text-foreground">
                           {labelFor(nested)}
                         </strong>
-                        {nested.kind === "tool" && nested.tool_name !== "" ? (
+                        {nested.kind === "tool" && nested.toolName !== "" ? (
                           <span className="overflow-hidden font-mono text-ellipsis whitespace-nowrap">
-                            {nested.tool_name}
+                            {nested.toolName}
                           </span>
                         ) : null}
                       </span>
@@ -422,7 +422,7 @@ export function ExecutionTimeline({
                       >
                         {nested.status === "error"
                           ? "Failed"
-                          : howLong(nested.duration_ns)}
+                          : howLong(nested.durationNs)}
                       </span>
                     </li>
                   ))}
@@ -450,15 +450,15 @@ export function ExecutionTimeline({
 const MEASURES: Readonly<
   Record<string, { readonly label: string; readonly shown: (n: number) => string }>
 > = {
-  duration_ms: {
+  durationMs: {
     label: "Duration",
     shown: (n) => (n < 1000 ? `${String(n)} ms` : `${(n / 1000).toFixed(1)} s`),
   },
-  turn_count: { label: "Turns", shown: String },
-  human_turn_count: { label: "Human turns", shown: String },
-  agent_turn_count: { label: "Agent turns", shown: String },
-  tool_call_count: { label: "Tool calls", shown: String },
-  errored_step_count: { label: "Errored steps", shown: String },
+  turnCount: { label: "Turns", shown: String },
+  humanTurnCount: { label: "Human turns", shown: String },
+  agentTurnCount: { label: "Agent turns", shown: String },
+  toolCallCount: { label: "Tool calls", shown: String },
+  erroredStepCount: { label: "Errored steps", shown: String },
   interruption_count: { label: "Interruptions", shown: String },
   cost_cents: { label: "Cost", shown: (n) => `${(n / 100).toFixed(2)}` },
 };
@@ -572,8 +572,8 @@ export function MockToolEvidence({
             Frozen for this simulation
           </strong>
           {frozen.map((one) => (
-            <span className={TOOL_CHIP} key={`frozen:${one.tool_name}`}>
-              {one.tool_name}
+            <span className={TOOL_CHIP} key={`frozen:${one.tool}`}>
+              {one.tool}
             </span>
           ))}
         </div>
@@ -661,7 +661,7 @@ export function VerdictEvidence({
   readonly children?: ReactNode;
 }) {
   const { speaking } = judged;
-  const cited = citedTurnPositions(speaking.cited_turns, turns);
+  const cited = citedTurnPositions(speaking.citedTurns, turns);
 
   return (
     <article
@@ -729,8 +729,8 @@ export function VerdictEvidence({
             {judged.superseded.length === 1 ? "" : "s"} of this assertion
           </summary>
           {judged.superseded.map((row) => (
-            <p className={cn(CITED)} key={row.judged_at}>
-              <span className={MONO}>{asSecond(row.judged_at)}</span>{" "}
+            <p className={cn(CITED)} key={row.judgedAt}>
+              <span className={MONO}>{asSecond(row.judgedAt)}</span>{" "}
               {row.verdict} — {row.rationale}
             </p>
           ))}
@@ -773,13 +773,13 @@ export function PlanItems({
             /* Narrow, the note sits under the grader it describes. */
             "max-[40rem]:grid-cols-[1fr] max-[40rem]:gap-1",
           )}
-          key={`${item.grader_id}:${item.grader_version_id}`}
+          key={`${item.graderId}:${item.graderVersionId}`}
         >
           <strong className="font-medium text-foreground">
             {graderDisplayName(item.name)}
           </strong>
           <span className="min-w-0 font-mono wrap-anywhere text-muted-foreground">
-            {`${item.required ? "blocks" : "reports only"} · ${item.grader_version_id}`}
+            {`${item.required ? "blocks" : "reports only"} · ${item.graderVersionId}`}
           </span>
         </li>
       ))}

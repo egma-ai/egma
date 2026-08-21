@@ -30,7 +30,7 @@ export function ModelFields({
   readonly onChange: (draft: ModelsDraft) => void;
 }) {
   const entries = (job: PersonaModelCatalogEntry["job"]) =>
-    form.model_catalog.filter((entry) => entry.job === job);
+    form.modelCatalog.filter((entry) => entry.job === job);
 
   /*
    * **One option carries both halves of the choice, encoded together.** A
@@ -138,7 +138,7 @@ export function ModelFields({
               ...draft,
               ttsProvider: entry.provider,
               ttsModel: entry.model,
-              voiceId: entry.recommended_voice_id ?? "",
+              voiceId: entry.recommendedVoiceId ?? "",
             });
           }}
         >
@@ -176,7 +176,7 @@ export function ModelFields({
           label="Speech rate"
           value={draft.speed}
           disabled={disabled}
-          hint={`A multiple of the natural pace, from ${form.speed_range.slowest} to ${form.speed_range.fastest}.`}
+          hint={`A multiple of the natural pace, from ${form.speedRange.slowest} to ${form.speedRange.fastest}.`}
           onChange={(speed) => onChange({ ...draft, speed })}
         />
       </FormRow>

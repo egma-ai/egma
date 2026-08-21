@@ -58,7 +58,7 @@ const DAY = { from: "2026-06-01T00:00:00Z", to: "2026-06-02T00:00:00Z" } as cons
  * The minute matters because it is what the store files by: the sort key buckets
  * `started_at` to `toStartOfMinute`, so several traces of one minute are the
  * case where a page boundary has nothing but the trace id to break a tie with.
- * A cursor that carried only a time would skip or repeat exactly here.
+ * A pageToken that carried only a time would skip or repeat exactly here.
  */
 const PAGING_TRACES = [
   { traceId: "aa000000000000000000000000000001", at: "2026-06-01T09:00:00Z" },
@@ -271,21 +271,21 @@ describe("walking every page of a list", () => {
   it("returns every trace exactly once, newest first, across every boundary", async () => {
     for (const size of [1, 2, 5, 7]) {
       const seen: string[] = [];
-      let cursor: string | undefined;
+      let pageToken: string | undefined;
       let pages = 0;
 
       do {
         const answered = await page(acme.secret, {
           ...DAY,
-          limit: size,
-          ...(cursor === undefined ? {} : { cursor }),
+          pageSize: size,
+          ...(pageToken === undefined ? {} : { pageToken }),
         });
         expect(answered.traces.length).toBeLessThanOrEqual(size);
-        seen.push(...answered.traces.map((trace) => trace.trace_id));
-        cursor = answered.next_cursor ?? undefined;
+        seen.push(...answered.traces.map((trace) => trace.traceId));
+        pageToken = answered.nextPageToken ?? undefined;
         pages += 1;
         expect(pages, "the walk did not terminate").toBeLessThan(50);
-      } while (cursor !== undefined);
+      } while (pageToken !== undefined);
 
       expect(new Set(seen).size, `page size ${size} repeated a trace`).toBe(
         seen.length,
@@ -295,7 +295,7 @@ describe("walking every page of a list", () => {
       );
 
       // Newest first. The three traces of 09:00 are ordered among themselves by
-      // id descending, which is the tie-break the cursor carries.
+      // id descending, which is the tie-break the pageToken carries.
       const expected = [...PAGING_TRACES]
         .map((trace) => ({ ...trace }))
         .sort(
@@ -310,19 +310,19 @@ describe("walking every page of a list", () => {
 
   it("splits a shared minute across a page boundary without losing either side", async () => {
     // Page size two, so the boundary falls between the two traces that share
-    // 09:00:00 exactly — the case where a cursor carrying only a time cannot
+    // 09:00:00 exactly — the case where a pageToken carrying only a time cannot
     // tell the second from the first.
     const walked: string[] = [];
-    let cursor: string | undefined;
+    let pageToken: string | undefined;
     do {
       const answered = await page(acme.secret, {
         ...DAY,
-        limit: 2,
-        ...(cursor === undefined ? {} : { cursor }),
+        pageSize: 2,
+        ...(pageToken === undefined ? {} : { pageToken }),
       });
-      walked.push(...answered.traces.map((trace) => trace.trace_id));
-      cursor = answered.next_cursor ?? undefined;
-    } while (cursor !== undefined);
+      walked.push(...answered.traces.map((trace) => trace.traceId));
+      pageToken = answered.nextPageToken ?? undefined;
+    } while (pageToken !== undefined);
 
     const sharingTheMinute = walked.filter((id) =>
       ["01", "02", "03"].includes(id.slice(-2)),
@@ -334,19 +334,19 @@ describe("walking every page of a list", () => {
     ]);
   });
 
-  it("hands out no cursor on the last page, so nobody asks for nothing", async () => {
-    const answered = await page(acme.secret, { ...DAY, limit: 200 });
+  it("hands out no pageToken on the last page, so nobody asks for nothing", async () => {
+    const answered = await page(acme.secret, { ...DAY, pageSize: 200 });
     expect(answered.traces).toHaveLength(PAGING_TRACES.length);
-    expect(answered.next_cursor).toBeNull();
+    expect(answered.nextPageToken).toBeNull();
   });
 
   it("refuses a token it did not issue", async () => {
-    for (const cursor of ["not-a-cursor", "MTox", Buffer.from("9:1:x").toString("base64url")]) {
+    for (const pageToken of ["not-a-pageToken", "MTox", Buffer.from("9:1:x").toString("base64url")]) {
       const response = await listTracesOverHttp(api.app, acme.secret, {
         ...DAY,
-        cursor,
+        pageToken,
       });
-      expect(response.statusCode, cursor).toBe(400);
+      expect(response.statusCode, pageToken).toBe(400);
       expect((response.json() as { message: string }).message).toContain(
         "page token",
       );
@@ -354,15 +354,15 @@ describe("walking every page of a list", () => {
   });
 
   it("clamps a page size nobody could want, and refuses one that is not a count", async () => {
-    const enormous = await page(acme.secret, { ...DAY, limit: 100_000 });
+    const enormous = await page(acme.secret, { ...DAY, pageSize: 100_000 });
     expect(enormous.traces).toHaveLength(PAGING_TRACES.length);
 
-    for (const limit of ["lots", "0", "-1"]) {
+    for (const pageSize of ["lots", "0", "-1"]) {
       const nonsense = await listTracesOverHttp(api.app, acme.secret, {
         ...DAY,
-        limit,
+        pageSize,
       });
-      expect(nonsense.statusCode, limit).toBe(400);
+      expect(nonsense.statusCode, pageSize).toBe(400);
       expect((nonsense.json() as { message: string }).message).toContain(
         "not a count",
       );
@@ -373,10 +373,10 @@ describe("walking every page of a list", () => {
 /**
  * A query parameter that arrived carrying nothing.
  *
- * `?project_id=&limit=` is what a form submits for fields left blank, and it is
+ * `?projectId=&pageSize=` is what a form submits for fields left blank, and it is
  * a request a client sends without meaning anything by it. Both used to be read
- * as though somebody had said something: `project_id` became a predicate on a
- * project no row is filed under and answered with an empty list, and `limit`
+ * as though somebody had said something: `projectId` became a predicate on a
+ * project no row is filed under and answered with an empty list, and `pageSize`
  * became `Number("")`, which is zero, which is refused. Neither is what the
  * caller asked, and neither said so.
  */
@@ -384,14 +384,14 @@ describe("a parameter that arrived empty", () => {
   it("is the whole organization, when it is the project", async () => {
     const answered = await page(acme.secret, {
       ...DAY,
-      project_id: "",
-      limit: 200,
+      projectId: "",
+      pageSize: 200,
     });
     expect(answered.traces).toHaveLength(PAGING_TRACES.length);
   });
 
-  it("is the default page size, when it is the limit", async () => {
-    const answered = await page(acme.secret, { ...DAY, limit: "" });
+  it("is the default page size, when it is the pageSize", async () => {
+    const answered = await page(acme.secret, { ...DAY, pageSize: "" });
     expect(answered.traces).toHaveLength(PAGING_TRACES.length);
   });
 
@@ -400,7 +400,7 @@ describe("a parameter that arrived empty", () => {
       api.app,
       acme.secret,
       PAGING_TRACES[0].traceId,
-      { ...DAY, project_id: "" },
+      { ...DAY, projectId: "" },
     );
     expect(response.statusCode, response.body).toBe(200);
   });
@@ -418,7 +418,7 @@ describe("a parameter that arrived empty", () => {
  */
 describe("another organization asking for a trace that is not theirs", () => {
   it("finds nothing in a list of the same window", async () => {
-    const answered = await page(globex.secret, { ...DAY, limit: 200 });
+    const answered = await page(globex.secret, { ...DAY, pageSize: 200 });
     expect(answered.traces).toEqual([]);
   });
 
@@ -454,8 +454,8 @@ describe("another organization asking for a trace that is not theirs", () => {
       }),
     );
 
-    const answered = await page(globex.secret, { ...DAY, limit: 200 });
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+    const answered = await page(globex.secret, { ...DAY, pageSize: 200 });
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
       "bb000000000000000000000000000001",
     ]);
     expect(answered.traces[0]?.preview).toBe("Globex speaking.");
@@ -466,7 +466,7 @@ describe("another organization asking for a trace that is not theirs", () => {
  * A project labels rows; it never walls them.
  *
  * So the organization-wide read is the first-class one and returns everything
- * the customer has, and `project_id` narrows it. A key minted for one project
+ * the customer has, and `projectId` narrows it. A key minted for one project
  * reads that project and cannot be argued into another — and is told so out
  * loud rather than having its filter silently dropped.
  */
@@ -523,9 +523,9 @@ describe("filtering a list to one project", () => {
   it("reads across the whole organization when nobody narrowed it", async () => {
     const answered = await page(acme.secret, {
       ...OUTBOUND_WINDOW,
-      limit: 200,
+      pageSize: 200,
     });
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
       "cc000000000000000000000000000002",
       "cc000000000000000000000000000001",
     ]);
@@ -534,10 +534,10 @@ describe("filtering a list to one project", () => {
   it("narrows to the one project when asked", async () => {
     const answered = await page(acme.secret, {
       ...OUTBOUND_WINDOW,
-      project_id: outboundProjectId,
-      limit: 200,
+      projectId: outboundProjectId,
+      pageSize: 200,
     });
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
       "cc000000000000000000000000000001",
     ]);
   });
@@ -547,7 +547,7 @@ describe("filtering a list to one project", () => {
       api.app,
       acme.secret,
       "cc000000000000000000000000000001",
-      { ...OUTBOUND_WINDOW, project_id: outboundProjectId },
+      { ...OUTBOUND_WINDOW, projectId: outboundProjectId },
     );
     expect(inside.statusCode).toBe(200);
 
@@ -555,7 +555,7 @@ describe("filtering a list to one project", () => {
       api.app,
       acme.secret,
       "cc000000000000000000000000000002",
-      { ...OUTBOUND_WINDOW, project_id: outboundProjectId },
+      { ...OUTBOUND_WINDOW, projectId: outboundProjectId },
     );
     expect(outside.statusCode).toBe(404);
   });
@@ -563,9 +563,9 @@ describe("filtering a list to one project", () => {
   it("gives a project-scoped key its own project and nothing beside it", async () => {
     const answered = await page(outboundSecret, {
       ...OUTBOUND_WINDOW,
-      limit: 200,
+      pageSize: 200,
     });
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
       "cc000000000000000000000000000001",
     ]);
 
@@ -581,7 +581,7 @@ describe("filtering a list to one project", () => {
   it("tells a project-scoped key it cannot ask about another project", async () => {
     const response = await listTracesOverHttp(api.app, outboundSecret, {
       ...OUTBOUND_WINDOW,
-      project_id: acme.projectId,
+      projectId: acme.projectId,
     });
     expect(response.statusCode).toBe(400);
     expect((response.json() as { error: string }).error).toBe("invalid_request");
@@ -594,7 +594,7 @@ describe("filtering a list to one project", () => {
       api.app,
       outboundSecret,
       "cc000000000000000000000000000002",
-      { ...OUTBOUND_WINDOW, project_id: acme.projectId },
+      { ...OUTBOUND_WINDOW, projectId: acme.projectId },
     );
     expect(detail.statusCode).toBe(400);
     expect((detail.json() as { message: string }).message).toContain(
@@ -625,12 +625,12 @@ describe("filtering a list to one project", () => {
     it("reads the project the address named, not the one the session defaulted to", async () => {
       const response = await listTracesAsSignedIn(api.app, acme.cookie, {
         ...OUTBOUND_WINDOW,
-        project_id: outboundProjectId,
-        limit: 200,
+        projectId: outboundProjectId,
+        pageSize: 200,
       });
       expect(response.statusCode, response.body).toBe(200);
       expect(
-        (response.json() as ListedPage).traces.map((trace) => trace.trace_id),
+        (response.json() as ListedPage).traces.map((trace) => trace.traceId),
       ).toEqual(["cc000000000000000000000000000001"]);
     });
 
@@ -640,7 +640,7 @@ describe("filtering a list to one project", () => {
         api.app,
         acme.cookie,
         "cc000000000000000000000000000001",
-        { ...OUTBOUND_WINDOW, project_id: outboundProjectId },
+        { ...OUTBOUND_WINDOW, projectId: outboundProjectId },
       );
       expect(inside.statusCode, inside.body).toBe(200);
 
@@ -650,7 +650,7 @@ describe("filtering a list to one project", () => {
         api.app,
         acme.cookie,
         "cc000000000000000000000000000002",
-        { ...OUTBOUND_WINDOW, project_id: outboundProjectId },
+        { ...OUTBOUND_WINDOW, projectId: outboundProjectId },
       );
       expect(outside.statusCode).toBe(404);
     });
@@ -659,11 +659,11 @@ describe("filtering a list to one project", () => {
     it("keeps the project it resolved to when the request names none", async () => {
       const response = await listTracesAsSignedIn(api.app, acme.cookie, {
         ...OUTBOUND_WINDOW,
-        limit: 200,
+        pageSize: 200,
       });
       expect(response.statusCode, response.body).toBe(200);
       expect(
-        (response.json() as ListedPage).traces.map((trace) => trace.trace_id),
+        (response.json() as ListedPage).traces.map((trace) => trace.traceId),
       ).toEqual(["cc000000000000000000000000000002"]);
     });
 
@@ -677,8 +677,8 @@ describe("filtering a list to one project", () => {
       for (const named of [globex.projectId, "prj_00000000000000000000000000"]) {
         const response = await listTracesAsSignedIn(api.app, acme.cookie, {
           ...OUTBOUND_WINDOW,
-          project_id: named,
-          limit: 200,
+          projectId: named,
+          pageSize: 200,
         });
         expect(response.statusCode, named).toBe(400);
 
@@ -690,7 +690,7 @@ describe("filtering a list to one project", () => {
           api.app,
           acme.cookie,
           "cc000000000000000000000000000001",
-          { ...OUTBOUND_WINDOW, project_id: named },
+          { ...OUTBOUND_WINDOW, projectId: named },
         );
         expect(detail.statusCode, named).toBe(400);
       }
@@ -705,8 +705,8 @@ describe("filtering a list to one project", () => {
     it("does not let another organization's browser name this one's project", async () => {
       const response = await listTracesAsSignedIn(api.app, globex.cookie, {
         ...OUTBOUND_WINDOW,
-        project_id: outboundProjectId,
-        limit: 200,
+        projectId: outboundProjectId,
+        pageSize: 200,
       });
       expect(response.statusCode).toBe(400);
       expect((response.json() as { message: string }).message).toContain(
@@ -757,12 +757,12 @@ describe("a browser session rather than a key", () => {
   it("reads the same list, with no key anywhere in the request", async () => {
     const response = await listTracesAsSignedIn(api.app, acme.cookie, {
       ...SESSION_WINDOW,
-      limit: 200,
+      pageSize: 200,
     });
     expect(response.statusCode, response.body).toBe(200);
 
     const answered = response.json() as ListedPage;
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
       SESSION_TRACE,
     ]);
     expect(answered.traces[0]?.preview).toBe("Reading this from a browser.");
@@ -925,9 +925,9 @@ describe("narrowing a list to one kind of traffic", () => {
   });
 
   it("reads both kinds when nobody narrowed it, newest first and interleaved", async () => {
-    const answered = await page(acme.secret, { ...MIXED, limit: 200 });
+    const answered = await page(acme.secret, { ...MIXED, pageSize: 200 });
 
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual([
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
       simulationTraces[2],
       PRODUCTION_TRACES[2].traceId,
       simulationTraces[1],
@@ -941,10 +941,10 @@ describe("narrowing a list to one kind of traffic", () => {
     const answered = await page(acme.secret, {
       ...MIXED,
       source: "production",
-      limit: 200,
+      pageSize: 200,
     });
 
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual(
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual(
       newestFirst(PRODUCTION_TRACES.map((trace) => trace.traceId)),
     );
     expect([...new Set(answered.traces.map((trace) => trace.source))]).toEqual([
@@ -956,10 +956,10 @@ describe("narrowing a list to one kind of traffic", () => {
     const answered = await page(acme.secret, {
       ...MIXED,
       source: "simulation",
-      limit: 200,
+      pageSize: 200,
     });
 
-    expect(answered.traces.map((trace) => trace.trace_id)).toEqual(
+    expect(answered.traces.map((trace) => trace.traceId)).toEqual(
       newestFirst(simulationTraces),
     );
     expect([...new Set(answered.traces.map((trace) => trace.source))]).toEqual([
@@ -973,18 +973,18 @@ describe("narrowing a list to one kind of traffic", () => {
    * An integration written before this parameter existed sends nothing, and
    * what comes back has to be the response it has always had — not a response
    * of the same shape, the same response. `?source=` is the third parameter to
-   * read as absence, beside `?project_id=` and `?limit=`: it is what a form
+   * read as absence, beside `?projectId=` and `?pageSize=`: it is what a form
    * submits for a field left blank.
    */
   it("is the same answer, byte for byte, when the parameter is absent or empty", async () => {
     const absent = await listTracesOverHttp(api.app, acme.secret, {
       ...MIXED,
-      limit: 200,
+      pageSize: 200,
     });
     const blank = await listTracesOverHttp(api.app, acme.secret, {
       ...MIXED,
       source: "",
-      limit: 200,
+      pageSize: 200,
     });
 
     expect(absent.statusCode, absent.body).toBe(200);
@@ -1029,15 +1029,15 @@ describe("narrowing a list to one kind of traffic", () => {
   it("walks a filtered list with its own token, skipping none and repeating none", async () => {
     for (const size of [1, 2]) {
       const seen: string[] = [];
-      let cursor: string | undefined;
+      let pageToken: string | undefined;
       let pages = 0;
 
       do {
         const answered = await page(acme.secret, {
           ...MIXED,
           source: "production",
-          limit: size,
-          ...(cursor === undefined ? {} : { cursor }),
+          pageSize: size,
+          ...(pageToken === undefined ? {} : { pageToken }),
         });
         expect(answered.traces.length).toBeLessThanOrEqual(size);
         for (const trace of answered.traces) {
@@ -1045,11 +1045,11 @@ describe("narrowing a list to one kind of traffic", () => {
             "production",
           );
         }
-        seen.push(...answered.traces.map((trace) => trace.trace_id));
-        cursor = answered.next_cursor ?? undefined;
+        seen.push(...answered.traces.map((trace) => trace.traceId));
+        pageToken = answered.nextPageToken ?? undefined;
         pages += 1;
         expect(pages, "the walk did not terminate").toBeLessThan(20);
-      } while (cursor !== undefined);
+      } while (pageToken !== undefined);
 
       expect(new Set(seen).size, `page size ${size} repeated a trace`).toBe(
         seen.length,
@@ -1078,16 +1078,16 @@ describe("narrowing a list to one kind of traffic", () => {
     const theirs = await page(globex.secret, {
       ...MIXED,
       source: "production",
-      limit: 200,
+      pageSize: 200,
     });
-    expect(theirs.traces.map((trace) => trace.trace_id)).toEqual([GLOBEX_TRACE]);
+    expect(theirs.traces.map((trace) => trace.traceId)).toEqual([GLOBEX_TRACE]);
 
     const ours = await page(acme.secret, {
       ...MIXED,
       source: "production",
-      limit: 200,
+      pageSize: 200,
     });
-    expect(ours.traces.map((trace) => trace.trace_id)).toEqual(
+    expect(ours.traces.map((trace) => trace.traceId)).toEqual(
       newestFirst(PRODUCTION_TRACES.map((trace) => trace.traceId)),
     );
 
@@ -1096,7 +1096,7 @@ describe("narrowing a list to one kind of traffic", () => {
     const none = await page(globex.secret, {
       ...MIXED,
       source: "simulation",
-      limit: 200,
+      pageSize: 200,
     });
     expect(none.traces).toEqual([]);
   });
@@ -1187,7 +1187,7 @@ describe("a production conversation egma judged", () => {
 
     const detail = read.json() as {
       trace: { source: string };
-      simulation_id: string | null;
+      simulationId: string | null;
       verdicts: readonly { assertion: string; verdict: string }[];
       outcome: { verdict: string; counts: Record<string, number> } | null;
     };
@@ -1195,7 +1195,7 @@ describe("a production conversation egma judged", () => {
     // A production conversation, and it names no simulation — which is exactly
     // the case the lookup used to get wrong.
     expect(detail.trace.source).toBe("production");
-    expect(detail.simulation_id).toBeNull();
+    expect(detail.simulationId).toBeNull();
 
     expect(detail.verdicts).toHaveLength(1);
     expect(detail.verdicts[0]?.assertion).toBe("turn_response_latency");

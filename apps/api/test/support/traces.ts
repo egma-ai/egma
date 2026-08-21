@@ -64,9 +64,9 @@ export async function mintKey(
 ): Promise<string> {
   const minted = await app.inject({
     method: "POST",
-    url: "/api/keys",
+    url: "/v1/keys",
     headers: { cookie },
-    payload: { name, ...(projectId === undefined ? {} : { project_id: projectId }) },
+    payload: { name, ...(projectId === undefined ? {} : { projectId }) },
   });
   expect(minted.statusCode, minted.body).toBe(201);
   return (minted.json() as { secret: string }).secret;
@@ -86,13 +86,13 @@ export async function colleagueOf(
 ): Promise<Customer> {
   const invited = await app.inject({
     method: "POST",
-    url: "/api/invitations",
+    url: "/v1/invitations",
     headers: { cookie: host.cookie },
     payload: { email, role },
   });
   expect(invited.statusCode, invited.body).toBe(201);
 
-  const link = (invited.json() as { accept_url: string }).accept_url;
+  const link = (invited.json() as { acceptUrl: string }).acceptUrl;
   const joined = await app.inject({
     method: "POST",
     url: "/api/signup",
@@ -312,47 +312,47 @@ export async function ingest(
  * ------------------------------------------------------------------ */
 
 export type ListedTrace = {
-  readonly trace_id: string;
-  readonly started_at: string;
-  readonly ended_at: string;
-  readonly duration_ns: string;
-  readonly span_count: number;
-  readonly turn_counts: { human: number; agent: number };
-  readonly tool_span_count: number;
-  readonly errored_span_count: number;
+  readonly traceId: string;
+  readonly startedAt: string;
+  readonly endedAt: string;
+  readonly durationNs: string;
+  readonly spanCount: number;
+  readonly turnCounts: { human: number; agent: number };
+  readonly toolSpanCount: number;
+  readonly erroredSpanCount: number;
   readonly source: string;
   readonly emitter: string;
   readonly environment: string;
-  readonly connection_kind: string;
-  readonly provider_call_id: string;
-  readonly agent_platform: string;
-  readonly platform_agent_id: string;
-  readonly platform_agent_name: string;
-  readonly platform_agent_version: string;
-  readonly run_id: string;
-  readonly agent_id: string;
+  readonly connectionKind: string;
+  readonly providerCallId: string;
+  readonly agentPlatform: string;
+  readonly platformAgentId: string;
+  readonly platformAgentName: string;
+  readonly platformAgentVersion: string;
+  readonly runId: string;
+  readonly agentId: string;
   readonly preview: string;
 };
 
 export type ListedPage = {
   readonly traces: ListedTrace[];
-  readonly next_cursor: string | null;
+  readonly nextPageToken: string | null;
   readonly window: { from: string; to: string };
 };
 
 export type DetailSpan = {
-  readonly span_id: string;
-  readonly parent_span_id: string;
+  readonly spanId: string;
+  readonly parentSpanId: string;
   readonly name: string;
   readonly kind: string;
   readonly status: string;
-  readonly started_at: string;
-  readonly duration_ns: string;
+  readonly startedAt: string;
+  readonly durationNs: string;
   readonly text: string;
-  readonly audio_url: string;
-  readonly tool_name: string;
-  readonly tool_arguments: string;
-  readonly tool_result: string;
+  readonly audioUrl: string;
+  readonly toolName: string;
+  readonly toolArguments: string;
+  readonly toolResult: string;
   readonly spans: DetailSpan[];
 };
 
@@ -367,14 +367,14 @@ export type DetailMeasure = {
    * rather than Egma measured — and **absent on every other measure**, which is
    * the whole of what keeps simulation traffic what it always was.
    */
-  readonly reported_by?: string;
+  readonly reportedBy?: string;
   readonly samples: readonly number[];
-  readonly span_ids: readonly string[];
+  readonly spanIds: readonly string[];
   /**
    * The one number a bound is held against, reduced by the platform rather than
    * left for every reader to work out for itself.
    */
-  readonly worst: { readonly value: number; readonly span_id: string } | null;
+  readonly worst: { readonly value: number; readonly spanId: string } | null;
   /** True when the reading is a prefix, so the figure is of the part held. */
   readonly partial: boolean;
 };
@@ -383,9 +383,9 @@ export type TraceDetailBody = {
   readonly trace: ListedTrace;
   readonly turns: DetailSpan[];
   readonly spans: DetailSpan[];
-  readonly spans_truncated: boolean;
+  readonly spansTruncated: boolean;
   /** The simulation this trace is, or `null` for a customer's own telemetry. */
-  readonly simulation_id: string | null;
+  readonly simulationId: string | null;
   /** What was measured — the metrics display's read path. Empty, never absent. */
   readonly measures: readonly DetailMeasure[];
 };
@@ -393,11 +393,11 @@ export type TraceDetailBody = {
 export type ReadQuery = {
   readonly from?: string;
   readonly to?: string;
-  readonly project_id?: string;
+  readonly projectId?: string;
   /** `simulation` or `production`, and a word that is neither, for the refusal. */
   readonly source?: string;
-  readonly limit?: string | number;
-  readonly cursor?: string;
+  readonly pageSize?: string | number;
+  readonly pageToken?: string;
 };
 
 function queryString(query: ReadQuery): string {

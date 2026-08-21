@@ -25,7 +25,7 @@ import {
  * refusal sentence word for word, and the three promises the surface rests on.
  *
  * **The review and the start agree, because they are one resolution.** What
- * `GET /api/run-plan` says would be pinned and skipped is what `POST /api/runs`
+ * `GET /v1/run-plan` says would be pinned and skipped is what `POST /v1/runs`
  * writes, and this file checks the two against each other rather than checking
  * each against a hand-written expectation.
  *
@@ -54,9 +54,9 @@ function request(
 }
 
 const RETELL = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -77,7 +77,7 @@ async function aCustomerReadyToPlan(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await request("POST", "/api/agents", key, {
+  const registered = await request("POST", "/v1/agents", key, {
     name: "Front desk",
     connection: RETELL,
   });
@@ -96,16 +96,16 @@ async function aCustomerReadyToPlan(
     name: string,
     requiredCapabilities: readonly string[],
   ): Promise<string> => {
-    const created = await request("POST", "/api/tests", key, {
+    const created = await request("POST", "/v1/tests", key, {
       name,
       scenario:
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
       personas: ["Impatient Rita"],
-      required_capabilities: [...requiredCapabilities],
+      requiredCapabilities: [...requiredCapabilities],
     });
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
-    return String(created.body.version_id);
+    return String(created.body.versionId);
   };
 
   return {
@@ -124,10 +124,10 @@ function planQuery(
   versions: readonly string[],
 ): string {
   const asked = new URLSearchParams();
-  asked.set("agent", agentId);
-  asked.set("connection", connectionId);
-  asked.set("test_versions", versions.join(","));
-  return `/api/run-plan?${asked.toString()}`;
+  asked.set("agentId", agentId);
+  asked.set("connectionId", connectionId);
+  asked.set("testVersionIds", versions.join(","));
+  return `/v1/run-plan?${asked.toString()}`;
 }
 
 describe("reading what a run would freeze", () => {
@@ -143,14 +143,14 @@ describe("reading what a run would freeze", () => {
 
     expect(plan.statusCode, JSON.stringify(plan.body)).toBe(200);
     expect(plan.body).toMatchObject({
-      agent_id: agentId,
-      connection_id: connectionId,
-      runnable_simulation_count: 1,
-      skipped_simulation_count: 0,
+      agentId: agentId,
+      connectionId: connectionId,
+      runnableSimulationCount: 1,
+      skippedSimulationCount: 0,
     });
 
     const [test] = plan.body.tests as Record<string, unknown>[];
-    expect(test?.test_version_id).toBe(plain);
+    expect(test?.testVersionId).toBe(plain);
     expect(
       (test?.personas as { name: string }[])[0]?.name,
     ).toBe("Impatient Rita");
@@ -162,11 +162,11 @@ describe("reading what a run would freeze", () => {
     // rather than by a reserved key of its own.
     const graders = test?.graders as Record<string, unknown>[];
     const behaviors = graders.find(
-      (one) => one.library_id === PREDEFINED_GRADERS.expectedBehaviors,
+      (one) => one.libraryId === PREDEFINED_GRADERS.expectedBehaviors,
     );
     expect(behaviors?.kind).toBe("authored");
     expect(behaviors?.required).toBe(true);
-    expect(behaviors?.grader_version_id).toMatch(/^grv_/u);
+    expect(behaviors?.graderVersionId).toMatch(/^grv_/u);
     expect("judge" in (behaviors ?? {})).toBe(false);
 
     // The whole answer is checked as bytes: no provider secret can enter it.
@@ -192,8 +192,8 @@ describe("reading what a run would freeze", () => {
 
     expect(plan.statusCode, JSON.stringify(plan.body)).toBe(200);
     expect(plan.body).toMatchObject({
-      runnable_simulation_count: 1,
-      skipped_simulation_count: 1,
+      runnableSimulationCount: 1,
+      skippedSimulationCount: 1,
     });
     const tests = plan.body.tests as Record<string, unknown>[];
     expect(tests[0]?.skip).toBeNull();
@@ -246,7 +246,7 @@ describe("reading what a run would freeze", () => {
       "run_plan_not_applicable",
     );
 
-    const second = await request("POST", "/api/agents", key, {
+    const second = await request("POST", "/v1/agents", key, {
       name: "Night desk",
       connection: {
         ...RETELL,
@@ -257,10 +257,10 @@ describe("reading what a run would freeze", () => {
     const otherConnection = (second.body.connection as { id: string }).id;
 
     // Take the test off the second agent, so the pair is genuinely unlinked.
-    const version = await request("GET", `/api/test-versions/${plain}`, key);
+    const version = await request("GET", `/v1/test-versions/${plain}`, key);
     await request(
       "POST",
-      `/api/tests/${String(version.body.test_id)}/agents`,
+      `/v1/tests/${String(version.body.testId)}/agents`,
       key,
       { agents: [agentId] },
     );
@@ -286,10 +286,10 @@ describe("starting a run safely", () => {
       "run_start_no_key",
     );
 
-    const refused = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain],
+    const refused = await request("POST", "/v1/runs", key, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [plain],
     });
 
     expect(refused.statusCode).toBe(422);
@@ -309,15 +309,15 @@ describe("starting a run safely", () => {
       "run_start_same_key",
     );
     const body = {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain],
-      idempotency_key: "the-terminal-said-this-once",
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [plain],
+      idempotencyKey: "the-terminal-said-this-once",
     };
 
-    const first = await request("POST", "/api/runs", key, body);
+    const first = await request("POST", "/v1/runs", key, body);
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
-    const again = await request("POST", "/api/runs", key, body);
+    const again = await request("POST", "/v1/runs", key, body);
 
     expect(again.statusCode).toBe(201);
     expect(again.body.id).toBe(first.body.id);
@@ -331,19 +331,19 @@ describe("starting a run safely", () => {
       await aCustomerReadyToPlan("run_start_key_conflict");
     const idempotencyKey = "the-terminal-said-this-once";
 
-    const first = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain],
-      idempotency_key: idempotencyKey,
+    const first = await request("POST", "/v1/runs", key, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [plain],
+      idempotencyKey: idempotencyKey,
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
 
-    const refused = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain, needsAudio],
-      idempotency_key: idempotencyKey,
+    const refused = await request("POST", "/v1/runs", key, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [plain, needsAudio],
+      idempotencyKey: idempotencyKey,
     });
 
     expect(refused.statusCode).toBe(409);
@@ -373,32 +373,32 @@ describe("starting a run safely", () => {
       key,
     );
     expect(plan.body).toMatchObject({
-      runnable_simulation_count: 0,
-      skipped_simulation_count: 1,
+      runnableSimulationCount: 0,
+      skippedSimulationCount: 1,
     });
 
-    const started = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [needsAudio],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [needsAudio],
+      idempotencyKey: newId("run"),
     });
 
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
       status: "completed",
-      completed_count: 0,
-      failed_count: 0,
-      canceled_count: 0,
-      skipped_count: 1,
+      completedCount: 0,
+      failedCount: 0,
+      canceledCount: 0,
+      skippedCount: 1,
       // A run that conducted nothing completes with no passing headline. The
       // word is `skipped`, which is precisely what happened.
       verdict: "skipped",
     });
     const [only] = started.body.simulations as Record<string, unknown>[];
     expect(only?.status).toBe("skipped");
-    expect(only?.skip_reason).toBe("required_capability_unsupported");
-    expect(only?.skipped_capabilities).toEqual(["raw_audio"]);
+    expect(only?.skipReason).toBe("required_capability_unsupported");
+    expect(only?.skippedCapabilities).toEqual(["raw_audio"]);
     /*
      * **No grader row is invented, and the verdict still says what happened.**
      * `counts` is null because nothing was judged, and the verdict is `skipped`
@@ -433,21 +433,21 @@ describe("starting a run safely", () => {
     );
     expect(plan.statusCode, JSON.stringify(plan.body)).toBe(200);
 
-    const refused = await request("POST", "/api/runs", viewerKey, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain],
-      idempotency_key: newId("run"),
+    const refused = await request("POST", "/v1/runs", viewerKey, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [plain],
+      idempotencyKey: newId("run"),
     });
     expect(refused.statusCode).toBe(403);
     expect(refused.body.error).toBe("not_permitted");
 
     // And nothing was written by the refused request, whatever the page showed.
-    const started = await request("POST", "/api/runs", key, {
-      agent: agentId,
-      connection: connectionId,
-      test_versions: [plain],
-      idempotency_key: newId("run"),
+    const started = await request("POST", "/v1/runs", key, {
+      agentId: agentId,
+      connectionId: connectionId,
+      testVersionIds: [plain],
+      idempotencyKey: newId("run"),
     });
     expect(started.statusCode).toBe(201);
     const { rows } = await api.database.sql("select id from run");

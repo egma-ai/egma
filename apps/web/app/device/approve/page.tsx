@@ -118,7 +118,7 @@ export default function ApproveDevicePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           user_code: state.authorization.user_code,
-          project_id: projectId,
+          projectId: projectId,
         }),
       });
       const body = (await response.json().catch(() => ({}))) as {

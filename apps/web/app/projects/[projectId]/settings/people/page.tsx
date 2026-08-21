@@ -2,19 +2,20 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-
 import {
-  readJson,
-  writeJson,
-  type Answer,
-  type Refusal,
-} from "../../../../../lib/api.ts";
+  changeMemberRole,
+  createInvitation,
+  deactivateMember,
+  listInvitations,
+  listMembers,
+  removeMember,
+} from "@egma/platform-api/client";
+
+import type { Answer, Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import {
   ASSIGNABLE_ROLES,
-  INVITATIONS_PATH,
-  MEMBERS_PATH,
-  memberActionPath,
   rowsIn,
   standingOf,
   type Invitation,
@@ -94,9 +95,11 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
 
-  const { answer, reload } = useOrganizationRead<Roster>(MEMBERS_PATH);
+  const { answer, reload } = useOrganizationRead<Roster>(() =>
+    platformAnswer(listMembers({ client: platformClient })),
+  );
   const settled = answer?.status === "ready" ? answer.value : null;
-  const mayManage = settled?.may_manage_members === true;
+  const mayManage = settled?.mayManageMembers === true;
 
   const [tab, setTab] = useState<Tab>("people");
   const tabRef = useRef<Tab>("people");
@@ -175,7 +178,9 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   const refreshInvitations = useCallback(async (): Promise<void> => {
     if (!mayManage) return;
     setInvitations(null);
-    const listed = await readJson<InvitationList>(INVITATIONS_PATH);
+    const listed = await platformAnswer(
+      listInvitations({ client: platformClient }),
+    );
     setInvitations(listed);
     if (listed.status === "signed-out") window.location.replace("/sign-in");
   }, [mayManage]);
@@ -196,10 +201,34 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     });
   }
 
-  async function act(path: string, body: Record<string, unknown>): Promise<void> {
+  async function act(
+    action: "role" | "remove" | "deactivate",
+    member: Member,
+    nextRole?: (typeof ASSIGNABLE_ROLES)[number],
+  ): Promise<void> {
     setRefused(null);
     setBusy(true);
-    const written = await writeJson<unknown>(path, { method: "POST", body });
+    const written =
+      action === "role"
+        ? await platformAnswer(
+            changeMemberRole(
+              { userId: member.userId, role: nextRole ?? member.role },
+              { client: platformClient },
+            ),
+          )
+        : action === "remove"
+          ? await platformAnswer(
+              removeMember(
+                { userId: member.userId },
+                { client: platformClient },
+              ),
+            )
+          : await platformAnswer(
+              deactivateMember(
+                { userId: member.userId },
+                { client: platformClient },
+              ),
+            );
     setBusy(false);
     if (written.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -281,14 +310,16 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       cell: (member) =>
         mayManage ? (
           <Select
-            id={`role-${member.user_id}`}
+            id={`role-${member.userId}`}
             aria-label={`${member.email} role`}
             value={member.role}
             disabled={busy}
             onChange={(event) =>
-              void act(memberActionPath(member.user_id, "role"), {
-                role: event.target.value,
-              })
+              void act(
+                "role",
+                member,
+                event.target.value as (typeof ASSIGNABLE_ROLES)[number],
+              )
             }
           >
             {ASSIGNABLE_ROLES.map((one) => (
@@ -305,7 +336,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       key: "standing",
       header: "Standing",
       cell: (member) =>
-        member.deactivated_at === null ? (
+        member.deactivatedAt === null ? (
           <Badge variant="success">Active</Badge>
         ) : (
           <Badge variant="warning">Deactivated</Badge>
@@ -393,7 +424,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
                     label="Members"
                     columns={columns}
                     rows={members}
-                    keyOf={(member) => member.user_id}
+                    keyOf={(member) => member.userId}
                   />
                 )}
               </Section>
@@ -444,10 +475,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
                 onClick={() => {
                   const chosen = confirming;
                   setConfirming(null);
-                  void act(
-                    memberActionPath(chosen.member.user_id, chosen.action),
-                    {},
-                  );
+                  void act(chosen.action, chosen.member);
                 }}
               >
                 {confirming.action === "remove" ? "Remove" : "Deactivate"}
@@ -511,14 +539,15 @@ function Invitations({
     setNote(null);
     onBusy(true);
 
-    const written = await writeJson<{
-      readonly email: string;
-      readonly delivered: boolean;
-      readonly accept_url?: string;
-    }>(INVITATIONS_PATH, {
-      method: "POST",
-      body: { email: toEmail, role: atRole },
-    });
+    const written = await platformAnswer(
+      createInvitation(
+        {
+          email: toEmail,
+          role: atRole as (typeof ASSIGNABLE_ROLES)[number],
+        },
+        { client: platformClient },
+      ),
+    );
 
     onBusy(false);
     if (written.status === "signed-out") {
@@ -533,7 +562,7 @@ function Invitations({
     if (written.value.delivered) {
       setNote(`An invitation is on its way to ${written.value.email}.`);
     } else {
-      setLink(written.value.accept_url ?? null);
+      setLink(written.value.acceptUrl ?? null);
     }
     onSent();
     return true;
@@ -571,7 +600,7 @@ function Invitations({
       header: "Expiry",
       mono: true,
       cell: (invitation) => (
-        <RelativeInstant instant={invitation.expires_at} now={now} />
+        <RelativeInstant instant={invitation.expiresAt} now={now} />
       ),
     },
     {

@@ -122,7 +122,7 @@ async function boundRepository(): Promise<{
   readonly agentId: string;
   readonly paths: Awaited<ReturnType<typeof createEgmaFolder>>["paths"];
 }> {
-  const registered = await fetch(`${platform.url}/api/agents`, {
+  const registered = await fetch(`${platform.url}/v1/agents`, {
     method: "POST",
     headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
     body: JSON.stringify({ name: "Front desk" }),
@@ -135,7 +135,6 @@ async function boundRepository(): Promise<{
   // other.
   await bindRepositoryPlatform(workspace.dir, {
     origin: platform.url,
-    instance: platform.instanceId,
   });
   await updateConfig(paths.config, { agent: { name: "Front desk", id: agentId } });
   return { agentId, paths };
@@ -204,7 +203,7 @@ describe("one repository, one agent", () => {
     const pulled = await readTest("ours.md");
 
     // Somebody in the browser takes this repository's agent off the test.
-    const other = await fetch(`${platform.url}/api/agents`, {
+    const other = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ name: "Night line" }),
@@ -430,7 +429,7 @@ describe("the file format a test is written in", () => {
       scenario: "s",
       expectedBehaviors: ["b"],
       agents: [agentId],
-      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delay_ms: 800 }],
+      mockTools: [{ tool: "check_availability", answer: { slots: [] }, delayMs: 800 }],
     });
 
     await egma(["pull"]);
@@ -724,7 +723,7 @@ describe("what makes a repository copy stale, and what does not", () => {
     await egma(["pull"]);
     const held = await readTest("reschedules.md");
 
-    const other = await fetch(`${platform.url}/api/agents`, {
+    const other = await fetch(`${platform.url}/v1/agents`, {
       method: "POST",
       headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ name: "Night line" }),
@@ -805,8 +804,9 @@ describe("a link removed after the preflight", () => {
     // preflight said both files were writable, and before the second one goes.
     let uploads = 0;
     const racing: typeof fetch = async (input, init) => {
-      const address = new URL(typeof input === "string" ? input : String(input));
-      const write = init?.method === "PATCH" && address.pathname.startsWith("/api/tests/");
+      const address = new URL(input instanceof Request ? input.url : String(input));
+      const method = input instanceof Request ? input.method : init?.method;
+      const write = method === "PATCH" && address.pathname.startsWith("/v1/tests/");
       const answer = await fetch(input, init);
       if (write) {
         uploads += 1;
@@ -875,8 +875,9 @@ describe("a link removed after the preflight", () => {
     // cannot call itself.
     const reallyFetch = globalThis.fetch;
     const racing: typeof fetch = async (input, init) => {
-      const address = new URL(typeof input === "string" ? input : String(input));
-      const write = init?.method === "PATCH" && address.pathname.startsWith("/api/tests/");
+      const address = new URL(input instanceof Request ? input.url : String(input));
+      const method = input instanceof Request ? input.method : init?.method;
+      const write = method === "PATCH" && address.pathname.startsWith("/v1/tests/");
       const answer = await reallyFetch(input, init);
       if (write) {
         uploads += 1;
@@ -958,8 +959,9 @@ describe("a link removed after the preflight", () => {
     const reallyFetch = globalThis.fetch;
     let uploads = 0;
     const racing: typeof fetch = async (input, init) => {
-      const address = new URL(typeof input === "string" ? input : String(input));
-      const write = init?.method === "PATCH" && address.pathname.startsWith("/api/tests/");
+      const address = new URL(input instanceof Request ? input.url : String(input));
+      const method = input instanceof Request ? input.method : init?.method;
+      const write = method === "PATCH" && address.pathname.startsWith("/v1/tests/");
       const answer = await reallyFetch(input, init);
       if (write) {
         uploads += 1;
@@ -1002,58 +1004,5 @@ describe("a link removed after the preflight", () => {
     // It is still reported, under the word for what happened to it, because the
     // push did look at it and its file was rewritten.
     expect(valuesOf(printed, "unchanged")).toEqual(["a-settled"]);
-  });
-});
-
-/**
- * The promise this project makes about the surface a repository writes through:
- * the CLI and the platform ship together, and a mismatch is one sentence.
- *
- * `/api/tests` is internal — not `/api/v1`, and nothing outside egma is invited
- * to build on it — so it is free to change shape. What it is not free to do is
- * change quietly. The cost of that was measured rather than imagined: a client
- * that read behaviors as bare text against a platform that answers objects
- * pulled a folder of tests with no behaviors in it, and what stopped the empty
- * folder being written back was a falsifiability rule somewhere else entirely.
- * Real protection, arrived at by accident, reporting the wrong problem.
- */
-describe("two egmas that read different shapes", () => {
-  it("refuse both verbs, name which side is behind, and read nothing", async () => {
-    const { agentId } = await boundRepository();
-    platform.tests.add({
-      name: "ours",
-      scenario: "s",
-      expectedBehaviors: ["b"],
-      agents: [agentId],
-    });
-    platform.speaking.speaksContract(99);
-
-    for (const verb of ["pull", "push"]) {
-      const refused = await egma([verb]);
-
-      expect(refused.code, verb).toBe(7);
-      expect(factOf(refused.stdout, "status"), verb).toBe("outdated");
-      expect(refused.stderr, verb).toContain("This copy of Egma is older than the platform");
-      expect(refused.stderr, verb).toContain("npx @egma/cli@latest");
-      expect(refused.stderr, verb).toContain("Nothing was read and nothing was uploaded.");
-    }
-
-    // And nothing was: the folder is as empty as it was, and the platform holds
-    // the version it held.
-    await expect(readTest("ours.md")).rejects.toThrow();
-    expect(platform.tests.versionsOf("ours")).toBe(1);
-  });
-
-  it("point at the platform when the platform is the older of the two", async () => {
-    await boundRepository();
-    // A platform from before the field existed answers no number at all, and
-    // that is contract 1 rather than an unknown.
-    platform.speaking.speaksContract(1);
-
-    const refused = await egma(["pull"]);
-
-    expect(refused.code).toBe(7);
-    expect(refused.stderr).toContain("The platform is older than this copy of Egma");
-    expect(refused.stderr).not.toContain("npx @egma/cli@latest");
   });
 });

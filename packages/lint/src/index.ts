@@ -90,9 +90,8 @@ const CONTEXT_ESTABLISHING = [
  * This category is narrower than the one above and the rule enforces both parts
  * of each named exception: no function here takes an argument, and each returns
  * only the platform fact written beside it. `instanceIsClaimed` returns a
- * boolean. `platformInstanceId` returns the platform's public, non-secret id.
- * A parameter or a wider return would make either an ordinary read wearing an
- * exemption, so the rule refuses both changes.
+ * boolean. A parameter or a wider return would make it an ordinary read
+ * wearing an exemption, so the rule refuses both changes.
  *
  * **The answer is pinned as a reader sees it, alias body and all.** Where the
  * declared type names an alias from the same file, the pin carries that alias's
@@ -101,20 +100,15 @@ const CONTEXT_ESTABLISHING = [
  * still green. That is `asWritten`'s rule for parameters, applied to the answer
  * by `answerAsWritten`.
  *
- * `platformFacts` was added on 2026-08-14 with the platform's own settings,
- * deliberately and on the same two terms. It is asked by the readiness answer
- * the CLI reads in front of every command — before login and before any
- * repository identifier is sent, exactly as the platform's identity is — so
- * there is no credential to build a context from. It takes nothing, and its
- * `PlatformFacts` is a map of non-secret values in which every secret the
- * platform holds is `null`: enough to say a key is there, and no part of one.
- * The settings behind it are the whole effort's — the carrier trunk and the
- * speech keys arrive there next — so the pin holds the value type it may
- * answer, and a hint added to it stops the build.
+ * `platformFacts` was added with the platform's own settings, deliberately and
+ * on the same two terms. The API uses it to enforce the carrier precondition
+ * before it creates a phone run. It takes nothing, and its `PlatformFacts` is a
+ * map of non-secret values in which every secret the platform holds is `null`:
+ * enough to decide whether a setting exists, and no part of one. The pin holds
+ * the value type it may answer, and a hint added to it stops the build.
  */
 const INSTANCE_SCOPED: ReadonlyMap<string, string> = new Map([
   ["instanceIsClaimed", "Promise<boolean>"],
-  ["platformInstanceId", "Promise<string>"],
   [
     "platformFacts",
     "Promise<PlatformFacts> export type PlatformFacts = " +

@@ -3,16 +3,13 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { listPersonas } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
-import { readJson, type Refusal } from "../../../../lib/api.ts";
+import type { Refusal } from "../../../../lib/api.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
-import {
-  personasAfter,
-  personasPath,
-  type Persona,
-  type PersonaPage,
-} from "../../../../lib/personas.ts";
+import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
+import type { Persona, PersonaPage } from "../../../../lib/personas.ts";
 import {
   projectLanding,
   projectPath,
@@ -93,7 +90,7 @@ function columnsFor(
       key: "default",
       header: "Project default",
       width: "130px",
-      cell: (persona) => (persona.is_default ? "Yes" : "No"),
+      cell: (persona) => (persona.isDefault ? "Yes" : "No"),
     },
     {
       key: "description",
@@ -115,7 +112,7 @@ function columnsFor(
       mono: true,
       width: "120px",
       cell: (persona) => (
-        <RelativeInstant instant={persona.updated_at} now={now} />
+        <RelativeInstant instant={persona.updatedAt} now={now} />
       ),
     },
   ];
@@ -135,8 +132,8 @@ function Personas({ projectId }: { readonly projectId: string }) {
    * **The archive filter's control came off every list page in this batch.**
    * The developer wants a filter row to hold what somebody reaches for daily,
    * and the archive is not that. Nothing under the control moved: the server
-   * still keeps the two lists apart, `personasPath` and `personasAfter` still
-   * carry the flag, the paging below still keys on which list it asked for, and
+   * still keeps the two lists apart, the generated list operation still
+   * carries the flag, the paging below still keys on which list it asked for, and
    * the archive's own empty state is still written. Putting the control back is
    * handing a `Choice` the setter this deliberately does not take.
    *
@@ -149,8 +146,18 @@ function Personas({ projectId }: { readonly projectId: string }) {
   const [shown] = useState<Shown>("active");
   const archived = shown === "archived";
   const { answer, reload } = useProjectRead<PersonaPage>(
-    personasPath(archived),
+    (projectId) =>
+      platformAnswer(
+        listPersonas(
+          {
+            projectId,
+            ...(archived ? { archived: "true" } : {}),
+          },
+          { client: platformClient },
+        ),
+      ),
     projectId,
+    String(archived),
   );
 
   /**
@@ -264,9 +271,11 @@ function Personas({ projectId }: { readonly projectId: string }) {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    const items = [...answer.value.items, ...(carried?.items ?? [])];
+    const items = [...answer.value.personas, ...(carried?.personas ?? [])];
     const cursor =
-      carried === null ? answer.value.next_cursor : carried.next_cursor;
+      carried === null
+        ? answer.value.nextPageToken
+        : carried.nextPageToken;
 
     /**
      * The next page, and everything that can happen instead of one.
@@ -286,9 +295,15 @@ function Personas({ projectId }: { readonly projectId: string }) {
       setMoreRefused(null);
       setLoadingMore(true);
 
-      const next = await readJson<PersonaPage>(
-        personasAfter(cursor, asked.shown === "archived"),
-        { project: asked.projectId },
+      const next = await platformAnswer(
+        listPersonas(
+          {
+            projectId: asked.projectId,
+            pageToken: cursor,
+            ...(asked.shown === "archived" ? { archived: "true" } : {}),
+          },
+          { client: platformClient },
+        ),
       );
 
       setLoadingMore(false);
@@ -313,8 +328,11 @@ function Personas({ projectId }: { readonly projectId: string }) {
         project: asked.projectId,
         shown: asked.shown,
         page: {
-          items: [...(carried?.items ?? []), ...next.value.items],
-          next_cursor: next.value.next_cursor,
+          personas: [
+            ...(carried?.personas ?? []),
+            ...next.value.personas,
+          ],
+          nextPageToken: next.value.nextPageToken,
         },
       });
     }

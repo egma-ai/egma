@@ -11,6 +11,7 @@
   "dependencies": {
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
+    "@egma/platform-api": "workspace:*",
     "@egma/provider-credentials": "workspace:*",
     "@egma/retell": "workspace:*",
     "@egma/simulation-contract": "workspace:*",

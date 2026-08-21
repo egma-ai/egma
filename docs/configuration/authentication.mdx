@@ -47,13 +47,13 @@ The key is stored at `~/.egma/credentials` by default. See [Credential storage l
 
 ### Via the API
 
-Send a `POST` request to `/api/keys`. You must authenticate this request with an existing session cookie or API key.
+Send a `POST` request to `/v1/keys`. You must authenticate this request with an existing session cookie or API key.
 
 ```bash
-curl -sX POST http://localhost:3101/api/keys \
+curl -sX POST http://localhost:3101/v1/keys \
   -H "Authorization: Bearer egma_sk_..." \
   -H "Content-Type: application/json" \
-  -d '{"projectId": "proj_..."}'
+  -d '{"projectId": "prj_..."}'
 ```
 
 ---
@@ -74,7 +74,7 @@ Pass your API key as a Bearer token in the `Authorization` header of every reque
 
 ```bash
 curl -H "Authorization: Bearer egma_sk_..." \
-  http://localhost:3101/api/keys
+  http://localhost:3101/v1/keys
 ```
 
 The same header format applies to the OpenTelemetry exporter endpoint, the REST API, and any direct `curl` calls.
@@ -110,7 +110,7 @@ The key stops working on the very next request that presents it.
 ### Via the API
 
 ```bash
-curl -sX POST http://localhost:3101/api/keys/:id/revoke \
+curl -sX POST http://localhost:3101/v1/keys/:id/revoke \
   -H "Authorization: Bearer egma_sk_..."
 ```
 

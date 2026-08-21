@@ -75,9 +75,9 @@ async function mintKey(
 ): Promise<string> {
   const minted = await api.app.inject({
     method: "POST",
-    url: "/api/keys",
+    url: "/v1/keys",
     headers: { cookie: customer.cookie },
-    payload: { name, ...(projectId === undefined ? {} : { project_id: projectId }) },
+    payload: { name, ...(projectId === undefined ? {} : { projectId: projectId }) },
   });
   expect(minted.statusCode).toBe(201);
   return (minted.json() as { secret: string }).secret;

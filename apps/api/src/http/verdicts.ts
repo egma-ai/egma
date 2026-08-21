@@ -61,7 +61,7 @@ export function onlyReporting(
 /**
  * One judged assertion as every read of one describes it.
  *
- * **`assertion` is the key the store keeps, and `assertion_text` is what a
+ * **`assertion` is the key the store keeps, and `assertionText` is what a
  * person reads.** The key is a behavior's position in the pinned test version,
  * or the identifier of the entry a whole-grader check names; the words behind it
  * are fetched from that pinned version at display time, because a row keyed by
@@ -80,14 +80,14 @@ export function describedVerdict(
   diagnostic: ReadonlySet<string>,
 ): Record<string, unknown> {
   return {
-    grader_id: its.graderId,
+    graderId: its.graderId,
     assertion: its.assertion,
-    assertion_text: words?.of(its.graderId, its.assertion) ?? null,
+    assertionText: words?.of(its.graderId, its.assertion) ?? null,
     required: !diagnostic.has(its.graderId),
     verdict: its.verdict,
     score: its.score,
     rationale: its.rationale,
-    cited_turns: [...its.citedSpanIds],
-    judged_at: its.judgedAt,
+    citedTurns: [...its.citedSpanIds],
+    judgedAt: its.judgedAt,
   };
 }

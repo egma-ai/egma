@@ -51,6 +51,7 @@ import {
   type Verdict,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { runOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -68,7 +69,8 @@ import {
   onlyReporting,
 } from "../http/verdicts.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, projectNamed, text } from "../http/reading.ts";
+import { given, text } from "../http/reading.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   conflict,
   invalid,
@@ -136,20 +138,15 @@ export type RunRoutesOptions = {
   readonly baseUrl: string;
 };
 
-export const RUNS_PATH = "/api/runs";
 /**
  * What a run would freeze, read before anybody starts one.
  *
  * A read rather than a dry-run write, and it is deliberately not under
- * `/api/runs`: nothing is created and nothing is reserved. It answers the same
- * resolution `POST /api/runs` performs, so a review step and the run it starts
+ * `/v1/runs`: nothing is created and nothing is reserved. It answers the same
+ * resolution `POST /v1/runs` performs, so a review step and the run it starts
  * can never disagree about which tests would be skipped, which versions would
  * be pinned, or which graders would judge.
  */
-export const RUN_PLAN_PATH = "/api/run-plan";
-export const RUN_PATH = "/api/runs/:runId";
-export const RUN_EVENTS_PATH = "/api/runs/:runId/events";
-export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
 /**
  * Run it again, under today's conditions.
  *
@@ -157,14 +154,21 @@ export const RUN_CANCEL_PATH = "/api/runs/:runId/cancel";
  * body.** Everything it uses — the agent, the connection, the exact frozen test
  * versions — comes off the run in the address, so a run that says it retries
  * another one really does execute what that one executed. There is no key in the
- * create body that could set `retry_of_run_id`, and there never will be.
+ * create body that could set `retryOfRunId`, and there never will be.
  */
-export const RUN_RETRY_PATH = "/api/runs/:runId/retry";
-/** Run one terminal simulation again as one new run. */
-export const SIMULATION_RERUN_PATH =
-  "/api/simulations/:simulationId/rerun";
-
 type Body = Record<string, unknown>;
+
+function projectNamedByPlatform(
+  query: Record<string, unknown>,
+  body: Record<string, unknown>,
+): string | undefined {
+  return given(text(query.projectId)) ?? given(text(body.projectId));
+}
+
+/** Read a page size whether Fastify has coerced it or left it as text. */
+function queryIntegerText(value: unknown): string | undefined {
+  return typeof value === "number" ? String(value) : given(text(value));
+}
 
 /**
  * The largest page of history this list will serve.
@@ -192,9 +196,9 @@ function pinnedVersions(value: unknown): PinnedVersions {
   if (!Array.isArray(value)) {
     return {
       refusal:
-        "test_versions is the list of frozen versions this run executes, by " +
+        "testVersionIds is the list of frozen versions this run executes, by " +
         'id. Send it as a list of text, like ["tstv_..."], taking each ' +
-        "version_id from the test it belongs to.",
+        "versionId from the test it belongs to.",
     };
   }
 
@@ -204,8 +208,8 @@ function pinnedVersions(value: unknown): PinnedVersions {
     if (typeof entry !== "string" || named === "") {
       return {
         refusal:
-          "a run pins each test version as text — the version_id a push or a " +
-          "read answered with — and one entry in test_versions is neither. " +
+          "a run pins each test version as text — the versionId a push or a " +
+          "read answered with — and one entry in testVersionIds is neither. " +
           "Send them all, or none of them runs.",
       };
     }
@@ -221,13 +225,13 @@ function pinnedVersions(value: unknown): PinnedVersions {
  */
 const NO_SUCH_RUN =
   "no run of yours has that id. Check the id, or start a run with POST " +
-  "/api/runs.";
+  "/v1/runs.";
 
 /**
  * One conversation of a run, as every read of one describes it.
  *
- * The two pins are both here on purpose: `test_version_id` is what actually
- * executed and never moves, and `test_id` is what to go and edit.
+ * The two pins are both here on purpose: `testVersionId` is what actually
+ * executed and never moves, and `testId` is what to go and edit.
  *
  * **Four facts, kept apart, and `foldSimulation` is what keeps them apart.**
  * `status` is the machinery; `grading` is where the judging stands; `verdict` is
@@ -255,7 +259,7 @@ const NO_SUCH_RUN =
  * conversation can be `completed` and ungraded, and a reader that collapsed the
  * two would call a run finished while its judgment was still being written.
  *
- * `mock_tool_coverage` is here because comparing two of these numbers is only
+ * `mockToolCoverage` is here because comparing two of these numbers is only
  * valid when both conversations were conducted in the same world. A simulation
  * whose tools were answered by mock tools and one whose tools ran for real met
  * different worlds, and this is where a reader finds that out — off the
@@ -274,14 +278,14 @@ function describedSimulation(
   return {
     id: one.id,
     position: one.position,
-    test_id: one.testId,
-    test_name: one.testName,
-    test_version_id: one.testVersionId,
-    persona_id: one.personaId,
-    persona_name: one.personaName,
+    testId: one.testId,
+    testName: one.testName,
+    testVersionId: one.testVersionId,
+    personaId: one.personaId,
+    personaName: one.personaName,
     // The pin beside the identity, on the test pin's own terms: the name reads
     // as it stands today, and this is exactly who called on the day.
-    persona_version_id: one.personaVersionId,
+    personaVersionId: one.personaVersionId,
     status: one.status,
     grading: fold.grading,
     verdict: fold.verdict,
@@ -300,17 +304,19 @@ function describedSimulation(
     // sends somebody to read a transcript to work out what egma already knew.
     // What each row carries is the one shape both surfaces that draw a judgment
     // send, decided in `http/verdicts.ts` rather than here and again there.
-    verdicts: rows.map((its) => describedVerdict(its, words, diagnostic)),
+    verdicts: rows.map((its) =>
+      describedVerdict(its, words, diagnostic),
+    ),
     reason: one.endingReason,
     // Why egma never conducted this conversation, and which capabilities
     // decided it. Null on every conversation that actually happened — the two
     // vocabularies are separate because `reason` is how a conversation ended
     // and this is why one never began.
-    skip_reason: one.skipReason,
-    skipped_capabilities: one.skippedCapabilities === null
+    skipReason: one.skipReason,
+    skippedCapabilities: one.skippedCapabilities === null
       ? null
       : [...one.skippedCapabilities],
-    mock_tool_coverage: describedMockToolCoverage(one.mockToolCoverage),
+    mockToolCoverage: describedMockToolCoverage(one.mockToolCoverage),
     // What this conversation was: the row's own modality rather than the run's,
     // because the row is what the database enforces the audio rule against.
     modality: one.modality,
@@ -320,7 +326,7 @@ function describedSimulation(
     // could not be shared. This is only enough to know whether to offer a
     // player at all, which is the difference between an honest absence and a
     // disabled control that reads as a broken feature.
-    has_recording: one.recordingReference !== null,
+    hasRecording: one.recordingReference !== null,
   };
 }
 
@@ -353,7 +359,7 @@ function describedMockToolCoverage(
  * is what the simulator is handed when it claims one.
  *
  * Each entry is the one projection every group of mocked answers is described
- * by; only the `mock_tool_id` beside a default is this read's own.
+ * by; only the `mockToolId` beside a default is this read's own.
  */
 function describedMockTools(
   snapshot: MockToolSnapshot,
@@ -363,7 +369,7 @@ function describedMockTools(
     // reader can go and look at the mock tool the run froze.
     defaults: snapshot.defaults.map((one) => ({
       ...describedMockTool(one),
-      mock_tool_id: one.mockToolId,
+      mockToolId: one.mockToolId,
     })),
     overrides: Object.fromEntries(
       Object.entries(snapshot.overrides).map(([versionId, entries]) => [
@@ -388,14 +394,14 @@ function describedMockTools(
  */
 function describedPlan(plan: RunPlan): Record<string, unknown> {
   return {
-    agent_id: plan.agentId,
-    connection_id: plan.connectionId,
+    agentId: plan.agentId,
+    connectionId: plan.connectionId,
     connection: {
-      agent_platform: plan.connection.agentPlatform,
-      connection_kind: plan.connection.connectionKind,
-      access_variant: plan.connection.accessVariant,
+      agentPlatform: plan.connection.agentPlatform,
+      connectionKind: plan.connection.connectionKind,
+      accessVariant: plan.connection.accessVariant,
       modality: plan.connection.modality,
-      product_label: plan.connection.productLabel,
+      productLabel: plan.connection.productLabel,
       environment: plan.connection.environment,
       // Unknown and known-and-bare are different facts and read differently:
       // one is a Refresh away from an answer, the other is settled.
@@ -406,22 +412,22 @@ function describedPlan(plan: RunPlan): Record<string, unknown> {
               state: "known",
               measured: [...plan.connection.capabilities.measured],
               supported: [...plan.connection.capabilities.supported],
-              checked_at: plan.connection.capabilities.checkedAt.toISOString(),
+              checkedAt: plan.connection.capabilities.checkedAt.toISOString(),
               source: plan.connection.capabilities.source,
             },
     },
-    runnable_simulation_count: plan.runnableSimulationCount,
-    skipped_simulation_count: plan.skippedSimulationCount,
+    runnableSimulationCount: plan.runnableSimulationCount,
+    skippedSimulationCount: plan.skippedSimulationCount,
     tests: plan.groups.map((group) => ({
-      test_id: group.testId,
-      test_version_id: group.testVersionId,
-      test_name: group.testName,
+      testId: group.testId,
+      testVersionId: group.testVersionId,
+      testName: group.testName,
       personas: group.personas.map((one) => ({
-        persona_id: one.personaId,
-        persona_version_id: one.personaVersionId,
+        personaId: one.personaId,
+        personaVersionId: one.personaVersionId,
         name: one.name,
       })),
-      required_capabilities: [...group.requiredCapabilities],
+      requiredCapabilities: [...group.requiredCapabilities],
       // Runnable, or the structured reason and the keys that decided it. The
       // two skip reasons are never folded together: one means write a
       // different test, the other means measure this connection.
@@ -476,15 +482,15 @@ function describedRun(
     // Which project this run happened in. A run is reached by an address with no
     // project in it — the one a terminal prints — so a page that wants to open
     // the project's own view of it has no other way to learn where it belongs.
-    project_id: one.projectId,
+    projectId: one.projectId,
     status: one.status,
-    agent_id: one.agentId,
-    connection_id: one.connectionId,
-    agent_platform: one.connectionSnapshot.agentPlatform,
-    connection_kind: one.connectionSnapshot.connectionKind,
-    access_variant: one.connectionSnapshot.accessVariant,
+    agentId: one.agentId,
+    connectionId: one.connectionId,
+    agentPlatform: one.connectionSnapshot.agentPlatform,
+    connectionKind: one.connectionSnapshot.connectionKind,
+    accessVariant: one.connectionSnapshot.accessVariant,
     modality: one.connectionSnapshot.modality,
-    product_label: productLabelOf(
+    productLabel: productLabelOf(
       one.connectionSnapshot.agentPlatform,
       one.connectionSnapshot.connectionKind,
       one.connectionSnapshot.accessVariant,
@@ -494,10 +500,10 @@ function describedRun(
     // start. Connections are unversioned, so this is the only record of what the
     // run actually reached — and there is no field here a credential could ride
     // in: the secret lives in its own sealed column and was never copied.
-    connection_snapshot: {
-      agent_platform: one.connectionSnapshot.agentPlatform,
-      connection_kind: one.connectionSnapshot.connectionKind,
-      access_variant: one.connectionSnapshot.accessVariant,
+    connectionSnapshot: {
+      agentPlatform: one.connectionSnapshot.agentPlatform,
+      connectionKind: one.connectionSnapshot.connectionKind,
+      accessVariant: one.connectionSnapshot.accessVariant,
       modality: one.connectionSnapshot.modality,
       topology: one.connectionSnapshot.topology,
       environment: one.connectionSnapshot.environment,
@@ -506,42 +512,42 @@ function describedRun(
     label: one.label,
     // The run this one retries, and null on every run that retries nothing.
     // Only the server-derived Retry can ever set it.
-    retry_of_run_id: one.retryOfRunId,
-    test_versions: [...one.pinnedTestVersionIds],
+    retryOfRunId: one.retryOfRunId,
+    testVersions: [...one.pinnedTestVersionIds],
     // The world this run was frozen into. It never changes after creation,
     // whatever anybody edits, which is what a reader comparing two runs' numbers
     // has to be able to check for themselves.
-    mock_tools: describedMockTools(one.mockToolSnapshot),
-    expected_simulation_count: one.expectedSimulationCount,
+    mockTools: describedMockTools(one.mockToolSnapshot),
+    expectedSimulationCount: one.expectedSimulationCount,
     // Null until all three land together at the finish. A count that appeared
     // one at a time would let a reader do arithmetic on a half-settled run.
-    completed_count: one.completedCount,
-    failed_count: one.failedCount,
-    canceled_count: one.canceledCount,
+    completedCount: one.completedCount,
+    failedCount: one.failedCount,
+    canceledCount: one.canceledCount,
     // Its own number beside the three above, never folded into any of them.
     // A conversation egma declined to conduct is not a failure of the agent,
     // not something anybody canceled, and certainly not a pass.
-    skipped_count: one.skippedCount,
+    skippedCount: one.skippedCount,
     // No token, no key, no query at all. A person opens it and the browser
     // they signed in with is already signed in — so the address is safe to
     // paste into a message, a ticket or a terminal somebody else can read.
-    results_url: `${baseUrl.replace(/\/+$/u, "")}/runs/${one.id}`,
-    created_at: one.createdAt.toISOString(),
-    finished_at: one.finishedAt?.toISOString() ?? null,
+    resultsUrl: `${baseUrl.replace(/\/+$/u, "")}/runs/${one.id}`,
+    createdAt: one.createdAt.toISOString(),
+    finishedAt: one.finishedAt?.toISOString() ?? null,
     // Grading progress, reported apart from execution progress. A run whose
     // conversations have all finished is not a run whose judgment is in: these
     // two counts settle at different moments and a reader has to be able to see
     // which one it is waiting on.
-    graded_count: gradedCount,
+    gradedCount,
     // How many conversations have landed terminal, and how many of those left
     // something to judge. Machinery, reported as machinery: a run whose every
     // conversation was skipped has finished all of them and made none gradable.
-    finished_count: fold.finished,
-    gradable_count: fold.gradable,
+    finishedCount: fold.finished,
+    gradableCount: fold.gradable,
     // Where every conversation of this run stands, counted by machinery state.
     // `skipped` has its own number here for the reason it has its own column:
     // egma declining to conduct a conversation says nothing about the agent.
-    simulation_counts: fold.simulations,
+    simulationCounts: fold.simulations,
     /*
      * The run's verdict, folded over its conversations' verdicts — one vote
      * each, so a test with forty expected behaviors cannot outvote a test with
@@ -570,8 +576,8 @@ function describedRun(
     // diagnostic's fraction is exactly what somebody switched it on to read, so
     // leaving it off this list would make it judge in silence — and folding it
     // into the headline above would make it a blocker.
-    by_grader: (judged?.byGrader ?? []).map((its) => ({
-      grader_id: its.graderId,
+    byGrader: (judged?.byGrader ?? []).map((its) => ({
+      graderId: its.graderId,
       required: its.required,
       verdict: its.outcome.verdict,
       score: its.outcome.score ?? null,
@@ -607,14 +613,14 @@ function describedRun(
 function describedGradingPlan(plan: GradingPlan): Record<string, unknown> {
   return {
     state: plan.state,
-    captured_at: plan.capturedAt?.toISOString() ?? null,
+    capturedAt: plan.capturedAt?.toISOString() ?? null,
     groups: plan.groups.map((group) =>
       group.tag === "version"
         ? {
             tag: "version",
-            test_id: group.testId,
-            test_version_id: group.testVersionId,
-            test_name: group.testName,
+            testId: group.testId,
+            testVersionId: group.testVersionId,
+            testName: group.testName,
             items: group.items.map(describedPlanItem),
           }
         : { tag: "legacy_testless", items: group.items.map(describedPlanItem) },
@@ -636,10 +642,10 @@ function describedPlanItem(
 ): Record<string, unknown> {
   return {
       kind: "authored",
-      grader_id: item.graderId,
-      grader_version_id: item.graderVersionId,
+      graderId: item.graderId,
+      graderVersionId: item.graderVersionId,
       name: item.graderName,
-      library_id: item.libraryId,
+      libraryId: item.libraryId,
       required: item.required,
       scope: item.scope,
   };
@@ -661,40 +667,40 @@ function describedHistoryEntry(
   const { run } = entry;
   return {
     id: run.id,
-    project_id: run.projectId,
+    projectId: run.projectId,
     status: run.status,
     label: run.label,
-    agent_id: run.agentId,
-    connection_id: run.connectionId,
-    agent_platform: run.connectionSnapshot.agentPlatform,
-    connection_kind: run.connectionSnapshot.connectionKind,
-    access_variant: run.connectionSnapshot.accessVariant,
+    agentId: run.agentId,
+    connectionId: run.connectionId,
+    agentPlatform: run.connectionSnapshot.agentPlatform,
+    connectionKind: run.connectionSnapshot.connectionKind,
+    accessVariant: run.connectionSnapshot.accessVariant,
     modality: run.connectionSnapshot.modality,
-    product_label: productLabelOf(
+    productLabel: productLabelOf(
       run.connectionSnapshot.agentPlatform,
       run.connectionSnapshot.connectionKind,
       run.connectionSnapshot.accessVariant,
       run.connectionSnapshot.modality,
     ),
     environment: run.connectionSnapshot.environment,
-    retry_of_run_id: run.retryOfRunId,
-    expected_simulation_count: run.expectedSimulationCount,
-    completed_count: run.completedCount,
-    failed_count: run.failedCount,
-    canceled_count: run.canceledCount,
-    skipped_count: run.skippedCount,
-    simulation_counts: fold.simulations,
-    finished_count: fold.finished,
-    gradable_count: fold.gradable,
-    graded_count: fold.graded,
+    retryOfRunId: run.retryOfRunId,
+    expectedSimulationCount: run.expectedSimulationCount,
+    completedCount: run.completedCount,
+    failedCount: run.failedCount,
+    canceledCount: run.canceledCount,
+    skippedCount: run.skippedCount,
+    simulationCounts: fold.simulations,
+    finishedCount: fold.finished,
+    gradableCount: fold.gradable,
+    gradedCount: fold.graded,
     // Null until every conversation has a verdict. A row that guessed early
     // would put a red mark on a run nobody has finished judging.
     verdict: fold.verdict,
     score: fold.score ?? null,
-    verdict_counts: fold.counts,
-    created_at: run.createdAt.toISOString(),
-    started_at: run.startedAt?.toISOString() ?? null,
-    finished_at: run.finishedAt?.toISOString() ?? null,
+    verdictCounts: fold.counts,
+    createdAt: run.createdAt.toISOString(),
+    startedAt: run.startedAt?.toISOString() ?? null,
+    finishedAt: run.finishedAt?.toISOString() ?? null,
   };
 }
 
@@ -724,14 +730,14 @@ function readNarrowing(query: Record<string, unknown>): Narrowing {
   } = {};
 
   const ids: readonly [string, "agt" | "con" | "tst", "agentId" | "connectionId" | "testId", string][] = [
-    ["agent", "agt", "agentId", "agt_ id of the agent whose runs you want"],
+    ["agentId", "agt", "agentId", "agt_ id of the agent whose runs you want"],
     [
-      "connection",
+      "connectionId",
       "con",
       "connectionId",
       "con_ id of the connection whose runs you want",
     ],
-    ["test", "tst", "testId", "tst_ id of the test whose runs you want"],
+    ["testId", "tst", "testId", "tst_ id of the test whose runs you want"],
   ];
 
   for (const [name, prefix, field, instead] of ids) {
@@ -806,9 +812,9 @@ function describedEvent(event: RunEvent): Record<string, unknown> {
         seq: event.seq,
         at: event.at.toISOString(),
         kind: "simulation",
-        simulation_id: event.simulationId,
-        test_name: event.testName,
-        persona_name: event.personaName,
+        simulationId: event.simulationId,
+        testName: event.testName,
+        personaName: event.personaName,
         status: event.status,
         verdict: event.verdict,
         reason: event.reason,
@@ -947,33 +953,33 @@ export async function runRoutes(
    * to draw — a project with no running graders, a test that would be skipped — and
    * refuses only what could never be written at all.
    */
-  app.get(RUN_PLAN_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.getRunPlan, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Record<string, unknown>;
 
-    const acting = await actingIn(auth, given(text(query.project)));
+    const acting = await actingIn(auth, given(text(query.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const selected = given(text(query.test_versions));
+    const selected = given(text(query.testVersionIds));
     const pinned = pinnedVersions(
       selected === undefined ? [] : selected.split(","),
     );
     if ("refusal" in pinned) return unprocessable(reply, pinned.refusal);
 
-    const onAgent = given(text(query.agent));
+    const onAgent = given(text(query.agentId));
     // Every refusal `planRun` raises is one `startRun` raises for the same
     // reason, so this group's own error handler answers both identically —
     // which is what stops a review step and a start disagreeing about a
     // selection that could never be written.
     const plan = await planRun(acting.auth, {
-      connectionId: text(query.connection),
+      connectionId: text(query.connectionId),
       ...(onAgent === undefined ? {} : { agentId: onAgent }),
       testVersionIds: pinned.entries,
     });
     return reply.send(describedPlan(plan));
   });
 
-  app.post(RUNS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.createRun, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const query = (request.query ?? {}) as Body;
@@ -986,13 +992,13 @@ export async function runRoutes(
       projectId: auth.projectId,
     });
 
-    const pinned = pinnedVersions(body.test_versions ?? []);
+    const pinned = pinnedVersions(body.testVersionIds ?? []);
     if ("refusal" in pinned) return unprocessable(reply, pinned.refusal);
 
     // The query and the body, `projectNamed`'s one rule — the same one Cancel
     // and Retry beside this keep. A page starting a run names its project in
     // the address; a terminal posts it in the body.
-    const acting = await actingIn(auth, projectNamed(query, body));
+    const acting = await actingIn(auth, projectNamedByPlatform(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     /**
@@ -1014,13 +1020,13 @@ export async function runRoutes(
      */
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
-      const kind = await connectionKindOf(acting.auth, text(body.connection));
+      const kind = await connectionKindOf(acting.auth, text(body.connectionId));
       if (kind !== undefined && connectionKindUsesPlatformCarrier(kind)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
 
-    const onAgent = given(text(body.agent));
+    const onAgent = given(text(body.agentId));
     const label = given(text(body.label));
 
     /**
@@ -1034,14 +1040,14 @@ export async function runRoutes(
      * run once inside a process they control. Every path a person or a client
      * comes in on is this one.
      */
-    const idempotencyKey = given(text(body.idempotency_key));
+    const idempotencyKey = given(text(body.idempotencyKey));
     if (idempotencyKey === undefined) {
       return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
     }
 
     const started = await startRun(acting.auth, {
       ...(onAgent === undefined ? {} : { agentId: onAgent }),
-      connectionId: text(body.connection),
+      connectionId: text(body.connectionId),
       testVersionIds: pinned.entries,
       idempotencyKey,
       ...(label === undefined ? {} : { label }),
@@ -1063,23 +1069,23 @@ export async function runRoutes(
    * name.
    *
    * **A verdict-filtered page may come back short and still carry a cursor.**
-   * That is not a bug and the sentence is worth keeping: `next_cursor` promises
+   * That is not a bug and the sentence is worth keeping: `nextPageToken` promises
    * there is more to *look at*, never that there is more to show. Asking again
    * with it continues from exactly where the sweep stopped.
    */
-  app.get(RUNS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.listRuns, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Record<string, unknown>;
 
-    const acting = await actingIn(auth, given(text(query.project)));
+    const acting = await actingIn(auth, given(text(query.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(text(query.cursor));
-    if (cursor !== undefined && !isId("run", cursor)) {
+    const pageToken = given(text(query.pageToken));
+    if (pageToken !== undefined && !isId("run", pageToken)) {
       return sendRefusal(
         reply,
         "invalid_cursor",
-        REFUSALS.invalidCursor(cursor),
+        REFUSALS.invalidCursor(pageToken),
       );
     }
 
@@ -1091,37 +1097,37 @@ export async function runRoutes(
     // A page size a client asked for, checked here rather than left to the
     // layer beneath — which raises rather than answers, because a bad limit at
     // that seam is a caller of egma's own that has lost track of itself.
-    const said = given(text(query.limit));
-    const limit = said === undefined ? undefined : Number(said);
+    const said = queryIntegerText(query.pageSize);
+    const pageSize = said === undefined ? undefined : Number(said);
     if (
       said !== undefined &&
       (!/^\d+$/u.test(said) ||
-        limit === undefined ||
-        !Number.isInteger(limit) ||
-        limit < 1 ||
-        limit > LARGEST_RUN_PAGE)
+        pageSize === undefined ||
+        !Number.isInteger(pageSize) ||
+        pageSize < 1 ||
+        pageSize > LARGEST_RUN_PAGE)
     ) {
       return invalid(
         reply,
-        `"${said}" is not a page size this list can serve. Send limit as a ` +
+        `"${said}" is not a page size this list can serve. Send pageSize as a ` +
           `whole number between 1 and ${String(LARGEST_RUN_PAGE)}, or leave ` +
           `it out for the default.`,
       );
     }
 
     const page = await listRunHistory(acting.auth, {
-      ...(cursor === undefined ? {} : { cursor }),
-      ...(limit === undefined ? {} : { limit }),
+      ...(pageToken === undefined ? {} : { cursor: pageToken }),
+      ...(pageSize === undefined ? {} : { limit: pageSize }),
       ...narrowing.filter,
     });
 
     return reply.send({
-      items: page.items.map((entry) =>
+      runs: page.items.map((entry) =>
         describedHistoryEntry(entry, entry.fold),
       ),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -1136,7 +1142,7 @@ export async function runRoutes(
    * archiving takes away is entry into new work, which is enforced where new
    * work is created.
    */
-  app.get(RUN_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.getRun, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const query = (request.query ?? {}) as Record<string, unknown>;
@@ -1158,11 +1164,11 @@ export async function runRoutes(
      * no project here is a filter left off rather than a destination left
      * unsaid. `actingIn` would answer a credential that names none — a key for
      * the whole organization — with *name the project*, which is a 400 to a
-     * terminal following the `results_url` egma printed for it. A session names
+     * terminal following the `resultsUrl` egma printed for it. A session names
      * none only on that same address, and carries a project of its own either
      * way.
      */
-    const acting = await reachingIn(auth, given(text(query.project)));
+    const acting = await reachingIn(auth, given(text(query.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const who = acting.auth;
 
@@ -1190,7 +1196,7 @@ export async function runRoutes(
       // Absent only where the run itself is not this caller's, which cannot
       // happen here — but a plan row can be missing on an instance whose
       // upgrade has not run, and `null` says so rather than inventing a state.
-      grading_plan: plan === undefined ? null : describedGradingPlan(plan),
+      gradingPlan: plan === undefined ? null : describedGradingPlan(plan),
       agent:
         ranAgainst === undefined
           ? null
@@ -1205,7 +1211,7 @@ export async function runRoutes(
           : {
               id: ranOver.id,
               name: ranOver.name,
-              product_label: ranOver.productLabel,
+              productLabel: ranOver.productLabel,
               archived: ranOver.archivedAt !== null,
             },
     });
@@ -1221,12 +1227,12 @@ export async function runRoutes(
    * starting again from the beginning would replay a whole run into a screen
    * that had already drawn it.
    */
-  app.get(RUN_EVENTS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.listRunEvents, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const query = (request.query ?? {}) as {
       readonly after?: string;
-      readonly project?: string;
+      readonly projectId?: string;
     };
 
     // The project the caller named, for the reason the run's own read beside
@@ -1235,7 +1241,7 @@ export async function runRoutes(
     // and answered "no such run" about every other one. `reachingIn` for the
     // reason that read gives too — a feed a caller can open and cannot follow
     // is the same fault as a run it can find and cannot read.
-    const acting = await reachingIn(auth, given(text(query.project)));
+    const acting = await reachingIn(auth, given(text(query.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // Digits and nothing else. `Number` would take 0x10, 1e3, 5.0 and a
@@ -1277,7 +1283,7 @@ export async function runRoutes(
    * **Server-derived, and that is what makes the link trustworthy.** The agent,
    * the connection and the exact frozen test versions come off the run in the
    * address; the body carries an idempotency key and nothing else. There is no
-   * field on `POST /api/runs` that can set `retry_of_run_id`, so a run that says
+   * field on `POST /v1/runs` that can set `retryOfRunId`, so a run that says
    * it retries another one really does execute what that one executed.
    *
    * **It refuses rather than substituting.** Every resource the earlier run used
@@ -1292,7 +1298,7 @@ export async function runRoutes(
    * current configuration, and the project's mock tools again — because a retry
    * under current conditions is what this is.
    */
-  app.post(RUN_RETRY_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.retryRun, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const body = (request.body ?? {}) as Body;
@@ -1303,13 +1309,13 @@ export async function runRoutes(
       projectId: auth.projectId,
     });
 
-    const acting = await actingIn(auth, projectNamed(query, body));
+    const acting = await actingIn(auth, projectNamedByPlatform(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // Required here for the reason it is required on a start: a retry dials a
     // real agent and spends a real judge, and an answer lost on the way back
     // must never become a second conversation.
-    const idempotencyKey = given(text(body.idempotency_key));
+    const idempotencyKey = given(text(body.idempotencyKey));
     if (idempotencyKey === undefined) {
       return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
     }
@@ -1330,7 +1336,7 @@ export async function runRoutes(
    * client's attempt, so it cannot turn this action into a different
    * simulation while claiming lineage to the source.
    */
-  app.post(SIMULATION_RERUN_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.rerunSimulation, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { simulationId } = request.params as { simulationId: string };
     const body = (request.body ?? {}) as Body;
@@ -1341,7 +1347,7 @@ export async function runRoutes(
       projectId: auth.projectId,
     });
 
-    const acting = await actingIn(auth, projectNamed(query, body));
+    const acting = await actingIn(auth, projectNamedByPlatform(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const label = given(text(body.label));
@@ -1352,7 +1358,7 @@ export async function runRoutes(
           "name that will identify the new run, then try again.",
       );
     }
-    const idempotencyKey = given(text(body.idempotency_key));
+    const idempotencyKey = given(text(body.idempotencyKey));
     if (idempotencyKey === undefined) {
       return unprocessable(reply, REFUSALS.idempotencyKeyRequired);
     }
@@ -1381,7 +1387,7 @@ export async function runRoutes(
     }
 
     // A one-simulation re-run is still a run start. It must pass the same
-    // deployment readiness check as POST /api/runs before it can spend the
+    // deployment readiness check as POST /v1/runs before it can spend the
     // platform's carrier.
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
@@ -1420,7 +1426,7 @@ export async function runRoutes(
    * one that already finished is refused out loud, because the caller missed
    * and should know it.
    */
-  app.post(RUN_CANCEL_PATH, async (request, reply) => {
+  registerPlatformOperation(app, runOperations.cancelRun, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { runId } = request.params as { runId: string };
     const body = (request.body ?? {}) as Body;
@@ -1446,7 +1452,7 @@ export async function runRoutes(
      * the organization, so Cancel does not need a project to know which run it
      * was handed.
      */
-    const acting = await reachingIn(auth, projectNamed(query, body));
+    const acting = await reachingIn(auth, projectNamedByPlatform(query, body));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // The header comes back from the write itself rather than from a second

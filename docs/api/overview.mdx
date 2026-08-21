@@ -5,10 +5,10 @@ description: "Understand the Egma REST API: base URL, authentication, JSON conve
 ---
 
 The Egma REST API gives you programmatic access to agents, simulation
-connections, tests, runs, graders, Monitoring setup, and traces. Every
+connections, tests, runs, graders, monitoring sources, and traces. Every
 operation available in the Egma web interface is backed by this API, so you can
 integrate Egma into CI, build dashboards, or automate simulation and production
-Monitoring work.
+monitoring work.
 
 ## Base URL
 
@@ -20,6 +20,10 @@ http://your-egma-host:3100
 
 For a local Docker Compose installation, that is `http://localhost:3100`. The web interface runs separately on port `3101`; use port `3100` for all API calls.
 
+All customer platform resources use the `/v1` prefix. For example, agents are
+available at `/v1/agents` and runs are available at `/v1/runs`. Platform
+resources have no `/api/*` compatibility aliases.
+
 <Note>
   If you deploy Egma behind a reverse proxy, the API and web interface share a
   single origin. Use the origin your proxy exposes rather than a port-suffixed
@@ -28,22 +32,28 @@ For a local Docker Compose installation, that is `http://localhost:3100`. The we
 
 ## Authentication
 
-Every request must carry an API key in the `Authorization` header:
+Programs and terminal clients carry an API key in the `Authorization` header:
 
 ```
 Authorization: Bearer egma_sk_...
 ```
 
-The key encodes your tenancy — organization and project scope — so you never include an organization ID or project ID in the URL path. Egma resolves both from the credential itself. See [Authentication](/api/authentication) for how to create and manage keys.
+The web app calls the same operations with its session cookie. The credential
+selects your organization and permissions, so you never include an organization
+ID in the URL path. A project can be selected by the credential or by an
+operation's `projectId` field. See [Authentication](/api/authentication) for how
+to create and manage keys.
 
 ## Request and Response Format
 
-All request bodies and all responses are JSON. Set `Content-Type: application/json` on every request that sends a body.
+All request bodies and all responses are JSON. JSON field names use
+lowerCamelCase. Set `Content-Type: application/json` on every request that
+sends a body.
 
 Here is a minimal example — fetching your API keys with `curl`:
 
 ```bash
-curl http://localhost:3100/api/keys \
+curl http://localhost:3100/v1/keys \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
@@ -54,38 +64,55 @@ curl http://localhost:3100/api/keys \
       "id": "key_01abc...",
       "name": "ci-pipeline",
       "scope": "project",
-      "organization_id": "org_01abc...",
-      "project_id": "proj_01abc...",
-      "looks_like": "egma_sk_…XyZw",
-      "created_by_user_id": "user_01abc...",
-      "created_at": "2025-01-15T10:00:00.000Z",
-      "last_used_at": "2025-01-20T08:32:11.000Z",
-      "revoked_at": null
+      "organizationId": "org_01abc...",
+      "projectId": "prj_01abc...",
+      "looksLike": "egma_sk_…XyZw",
+      "createdByUserId": "user_01abc...",
+      "createdByEmail": "developer@example.com",
+      "createdAt": "2025-01-15T10:00:00.000Z",
+      "lastUsedAt": "2025-01-20T08:32:11.000Z",
+      "revokedAt": null
     }
   ]
 }
 ```
 
+## OpenAPI contract
+
+Each Egma instance serves the complete platform API contract at:
+
+```text
+GET /openapi.json
+```
+
+The document uses OpenAPI 3.1. It is the source for generated clients and lists
+the request and response schema for every `/v1` platform operation. Sign-up,
+sign-in, device login, password reset, self-host settings, health checks,
+simulator worker operations, and OTLP ingest are separate interfaces. They are
+not added to this platform contract.
+
 ## Pagination
 
-All paginated list endpoints return a top-level `items` array and a `next_cursor` field. The cursor is the ID of the last item in the page:
+Paginated list endpoints return a resource array and a `nextPageToken` field.
+For example, the tests endpoint returns:
 
 ```json
 {
-  "items": [...],
-  "next_cursor": "tst_01abc..."
+  "tests": [...],
+  "nextPageToken": "tst_01abc..."
 }
 ```
 
-When `next_cursor` is `null`, you have reached the last page. To fetch the next page, pass the cursor as a query parameter:
+When `nextPageToken` is `null`, you have reached the last page. To fetch the
+next page, pass it as `pageToken`:
 
 ```bash
-curl "http://localhost:3100/api/tests?cursor=tst_01abc..." \
+curl "http://localhost:3100/v1/tests?pageToken=tst_01abc..." \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
 <Tip>
-  Always check `next_cursor` rather than comparing the length of `items` to a
+  Always check `nextPageToken` rather than comparing the length of the resource array to a
   page size — the last page may be a full page, and the cursor is the only
   reliable end-of-results signal.
 </Tip>

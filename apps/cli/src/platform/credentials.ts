@@ -24,13 +24,7 @@ import {
   type FolderConfig,
   type PlatformBinding,
 } from "../folder/egma-folder.ts";
-import {
-  normalizePlatformOrigin,
-  readPlatformIdentity,
-  whatAnswered,
-  type PlatformIdentity,
-} from "./identity.ts";
-import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
+import { normalizePlatformOrigin } from "./url.ts";
 
 /**
  * The egma an agent repository uses when nothing else names one.
@@ -441,56 +435,12 @@ export type PlatformAccess = {
   readonly credentialsFile: string;
 };
 
-/** Platform access after its public identity has answered. */
-export type VerifiedPlatformAccess = PlatformAccess & {
-  readonly instanceId: string;
-};
-
-/**
- * The platform answering at the recorded address is not the one recorded.
- *
- * This and the address refusal below are the two a developer meets when a
- * repository and a platform have come apart, so both end with the whole move
- * rather than its first step. Naming one deletion and stopping is what leaves
- * somebody deleting a line, running again, and meeting a stranger failure about
- * identifiers the new platform never issued.
- *
- * **Nothing anybody typed can be the cause, and the sentence must not pretend
- * otherwise.** An address that is not the bound one is refused above, before
- * anybody is asked anything, so the only ways to reach this are the binding
- * choosing its own address and a flag naming that same address — and dropping a
- * flag that names the bound platform changes nothing. So this says what really
- * happened: the address held still and the platform at it changed. That is a
- * colleague's rebuilt stack, or a redeployment with a fresh database, and the
- * developer meeting it has no reason yet to know that.
- *
- * The two ways on are the same two the address refusal offers, one rung down.
- * The address is not in question here, so the deliberate edit on offer is the
- * instance rather than the origin — and it is offered only for the case where
- * it is honest, which is this platform reinstalled rather than another one.
- */
-export class PlatformBindingMismatchError extends Error {
-  constructor(binding: PlatformBinding, selected: PlatformIdentity) {
-    super(
-      teachingTheMove(
-        `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and the platform answering there now says it is ${selected.instanceId}. That address is the one this repository records, so what changed is the platform at it rather than an address anybody named. If it is this same platform reinstalled — a rebuilt stack has a new database and so a new identity — edit the platform instance in egma/config.yaml to ${selected.instanceId} and change nothing else; the move below is for a different platform, not a reinstall of this one. Egma does not move a repository between platforms, and no repository identifiers were sent.`,
-      ),
-    );
-    this.name = "PlatformBindingMismatchError";
-  }
-}
-
 /**
  * A bound repository was pointed at a different address than the one it
  * recorded, whoever is answering there.
  *
- * Separate from the instance mismatch above because it is refused before
- * anybody answers: the move is out of this effort either way, and the same
- * instance served at a new address is still a change to a committed file that
- * a developer has to make on purpose rather than have made for them. That case
- * keeps its own sentence, because editing one address is not the move and
- * treating it as one would have somebody throw away identifiers that are still
- * good.
+ * A new address is still a change to a committed file that a developer must
+ * make on purpose rather than have made for them.
  *
  * The sentence offers two edits that contradict each other — change the
  * platform origin, or delete the whole platform block — so it says which one
@@ -504,58 +454,9 @@ export class PlatformBindingMismatchError extends Error {
 export class BoundPlatformAddressError extends Error {
   constructor(binding: PlatformBinding, source: PlatformSource, selected: string) {
     const named = SOURCE_NAMES[source];
-    const refusal = `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and ${named} names ${selected} instead. Drop ${named} to use the bound platform. If ${selected} is that same platform at a new address, edit the platform origin in egma/config.yaml to ${selected} and change nothing else — the move below is for a different platform, not a new address for this one. Egma does not move a repository between platforms, and no repository identifiers were sent.`;
+    const refusal = `This repository is bound to the Egma platform at ${binding.origin}, and ${named} names ${selected} instead. Drop ${named} to use the bound platform. If ${selected} is the same platform at a new address, edit the platform origin in egma/config.yaml on purpose. Egma does not move a repository between platforms, and no repository identifiers were sent.`;
     super(source === "binding" ? refusal : teachingTheMove(refusal));
     this.name = "BoundPlatformAddressError";
-  }
-}
-
-/** The bound platform did not answer, and egma's own was deliberately not tried. */
-export class BoundPlatformUnavailableError extends Error {
-  constructor(binding: PlatformBinding, cause: unknown) {
-    super(
-      `This repository is bound to Egma platform ${binding.instance} at ${binding.origin}, and it did not answer. Start the bound platform and run this again. Egma did not fall back to its own platform, and no repository identifiers were sent.`,
-      { cause },
-    );
-    this.name = "BoundPlatformUnavailableError";
-  }
-}
-
-/**
- * Nothing named a platform, so egma used its own, and its own is no use today.
- *
- * One refusal for every way that address can fail, because the developer never
- * typed it, does not run what is at it, and cannot fix any of them. What is
- * suppressed is the advice — "check the address", "look at the proxy in front
- * of it", "set EGMA_BASE_URL on the platform" — every word of which is
- * addressed to somebody who is not reading. **What happened is not suppressed.**
- * A redirect told as "it did not answer" is wrong about the fact and wrong
- * about the remedy, and it is the one shape the spec relies on egma reporting.
- *
- * So the shape travels with the refusal. Something that answered wrongly and
- * will answer wrongly again is `refused`: it is stated plainly, and nobody is
- * invited into a retry loop over it. Nobody answering, a connection that stalls
- * and a platform having a bad minute are `unreachable`, and those do say to try
- * again. The real fault stays on as the cause for whoever goes looking.
- */
-export class DefaultPlatformUnusableError extends Error {
-  /** Which of egma's two refusal shapes this is, decided by what answered. */
-  readonly refusal: "refused" | "unreachable";
-
-  constructor(url: string, cause: unknown) {
-    const answered = whatAnswered(cause);
-    super(
-      [
-        `This repository names no Egma platform, so Egma used its own at ${url}, and ${answered.said}`,
-        answered.worthRetrying
-          ? "Try again in a moment, or point Egma at another platform with --url <address>."
-          : "That is Egma's to fix and not yours, and waiting will not change it. To carry on now, point Egma at another platform with --url <address>.",
-        "Nothing was sent.",
-      ].join(" "),
-      { cause },
-    );
-    this.name = "DefaultPlatformUnusableError";
-    this.refusal = answered.worthRetrying ? "unreachable" : "refused";
   }
 }
 
@@ -692,50 +593,8 @@ export async function choosePlatform(choice: {
   return { ...selected, binding, credentialsFile };
 }
 
-/** Who is answering there — the first thing a command asks of any address. */
-export async function verifyPlatform(
-  chosen: ChosenPlatform,
-  fetchImpl?: Fetch,
-  identityTimeoutSignal?: AbortSignal,
-): Promise<VerifiedPlatformAccess> {
-  const { binding } = chosen;
-  let identity: PlatformIdentity;
-  try {
-    identity = await readPlatformIdentity(
-      chosen.url,
-      fetchImpl,
-      identityTimeoutSignal,
-    );
-  } catch (cause) {
-    // Safe to name the binding here, and only here: any address that is not the
-    // bound one was already refused above, so a bound repository that got this
-    // far was reaching its own platform.
-    if (binding !== null && cause instanceof PlatformUnreachableError) {
-      throw new BoundPlatformUnavailableError(binding, cause);
-    }
-    // Nobody chose this address, so nobody can be sent to go and look at it.
-    if (chosen.source === "default") {
-      throw new DefaultPlatformUnusableError(chosen.url, cause);
-    }
-    throw cause;
-  }
-
-  if (binding !== null && binding.instance !== identity.instanceId) {
-    throw new PlatformBindingMismatchError(binding, identity);
-  }
-
-  return {
-    url: identity.origin,
-    instanceId: identity.instanceId,
-    credentialsFile: chosen.credentialsFile,
-  };
-}
-
 /**
- * Resolved once, in one place, so the wizard and every verb read the same
- * answer from the same three places in the same order. Two copies of this would
- * be two answers to "which egma is this", and the one that is wrong would be
- * the one that wrote the key.
+ * Resolve platform access once, without asking the selected address anything.
  */
 export async function resolvePlatformAccess(choice: {
   readonly env: NodeJS.ProcessEnv;
@@ -743,16 +602,7 @@ export async function resolvePlatformAccess(choice: {
   readonly flag: string | null;
   /** The agent repository whose binding is part of resolution. */
   readonly cwd: string;
-  readonly fetchImpl?: Fetch;
-  /**
-   * The platform-identity deadline. Commands use the production default; a
-   * test supplies a signal whose deadline has already passed.
-   */
-  readonly identityTimeoutSignal?: AbortSignal;
-}): Promise<VerifiedPlatformAccess> {
-  return verifyPlatform(
-    await choosePlatform(choice),
-    choice.fetchImpl,
-    choice.identityTimeoutSignal,
-  );
+}): Promise<PlatformAccess> {
+  const selected = await choosePlatform(choice);
+  return { url: selected.url, credentialsFile: selected.credentialsFile };
 }

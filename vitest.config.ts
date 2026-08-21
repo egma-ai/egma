@@ -64,6 +64,15 @@ export default defineConfig({
       "@egma/provider-credentials": resolve(
         "./packages/provider-credentials/src/index.ts",
       ),
+      "@egma/platform-api/contract": resolve(
+        "./packages/platform-api/src/contract/index.ts",
+      ),
+      "@egma/platform-api/openapi": resolve(
+        "./packages/platform-api/src/openapi.ts",
+      ),
+      "@egma/platform-api/client": resolve(
+        "./packages/platform-api/src/client.ts",
+      ),
       "@egma/retell": resolve("./packages/retell/src/index.ts"),
       "@egma/db": resolve("./packages/db/src/index.ts"),
       "@egma/simulation-contract": resolve(

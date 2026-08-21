@@ -121,8 +121,8 @@ type ReadMeasure = {
   readonly unit: string;
   readonly derived: boolean;
   readonly samples: readonly number[];
-  readonly span_ids: readonly string[];
-  readonly worst: { readonly value: number; readonly span_id: string } | null;
+  readonly spanIds: readonly string[];
+  readonly worst: { readonly value: number; readonly spanId: string } | null;
 };
 
 async function measuresOfTheCapture(): Promise<readonly ReadMeasure[]> {
@@ -187,7 +187,7 @@ describe("the captured LiveKit conversation, read back through the door", () => 
 
     expect(measured?.samples).toEqual(HAND_COMPUTED.first_response_latency);
     // Citing the `agent_speaking` span the first word came out of.
-    expect(measured?.span_ids).toEqual(["71ac2d247c9b060d"]);
+    expect(measured?.spanIds).toEqual(["71ac2d247c9b060d"]);
   });
 
   it("measures each answered turn's wait at the hand-computed numbers", async () => {
@@ -199,14 +199,14 @@ describe("the captured LiveKit conversation, read back through the door", () => 
     expect(measured?.samples).toEqual(HAND_COMPUTED.turn_response_latency);
     // The agent turn that answered without speaking, then the speech that
     // answered the last thing the caller said.
-    expect(measured?.span_ids).toEqual([
+    expect(measured?.spanIds).toEqual([
       "00820fa943b873e6",
       "11a1eaca219437a9",
     ]);
     // The worst of them is what a bound is held against, and it is the second.
     expect(measured?.worst).toEqual({
       value: 1994.917806,
-      span_id: "11a1eaca219437a9",
+      spanId: "11a1eaca219437a9",
     });
   });
 
@@ -219,7 +219,7 @@ describe("the captured LiveKit conversation, read back through the door", () => 
     expect(measured?.samples).toEqual(HAND_COMPUTED.agent_speech_duration);
     // One sample per agent turn that spoke, citing the turn rather than the
     // speech inside it — the number is the turn's.
-    expect(measured?.span_ids).toEqual([
+    expect(measured?.spanIds).toEqual([
       "0701cc09e5f3d203",
       "b2444815bd74fb3b",
       "2c8883b32dbc323c",

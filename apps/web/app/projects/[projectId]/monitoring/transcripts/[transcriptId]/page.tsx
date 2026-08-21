@@ -1,14 +1,18 @@
 "use client";
 
 import { Fragment, use, useEffect, useState, type CSSProperties } from "react";
+import { getTrace } from "@egma/platform-api/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { readJson } from "../../../../../../lib/api.ts";
 import { GRADING } from "../../../../../../lib/grading-copy.ts";
 import { asSecond } from "../../../../../../lib/instants.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../../lib/platform-client.ts";
 import {
   DETAIL,
   FACTS,
@@ -28,7 +32,6 @@ import {
   milliseconds,
   somethingFailed,
   stepsInside,
-  transcriptReadPath,
   transcriptsPath,
   turnsCited,
   type Detail,
@@ -250,12 +253,11 @@ export default function TranscriptPage({
       return undefined;
     }
 
-    void readJson<Detail>(
-      transcriptReadPath({
-        traceId: transcriptId,
-        window: { from, to },
-        projectId,
-      }),
+    void platformAnswer(
+      getTrace(
+        { traceId: transcriptId, from, to, projectId },
+        { client: platformClient },
+      ),
     )
       .then((answer) => {
         if (!current) return;
@@ -350,9 +352,9 @@ export default function TranscriptPage({
   }
 
   const { detail } = state;
-  const openedAt = detail.trace.started_at;
+  const openedAt = detail.trace.startedAt;
   const positioned = positionedSteps(detail);
-  const selected = positioned.find(({ step }) => step.span_id === selectedId)?.step
+  const selected = positioned.find(({ step }) => step.spanId === selectedId)?.step
     ?? detail.turns[0]
     ?? detail.spans[0]
     ?? null;
@@ -361,19 +363,19 @@ export default function TranscriptPage({
     .filter((step) => step.status === "error");
 
   function select(step: Step): void {
-    setSelectedId(step.span_id);
+    setSelectedId(step.spanId);
   }
 
   function moveBetweenFailures(direction: -1 | 1): void {
     if (failures.length === 0) return;
-    const selectedFailure = failures.findIndex((step) => step.span_id === selected?.span_id);
+    const selectedFailure = failures.findIndex((step) => step.spanId === selected?.spanId);
     const from = selectedFailure < 0 ? (direction > 0 ? -1 : 0) : selectedFailure;
     const next = (from + direction + failures.length) % failures.length;
-    setSelectedId(failures[next]?.span_id ?? null);
+    setSelectedId(failures[next]?.spanId ?? null);
     setView("execution");
   }
 
-  const errored = detail.trace.errored_span_count;
+  const errored = detail.trace.erroredSpanCount;
 
   return (
     <AppShell>
@@ -399,7 +401,7 @@ export default function TranscriptPage({
             <>
               <RelativeInstant instant={openedAt} now={now} precision="second" />
               {" · "}
-              {howLong(detail.trace.duration_ns)}
+              {howLong(detail.trace.durationNs)}
             </>
           }
           action={
@@ -441,15 +443,15 @@ export default function TranscriptPage({
           with no controls on it — a hidden `<audio>` keeps going, and a person
           hunting for the sound would have no way to stop it.
 
-          `simulation_id` is present only for an exchange egma conducted, which
+          `simulationId` is present only for an exchange egma conducted, which
           is the one question this page can answer for itself; whether that
           conversation recorded anything is the recording route's answer, and a
           refusal there shows nothing at all rather than a control that does
           nothing.
         */}
-        {typeof detail.simulation_id === "string" ? (
+        {typeof detail.simulationId === "string" ? (
           <RecordingPlayer
-            simulationId={detail.simulation_id}
+            simulationId={detail.simulationId}
             words={RECORDING}
             knownToExist={false}
           />
@@ -542,7 +544,7 @@ export default function TranscriptPage({
           )}
         </div>
 
-        {detail.spans_truncated ? (
+        {detail.spansTruncated ? (
           <div className="mt-5">
             <Notice tone="error">{DETAIL.truncated}</Notice>
           </div>
@@ -557,13 +559,13 @@ export default function TranscriptPage({
         >
           <section className="min-w-0">
             <div role="tabpanel" hidden={view !== "transcript"}>
-              <TranscriptView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
+              <TranscriptView detail={detail} selectedId={selected?.spanId ?? null} onSelect={select} />
             </div>
             <div role="tabpanel" hidden={view !== "timeline"}>
-              <TimelineView detail={detail} steps={positioned} selectedId={selected?.span_id ?? null} onSelect={select} />
+              <TimelineView detail={detail} steps={positioned} selectedId={selected?.spanId ?? null} onSelect={select} />
             </div>
             <div role="tabpanel" hidden={view !== "execution"}>
-              <ExecutionView detail={detail} selectedId={selected?.span_id ?? null} onSelect={select} />
+              <ExecutionView detail={detail} selectedId={selected?.spanId ?? null} onSelect={select} />
             </div>
           </section>
           <Inspector selected={selected} facts={detail.trace} openedAt={openedAt} />
@@ -598,11 +600,11 @@ function Fact({
 
 function Summary({ facts }: { facts: TraceFacts }) {
   const primary: readonly (readonly [string, string, boolean])[] = [
-    [FACTS.duration, howLong(facts.duration_ns), false],
-    [FACTS.turns, `${facts.turn_counts.human} ${LIST.human} · ${facts.turn_counts.agent} ${LIST.agent}`, false],
-    [FACTS.steps, String(facts.span_count), false],
-    [FACTS.tools, String(facts.tool_span_count), false],
-    [FACTS.errors, String(facts.errored_span_count), facts.errored_span_count > 0],
+    [FACTS.duration, howLong(facts.durationNs), false],
+    [FACTS.turns, `${facts.turnCounts.human} ${LIST.human} · ${facts.turnCounts.agent} ${LIST.agent}`, false],
+    [FACTS.steps, String(facts.spanCount), false],
+    [FACTS.tools, String(facts.toolSpanCount), false],
+    [FACTS.errors, String(facts.erroredSpanCount), facts.erroredSpanCount > 0],
   ];
 
   return (
@@ -680,7 +682,7 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
  * one origin the page still says anything about.
  *
  * **`derived` alone does not answer it.** A figure an agent platform reported
- * arrives derived as well, because Egma did not time it either; `reported_by`
+ * arrives derived as well, because Egma did not time it either; `reportedBy`
  * beside it is what tells the two apart. Without that second half the page would
  * tell a developer their platform's number was "worked out from your framework's
  * own timings", which is a claim about an observation Egma never made. So the
@@ -692,7 +694,7 @@ function Measures({ measured }: { measured: readonly Measured[] }) {
  * origin is still there to be asked for the day a surface asks.
  */
 function workedOut(one: Measured): boolean {
-  return one.derived === true && one.reported_by === undefined;
+  return one.derived === true && one.reportedBy === undefined;
 }
 
 /**
@@ -837,7 +839,7 @@ function TranscriptView({
   selectedId: string | null;
   onSelect: (step: Step) => void;
 }) {
-  const openedAt = detail.trace.started_at;
+  const openedAt = detail.trace.startedAt;
 
   return (
     <div>
@@ -853,7 +855,7 @@ function TranscriptView({
       ) : (
         <div className={LIST_SURFACE}>
           {detail.turns.map((turn, position) => (
-            <Fragment key={turn.span_id}>
+            <Fragment key={turn.spanId}>
               <Turn
                 turn={turn}
                 openedAt={openedAt}
@@ -864,7 +866,7 @@ function TranscriptView({
                 .filter((judgment) => turnsCited(judgment).includes(position + 1))
                 .map((judgment) => (
                   <JudgmentCard
-                    key={`${judgment.grader_id}:${judgment.assertion}:${judgment.judged_at}`}
+                    key={`${judgment.graderId}:${judgment.assertion}:${judgment.judgedAt}`}
                     judgment={judgment}
                   />
                 ))}
@@ -885,7 +887,7 @@ function TranscriptView({
           <p className="mt-2 mb-4 text-sm text-muted-foreground">{DETAIL.otherStepsLead}</p>
           <div className={STEP_STACK}>
             {detail.spans.map((step) => (
-              <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+              <Timed key={step.spanId} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
             ))}
           </div>
         </details>
@@ -908,7 +910,7 @@ function Turn({
   const inside = stepsInside(turn);
   const failed = turn.status === "error" || somethingFailed(turn);
   const human = isHuman(turn);
-  const selected = turn.span_id === selectedId;
+  const selected = turn.spanId === selectedId;
 
   return (
     <details
@@ -938,7 +940,7 @@ function Turn({
         */}
         <span className="relative flex min-w-0 flex-col gap-2 font-mono text-sm text-muted-foreground">
           <span className="[overflow-wrap:anywhere]">
-            {howFarIn(turn.started_at, openedAt)}
+            {howFarIn(turn.startedAt, openedAt)}
           </span>
           <span
             aria-hidden="true"
@@ -960,7 +962,7 @@ function Turn({
               {human ? SPEAKERS.human : SPEAKERS.agent}
             </strong>
             <small className="font-mono text-sm text-muted-foreground">
-              {howLong(turn.duration_ns)} · {DETAIL.steps(inside)}
+              {howLong(turn.durationNs)} · {DETAIL.steps(inside)}
             </small>
           </span>
           <span className="mt-2 block max-w-[720px] text-base leading-(--line-body) [overflow-wrap:anywhere]">
@@ -1006,7 +1008,7 @@ function Turn({
         ) : (
           <div className={STEP_STACK}>
             {turn.spans.map((step) => (
-              <Timed key={step.span_id} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+              <Timed key={step.spanId} step={step} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
             ))}
           </div>
         )}
@@ -1034,7 +1036,7 @@ function Timed({
       className={cn(
         "min-w-0 overflow-clip rounded-input border border-border bg-surface",
         marked && "border-failure-border",
-        selectedId === step.span_id && SELECTED,
+        selectedId === step.spanId && SELECTED,
       )}
       onToggle={(event) => {
         if (event.currentTarget.open) onSelect(step);
@@ -1057,7 +1059,7 @@ function Timed({
           <span className={cn(ONE_LINE, "font-mono")}>{step.name}</span>
         </span>
         <span className="font-mono text-sm whitespace-nowrap text-muted-foreground max-[620px]:whitespace-normal">
-          {howFarIn(step.started_at, openedAt)} · {howLong(step.duration_ns)}
+          {howFarIn(step.startedAt, openedAt)} · {howLong(step.durationNs)}
           {failed ? <span className="text-failure"> · {DETAIL.failed}</span> : null}
         </span>
       </summary>
@@ -1066,7 +1068,7 @@ function Timed({
         {step.spans.length === 0 ? null : (
           <div className={cn(STEP_STACK, "mt-2")}>
             {step.spans.map((child) => (
-              <Timed key={child.span_id} step={child} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
+              <Timed key={child.spanId} step={child} openedAt={openedAt} selectedId={selectedId} onSelect={onSelect} />
             ))}
           </div>
         )}
@@ -1086,8 +1088,8 @@ function TimelineView({
   selectedId: string | null;
   onSelect: (step: Step) => void;
 }) {
-  const total = Math.max(milliseconds(detail.trace.duration_ns), 1);
-  const openedAt = Date.parse(detail.trace.started_at);
+  const total = Math.max(milliseconds(detail.trace.durationNs), 1);
+  const openedAt = Date.parse(detail.trace.startedAt);
 
   return (
     <div>
@@ -1095,8 +1097,8 @@ function TimelineView({
       {steps.length === 0 ? <Notice>{DETAIL.noStepsAtAll}</Notice> : (
         <div className={LIST_SURFACE}>
           {steps.map(({ step, depth }) => {
-            const offset = Math.max(Date.parse(step.started_at) - openedAt, 0);
-            const duration = Math.max(milliseconds(step.duration_ns), 0);
+            const offset = Math.max(Date.parse(step.startedAt) - openedAt, 0);
+            const duration = Math.max(milliseconds(step.durationNs), 0);
             const left = Math.min((offset / total) * 100, 100);
             const width = Math.max(Math.min((duration / total) * 100, 100 - left), .8);
             const style = {
@@ -1107,7 +1109,7 @@ function TimelineView({
 
             return (
               <button
-                key={step.span_id}
+                key={step.spanId}
                 className={cn(
                   ROW,
                   /*
@@ -1119,7 +1121,7 @@ function TimelineView({
                   "ps-[calc(var(--space-3)+var(--timeline-indent))]",
                   "first:border-t-0",
                   "max-[620px]:grid-cols-[minmax(0,1fr)_56px]",
-                  selectedId === step.span_id && SELECTED,
+                  selectedId === step.spanId && SELECTED,
                 )}
                 type="button"
                 style={style}
@@ -1152,7 +1154,7 @@ function TimelineView({
                     "max-[620px]:col-start-2 max-[620px]:row-start-1",
                   )}
                 >
-                  {howLong(step.duration_ns)}
+                  {howLong(step.durationNs)}
                 </span>
               </button>
             );
@@ -1174,8 +1176,8 @@ function ExecutionView({
 }) {
   const groups = [
     ...detail.turns.map((turn) => ({
-      id: turn.span_id,
-      label: `${isHuman(turn) ? SPEAKERS.human : SPEAKERS.agent} ${howFarIn(turn.started_at, detail.trace.started_at)}`,
+      id: turn.spanId,
+      label: `${isHuman(turn) ? SPEAKERS.human : SPEAKERS.agent} ${howFarIn(turn.startedAt, detail.trace.startedAt)}`,
       steps: flatten(turn.spans),
     })),
     ...(detail.spans.length === 0 ? [] : [{ id: "outside", label: DETAIL.otherSteps, steps: flatten(detail.spans) }]),
@@ -1198,14 +1200,14 @@ function ExecutionView({
               </h3>
               {group.steps.map(({ step, depth }) => (
                 <button
-                  key={step.span_id}
+                  key={step.spanId}
                   className={cn(
                     ROW,
                     "justify-between gap-5",
                     "ps-[calc(var(--space-3)+var(--execution-indent))]",
                     /* The first row sits under the group's own rule, not a second one. */
                     "[h3+&]:border-t-0",
-                    selectedId === step.span_id && SELECTED,
+                    selectedId === step.spanId && SELECTED,
                   )}
                   type="button"
                   style={{ "--execution-indent": `${Math.min(depth, 6) * 14}px` } as CSSProperties}
@@ -1221,7 +1223,7 @@ function ExecutionView({
                       step.status === "error" ? "text-failure" : "text-muted-foreground",
                     )}
                   >
-                    {step.status === "error" ? DETAIL.failed : howLong(step.duration_ns)}
+                    {step.status === "error" ? DETAIL.failed : howLong(step.durationNs)}
                   </span>
                 </button>
               ))}
@@ -1271,10 +1273,10 @@ function Inspector({
           <div className="min-w-0 border-b border-border pb-4">
             <p className={cn(FACT_LABEL, "mt-0 mb-3")}>{presentedStepLabel(selected)}</p>
             <h2 className="m-0 text-lg font-normal [overflow-wrap:anywhere]">
-              {selected.text || selected.tool_name || selected.name}
+              {selected.text || selected.toolName || selected.name}
             </h2>
             <p className="mt-2 mb-0 text-sm text-muted-foreground">
-              {howFarIn(selected.started_at, openedAt)} · {howLong(selected.duration_ns)}
+              {howFarIn(selected.startedAt, openedAt)} · {howLong(selected.durationNs)}
             </p>
           </div>
 
@@ -1289,20 +1291,20 @@ function Inspector({
             )}
           >
             <div><dt>{FACTS.status}</dt><dd className={selected.status === "error" ? "text-failure" : undefined}>{readableStatus(selected.status)}</dd></div>
-            <div><dt>{FACTS.started}</dt><dd>{asSecond(selected.started_at)}</dd></div>
-            <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.duration_ns)}</dd></div>
+            <div><dt>{FACTS.started}</dt><dd>{asSecond(selected.startedAt)}</dd></div>
+            <div><dt>{FACTS.duration}</dt><dd>{howLong(selected.durationNs)}</dd></div>
           </dl>
 
-          {selected.tool_name === "" ? null : (
+          {selected.toolName === "" ? null : (
             <section className="border-b border-border py-4">
               <h3 className="mt-0 mb-2 text-base font-normal">{DETAIL.toolWork}</h3>
-              <p className="m-0 font-mono text-sm [overflow-wrap:anywhere]">{selected.tool_name}</p>
-              {selected.tool_arguments === "" ? null : <Payload label={FACTS.toolArguments} value={selected.tool_arguments} />}
-              {selected.tool_result === "" ? null : <Payload label={FACTS.toolResult} value={selected.tool_result} />}
+              <p className="m-0 font-mono text-sm [overflow-wrap:anywhere]">{selected.toolName}</p>
+              {selected.toolArguments === "" ? null : <Payload label={FACTS.toolArguments} value={selected.toolArguments} />}
+              {selected.toolResult === "" ? null : <Payload label={FACTS.toolResult} value={selected.toolResult} />}
             </section>
           )}
 
-          {selected.audio_url === "" ? null : (
+          {selected.audioUrl === "" ? null : (
             <p className="mt-4 mb-0 text-sm">
               <a
                 className={cn(
@@ -1313,7 +1315,7 @@ function Inspector({
                   "pointer-coarse:min-h-(--tap-target)",
                   "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
                 )}
-                href={selected.audio_url}
+                href={selected.audioUrl}
               >
                 {DETAIL.openAudio}
               </a>
@@ -1369,15 +1371,15 @@ const RECORDED_LIST = cn(
  */
 function WhereItCameFrom({ facts }: { facts: TraceFacts }) {
   const shown: readonly (readonly [string, string])[] = [
-    [FACTS.started, asSecond(facts.started_at)],
-    [FACTS.ended, asSecond(facts.ended_at)],
+    [FACTS.started, asSecond(facts.startedAt)],
+    [FACTS.ended, asSecond(facts.endedAt)],
     [FACTS.source, facts.source],
     [FACTS.environment, facts.environment],
-    [FACTS.platform, agentPlatformLabel(facts.agent_platform)],
-    [FACTS.platformAgentName, facts.platform_agent_name],
-    [FACTS.platformAgentId, facts.platform_agent_id],
-    [FACTS.platformAgentVersion, facts.platform_agent_version],
-    [FACTS.reference, facts.provider_call_id],
+    [FACTS.platform, agentPlatformLabel(facts.agentPlatform)],
+    [FACTS.platformAgentName, facts.platformAgentName],
+    [FACTS.platformAgentId, facts.platformAgentId],
+    [FACTS.platformAgentVersion, facts.platformAgentVersion],
+    [FACTS.reference, facts.providerCallId],
   ];
 
   return (
@@ -1397,15 +1399,15 @@ function Recorded({ step, openedAt }: { step: Step; openedAt: string }) {
     [FACTS.kind, stepLabel(step.kind)],
     [FACTS.name, step.name],
     [FACTS.status, step.status],
-    [FACTS.started, `${asSecond(step.started_at)} (${howFarIn(step.started_at, openedAt)})`],
-    [FACTS.duration, howLong(step.duration_ns)],
-    [FACTS.nanoseconds, step.duration_ns],
-    [FACTS.identifier, step.span_id],
-    [FACTS.within, step.parent_span_id],
-    [FACTS.toolName, step.tool_name],
-    [FACTS.toolArguments, step.tool_arguments],
-    [FACTS.toolResult, step.tool_result],
-    [FACTS.audio, step.audio_url],
+    [FACTS.started, `${asSecond(step.startedAt)} (${howFarIn(step.startedAt, openedAt)})`],
+    [FACTS.duration, howLong(step.durationNs)],
+    [FACTS.nanoseconds, step.durationNs],
+    [FACTS.identifier, step.spanId],
+    [FACTS.within, step.parentSpanId],
+    [FACTS.toolName, step.toolName],
+    [FACTS.toolArguments, step.toolArguments],
+    [FACTS.toolResult, step.toolResult],
+    [FACTS.audio, step.audioUrl],
   ];
 
   return (
@@ -1430,8 +1432,8 @@ function flatten(steps: readonly Step[], depth = 0): PositionedStep[] {
 function positionedSteps(detail: Detail): PositionedStep[] {
   const seen = new Set<string>();
   return [...flatten(detail.turns), ...flatten(detail.spans)].filter(({ step }) => {
-    if (seen.has(step.span_id)) return false;
-    seen.add(step.span_id);
+    if (seen.has(step.spanId)) return false;
+    seen.add(step.spanId);
     return true;
   });
 }

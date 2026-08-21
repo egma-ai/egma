@@ -65,7 +65,7 @@ If you drive `docker compose` directly without the CLI, supply these three yours
 <ParamField path="EGMA_BASE_URL" type="string" required>
   The full public URL of your instance — scheme, host, and port only. No path, query string, or trailing slash. Example: `http://localhost:3101`.
 
-  Every agent repository that connects to this instance reads its identity from this value. If others reach your instance at `http://192.168.1.10:3101`, this must say exactly that — not `http://localhost:3101`.
+  Egma uses this origin for browser-facing links and trusted browser requests. If others reach your instance at `http://192.168.1.10:3101`, this must say exactly that — not `http://localhost:3101`.
 </ParamField>
 
 <ParamField path="EGMA_LIVEKIT_API_KEY" type="string" required>

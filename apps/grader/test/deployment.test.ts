@@ -186,7 +186,7 @@ describe("the API process", () => {
         if (entry.isDirectory()) await walk(full);
         else if (entry.name.endsWith(".ts")) {
           const text = await readFile(full, "utf8");
-          if (/claimGradingJobs|watchGradingWork|gradingJob/.test(text)) {
+          if (/claimGradingJobs|watchGradingWork|\bgradingJob\b/.test(text)) {
             offending.push(path.relative(ROOT, full));
           }
         }

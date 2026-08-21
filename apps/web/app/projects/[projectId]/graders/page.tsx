@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
+import { listGraderLibrary } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -13,13 +14,16 @@ import {
   USE,
 } from "../../../../lib/grader-library-copy.ts";
 import {
-  GRADER_LIBRARY_PATH,
   GRADERS_SECTION,
   RUNNING_GRADERS_STEP,
   type LibraryEntry,
   type LibraryPage,
 } from "../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../lib/platform-client.ts";
 import {
   graderDisplayName,
   ownerDisplayName,
@@ -166,7 +170,10 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
 
   const { answer, reload } = useProjectRead<LibraryPage>(
-    GRADER_LIBRARY_PATH,
+    (projectId) =>
+      platformAnswer(
+        listGraderLibrary({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
 
@@ -205,7 +212,7 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    const entries = answer.value.items;
+    const entries = answer.value.graderLibraryEntries;
 
     /*
      * **It reads the first page and stops there**, which is honest for a shelf

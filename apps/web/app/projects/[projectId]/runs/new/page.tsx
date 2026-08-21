@@ -3,30 +3,36 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
 import {
-  agentsQuery,
-  agentDetailQuery,
+  createRun,
+  getAgent,
+  getRunPlan,
+  listAgents,
+  listTests,
+} from "@egma/platform-api/client";
+
+import type { Refusal } from "../../../../../lib/api.ts";
+import {
   type AgentDetail,
   type AgentPage,
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   judgesNothing,
   preselectedAgent,
-  runPlanQuery,
-  RUNS_PATH,
   whyNotStartable,
   type RunPlan,
   type StartedRun,
 } from "../../../../../lib/runs.ts";
 import {
   activeAgents,
-  testsPath,
   type ListedTest,
   type TestPage,
 } from "../../../../../lib/tests.ts";
@@ -89,8 +95,8 @@ const START_ACTION = "flex flex-col gap-2 [&>button]:w-full";
  *
  * **Nothing on this page decides anything.** Which versions would be pinned,
  * which conversations would be skipped and why, which graders would judge and
- * at which versions — all of it is `GET /api/run-plan`, which is the same
- * resolution `POST /api/runs` performs.
+ * at which versions — all of it is `GET /v1/run-plan`, which is the same
+ * resolution `POST /v1/runs` performs.
  * A page that worked any of it out for itself would be a second opinion, and
  * the moment the two disagreed somebody would approve one run and start
  * another.
@@ -173,7 +179,7 @@ function Step({
 function connectionLabel(connection: ListedConnection): string {
   const where =
     connection.environment === null ? "" : ` · ${connection.environment}`;
-  return `${connection.name} · ${connection.product_label} · ${connection.modality}${where}`;
+  return `${connection.name} · ${connection.productLabel} · ${connection.modality}${where}`;
 }
 
 /** A fresh browser intent, reused only while that same start is retried. */
@@ -230,19 +236,31 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
   useUnsavedChanges(changed && !starting, starting);
 
   const { answer: agents } = useProjectRead<AgentPage>(
-    agentsQuery({}),
+    (projectId) =>
+      platformAnswer(listAgents({ projectId }, { client: platformClient })),
     projectId,
   );
   const { answer: detail } = useProjectRead<AgentDetail>(
-    agentId === "" ? "" : agentDetailQuery(agentId, "active"),
+    (projectId) =>
+      platformAnswer(
+        getAgent({ agentId, projectId }, { client: platformClient }),
+      ),
     agentId === "" ? null : projectId,
+    agentId,
   );
   const { answer: tests } = useProjectRead<TestPage>(
-    agentId === "" ? "" : testsPath({ archived: false, agent: agentId }),
+    (projectId) =>
+      platformAnswer(
+        listTests(
+          { projectId, agentId },
+          { client: platformClient },
+        ),
+      ),
     agentId === "" ? null : projectId,
+    agentId,
   );
 
-  const agentRows = agents?.status === "ready" ? agents.value.items : [];
+  const agentRows = agents?.status === "ready" ? agents.value.agents : [];
   const connections =
     detail?.status === "ready"
       ? detail.value.connections.filter((one) => !one.archived)
@@ -257,7 +275,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
    */
   const testRows: readonly ListedTest[] =
     tests?.status === "ready"
-      ? tests.value.items.filter((one) => activeAgents(one).length > 0)
+      ? tests.value.tests.filter((one) => activeAgents(one).length > 0)
       : [];
 
   /**
@@ -278,16 +296,26 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
     () =>
       testRows
         .filter((one) => chosen.includes(one.id))
-        .map((one) => one.version_id),
+        .map((one) => one.versionId),
     [testRows, chosen],
   );
 
   const readyToPlan = agentId !== "" && connectionId !== "" && selection.length > 0;
   const { answer: plan, reload: replan } = useProjectRead<RunPlan>(
-    readyToPlan
-      ? runPlanQuery({ agentId, connectionId, testVersionIds: selection })
-      : "",
+    (projectId) =>
+      platformAnswer(
+        getRunPlan(
+          {
+            projectId,
+            agentId,
+            connectionId,
+            testVersionIds: selection.join(","),
+          },
+          { client: platformClient },
+        ),
+      ),
     readyToPlan ? projectId : null,
+    `${agentId}:${connectionId}:${selection.join(",")}`,
   );
 
   async function start(): Promise<void> {
@@ -301,17 +329,19 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
     setConfirming(false);
     setRefused(null);
     setStarting(true);
-    const written = await writeJson<StartedRun>(RUNS_PATH, {
-      method: "POST",
-      project: projectId,
-      body: {
-        agent: agentId,
-        connection: connectionId,
-        test_versions: [...selection],
-        idempotency_key: idempotencyKey,
-        label: name,
-      },
-    });
+    const written = await platformAnswer(
+      createRun(
+        {
+          projectId,
+          agentId,
+          connectionId,
+          testVersionIds: [...selection],
+          idempotencyKey,
+          label: name,
+        },
+        { client: platformClient },
+      ),
+    );
     if (written.status === "signed-out") {
       setStarting(false);
       window.location.replace("/sign-in");
@@ -584,8 +614,8 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                 inset, from the component that draws the panel.
               */}
               <p className="m-0 text-sm text-foreground">
-                {planned.runnable_simulation_count}{" "}
-                {planned.runnable_simulation_count === 1
+                {planned.runnableSimulationCount}{" "}
+                {planned.runnableSimulationCount === 1
                   ? "simulation"
                   : "simulations"}{" "}
                 will be conducted.

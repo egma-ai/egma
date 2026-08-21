@@ -17,6 +17,7 @@ import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organ
 import PeoplePage from "../app/projects/[projectId]/settings/people/page.tsx";
 import ProjectSettingsPage from "../app/projects/[projectId]/settings/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * The Settings area, rendered and driven the way somebody with a keyboard
@@ -76,18 +77,18 @@ const PROJECT = {
   name: "Default",
   slug: "default",
   description: "The first one.",
-  organization_id: "org_1",
+  organizationId: "org_1",
   revision: "rev_1",
-  created_at: "2026-08-01T10:00:00.000Z",
-  may_manage_projects: true,
+  createdAt: "2026-08-01T10:00:00.000Z",
+  mayManageProjects: true,
 };
 
 const ORGANIZATION = {
   id: "org_1",
   name: "Acme",
   slug: "acme",
-  created_at: "2026-08-01T10:00:00.000Z",
-  may_manage_organization: true,
+  createdAt: "2026-08-01T10:00:00.000Z",
+  mayManageOrganization: true,
 };
 
 function json(status: number, body: unknown): Response {
@@ -114,15 +115,13 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): void
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, init?: RequestInit) => {
-      const url = new URL(input, "http://egma.test");
+    vi.fn(async (input: FetchInput, init?: RequestInit) => {
+      const request = await observeRequest(input, init);
+      const { address: url } = request;
       sent.push({
-        url: input,
-        method: init?.method ?? "GET",
-        body:
-          typeof init?.body === "string"
-            ? (JSON.parse(init.body) as unknown)
-            : undefined,
+        url: request.url,
+        method: request.method,
+        body: request.body,
       });
 
       const held = answers[url.pathname];
@@ -189,7 +188,7 @@ const ORGANIZATION_WIDE: readonly {
   {
     page: "Organization",
     answers: {
-      "/api/organization": { status: 200, body: ORGANIZATION },
+      "/v1/organization": { status: 200, body: ORGANIZATION },
     },
     open: () => render(<OrganizationSettingsPage />),
     removed: /Everything on this page belongs to the whole organization/,
@@ -197,18 +196,18 @@ const ORGANIZATION_WIDE: readonly {
   {
     page: "People",
     answers: {
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [], may_manage_members: true },
+        body: { members: [], mayManageMembers: true },
       },
-      "/api/invitations": { status: 200, body: { invitations: [] } },
+      "/v1/invitations": { status: 200, body: { invitations: [] } },
     },
     open: () => render(<PeoplePage />),
     removed: /Membership belongs to the whole organization/,
   },
   {
     page: "API keys",
-    answers: { "/api/keys": { status: 200, body: { keys: [] } } },
+    answers: { "/v1/keys": { status: 200, body: { keys: [] } } },
     open: () => render(<ApiKeysPage />),
     removed: /Keys belong to the organization/,
   },
@@ -218,7 +217,7 @@ describe("the Settings navigation", () => {
   it("says which settings belong to the project and which to the organization", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": { status: 200, body: PROJECT },
+      "/v1/projects/prj_1": { status: 200, body: PROJECT },
     });
     render(<ProjectSettingsPage />);
 
@@ -274,7 +273,7 @@ describe("project settings", () => {
   function open(role = "admin", project: unknown = PROJECT) {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/projects/prj_1": { status: 200, body: project },
+      "/v1/projects/prj_1": { status: 200, body: project },
     });
     render(<ProjectSettingsPage />);
   }
@@ -282,7 +281,7 @@ describe("project settings", () => {
   it("shows what is stored, and saves against the revision it was opened at", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": [
+      "/v1/projects/prj_1": [
         { status: 200, body: PROJECT },
         { status: 200, body: { ...PROJECT, name: "Renamed", revision: "rev_2" } },
       ],
@@ -311,14 +310,14 @@ describe("project settings", () => {
       name: "Renamed",
       slug: "default",
       description: "The first one.",
-      expected_revision: "rev_1",
+      expectedRevision: "rev_1",
     });
   });
 
   it("enables Save only for a draft, clears Saved on the next edit, and protects the draft", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": [
+      "/v1/projects/prj_1": [
         { status: 200, body: PROJECT },
         {
           status: 200,
@@ -374,7 +373,7 @@ describe("project settings", () => {
 
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": [
+      "/v1/projects/prj_1": [
         { status: 200, body: PROJECT },
         saveAnswer,
         reloadAnswer,
@@ -407,7 +406,7 @@ describe("project settings", () => {
     });
     await waitFor(() => {
       expect(
-        sent.filter((request) => request.url === "/api/projects/prj_1"),
+        sent.filter((request) => request.url === "/v1/projects/prj_1"),
       ).toHaveLength(3);
     });
 
@@ -453,7 +452,7 @@ describe("project settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => {
       expect(
-        sent.filter((request) => request.url === "/api/projects/prj_1"),
+        sent.filter((request) => request.url === "/v1/projects/prj_1"),
       ).toHaveLength(4);
     });
     await act(async () => {
@@ -477,7 +476,7 @@ describe("project settings", () => {
   it("asks before a Settings link or project switch discards a draft", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": { status: 200, body: PROJECT },
+      "/v1/projects/prj_1": { status: 200, body: PROJECT },
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
@@ -533,14 +532,14 @@ describe("project settings", () => {
     // so there is no reason to change them while it is running.
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": [
+      "/v1/projects/prj_1": [
         { status: 200, body: PROJECT },
         {
           status: 409,
           body: {
             error: "identity_conflict",
             message:
-              "Project prj_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expected_revision set to its new revision.",
+              "Project prj_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
           },
         },
         { status: 200, body: { ...PROJECT, revision: "rev_2" } },
@@ -576,7 +575,7 @@ describe("project settings", () => {
   it.each(["viewer", "member"] as const)(
     "leaves a %s every control in place and truly disabled",
     async (role) => {
-      open(role, { ...PROJECT, may_manage_projects: false });
+      open(role, { ...PROJECT, mayManageProjects: false });
 
       const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
       await waitFor(() => {
@@ -608,7 +607,7 @@ describe("project settings", () => {
    * is exactly the failure worth a test of its own.
    */
   it("points a disabled Save at the sentence that says why", async () => {
-    open("viewer", { ...PROJECT, may_manage_projects: false });
+    open("viewer", { ...PROJECT, mayManageProjects: false });
 
     // Waited for rather than read: the reason needs the session to have
     // settled, and a control with no reason yet is not a control with none.
@@ -627,14 +626,14 @@ describe("project settings", () => {
    * a page reading either one passes. They part company only here — somebody
    * the server permits who is not an admin.
    *
-   * `may_manage_projects` is computed by the API from the same permission check
+   * `mayManageProjects` is computed by the API from the same permission check
    * that decides whether the write lands. A page deriving it from the role
    * instead is a second opinion about what `manage_projects` means, and the
    * moment that permission moves the two disagree: controls withheld from
    * somebody who may act, or controls offered whose writes come back refused.
    */
   it("lets a non-admin edit when the server says the permission is theirs", async () => {
-    open("member", { ...PROJECT, may_manage_projects: true });
+    open("member", { ...PROJECT, mayManageProjects: true });
 
     const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
     await waitFor(() => {
@@ -663,7 +662,7 @@ describe("project settings", () => {
   it("says so, and offers a retry, when egma refuses the read", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects/prj_1": {
+      "/v1/projects/prj_1": {
         status: 500,
         body: { error: "unavailable", message: "Egma could not answer that." },
       },
@@ -677,7 +676,7 @@ describe("project settings", () => {
   it("sends an expired session to sign-in rather than showing a retry that cannot work", async () => {
     apiAnswers({
       "/api/me": { status: 401, body: { error: "not_signed_in", message: "no" } },
-      "/api/projects/prj_1": {
+      "/v1/projects/prj_1": {
         status: 401,
         body: { error: "not_signed_in", message: "no" },
       },
@@ -696,7 +695,7 @@ describe("making a project", () => {
   it("protects its draft from product navigation", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects": "never",
+      "/v1/projects": "never",
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
@@ -736,7 +735,7 @@ describe("making a project", () => {
           },
         },
       ],
-      "/api/projects": {
+      "/v1/projects": {
         status: 201,
         body: { ...PROJECT, id: "prj_9", name: "Outbound sales" },
       },
@@ -765,7 +764,7 @@ describe("making a project", () => {
   it("does not ask for a slug", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects": "never",
+      "/v1/projects": "never",
     });
     render(<NewProjectPage />);
 
@@ -778,7 +777,7 @@ describe("making a project", () => {
     async (role) => {
       apiAnswers({
         "/api/me": { status: 200, body: meWith(role) },
-        "/api/projects": "never",
+        "/v1/projects": "never",
       });
       render(<NewProjectPage />);
 
@@ -801,7 +800,7 @@ describe("making a project", () => {
   it("keeps the draft and shows the refusal when the slug is taken", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/projects": {
+      "/v1/projects": {
         status: 409,
         body: {
           error: "project_slug_taken",
@@ -882,7 +881,7 @@ describe("organization settings", () => {
   ) {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/organization": { status: 200, body: organization },
+      "/v1/organization": { status: 200, body: organization },
     });
     render(<OrganizationSettingsPage />);
   }
@@ -890,7 +889,7 @@ describe("organization settings", () => {
   it("renames the organization and leaves its short name alone", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": [
+      "/v1/organization": [
         { status: 200, body: ORGANIZATION },
         { status: 200, body: { ...ORGANIZATION, name: "Acme Voice" } },
         { status: 200, body: { ...ORGANIZATION, name: "Acme Voice" } },
@@ -952,7 +951,7 @@ describe("organization settings", () => {
 
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/organization": [
+      "/v1/organization": [
         { status: 200, body: ORGANIZATION },
         saveAnswer,
         reloadAnswer,
@@ -972,7 +971,7 @@ describe("organization settings", () => {
     });
     await waitFor(() => {
       expect(
-        sent.filter((request) => request.url === "/api/organization"),
+        sent.filter((request) => request.url === "/v1/organization"),
       ).toHaveLength(3);
     });
 
@@ -1023,7 +1022,7 @@ describe("organization settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => {
       expect(
-        sent.filter((request) => request.url === "/api/organization"),
+        sent.filter((request) => request.url === "/v1/organization"),
       ).toHaveLength(4);
     });
     await act(async () => {
@@ -1043,7 +1042,7 @@ describe("organization settings", () => {
   it.each(["viewer", "member"] as const)(
     "leaves a %s the page, disabled, with the reason beside it",
     async (role) => {
-      open(role, { ...ORGANIZATION, may_manage_organization: false });
+      open(role, { ...ORGANIZATION, mayManageOrganization: false });
 
       const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
       await waitFor(() => {
@@ -1088,21 +1087,21 @@ describe("organization settings", () => {
 /* ------------------------------------------------------------------------ */
 
 const ADA = {
-  user_id: "usr_1",
+  userId: "usr_1",
   email: "ada@acme.example",
   name: "Ada",
   role: "admin",
-  joined_at: "2026-08-01T10:00:00.000Z",
-  deactivated_at: null,
+  joinedAt: "2026-08-01T10:00:00.000Z",
+  deactivatedAt: null,
 };
 
 const BOB = {
-  user_id: "usr_2",
+  userId: "usr_2",
   email: "bob@acme.example",
   name: "Bob",
   role: "viewer",
-  joined_at: "2026-08-02T10:00:00.000Z",
-  deactivated_at: null,
+  joinedAt: "2026-08-02T10:00:00.000Z",
+  deactivatedAt: null,
 };
 
 /**
@@ -1119,16 +1118,16 @@ const WAITING_INVITATION = {
   id: "inv_1",
   email: "cleo@acme.example",
   role: "member",
-  expires_at: new Date(Date.now() + A_WEEK).toISOString(),
-  created_at: new Date(Date.now() - A_WEEK).toISOString(),
+  expiresAt: new Date(Date.now() + A_WEEK).toISOString(),
+  createdAt: new Date(Date.now() - A_WEEK).toISOString(),
 };
 
 const DEAD_INVITATION = {
   id: "inv_2",
   email: "dev@acme.example",
   role: "viewer",
-  expires_at: new Date(Date.now() - A_WEEK).toISOString(),
-  created_at: new Date(Date.now() - 2 * A_WEEK).toISOString(),
+  expiresAt: new Date(Date.now() - A_WEEK).toISOString(),
+  createdAt: new Date(Date.now() - 2 * A_WEEK).toISOString(),
 };
 
 describe("people and invitations", () => {
@@ -1140,15 +1139,15 @@ describe("people and invitations", () => {
   ) {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members, may_manage_members: mayManage },
+        body: { members, mayManageMembers: mayManage },
       },
-      "/api/invitations": { status: 200, body: { invitations } },
-      "/api/members/usr_2/role": { status: 200, body: { ...BOB, role: "member" } },
-      "/api/members/usr_2/remove": {
+      "/v1/invitations": { status: 200, body: { invitations } },
+      "/v1/members/usr_2/role": { status: 200, body: { ...BOB, role: "member" } },
+      "/v1/members/usr_2/remove": {
         status: 200,
-        body: { user_id: "usr_2", keys_revoked: 1 },
+        body: { userId: "usr_2", keys_revoked: 1 },
       },
     });
     render(<PeoplePage />);
@@ -1167,11 +1166,11 @@ describe("people and invitations", () => {
 
     await waitFor(() => {
       expect(
-        sent.some((one) => one.url.includes("/api/members/usr_2/role")),
+        sent.some((one) => one.url.includes("/v1/members/usr_2/role")),
       ).toBe(true);
     });
     expect(
-      sent.find((one) => one.url.includes("/api/members/usr_2/role"))?.body,
+      sent.find((one) => one.url.includes("/v1/members/usr_2/role"))?.body,
     ).toEqual({ role: "member" });
   });
 
@@ -1216,7 +1215,7 @@ describe("people and invitations", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => {
-      expect(sent.some((one) => one.url.includes("/api/members/usr_2/remove"))).toBe(
+      expect(sent.some((one) => one.url.includes("/v1/members/usr_2/remove"))).toBe(
         true,
       );
     });
@@ -1249,11 +1248,11 @@ describe("people and invitations", () => {
   it("hands the invitation link back when there was nowhere to post it", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [ADA], may_manage_members: true },
+        body: { members: [ADA], mayManageMembers: true },
       },
-      "/api/invitations": [
+      "/v1/invitations": [
         { status: 200, body: { invitations: [] } },
         {
           status: 201,
@@ -1262,9 +1261,9 @@ describe("people and invitations", () => {
             email: "bob@acme.example",
             role: "viewer",
             delivered: false,
-            accept_url: "http://egma.test/invite?token=abc",
-            expires_at: "2026-09-01T10:00:00.000Z",
-            created_at: "2026-08-15T10:00:00.000Z",
+            acceptUrl: "http://egma.test/invite?token=abc",
+            expiresAt: "2026-09-01T10:00:00.000Z",
+            createdAt: "2026-08-15T10:00:00.000Z",
           },
         },
         { status: 200, body: { invitations: [] } },
@@ -1299,11 +1298,11 @@ describe("people and invitations", () => {
   it("says the invitation is on its way when a transport delivered it", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [ADA], may_manage_members: true },
+        body: { members: [ADA], mayManageMembers: true },
       },
-      "/api/invitations": [
+      "/v1/invitations": [
         { status: 200, body: { invitations: [] } },
         {
           status: 201,
@@ -1312,8 +1311,8 @@ describe("people and invitations", () => {
             email: "bob@acme.example",
             role: "viewer",
             delivered: true,
-            expires_at: "2026-09-01T10:00:00.000Z",
-            created_at: "2026-08-15T10:00:00.000Z",
+            expiresAt: "2026-09-01T10:00:00.000Z",
+            createdAt: "2026-08-15T10:00:00.000Z",
           },
         },
         { status: 200, body: { invitations: [] } },
@@ -1393,11 +1392,11 @@ describe("people and invitations", () => {
   it("shows an invitation failure instead of an empty list", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [ADA], may_manage_members: true },
+        body: { members: [ADA], mayManageMembers: true },
       },
-      "/api/invitations": [
+      "/v1/invitations": [
         {
           status: 500,
           body: { error: "unavailable", message: "Invitations are offline." },
@@ -1414,11 +1413,11 @@ describe("people and invitations", () => {
   it("shows invitation loading instead of an empty list", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [ADA], may_manage_members: true },
+        body: { members: [ADA], mayManageMembers: true },
       },
-      "/api/invitations": "never",
+      "/v1/invitations": "never",
     });
     render(<PeoplePage />);
 
@@ -1472,13 +1471,13 @@ describe("people and invitations", () => {
   it("sends another invitation for a dead one, and hands the new link back", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [ADA], may_manage_members: true },
+        body: { members: [ADA], mayManageMembers: true },
       },
       // Named in the order the page asks: the list it opens with, the new
       // invitation, and the list again once one has been sent.
-      "/api/invitations": [
+      "/v1/invitations": [
         { status: 200, body: { invitations: [DEAD_INVITATION] } },
         {
           status: 201,
@@ -1486,7 +1485,7 @@ describe("people and invitations", () => {
             ...DEAD_INVITATION,
             id: "inv_9",
             delivered: false,
-            accept_url: "http://egma.test/invite?token=xyz",
+            acceptUrl: "http://egma.test/invite?token=xyz",
           },
         },
         { status: 200, body: { invitations: [DEAD_INVITATION] } },
@@ -1513,15 +1512,15 @@ describe("people and invitations", () => {
   it("shows the refusal in its own words when the last admin is protected", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/members": {
+      "/v1/members": {
         status: 200,
-        body: { members: [ADA], may_manage_members: true },
+        body: { members: [ADA], mayManageMembers: true },
       },
-      "/api/invitations": { status: 200, body: { invitations: [] } },
-      "/api/members/usr_1/role": {
+      "/v1/invitations": { status: 200, body: { invitations: [] } },
+      "/v1/members/usr_1/role": {
         status: 409,
         body: {
-          error: "last_admin",
+          error: "lastAdmin",
           message:
             "this is the organization's last admin, and an organization with no admin is one nobody can invite, re-role or remove anybody in ever again. Make somebody else an admin first.",
         },
@@ -1546,14 +1545,14 @@ const MY_KEY = {
   id: "key_1",
   name: "My laptop",
   scope: "organization",
-  organization_id: "org_1",
-  project_id: null,
-  looks_like: "egma_sk_ab…WXYZ",
-  created_by_user_id: "usr_1",
-  created_by_email: "ada@acme.example",
-  created_at: "2026-08-01T10:00:00.000Z",
-  last_used_at: null,
-  revoked_at: null,
+  organizationId: "org_1",
+  projectId: null,
+  looksLike: "egma_sk_ab…WXYZ",
+  createdByUserId: "usr_1",
+  createdByEmail: "ada@acme.example",
+  createdAt: "2026-08-01T10:00:00.000Z",
+  lastUsedAt: null,
+  revokedAt: null,
 };
 
 const SOMEBODY_ELSES = {
@@ -1561,16 +1560,16 @@ const SOMEBODY_ELSES = {
   id: "key_2",
   name: "Bob's CI",
   scope: "project",
-  project_id: "prj_2",
-  created_by_user_id: "usr_2",
-  created_by_email: "bob@acme.example",
+  projectId: "prj_2",
+  createdByUserId: "usr_2",
+  createdByEmail: "bob@acme.example",
 };
 
 describe("API keys", () => {
   function open(role = "admin", keys: unknown[] = [MY_KEY]) {
     apiAnswers({
       "/api/me": { status: 200, body: meWith(role) },
-      "/api/keys": { status: 200, body: { keys } },
+      "/v1/keys": { status: 200, body: { keys } },
     });
     render(<ApiKeysPage />);
   }
@@ -1596,7 +1595,7 @@ describe("API keys", () => {
   it("shows a new key's secret once, and nothing that could show it again", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/keys": [
+      "/v1/keys": [
         { status: 200, body: { keys: [] } },
         { status: 201, body: { ...MY_KEY, secret: "egma_sk_the_only_time" } },
         { status: 200, body: { keys: [MY_KEY] } },
@@ -1632,7 +1631,7 @@ describe("API keys", () => {
     });
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/keys": [
+      "/v1/keys": [
         { status: 200, body: { keys: [] } },
         { status: 201, body: { ...MY_KEY, secret: "egma_sk_keep_me" } },
         {
@@ -1660,7 +1659,7 @@ describe("API keys", () => {
   it("protects a one-time key while creation is still in flight", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("viewer") },
-      "/api/keys": [
+      "/v1/keys": [
         { status: 200, body: { keys: [] } },
         "never",
       ],
@@ -1689,9 +1688,9 @@ describe("API keys", () => {
   it("defaults a new key to the current project", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/keys": [
+      "/v1/keys": [
         { status: 200, body: { keys: [] } },
-        { status: 201, body: { ...MY_KEY, project_id: "prj_1", secret: "s" } },
+        { status: 201, body: { ...MY_KEY, projectId: "prj_1", secret: "s" } },
         { status: 200, body: { keys: [] } },
       ],
     });
@@ -1706,15 +1705,15 @@ describe("API keys", () => {
     });
     expect(sent.find((one) => one.method === "POST")?.body).toEqual({
       name: "",
-      project_id: "prj_1",
+      projectId: "prj_1",
     });
   });
 
   it("asks before revoking an API key", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
-      "/api/keys": { status: 200, body: { keys: [MY_KEY] } },
-      "/api/keys/key_1/revoke": { status: 200, body: MY_KEY },
+      "/v1/keys": { status: 200, body: { keys: [MY_KEY] } },
+      "/v1/keys/key_1/revoke": { status: 200, body: MY_KEY },
     });
     render(<ApiKeysPage />);
 
@@ -1740,7 +1739,7 @@ describe("API keys", () => {
   it("scopes a key to one project when one is chosen", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/api/keys": [
+      "/v1/keys": [
         { status: 200, body: { keys: [] } },
         { status: 201, body: { ...MY_KEY, secret: "s" } },
         { status: 200, body: { keys: [MY_KEY] } },
@@ -1758,7 +1757,7 @@ describe("API keys", () => {
     });
     expect(sent.find((one) => one.method === "POST")?.body).toEqual({
       name: "",
-      project_id: "prj_2",
+      projectId: "prj_2",
     });
   });
 
@@ -1783,7 +1782,7 @@ describe("API keys", () => {
   it("uses a safe owner label if an older list response has no email", async () => {
     open("admin", [
       MY_KEY,
-      { ...SOMEBODY_ELSES, created_by_email: undefined },
+      { ...SOMEBODY_ELSES, createdByEmail: undefined },
     ]);
 
     const others = await screen.findByRole("table", {
@@ -1810,12 +1809,12 @@ describe("API keys", () => {
   it("says which project or organization each of your own keys reaches", async () => {
     open("member", [
       MY_KEY,
-      { ...MY_KEY, id: "key_3", project_id: "prj_2", scope: "project" },
+      { ...MY_KEY, id: "key_3", projectId: "prj_2", scope: "project" },
       {
         ...MY_KEY,
         id: "key_revoked",
         name: "Old revoked key",
-        revoked_at: "2026-08-16T10:00:00.000Z",
+        revokedAt: "2026-08-16T10:00:00.000Z",
       },
     ]);
 

@@ -11,18 +11,20 @@ COPY apps/web/package.json apps/web/
 COPY packages/db/package.json packages/db/
 COPY packages/ids/package.json packages/ids/
 COPY packages/lint/package.json packages/lint/
+COPY packages/platform-api/package.json packages/platform-api/
 COPY packages/provider-credentials/package.json packages/provider-credentials/
 COPY packages/retell/package.json packages/retell/
 COPY packages/simulation-contract/package.json packages/simulation-contract/
 RUN pnpm install --frozen-lockfile --filter "egma" --filter "@egma/api..."
 
 COPY packages/ids packages/ids
+COPY packages/platform-api packages/platform-api
 COPY packages/provider-credentials packages/provider-credentials
 COPY packages/retell packages/retell
 COPY packages/simulation-contract packages/simulation-contract
 COPY packages/db packages/db
 COPY apps/api apps/api
-RUN pnpm exec tsc -b packages/ids packages/provider-credentials packages/retell packages/db apps/api
+RUN pnpm exec tsc -b packages/ids packages/platform-api packages/provider-credentials packages/retell packages/db apps/api
 
 ENV NODE_ENV=production
 EXPOSE 3100

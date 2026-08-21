@@ -8,10 +8,8 @@
  *
  * On its own it asks nothing, needs no key, and talks to nobody — a developer
  * with the network cable out gets the whole folder. Naming an address with
- * `--url` adds one thing to that: the platform's verified identity, already
- * read by the time this runs, committed beside the names. It is the only
- * binding a repository can gain before anybody has signed in, because the
- * identity contract is the one read egma makes with no credential at all.
+ * `--url` adds one thing to that: the selected platform URL, committed beside
+ * the names. It is the only binding a repository can gain before sign-in.
  *
  * Running it twice is safe. A folder that is already here is recognised and
  * left as it is — the second developer to clone the repository runs the same
@@ -37,14 +35,7 @@ export type InitCommandOptions = FolderCommandOptions & {
     readonly connection: string | null;
     readonly suite: string | null;
   };
-  /**
-   * The platform to commit, verified, or `null` when the command named none.
-   *
-   * Whole or absent, never half: this address has already been asked who it is
-   * and has answered, so there is no origin-without-instance state for anything
-   * downstream to reason about. An address that could not answer never reaches
-   * here at all.
-   */
+  /** The platform URL to commit, or `null` when the command named none. */
   readonly binding: PlatformBinding | null;
 };
 
@@ -77,7 +68,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
   // along.
   //
   // Through the same door `connect` binds through, so one function commits a
-  // verified platform and there is one place to read to know what that means.
+  // selected platform URL and there is one place to read to know what it means.
   // Nothing it can refuse is reachable from here: an address that disagrees
   // with a binding already in this folder was turned away before any of this
   // ran, and a binding that agrees is handed straight back unwritten.
@@ -95,9 +86,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
   // Read from the file for the same reason the names under it are: what this
   // reports is what a teammate cloning the repository will get, not what this
   // one run happened to be handed.
-  if (committed.platform !== null) {
-    options.out(`platform: ${committed.platform.instance}`);
-  }
+  if (committed.platform !== null) options.out(`platform: ${committed.platform.origin}`);
   for (const key of ["agent", "connection", "suite"] as const) {
     const thing = committed[key];
     if (thing !== null) options.out(`${key}: ${thing.name}${thing.id === null ? "" : ` ${thing.id}`}`);

@@ -196,20 +196,20 @@ describe("one conversation's evidence, in one read", () => {
     });
     await appendVerdicts(who.auth, [machineVerdict(run, run.heard)]);
 
-    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    const read = await request("GET", `/v1/simulations/${run.heard}`, who.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
 
     // Which run this belongs to, so the page can go back to it.
-    expect(read.body.run_id).toBe(run.runId);
+    expect(read.body.runId).toBe(run.runId);
 
     // The two pins: what actually executed, which never moves.
     const test = read.body.test as Record<string, unknown>;
-    expect(String(test.version_id)).toMatch(/^tstv_/u);
+    expect(String(test.versionId)).toMatch(/^tstv_/u);
     expect(String(test.scenario)).toContain("cleaning is booked for Thursday");
-    expect(test.expected_behaviors).toEqual([BEHAVIOR]);
+    expect(test.expectedBehaviors).toEqual([BEHAVIOR]);
 
     const persona = read.body.persona as Record<string, unknown>;
-    expect(String(persona.version_id)).toMatch(/^prsv_/u);
+    expect(String(persona.versionId)).toMatch(/^prsv_/u);
     expect(persona.traits).not.toBeNull();
     const personaTraits = persona.traits as Record<string, unknown>;
     expect(Object.keys(personaTraits).sort()).toEqual([
@@ -225,10 +225,10 @@ describe("one conversation's evidence, in one read", () => {
       /^Front desk voice \d+$/u,
     );
     expect((read.body.connection as { name: string }).name).not.toBe(null);
-    const snapshot = read.body.connection_snapshot as Record<string, unknown>;
-    expect(snapshot.agent_platform).toBe("livekit_agents");
-    expect(snapshot.connection_kind).toBe("livekit_room");
-    expect(snapshot.access_variant).toBe("livekit_room.project_credentials");
+    const snapshot = read.body.connectionSnapshot as Record<string, unknown>;
+    expect(snapshot.agentPlatform).toBe("livekit_agents");
+    expect(snapshot.connectionKind).toBe("livekit_room");
+    expect(snapshot.accessVariant).toBe("livekit_room.project_credentials");
     expect(snapshot.modality).toBe("voice");
     // Nothing a credential could ride in. The secret lives in its own sealed
     // column and was never copied into the snapshot.
@@ -236,7 +236,7 @@ describe("one conversation's evidence, in one read", () => {
     expect(JSON.stringify(snapshot)).not.toContain("livekit-secret");
 
     // What judged it, and the state that says how much of it can be believed.
-    const plan = read.body.grading_plan as { state: string; items: unknown[] };
+    const plan = read.body.gradingPlan as { state: string; items: unknown[] };
     expect(plan.state).toBe("run_start");
     expect(plan.items.length).toBeGreaterThan(0);
 
@@ -244,7 +244,7 @@ describe("one conversation's evidence, in one read", () => {
     const verdicts = read.body.verdicts as Record<string, unknown>[];
     expect(verdicts).toHaveLength(1);
     expect(verdicts[0]).toMatchObject({
-      grader_id: GRADER,
+      graderId: GRADER,
       assertion: BEHAVIOR,
       verdict: "failed",
       // A grader nothing on this project holds is required, which is the safe
@@ -256,19 +256,19 @@ describe("one conversation's evidence, in one read", () => {
     // And what was said, read inside a window nobody had to name.
     const transcript = read.body.transcript as {
       turns: { text: string }[];
-      spans_truncated: boolean;
+      spansTruncated: boolean;
     };
     expect(transcript.turns.map((turn) => turn.text)).toEqual([
       "I need to move Thursday's clean to next week.",
       "Of course — Tuesday at four works. You are all set.",
     ]);
-    expect(transcript.spans_truncated).toBe(false);
+    expect(transcript.spansTruncated).toBe(false);
 
     // Reported counts, not judgements, and only what is actually known.
     const measures = read.body.measures as Record<string, number>;
-    expect(measures.turn_count).toBe(6);
-    expect(measures).not.toHaveProperty("measured_audio_band_hertz");
-    expect(measures.human_turn_count).toBe(1);
+    expect(measures.turnCount).toBe(6);
+    expect(measures).not.toHaveProperty("measuredAudioBandHertz");
+    expect(measures.humanTurnCount).toBe(1);
   });
 
   /**
@@ -281,12 +281,12 @@ describe("one conversation's evidence, in one read", () => {
       withTraceEvidence: true,
     });
 
-    const read = await request("GET", `/api/simulations/${run.silent}`, who.key);
+    const read = await request("GET", `/v1/simulations/${run.silent}`, who.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     expect(read.body.transcript).toBeNull();
     // The evidence around it is all still there.
-    expect(read.body.run_id).toBe(run.runId);
-    expect((read.body.test as { version_id: string }).version_id).not.toBeNull();
+    expect(read.body.runId).toBe(run.runId);
+    expect((read.body.test as { versionId: string }).versionId).not.toBeNull();
   });
 
   /**
@@ -298,12 +298,12 @@ describe("one conversation's evidence, in one read", () => {
       withTraceEvidence: true,
     });
 
-    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
+    const read = await request("GET", `/v1/simulations/${run.heard}`, who.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     expect(read.body.status).toBe("completed");
     expect(read.body.grading).toBe("pending");
     expect(read.body.verdict).toBeNull();
-    const jobs = read.body.grading_jobs as { status: string }[];
+    const jobs = read.body.gradingJobs as { status: string }[];
     expect(jobs.map((job) => job.status)).toContain("pending");
   });
 
@@ -313,7 +313,7 @@ describe("one conversation's evidence, in one read", () => {
 
     const read = await request(
       "GET",
-      `/api/simulations/${run.heard}`,
+      `/v1/simulations/${run.heard}`,
       grace.secret,
     );
     expect(read.statusCode).toBe(404);
@@ -328,15 +328,15 @@ describe("judging one conversation again", () => {
 
     const asked = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
       {},
     );
     expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
     expect(asked.body).toMatchObject({
-      simulation_id: run.heard,
+      simulationId: run.heard,
       // No grader named: the whole applicable set is resolved again.
-      grader_id: null,
+      graderId: null,
       reopened: 1,
     });
 
@@ -350,15 +350,15 @@ describe("judging one conversation again", () => {
     expect(neighbour.map((job) => job.status)).toEqual(["graded"]);
   });
 
-  it("refuses a grader_id that is not a grader id, and says why", async () => {
+  it("refuses a graderId that is not a grader id, and says why", async () => {
     const { who, run } = await aCustomerWhoHasRun("evidence_regrade_shape");
     await finishGrading(who.auth);
 
     const asked = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: "expected_behaviors_v1" },
+      { graderId: "expected_behaviors_v1" },
     );
     expect(asked.statusCode).toBe(400);
     expect(String(asked.body.message)).toContain("active grader");
@@ -377,15 +377,15 @@ describe("judging one conversation again", () => {
 
     const asked = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: grader },
+      { graderId: grader },
     );
 
     expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
     expect(asked.body).toMatchObject({
-      simulation_id: run.heard,
-      grader_id: grader,
+      simulationId: run.heard,
+      graderId: grader,
       reopened: 1,
     });
     expect(await theJobOn(who.auth, run.heard)).toEqual({
@@ -400,9 +400,9 @@ describe("judging one conversation again", () => {
 
     const asked = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: GRADER },
+      { graderId: GRADER },
     );
     expect(asked.statusCode).toBe(404);
     const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
@@ -427,7 +427,7 @@ describe("judging one conversation again", () => {
     // Asked for the whole conversation, then taken by the engine.
     const first = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
       {},
     );
@@ -442,15 +442,15 @@ describe("judging one conversation again", () => {
     // out by the work already running and the old sentence is the true one.
     const again = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: grader },
+      { graderId: grader },
     );
     expect(again.statusCode, JSON.stringify(again.body)).toBe(200);
     expect(again.body).toMatchObject({
-      simulation_id: run.heard,
+      simulationId: run.heard,
       reopened: 0,
-      already_waiting: 1,
+      alreadyWaiting: 1,
     });
   });
 
@@ -461,9 +461,9 @@ describe("judging one conversation again", () => {
 
     const first = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: grader },
+      { graderId: grader },
     );
     expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
     await theEngineTakesTheWork("grader-judging-that-grader");
@@ -474,12 +474,12 @@ describe("judging one conversation again", () => {
 
     const again = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: grader },
+      { graderId: grader },
     );
     expect(again.statusCode, JSON.stringify(again.body)).toBe(200);
-    expect(again.body).toMatchObject({ reopened: 0, already_waiting: 1 });
+    expect(again.body).toMatchObject({ reopened: 0, alreadyWaiting: 1 });
   });
 
   it("says nothing was queued when the work running is narrowed to another grader", async () => {
@@ -490,18 +490,18 @@ describe("judging one conversation again", () => {
 
     const first = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: judged },
+      { graderId: judged },
     );
     expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
     await theEngineTakesTheWork("grader-judging-one-grader");
 
     const again = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: asked },
+      { graderId: asked },
     );
 
     // Not a success with a caveat: the ask was not carried out and nothing was
@@ -511,7 +511,7 @@ describe("judging one conversation again", () => {
     expect(String(again.body.message)).toContain("being judged right now");
     expect(String(again.body.message)).toContain("Ask again once those");
     // And it says nothing that could be read as "already waiting".
-    expect(again.body.already_waiting).toBeUndefined();
+    expect(again.body.alreadyWaiting).toBeUndefined();
     expect(again.body.reopened).toBeUndefined();
 
     // The judgment already running is untouched. Nothing interrupts it.
@@ -528,9 +528,9 @@ describe("judging one conversation again", () => {
 
     const first = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
-      { grader_id: judged },
+      { graderId: judged },
     );
     expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
     await theEngineTakesTheWork("grader-judging-one-of-many");
@@ -539,7 +539,7 @@ describe("judging one conversation again", () => {
     // running, and the rest of it is not going to be judged by that job.
     const again = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       who.key,
       {},
     );
@@ -560,12 +560,12 @@ describe("judging one conversation again", () => {
     const sam = await colleagueOf(api.app, ada, "sam@acme.example", "viewer");
 
     // They can read every piece of evidence on the page.
-    const read = await request("GET", `/api/simulations/${run.heard}`, sam.secret);
+    const read = await request("GET", `/v1/simulations/${run.heard}`, sam.secret);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
 
     const asked = await request(
       "POST",
-      `/api/simulations/${run.heard}/regrade`,
+      `/v1/simulations/${run.heard}/regrade`,
       sam.secret,
       {},
     );
@@ -599,8 +599,8 @@ describe("the conversation and its spans", () => {
       withTraceEvidence: true,
     });
 
-    const read = await request("GET", `/api/simulations/${run.heard}`, who.key);
-    const transcript = read.body.transcript as { trace_id: string };
-    expect(transcript.trace_id).toBe(traceIdOfSimulation(run.heard));
+    const read = await request("GET", `/v1/simulations/${run.heard}`, who.key);
+    const transcript = read.body.transcript as { traceId: string };
+    expect(transcript.traceId).toBe(traceIdOfSimulation(run.heard));
   });
 });

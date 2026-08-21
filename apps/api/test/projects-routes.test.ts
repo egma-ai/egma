@@ -48,18 +48,18 @@ describe("listing the organization's projects", () => {
     api = await createApi("projects_list");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "Outbound",
     });
 
-    const listed = await request("GET", "/api/projects", { cookie: ada.cookie });
+    const listed = await request("GET", "/v1/projects", { cookie: ada.cookie });
     expect(listed.status).toBe(200);
-    const items = listed.body.items as { name: string; revision: string }[];
-    expect(items.map((one) => one.name)).toEqual(["Default", "Outbound"]);
+    const projects = listed.body.projects as { name: string; revision: string }[];
+    expect(projects.map((one) => one.name)).toEqual(["Default", "Outbound"]);
     // The revision travels with every row, because a Settings form has to send
     // back the one it was opened at.
-    expect(items.every((one) => one.revision.startsWith("rev_"))).toBe(true);
-    expect(listed.body.may_manage_projects).toBe(true);
+    expect(projects.every((one) => one.revision.startsWith("rev_"))).toBe(true);
+    expect(listed.body.mayManageProjects).toBe(true);
   });
 
   /**
@@ -72,10 +72,10 @@ describe("listing the organization's projects", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const val = await colleagueOf(api.app, ada, "val@acme.example", "viewer");
 
-    const listed = await request("GET", "/api/projects", { cookie: val.cookie });
+    const listed = await request("GET", "/v1/projects", { cookie: val.cookie });
     expect(listed.status).toBe(200);
-    expect((listed.body.items as unknown[]).length).toBe(1);
-    expect(listed.body.may_manage_projects).toBe(false);
+    expect((listed.body.projects as unknown[]).length).toBe(1);
+    expect(listed.body.mayManageProjects).toBe(false);
   });
 
   it("does not answer with another organization's project", async () => {
@@ -83,13 +83,13 @@ describe("listing the organization's projects", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const bob = await signUp(api.app, "bob@globex.example", "Globex");
 
-    const theirs = await request("POST", "/api/projects", { cookie: bob.cookie }, {
+    const theirs = await request("POST", "/v1/projects", { cookie: bob.cookie }, {
       name: "Theirs",
     });
     expect(theirs.status).toBe(201);
 
-    const listed = await request("GET", "/api/projects", { cookie: ada.cookie });
-    const ids = (listed.body.items as { id: string }[]).map((one) => one.id);
+    const listed = await request("GET", "/v1/projects", { cookie: ada.cookie });
+    const ids = (listed.body.projects as { id: string }[]).map((one) => one.id);
     expect(ids).not.toContain(theirs.body.id);
   });
 
@@ -105,7 +105,7 @@ describe("listing the organization's projects", () => {
 
     const read = await request(
       "GET",
-      `/api/projects/${bob.projectId}`,
+      `/v1/projects/${bob.projectId}`,
       { cookie: ada.cookie },
     );
 
@@ -123,11 +123,11 @@ describe("creating a project", () => {
     api = await createApi("projects_create_slug");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const first = await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    const first = await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "Outbound sales",
       description: "  Cold calls.  ",
     });
-    const second = await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    const second = await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "Outbound sales",
     });
 
@@ -141,11 +141,11 @@ describe("creating a project", () => {
     api = await createApi("projects_create_slug_taken");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "Outbound",
       slug: "outbound",
     });
-    const again = await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    const again = await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "Outbound again",
       slug: "outbound",
     });
@@ -167,17 +167,17 @@ describe("creating a project", () => {
     api = await createApi("projects_create_whole");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const made = await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    const made = await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "Whole",
     });
     expect(made.status).toBe(201);
 
     const personas = await request(
       "GET",
-      `/api/personas?project=${String(made.body.id)}`,
+      `/v1/personas?projectId=${String(made.body.id)}`,
       { cookie: ada.cookie },
     );
-    expect((personas.body.items as unknown[]).length).toBe(1);
+    expect((personas.body.personas as unknown[]).length).toBe(1);
 
     const { rows } = await api.database.sql<{ count: string }>(
       "select count(*) as count from grader where project_id = $1 and deleted_at is null",
@@ -190,7 +190,7 @@ describe("creating a project", () => {
     api = await createApi("projects_create_unnamed");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const made = await request("POST", "/api/projects", { cookie: ada.cookie }, {
+    const made = await request("POST", "/v1/projects", { cookie: ada.cookie }, {
       name: "   ",
     });
     expect(made.status).toBe(422);
@@ -207,7 +207,7 @@ describe("who may change project settings", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const them = await colleagueOf(api.app, ada, `${role}@acme.example`, role);
 
-    const made = await request("POST", "/api/projects", { cookie: them.cookie }, {
+    const made = await request("POST", "/v1/projects", { cookie: them.cookie }, {
       name: "Not yours to make",
     });
 
@@ -218,8 +218,8 @@ describe("who may change project settings", () => {
         "to change your role, then try again.",
     );
 
-    const listed = await request("GET", "/api/projects", { cookie: ada.cookie });
-    expect((listed.body.items as { name: string }[]).map((one) => one.name)).toEqual([
+    const listed = await request("GET", "/v1/projects", { cookie: ada.cookie });
+    expect((listed.body.projects as { name: string }[]).map((one) => one.name)).toEqual([
       "Default",
     ]);
   });
@@ -231,7 +231,7 @@ describe("who may change project settings", () => {
 
     const edited = await request(
       "PATCH",
-      `/api/projects/${ada.projectId}`,
+      `/v1/projects/${ada.projectId}`,
       { cookie: them.cookie },
       { name: "Renamed by somebody who may not" },
     );
@@ -242,7 +242,7 @@ describe("who may change project settings", () => {
         "admin to change your role, then try again.",
     );
 
-    const read = await request("GET", `/api/projects/${ada.projectId}`, {
+    const read = await request("GET", `/v1/projects/${ada.projectId}`, {
       cookie: ada.cookie,
     });
     expect(read.body.name).toBe("Default");
@@ -255,7 +255,7 @@ describe("who may change project settings", () => {
 
     const edited = await request(
       "PATCH",
-      `/api/projects/${ada.projectId}`,
+      `/v1/projects/${ada.projectId}`,
       { cookie: bob.cookie },
       { name: "Ours now" },
     );
@@ -263,7 +263,7 @@ describe("who may change project settings", () => {
     expect(edited.status).toBe(404);
     expect(edited.body.error).toBe("project_outside_organization");
 
-    const read = await request("GET", `/api/projects/${ada.projectId}`, {
+    const read = await request("GET", `/v1/projects/${ada.projectId}`, {
       cookie: ada.cookie,
     });
     expect(read.body.name).toBe("Default");
@@ -275,17 +275,17 @@ describe("editing a project", () => {
     api = await createApi("projects_edit_partial");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const before = await request("GET", `/api/projects/${ada.projectId}`, {
+    const before = await request("GET", `/v1/projects/${ada.projectId}`, {
       cookie: ada.cookie,
     });
 
     const edited = await request(
       "PATCH",
-      `/api/projects/${ada.projectId}`,
+      `/v1/projects/${ada.projectId}`,
       { cookie: ada.cookie },
       {
         description: "What this one is for.",
-        expected_revision: String(before.body.revision),
+        expectedRevision: String(before.body.revision),
       },
     );
 
@@ -304,23 +304,23 @@ describe("editing a project", () => {
     api = await createApi("projects_edit_stale");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const opened = await request("GET", `/api/projects/${ada.projectId}`, {
+    const opened = await request("GET", `/v1/projects/${ada.projectId}`, {
       cookie: ada.cookie,
     });
     const stale = String(opened.body.revision);
 
     await request(
       "PATCH",
-      `/api/projects/${ada.projectId}`,
+      `/v1/projects/${ada.projectId}`,
       { cookie: ada.cookie },
-      { name: "The first tab won", expected_revision: stale },
+      { name: "The first tab won", expectedRevision: stale },
     );
 
     const second = await request(
       "PATCH",
-      `/api/projects/${ada.projectId}`,
+      `/v1/projects/${ada.projectId}`,
       { cookie: ada.cookie },
-      { name: "The second tab lost", expected_revision: stale },
+      { name: "The second tab lost", expectedRevision: stale },
     );
 
     expect(second.status).toBe(409);
@@ -328,10 +328,10 @@ describe("editing a project", () => {
     expect(second.body.message).toBe(
       `Project ${ada.projectId} changed after you opened it. Read it again, ` +
         "keep or reapply your edits, and send the update with " +
-        "expected_revision set to its new revision.",
+        "expectedRevision set to its new revision.",
     );
 
-    const now = await request("GET", `/api/projects/${ada.projectId}`, {
+    const now = await request("GET", `/v1/projects/${ada.projectId}`, {
       cookie: ada.cookie,
     });
     expect(now.body.name).toBe("The first tab won");
@@ -344,24 +344,24 @@ describe("the organization a session is in", () => {
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const val = await colleagueOf(api.app, ada, "val@acme.example", "viewer");
 
-    const mine = await request("GET", "/api/organization", { cookie: ada.cookie });
+    const mine = await request("GET", "/v1/organization", { cookie: ada.cookie });
     expect(mine.status).toBe(200);
     expect(mine.body.name).toBe("Acme");
-    expect(mine.body.may_manage_organization).toBe(true);
+    expect(mine.body.mayManageOrganization).toBe(true);
 
-    const theirs = await request("GET", "/api/organization", { cookie: val.cookie });
+    const theirs = await request("GET", "/v1/organization", { cookie: val.cookie });
     expect(theirs.body.name).toBe("Acme");
-    expect(theirs.body.may_manage_organization).toBe(false);
+    expect(theirs.body.mayManageOrganization).toBe(false);
   });
 
   it("is renamed by an admin, and the slug is left where it was", async () => {
     api = await createApi("organization_rename");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const before = await request("GET", "/api/organization", { cookie: ada.cookie });
+    const before = await request("GET", "/v1/organization", { cookie: ada.cookie });
     const renamed = await request(
       "PATCH",
-      "/api/organization",
+      "/v1/organization",
       { cookie: ada.cookie },
       { name: "Acme Voice" },
     );
@@ -378,7 +378,7 @@ describe("the organization a session is in", () => {
 
     const renamed = await request(
       "PATCH",
-      "/api/organization",
+      "/v1/organization",
       { cookie: them.cookie },
       { name: "Renamed by somebody who may not" },
     );
@@ -389,7 +389,7 @@ describe("the organization a session is in", () => {
         "organization admin to change your role, then try again.",
     );
 
-    const still = await request("GET", "/api/organization", { cookie: ada.cookie });
+    const still = await request("GET", "/v1/organization", { cookie: ada.cookie });
     expect(still.body.name).toBe("Acme");
   });
 
@@ -399,7 +399,7 @@ describe("the organization a session is in", () => {
 
     const renamed = await request(
       "PATCH",
-      "/api/organization",
+      "/v1/organization",
       { cookie: ada.cookie },
       { name: "  " },
     );

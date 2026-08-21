@@ -97,12 +97,12 @@ async function claim(
 async function aQueuedRun(): Promise<void> {
   const started = await api(
     "POST",
-    "/api/runs",
+    "/v1/runs",
     { authorization: `Bearer ${key}` },
     {
-      connection: connectionId,
-      test_versions: [versionId],
-      idempotency_key: newId("run"),
+      connectionId: connectionId,
+      testVersionIds: [versionId],
+      idempotencyKey: newId("run"),
     },
   );
   expect(started.status, JSON.stringify(started.body)).toBe(201);
@@ -129,23 +129,23 @@ beforeAll(async () => {
 
   const minted = await api(
     "POST",
-    "/api/keys",
+    "/v1/keys",
     { cookie },
-    { name: "a terminal", project_id: landed.project.id },
+    { name: "a terminal", projectId: landed.project.id },
   );
   expect(minted.status, JSON.stringify(minted.body)).toBe(201);
   key = String(minted.body.secret);
 
   const registered = await api(
     "POST",
-    "/api/agents",
+    "/v1/agents",
     { authorization: `Bearer ${key}` },
     {
       name: "Front desk",
       connection: {
-        agent_platform: "retell",
-        connection_kind: "retell_chat_api",
-        access_variant: "retell_chat_api.api_key",
+        agentPlatform: "retell",
+        connectionKind: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_1" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -171,18 +171,18 @@ beforeAll(async () => {
 
   const pushed = await api(
     "POST",
-    "/api/tests",
+    "/v1/tests",
     { authorization: `Bearer ${key}` },
     {
       name: "Reschedules a booked appointment",
       scenario:
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
       personas: ["Impatient Rita"],
     },
   );
   expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
-  versionId = String(pushed.body.version_id);
+  versionId = String(pushed.body.versionId);
 });
 
 afterAll(async () => {

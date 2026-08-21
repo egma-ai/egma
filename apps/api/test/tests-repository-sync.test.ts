@@ -1,7 +1,6 @@
 import { createAgent, createPersona, type AuthContext } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { REPOSITORY_CONTRACT } from "../src/routes/platform.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   contextFor,
@@ -42,7 +41,7 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: [
+  expectedBehaviors: [
     "verifies who it is speaking to before discussing the booking",
     "confirms the new time back before finishing",
   ],
@@ -72,9 +71,9 @@ function author(person: Customer): AuthContext {
 
 type WireTest = {
   id: string;
-  version_id: string;
+  versionId: string;
   revision: string;
-  applicability_revision: string;
+  applicabilityRevision: string;
   agents: { id: string }[];
 };
 
@@ -90,9 +89,9 @@ async function aBoundRepository(label: string): Promise<{
   const boundAgent = (await createAgent(author(ada), { name: "Front desk" })).id;
   const otherAgent = (await createAgent(author(ada), { name: "Night line" })).id;
 
-  const created = await browse("POST", "/api/tests", ada, {
+  const created = await browse("POST", "/v1/tests", ada, {
     ...RESCHEDULING,
-    project: ada.projectId,
+    projectId: ada.projectId,
     agents: [boundAgent, otherAgent],
   });
   expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
@@ -109,12 +108,12 @@ describe("the agent a repository is bound to", () => {
   it("lets an edit through while the test still applies to it", async () => {
     const { ada, boundAgent, test } = await aBoundRepository("repo_applies");
 
-    const edited = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const edited = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "The file's own words.",
-      expected_version_id: test.version_id,
-      expected_revision: test.revision,
-      repository_agent: boundAgent,
+      expectedVersionId: test.versionId,
+      expectedRevision: test.revision,
+      repositoryAgentId: boundAgent,
     });
 
     expect(edited.statusCode, JSON.stringify(edited.body)).toBe(200);
@@ -123,8 +122,8 @@ describe("the agent a repository is bound to", () => {
     expect((edited.body as unknown as WireTest).agents.map((one) => one.id).sort()).toEqual(
       test.agents.map((one) => one.id).sort(),
     );
-    expect((edited.body as unknown as WireTest).applicability_revision).toBe(
-      test.applicability_revision,
+    expect((edited.body as unknown as WireTest).applicabilityRevision).toBe(
+      test.applicabilityRevision,
     );
   });
 
@@ -135,19 +134,19 @@ describe("the agent a repository is bound to", () => {
 
     // What somebody does in the browser's link editor: the repository's agent
     // comes off, and the test still applies to another one.
-    const relinked = await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    const relinked = await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [otherAgent],
-      expected_applicability_revision: test.applicability_revision,
+      expectedApplicabilityRevision: test.applicabilityRevision,
     });
     expect(relinked.statusCode, JSON.stringify(relinked.body)).toBe(200);
 
-    const refused = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const refused = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "The file's own words.",
-      expected_version_id: test.version_id,
-      expected_revision: test.revision,
-      repository_agent: boundAgent,
+      expectedVersionId: test.versionId,
+      expectedRevision: test.revision,
+      repositoryAgentId: boundAgent,
     });
 
     expect(refused.statusCode).toBe(409);
@@ -160,8 +159,8 @@ describe("the agent a repository is bound to", () => {
 
     // Neither side moved. The refusal says so, and this is what makes that
     // sentence true rather than reassuring.
-    const read = await browse("GET", `/api/tests/${test.id}?project=${ada.projectId}`, ada);
-    expect((read.body as unknown as WireTest).version_id).toBe(test.version_id);
+    const read = await browse("GET", `/v1/tests/${test.id}?projectId=${ada.projectId}`, ada);
+    expect((read.body as unknown as WireTest).versionId).toBe(test.versionId);
     expect(read.body.scenario).toBe(RESCHEDULING.scenario);
   });
 
@@ -179,23 +178,23 @@ describe("the agent a repository is bound to", () => {
       "repo_unlinked_first",
     );
 
-    await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [otherAgent],
-      expected_applicability_revision: test.applicability_revision,
+      expectedApplicabilityRevision: test.applicabilityRevision,
     });
-    const moved = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const moved = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "Somebody else's words.",
-      expected_version_id: test.version_id,
+      expectedVersionId: test.versionId,
     });
     expect(moved.statusCode, JSON.stringify(moved.body)).toBe(200);
 
-    const refused = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const refused = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "The file's own words.",
-      expected_version_id: test.version_id,
-      repository_agent: boundAgent,
+      expectedVersionId: test.versionId,
+      repositoryAgentId: boundAgent,
     });
 
     expect(refused.body.error).toBe("repository_agent_not_applicable");
@@ -204,11 +203,11 @@ describe("the agent a repository is bound to", () => {
   it("refuses anything that is not an agent id, before it reads a thing", async () => {
     const { ada, test } = await aBoundRepository("repo_agent_shape");
 
-    const refused = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const refused = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "x",
-      expected_version_id: test.version_id,
-      repository_agent: "front-desk",
+      expectedVersionId: test.versionId,
+      repositoryAgentId: "front-desk",
     });
 
     expect(refused.statusCode).toBe(422);
@@ -220,34 +219,34 @@ describe("a repository write names both tokens", () => {
   it("refuses on a revision the browser has moved, without touching the content", async () => {
     const { ada, boundAgent, test } = await aBoundRepository("repo_identity_stale");
 
-    const renamed = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const renamed = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       name: "Reschedules a booked clean",
-      expected_revision: test.revision,
+      expectedRevision: test.revision,
     });
     expect(renamed.statusCode, JSON.stringify(renamed.body)).toBe(200);
     // A rename mints no version — that is the whole reason the two tokens are
     // separate — so the file's content pin is still current and only the
     // revision has moved.
-    expect((renamed.body as unknown as WireTest).version_id).toBe(test.version_id);
+    expect((renamed.body as unknown as WireTest).versionId).toBe(test.versionId);
 
-    const refused = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const refused = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "The file's own words.",
-      expected_version_id: test.version_id,
-      expected_revision: test.revision,
-      repository_agent: boundAgent,
+      expectedVersionId: test.versionId,
+      expectedRevision: test.revision,
+      repositoryAgentId: boundAgent,
     });
 
     expect(refused.statusCode).toBe(409);
     expect(refused.body.error).toBe("identity_conflict");
     expect(refused.body.message).toBe(
       `Test ${test.id} changed after you opened it. Read it again, keep or ` +
-        `reapply your edits, and send the update with expected_revision set ` +
+        `reapply your edits, and send the update with expectedRevision set ` +
         `to its new revision.`,
     );
 
-    const read = await browse("GET", `/api/tests/${test.id}?project=${ada.projectId}`, ada);
+    const read = await browse("GET", `/v1/tests/${test.id}?projectId=${ada.projectId}`, ada);
     expect(read.body.scenario).toBe(RESCHEDULING.scenario);
   });
 
@@ -260,27 +259,27 @@ describe("a repository write names both tokens", () => {
       "repo_applicability_only",
     );
 
-    const relinked = await browse("POST", `/api/tests/${test.id}/agents`, ada, {
-      project: ada.projectId,
+    const relinked = await browse("POST", `/v1/tests/${test.id}/agents`, ada, {
+      projectId: ada.projectId,
       agents: [boundAgent],
-      expected_applicability_revision: test.applicability_revision,
+      expectedApplicabilityRevision: test.applicabilityRevision,
     });
     expect(relinked.statusCode).toBe(200);
     const after = relinked.body as unknown as WireTest;
     expect(after.agents.map((one) => one.id)).toEqual([boundAgent]);
-    expect(after.applicability_revision).not.toBe(test.applicability_revision);
+    expect(after.applicabilityRevision).not.toBe(test.applicabilityRevision);
 
     // Neither of the two a file pins moved.
-    expect(after.version_id).toBe(test.version_id);
+    expect(after.versionId).toBe(test.versionId);
     expect(after.revision).toBe(test.revision);
     expect(otherAgent).not.toBe(boundAgent);
 
-    const written = await browse("PATCH", `/api/tests/${test.id}`, ada, {
-      project: ada.projectId,
+    const written = await browse("PATCH", `/v1/tests/${test.id}`, ada, {
+      projectId: ada.projectId,
       scenario: "The file's own words.",
-      expected_version_id: test.version_id,
-      expected_revision: test.revision,
-      repository_agent: boundAgent,
+      expectedVersionId: test.versionId,
+      expectedRevision: test.revision,
+      repositoryAgentId: boundAgent,
     });
     expect(written.statusCode, JSON.stringify(written.body)).toBe(200);
   });
@@ -303,9 +302,9 @@ describe("a persona name two living personas answer to", () => {
       traits: NEUTRAL_TRAITS,
     });
 
-    const refused = await browse("POST", "/api/tests", ada, {
+    const refused = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [agentId],
       personas: ["Impatient Rita"],
     });
@@ -334,9 +333,9 @@ describe("a persona name two living personas answer to", () => {
       traits: NEUTRAL_TRAITS,
     });
 
-    const created = await browse("POST", "/api/tests", ada, {
+    const created = await browse("POST", "/v1/tests", ada, {
       ...RESCHEDULING,
-      project: ada.projectId,
+      projectId: ada.projectId,
       agents: [agentId],
       personas: [first.id],
     });
@@ -345,23 +344,5 @@ describe("a persona name two living personas answer to", () => {
     expect((created.body.personas as { id: string }[]).map((one) => one.id)).toEqual([
       first.id,
     ]);
-  });
-});
-
-describe("the contract a repository client is held to", () => {
-  /**
-   * The promise, made out loud: the CLI and the platform ship together, and a
-   * mismatch is one sentence rather than a folder that quietly reads less than
-   * it used to.
-   */
-  it("is answered on the public identity read, before anything is signed in", async () => {
-    api = await createApi("repo_contract");
-
-    const answered = await api.app.inject({ method: "GET", url: "/api/platform" });
-
-    expect(answered.statusCode).toBe(200);
-    expect((answered.json() as { repository_contract: number }).repository_contract).toBe(
-      REPOSITORY_CONTRACT,
-    );
   });
 });

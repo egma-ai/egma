@@ -74,15 +74,15 @@ type Registered = { readonly agentId: string; readonly connectionId: string };
  * platform really issued.
  */
 async function register(connectionKind = "retell_chat_api"): Promise<Registered> {
-  const response = await fetch(`${platform.url}/api/agents`, {
+  const response = await fetch(`${platform.url}/v1/agents`, {
     method: "POST",
     headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
       name: "order-line",
       connection: {
-        agent_platform: connectionKind === "retell_chat_api" ? "retell" : null,
-        connection_kind: connectionKind,
-        access_variant:
+        agentPlatform: connectionKind === "retell_chat_api" ? "retell" : null,
+        connectionKind: connectionKind,
+        accessVariant:
           connectionKind === "retell_chat_api"
             ? "retell_chat_api.api_key"
             : "phone_number.public_e164",
@@ -131,7 +131,7 @@ async function makeFolder(registered: Registered | null): Promise<void> {
     platform:
       registered === null
         ? null
-        : { origin: platform.url, instance: platform.instanceId },
+        : { origin: platform.url },
     agent: registered === null ? null : { name: "order-line", id: registered.agentId },
     connection:
       registered === null

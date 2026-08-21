@@ -89,9 +89,9 @@ describe("platform-first Monitoring setup", () => {
 
     const discovered = await api.app.inject({
       method: "POST",
-      url: `/api/monitoring/retell/discover?project=${ada.projectId}`,
+      url: `/v1/monitoring/retell/discover?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
-      payload: { api_key: RETELL_KEY },
+      payload: { apiKey: RETELL_KEY },
     });
     expect(discovered.statusCode, discovered.body).toBe(200);
     expect(discovered.json()).toEqual({
@@ -100,23 +100,23 @@ describe("platform-first Monitoring setup", () => {
 
     const configured = await api.app.inject({
       method: "PUT",
-      url: `/api/monitoring/retell?project=${ada.projectId}`,
+      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
-        api_key: RETELL_KEY,
+        apiKey: RETELL_KEY,
         agents: [{ id: "agent_voice_1", name: "A browser cannot rename it" }],
       },
     });
     expect(configured.statusCode, configured.body).toBe(200);
     expect(configured.json()).toMatchObject({
-      setup: {
-        agent_platform: "retell",
+      monitoringSource: {
+        agentPlatform: "retell",
         strategy: "retell_api_polling",
-        credentials_hint: "QRST",
+        credentialsHint: "QRST",
         agents: [
           {
-            platform_agent_id: "agent_voice_1",
-            platform_agent_name: "Front desk from Retell",
+            platformAgentId: "agent_voice_1",
+            platformAgentName: "Front desk from Retell",
             state: "importing",
           },
         ],
@@ -140,7 +140,7 @@ describe("platform-first Monitoring setup", () => {
 
     const listed = await api.app.inject({
       method: "GET",
-      url: `/api/monitoring?project=${ada.projectId}`,
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
     expect(listed.statusCode).toBe(200);
@@ -163,10 +163,10 @@ describe("platform-first Monitoring setup", () => {
 
     const configured = await api.app.inject({
       method: "PUT",
-      url: `/api/monitoring/retell?project=${ada.projectId}`,
+      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
-        api_key: RETELL_KEY,
+        apiKey: RETELL_KEY,
         agents: [{ id: "agent_voice_1", name: "Front desk" }],
       },
     });
@@ -198,14 +198,14 @@ describe("platform-first Monitoring setup", () => {
     for (const request of [
       {
         method: "POST" as const,
-        url: `/api/monitoring/retell/discover?project=${ada.projectId}`,
-        payload: { api_key: RETELL_KEY },
+        url: `/v1/monitoring/retell/discover?projectId=${ada.projectId}`,
+        payload: { apiKey: RETELL_KEY },
       },
       {
         method: "PUT" as const,
-        url: `/api/monitoring/retell?project=${ada.projectId}`,
+        url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
         payload: {
-          api_key: RETELL_KEY,
+          apiKey: RETELL_KEY,
           agents: [{ id: "agent_voice_1", name: "Front desk" }],
         },
       },
@@ -244,10 +244,10 @@ describe("platform-first Monitoring setup", () => {
     const ada = await signUp(api.app, "ada-replay@acme.example", "Acme");
     const configured = await api.app.inject({
       method: "PUT",
-      url: `/api/monitoring/retell?project=${ada.projectId}`,
+      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
-        api_key: RETELL_KEY,
+        apiKey: RETELL_KEY,
         agents: [{ id: "agent_voice_1", name: "Front desk" }],
       },
     });
@@ -265,32 +265,32 @@ describe("platform-first Monitoring setup", () => {
 
     const before = await api.app.inject({
       method: "GET",
-      url: `/api/monitoring?project=${ada.projectId}`,
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
-    const failure = before.json().setups[0].agents[0].failures[0] as {
+    const failure = before.json().monitoringSources[0].agents[0].failures[0] as {
       id: string;
-      provider_call_id: string;
+      providerCallId: string;
     };
-    expect(failure.provider_call_id).toBe(providerCallId);
+    expect(failure.providerCallId).toBe(providerCallId);
 
     const replayed = await api.app.inject({
       method: "POST",
       url:
-        `/api/monitoring/retell/failures/${failure.id}/replay` +
-        `?project=${ada.projectId}`,
+        `/v1/monitoring/retell/failures/${failure.id}/replay` +
+        `?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
     expect(replayed.statusCode, replayed.body).toBe(200);
     expect(replayed.json()).toMatchObject({
-      failure: { id: failure.id, status: "resolved" },
+      monitoringImportFailure: { id: failure.id, status: "resolved" },
       trace: { write: "written" },
     });
     const repeated = await api.app.inject({
       method: "POST",
       url:
-        `/api/monitoring/retell/failures/${failure.id}/replay` +
-        `?project=${ada.projectId}`,
+        `/v1/monitoring/retell/failures/${failure.id}/replay` +
+        `?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
     expect(repeated.statusCode).toBe(404);
@@ -312,10 +312,10 @@ describe("platform-first Monitoring setup", () => {
 
     const after = await api.app.inject({
       method: "GET",
-      url: `/api/monitoring?project=${ada.projectId}`,
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
-    expect(after.json().setups[0].agents[0]).toMatchObject({
+    expect(after.json().monitoringSources[0].agents[0]).toMatchObject({
       state: "active",
       failures: [],
     });
@@ -333,10 +333,10 @@ describe("platform-first Monitoring setup", () => {
     const ada = await signUp(api.app, "ada-retry-after@acme.example", "Acme");
     const configured = await api.app.inject({
       method: "PUT",
-      url: `/api/monitoring/retell?project=${ada.projectId}`,
+      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
-        api_key: RETELL_KEY,
+        apiKey: RETELL_KEY,
         agents: [{ id: "agent_voice_1", name: "Front desk" }],
       },
     });
@@ -353,13 +353,13 @@ describe("platform-first Monitoring setup", () => {
     await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
     const listed = await api.app.inject({
       method: "GET",
-      url: `/api/monitoring?project=${ada.projectId}`,
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
-    const failureId = listed.json().setups[0].agents[0].failures[0].id as string;
+    const failureId = listed.json().monitoringSources[0].agents[0].failures[0].id as string;
     const replayUrl =
-      `/api/monitoring/retell/failures/${failureId}/replay` +
-      `?project=${ada.projectId}`;
+      `/v1/monitoring/retell/failures/${failureId}/replay` +
+      `?projectId=${ada.projectId}`;
 
     const first = await api.app.inject({
       method: "POST",
@@ -387,31 +387,31 @@ describe("platform-first Monitoring setup", () => {
 
     const configured = await api.app.inject({
       method: "PUT",
-      url: `/api/monitoring/livekit-agents?project=${ada.projectId}`,
+      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
     expect(configured.statusCode, configured.body).toBe(200);
     expect(configured.json()).toMatchObject({
-      setup: {
-        agent_platform: "livekit_agents",
+      monitoringSource: {
+        agentPlatform: "livekit_agents",
         strategy: "livekit_otlp",
-        credentials_hint: null,
+        credentialsHint: null,
         agents: [],
       },
     });
 
     const removed = await api.app.inject({
       method: "DELETE",
-      url: `/api/monitoring/livekit-agents?project=${ada.projectId}`,
+      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
     expect(removed.statusCode).toBe(204);
 
     const listed = await api.app.inject({
       method: "GET",
-      url: `/api/monitoring?project=${ada.projectId}`,
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
-    expect(listed.json()).toEqual({ setups: [] });
+    expect(listed.json()).toEqual({ monitoringSources: [] });
   });
 });

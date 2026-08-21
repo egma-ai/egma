@@ -29,6 +29,7 @@ import {
   type TestVersion,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { testOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -44,7 +45,8 @@ import {
   REFUSALS,
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, projectNamed, text, textList } from "../http/reading.ts";
+import { given, text, textList } from "../http/reading.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 
 /**
  * The tests of one project: the list a browser filters, one frozen version by
@@ -59,16 +61,16 @@ import { given, projectNamed, text, textList } from "../http/reading.ts";
  * refusals live.
  *
  * **A test's mock-tool overrides are content, so they travel with it** — and a
- * browser write never mentions them. They ride in `mock_tools`, they version
+ * browser write never mentions them. They ride in `mockTools`, they version
  * with the test exactly as an expected behavior does, and a body that leaves
- * the field out keeps them. That is the whole of what stops a partial browser
+ * the `mockTools` field out keeps them. That is the whole of what stops a partial browser
  * form erasing hidden versioned content: the form does not edit them, so it
  * does not send them, so they stay.
  *
  * **Three writes, three expectations, three refusals.** The live half of a test
- * — its name and description — carries `expected_revision`. Its versioned
- * content carries `expected_version_id`. Which agents it applies to carries
- * `expected_applicability_revision`, on a door of its own. They are separate
+ * — its name and description — carries `expectedRevision`. Its versioned
+ * content carries `expectedVersionId`. Which agents it applies to carries
+ * `expectedApplicabilityRevision`, on a door of its own. They are separate
  * because the losses are separately recoverable: a rename that lost a race is
  * retyped in a second, a scenario edit that lost one may be an afternoon's
  * work, and a link edit is neither. A single token covering all three would
@@ -78,7 +80,7 @@ import { given, projectNamed, text, textList } from "../http/reading.ts";
  * the link editor cannot empty the set, and Restore of a test that has none
  * takes one in the same request.
  *
- * **What a test may require of a connection comes from `GET /api/capabilities`,
+ * **What a test may require of a connection comes from `GET /v1/capabilities`,
  * which already exists** — the same catalog the connection forms draw from. A
  * second endpoint answering the same list would be a second opinion about which
  * keys exist, and the whole worth of the catalog is that a requirement and a
@@ -94,22 +96,13 @@ export type TestRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const TESTS_PATH = "/api/tests";
-export const TEST_PATH = "/api/tests/:testId";
-export const TEST_VERSIONS_PATH = "/api/tests/:testId/versions";
-export const TEST_AGENTS_PATH = "/api/tests/:testId/agents";
-export const TEST_CLONE_PATH = "/api/tests/:testId/clone";
-export const TEST_ARCHIVE_PATH = "/api/tests/:testId/archive";
-export const TEST_RESTORE_PATH = "/api/tests/:testId/restore";
-export const TEST_VERSION_PATH = "/api/test-versions/:versionId";
-
 type Body = Record<string, unknown>;
 
 type Query = {
-  readonly project?: string;
-  readonly cursor?: string;
+  readonly projectId?: string;
+  readonly pageToken?: string;
   readonly archived?: string;
-  readonly agent?: string;
+  readonly agentId?: string;
   readonly name?: string;
 };
 
@@ -118,7 +111,7 @@ function describedPersona(named: TestPersona): Record<string, unknown> {
   return {
     id: named.id,
     name: named.name,
-    archived_at: named.archivedAt === null ? null : named.archivedAt.toISOString(),
+    archivedAt: named.archivedAt === null ? null : named.archivedAt.toISOString(),
   };
 }
 
@@ -134,7 +127,7 @@ function describedAgent(applies: TestAgent): Record<string, unknown> {
   return {
     id: applies.id,
     name: applies.name,
-    archived_at:
+    archivedAt:
       applies.archivedAt === null ? null : applies.archivedAt.toISOString(),
   };
 }
@@ -144,8 +137,8 @@ type WrittenBehaviors =
   | { readonly entries: readonly string[] }
   | { readonly refusal: string };
 
-/** The keys one entry of `mock_tools` holds, and no others. */
-const OVERRIDE_KEYS = ["tool", "answer", "error", "delay_ms"] as const;
+/** The keys one entry of `mockTools` holds, and no others. */
+const OVERRIDE_KEYS = ["tool", "answer", "error", "delayMs"] as const;
 
 /**
  * The overrides a body carries, as the factory takes them.
@@ -166,7 +159,7 @@ function overrideEntries(value: unknown): WrittenOverrides {
   if (!Array.isArray(value)) {
     return {
       refusal:
-        "mock_tools is the list of tools this test answers for itself. Send " +
+        "mockTools is the list of tools this test answers for itself. Send " +
         'it as a list of objects, like [{"tool": "check_availability", ' +
         '"answer": {"slots": []}}], or leave it out and the project\'s mock ' +
         "tools are the whole world.",
@@ -178,7 +171,7 @@ function overrideEntries(value: unknown): WrittenOverrides {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
       return {
         refusal:
-          "each entry in mock_tools names one tool and what it answers with. " +
+          "each entry in mockTools names one tool and what it answers with. " +
           'Send objects, like {"tool": "check_availability", "error": "the ' +
           'calendar is unreachable"}.',
       };
@@ -192,19 +185,19 @@ function overrideEntries(value: unknown): WrittenOverrides {
           OVERRIDE_KEYS.join(", "),
       };
     }
-    if ("delay_ms" in written && typeof written.delay_ms !== "number") {
+    if ("delayMs" in written && typeof written.delayMs !== "number") {
       return {
         refusal:
-        "delay_ms is how long Egma holds this answer back, as a whole number " +
-          `of milliseconds, and one entry in mock_tools sent ${typeof written.delay_ms}.`,
+          "delayMs is how long Egma holds this answer back, as a whole number " +
+          `of milliseconds, and one entry in mockTools sent ${typeof written.delayMs}.`,
       };
     }
 
     entries.push({
       toolName: written.tool,
       answer: answerAsSent(written),
-      ...(typeof written.delay_ms === "number"
-        ? { delayMilliseconds: written.delay_ms }
+      ...(typeof written.delayMs === "number"
+        ? { delayMilliseconds: written.delayMs }
         : {}),
     });
   }
@@ -217,33 +210,33 @@ function overrideEntries(value: unknown): WrittenOverrides {
  *
  * A page has to be able to say which of a person's edits will mint history and
  * which will not, and a flat object of fields cannot say it. So the shape says
- * it: `revision` covers the name and description, `version_id` covers
- * everything a run is judged by, and `applicability_revision` covers which
+ * it: `revision` covers the name and description, `versionId` covers
+ * everything a run is judged by, and `applicabilityRevision` covers which
  * agents it applies to. Each write sends back the one it is about.
  */
 function described(test: Test): Record<string, unknown> {
   return {
     id: test.id,
-    project_id: test.projectId,
+    projectId: test.projectId,
     name: test.name,
     description: test.description,
     version: test.version,
-    version_id: test.versionId,
+    versionId: test.versionId,
     scenario: test.scenario,
-    expected_behaviors: [...test.expectedBehaviors],
+    expectedBehaviors: [...test.expectedBehaviors],
     personas: test.personas.map(describedPersona),
-    required_capabilities: test.requiredCapabilities,
-    mock_tools: test.mockOverrides.map(describedMockTool),
+    requiredCapabilities: test.requiredCapabilities,
+    mockTools: test.mockOverrides.map(describedMockTool),
     // What a browser shows instead of the overrides themselves: it does not
     // edit them, so it is told only that they are there.
-    override_count: test.mockOverrides.length,
+    overrideCount: test.mockOverrides.length,
     agents: test.agents.map(describedAgent),
     revision: test.revision,
-    applicability_revision: test.applicabilityRevision,
-    archived_at: test.archivedAt === null ? null : test.archivedAt.toISOString(),
-    archive_reason: test.archiveReason,
-    created_at: test.createdAt.toISOString(),
-    updated_at: test.updatedAt.toISOString(),
+    applicabilityRevision: test.applicabilityRevision,
+    archivedAt: test.archivedAt === null ? null : test.archivedAt.toISOString(),
+    archiveReason: test.archiveReason,
+    createdAt: test.createdAt.toISOString(),
+    updatedAt: test.updatedAt.toISOString(),
   };
 }
 
@@ -251,17 +244,17 @@ function described(test: Test): Record<string, unknown> {
 function describedVersion(version: TestVersion): Record<string, unknown> {
   return {
     id: version.id,
-    test_id: version.testId,
-    test_name: version.testName,
+    testId: version.testId,
+    testName: version.testName,
     version: version.version,
     current: version.current,
     scenario: version.scenario,
-    expected_behaviors: [...version.expectedBehaviors],
+    expectedBehaviors: [...version.expectedBehaviors],
     personas: version.personas.map(describedPersona),
-    required_capabilities: version.requiredCapabilities,
-    mock_tools: version.mockOverrides.map(describedMockTool),
-    override_count: version.mockOverrides.length,
-    created_at: version.createdAt.toISOString(),
+    requiredCapabilities: version.requiredCapabilities,
+    mockTools: version.mockOverrides.map(describedMockTool),
+    overrideCount: version.mockOverrides.length,
+    createdAt: version.createdAt.toISOString(),
   };
 }
 
@@ -340,10 +333,10 @@ function idEntries(value: unknown, field: string, shape: string): NamedIds {
  */
 const VERSIONED_KEYS = [
   "scenario",
-  "expected_behaviors",
+  "expectedBehaviors",
   "personas",
-  "mock_tools",
-  "required_capabilities",
+  "mockTools",
+  "requiredCapabilities",
 ] as const;
 
 /** The one sentence a test nobody can see gets, whichever way it is absent. */
@@ -402,7 +395,7 @@ function behaviorEntries(value: unknown): WrittenBehaviors {
   if (!Array.isArray(value)) {
     return {
       refusal:
-        "expected_behaviors is what should happen, as a list of sentences, " +
+        "expectedBehaviors is what should happen, as a list of sentences, " +
         'like ["confirms the new time back before finishing"].',
     };
   }
@@ -421,6 +414,11 @@ function behaviorEntries(value: unknown): WrittenBehaviors {
   return { entries: textList(value) };
 }
 
+/** The address wins when both places name a project, as on every v1 write. */
+function projectNamed(query: Body, body: Body): string | undefined {
+  return given(text(query.projectId)) ?? given(text(body.projectId));
+}
+
 export async function testRoutes(
   app: FastifyInstance,
   options: TestRoutesOptions,
@@ -433,8 +431,8 @@ export async function testRoutes(
   /**
    * The project's tests, newest first, one page at a time.
    *
-   * `{ items, next_cursor }` is the envelope every list in this API answers
-   * with, and the cursor is the last id of the page rather than a count of rows
+   * `{ tests, nextPageToken }` is this list's envelope, and the token is the
+   * last id of the page rather than a count of rows
    * to skip: the ids sort by mint time, so a list changing under a reader never
    * shows them a row twice and never skips one.
    *
@@ -442,43 +440,43 @@ export async function testRoutes(
    * mixing them: `archived` chooses the list, `agent` narrows to the tests that
    * apply to one, and `name` searches.
    */
-  app.get(TESTS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.listTests, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
-    const acting = await namingAProject(auth, given(query.project));
+    const acting = await namingAProject(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
-    if (cursor !== undefined && !isId("tst", cursor)) {
+    const pageToken = given(query.pageToken);
+    if (pageToken !== undefined && !isId("tst", pageToken)) {
       return sendRefusal(
         reply,
         "invalid_cursor",
-        REFUSALS.invalidCursor(cursor),
+        REFUSALS.invalidCursor(pageToken),
       );
     }
 
-    const agent = given(query.agent);
-    if (agent !== undefined && !isId("agt", agent)) {
+    const agentId = given(query.agentId);
+    if (agentId !== undefined && !isId("agt", agentId)) {
       return invalid(
         reply,
-        `"${agent}" is not an agent id. Send the agt_ id of the agent whose ` +
+        `"${agentId}" is not an agent id. Send the agt_ id of the agent whose ` +
           `tests you want, or leave it out for every test in the project.`,
       );
     }
 
     const page = await listTests(acting.auth, {
-      ...(cursor === undefined ? {} : { cursor }),
-      ...(agent === undefined ? {} : { agentId: agent }),
+      ...(pageToken === undefined ? {} : { cursor: pageToken }),
+      ...(agentId === undefined ? {} : { agentId }),
       ...(given(query.name) === undefined ? {} : { name: text(query.name) }),
       archived: given(query.archived) === "true",
     });
 
     return reply.send({
-      items: page.items.map(described),
+      tests: page.items.map(described),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this response is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -490,12 +488,12 @@ export async function testRoutes(
    * a caller holding only a version id cannot get any other way, and a version
    * outlives its test's archiving, so both stay answerable afterwards.
    */
-  app.get(TEST_VERSION_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.getTestVersion, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { versionId } = request.params as { versionId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await actingIn(auth, given(query.project));
+    const acting = await actingIn(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const version = await getTestVersion(acting.auth, versionId);
@@ -510,12 +508,12 @@ export async function testRoutes(
     return reply.send(describedVersion(version));
   });
 
-  app.get(TEST_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.getTest, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await namingAProject(auth, given(query.project));
+    const acting = await namingAProject(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     // An archived test stays readable: a run pinned it, its history is evidence,
@@ -530,23 +528,23 @@ export async function testRoutes(
    * Every version of one test, newest first — the immutable history a detail
    * page shows, and the list an older-version read is chosen from.
    */
-  app.get(TEST_VERSIONS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.listTestVersions, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await namingAProject(auth, given(query.project));
+    const acting = await namingAProject(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
+    const pageToken = given(query.pageToken);
     const page = await listTestVersions(acting.auth, testId, {
-      ...(cursor === undefined ? {} : { cursor }),
+      ...(pageToken === undefined ? {} : { cursor: pageToken }),
     });
     if (page === undefined) return noSuchTest(reply, testId);
 
     return reply.send({
-      items: page.items.map(describedVersion),
-      next_cursor: page.nextCursor ?? null,
+      versions: page.items.map(describedVersion),
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -557,7 +555,7 @@ export async function testRoutes(
    * takes for the same reason: a viewer is refused for being a viewer, rather
    * than after a read that tells them what is there.
    */
-  app.post(TESTS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.createTest, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const query = (request.query ?? {}) as Body;
@@ -578,13 +576,13 @@ export async function testRoutes(
     if ("refusal" in personas) return unprocessable(reply, personas.refusal);
 
     const overrides =
-      "mock_tools" in body ? overrideEntries(body.mock_tools) : { entries: [] };
+      "mockTools" in body ? overrideEntries(body.mockTools) : { entries: [] };
     if ("refusal" in overrides) return unprocessable(reply, overrides.refusal);
 
     const behaviors =
-      "expected_behaviors" in body
-        ? behaviorEntries(body.expected_behaviors)
-        : { entries: textList(body.expected_behaviors) };
+      "expectedBehaviors" in body
+        ? behaviorEntries(body.expectedBehaviors)
+        : { entries: textList(body.expectedBehaviors) };
     if ("refusal" in behaviors) return unprocessable(reply, behaviors.refusal);
 
     const agents =
@@ -594,8 +592,8 @@ export async function testRoutes(
     if ("refusal" in agents) return unprocessable(reply, agents.refusal);
 
     const capabilities =
-      "required_capabilities" in body
-        ? idEntries(body.required_capabilities, "required_capabilities", "capability")
+      "requiredCapabilities" in body
+        ? idEntries(body.requiredCapabilities, "requiredCapabilities", "capability")
         : { entries: [] };
     if ("refusal" in capabilities) {
       return unprocessable(reply, capabilities.refusal);
@@ -627,10 +625,10 @@ export async function testRoutes(
   /**
    * An edit, carrying whichever expectations it is about.
    *
-   * `expected_version_id` is what guards content, and a repository client
+   * `expectedVersionId` is what guards content, and a repository client
    * always sends it: an edit that named no version would be accepted over a
    * test somebody else moved in the meantime, and the later write would quietly
-   * become what the test says. `expected_revision` guards the name and the
+   * become what the test says. `expectedRevision` guards the name and the
    * description on the same terms.
    *
    * What the body leaves out, the test keeps — the factory's rule, and this
@@ -643,7 +641,7 @@ export async function testRoutes(
    * Content byte-identical to the current version mints nothing and answers the
    * current version, so a nervous re-save leaves no history behind.
    */
-  app.patch(TEST_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.updateTest, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
@@ -659,8 +657,8 @@ export async function testRoutes(
         reply,
         "which agents a test applies to is edited on its own, because it " +
           "mints no version and carries its own revision. Send the set to " +
-          `POST /api/tests/${testId}/agents with ` +
-          "expected_applicability_revision.",
+          `POST /v1/tests/${testId}/agents with ` +
+          "expectedApplicabilityRevision.",
       );
     }
 
@@ -673,22 +671,22 @@ export async function testRoutes(
     }
 
     const overrides =
-      "mock_tools" in body ? overrideEntries(body.mock_tools) : undefined;
+      "mockTools" in body ? overrideEntries(body.mockTools) : undefined;
     if (overrides !== undefined && "refusal" in overrides) {
       return unprocessable(reply, overrides.refusal);
     }
 
     const behaviors =
-      "expected_behaviors" in body
-        ? behaviorEntries(body.expected_behaviors)
+      "expectedBehaviors" in body
+        ? behaviorEntries(body.expectedBehaviors)
         : undefined;
     if (behaviors !== undefined && "refusal" in behaviors) {
       return unprocessable(reply, behaviors.refusal);
     }
 
     const capabilities =
-      "required_capabilities" in body
-        ? idEntries(body.required_capabilities, "required_capabilities", "capability")
+      "requiredCapabilities" in body
+        ? idEntries(body.requiredCapabilities, "requiredCapabilities", "capability")
         : undefined;
     if (capabilities !== undefined && "refusal" in capabilities) {
       return unprocessable(reply, capabilities.refusal);
@@ -708,11 +706,11 @@ export async function testRoutes(
      * separate tokens exist to prevent. Its own token guards it instead.
      */
     const touchesContent = VERSIONED_KEYS.some((key) => key in body);
-    if (touchesContent && given(text(body.expected_version_id)) === undefined) {
+    if (touchesContent && given(text(body.expectedVersionId)) === undefined) {
       return unprocessable(
         reply,
         "an edit says which version it was written against, and this one " +
-          "named no expected_version_id. Send the version_id you last read " +
+          "named no expectedVersionId. Send the versionId you last read " +
           "for this test, or read the test again and send the version it " +
           "names now.",
       );
@@ -727,7 +725,7 @@ export async function testRoutes(
      * instruction, and one file must never become the source of truth for a set
      * of links it cannot see.
      */
-    const repositoryAgent = given(text(body.repository_agent));
+    const repositoryAgent = given(text(body.repositoryAgentId));
     if (repositoryAgent !== undefined && !isId("agt", repositoryAgent)) {
       return unprocessable(
         reply,
@@ -749,12 +747,12 @@ export async function testRoutes(
       ...(repositoryAgent === undefined
         ? {}
         : { repositoryAgentId: repositoryAgent }),
-      ...(given(text(body.expected_version_id)) === undefined
+      ...(given(text(body.expectedVersionId)) === undefined
         ? {}
-        : { expectedVersionId: text(body.expected_version_id) }),
-      ...(given(text(body.expected_revision)) === undefined
+        : { expectedVersionId: text(body.expectedVersionId) }),
+      ...(given(text(body.expectedRevision)) === undefined
         ? {}
-        : { expectedRevision: text(body.expected_revision) }),
+        : { expectedRevision: text(body.expectedRevision) }),
       ...("name" in body ? { name: text(body.name) } : {}),
       ...("description" in body
         ? { description: body.description === null ? null : text(body.description) }
@@ -784,7 +782,7 @@ export async function testRoutes(
    * whole set rather than one add or one remove, because a browser edits a list
    * of checkboxes and sends what it now says.
    */
-  app.post(TEST_AGENTS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.setTestAgents, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
@@ -802,11 +800,11 @@ export async function testRoutes(
 
     const changed = await setTestAgents(acting.auth, testId, {
       agentIds: agents.entries,
-      ...(given(text(body.expected_applicability_revision)) === undefined
+      ...(given(text(body.expectedApplicabilityRevision)) === undefined
         ? {}
         : {
             expectedApplicabilityRevision: text(
-              body.expected_applicability_revision,
+              body.expectedApplicabilityRevision,
             ),
           }),
     });
@@ -824,7 +822,7 @@ export async function testRoutes(
    * identities share a past, and the first question anybody asks of a version
    * history would then have two answers.
    */
-  app.post(TEST_CLONE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.cloneTest, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
@@ -841,7 +839,7 @@ export async function testRoutes(
     return reply.code(201).send(described(cloned));
   });
 
-  app.post(TEST_ARCHIVE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.archiveTest, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
@@ -853,16 +851,16 @@ export async function testRoutes(
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const archived = await archiveTest(acting.auth, testId, {
-      ...(given(text(body.expected_revision)) === undefined
+      ...(given(text(body.expectedRevision)) === undefined
         ? {}
-        : { expectedRevision: text(body.expected_revision) }),
+        : { expectedRevision: text(body.expectedRevision) }),
     });
     if (archived === undefined) return noSuchTest(reply, testId);
 
     return reply.send(described(archived));
   });
 
-  app.post(TEST_RESTORE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, testOperations.restoreTest, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { testId } = request.params as { testId: string };
     const body = (request.body ?? {}) as Body;
@@ -881,9 +879,9 @@ export async function testRoutes(
 
     const restored = await restoreTest(acting.auth, testId, {
       agentIds: agents.entries,
-      ...(given(text(body.expected_revision)) === undefined
+      ...(given(text(body.expectedRevision)) === undefined
         ? {}
-        : { expectedRevision: text(body.expected_revision) }),
+        : { expectedRevision: text(body.expectedRevision) }),
     });
     if (restored === undefined) return noSuchTest(reply, testId);
 
@@ -909,11 +907,11 @@ export async function testRoutes(
         message:
           `this edit was written against version ${error.expectedVersionId}, ` +
           `and the test has moved on to ${error.currentVersionId}. Read the ` +
-          `test again and send the edit with expected_version_id set to the ` +
+          `test again and send the edit with expectedVersionId set to the ` +
           `version it names now.`,
         test: { id: error.testId, name: error.testName },
-        expected_version_id: error.expectedVersionId,
-        current_version_id: error.currentVersionId,
+        expectedVersionId: error.expectedVersionId,
+        currentVersionId: error.currentVersionId,
       });
     }
 

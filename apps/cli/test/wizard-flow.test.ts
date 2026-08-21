@@ -344,35 +344,27 @@ describe("one task, driven on a scripted agent", () => {
       }
     })({ write: (line) => lines.push(line) });
 
-    let asked = 0;
     const running = runWizard({
       ui,
       launch: workspace.launch(script),
       cwd: workspace.dir,
       signal: new AbortController().signal,
       platform: {
-        url: "http://named-before-it-is-asked.example",
+        url: "http://127.0.0.1:1",
+        credentialsFile: workspace.credentialsFile,
         bound: false,
-        verify: () => {
-          asked += 1;
-          return Promise.reject(new Error("this platform did not answer"));
-        },
       },
     });
 
     expect(await waitUntil(() => ui.record.platform !== null)).toBe(true);
-    expect(ui.record.platform).toBe("http://named-before-it-is-asked.example");
+    expect(ui.record.platform).toBe("http://127.0.0.1:1");
     // The same fact as one plain line, in the same place in the walk.
-    expect(lines).toContain("url: http://named-before-it-is-asked.example");
-    expect(asked).toBe(0);
+    expect(lines).toContain("url: http://127.0.0.1:1");
 
     openTheGate();
 
-    // And a refusal from that read leaves the walk rather than becoming an exit
-    // line: it is egma declining to talk to an address, which is answered in
-    // the same sentence and the same number every verb answers it with.
-    await expect(running).rejects.toThrow("this platform did not answer");
-    expect(asked).toBe(1);
-    expect(ui.record.exit).toBeNull();
+    const report = await running;
+    expect(report.kind).toBe("failed");
+    expect(ui.record.exit).toEqual(report);
   });
 });

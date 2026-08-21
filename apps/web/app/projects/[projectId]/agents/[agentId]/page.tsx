@@ -3,20 +3,20 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { getAgent, updateAgent } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { writeJson, type Refusal } from "../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../lib/api.ts";
 import {
-  agentDetailQuery,
-  agentPath,
   NO_ENVIRONMENT,
   type AgentDetail,
   type ListedAgent,
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { Actions, Section } from "../../../../../ui/section.tsx";
@@ -112,7 +112,7 @@ function connectionColumns(
       key: "product-label",
       header: "Connection",
       width: "180px",
-      cell: (one) => one.product_label,
+      cell: (one) => one.productLabel,
     },
     {
       key: "modality",
@@ -142,8 +142,12 @@ function AgentDetailView({
   const now = useMinuteClock();
 
   const { answer, reload } = useProjectRead<AgentDetail>(
-    agentDetailQuery(agentId, "active"),
+    (projectId) =>
+      platformAnswer(
+        getAgent({ agentId, projectId }, { client: platformClient }),
+      ),
     projectId,
+    agentId,
   );
 
   const [editing, setEditing] = useState(false);
@@ -358,17 +362,17 @@ function EditAgent({
     setRefused(null);
     setSaving(true);
 
-    const answer = await writeJson<{ readonly agent: ListedAgent }>(
-      agentPath(agent.id),
-      {
-        method: "PATCH",
-        project: projectId,
-        body: {
+    const answer = await platformAnswer(
+      updateAgent(
+        {
+          agentId: agent.id,
+          projectId,
           name: wanted,
           description: description.trim() === "" ? null : description.trim(),
-          expected_revision: agent.revision,
+          expectedRevision: agent.revision,
         },
-      },
+        { client: platformClient },
+      ),
     );
 
     setSaving(false);

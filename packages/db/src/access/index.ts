@@ -30,9 +30,8 @@
  * this category is a deliberate act: a test names them all and fails when an
  * eighth appears.
  *
- * **Instance-scoped.** `instanceIsClaimed` and `platformInstanceId`. Both take
- * nothing, so neither can name a customer. They return only one platform fact:
- * whether signup has been claimed, or the platform's own non-secret identity.
+ * **Instance-scoped.** `instanceIsClaimed` takes nothing, so it cannot name a
+ * customer. It returns only whether signup has been claimed.
  *
  * **Work-dispatching.** `claimGradingJobs`, `watchGradingWork`,
  * `claimSimulations`, `recordSimulationHeartbeat`, `sweepOrphanedSimulations`
@@ -188,15 +187,15 @@ export {
   type NewOrganization,
   type ProvisionedOrganization,
 } from "./provisioning.ts";
-export { instanceIsClaimed, platformInstanceId } from "./instance.ts";
+export { instanceIsClaimed } from "./instance.ts";
 
 /**
  * The non-model settings this deployment holds. Carrier credentials are sealed
  * with the deployment's own key, hinted rather than handed back, seeded from
  * the environment at start and never over a value somebody chose.
- * `platformFacts` is the third instance-scoped export: it takes nothing,
- * so there is no customer to name, and it answers only what is not secret,
- * because the readiness answer it feeds is read before anybody has logged in.
+ * `platformFacts` is another instance-scoped export: it takes nothing,
+ * so there is no customer to name, and it answers only what is not secret. The
+ * API uses it to enforce the carrier precondition before it creates phone work.
  *
  * The read and the write take the deployment's own tenancy beside the context,
  * because who may be here depends on it: an organization owner may, and only

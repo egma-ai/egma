@@ -7,6 +7,7 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
+    { "path": "../../packages/platform-api" },
     { "path": "../../packages/ids" },
     { "path": "../../packages/provider-credentials" },
     { "path": "../../packages/retell" },

@@ -208,18 +208,11 @@ async function runWizardFlow(
   }
   advance({ type: "intro-accepted" });
 
-  // Before anything is driven: who this is. Nothing else in the walk can name
-  // an agent, a connection or a test until egma knows whose they are.
-  //
-  // Asking the address who it is happens here, on the far side of the gate, so
-  // that a developer who reads the first screen and closes the wizard has sent
-  // nothing anywhere. A refusal from it leaves the walk entirely: it is not the
-  // walk failing, it is egma declining to talk to an address, and it is
-  // answered in the same plain sentence and the same number every verb answers
-  // with.
+  // Login starts on the far side of the gate. A developer who reads the first
+  // screen and closes the wizard has sent nothing to the selected platform.
   let platform: PlatformAccess | undefined;
   if (options.platform !== undefined) {
-    platform = await options.platform.verify();
+    platform = options.platform;
     const refusal = await logInStep(platform, ui, signal);
     if (refusal !== null) {
       ui.setExit(refusal);

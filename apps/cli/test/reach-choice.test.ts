@@ -125,7 +125,6 @@ async function run(answers: Answers, fetchImpl?: typeof fetch) {
     ui,
     platform: {
       url: platform.url,
-      instanceId: platform.instanceId,
       credentialsFile: workspace.credentialsFile,
     },
     cwd: workspace.dir,
@@ -148,13 +147,14 @@ async function run(answers: Answers, fetchImpl?: typeof fetch) {
 function losingTheRace(): typeof fetch {
   let raced = false;
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    const where = typeof input === "string" ? input : String(input);
-    if (raced || init?.method !== "POST" || !where.endsWith("/connections")) {
+    const where = input instanceof Request ? input.url : String(input);
+    const method = input instanceof Request ? input.method : init?.method;
+    if (raced || method !== "POST" || !where.endsWith("/connections")) {
       return fetch(input, init);
     }
     raced = true;
     // The winner's write, made through the same door and committed.
-    await fetch(input, init);
+    await fetch(input instanceof Request ? input.clone() : input, init);
     return new Response(
       JSON.stringify({
         error: "name_taken",
@@ -380,7 +380,7 @@ describe("choosing neither", () => {
 
     expect(await wroteAnEgmaFolder()).toBe(true);
     expect(ui.record.statuses).toContain(
-      `◆ Bound this repository to Egma platform ${platform.instanceId}.`,
+      `◆ Bound this repository to Egma platform ${platform.url}.`,
     );
   });
 });

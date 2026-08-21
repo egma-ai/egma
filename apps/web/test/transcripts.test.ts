@@ -9,7 +9,6 @@ import * as gradingCopy from "../lib/grading-copy.ts";
 import {
   agentPlatformLabel,
   assertionHeading,
-  everRecordedPath,
   everyStep,
   howFarIn,
   howLong,
@@ -19,13 +18,11 @@ import {
   milliseconds,
   monitoringPath,
   namesWholeOrganization,
-  productionListPath,
   quietState,
   recentWindow,
   somethingFailed,
   stepsInside,
   transcriptPath,
-  transcriptReadPath,
   transcriptsPath,
   watchesProduction,
   windowAround,
@@ -49,41 +46,41 @@ const LIST_PAGE = `${SECTION}/transcripts/page.tsx`;
 const DETAIL_PAGE = `${SECTION}/transcripts/[transcriptId]/page.tsx`;
 
 const FACTS: Facts = {
-  trace_id: "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d",
-  started_at: "2026-08-02T18:04:40.281989Z",
-  ended_at: "2026-08-02T18:05:53.776865Z",
-  duration_ns: "73494876403",
-  span_count: 133,
-  turn_counts: { human: 5, agent: 8 },
-  tool_span_count: 2,
-  errored_span_count: 3,
+  traceId: "5c1e4b0f8d2a4e6b9f0c1d2e3a4b5c6d",
+  startedAt: "2026-08-02T18:04:40.281989Z",
+  endedAt: "2026-08-02T18:05:53.776865Z",
+  durationNs: "73494876403",
+  spanCount: 133,
+  turnCounts: { human: 5, agent: 8 },
+  toolSpanCount: 2,
+  erroredSpanCount: 3,
   source: "production",
   emitter: "agent",
   environment: "default",
-  connection_kind: "",
-  provider_call_id: "egma-fixture-capture-1",
-  agent_platform: "livekit_agents",
-  platform_agent_id: "",
-  platform_agent_name: "kelly",
-  platform_agent_version: "",
-  run_id: "",
-  agent_id: "",
+  connectionKind: "",
+  providerCallId: "egma-fixture-capture-1",
+  agentPlatform: "livekit_agents",
+  platformAgentId: "",
+  platformAgentName: "kelly",
+  platformAgentVersion: "",
+  runId: "",
+  agentId: "",
 };
 
 function step(overrides: Partial<Step> = {}): Step {
   return {
-    span_id: "a1",
-    parent_span_id: "",
+    spanId: "a1",
+    parentSpanId: "",
     name: "llm_request",
     kind: "model",
     status: "unset",
-    started_at: "2026-08-02T18:04:41.000000Z",
-    duration_ns: "1000000",
+    startedAt: "2026-08-02T18:04:41.000000Z",
+    durationNs: "1000000",
     text: "",
-    audio_url: "",
-    tool_name: "",
-    tool_arguments: "",
-    tool_result: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
     spans: [],
     ...overrides,
   };
@@ -182,8 +179,8 @@ describe("the window one transcript carries", () => {
    */
   it("holds the whole of it, at both ends", () => {
     const window = windowAround(FACTS);
-    expect(Date.parse(window.from)).toBeLessThan(Date.parse(FACTS.started_at));
-    expect(Date.parse(window.to)).toBeGreaterThan(Date.parse(FACTS.ended_at));
+    expect(Date.parse(window.from)).toBeLessThan(Date.parse(FACTS.startedAt));
+    expect(Date.parse(window.to)).toBeGreaterThan(Date.parse(FACTS.endedAt));
   });
 
   /** Which is what makes one transcript a link somebody can send. */
@@ -191,16 +188,16 @@ describe("the window one transcript carries", () => {
     const where = transcriptPath("prj_2", FACTS);
     expect(
       where.startsWith(
-        `/projects/prj_2/monitoring/transcripts/${FACTS.trace_id}?`,
+        `/projects/prj_2/monitoring/transcripts/${FACTS.traceId}?`,
       ),
     ).toBe(true);
 
     const asked = new URLSearchParams(where.slice(where.indexOf("?")));
     expect(Date.parse(asked.get("from") ?? "")).toBeLessThan(
-      Date.parse(FACTS.started_at),
+      Date.parse(FACTS.startedAt),
     );
     expect(Date.parse(asked.get("to") ?? "")).toBeGreaterThan(
-      Date.parse(FACTS.ended_at),
+      Date.parse(FACTS.endedAt),
     );
   });
 });
@@ -242,88 +239,10 @@ describe("the addresses the monitoring section holds", () => {
     ]) {
       // The identifier a row carries is the store's, and it is a value rather
       // than a segment — so the check is on the path with the name removed.
-      expect(where.replace(FACTS.trace_id, ""), where).not.toMatch(
+      expect(where.replace(FACTS.traceId, ""), where).not.toMatch(
         /\btrace|\bspan/iu,
       );
     }
-  });
-});
-
-/**
- * What the list asks the v1 contract for.
- *
- * **Production, this project, and a window** — three narrowings, each of which
- * the page would be wrong without. Every one of them is in the address of the
- * request rather than applied to what came back: a filter applied afterwards
- * answers differently depending on what had already been fetched, and quietly
- * breaks paging.
- */
-describe("what the monitoring list asks for", () => {
-  const WINDOW = {
-    from: "2026-08-01T20:00:00.000Z",
-    to: "2026-08-02T20:01:00.000Z",
-  };
-
-  function asked(path: string): URLSearchParams {
-    return new URLSearchParams(path.slice(path.indexOf("?")));
-  }
-
-  it("narrows to production, so no simulation can appear here", () => {
-    const query = asked(
-      productionListPath({ window: WINDOW, projectId: "prj_2" }),
-    );
-    expect(query.get("source")).toBe("production");
-  });
-
-  it("names the project from the address rather than leaving it to be resolved", () => {
-    const query = asked(
-      productionListPath({ window: WINDOW, projectId: "prj_2" }),
-    );
-    expect(query.get("project_id")).toBe("prj_2");
-    expect(query.get("from")).toBe(WINDOW.from);
-    expect(query.get("to")).toBe(WINDOW.to);
-  });
-
-  /**
-   * A token minted under a filter pages within that filter, so the next page
-   * carries the same narrowing — and a first page and a next page differ only
-   * by where they start.
-   */
-  it("carries the same narrowing into the next page", () => {
-    const next = asked(
-      productionListPath({
-        window: WINDOW,
-        projectId: "prj_2",
-        cursor: "eyJhIjoxfQ==",
-      }),
-    );
-    expect(next.get("cursor")).toBe("eyJhIjoxfQ==");
-    expect(next.get("source")).toBe("production");
-    expect(next.get("project_id")).toBe("prj_2");
-  });
-
-  it("sends no cursor on the first page, however absence is spelled", () => {
-    for (const cursor of [null, undefined, ""]) {
-      const query = asked(
-        productionListPath({ window: WINDOW, projectId: "prj_2", cursor }),
-      );
-      expect(query.has("cursor"), String(cursor)).toBe(false);
-    }
-  });
-
-  /**
-   * One transcript is looked up by name, and a source filter on a lookup could
-   * only ever turn a link somebody was sent into a page saying it is not there.
-   */
-  it("looks one transcript up by project and window, and never by source", () => {
-    const where = transcriptReadPath({
-      traceId: "5c1e/4b",
-      window: WINDOW,
-      projectId: "prj_2",
-    });
-    expect(where.startsWith("/v1/traces/5c1e%2F4b?")).toBe(true);
-    expect(asked(where).get("project_id")).toBe("prj_2");
-    expect(asked(where).has("source")).toBe(false);
   });
 });
 
@@ -464,21 +383,6 @@ describe("which guidance a quiet page shows", () => {
   });
 
   /**
-   * The probe asks the widest window for one row, because *some* or *none* is
-   * the whole branch and a count is not wanted.
-   */
-  it("asks the widest window for a single row, and nothing more", () => {
-    const where = everRecordedPath("prj_2", new Date("2026-08-16T12:00:00Z"));
-    const asked = new URLSearchParams(where.slice(where.indexOf("?")));
-
-    expect(asked.get("limit")).toBe("1");
-    expect(asked.get("project_id")).toBe("prj_2");
-    expect(asked.get("source")).toBe("production");
-    // The widest window this page offers, which is thirty days.
-    expect(asked.get("from")).toBe("2026-07-17T12:00:00.000Z");
-  });
-
-  /**
    * A copy scoped to `both` judges production as well as simulations, so it
    * counts. `simulations` never does, whatever its sampling rate says — and
    * that is the day-one trap the line exists for, because every new grader
@@ -492,10 +396,10 @@ describe("which guidance a quiet page shows", () => {
 
   it("reads a key with no project as one that names the whole organization", () => {
     expect(
-      namesWholeOrganization({ project_id: null, revoked_at: null }),
+      namesWholeOrganization({ projectId: null, revokedAt: null }),
     ).toBe(true);
     expect(
-      namesWholeOrganization({ project_id: "prj_2", revoked_at: null }),
+      namesWholeOrganization({ projectId: "prj_2", revokedAt: null }),
     ).toBe(false);
   });
 
@@ -507,8 +411,8 @@ describe("which guidance a quiet page shows", () => {
   it("does not count a key that has been revoked", () => {
     expect(
       namesWholeOrganization({
-        project_id: null,
-        revoked_at: "2026-08-15T09:00:00.000000Z",
+        projectId: null,
+        revokedAt: "2026-08-15T09:00:00.000000Z",
       }),
     ).toBe(false);
   });
@@ -544,7 +448,7 @@ describe("the numbers the contract sends", () => {
   });
 
   it("says how far into the exchange something happened", () => {
-    expect(howFarIn("2026-08-02T18:04:52.681989Z", FACTS.started_at)).toBe(
+    expect(howFarIn("2026-08-02T18:04:52.681989Z", FACTS.startedAt)).toBe(
       "+12.4 s",
     );
   });
@@ -552,10 +456,10 @@ describe("the numbers the contract sends", () => {
 });
 
 describe("reading the shape of a turn", () => {
-  const failing = step({ span_id: "b1", status: "error", name: "llm_request" });
+  const failing = step({ spanId: "b1", status: "error", name: "llm_request" });
   const turn = step({
     kind: "turn:agent",
-    spans: [step({ span_id: "a2", spans: [failing] }), step({ span_id: "a3" })],
+    spans: [step({ spanId: "a2", spans: [failing] }), step({ spanId: "a3" })],
   });
 
   it("counts every step inside, however deeply it is nested", () => {
@@ -646,13 +550,15 @@ describe("what a stored kind is called where somebody reads it", () => {
 describe("the heading a judgment carries", () => {
   function judged(overrides: Partial<Judgment> = {}): Judgment {
     return {
-      grader_id: "grd_01JQZ0000000000000000000AA",
+      graderId: "grd_01JQZ0000000000000000000AA",
       assertion: "behavior_3",
+      assertionText: null,
+      required: true,
       verdict: "passed",
       score: 1,
       rationale: "the agent named the new time back.",
-      cited_turns: ["turn:5"],
-      judged_at: "2026-08-14T09:00:00.000000Z",
+      citedTurns: ["turn:5"],
+      judgedAt: "2026-08-14T09:00:00.000000Z",
       ...overrides,
     };
   }
@@ -660,18 +566,15 @@ describe("the heading a judgment carries", () => {
   it("is the sentence the read resolved, word for word", () => {
     expect(
       assertionHeading(
-        judged({ assertion_text: "confirms the new time back before finishing" }),
+        judged({ assertionText: "confirms the new time back before finishing" }),
       ),
     ).toBe("confirms the new time back before finishing");
   });
 
   it("is the key itself where nothing could place it", () => {
-    expect(assertionHeading(judged({ assertion_text: null }))).toBe("Behavior 3");
-    // And on an answer that never carried the field at all, which is the same
-    // absence said a different way.
-    expect(assertionHeading(judged())).toBe("Behavior 3");
+    expect(assertionHeading(judged({ assertionText: null }))).toBe("Behavior 3");
     // A resolved sentence of nothing but spaces is nothing resolved.
-    expect(assertionHeading(judged({ assertion_text: "   " }))).toBe("Behavior 3");
+    expect(assertionHeading(judged({ assertionText: "   " }))).toBe("Behavior 3");
   });
 });
 
@@ -873,42 +776,10 @@ describe("the transcript pages", () => {
     }
   });
 
-  /**
-   * The pages consume the two v1 endpoints and nothing else, on the origin they
-   * were served from — which only works if this process forwards that path. A
-   * path a page fetches and the config does not forward would be served by this
-   * process, which has no such route, and the page would 404.
-   */
-  it("reach the v1 read endpoints at paths this instance rewrites", async () => {
+  it("forwards the versioned platform API on this origin", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-    expect(rewrites).toContain("/v1/traces/:path*");
-
-    /**
-     * **And the bare path is a rule of its own**, rather than being left to the
-     * wildcard. `:path*` is documented as matching zero segments and does so in
-     * this process — but on the hosted deployment `POST /v1/traces` fell
-     * through it to this app's own routing and answered 404, while the API
-     * answered 401 for the same request. That is an exporter posting into
-     * nothing and reporting no fault, and `toContain("/v1/traces")` could never
-     * have caught it, because the wildcard rule contains that string.
-     */
-    expect(rewrites).toMatch(
-      /source: "\/v1\/traces", destination: `\$\{api\}\/v1\/traces`/,
-    );
-
-    /**
-     * The pages no longer name the endpoint themselves — both addresses are
-     * built by `lib/transcripts.ts`, so the project and the source filter
-     * cannot be forgotten by one page and remembered by the other. What is held
-     * to the rewrite is therefore what that module builds.
-     */
-    const window = { from: "2026-08-01T20:00:00Z", to: "2026-08-02T20:00:00Z" };
-    for (const built of [
-      productionListPath({ window, projectId: "prj_1" }),
-      transcriptReadPath({ traceId: "abc", window, projectId: "prj_1" }),
-    ]) {
-      expect(built.startsWith("/v1/traces"), built).toBe(true);
-    }
+    expect(rewrites).toContain('source: "/v1/:path*"');
+    expect(rewrites).toContain('destination: `${api}/v1/:path*`');
   });
 });
 
@@ -1025,7 +896,7 @@ describe("saying which numbers Egma worked out", () => {
    * **A figure an agent platform measured reads bare — no mark, no caveat.**
    *
    * Who took a number is a fact about the record, and the record keeps it: the
-   * measure still arrives carrying `reported_by`. What it no longer does is
+   * measure still arrives carrying `reportedBy`. What it no longer does is
    * appear in a sentence a customer reads, so a platform-reported figure sits on
    * this page exactly as a figure Egma timed does. The day a surface wants
    * provenance back, the answer already carries it.
@@ -1059,7 +930,7 @@ describe("saying which numbers Egma worked out", () => {
     // The gate itself: reported figures are outside it, by the field that is
     // the only thing telling them from worked-out ones.
     expect(page).toContain(
-      "return one.derived === true && one.reported_by === undefined;",
+      "return one.derived === true && one.reportedBy === undefined;",
     );
     // And it is the only way to either the caveat or the mark.
     expect(page).toContain("{measured.some(workedOut) ? (");

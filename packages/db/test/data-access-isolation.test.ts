@@ -9,7 +9,6 @@ import {
   listMembers,
   listProjects,
   membershipsOf,
-  platformInstanceId,
   ProjectOutsideOrganizationError,
   projectsOf,
   provisionOrganization,
@@ -309,16 +308,6 @@ describe("which projects an organization has", () => {
 describe("whether anybody has signed up here yet", () => {
   it("is true once a customer exists, which is what closes open signup", async () => {
     expect(await instanceIsClaimed()).toBe(true);
-  });
-});
-
-describe("the platform instance identity", () => {
-  it("is stable and carries no customer identity", async () => {
-    const first = await platformInstanceId();
-    expect(first).toMatch(/^pf_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(await platformInstanceId()).toBe(first);
-    expect(first).not.toContain(acme.organizationId);
-    expect(first).not.toContain(globex.organizationId);
   });
 });
 

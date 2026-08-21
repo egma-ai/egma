@@ -135,10 +135,6 @@ upgrade and a move to another machine. Every simulator receives the route on
 the phone work order it claims, so a second simulator on another host needs no
 carrier credential copied to it. The CLI keeps none of it.
 
-**Phone readiness is one optional capability, not platform readiness.** A
-platform with no carrier runs chat simulations. `self-host up` reports
-the platform ready and reports `phone: setup_required` beside it.
-
 **Normal setup never receives the Twilio Auth Token.** A running Egma receives
 only one developer or production SIP credential. That credential can
 authenticate SIP requests on the shared trunk; it cannot manage the Twilio
@@ -722,6 +718,10 @@ packages/db     The data-access module: schema, migrations, and every read
                 and write there is.
 packages/ids    The identifier generator.
 packages/lint   Build-time rules that hold the boundaries in place.
+packages/platform-api
+                The executable `/v1` platform contract, its generated OpenAPI
+                document, and the generated TypeScript client used by the API,
+                web app, and CLI.
 packages/simulation-contract
                 The versioned JSON contract between the control plane and the
                 simulator: a schema per direction, golden fixtures beside
@@ -790,7 +790,7 @@ revoke.
 Both credentials work on the same routes:
 
 ```bash
-curl -H "authorization: Bearer egma_sk_..." http://localhost:3101/api/keys
+curl -H "authorization: Bearer egma_sk_..." http://localhost:3101/v1/keys
 ```
 
 An `admin` sees every key in their organization; everybody else sees the ones
@@ -836,7 +836,7 @@ whole variable, and the failure looks like an agent that exports nothing.
 Prefer the API address for an exporter. On a self-host that is the API's own
 port — `http://localhost:3100` above, or whatever address you publish it on. The
 web address also works because Egma forwards `/v1/traces` to the API; it only
-adds one hop. This lets the Monitoring setup page show its own reachable origin
+adds one hop. This lets the monitoring source page show its own reachable origin
 without making that origin a second telemetry contract.
 
 `POST /v1/traces` accepts OTLP/HTTP in both encodings the specification defines
@@ -895,7 +895,7 @@ curl -H "authorization: Bearer egma_sk_..." \
   "http://localhost:3100/v1/traces?from=2026-08-02T00:00:00Z&to=2026-08-03T00:00:00Z"
 
 curl -H "authorization: Bearer egma_sk_..." \
-  "http://localhost:3100/v1/traces/<trace_id>?from=2026-08-02T00:00:00Z&to=2026-08-03T00:00:00Z"
+  "http://localhost:3100/v1/traces/<traceId>?from=2026-08-02T00:00:00Z&to=2026-08-03T00:00:00Z"
 ```
 
 **`GET /v1/traces`** lists a customer's traces, newest first.
@@ -903,17 +903,17 @@ curl -H "authorization: Bearer egma_sk_..." \
 | Parameter | | |
 |---|---|---|
 | `from`, `to` | **required** | RFC 3339, honoured to the microsecond. The window is closed at `from` and open at `to`. |
-| `project_id` | optional | Narrows to one project. Absent — or empty — means the whole organization. |
+| `projectId` | optional | Narrows to one project. Absent — or empty — means the whole organization. |
 | `source` | optional | `simulation` or `production`. Narrows to one kind of traffic; absent — or empty — means both. Any other word is refused. |
-| `limit` | optional | 50 by default. Above the maximum of 200 it is clamped; zero, negative or not a count at all is refused. Empty is absent. |
-| `cursor` | optional | `next_cursor` from the previous page. Send `source` again on every page: a token is a position in the ordering it was minted in. |
+| `pageSize` | optional | 50 by default. Above the maximum of 200 it is clamped; zero, negative or not a count at all is refused. Empty is absent. |
+| `pageToken` | optional | `nextPageToken` from the previous page. Send `source` again on every page: a token is a position in the ordering it was minted in. |
 
 **`GET /v1/traces/:traceId`** returns one trace as a transcript: `turns` in the
 order they were taken, each carrying the spans that happened inside it, and
 `spans` for everything top-level that is not a turn — the root span above all.
-It takes `from`, `to` and `project_id` on the same terms.
+It takes `from`, `to` and `projectId` on the same terms.
 
-It also carries **`simulation_id`**: which simulation this trace is, when Egma
+It also carries **`simulationId`**: which simulation this trace is, when Egma
 conducted it, and `null` when your own agent had the exchange in production. A
 simulation id and the trace its spans are filed under are the same 128 bits
 written two ways, so this is derived rather than stored — and it is sent only
@@ -922,12 +922,12 @@ into an id nothing ever minted. It is what lets a reader holding one transcript
 ask for that conversation's recording without looking anything else up.
 
 And it carries **`measures`**: what this exchange measured, computed from its
-own spans. Each entry is `{measure, unit, samples, span_ids, worst, partial}` —
+own spans. Each entry is `{measure, unit, samples, spanIds, worst, partial}` —
 the measure's name from
 [the measure catalog](packages/simulation-contract/measure-catalog.md), the unit
 that catalog counts it in, one sample per measurement in the order they were
 taken, the span each sample came off, and **`worst`**: the single measurement a
-grader holds against a bound, as `{value, span_id}`. A measure this exchange did
+grader holds against a bound, as `{value, spanId}`. A measure this exchange did
 not produce is **absent** rather than present with nothing in it, so an empty
   list means nothing was measured. Production conversations have measures only
   when their stored spans contain the timing evidence that measure needs.
@@ -961,7 +961,7 @@ Five things about the contract are worth knowing before you build on it:
   about having done so, so it is refused with the cap in the message.
 - **Both bounds mean what they say, to the microsecond.** Fractional seconds are
   read to six digits, which is the precision the store keeps, so you can paste a
-  trace's own `started_at` or `ended_at` straight back in as a bound. A seventh
+  trace's own `startedAt` or `endedAt` straight back in as a bound. A seventh
   digit is refused rather than rounded: `to` is exclusive, so rounding it would
   move the edge of your window and take spans out of the answer without
   mentioning it.
@@ -978,8 +978,8 @@ Five things about the contract are worth knowing before you build on it:
   JSON nobody asked to render. Safe Direct OTLP and Retell provider payloads
   stay on their rows after credential-like values are redacted.
 - **A transcript of more than 10,000 spans is a prefix, and says so.**
-  `spans_truncated` is then `true`, and it means exactly one thing: `turns` and
-  `spans` hold the first 10,000 spans in time order, while `span_count` and every
+  `spansTruncated` is then `true`, and it means exactly one thing: `turns` and
+  `spans` hold the first 10,000 spans in time order, while `spanCount` and every
   count beside it are still the whole trace inside your window. So the two
   together tell you how much of the trace you are looking at, rather than leaving
   you to guess.

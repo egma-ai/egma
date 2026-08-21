@@ -1,40 +1,26 @@
-/**
- * The runs on the platform, over egma's public HTTP API.
- *
- * The same seam the tests and the agents sit behind, and it is a seam rather
- * than a convenience: pointing this at a real instance is one address and one
- * key, and nothing in this file, in the follower above it, or in the screen
- * above that knows which egma answered.
- *
- * Three things happen here. A run is started, and the request **pins the
- * versions it will execute** — the whole reason a result from last week still
- * says what it ran. The run is read back, header and simulations together.
- * And the changes since a point are fetched, in order, which is how a terminal
- * follows a run without holding a socket open: a cursor can be asked again
- * from where it was, so a follower never misses a change and never sees one
- * twice.
- *
- * One shape of answer is a value rather than an exception, because it is an
- * ordinary thing that happens: **the platform refusing to start the run**. A
- * connection kind whose adapter has not shipped is the case that matters, and
- * the platform's own sentence is carried up untouched — a terminal that
- * paraphrased it would be inventing an explanation for a decision it did not
- * make.
- */
+/** Start runs, read their snapshots, and follow their ordered events. */
 
 import { randomUUID } from "node:crypto";
 
+import {
+  createRun,
+  getRun as getRunRequest,
+  listRunEvents,
+  type CreateRunResponse,
+  type GetRunResponse,
+  type ListRunEventsResponse,
+} from "@egma/platform-api/client";
+
+import {
+  platformClient,
+  platformRefusalMessage,
+  platformResponse,
+  platformText,
+} from "./client.ts";
 import type { Fetch } from "./device-flow.ts";
 import { PlatformRefusedError } from "./refused.ts";
 import type { SignedIn } from "./signed-in.ts";
-import { ask, saidBy, text, textList } from "./wire.ts";
 
-/**
- * How far one simulation got.
- *
- * Not a verdict. This says whether there was anything to judge at all; the
- * verdict says what the graders made of it.
- */
 export type SimulationStatus =
   | "queued"
   | "claimed"
@@ -44,32 +30,9 @@ export type SimulationStatus =
   | "canceled"
   | "skipped";
 
-/**
- * What the graders made of a simulation.
- *
- * Four, and never three: `skipped` and `errored` are their own answers, and a
- * test that could not run is not a test that failed. Nothing in egma folds
- * either of them into `failed`, on a screen or on a line.
- */
 export type Verdict = "passed" | "failed" | "skipped" | "errored";
-
 export type RunStatus = "pending" | "running" | "completed" | "canceled";
 
-const SIMULATION_STATUSES: readonly string[] = [
-  "queued",
-  "claimed",
-  "running",
-  "completed",
-  "failed",
-  "canceled",
-  "skipped",
-];
-
-const VERDICTS: readonly string[] = ["passed", "failed", "skipped", "errored"];
-
-const RUN_STATUSES: readonly string[] = ["pending", "running", "completed", "canceled"];
-
-/** One test executed once, inside a run. */
 export type PlatformSimulation = {
   readonly id: string;
   readonly position: number;
@@ -78,7 +41,6 @@ export type PlatformSimulation = {
   readonly personaName: string;
   readonly status: SimulationStatus;
   readonly verdict: Verdict | null;
-  /** What the platform said about how it ended, or `null`. */
   readonly reason: string | null;
 };
 
@@ -89,15 +51,12 @@ export type PlatformRun = {
   readonly connectionId: string;
   readonly productLabel: string;
   readonly modality: string;
-  /** The versions this run executed against, exactly as they were pinned. */
   readonly testVersionIds: readonly string[];
   readonly expectedSimulationCount: number;
-  /** Where a person opens what happened. No token ever rides it. */
   readonly resultsUrl: string;
   readonly simulations: readonly PlatformSimulation[];
 };
 
-/** One change to a run, in the order it happened. */
 export type RunEvent =
   | {
       readonly kind: "simulation";
@@ -111,214 +70,158 @@ export type RunEvent =
     }
   | { readonly kind: "run"; readonly seq: number; readonly status: RunStatus };
 
-/** A page of changes, and where to ask from next. */
 export type RunEvents = {
   readonly events: readonly RunEvent[];
   readonly next: number;
-  /** True once execution has finished; grader verdicts can still arrive in the run snapshot. */
   readonly done: boolean;
 };
 
-/** What starting a run came back with. */
 export type StartRunAnswer =
   | { readonly kind: "started"; readonly run: PlatformRun }
-  /**
-   * The platform would not start it, and said why in its own words. Carried up
-   * exactly as it arrived and printed exactly as it is carried.
-   */
   | { readonly kind: "refused"; readonly reason: string };
 
-/** What a run is asked for. */
 export type NewRun = {
   readonly agentId: string;
   readonly connectionId: string;
-  /** The versions to execute, pinned — never "whatever is current then". */
   readonly testVersionIds: readonly string[];
-  /** Something to recognise this run by in a list. */
   readonly label?: string;
-  /**
-   * The word this attempt is remembered by, so a retried request starts one
-   * run.
-   *
-   * Left out, one is minted for this call. A terminal that dials a real agent
-   * and loses the answer on the way back must never produce a second
-   * conversation, and the platform can only prevent that if the client names
-   * the attempt — nothing on the server can tell a repeat from a new request.
-   * A caller that retries the same start itself passes the same word twice.
-   */
   readonly idempotencyKey?: string;
 };
 
-/** A whole number off the wire, or zero for anything that is not one. */
-function whole(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
-}
+type RunBody = CreateRunResponse | GetRunResponse;
 
-/**
- * A word off the wire, or the honest fallback for one egma has never heard of.
- *
- * A status this build does not know is not a status it may act on, and
- * guessing at it would be the one thing worse than saying so — so an unknown
- * simulation status reads as `queued` (nothing has happened that this build
- * can describe) and an unknown verdict reads as none at all.
- */
-function statusOf(value: unknown): SimulationStatus {
-  const said = text(value);
-  return (SIMULATION_STATUSES.includes(said) ? said : "queued") as SimulationStatus;
-}
-
-function verdictOf(value: unknown): Verdict | null {
-  const said = text(value);
-  return VERDICTS.includes(said) ? (said as Verdict) : null;
-}
-
-function runStatusOf(value: unknown): RunStatus {
-  const said = text(value);
-  return (RUN_STATUSES.includes(said) ? said : "pending") as RunStatus;
-}
-
-function simulationFrom(body: Record<string, unknown>): PlatformSimulation {
+function simulationFrom(
+  simulation: RunBody["simulations"][number],
+): PlatformSimulation {
   return {
-    id: text(body.id),
-    position: whole(body.position),
-    testName: text(body.test_name),
-    testVersionId: text(body.test_version_id),
-    personaName: text(body.persona_name),
-    status: statusOf(body.status),
-    verdict: verdictOf(body.verdict),
-    reason: text(body.reason) === "" ? null : text(body.reason),
+    id: platformText(simulation.id),
+    position: simulation.position,
+    testName: simulation.testName === null ? "" : platformText(simulation.testName),
+    testVersionId:
+      simulation.testVersionId === null ? "" : platformText(simulation.testVersionId),
+    personaName: platformText(simulation.personaName),
+    status: simulation.status,
+    verdict: simulation.verdict,
+    reason: simulation.reason === null ? null : platformText(simulation.reason),
   };
 }
 
-function runFrom(body: Record<string, unknown>): PlatformRun {
-  const simulations = Array.isArray(body.simulations) ? body.simulations : [];
+function runFrom(body: RunBody): PlatformRun {
   return {
-    id: text(body.id),
-    status: runStatusOf(body.status),
-    agentId: text(body.agent_id),
-    connectionId: text(body.connection_id),
-    productLabel: text(body.product_label),
-    modality: text(body.modality),
-    testVersionIds: textList(body.test_versions),
-    expectedSimulationCount: whole(body.expected_simulation_count),
-    resultsUrl: text(body.results_url),
-    simulations: simulations.flatMap((entry) =>
-      typeof entry === "object" && entry !== null
-        ? [simulationFrom(entry as Record<string, unknown>)]
-        : [],
-    ),
+    id: platformText(body.id),
+    status: body.status,
+    agentId: platformText(body.agentId),
+    connectionId: platformText(body.connectionId),
+    productLabel: platformText(body.productLabel),
+    modality: body.modality,
+    testVersionIds: body.testVersions
+      .map(platformText)
+      .filter((id) => id !== ""),
+    expectedSimulationCount: body.expectedSimulationCount,
+    resultsUrl: platformText(body.resultsUrl),
+    simulations: body.simulations.map(simulationFrom),
   };
 }
 
-function eventFrom(body: Record<string, unknown>): RunEvent | null {
-  const seq = whole(body.seq);
-  if (text(body.kind) === "run") {
-    return { kind: "run", seq, status: runStatusOf(body.status) };
+function eventFrom(
+  event: ListRunEventsResponse["events"][number],
+): RunEvent {
+  if (event.kind === "run") {
+    return { kind: "run", seq: event.seq, status: event.status };
   }
-  if (text(body.kind) !== "simulation") return null;
   return {
     kind: "simulation",
-    seq,
-    simulationId: text(body.simulation_id),
-    testName: text(body.test_name),
-    personaName: text(body.persona_name),
-    status: statusOf(body.status),
-    verdict: verdictOf(body.verdict),
-    reason: text(body.reason) === "" ? null : text(body.reason),
+    seq: event.seq,
+    simulationId: platformText(event.simulationId),
+    testName: event.testName === null ? "" : platformText(event.testName),
+    personaName: event.personaName === null ? "" : platformText(event.personaName),
+    status: event.status,
+    verdict: event.verdict,
+    reason: event.reason === null ? null : platformText(event.reason),
   };
 }
 
-/**
- * Start a run, pinning the versions it will execute.
- *
- * A refusal is an answer and not an exception. The one that matters is a
- * connection kind egma has no adapter for: it can never be conducted, so it is
- * refused here at creation rather than left queued, and the sentence comes back
- * whole for the terminal to print as it stands.
- */
+/** Start a run and pin the exact test versions it executes. */
 export async function startRun(
   signedIn: SignedIn,
   input: NewRun,
   fetchImpl?: Fetch,
 ): Promise<StartRunAnswer> {
-  const { response, body } = await ask({
-    signedIn,
-    path: "/api/runs",
-    method: "POST",
-    body: {
-      agent: input.agentId,
-      connection: input.connectionId,
-      test_versions: [...input.testVersionIds],
-      // Node's own, deliberately, and not `newId` from `@egma/ids`. That
-      // package is private and never published, so an import of it survives
-      // into `dist/` — which this package ships unbundled — and `npx @egma/cli`
-      // would fail to resolve it at the moment somebody started a run. The
-      // build caught it here only because nothing built the package first; the
-      // published crash would have had no such warning.
-      //
-      // Nothing wants an egma-shaped id anyway. A key has one job: to be
-      // different from every other invocation's, so a retry of *this* start is
-      // told apart from a new one.
-      idempotency_key: input.idempotencyKey ?? `run_${randomUUID()}`,
+  const answer = await createRun(
+    {
+      agentId: input.agentId,
+      connectionId: input.connectionId,
+      testVersionIds: [...input.testVersionIds],
+      idempotencyKey: input.idempotencyKey ?? `run_${randomUUID()}`,
       ...(input.label === undefined ? {} : { label: input.label }),
     },
-    ...(fetchImpl === undefined ? {} : { fetchImpl }),
-  });
-
-  // Everything the platform decided about this run rather than about this
-  // request: it will not conduct it, and it said why.
+    { client: platformClient(signedIn, fetchImpl) },
+  );
+  const response = platformResponse(answer, signedIn.url);
   if (response.status === 422 || response.status === 409) {
-    return { kind: "refused", reason: saidBy(body, response.status) };
+    return {
+      kind: "refused",
+      reason: platformRefusalMessage(answer.error, response.status),
+    };
   }
-  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
-
-  return { kind: "started", run: runFrom(body) };
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
+  return { kind: "started", run: runFrom(answer.data) };
 }
 
-/** One run as it now stands, header and simulations, or `null`. */
+/** One run as it now stands, or null when it does not exist. */
 export async function getRun(
   signedIn: SignedIn,
   runId: string,
   fetchImpl?: Fetch,
   signal?: AbortSignal,
 ): Promise<PlatformRun | null> {
-  const { response, body } = await ask({
-    signedIn,
-    path: `/api/runs/${encodeURIComponent(runId)}`,
-    ...(fetchImpl === undefined ? {} : { fetchImpl }),
-    ...(signal === undefined ? {} : { signal }),
-  });
-
+  const answer = await getRunRequest(
+    { runId },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
   if (response.status === 404) return null;
-  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
-  return runFrom(body);
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
+  return runFrom(answer.data);
 }
 
-/** Everything that has changed since `after`, in the order it happened. */
+/** Everything that changed after one event sequence number. */
 export async function runEvents(
   signedIn: SignedIn,
   runId: string,
   after: number,
   options: { readonly fetchImpl?: Fetch; readonly signal?: AbortSignal } = {},
 ): Promise<RunEvents> {
-  const { response, body } = await ask({
-    signedIn,
-    path: `/api/runs/${encodeURIComponent(runId)}/events?after=${String(after)}`,
-    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  });
-
-  if (!response.ok) throw new PlatformRefusedError(response.status, saidBy(body, response.status));
-
-  const events = (Array.isArray(body.events) ? body.events : []).flatMap((entry) => {
-    if (typeof entry !== "object" || entry === null) return [];
-    const event = eventFrom(entry as Record<string, unknown>);
-    return event === null ? [] : [event];
-  });
-
+  const answer = await listRunEvents(
+    { runId, after },
+    {
+      client: platformClient(signedIn, options.fetchImpl),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
   return {
-    events,
-    next: whole(body.next) === 0 ? after : whole(body.next),
-    done: body.done === true,
+    events: answer.data.events.map(eventFrom),
+    next: answer.data.next === 0 ? after : answer.data.next,
+    done: answer.data.done,
   };
 }

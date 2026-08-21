@@ -55,18 +55,18 @@ function request(
 }
 
 const RETELL = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
 } as const;
 
 const PHONE = {
-  agent_platform: null,
-  connection_kind: "phone_number",
-  access_variant: "phone_number.public_e164",
+  agentPlatform: null,
+  connectionKind: "phone_number",
+  accessVariant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
 } as const;
@@ -111,7 +111,7 @@ async function aCustomerWithRuns(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await request("POST", "/api/agents", key, {
+  const registered = await request("POST", "/v1/agents", key, {
     name: "Front desk",
     connection: options.connection ?? RETELL,
   });
@@ -131,18 +131,18 @@ async function aCustomerWithRuns(
     personas: readonly string[],
     extra: Record<string, unknown> = {},
   ): Promise<{ testId: string; versionId: string }> => {
-    const created = await request("POST", "/api/tests", key, {
+    const created = await request("POST", "/v1/tests", key, {
       name,
       scenario:
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
+      expectedBehaviors: ["confirms the new time back before finishing"],
       personas: [...personas],
       ...extra,
     });
     expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
     return {
       testId: String(created.body.id),
-      versionId: String(created.body.version_id),
+      versionId: String(created.body.versionId),
     };
   };
 
@@ -154,7 +154,7 @@ async function aCustomerWithRuns(
     reschedules: await push("Reschedules", ["Impatient Rita"]),
     cancels: await push("Cancels", ["Impatient Rita", "Deliberate Sam"]),
     needsAudio: await push("Reads a card number back", ["Impatient Rita"], {
-      required_capabilities: ["raw_audio"],
+      requiredCapabilities: ["raw_audio"],
     }),
   };
 }
@@ -164,11 +164,11 @@ async function startRunOver(
   versionIds: readonly string[],
   label?: string,
 ): Promise<string> {
-  const started = await request("POST", "/api/runs", ready.key, {
-    agent: ready.agentId,
-    connection: ready.connectionId,
-    test_versions: [...versionIds],
-    idempotency_key: newId("run"),
+  const started = await request("POST", "/v1/runs", ready.key, {
+    agentId: ready.agentId,
+    connectionId: ready.connectionId,
+    testVersionIds: [...versionIds],
+    idempotencyKey: newId("run"),
     ...(label === undefined ? {} : { label }),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -183,18 +183,18 @@ describe("the run history", () => {
     const first = await startRunOver(ready, [ready.reschedules.versionId]);
     const second = await startRunOver(ready, [ready.reschedules.versionId]);
 
-    const page = await request("GET", "/api/runs?limit=1", ready.key);
+    const page = await request("GET", "/v1/runs?pageSize=1", ready.key);
     expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
-    const items = page.body.items as Record<string, unknown>[];
+    const items = page.body.runs as Record<string, unknown>[];
     expect(items.map((one) => one.id)).toEqual([second]);
-    expect(page.body.next_cursor).toBe(second);
+    expect(page.body.nextPageToken).toBe(second);
 
     const next = await request(
       "GET",
-      `/api/runs?limit=1&cursor=${String(page.body.next_cursor)}`,
+      `/v1/runs?pageSize=1&pageToken=${String(page.body.nextPageToken)}`,
       ready.key,
     );
-    expect((next.body.items as Record<string, unknown>[]).map((one) => one.id)).toEqual([
+    expect((next.body.runs as Record<string, unknown>[]).map((one) => one.id)).toEqual([
       first,
     ]);
   });
@@ -223,18 +223,18 @@ describe("the run history", () => {
     if (only === undefined) throw new Error("the run should hand out one");
     await failSimulation(auth, only.id, CLAIMANT, { reason: "not_answered" });
 
-    const read = await request("GET", `/api/runs/${runId}`, ready.key);
+    const read = await request("GET", `/v1/runs/${runId}`, ready.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
 
     // The machinery finished. Nothing about the agent was established.
     expect(read.body).toMatchObject({
       status: "completed",
-      failed_count: 1,
-      skipped_count: 1,
-      completed_count: 0,
-      canceled_count: 0,
+      failedCount: 1,
+      skippedCount: 1,
+      completedCount: 0,
+      canceledCount: 0,
     });
-    expect(read.body.simulation_counts).toMatchObject({ failed: 1, skipped: 1 });
+    expect(read.body.simulationCounts).toMatchObject({ failed: 1, skipped: 1 });
 
     const simulations = read.body.simulations as Record<string, unknown>[];
     const failed = simulations.find((one) => one.status === "failed");
@@ -246,21 +246,21 @@ describe("the run history", () => {
     // Egma declined to try: `skipped`, no grading work, and a named reason.
     expect(skipped?.verdict).toBe("skipped");
     expect(skipped?.grading).toBe("not_required");
-    expect(skipped?.skip_reason).toBe("required_capability_unknown");
-    expect(skipped?.skipped_capabilities).toEqual(["raw_audio"]);
+    expect(skipped?.skipReason).toBe("required_capability_unknown");
+    expect(skipped?.skippedCapabilities).toEqual(["raw_audio"]);
 
     // And the run's own verdict is neither of those words and is not `failed`.
     expect(read.body.verdict).toBe("errored");
 
     // The row that opens this page says exactly the same.
-    const list = await request("GET", "/api/runs", ready.key);
-    const row = (list.body.items as Record<string, unknown>[]).find(
+    const list = await request("GET", "/v1/runs", ready.key);
+    const row = (list.body.runs as Record<string, unknown>[]).find(
       (one) => one.id === runId,
     );
     expect(row).toMatchObject({
       status: "completed",
       verdict: "errored",
-      simulation_counts: { failed: 1, skipped: 1 },
+      simulationCounts: { failed: 1, skipped: 1 },
     });
   });
 
@@ -268,13 +268,13 @@ describe("the run history", () => {
     const ready = await aCustomerWithRuns("run_history_pending");
     const runId = await startRunOver(ready, [ready.reschedules.versionId]);
 
-    const list = await request("GET", "/api/runs", ready.key);
-    const row = (list.body.items as Record<string, unknown>[]).find(
+    const list = await request("GET", "/v1/runs", ready.key);
+    const row = (list.body.runs as Record<string, unknown>[]).find(
       (one) => one.id === runId,
     );
     // Pending grading is not a failure and is not a pass. It is nothing yet.
     expect(row?.verdict).toBeNull();
-    expect(row?.graded_count).toBe(0);
+    expect(row?.gradedCount).toBe(0);
     expect(row?.status).toBe("pending");
   });
 
@@ -286,16 +286,16 @@ describe("the run history", () => {
     const onCancels = await startRunOver(ready, [ready.cancels.versionId]);
 
     const ids = async (query: string): Promise<string[]> => {
-      const page = await request("GET", `/api/runs?${query}`, ready.key);
+      const page = await request("GET", `/v1/runs?${query}`, ready.key);
       expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
-      return (page.body.items as Record<string, unknown>[]).map((one) =>
+      return (page.body.runs as Record<string, unknown>[]).map((one) =>
         String(one.id),
       );
     };
 
-    expect(await ids(`agent=${ready.agentId}`)).toContain(onReschedules);
-    expect(await ids(`connection=${ready.connectionId}`)).toContain(onCancels);
-    expect(await ids(`test=${ready.cancels.testId}`)).toEqual([onCancels]);
+    expect(await ids(`agentId=${ready.agentId}`)).toContain(onReschedules);
+    expect(await ids(`connectionId=${ready.connectionId}`)).toContain(onCancels);
+    expect(await ids(`testId=${ready.cancels.testId}`)).toEqual([onCancels]);
     expect(await ids("status=pending")).toContain(onReschedules);
     expect(await ids("status=canceled")).toEqual([]);
     expect(await ids("since=2999-01-01T00:00:00.000Z")).toEqual([]);
@@ -309,11 +309,11 @@ describe("the run history", () => {
     const ready = await aCustomerWithRuns("run_history_bad_filters");
 
     const bad = async (query: string): Promise<Answer> =>
-      request("GET", `/api/runs?${query}`, ready.key);
+      request("GET", `/v1/runs?${query}`, ready.key);
 
-    const agent = await bad("agent=tst_not_an_agent");
+    const agent = await bad("agentId=tst_not_an_agent");
     expect(agent.statusCode).toBe(400);
-    expect(String(agent.body.message)).toContain("is not a agent id");
+    expect(String(agent.body.message)).toContain("is not a agentId id");
 
     const status = await bad("status=finished");
     expect(status.statusCode).toBe(400);
@@ -329,7 +329,7 @@ describe("the run history", () => {
     expect(since.statusCode).toBe(400);
     expect(String(since.body.message)).toContain("RFC 3339");
 
-    const cursor = await bad("cursor=not-a-run");
+    const cursor = await bad("pageToken=not-a-run");
     expect(cursor.statusCode).toBe(422);
     expect(cursor.body.error).toBe("invalid_cursor");
   });
@@ -344,16 +344,16 @@ describe("the run history", () => {
       "quentin@acme.example",
       "viewer",
     );
-    const seen = await request("GET", "/api/runs", quentin.secret);
+    const seen = await request("GET", "/v1/runs", quentin.secret);
     expect(seen.statusCode).toBe(200);
     expect(
-      (seen.body.items as Record<string, unknown>[]).map((one) => one.id),
+      (seen.body.runs as Record<string, unknown>[]).map((one) => one.id),
     ).toContain(runId);
 
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
-    const theirs = await request("GET", "/api/runs", grace.secret);
+    const theirs = await request("GET", "/v1/runs", grace.secret);
     expect(theirs.statusCode).toBe(200);
-    expect(theirs.body.items).toEqual([]);
+    expect(theirs.body.runs).toEqual([]);
   });
 });
 
@@ -366,32 +366,32 @@ describe("one run, read whole", () => {
       "Nightly smoke",
     );
 
-    const read = await request("GET", `/api/runs/${runId}`, ready.key);
+    const read = await request("GET", `/v1/runs/${runId}`, ready.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
 
-    expect(read.body.test_versions).toEqual([ready.reschedules.versionId]);
-    expect(read.body.connection_snapshot).toMatchObject({
-      agent_platform: "retell",
-      connection_kind: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+    expect(read.body.testVersions).toEqual([ready.reschedules.versionId]);
+    expect(read.body.connectionSnapshot).toMatchObject({
+      agentPlatform: "retell",
+      connectionKind: "retell_chat_api",
+      accessVariant: "retell_chat_api.api_key",
       modality: "chat",
     });
     // Nothing a credential could ride in, and there never will be.
-    expect(JSON.stringify(read.body.connection_snapshot)).not.toContain(
+    expect(JSON.stringify(read.body.connectionSnapshot)).not.toContain(
       "retell-secret",
     );
-    expect(read.body.mock_tools).toMatchObject({ defaults: [], overrides: {} });
+    expect(read.body.mockTools).toMatchObject({ defaults: [], overrides: {} });
     expect(read.body.agent).toMatchObject({ name: "Front desk", archived: false });
     expect(read.body.connection).toMatchObject({ archived: false });
-    expect(read.body.retry_of_run_id).toBeNull();
+    expect(read.body.retryOfRunId).toBeNull();
 
-    const plan = read.body.grading_plan as Record<string, unknown>;
+    const plan = read.body.gradingPlan as Record<string, unknown>;
     expect(plan.state).toBe("run_start");
-    expect(plan.captured_at).not.toBeNull();
+    expect(plan.capturedAt).not.toBeNull();
     const groups = plan.groups as Record<string, unknown>[];
     expect(groups[0]).toMatchObject({
       tag: "version",
-      test_version_id: ready.reschedules.versionId,
+      testVersionId: ready.reschedules.versionId,
     });
     const items = groups[0]?.items as Record<string, unknown>[];
     // The expected-behaviors grader is a running copy of a predefined library
@@ -399,7 +399,7 @@ describe("one run, read whole", () => {
     // item with an id of its own, not as a rowless `built_in` sentinel.
     expect(items.some((one) => one.kind === "authored")).toBe(true);
     expect(
-      items.some((one) => one.library_id === PREDEFINED_GRADERS.expectedBehaviors),
+      items.some((one) => one.libraryId === PREDEFINED_GRADERS.expectedBehaviors),
     ).toBe(true);
     // A plan names a credential reference and never a key.
     expect(JSON.stringify(plan)).not.toContain("sk-");
@@ -417,11 +417,11 @@ describe("one run, read whole", () => {
     await archiveConnection(auth, ready.agentId, ready.connectionId);
     await archiveAgent(auth, ready.agentId);
 
-    const read = await request("GET", `/api/runs/${runId}`, ready.key);
+    const read = await request("GET", `/v1/runs/${runId}`, ready.key);
     expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
     expect(read.body.agent).toMatchObject({ name: "Front desk", archived: true });
     expect(read.body.connection).toMatchObject({ archived: true });
-    expect(read.body.test_versions).toEqual([ready.reschedules.versionId]);
+    expect(read.body.testVersions).toEqual([ready.reschedules.versionId]);
     // Archiving what a run went over cancels the run rather than deleting it.
     expect(read.body.status).toBe("canceled");
   });
@@ -436,20 +436,20 @@ describe("retrying a run", () => {
       "Nightly smoke",
     );
 
-    const again = await request("POST", `/api/runs/${earlier}/retry`, ready.key, {
-      idempotency_key: newId("run"),
+    const again = await request("POST", `/v1/runs/${earlier}/retry`, ready.key, {
+      idempotencyKey: newId("run"),
     });
     expect(again.statusCode, JSON.stringify(again.body)).toBe(201);
     expect(again.body.id).not.toBe(earlier);
-    expect(again.body.retry_of_run_id).toBe(earlier);
-    expect(again.body.agent_id).toBe(ready.agentId);
-    expect(again.body.connection_id).toBe(ready.connectionId);
-    expect(again.body.test_versions).toEqual([ready.reschedules.versionId]);
+    expect(again.body.retryOfRunId).toBe(earlier);
+    expect(again.body.agentId).toBe(ready.agentId);
+    expect(again.body.connectionId).toBe(ready.connectionId);
+    expect(again.body.testVersions).toEqual([ready.reschedules.versionId]);
 
     // The earlier run is not reopened and not changed.
-    const before = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const before = await request("GET", `/v1/runs/${earlier}`, ready.key);
     expect(before.body.status).toBe("pending");
-    expect(before.body.retry_of_run_id).toBeNull();
+    expect(before.body.retryOfRunId).toBeNull();
   });
 
   /**
@@ -462,16 +462,16 @@ describe("retrying a run", () => {
     const ready = await aCustomerWithRuns("run_history_retry_body");
     const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
 
-    const started = await request("POST", "/api/runs", ready.key, {
-      agent: ready.agentId,
-      connection: ready.connectionId,
-      test_versions: [ready.reschedules.versionId],
-      idempotency_key: newId("run"),
-      retry_of_run_id: earlier,
+    const started = await request("POST", "/v1/runs", ready.key, {
+      agentId: ready.agentId,
+      connectionId: ready.connectionId,
+      testVersionIds: [ready.reschedules.versionId],
+      idempotencyKey: newId("run"),
+      retryOfRunId: earlier,
       retry_of: earlier,
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.retry_of_run_id).toBeNull();
+    expect(started.body.retryOfRunId).toBeNull();
   });
 
   it("refuses rather than substituting when the connection is no longer active", async () => {
@@ -483,9 +483,9 @@ describe("retrying a run", () => {
 
     const refused = await request(
       "POST",
-      `/api/runs/${earlier}/retry`,
+      `/v1/runs/${earlier}/retry`,
       ready.key,
-      { idempotency_key: newId("run") },
+      { idempotencyKey: newId("run") },
     );
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(409);
     expect(refused.body.error).toBe("retry_unavailable");
@@ -496,9 +496,9 @@ describe("retrying a run", () => {
     );
 
     // Nothing was started. The refusal is the whole of what happened.
-    const list = await request("GET", "/api/runs", ready.key);
-    const retries = (list.body.items as Record<string, unknown>[]).filter(
-      (one) => one.retry_of_run_id !== null,
+    const list = await request("GET", "/v1/runs", ready.key);
+    const retries = (list.body.runs as Record<string, unknown>[]).filter(
+      (one) => one.retryOfRunId !== null,
     );
     expect(retries).toEqual([]);
   });
@@ -509,13 +509,13 @@ describe("retrying a run", () => {
 
     // A second agent to hold the link, so the test keeps one and the only thing
     // that changed is the pairing this run used.
-    const elsewhere = await request("POST", "/api/agents", ready.key, {
+    const elsewhere = await request("POST", "/v1/agents", ready.key, {
       name: "Somewhere else",
     });
     const other = String((elsewhere.body.agent as { id: string }).id);
     const relinked = await request(
       "POST",
-      `/api/tests/${ready.cancels.testId}/agents`,
+      `/v1/tests/${ready.cancels.testId}/agents`,
       ready.key,
       { agents: [other] },
     );
@@ -523,9 +523,9 @@ describe("retrying a run", () => {
 
     const refused = await request(
       "POST",
-      `/api/runs/${earlier}/retry`,
+      `/v1/runs/${earlier}/retry`,
       ready.key,
-      { idempotency_key: newId("run") },
+      { idempotencyKey: newId("run") },
     );
     expect(refused.statusCode).toBe(409);
     expect(refused.body.error).toBe("retry_unavailable");
@@ -541,7 +541,7 @@ describe("retrying a run", () => {
 
     const without = await request(
       "POST",
-      `/api/runs/${earlier}/retry`,
+      `/v1/runs/${earlier}/retry`,
       ready.key,
       {},
     );
@@ -557,11 +557,11 @@ describe("retrying a run", () => {
 
     // And the same key twice answers the same run rather than dialing again.
     const key = newId("run");
-    const first = await request("POST", `/api/runs/${earlier}/retry`, ready.key, {
-      idempotency_key: key,
+    const first = await request("POST", `/v1/runs/${earlier}/retry`, ready.key, {
+      idempotencyKey: key,
     });
-    const second = await request("POST", `/api/runs/${earlier}/retry`, ready.key, {
-      idempotency_key: key,
+    const second = await request("POST", `/v1/runs/${earlier}/retry`, ready.key, {
+      idempotencyKey: key,
     });
     expect(second.body.id).toBe(first.body.id);
   });
@@ -578,18 +578,18 @@ describe("retrying a run", () => {
     );
     const refused = await request(
       "POST",
-      `/api/runs/${earlier}/retry`,
+      `/v1/runs/${earlier}/retry`,
       quentin.secret,
-      { idempotency_key: newId("run") },
+      { idempotencyKey: newId("run") },
     );
     expect(refused.statusCode).toBe(403);
 
     const grace = await signUp(api.app, "grace@globex.example", "Globex");
     const stranger = await request(
       "POST",
-      `/api/runs/${earlier}/retry`,
+      `/v1/runs/${earlier}/retry`,
       grace.secret,
-      { idempotency_key: newId("run") },
+      { idempotencyKey: newId("run") },
     );
     expect(stranger.statusCode).toBe(404);
   });
@@ -601,7 +601,7 @@ describe("running one simulation again", () => {
     const earlier = await startRunOver(ready, [ready.cancels.versionId]);
     const canceled = await request(
       "POST",
-      `/api/runs/${earlier}/cancel`,
+      `/v1/runs/${earlier}/cancel`,
       ready.key,
       {},
     );
@@ -613,27 +613,27 @@ describe("running one simulation again", () => {
 
     const again = await request(
       "POST",
-      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`,
+      `/v1/simulations/${String(source.id)}/rerun?projectId=${ready.ada.projectId}`,
       ready.key,
       {
         label: "Deliberate Sam again",
-        idempotency_key: newId("run"),
+        idempotencyKey: newId("run"),
       },
     );
     expect(again.statusCode, JSON.stringify(again.body)).toBe(201);
     expect(again.body).toMatchObject({
       label: "Deliberate Sam again",
-      retry_of_run_id: earlier,
-      expected_simulation_count: 1,
+      retryOfRunId: earlier,
+      expectedSimulationCount: 1,
     });
     expect(again.body.simulations).toHaveLength(1);
     expect((again.body.simulations as Record<string, unknown>[])[0]).toMatchObject({
-      test_version_id: ready.cancels.versionId,
-      persona_id: source.persona_id,
+      testVersionId: ready.cancels.versionId,
+      personaId: source.personaId,
       position: 1,
     });
 
-    const original = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const original = await request("GET", `/v1/runs/${earlier}`, ready.key);
     expect(original.body.status).toBe("canceled");
     expect(original.body.simulations).toHaveLength(2);
   });
@@ -641,14 +641,14 @@ describe("running one simulation again", () => {
   it("requires a run name and idempotency key, and waits for a terminal source", async () => {
     const ready = await aCustomerWithRuns("simulation_rerun_input");
     const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
-    const read = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const read = await request("GET", `/v1/runs/${earlier}`, ready.key);
     const source = (read.body.simulations as Record<string, unknown>[])[0];
     if (source === undefined) throw new Error("the source simulation is needed");
     const path =
-      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`;
+      `/v1/simulations/${String(source.id)}/rerun?projectId=${ready.ada.projectId}`;
 
     const unnamed = await request("POST", path, ready.key, {
-      idempotency_key: newId("run"),
+      idempotencyKey: newId("run"),
     });
     expect(unnamed.statusCode).toBe(422);
 
@@ -663,7 +663,7 @@ describe("running one simulation again", () => {
 
     const active = await request("POST", path, ready.key, {
       label: "Too early",
-      idempotency_key: newId("run"),
+      idempotencyKey: newId("run"),
     });
     expect(active.statusCode).toBe(409);
     expect(active.body.error).toBe("simulation_rerun_unavailable");
@@ -674,20 +674,20 @@ describe("running one simulation again", () => {
   it("answers legacy simulation evidence as unprocessable rather than a conflict", async () => {
     const ready = await aCustomerWithRuns("simulation_rerun_legacy");
     const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
-    const read = await request("GET", `/api/runs/${earlier}`, ready.key);
+    const read = await request("GET", `/v1/runs/${earlier}`, ready.key);
     const source = (read.body.simulations as Record<string, unknown>[])[0];
     if (source === undefined) throw new Error("the source simulation is needed");
     await api.database.sql(
       "update simulation set test_id = null, test_version_id = null where id = $1",
       [String(source.id)],
     );
-    await request("POST", `/api/runs/${earlier}/cancel`, ready.key, {});
+    await request("POST", `/v1/runs/${earlier}/cancel`, ready.key, {});
 
     const refused = await request(
       "POST",
-      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`,
+      `/v1/simulations/${String(source.id)}/rerun?projectId=${ready.ada.projectId}`,
       ready.key,
-      { label: "Legacy source", idempotency_key: newId("run") },
+      { label: "Legacy source", idempotencyKey: newId("run") },
     );
     expect(refused.statusCode).toBe(422);
     expect(refused.body.error).toBe("unprocessable");
@@ -702,7 +702,7 @@ describe("running one simulation again", () => {
     const earlier = await startRunOver(ready, [ready.cancels.versionId]);
     const canceled = await request(
       "POST",
-      `/api/runs/${earlier}/cancel`,
+      `/v1/runs/${earlier}/cancel`,
       ready.key,
       {},
     );
@@ -718,9 +718,9 @@ describe("running one simulation again", () => {
     const rerun = async (source: Record<string, unknown>, label: string) =>
       request(
         "POST",
-        `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`,
+        `/v1/simulations/${String(source.id)}/rerun?projectId=${ready.ada.projectId}`,
         ready.key,
-        { label, idempotency_key: key },
+        { label, idempotencyKey: key },
       );
     const first = await rerun(firstSource, "First source");
     const repeated = await rerun(firstSource, "First source");
@@ -739,7 +739,7 @@ describe("running one simulation again", () => {
     const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
     const canceled = await request(
       "POST",
-      `/api/runs/${earlier}/cancel`,
+      `/v1/runs/${earlier}/cancel`,
       ready.key,
       {},
     );
@@ -747,11 +747,11 @@ describe("running one simulation again", () => {
     if (source === undefined) throw new Error("the source simulation is needed");
 
     const path =
-      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`;
+      `/v1/simulations/${String(source.id)}/rerun?projectId=${ready.ada.projectId}`;
     const idempotencyKey = newId("run");
     const first = await request("POST", path, ready.key, {
       label: "Phone source again",
-      idempotency_key: idempotencyKey,
+      idempotencyKey: idempotencyKey,
     });
     expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
 
@@ -762,7 +762,7 @@ describe("running one simulation again", () => {
 
     const repeated = await request("POST", path, ready.key, {
       label: "Phone source again",
-      idempotency_key: idempotencyKey,
+      idempotencyKey: idempotencyKey,
     });
     expect(repeated.statusCode, JSON.stringify(repeated.body)).toBe(201);
     expect(repeated.body.id).toBe(first.body.id);
@@ -771,7 +771,7 @@ describe("running one simulation again", () => {
     // the carrier is unavailable.
     const newAttempt = await request("POST", path, ready.key, {
       label: "A genuinely new phone run",
-      idempotency_key: newId("run"),
+      idempotencyKey: newId("run"),
     });
     expect(newAttempt.statusCode).toBe(422);
     expect(newAttempt.body.error).toBe("phone_setup_required");
@@ -782,12 +782,12 @@ describe("running one simulation again", () => {
   it("is unavailable to a viewer and reveals no other customer's simulation", async () => {
     const ready = await aCustomerWithRuns("simulation_rerun_roles");
     const earlier = await startRunOver(ready, [ready.reschedules.versionId]);
-    await request("POST", `/api/runs/${earlier}/cancel`, ready.key, {});
-    const read = await request("GET", `/api/runs/${earlier}`, ready.key);
+    await request("POST", `/v1/runs/${earlier}/cancel`, ready.key, {});
+    const read = await request("GET", `/v1/runs/${earlier}`, ready.key);
     const source = (read.body.simulations as Record<string, unknown>[])[0];
     if (source === undefined) throw new Error("the source simulation is needed");
     const path =
-      `/api/simulations/${String(source.id)}/rerun?project=${ready.ada.projectId}`;
+      `/v1/simulations/${String(source.id)}/rerun?projectId=${ready.ada.projectId}`;
 
     const quentin = await colleagueOf(
       api.app,
@@ -797,16 +797,16 @@ describe("running one simulation again", () => {
     );
     const viewer = await request("POST", path, quentin.secret, {
       label: "Viewer cannot run it",
-      idempotency_key: newId("run"),
+      idempotencyKey: newId("run"),
     });
     expect(viewer.statusCode).toBe(403);
 
     const grace = await signUp(api.app, "sim@globex.example", "Globex");
     const stranger = await request(
       "POST",
-      `/api/simulations/${String(source.id)}/rerun?project=${grace.projectId}`,
+      `/v1/simulations/${String(source.id)}/rerun?projectId=${grace.projectId}`,
       grace.secret,
-      { label: "Not visible", idempotency_key: newId("run") },
+      { label: "Not visible", idempotencyKey: newId("run") },
     );
     expect(stranger.statusCode).toBe(404);
   });
@@ -831,7 +831,7 @@ describe("stopping a run", () => {
 
     const canceled = await request(
       "POST",
-      `/api/runs/${runId}/cancel`,
+      `/v1/runs/${runId}/cancel`,
       ready.key,
     );
     expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
@@ -853,11 +853,11 @@ describe("stopping a run", () => {
     // which is what settles the run's counts.
     await markSimulationCanceled(auth, other.id, CLAIMANT);
 
-    const read = await request("GET", `/api/runs/${runId}`, ready.key);
+    const read = await request("GET", `/v1/runs/${runId}`, ready.key);
     expect(read.body.status).toBe("canceled");
     // Its conversations are counted honestly — one finished, one stopped — and
     // the header still says the run was canceled.
-    expect(read.body.simulation_counts).toMatchObject({
+    expect(read.body.simulationCounts).toMatchObject({
       completed: 1,
       canceled: 1,
     });

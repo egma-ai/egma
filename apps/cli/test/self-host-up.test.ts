@@ -1,23 +1,4 @@
-/**
- * `egma self-host up`, and the one agreement the whole onboarding path rests
- * on.
- *
- * A repository binds to the platform origin the platform *reports*, and the CLI
- * refuses to send that repository's identifiers anywhere whose reported origin
- * differs from the address the developer typed. That refusal is right and it is
- * load-bearing — and it makes this command's contract sharp: whatever `up`
- * prints, the platform has to answer with. If `up` printed a LAN address while
- * the platform still reported localhost, every later command in every agent
- * repository would be refused, and the failure would surface a directory away
- * from its cause.
- *
- * So this file proves the two are one value: what is printed is what was set,
- * and a platform that disagrees is a failure here rather than a mystery later.
- *
- * The platform and the container runtime this runs against are the shared
- * stand-ins in `support/platform-workspace.ts`; what it drives is the real CLI
- * process.
- */
+/** `egma self-host up`, driven through a real CLI process and local stand-ins. */
 
 import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,7 +17,7 @@ const COMPOSE_BUILD = "ARGS compose build";
 const COMPOSE_UP = "ARGS compose up -d --wait --wait-timeout 300";
 
 describe("egma self-host up", () => {
-  it("starts the platform, and the address it prints is the one the platform reports", async () => {
+  it("starts the platform and prints the configured address", async () => {
     const platform = await startPlatform();
     const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     try {
@@ -45,18 +26,7 @@ describe("egma self-host up", () => {
       expect(run.code).toBe(0);
       expect(run.stdout).toContain(`url: ${platform.url}`);
       expect(run.stdout).toContain("status: ready");
-      // The platform is ready even when its optional phone capability is not.
-      // Chat simulations stay usable without a carrier route.
-      expect(run.stdout).toContain("phone: setup_required");
-      expect(run.stdout).toContain("phone_missing: the carrier trunk");
-      expect(run.stdout).not.toMatch(/^setup(?:_missing)?:/mu);
       expect(run.stderr).toContain(`Egma is ready at ${platform.url}`);
-      expect(run.stderr).toContain("Chat simulations can run now");
-      // The whole optional phone step is named because setup writes through
-      // the platform API, whose door opens for an organization owner.
-      expect(run.stderr).toContain(`Sign up at ${platform.url}`);
-      expect(run.stderr).toContain(`npx @egma/cli login --url ${platform.url}`);
-      expect(run.stderr).toContain("npx @egma/cli self-host setup");
       expect(run.stdout).toContain(
         `connect: npx @egma/cli --url ${platform.url}`,
       );
@@ -89,56 +59,7 @@ describe("egma self-host up", () => {
       // And the address it printed is the address the containers were given.
       expect(calls).toContain(`EGMA_BASE_URL=${platform.url}`);
 
-      // Starting a platform creates nothing on it. No agent, no connection, no
-      // test, no run — and nothing that could reach a paid provider. Bringing
-      // a deployment up is not an act on anybody's account, and the only thing
-      // this command asks the platform is who it is.
-      expect(new Set(platform.asked)).toEqual(new Set(["GET /api/platform"]));
-    } finally {
-      await platform.close();
-    }
-  });
-
-  it("reports a ready phone capability without a second platform setup state", async () => {
-    const platform = await startPlatform({
-      holds: {
-        carrier_trunk_address: "carrier.example.com",
-        carrier_trunk_number: "+15550100100",
-      },
-    });
-    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
-    try {
-      const run = await runSelfHost(workspace, ["up"], {
-        EGMA_BASE_URL: platform.url,
-      });
-
-      expect(run.code, run.stderr).toBe(0);
-      expect(run.stdout).toContain("status: ready");
-      expect(run.stdout).toContain("phone: ready");
-      expect(run.stdout).not.toMatch(/^setup(?:_missing)?:/mu);
-      expect(run.stdout).not.toMatch(/^phone_missing:/mu);
-      expect(run.stderr).toContain("Phone calls are ready");
-      expect(run.stderr).not.toContain("npx @egma/cli self-host setup");
-    } finally {
-      await platform.close();
-    }
-  });
-
-  it("fails, naming both addresses, when the platform reports a different one", async () => {
-    // The exact shape of the disaster this test exists for: a deployment
-    // started on a LAN address whose API still reports localhost. Every later
-    // command in every agent repository would be refused, a directory away
-    // from anything that could explain it.
-    const platform = await startPlatform({ reports: () => "http://localhost:3101" });
-    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
-    try {
-      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
-
-      expect(run.code).toBe(4);
-      expect(run.stdout).toContain("status: failed");
-      expect(run.stdout).toContain("reports its address as http://localhost:3101");
-      expect(run.stdout).toContain(`but was started at ${platform.url}`);
-      expect(run.stdout).toContain("would be refused");
+      expect(new Set(platform.asked)).toEqual(new Set(["GET /api/health"]));
     } finally {
       await platform.close();
     }

@@ -30,6 +30,7 @@ import {
   type PersonaVersion,
 } from "@egma/db";
 import { isId } from "@egma/ids";
+import { personaOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -37,6 +38,7 @@ import { actingIn, refuseActing, type Acting } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { identityConflict, sendRefusal } from "../http/refusals.ts";
 
 /**
@@ -53,7 +55,7 @@ import { identityConflict, sendRefusal } from "../http/refusals.ts";
  * which.** Name, description and archive state are written in place. Traits
  * mint an immutable version, and traits byte-identical to the current version
  * mint nothing. So a write names *two* expectations where it touches both:
- * `expected_revision` for the identity and `expected_version_id` for the
+ * `expectedRevision` for the identity and `expectedVersionId` for the
  * content, refused separately because they are separately recoverable.
  *
  * **A Custom persona is never deleted.** Archive takes them out of the
@@ -72,22 +74,11 @@ export type PersonaRoutesOptions = {
   readonly rateLimit: RateLimit;
 };
 
-export const PERSONAS_PATH = "/api/personas";
-export const PERSONA_PATH = "/api/personas/:personaId";
-export const PERSONA_VERSIONS_PATH = "/api/personas/:personaId/versions";
-export const PERSONA_USAGE_PATH = "/api/personas/:personaId/usage";
-export const PERSONA_FORK_PATH = "/api/personas/:personaId/fork";
-export const PERSONA_DEFAULT_PATH = "/api/personas/:personaId/default";
-export const PERSONA_ARCHIVE_PATH = "/api/personas/:personaId/archive";
-export const PERSONA_RESTORE_PATH = "/api/personas/:personaId/restore";
-export const PERSONA_VERSION_PATH = "/api/persona-versions/:versionId";
-export const PERSONA_FORM_PATH = "/api/persona-form";
-
 type Body = Record<string, unknown>;
 
 type Query = {
-  readonly project?: string;
-  readonly cursor?: string;
+  readonly projectId?: string;
+  readonly pageToken?: string;
   readonly archived?: string;
   readonly search?: string;
 };
@@ -139,7 +130,7 @@ const REFUSALS = {
   ): string =>
     `this ${resource} edit was written against version ${expected}, and it ` +
     `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
-    `your edits, and send them with expected_version_id set to ${current}.`,
+    `your edits, and send them with expectedVersionId set to ${current}.`,
 
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
@@ -197,11 +188,11 @@ function mayAuthor(
 function describedPersona(one: Persona): Record<string, unknown> {
   return {
     id: one.id,
-    project_id: one.projectId,
+    projectId: one.projectId,
     name: one.name,
     description: one.description,
     version: one.version,
-    version_id: one.versionId,
+    versionId: one.versionId,
     // Human behavior and technical execution have one owner each. The complete
     // model selection is on this same immutable version, with technical voice
     // only under TTS.
@@ -211,10 +202,10 @@ function describedPersona(one: Persona): Record<string, unknown> {
     // The two expectations a write can name, always answered, so that reading
     // a persona is always enough to edit one.
     revision: one.revision,
-    archived_at: one.archivedAt?.toISOString() ?? null,
-    is_default: one.isDefault,
-    created_at: one.createdAt.toISOString(),
-    updated_at: one.updatedAt.toISOString(),
+    archivedAt: one.archivedAt?.toISOString() ?? null,
+    isDefault: one.isDefault,
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
   };
 }
 
@@ -222,11 +213,11 @@ function describedPersona(one: Persona): Record<string, unknown> {
 function describedVersion(one: PersonaVersion): Record<string, unknown> {
   return {
     id: one.id,
-    persona_id: one.personaId,
+    personaId: one.personaId,
     version: one.version,
     traits: one.traits,
     models: one.models,
-    created_at: one.createdAt.toISOString(),
+    createdAt: one.createdAt.toISOString(),
   };
 }
 
@@ -324,33 +315,33 @@ export async function personaRoutes(
    * An authoring list that mixed archived rows into active ones is a list
    * somebody picks the wrong row out of.
    */
-  app.get(PERSONAS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.listPersonas, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
-    const acting = await projectFor(auth, given(query.project));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
-    if (cursor !== undefined && !isId("prs", cursor)) {
+    const pageToken = given(query.pageToken);
+    if (pageToken !== undefined && !isId("prs", pageToken)) {
       return sendRefusal(
         reply,
         "invalid_cursor",
-        REFUSALS.invalidCursor(cursor),
+        REFUSALS.invalidCursor(pageToken),
       );
     }
 
     const page = await listPersonas(acting.auth, {
-      cursor,
+      cursor: pageToken,
       archived: query.archived === "true",
       search: given(text(query.search)),
     });
 
     return reply.send({
-      items: page.items.map(describedPersona),
+      personas: page.items.map(describedPersona),
       // Null rather than absent, so a client can tell "there is no next page"
       // from "this answer is an older shape that never had one".
-      next_cursor: page.nextCursor ?? null,
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -361,35 +352,35 @@ export async function personaRoutes(
    * safe projection of the closed adapter catalog and the release defaults.
    * It contains no provider key and no deployment setting.
    */
-  app.get(PERSONA_FORM_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.getPersonaForm, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = (request.query ?? {}) as Query;
 
-    const acting = await projectFor(auth, given(query.project));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     return reply.send({
-      model_catalog: PROVIDER_CATALOG.map((entry) => ({
+      modelCatalog: PROVIDER_CATALOG.map((entry) => ({
         provider: entry.provider,
         job: entry.job,
         model: entry.model,
         label: entry.label,
         ...("recommendedVoiceId" in entry
-          ? { recommended_voice_id: entry.recommendedVoiceId }
+          ? { recommendedVoiceId: entry.recommendedVoiceId }
           : {}),
       })),
-      recommended_models: RECOMMENDED_PERSONA_MODELS,
-      speed_range: SPEED_RANGE,
+      recommendedModels: RECOMMENDED_PERSONA_MODELS,
+      speedRange: SPEED_RANGE,
     });
   });
 
   /** One persona, active or archived — a detail page has to render both. */
-  app.get(PERSONA_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.getPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await projectFor(auth, given(query.project));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const one = await getPersona(acting.auth, personaId);
@@ -405,20 +396,20 @@ export async function personaRoutes(
    * pinned one of these versions is still on the record and still has to be
    * interpretable.
    */
-  app.get(PERSONA_VERSIONS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.listPersonaVersions, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await projectFor(auth, given(query.project));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const cursor = given(query.cursor);
-    if (cursor !== undefined && !isId("prsv", cursor)) {
+    const pageToken = given(query.pageToken);
+    if (pageToken !== undefined && !isId("prsv", pageToken)) {
       return sendRefusal(
         reply,
         "invalid_cursor",
-        REFUSALS.invalidCursor(cursor),
+        REFUSALS.invalidCursor(pageToken),
       );
     }
 
@@ -427,10 +418,12 @@ export async function personaRoutes(
     const one = await getPersona(acting.auth, personaId);
     if (one === undefined) return noSuchPersona(reply, personaId);
 
-    const page = await listPersonaVersions(acting.auth, personaId, { cursor });
+    const page = await listPersonaVersions(acting.auth, personaId, {
+      cursor: pageToken,
+    });
     return reply.send({
-      items: page.items.map(describedVersion),
-      next_cursor: page.nextCursor ?? null,
+      versions: page.items.map(describedVersion),
+      nextPageToken: page.nextCursor ?? null,
     });
   });
 
@@ -441,12 +434,12 @@ export async function personaRoutes(
    * a page saying "nothing uses them" can never be followed by a refusal
    * saying three tests do.
    */
-  app.get(PERSONA_USAGE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.getPersonaUsage, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await projectFor(auth, given(query.project));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const using = await testsUsingPersona(acting.auth, personaId);
@@ -458,12 +451,12 @@ export async function personaRoutes(
   });
 
   /** One frozen version by its own `prsv_` id — the older-version read. */
-  app.get(PERSONA_VERSION_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.getPersonaVersion, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { versionId } = request.params as { versionId: string };
     const query = (request.query ?? {}) as Query;
 
-    const acting = await projectFor(auth, given(query.project));
+    const acting = await projectFor(auth, given(query.projectId));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const version = await getPersonaVersion(acting.auth, versionId);
@@ -479,7 +472,7 @@ export async function personaRoutes(
   });
 
   /** A new persona, at version 1, active, and nobody's default. */
-  app.post(PERSONAS_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.createPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
 
@@ -499,7 +492,7 @@ export async function personaRoutes(
     }
     const models = validPersonaModels(body.models);
 
-    const acting = await projectFor(auth, given(text(body.project)));
+    const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const created = await createPersona(acting.auth, {
@@ -527,7 +520,7 @@ export async function personaRoutes(
    * else did in the meantime, which is the one outcome nothing here can
    * recover from.
    */
-  app.patch(PERSONA_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.updatePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
@@ -535,13 +528,13 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "edit personas");
     if (refused !== undefined) return refused;
 
-    const expectedRevision = given(text(body.expected_revision));
+    const expectedRevision = given(text(body.expectedRevision));
     if (expectedRevision === undefined) {
       return sendRefusal(
         reply,
         "unprocessable",
         "an edit says which revision of the persona it was written against, " +
-          "and this one named no expected_revision. Read the persona again " +
+          "and this one named no expectedRevision. Read the persona again " +
           "and send the revision it names now.",
       );
     }
@@ -553,7 +546,7 @@ export async function personaRoutes(
     const models =
       "models" in body ? validPersonaModels(body.models) : undefined;
 
-    const expectedVersionId = given(text(body.expected_version_id));
+    const expectedVersionId = given(text(body.expectedVersionId));
     if (
       (written !== undefined || models !== undefined) &&
       expectedVersionId === undefined
@@ -562,12 +555,12 @@ export async function personaRoutes(
         reply,
         "unprocessable",
         "a traits or models edit says which version it was written " +
-          "against, and this one named no expected_version_id. Read the " +
-          "persona again and send the version_id it names now.",
+          "against, and this one named no expectedVersionId. Read the " +
+          "persona again and send the versionId it names now.",
       );
     }
 
-    const acting = await projectFor(auth, given(text(body.project)));
+    const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const edited = await editPersona(acting.auth, personaId, {
@@ -590,7 +583,7 @@ export async function personaRoutes(
    * complete human traits, and model selections. A fork starts its own history
    * and is editable even when the source is an Egma-provided persona.
    */
-  app.post(PERSONA_FORK_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.forkPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
@@ -598,7 +591,7 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "fork personas");
     if (refused !== undefined) return refused;
 
-    const acting = await projectFor(auth, given(text(body.project)));
+    const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const fork = await forkPersona(acting.auth, personaId);
@@ -613,7 +606,7 @@ export async function personaRoutes(
    * This is a project choice, not a persona type. The same action works for an
    * Egma-provided persona and for a Custom persona, and changes no version.
    */
-  app.post(PERSONA_DEFAULT_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.setDefaultPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
@@ -621,7 +614,7 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "change the project default persona");
     if (refused !== undefined) return refused;
 
-    const acting = await projectFor(auth, given(text(body.project)));
+    const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const selected = await setDefaultPersona(acting.auth, personaId);
@@ -632,12 +625,12 @@ export async function personaRoutes(
   /**
    * Archive: they leave the authoring lists, and nothing else changes.
    *
-   * `replacement_persona_id` is the persona who takes the project's default
+   * `replacementPersonaId` is the persona who takes the project's default
    * pointer, and it is required exactly when this persona is holding it. The
    * pointer moves in the same transaction, so there is never an instant in
    * which a test authored naming nobody has nobody to be given.
    */
-  app.post(PERSONA_ARCHIVE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.archivePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
@@ -645,25 +638,25 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "archive personas");
     if (refused !== undefined) return refused;
 
-    const expectedRevision = given(text(body.expected_revision));
+    const expectedRevision = given(text(body.expectedRevision));
     if (expectedRevision === undefined) {
       return sendRefusal(
         reply,
         "unprocessable",
         "Archive says which revision of the persona it was written against, " +
-          "and this one named no expected_revision. Read the persona again " +
+          "and this one named no expectedRevision. Read the persona again " +
           "and send the revision it names now.",
       );
     }
 
-    const acting = await projectFor(auth, given(text(body.project)));
+    const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const archived = await archivePersona(acting.auth, personaId, {
       expectedRevision,
-      ...(given(text(body.replacement_persona_id)) === undefined
+      ...(given(text(body.replacementPersonaId)) === undefined
         ? {}
-        : { replacementPersonaId: text(body.replacement_persona_id) }),
+        : { replacementPersonaId: text(body.replacementPersonaId) }),
     });
 
     if (archived === undefined) return noSuchPersona(reply, personaId);
@@ -671,7 +664,7 @@ export async function personaRoutes(
   });
 
   /** Restore: they are offered again. Nothing refuses this one. */
-  app.post(PERSONA_RESTORE_PATH, async (request, reply) => {
+  registerPlatformOperation(app, personaOperations.restorePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
@@ -679,18 +672,18 @@ export async function personaRoutes(
     const refused = mayAuthor(reply, auth, "restore personas");
     if (refused !== undefined) return refused;
 
-    const expectedRevision = given(text(body.expected_revision));
+    const expectedRevision = given(text(body.expectedRevision));
     if (expectedRevision === undefined) {
       return sendRefusal(
         reply,
         "unprocessable",
         "Restore says which revision of the persona it was written against, " +
-          "and this one named no expected_revision. Read the persona again " +
+          "and this one named no expectedRevision. Read the persona again " +
           "and send the revision it names now.",
       );
     }
 
-    const acting = await projectFor(auth, given(text(body.project)));
+    const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const restored = await restorePersona(acting.auth, personaId, {

@@ -11,6 +11,15 @@
       "@egma/provider-credentials": [
         "./packages/provider-credentials/src/index.ts"
       ],
+      "@egma/platform-api/contract": [
+        "./packages/platform-api/dist/contract/index.d.ts"
+      ],
+      "@egma/platform-api/openapi": [
+        "./packages/platform-api/dist/openapi.d.ts"
+      ],
+      "@egma/platform-api/client": [
+        "./packages/platform-api/dist/client.d.ts"
+      ],
       "@egma/db": ["./packages/db/src/index.ts"],
       "@egma/retell": ["./packages/retell/src/index.ts"],
       "@egma/simulation-contract": [

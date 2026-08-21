@@ -43,13 +43,13 @@ const RESCHEDULING = {
   name: "Reschedules a booked appointment",
   scenario:
     "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
-  expected_behaviors: ["confirms the new time back before finishing"],
+  expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
 const RETELL = {
-  agent_platform: "retell",
-  connection_kind: "retell_chat_api",
-  access_variant: "retell_chat_api.api_key",
+  agentPlatform: "retell",
+  connectionKind: "retell_chat_api",
+  accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -179,7 +179,7 @@ async function aCustomerReadyToRun(
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
-  const registered = await ask(api.app, "POST", "/api/agents", key, {
+  const registered = await ask(api.app, "POST", "/v1/agents", key, {
     name: "Front desk",
     connection: RETELL,
   });
@@ -191,7 +191,7 @@ async function aCustomerReadyToRun(
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
   });
-  const pushed = await ask(api.app, "POST", "/api/tests", key, {
+  const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
     personas: ["Impatient Rita"],
   });
@@ -202,7 +202,7 @@ async function aCustomerReadyToRun(
     key,
     agentId,
     connectionId,
-    versionId: String(pushed.body.version_id),
+    versionId: String(pushed.body.versionId),
   };
 }
 
@@ -212,10 +212,10 @@ async function aClaimedSimulation(
   connectionId: string,
   versionId: string,
 ): Promise<{ runId: string; simulationId: string }> {
-  const started = await ask(api.app, "POST", "/api/runs", key, {
-    connection: connectionId,
-    test_versions: [versionId],
-    idempotency_key: newId("run"),
+  const started = await ask(api.app, "POST", "/v1/runs", key, {
+    connectionId: connectionId,
+    testVersionIds: [versionId],
+    idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const simulations = started.body.simulations as { id: string }[];
@@ -415,10 +415,10 @@ describe("the lifecycle lands", () => {
     // The landing minted the judgement and froze the header, exactly as the
     // access layer promises every terminal transition does.
     expect(await gradingJobsFor(simulationId)).toBe(1);
-    const header = await ask(api.app, "GET", `/api/runs/${runId}`, key);
+    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
-    expect(header.body.completed_count).toBe(1);
-    expect(header.body.failed_count).toBe(0);
+    expect(header.body.completedCount).toBe(1);
+    expect(header.body.failedCount).toBe(0);
   });
 
   it("declines reported moments that cannot be true, and lands on its own stamps", async () => {
@@ -458,10 +458,10 @@ describe("the lifecycle lands", () => {
       "reports_voice",
       { platformSettings: PHONE_IS_SET_UP },
     );
-    const attached = await ask(api.app, "POST", `/api/agents/${agentId}/connections`, key, {
-      agent_platform: null,
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
+    const attached = await ask(api.app, "POST", `/v1/agents/${agentId}/connections`, key, {
+      agentPlatform: null,
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
     });
@@ -526,11 +526,11 @@ describe("the lifecycle lands", () => {
 
     // And readable by whoever asks for the run — the different-units rule
     // answered off the conversation itself, without joining anything.
-    const read = await ask(api.app, "GET", `/api/runs/${runId}`, key);
+    const read = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     const [served] = read.body.simulations as {
-      readonly mock_tool_coverage: unknown;
+      readonly mockToolCoverage: unknown;
     }[];
-    expect(served?.mock_tool_coverage).toEqual({
+    expect(served?.mockToolCoverage).toEqual({
       discovered: ["check_calendar", "send_confirmation"],
       covered: ["check_calendar"],
       uncovered: ["send_confirmation"],
@@ -614,9 +614,9 @@ describe("the lifecycle lands", () => {
 
     // A failed conversation is judged too — errored, never left unjudged.
     expect(await gradingJobsFor(simulationId)).toBe(1);
-    const header = await ask(api.app, "GET", `/api/runs/${runId}`, key);
+    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
-    expect(header.body.failed_count).toBe(1);
+    expect(header.body.failedCount).toBe(1);
   });
 
   it("lands agent_never_joined from the claimed state, where nothing ever ran", async () => {
@@ -650,7 +650,7 @@ describe("the lifecycle lands", () => {
       versionId,
     );
 
-    const asked = await ask(api.app, "POST", `/api/runs/${runId}/cancel`, key);
+    const asked = await ask(api.app, "POST", `/v1/runs/${runId}/cancel`, key);
     expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
 
     const answered = await report(simulationId, [
@@ -666,9 +666,9 @@ describe("the lifecycle lands", () => {
 
     // A canceled conversation was never judged — no grading work minted.
     expect(await gradingJobsFor(simulationId)).toBe(0);
-    const header = await ask(api.app, "GET", `/api/runs/${runId}`, key);
+    const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("canceled");
-    expect(header.body.canceled_count).toBe(1);
+    expect(header.body.canceledCount).toBe(1);
   });
 
   it("retries once when the cancellation lands between the attempt and the answer", async () => {
@@ -680,7 +680,7 @@ describe("the lifecycle lands", () => {
       connectionId,
       versionId,
     );
-    const asked = await ask(api.app, "POST", `/api/runs/${runId}/cancel`, key);
+    const asked = await ask(api.app, "POST", `/v1/runs/${runId}/cancel`, key);
     expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
 
     // The race, held open deterministically: a trigger suppresses the first
@@ -908,7 +908,7 @@ describe("what the report door never touches", () => {
     // Spend the organization's whole budget…
     let refused = 0;
     for (let i = 0; i < 8; i += 1) {
-      const answer = await ask(api.app, "GET", "/api/agents", key);
+      const answer = await ask(api.app, "GET", "/v1/agents", key);
       if (answer.statusCode === 429) refused += 1;
     }
     expect(refused).toBeGreaterThan(0);

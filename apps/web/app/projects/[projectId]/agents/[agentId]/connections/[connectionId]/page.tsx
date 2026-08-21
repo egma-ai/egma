@@ -2,24 +2,25 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  getAgent,
+  getConnection,
+  listConnectionOptions,
+  updateConnection,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
+import type { Refusal } from "../../../../../../../lib/api.ts";
+import type { AgentDetail, ListedConnection } from "../../../../../../../lib/agents.ts";
 import {
-  agentDetailQuery,
-  connectionPath,
-  type AgentDetail,
-  type ListedConnection,
-} from "../../../../../../../lib/agents.ts";
-import {
-  CONNECTION_OPTIONS_PATH,
   optionNamed,
   type ConnectionOption,
   type ConnectionOptionCatalog,
 } from "../../../../../../../lib/connection-options.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import { Actions } from "../../../../../../../ui/section.tsx";
@@ -159,12 +160,23 @@ function ConnectionDetail({
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const { answer, reload } = useProjectRead<Answered>(
-    connectionPath(agentId, connectionId),
+    (projectId) =>
+      platformAnswer(
+        getConnection(
+          { agentId, connectionId, projectId },
+          { client: platformClient },
+        ),
+      ),
     projectId,
+    `${agentId}:${connectionId}`,
   );
   const { answer: parentAgent } = useProjectRead<AgentDetail>(
-    agentDetailQuery(agentId, "active"),
+    (projectId) =>
+      platformAnswer(
+        getAgent({ agentId, projectId }, { client: platformClient }),
+      ),
     projectId,
+    agentId,
   );
   const [catalog, setCatalog] = useState<ConnectionOptionCatalog | null>(null);
   const [catalogRefused, setCatalogRefused] = useState<Refusal | null>(null);
@@ -174,7 +186,9 @@ function ConnectionDetail({
   useEffect(() => {
     let current = true;
     setCatalogRefused(null);
-    void readJson<ConnectionOptionCatalog>(CONNECTION_OPTIONS_PATH).then((read) => {
+    void platformAnswer(
+      listConnectionOptions({ client: platformClient }),
+    ).then((read) => {
       if (!current) return;
       if (read.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -274,7 +288,7 @@ function ConnectionDetail({
           { label: agentLabel, href: agentHome },
           { label: connection.name },
         ]}
-        lead={`${connection.product_label} · ${connection.modality === "voice" ? "Voice" : "Chat"}`}
+        lead={`${connection.productLabel} · ${connection.modality === "voice" ? "Voice" : "Chat"}`}
         action={
           role === null ? undefined : (
             <Actions>
@@ -317,14 +331,14 @@ function ConnectionDetail({
               {
                 label: "Agent platform",
                 value:
-                  option?.agent_platform_label ??
-                  connection.agent_platform ??
+                  option?.agentPlatformLabel ??
+                  connection.agentPlatform ??
                   "Any or unknown",
               },
-              { label: "Connection", value: connection.product_label },
+              { label: "Connection", value: connection.productLabel },
               {
                 label: "Access",
-                value: option?.access_variant_label ?? connection.access_variant,
+                value: option?.accessVariantLabel ?? connection.accessVariant,
               },
               {
                 label: "Modality",
@@ -389,7 +403,7 @@ function EditConnection({
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
   const liveKitForm = liveKitDispatchForm({
-    connectionKind: connection.connection_kind,
+    connectionKind: connection.connectionKind,
     option,
     config: draft.config,
     mode: livekitDispatch,
@@ -433,17 +447,18 @@ function EditConnection({
     setNameProblem(null);
     setRefused(null);
     setSaving(true);
-    const answer = await writeJson<Answered>(
-      connectionPath(connection.agent_id, connection.id),
-      {
-        method: "PATCH",
-        project: projectId,
-        body: {
+    const answer = await platformAnswer(
+      updateConnection(
+        {
+          agentId: connection.agentId,
+          connectionId: connection.id,
+          projectId,
           name: wantedName,
           config,
-          expected_revision: connection.revision,
+          expectedRevision: connection.revision,
         },
-      },
+        { client: platformClient },
+      ),
     );
     setSaving(false);
 

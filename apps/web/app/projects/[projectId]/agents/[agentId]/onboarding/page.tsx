@@ -3,24 +3,18 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getAgent, listTests, setTestAgents } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { readJson, writeJson, type Refusal } from "../../../../../../lib/api.ts";
-import {
-  agentDetailQuery,
-  type AgentDetail,
-} from "../../../../../../lib/agents.ts";
+import type { Refusal } from "../../../../../../lib/api.ts";
+import type { AgentDetail } from "../../../../../../lib/agents.ts";
 import { roleOf } from "../../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../lib/roles.ts";
-import {
-  testAgentsPath,
-  testsPath,
-  type ListedTest,
-  type TestPage,
-} from "../../../../../../lib/tests.ts";
+import type { ListedTest, TestPage } from "../../../../../../lib/tests.ts";
 import { Actions, Section } from "../../../../../../ui/section.tsx";
 import {
   Form,
@@ -84,8 +78,12 @@ function AttachTests({
   const mayAuthor = role !== null && canAuthor(role);
   const detailPath = projectPath(projectId, "agents", agentId);
   const { answer: parentAgent, reload: reloadAgent } = useProjectRead<AgentDetail>(
-    agentDetailQuery(agentId, "active"),
+    (projectId) =>
+      platformAnswer(
+        getAgent({ agentId, projectId }, { client: platformClient }),
+      ),
     projectId,
+    agentId,
   );
 
   const [typedSearch, setTypedSearch] = useState("");
@@ -123,10 +121,15 @@ function AttachTests({
     setReadRefused(null);
     setRefused(null);
 
-    void readJson<TestPage>(testsPath({ archived: false, name: search }), {
-      project: projectId,
-      signal: controller.signal,
-    }).then((answer) => {
+    void platformAnswer(
+      listTests(
+        {
+          projectId,
+          ...(search === "" ? {} : { name: search }),
+        },
+        { client: platformClient },
+      ),
+    ).then((answer) => {
       if (
         controller.signal.aborted ||
         generation.current !== heldGeneration
@@ -142,14 +145,14 @@ function AttachTests({
         setReadRefused(answer.refusal);
         return;
       }
-      const tests = answer.value.items.filter((test) => test.archived_at === null);
+      const tests = answer.value.tests.filter((test) => test.archivedAt === null);
       for (const test of tests) knownTests.current.set(test.id, test);
       const already = tests
         .filter((test) => test.agents.some((agent) => agent.id === agentId))
         .map((test) => test.id);
       setAttached((held) => new Set([...held, ...already]));
       setSelected((held) => new Set([...held, ...already]));
-      setPages([{ tests, nextCursor: answer.value.next_cursor }]);
+      setPages([{ tests, nextCursor: answer.value.nextPageToken }]);
     });
 
     return () => {
@@ -192,13 +195,15 @@ function AttachTests({
     const heldGeneration = generation.current;
     setLoadingTests(true);
     setReadRefused(null);
-    const answer = await readJson<TestPage>(
-      testsPath({
-        archived: false,
-        name: search,
-        cursor: current.nextCursor,
-      }),
-      { project: projectId },
+    const answer = await platformAnswer(
+      listTests(
+        {
+          projectId,
+          pageToken: current.nextCursor,
+          ...(search === "" ? {} : { name: search }),
+        },
+        { client: platformClient },
+      ),
     );
     if (generation.current !== heldGeneration) return;
     setLoadingTests(false);
@@ -210,7 +215,7 @@ function AttachTests({
       setReadRefused(answer.refusal);
       return;
     }
-    const tests = answer.value.items.filter((test) => test.archived_at === null);
+    const tests = answer.value.tests.filter((test) => test.archivedAt === null);
     for (const test of tests) knownTests.current.set(test.id, test);
     const already = tests
       .filter((test) => test.agents.some((agent) => agent.id === agentId))
@@ -219,7 +224,7 @@ function AttachTests({
     setSelected((held) => new Set([...held, ...already]));
     setPages((held) => [
       ...held,
-      { tests, nextCursor: answer.value.next_cursor },
+      { tests, nextCursor: answer.value.nextPageToken },
     ]);
     setPage(page + 1);
   }
@@ -236,17 +241,22 @@ function AttachTests({
     const completed = new Set(attached);
 
     for (const test of pending) {
-      const answer = await writeJson<ListedTest>(testAgentsPath(test.id), {
-        method: "POST",
-        project: projectId,
-        body: {
-          agents: [
-            ...test.agents.map((agent) => agent.id),
-            ...(test.agents.some((agent) => agent.id === agentId) ? [] : [agentId]),
-          ],
-          expected_applicability_revision: test.applicability_revision,
-        },
-      });
+      const answer = await platformAnswer(
+        setTestAgents(
+          {
+            testId: test.id,
+            projectId,
+            agents: [
+              ...test.agents.map((agent) => agent.id),
+              ...(test.agents.some((agent) => agent.id === agentId)
+                ? []
+                : [agentId]),
+            ],
+            expectedApplicabilityRevision: test.applicabilityRevision,
+          },
+          { client: platformClient },
+        ),
+      );
 
       if (answer.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -490,7 +500,7 @@ function AttachTests({
                           {alreadyAttached
                             ? "Already attached"
                             : test.description ??
-                              `${String(test.expected_behaviors.length)} expected behaviors`}
+                              `${String(test.expectedBehaviors.length)} expected behaviors`}
                         </span>
                       </label>
                       <Link

@@ -322,7 +322,7 @@ export const MEASURES = {
  * a step carries.
  *
  * Two different things share one word on this page, and the confusion is not
- * hypothetical: a step can carry an `audio_url` the agent's own telemetry
+ * hypothetical: a step can carry an `audioUrl` the agent's own telemetry
  * attached to it — somebody else's file, at somebody else's address, of
  * whatever that framework decided to keep. What is below is egma's own: both
  * sides of a voice conversation egma drove, the human on one channel and the

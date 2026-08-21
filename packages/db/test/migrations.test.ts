@@ -4089,7 +4089,10 @@ describe("the direct Monitoring cutover (0038)", () => {
   });
 
   it("starts with the Monitoring cutover on a populated 0037 database", () => {
-    expect(applied).toEqual(["0038_parched_goblin_queen.sql"]);
+    expect(applied).toEqual([
+      "0038_parched_goblin_queen.sql",
+      "0039_lean_quentin_quire.sql",
+    ]);
   });
 
   it("converts every supported connection and its frozen run snapshot", async () => {

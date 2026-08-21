@@ -3,20 +3,16 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { cancelRun, listAgents, listRuns } from "@egma/platform-api/client";
 
 import { cn } from "@/lib/utils";
-import { readJson, writeJson, type Refusal } from "../../../../lib/api.ts";
-import {
-  agentsQuery,
-  type AgentPage,
-  type ListedAgent,
-} from "../../../../lib/agents.ts";
+import type { Refusal } from "../../../../lib/api.ts";
+import type { AgentPage, ListedAgent } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
-  runCancelPath,
-  runsQuery,
   RUN_STATUS_WORDS,
   VERDICT_WORDS,
   type RunHistoryPage,
@@ -80,8 +76,8 @@ export default function RunsPage() {
 
 /** What a row says a run was against. Ids where a name has been archived away. */
 function ranAgainst(run: RunRow, agents: readonly ListedAgent[]): string {
-  const named = agents.find((one) => one.id === run.agent_id);
-  return named?.name ?? run.agent_id;
+  const named = agents.find((one) => one.id === run.agentId);
+  return named?.name ?? run.agentId;
 }
 
 function columnsFor(
@@ -108,7 +104,7 @@ function columnsFor(
       header: "Started",
       width: "130px",
       cell: (run) => (
-        <RelativeInstant instant={run.created_at} now={now} />
+        <RelativeInstant instant={run.createdAt} now={now} />
       ),
     },
     {
@@ -121,14 +117,14 @@ function columnsFor(
       key: "simulations",
       header: "Simulations",
       width: "220px",
-      cell: (run) => <SimulationTally counts={run.simulation_counts} />,
+      cell: (run) => <SimulationTally counts={run.simulationCounts} />,
     },
     {
       key: "grading",
       header: "Grading",
       width: "120px",
       cell: (run) =>
-        `${String(run.graded_count)} of ${String(run.gradable_count)} judged`,
+        `${String(run.gradedCount)} of ${String(run.gradableCount)} judged`,
     },
     {
       key: "verdict",
@@ -195,16 +191,30 @@ function Runs({ projectId }: { readonly projectId: string }) {
   const [since, setSince] = useState("");
   const now = useMinuteClock();
 
-  const path = runsQuery({
-    ...(agent === "" ? {} : { agent }),
-    ...(connection === "" ? {} : { connection }),
-    ...(status === "" ? {} : { status }),
-    ...(verdict === "" ? {} : { verdict }),
-    ...(since === "" ? {} : { since: `${since}T00:00:00.000Z` }),
-  });
-
-  const { answer, reload } = useProjectRead<RunHistoryPage>(path, projectId);
-  const { answer: agents } = useProjectRead<AgentPage>(agentsQuery({}), projectId);
+  const question = `${agent}:${connection}:${status}:${verdict}:${since}`;
+  const { answer, reload } = useProjectRead<RunHistoryPage>(
+    (projectId) =>
+      platformAnswer(
+        listRuns(
+          {
+            projectId,
+            ...(agent === "" ? {} : { agentId: agent }),
+            ...(connection === "" ? {} : { connectionId: connection }),
+            ...(status === "" ? {} : { status }),
+            ...(verdict === "" ? {} : { verdict }),
+            ...(since === "" ? {} : { since: `${since}T00:00:00.000Z` }),
+          },
+          { client: platformClient },
+        ),
+      ),
+    projectId,
+    question,
+  );
+  const { answer: agents } = useProjectRead<AgentPage>(
+    (projectId) =>
+      platformAnswer(listAgents({ projectId }, { client: platformClient })),
+    projectId,
+  );
 
   /**
    * Pages fetched after the first, kept beside it — **and each one remembers
@@ -249,7 +259,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
   const [stopping, setStopping] = useState(false);
 
   const carried =
-    after !== null && after.project === projectId && after.asked === path
+    after !== null && after.project === projectId && after.asked === question
       ? after.page
       : null;
 
@@ -280,10 +290,15 @@ function Runs({ projectId }: { readonly projectId: string }) {
 
     // Named the one way every write in the product names it. See the same call
     // on the run's own page.
-    const answered = await writeJson<RunRow>(runCancelPath(runId), {
-      method: "POST",
-      project: projectId,
-    });
+    const answered = await platformAnswer(
+      cancelRun(
+        {
+          runId,
+          projectId,
+        },
+        { client: platformClient },
+      ),
+    );
 
     setStopping(false);
     if (answered.status === "signed-out") {
@@ -324,7 +339,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
-  const agentRows = agents?.status === "ready" ? agents.value.items : [];
+  const agentRows = agents?.status === "ready" ? agents.value.agents : [];
   const narrowed =
     agent !== "" || connection !== "" || status !== "" || verdict !== "" || since !== "";
 
@@ -363,21 +378,34 @@ function Runs({ projectId }: { readonly projectId: string }) {
       return <Failure message={answer.refusal.message} onRetry={reload} />;
     }
 
-    const items = [...answer.value.items, ...(carried?.items ?? [])];
-    const cursor = carried === null ? answer.value.next_cursor : carried.next_cursor;
+    const items = [...answer.value.runs, ...(carried?.runs ?? [])];
+    const cursor =
+      carried === null
+        ? answer.value.nextPageToken
+        : carried.nextPageToken;
     const opened = items.find((run) => run.id === openRun);
 
     async function showMore(): Promise<void> {
       if (cursor === null) return;
 
       const asked = projectId;
-      const question = path;
+      const askedQuestion = question;
       setMoreRefused(null);
       setLoadingMore(true);
 
-      const next = await readJson<RunHistoryPage>(
-        `${question}${question.includes("?") ? "&" : "?"}cursor=${encodeURIComponent(cursor)}`,
-        { project: asked },
+      const next = await platformAnswer(
+        listRuns(
+          {
+            projectId: asked,
+            pageToken: cursor,
+            ...(agent === "" ? {} : { agentId: agent }),
+            ...(connection === "" ? {} : { connectionId: connection }),
+            ...(status === "" ? {} : { status }),
+            ...(verdict === "" ? {} : { verdict }),
+            ...(since === "" ? {} : { since: `${since}T00:00:00.000Z` }),
+          },
+          { client: platformClient },
+        ),
       );
 
       setLoadingMore(false);
@@ -394,10 +422,10 @@ function Runs({ projectId }: { readonly projectId: string }) {
 
       setAfter({
         project: asked,
-        asked: question,
+        asked: askedQuestion,
         page: {
-          items: [...(carried?.items ?? []), ...next.value.items],
-          next_cursor: next.value.next_cursor,
+          runs: [...(carried?.runs ?? []), ...next.value.runs],
+          nextPageToken: next.value.nextPageToken,
         },
       });
     }
@@ -555,10 +583,10 @@ function Runs({ projectId }: { readonly projectId: string }) {
 
   const connections = new Map<string, string>();
   if (answer?.status === "ready") {
-    for (const run of answer.value.items) {
+    for (const run of answer.value.runs) {
       connections.set(
-        run.connection_id,
-        `${run.product_label} · ${run.modality}${
+        run.connectionId,
+        `${run.productLabel} · ${run.modality}${
           run.environment === null ? "" : ` · ${run.environment}`
         }`,
       );

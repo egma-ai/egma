@@ -28,20 +28,15 @@
  * seals it in its store. This CLI writes only the bootstrap variables a
  * container reads when it is created. See `BOOTSTRAP_VARIABLES`.
  *
- * **The address `up` prints is the address the platform reports.** They are one
- * value, not two that happen to agree: the CLI refuses to send a repository's
- * identifiers to a platform whose reported origin differs from the address a
- * developer typed, which is right, and which makes an `up` that printed a LAN
- * address while the API reported localhost a deployment where every later
- * command is refused. So `up` sets `EGMA_BASE_URL` to exactly what it prints,
- * and prints exactly what it set.
+ * `up` sets `EGMA_BASE_URL` to the same URL it prints. Agent repositories use
+ * that URL directly; there is no second platform-identity response to compare.
  */
 
 import path from "node:path";
 
 import { credentialsFileIn, UnusableUrlError } from "../platform/credentials.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
-import { normalizePlatformOrigin } from "../platform/identity.ts";
+import { normalizePlatformOrigin } from "../platform/url.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import {
   compose,
@@ -120,8 +115,8 @@ export const SELF_HOST_EXIT = {
  */
 export const DEFAULT_PLATFORM_ADDRESS = "http://localhost:3101";
 
-/** Where the API answers its own identity and phone readiness. */
-const PLATFORM_IDENTITY_PATH = "/api/platform";
+/** The health check served by the web origin that `self-host up` prints. */
+const PLATFORM_HEALTH_PATH = "/api/health";
 
 /** How long the platform has to come up before something is wrong. */
 const READY_TIMEOUT_MS = 300_000;
@@ -477,66 +472,23 @@ async function runUp(
     return SELF_HOST_EXIT.refused;
   }
 
-  const platform = await waitForPlatform(address, options.signal);
-  if (platform === null) {
+  const ready = await waitForPlatform(address, options.signal);
+  if (!ready) {
     options.out("status: failed");
     options.out(
-      `reason: the containers started but nothing answered ${address}${PLATFORM_IDENTITY_PATH} within ${
+      `reason: the containers started but nothing answered ${address}${PLATFORM_HEALTH_PATH} within ${
         READY_TIMEOUT_MS / 1000
       }s`,
     );
     return SELF_HOST_EXIT.refused;
   }
 
-  // The agreement this whole command turns on: what was printed is what the
-  // platform reports about itself. A repository binds to the second and a
-  // developer types the first, and a CLI that refuses a mismatch — which it
-  // does, and should — makes any disagreement here fatal later rather than now.
-  if (platform.origin !== address) {
-    options.out("status: failed");
-    options.out(
-      `reason: this platform reports its address as ${platform.origin} but was started at ${address}. ` +
-        "Every command from an agent repository would be refused. Set EGMA_BASE_URL to the address " +
-        "people really reach this platform at and run this again.",
-    );
-    return SELF_HOST_EXIT.refused;
-  }
-
-  options.out(`platform: ${platform.instanceId}`);
   options.out(`services: ${STARTED.join(" ")}`);
-  options.out(`phone: ${platform.phoneState}`);
-  if (platform.phoneMissing.length > 0) {
-    options.out(`phone_missing: ${platform.phoneMissing.join(", ")}`);
-  }
   options.out("status: ready");
   options.out(`connect: npx @egma/cli --url ${address}`);
 
   options.fail("");
   options.fail(`Egma is ready at ${address}`);
-  if (platform.phoneState === "ready") {
-    options.fail(
-      "Phone calls are ready. The carrier route stays configured through a restart, an upgrade and a move to another machine.",
-    );
-  } else {
-    options.fail(
-      "Chat simulations can run now. Phone calls are optional and are not ready yet.",
-    );
-    // **The whole optional phone step, not just its last command.** Setup
-    // writes the carrier route through the platform's own API, and that door
-    // opens for an organization owner.
-    options.fail(
-      `Phone is missing ${
-        platform.phoneMissing.length === 0
-          ? "its carrier route"
-          : platform.phoneMissing.join(", ")
-      }.`,
-    );
-    options.fail(
-      `Sign up at ${address} if you have not. The first person to sign up on a fresh Egma becomes its owner. Then run:`,
-    );
-    options.fail(`  npx @egma/cli login --url ${address}`);
-    options.fail("  npx @egma/cli self-host setup");
-  }
   options.fail("");
   options.fail("In your agent repository, once:");
   options.fail(`  npx @egma/cli --url ${address}`);
@@ -580,70 +532,25 @@ const MEDIA_DID_NOT_COME_BACK =
   "The settings themselves are safely stored. Run egma self-host up, which hands the " +
   "recorded pair to those containers and is safe to run again.";
 
-type PlatformFacts = {
-  readonly instanceId: string;
-  readonly origin: string;
-  /** Whether this otherwise-ready platform can place a phone call. */
-  readonly phoneState: "ready" | "setup_required";
-  readonly phoneMissing: readonly string[];
-};
-
-type Readiness = { readonly state?: unknown; readonly missing?: unknown };
-
-function readinessIn(reported: Readiness | undefined): {
-  state: "ready" | "setup_required";
-  missing: readonly string[];
-} | null {
-  const missing = reported?.missing;
-  if (
-    (reported?.state !== "ready" && reported?.state !== "setup_required") ||
-    !Array.isArray(missing) ||
-    !missing.every((one) => typeof one === "string") ||
-    (reported.state === "ready" && missing.length > 0) ||
-    (reported.state === "setup_required" && missing.length === 0)
-  ) {
-    return null;
-  }
-  return {
-    state: reported.state,
-    missing,
-  };
-}
-
-async function readPlatform(address: string): Promise<PlatformFacts | null> {
+async function platformIsHealthy(address: string): Promise<boolean> {
   try {
-    const answer = await fetch(`${address}${PLATFORM_IDENTITY_PATH}`, {
+    const answer = await fetch(`${address}${PLATFORM_HEALTH_PATH}`, {
       signal: AbortSignal.timeout(5_000),
     });
-    if (!answer.ok) return null;
-    const body = (await answer.json()) as {
-      instance_id?: unknown;
-      origin?: unknown;
-      phone?: Readiness;
-    };
-    if (typeof body.instance_id !== "string" || typeof body.origin !== "string") return null;
-    const phone = readinessIn(body.phone);
-    if (phone === null) return null;
-    return {
-      instanceId: body.instance_id,
-      origin: body.origin,
-      phoneState: phone.state,
-      phoneMissing: phone.missing,
-    };
+    return answer.ok;
   } catch {
-    return null;
+    return false;
   }
 }
 
 async function waitForPlatform(
   address: string,
   signal: AbortSignal | undefined,
-): Promise<PlatformFacts | null> {
+): Promise<boolean> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
-    const facts = await readPlatform(address);
-    if (facts !== null) return facts;
-    if (Date.now() >= deadline || signal?.aborted === true) return null;
+    if (await platformIsHealthy(address)) return true;
+    if (Date.now() >= deadline || signal?.aborted === true) return false;
     await new Promise((wake) => setTimeout(wake, READY_POLL_MS));
   }
 }
@@ -777,8 +684,8 @@ async function runSetup(
   // address spelled any other way — a trailing slash, an upper-case host, an
   // explicit `:443` — looks up nothing, and setup would refuse an owner who is
   // signed in and refuse them again after they logged in a second time. Every
-  // other verb is handed an origin the platform itself reported; this one
-  // starts from a variable somebody typed, so it does the normalizing here.
+  // other verb receives an origin from the shared URL resolver; this one starts
+  // from a workspace variable, so it does the same normalizing here.
   const address = platformAddress(
     options.env.EGMA_BASE_URL?.trim() || boot.EGMA_BASE_URL?.trim() || DEFAULT_PLATFORM_ADDRESS,
     options.env.EGMA_BASE_URL?.trim() ? "EGMA_BASE_URL" : "this workspace's recorded address",
@@ -981,26 +888,19 @@ async function runSetup(
   // container.
   const media = await settleMediaCredential(options, workspace, boot, address);
 
-  // Read once rather than waited for. Readiness is built from the store on
-  // every request, so the answer is already true the moment the write lands.
-  const platform = await readPlatform(address);
   // A held source-IP route makes carrierWanted false before the interview. If
   // no route existed, setup must not call the result ready until a complete
   // two-value or four-value route has been supplied.
   const carrierBundleMissing = carrierWanted && carrierBundle === null;
-  const stillMissing = [
-    ...(platform?.phoneMissing ?? []),
-    ...(carrierBundleMissing ? ["the complete SIP carrier bundle"] : []),
-  ];
+  const stillMissing = carrierBundleMissing
+    ? ["the complete SIP carrier bundle"]
+    : [];
 
   const configFile = path.join(PLATFORM_DIRECTORY, PLATFORM_CONFIG_FILE);
   const receipt: Receipt = {
     command: "self-host setup",
     at: new Date().toISOString(),
-    result:
-      platform?.phoneState === "ready" && !carrierBundleMissing
-        ? "applied"
-        : "failed",
+    result: carrierBundleMissing ? "failed" : "applied",
     facts: {
       settings_written: names.join(", "),
       source_number: carrierBundle?.carrier_trunk_number ?? null,
@@ -1014,9 +914,6 @@ async function runSetup(
           : "supplied, not recorded",
       configuration_file: configFile,
       platform_url: address,
-      phone: carrierBundleMissing
-        ? "setup_required"
-        : (platform?.phoneState ?? "unknown"),
       media_credential: media.generated ? "generated" : "existing",
     },
     steps: [],
@@ -1042,9 +939,6 @@ async function runSetup(
           : "supplied",
     receipt: path.relative(workspace, receiptFile),
     platform_url: address,
-    phone: carrierBundleMissing
-      ? "setup_required"
-      : (platform?.phoneState ?? "unknown"),
     media_credential: media.generated ? "generated" : "existing",
   } as const;
 
@@ -1052,10 +946,10 @@ async function runSetup(
   // sentence chosen by whichever condition was tested first masks the other.
   //
   // The media sentence goes first because it is the silent one. A missing
-  // setting is named by the readiness answer on every request and by every
-  // `self-host up`; a media pair that disagrees with the running containers is
-  // reported by nothing at all, and surfaces minutes later as an authentication
-  // refusal naming nothing about configuration.
+  // carrier setting is named when a phone run is started; a media pair that
+  // disagrees with the running containers is reported by nothing at all and
+  // surfaces minutes later as an authentication refusal naming nothing about
+  // configuration.
   const wrong = [
     ...(media.settled ? [] : [MEDIA_DID_NOT_COME_BACK]),
     ...(carrierBundleMissing
@@ -1063,17 +957,6 @@ async function runSetup(
           `the complete SIP carrier bundle was not supplied. Set ${CARRIER_VARIABLES.trunkAddress}, ${CARRIER_VARIABLES.sourceNumber}, ${CARRIER_VARIABLES.sipUsername}, and ${CARRIER_VARIABLES.sipPassword}, then run setup again`,
         ]
       : []),
-    ...(platform === null
-      ? [
-          `the settings were written but ${address} stopped answering, so Egma cannot say whether phone calls are ready`,
-        ]
-      : platform.phoneState === "ready"
-        ? []
-        : [
-            `every answer was written and this platform still reports phone setup required. It is missing ${platform.phoneMissing.join(
-              ", ",
-            )}. Run the same command again — it asks only for what is still absent.`,
-          ]),
   ];
 
   if (wrong.length > 0) {
@@ -1116,9 +999,9 @@ type SettledMedia = MediaCredential & { readonly settled: boolean };
 /**
  * The one spelling of a platform's address that everything here is keyed on.
  *
- * `normalizePlatformOrigin` is what the credentials file files a key under and
- * what the platform reports about itself, so anything that looks a key up, asks
- * the platform a question, or writes the address down goes through it first.
+ * `normalizePlatformOrigin` is what the credentials file files a key under, so
+ * anything that looks a key up, asks the platform a question, or writes the
+ * address down goes through it first.
  * An address it cannot make sense of is refused by naming where it came from —
  * never by printing it, because a rejected address can carry a password.
  */

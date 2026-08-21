@@ -16,6 +16,7 @@ import {
   type Member,
   type Role,
 } from "@egma/db";
+import { memberOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import type { EmailSender } from "../auth/email.ts";
@@ -25,6 +26,7 @@ import {
 } from "../auth/invitation.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 
 /**
@@ -65,12 +67,12 @@ function isRole(value: string): value is Role {
 
 function describedMember(member: Member): Record<string, unknown> {
   return {
-    user_id: member.userId,
+    userId: member.userId,
     email: member.email,
     name: member.name,
     role: member.role,
-    joined_at: member.joinedAt.toISOString(),
-    deactivated_at: member.deactivatedAt?.toISOString() ?? null,
+    joinedAt: member.joinedAt.toISOString(),
+    deactivatedAt: member.deactivatedAt?.toISOString() ?? null,
   };
 }
 
@@ -80,9 +82,9 @@ function describedInvitation(invitation: Invitation): Record<string, unknown> {
     id: invitation.id,
     email: invitation.email,
     role: invitation.role,
-    expires_at: invitation.expiresAt.toISOString(),
-    created_by: invitation.createdBy,
-    created_at: invitation.createdAt.toISOString(),
+    expiresAt: invitation.expiresAt.toISOString(),
+    createdBy: invitation.createdBy,
+    createdAt: invitation.createdAt.toISOString(),
   };
 }
 
@@ -96,7 +98,7 @@ export async function memberRoutes(
   });
 
   /** Everybody may see who is here. Reading is not what roles are for. */
-  app.get("/api/members", async (request, reply) => {
+  registerPlatformOperation(app, memberOperations.listMembers, async (request, reply) => {
     const { auth } = requesterOf(request);
     const members = await listMembers(auth);
     return reply.send({
@@ -104,14 +106,14 @@ export async function memberRoutes(
       // So a page can render the actions it is allowed to offer, rather than
       // offering everything and finding out. Deciding what to *show* is
       // `permits`; deciding what to allow is `authorize`, on each route below.
-      may_manage_members: permits(auth, "manage_members", {
+      mayManageMembers: permits(auth, "manage_members", {
         organizationId: auth.organizationId,
         projectId: auth.projectId,
       }),
     });
   });
 
-  app.get("/api/invitations", async (request, reply) => {
+  registerPlatformOperation(app, memberOperations.listInvitations, async (request, reply) => {
     const { auth } = requesterOf(request);
     authorize(auth, "manage_members", {
       organizationId: auth.organizationId,
@@ -134,7 +136,7 @@ export async function memberRoutes(
    * version. An organization whose second person cannot invite a third is a
    * two-person product.
    */
-  app.post("/api/invitations", async (request, reply) => {
+  registerPlatformOperation(app, memberOperations.createInvitation, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
 
@@ -202,7 +204,7 @@ export async function memberRoutes(
       .send({
         ...describedInvitation(invitation),
         delivered: options.emailSender.delivers,
-        ...(options.emailSender.delivers ? {} : { accept_url: link }),
+        ...(options.emailSender.delivers ? {} : { acceptUrl: link }),
       });
   });
 
@@ -213,7 +215,7 @@ export async function memberRoutes(
    * re-reads its creator's membership on every request, so this is complete the
    * moment the row is written.
    */
-  app.post("/api/members/:userId/role", async (request, reply) => {
+  registerPlatformOperation(app, memberOperations.changeMemberRole, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { userId } = request.params as { userId: string };
     const body = (request.body ?? {}) as Body;
@@ -240,7 +242,7 @@ export async function memberRoutes(
    * Somebody removed. Their keys are revoked and everything they authored stays
    * exactly where it is, with their name still on it.
    */
-  app.post("/api/members/:userId/remove", async (request, reply) => {
+  registerPlatformOperation(app, memberOperations.removeMember, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { userId } = request.params as { userId: string };
 
@@ -252,8 +254,8 @@ export async function memberRoutes(
     const removed = await removeMember(auth, userId);
     if (removed === undefined) return notHere(reply);
     return reply.send({
-      user_id: removed.userId,
-      keys_revoked: removed.keysRevoked,
+      userId: removed.userId,
+      keysRevoked: removed.keysRevoked,
     });
   });
 
@@ -262,7 +264,7 @@ export async function memberRoutes(
    * membership half: every key they minted stops working on the very next
    * request, and their membership and their name on what they authored stay.
    */
-  app.post("/api/members/:userId/deactivate", async (request, reply) => {
+  registerPlatformOperation(app, memberOperations.deactivateMember, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { userId } = request.params as { userId: string };
 

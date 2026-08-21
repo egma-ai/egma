@@ -335,7 +335,7 @@ export function loadConfig(
     throw new Error(
       `EGMA_BASE_URL must be only the address Egma is reached at — scheme, host and port, nothing else — and this one carries ${wrong.join(
         " and ",
-      )}. Set it to ${parsedBaseUrl.origin} and start Egma again. Egma serves its whole public surface, including the platform identity the CLI reads, at the root of this address; anything after the port cannot be honoured and is a sign that a proxy is putting Egma under a subpath, which is not supported.`,
+      )}. Set it to ${parsedBaseUrl.origin} and start Egma again. Egma serves its HTTP interfaces at the root of this address; anything after the port cannot be honoured and is a sign that a proxy is putting Egma under a subpath, which is not supported.`,
     );
   }
   const baseUrl = parsedBaseUrl.origin;

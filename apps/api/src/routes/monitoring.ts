@@ -10,6 +10,7 @@ import {
   type MonitoringSetup,
   type SelectedRetellAgent,
 } from "@egma/db";
+import { monitoringOperations } from "@egma/platform-api/contract";
 import {
   listAgents,
   type Fetch as RetellFetch,
@@ -21,8 +22,9 @@ import type { FastifyInstance } from "fastify";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given, projectNamed, text } from "../http/reading.ts";
+import { given, text } from "../http/reading.ts";
 import {
   notPermitted,
   sendRefusal,
@@ -33,8 +35,6 @@ import {
   type RetellReach as RetellCallReach,
 } from "../retell/api.ts";
 import { replayRetellIngestionFailure } from "../retell-production-ingestion.ts";
-
-export const MONITORING_PATH = "/api/monitoring";
 
 export type MonitoringRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -72,37 +72,37 @@ function callReach(options: MonitoringRoutesOptions): RetellCallReach {
 function described(setup: MonitoringSetup): Record<string, unknown> {
   return {
     id: setup.id,
-    project_id: setup.projectId,
-    agent_platform: setup.agentPlatform,
+    projectId: setup.projectId,
+    agentPlatform: setup.agentPlatform,
     strategy: setup.strategy,
-    credentials_hint: setup.credentialsHint,
+    credentialsHint: setup.credentialsHint,
     health: {
       state: setup.healthState,
-      blocked_until: setup.blockedUntil?.toISOString() ?? null,
-      consecutive_failures: setup.consecutiveFailures,
-      last_error_at: setup.lastErrorAt?.toISOString() ?? null,
-      last_recovered_at: setup.lastRecoveredAt?.toISOString() ?? null,
-      last_received_at: setup.lastReceivedAt?.toISOString() ?? null,
+      blockedUntil: setup.blockedUntil?.toISOString() ?? null,
+      consecutiveFailures: setup.consecutiveFailures,
+      lastErrorAt: setup.lastErrorAt?.toISOString() ?? null,
+      lastRecoveredAt: setup.lastRecoveredAt?.toISOString() ?? null,
+      lastReceivedAt: setup.lastReceivedAt?.toISOString() ?? null,
     },
     agents: setup.agents.map((agent) => ({
       id: agent.id,
-      platform_agent_id: agent.platformAgentId,
-      platform_agent_name: agent.platformAgentName,
+      platformAgentId: agent.platformAgentId,
+      platformAgentName: agent.platformAgentName,
       state: agent.state,
-      scan_kind: agent.scanKind,
-      last_success_at: agent.lastSuccessAt?.toISOString() ?? null,
-      last_conversation_at: agent.lastCallReceivedAt?.toISOString() ?? null,
-      last_error_kind: agent.lastErrorKind,
-      last_error_at: agent.lastErrorAt?.toISOString() ?? null,
-      consecutive_failures: agent.consecutiveFailures,
+      scanKind: agent.scanKind,
+      lastSuccessAt: agent.lastSuccessAt?.toISOString() ?? null,
+      lastConversationAt: agent.lastCallReceivedAt?.toISOString() ?? null,
+      lastErrorKind: agent.lastErrorKind,
+      lastErrorAt: agent.lastErrorAt?.toISOString() ?? null,
+      consecutiveFailures: agent.consecutiveFailures,
       failures: agent.failures.map((failure) => ({
         id: failure.id,
-        provider_call_id: failure.providerCallId,
-        error_kind: failure.errorKind,
+        providerCallId: failure.providerCallId,
+        errorKind: failure.errorKind,
         attempts: failure.attempts,
         status: failure.status,
-        last_attempt_at: failure.lastAttemptAt.toISOString(),
-        created_at: failure.createdAt.toISOString(),
+        lastAttemptAt: failure.lastAttemptAt.toISOString(),
+        createdAt: failure.createdAt.toISOString(),
       })),
     })),
   };
@@ -116,7 +116,11 @@ async function acting(
 }
 
 function apiKeyIn(body: Body): string | undefined {
-  return given(text(body["api_key"]));
+  return given(text(body.apiKey));
+}
+
+function projectNamed(query: Body, body: Body): string | undefined {
+  return given(text(query.projectId)) ?? given(text(body.projectId));
 }
 
 function selectedIn(body: Body): readonly SelectedRetellAgent[] | undefined {
@@ -151,17 +155,17 @@ export async function monitoringRoutes(
     rateLimit: options.rateLimit,
   });
 
-  app.get(MONITORING_PATH, async (request, reply) => {
+  registerPlatformOperation(app, monitoringOperations.listMonitoringSources, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = request.query as Record<string, unknown>;
     const resolved = await acting(auth, projectNamed(query, {}));
     if (!("auth" in resolved)) return refuseActing(reply, resolved);
     const setups = await listMonitoringSetups(resolved.auth);
-    return reply.send({ setups: setups.map(described) });
+    return reply.send({ monitoringSources: setups.map(described) });
   });
 
   /** Validate a key and return only Retell voice-agent identities. */
-  app.post(`${MONITORING_PATH}/retell/discover`, async (request, reply) => {
+  registerPlatformOperation(app, monitoringOperations.discoverRetellVoiceAgents, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const resolved = await acting(
@@ -201,7 +205,7 @@ export async function monitoringRoutes(
     });
   });
 
-  app.put(`${MONITORING_PATH}/retell`, async (request, reply) => {
+  registerPlatformOperation(app, monitoringOperations.configureRetellMonitoring, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const resolved = await acting(
@@ -284,10 +288,10 @@ export async function monitoringRoutes(
       apiKey,
       agents: canonical,
     });
-    return reply.send({ setup: described(configured) });
+    return reply.send({ monitoringSource: described(configured) });
   });
 
-  app.put(`${MONITORING_PATH}/livekit-agents`, async (request, reply) => {
+  registerPlatformOperation(app, monitoringOperations.configureLiveKitMonitoring, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
     const resolved = await acting(
@@ -296,11 +300,12 @@ export async function monitoringRoutes(
     );
     if (!("auth" in resolved)) return refuseActing(reply, resolved);
     const configured = await configureLiveKitMonitoring(resolved.auth);
-    return reply.send({ setup: described(configured) });
+    return reply.send({ monitoringSource: described(configured) });
   });
 
-  app.post(
-    `${MONITORING_PATH}/retell/failures/:failureId/replay`,
+  registerPlatformOperation(
+    app,
+    monitoringOperations.replayMonitoringImportFailure,
     async (request, reply) => {
       const { auth } = requesterOf(request);
       const query = request.query as Record<string, unknown>;
@@ -387,13 +392,16 @@ export async function monitoringRoutes(
         );
       }
       return reply.send({
-        failure: { id: replayed.failureId, status: "resolved" },
+        monitoringImportFailure: {
+          id: replayed.failureId,
+          status: "resolved",
+        },
         trace: { id: replayed.traceId, write: replayed.write },
       });
     },
   );
 
-  app.delete(`${MONITORING_PATH}/:platform`, async (request, reply) => {
+  registerPlatformOperation(app, monitoringOperations.deleteMonitoringSource, async (request, reply) => {
     const { auth } = requesterOf(request);
     const query = request.query as Record<string, unknown>;
     const { platform: rawPlatform } = request.params as { platform: string };

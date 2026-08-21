@@ -1,3 +1,8 @@
+import type {
+  GetAgentResponse,
+  ListAgentsResponse,
+} from "@egma/platform-api/client";
+
 /**
  * The agents of one project, and every way egma can reach one, as the API
  * answers them.
@@ -19,21 +24,11 @@
  * is, and never the secret.
  */
 
-export type ListedAgent = {
-  readonly id: string;
-  readonly project_id: string;
-  readonly name: string;
-  readonly description: string | null;
-  /** What an edit has to be written against. Every read carries it. */
-  readonly revision: string;
-  readonly archived: boolean;
-  readonly archived_at: string | null;
-  readonly created_at: string;
-  readonly updated_at: string;
-};
+export type ListedAgentWithConnections = ListAgentsResponse["agents"][number];
+export type ListedAgent = Omit<ListedAgentWithConnections, "connections">;
 
 /**
- * One page of them. Keyset, newest first: `next_cursor` is where this page
+ * One page of them. Keyset, newest first: `nextCursor` is where this page
  * stopped, and asking for more means handing it back. It is `null` rather than
  * absent when there is no next page, so "there is no more" and "this answer is
  * an older shape" are different answers.
@@ -42,10 +37,7 @@ export type ListedAgent = {
  * agent's connections, so a page of agents is a page of *reachability* rather
  * than a page of names each hiding a second request.
  */
-export type AgentPage = {
-  readonly items: readonly ListedAgentWithConnections[];
-  readonly next_cursor: string | null;
-};
+export type AgentPage = ListAgentsResponse;
 
 /**
  * What is known about one target — or the fact that nobody has measured it.
@@ -55,27 +47,8 @@ export type AgentPage = {
  * the other is a settled fact about the target. A page must never collapse
  * them, which is why the state is its own field rather than an empty array.
  */
-export type CapabilityStanding = "supported" | "unsupported" | "not_measured";
-
-export type Capabilities = {
-  readonly state: "unknown" | "known";
-  /** The catalog keys the adapter looked at, or null when none has. */
-  readonly measured: readonly string[] | null;
-  /** The measured keys it found. Always a subset of `measured`. */
-  readonly supported: readonly string[] | null;
-  readonly checked_at: string | null;
-  readonly source: string | null;
-  /**
-   * What the record says about each catalog key, worked out by the server.
-   *
-   * The page shows this rather than deriving anything from `supported`, because
-   * the derivation is the thing that goes wrong: a key missing from `supported`
-   * is only an absence when the adapter looked for it, and treating it as one
-   * otherwise turns "nobody asked" into "the target cannot", which is the one
-   * confusion this record exists to prevent.
-   */
-  readonly standing: Readonly<Record<string, CapabilityStanding>>;
-};
+export type Capabilities = ListedAgentWithConnections["connections"][number]["capabilities"];
+export type CapabilityStanding = Capabilities["standing"][keyof Capabilities["standing"]];
 
 /** The keys this record settles one way or the other, in catalog order. */
 export function standingIn(
@@ -87,34 +60,7 @@ export function standingIn(
     .map(([key]) => key);
 }
 
-export type ListedConnection = {
-  readonly id: string;
-  readonly agent_id: string;
-  readonly project_id: string;
-  readonly name: string;
-  /** Who runs the agent, or null when Egma does not know. */
-  readonly agent_platform: string | null;
-  /** What Egma connects to for a simulation. */
-  readonly connection_kind: string;
-  /** How Egma gets access to that connection. */
-  readonly access_variant: string;
-  readonly modality: string;
-  /** Customer-facing text derived by the server from the four axes above. */
-  readonly product_label: string;
-  readonly topology: string;
-  readonly environment: string | null;
-  readonly config: Readonly<Record<string, string>>;
-  /** Whether a credential is stored at all. Never the credential. */
-  readonly credential_present: boolean;
-  /** Enough to tell two keys apart, and never enough to be one. */
-  readonly credentials_hint: string | null;
-  readonly capabilities: Capabilities;
-  readonly revision: string;
-  readonly archived: boolean;
-  readonly archived_at: string | null;
-  readonly created_at: string;
-  readonly updated_at: string;
-};
+export type ListedConnection = ListedAgentWithConnections["connections"][number];
 
 /**
  * One agent as a *list* of them answers it: the identity above, and every
@@ -128,81 +74,10 @@ export type ListedConnection = {
  * "how it used to" are two questions, and the second is asked of the agent's
  * own read.
  */
-export type ListedAgentWithConnections = ListedAgent & {
-  readonly connections: readonly ListedConnection[];
-};
-
-export type AgentDetail = {
-  readonly agent: ListedAgent;
-  readonly connections: readonly ListedConnection[];
-};
-
-export const AGENTS_PATH = "/api/agents";
+export type AgentDetail = GetAgentResponse;
 
 /** Which half of the project a list is asking for. */
 export type ArchiveFilter = "active" | "archived";
-
-/**
- * One page of agents, narrowed by whatever the toolbar is set to.
- *
- * The search and the filter are in the address of the request rather than
- * applied to what came back, because a filter that only reached the page
- * already fetched would answer differently depending on how far somebody had
- * scrolled.
- */
-export function agentsQuery(options: {
-  readonly search?: string;
-  readonly filter?: ArchiveFilter;
-  readonly cursor?: string;
-}): string {
-  const asked = new URLSearchParams();
-  const wanted = options.search?.trim() ?? "";
-  if (wanted !== "") asked.set("search", wanted);
-  if (options.filter === "archived") asked.set("archived", "true");
-  if (options.cursor !== undefined) asked.set("cursor", options.cursor);
-  const written = asked.toString();
-  return written === "" ? AGENTS_PATH : `${AGENTS_PATH}?${written}`;
-}
-
-export function agentPath(agentId: string): string {
-  return `${AGENTS_PATH}/${encodeURIComponent(agentId)}`;
-}
-
-/** The agent, with the active connections or the archived ones. */
-export function agentDetailQuery(
-  agentId: string,
-  filter: ArchiveFilter,
-): string {
-  return filter === "archived"
-    ? `${agentPath(agentId)}?archived=true`
-    : agentPath(agentId);
-}
-
-export function agentActionPath(
-  agentId: string,
-  action: "archive" | "restore",
-): string {
-  return `${agentPath(agentId)}/${action}`;
-}
-
-export function connectionsPath(agentId: string): string {
-  return `${agentPath(agentId)}/connections`;
-}
-
-export function connectionPath(
-  agentId: string,
-  connectionId: string,
-): string {
-  return `${connectionsPath(agentId)}/${encodeURIComponent(connectionId)}`;
-}
-
-export function connectionActionPath(
-  agentId: string,
-  connectionId: string,
-  action: "archive" | "restore" | "capabilities/refresh",
-): string {
-  return `${connectionPath(agentId, connectionId)}/${action}`;
-}
 
 /**
  * How a connection's environment reads when it has none.

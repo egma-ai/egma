@@ -1,20 +1,23 @@
-/**
- * The simulation connection forms this Egma instance accepts.
- *
- * The platform owns this catalog. The CLI reads it instead of carrying a
- * second list of fields, labels, or credential rules that can drift from the
- * platform that will check the finished connection.
- */
+/** The connection forms supported by the selected Egma platform. */
 
-import { PlatformUnreachableError, type Fetch } from "./device-flow.ts";
+import {
+  listConnectionOptions,
+  type ListConnectionOptionsResponse,
+} from "@egma/platform-api/client";
+
 import type { RegisterOptions } from "./agents.ts";
-import { ask, saidBy, text } from "./wire.ts";
+import {
+  platformClient,
+  platformRefusalMessage,
+  platformText,
+  platformUnreachableMessage,
+} from "./client.ts";
 
-export const CONNECTION_OPTIONS_PATH = "/api/connection-options";
+type GeneratedOption = ListConnectionOptionsResponse["items"][number];
 
-export type ConnectionFieldKind = "text" | "url" | "e164" | "json";
-export type CredentialFieldKind = "secret" | "json";
-export type CredentialRule = "required" | "forbidden" | "optional";
+export type ConnectionFieldKind = GeneratedOption["fields"][number]["kind"];
+export type CredentialFieldKind = GeneratedOption["credentialFields"][number]["kind"];
+export type CredentialRule = GeneratedOption["credentialRule"];
 
 export type ConnectionField = {
   readonly key: string;
@@ -34,14 +37,14 @@ export type CredentialField = {
 };
 
 export type ConnectionOption = {
-  readonly agentPlatform: string | null;
+  readonly agentPlatform: GeneratedOption["agentPlatform"];
   readonly agentPlatformLabel: string;
-  readonly connectionKind: string;
-  readonly accessVariant: string;
+  readonly connectionKind: GeneratedOption["connectionKind"];
+  readonly accessVariant: GeneratedOption["accessVariant"];
   readonly accessVariantLabel: string;
-  readonly modality: string;
+  readonly modality: GeneratedOption["modality"];
   readonly productLabel: string;
-  readonly topology: string;
+  readonly topology: GeneratedOption["topology"];
   readonly simulatorAdapter: boolean;
   readonly capabilityDiscovery: boolean;
   readonly fields: readonly ConnectionField[];
@@ -60,84 +63,35 @@ export type ConnectionOptionCatalogResult =
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "unreachable"; readonly reason: string };
 
-const FIELD_KINDS: readonly string[] = ["text", "url", "e164", "json"];
-const CREDENTIAL_FIELD_KINDS: readonly string[] = ["secret", "json"];
-const CREDENTIAL_RULES: readonly string[] = ["required", "forbidden", "optional"];
-
-function objectsIn(value: unknown): readonly Record<string, unknown>[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter(
-    (entry): entry is Record<string, unknown> =>
-      typeof entry === "object" && entry !== null && !Array.isArray(entry),
-  );
-}
-
-function fieldIn(value: Record<string, unknown>): ConnectionField | null {
-  const key = text(value.key);
-  const kind = text(value.kind);
-  if (key === "" || !FIELD_KINDS.includes(kind)) return null;
+function cleanOption(option: GeneratedOption): ConnectionOption {
   return {
-    key,
-    label: text(value.label),
-    kind: kind as ConnectionFieldKind,
-    required: value.required === true,
-    help: text(value.help),
-    afterCredentials: value.after_credentials === true,
-  };
-}
-
-function credentialFieldIn(value: Record<string, unknown>): CredentialField | null {
-  const field = text(value.field);
-  const kind = text(value.kind);
-  if (field === "" || !CREDENTIAL_FIELD_KINDS.includes(kind)) return null;
-  return {
-    field,
-    label: text(value.label),
-    kind: kind as CredentialFieldKind,
-    required: value.required === true,
-    help: text(value.help),
-  };
-}
-
-function optionIn(value: Record<string, unknown>): ConnectionOption | null {
-  const connectionKind = text(value.connection_kind);
-  const accessVariant = text(value.access_variant);
-  const modality = text(value.modality);
-  const productLabel = text(value.product_label);
-  const rule = text(value.credential_rule);
-  const rawPlatform = value.agent_platform;
-  if (
-    (rawPlatform !== null && typeof rawPlatform !== "string") ||
-    connectionKind === "" ||
-    accessVariant === "" ||
-    modality === "" ||
-    productLabel === "" ||
-    !CREDENTIAL_RULES.includes(rule)
-  ) {
-    return null;
-  }
-
-  return {
-    agentPlatform: rawPlatform === null ? null : text(rawPlatform),
-    agentPlatformLabel: text(value.agent_platform_label),
-    connectionKind,
-    accessVariant,
-    accessVariantLabel: text(value.access_variant_label),
-    modality,
-    productLabel,
-    topology: text(value.topology),
-    simulatorAdapter: value.simulator_adapter === true,
-    capabilityDiscovery: value.capability_discovery === true,
-    fields: objectsIn(value.fields).flatMap((field) => {
-      const read = fieldIn(field);
-      return read === null ? [] : [read];
-    }),
-    credentialRule: rule as CredentialRule,
-    credentialHelp: text(value.credential_help),
-    credentialFields: objectsIn(value.credential_fields).flatMap((field) => {
-      const read = credentialFieldIn(field);
-      return read === null ? [] : [read];
-    }),
+    agentPlatform: option.agentPlatform,
+    agentPlatformLabel: platformText(option.agentPlatformLabel),
+    connectionKind: option.connectionKind,
+    accessVariant: option.accessVariant,
+    accessVariantLabel: platformText(option.accessVariantLabel),
+    modality: option.modality,
+    productLabel: platformText(option.productLabel),
+    topology: option.topology,
+    simulatorAdapter: option.simulatorAdapter,
+    capabilityDiscovery: option.capabilityDiscovery,
+    fields: option.fields.map((field) => ({
+      key: platformText(field.key),
+      label: platformText(field.label),
+      kind: field.kind,
+      required: field.required,
+      help: platformText(field.help),
+      afterCredentials: field.afterCredentials,
+    })),
+    credentialRule: option.credentialRule,
+    credentialHelp: platformText(option.credentialHelp),
+    credentialFields: option.credentialFields.map((field) => ({
+      field: platformText(field.field),
+      label: platformText(field.label),
+      kind: field.kind,
+      required: field.required,
+      help: platformText(field.help),
+    })),
   };
 }
 
@@ -153,38 +107,24 @@ export function connectionOptionsForPlatform(
 export async function readConnectionOptions(
   options: RegisterOptions,
 ): Promise<ConnectionOptionCatalogResult> {
-  let answered: Awaited<ReturnType<typeof ask>>;
-  try {
-    answered = await ask({
-      signedIn: { url: options.url.replace(/\/+$/u, ""), key: options.key },
-      path: CONNECTION_OPTIONS_PATH,
-      ...(options.fetchImpl === undefined
-        ? {}
-        : { fetchImpl: options.fetchImpl as Fetch }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    });
-  } catch (error) {
-    if (error instanceof PlatformUnreachableError) {
-      return { kind: "unreachable", reason: error.message };
-    }
-    throw error;
-  }
+  const signedIn = { url: options.url.replace(/\/+$/u, ""), key: options.key };
+  const answer = await listConnectionOptions({
+    client: platformClient(signedIn, options.fetchImpl),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
 
-  if (answered.response.status === 401) return { kind: "not-authenticated" };
-  if (!answered.response.ok) {
+  if (answer.response === undefined) {
+    return { kind: "unreachable", reason: platformUnreachableMessage(options.url) };
+  }
+  if (answer.response.status === 401) return { kind: "not-authenticated" };
+  if (!answer.response.ok) {
     return {
       kind: "refused",
-      reason: saidBy(answered.body, answered.response.status),
+      reason: platformRefusalMessage(answer.error, answer.response.status),
     };
   }
-
   return {
     kind: "catalog",
-    catalog: {
-      items: objectsIn(answered.body.items).flatMap((entry) => {
-        const read = optionIn(entry);
-        return read === null ? [] : [read];
-      }),
-    },
+    catalog: { items: (answer.data?.items ?? []).map(cleanOption) },
   };
 }

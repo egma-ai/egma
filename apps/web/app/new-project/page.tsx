@@ -6,10 +6,12 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { writeJson, type Refusal } from "../../lib/api.ts";
+import { createProject } from "@egma/platform-api/client";
+
+import type { Refusal } from "../../lib/api.ts";
 import { roleOf } from "../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../lib/platform-client.ts";
 import { projectLanding } from "../../lib/project-context.ts";
-import { PROJECTS_PATH, type ProjectSettings } from "../../lib/settings.ts";
 import { Section } from "../../ui/section.tsx";
 import {
   Field,
@@ -89,10 +91,12 @@ function NewProject() {
     setRefused(null);
     setCreating(true);
 
-    const written = await writeJson<ProjectSettings>(PROJECTS_PATH, {
-      method: "POST",
-      body: { name: name.trim(), description: description.trim() },
-    });
+    const written = await platformAnswer(
+      createProject(
+        { name: name.trim(), description: description.trim() },
+        { client: platformClient },
+      ),
+    );
 
     setCreating(false);
     if (written.status === "signed-out") {

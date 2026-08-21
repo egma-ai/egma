@@ -332,7 +332,7 @@ describe("the exit line", () => {
    * A reason that arrived carrying a block keeps the block.
    *
    * One refusal in egma is more than a sentence: the one that keeps a
-   * repository on the platform it is bound to ends with every line a developer
+   * repository on the platform URL it is bound to ends with every line a developer
    * deletes to move it, and a coding agent is meant to act on those lines
    * without a person reading them out. Squashed into the exit line they are
    * neither readable nor usable — which is exactly what happened, because a
@@ -344,12 +344,12 @@ describe("the exit line", () => {
    */
   it("keeps a block under the line, and flattens everything else onto it", () => {
     const refusal = teachingTheMove(
-      "This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. Egma does not move a repository between platforms, and nothing was sent.",
+      "This repository is bound to the Egma platform at https://theirs.example, and --url names https://ours.example instead. Drop --url to use the bound platform. If https://ours.example is the same platform at a new address, edit the platform origin in egma/config.yaml on purpose. Egma does not move a repository between platforms, and no repository identifiers were sent.",
     );
     const lines = exitLines({ kind: "failed", reason: refusal });
 
     expect(lines[0]).toBe(
-      "Egma could not finish: This repository is already bound to Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEP at https://theirs.example, and this run reached Egma platform pf_01K3XQ7M4E8YB2FVN0H9TZQWEQ at https://ours.example. Egma does not move a repository between platforms, and nothing was sent.",
+      "Egma could not finish: This repository is bound to the Egma platform at https://theirs.example, and --url names https://ours.example instead. Drop --url to use the bound platform. If https://ours.example is the same platform at a new address, edit the platform origin in egma/config.yaml on purpose. Egma does not move a repository between platforms, and no repository identifiers were sent.",
     );
     expect(lines[1]).toBe("");
     expect(lines.slice(2)).toEqual([...MOVE_TO_ANOTHER_PLATFORM]);

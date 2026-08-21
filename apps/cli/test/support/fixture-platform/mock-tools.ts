@@ -7,7 +7,7 @@
  * mirroring is what the CLI depends on, and it is deliberately not kinder than
  * the real thing anywhere:
  *
- * - **An edit overwrites.** There is no `expected_version_id` here and there is
+ * - **An edit overwrites.** There is no `expected_versionId` here and there is
  *   no version to name: a mock tool is the one authored thing egma does not
  *   version. So a second push of the same file is a write that changes nothing
  *   rather than a conflict.
@@ -91,7 +91,7 @@ export type MockToolControls = {
 };
 
 /** The keys a mock tool's body holds, and no others. */
-const MOCK_TOOL_KEYS = ["tool", "answer", "error", "delay_ms", "agents", "project"] as const;
+const MOCK_TOOL_KEYS = ["tool", "answer", "error", "delayMs", "agents", "projectId"] as const;
 
 /** The route group's own refusals, word for word. */
 export function unknownKeyIn(
@@ -118,7 +118,7 @@ const AN_AGENT_IS_TEXT =
 
 function delayIsNotANumber(sent: string): string {
   return (
-    "delay_ms is how long Egma holds this answer back, as a whole number " +
+    "delayMs is how long Egma holds this answer back, as a whole number " +
     `of milliseconds, and this request sent ${sent}.`
   );
 }
@@ -216,16 +216,16 @@ export function delayOf(
   if (!Number.isInteger(milliseconds) || milliseconds < 0) {
     return {
       refusal:
-        `delay_ms is a whole number of milliseconds, zero or more, and this ` +
+        `delayMs is a whole number of milliseconds, zero or more, and this ` +
         `request sent ${JSON.stringify(milliseconds)}.`,
     };
   }
   if (milliseconds > LONGEST_MOCK_TOOL_DELAY_MILLISECONDS) {
     return {
       refusal:
-        `delay_ms is ${milliseconds}, and a mock tool may delay its answer by ` +
+        `delayMs is ${milliseconds}, and a mock tool may delay its answer by ` +
         `at most ${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the ` +
-        `budget the exchange carrying it is given. Send a smaller delay_ms.`,
+        `budget the exchange carrying it is given. Send a smaller delayMs.`,
     };
   }
   return { delay: milliseconds };
@@ -308,10 +308,10 @@ export function mockToolRoutes(options: {
     id: one.id,
     tool: one.toolName,
     ...one.answer,
-    delay_ms: one.delayMilliseconds,
+    delayMs: one.delayMilliseconds,
     agents: namesOf(one.agentIds).map((named) => ({ id: named.id, name: named.name })),
-    created_at: one.createdAt.toISOString(),
-    updated_at: one.updatedAt.toISOString(),
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
   });
 
   const behindAKey = (request: FixtureRequest, answer: () => FixtureAnswer): FixtureAnswer => {
@@ -351,9 +351,9 @@ export function mockToolRoutes(options: {
     const unknown = unknownKeyIn(said, MOCK_TOOL_KEYS, "a mock tool");
     if (unknown !== undefined) return { refused: refuse(400, "invalid_request", unknown) };
 
-    if ("delay_ms" in said && said.delay_ms !== undefined && typeof said.delay_ms !== "number") {
+    if ("delayMs" in said && said.delayMs !== undefined && typeof said.delayMs !== "number") {
       return {
-        refused: refuse(422, "unprocessable", delayIsNotANumber(typeof said.delay_ms)),
+        refused: refuse(422, "unprocessable", delayIsNotANumber(typeof said.delayMs)),
       };
     }
 
@@ -362,7 +362,7 @@ export function mockToolRoutes(options: {
       return { refused: refuse(422, "unprocessable", named.refusal) };
     }
 
-    const outsider = projectNamed(given(text(said.project)));
+    const outsider = projectNamed(given(text(said.projectId)));
     if (outsider !== null) return { refused: outsider };
 
     const resolved = named === undefined ? undefined : resolveAgents(named.entries);
@@ -391,8 +391,8 @@ export function mockToolRoutes(options: {
     }
 
     let delay: number | undefined;
-    if ("delay_ms" in said && said.delay_ms !== undefined) {
-      const read = delayOf(said.delay_ms);
+    if ("delayMs" in said && said.delayMs !== undefined) {
+      const read = delayOf(said.delayMs);
       if ("refusal" in read) return { refused: refuse(422, "unprocessable", read.refusal) };
       delay = read.delay;
     } else if (kind === "create") {
@@ -414,18 +414,18 @@ export function mockToolRoutes(options: {
     routes: [
       {
         method: "GET",
-        path: "/api/mock-tools",
+        path: "/v1/mock-tools",
         handle: (request) =>
           behindAKey(request, () => {
-            const outsider = projectNamed(given(request.url.searchParams.get("project")));
+            const outsider = projectNamed(given(request.url.searchParams.get("projectId")));
             if (outsider !== null) return outsider;
 
-            const cursor = given(request.url.searchParams.get("cursor"));
+            const cursor = given(request.url.searchParams.get("pageToken"));
             if (cursor !== undefined && !isId("mck", cursor)) {
               return refuse(
                 400,
                 "invalid_request",
-                `"${cursor}" is not a cursor this list issued. Send the next_cursor ` +
+                `"${cursor}" is not a cursor this list issued. Send the nextPageToken ` +
                   `an earlier page answered with, or leave it out to start at the ` +
                   `newest mock tool.`,
               );
@@ -442,15 +442,15 @@ export function mockToolRoutes(options: {
             return {
               status: 200,
               body: {
-                items: page.map(described),
-                next_cursor: more ? (page.at(-1)?.id ?? null) : null,
+                mockTools: page.map(described),
+                nextPageToken: more ? (page.at(-1)?.id ?? null) : null,
               },
             };
           }),
       },
       {
         method: "POST",
-        path: "/api/mock-tools",
+        path: "/v1/mock-tools",
         handle: (request) =>
           behindAKey(request, () => {
             const read = readWrite(request.body, "create");
@@ -478,7 +478,7 @@ export function mockToolRoutes(options: {
       },
       {
         method: "PATCH",
-        path: "/api/mock-tools/:mockToolId",
+        path: "/v1/mock-tools/:mockToolId",
         handle: (request) =>
           behindAKey(request, () => {
             const id = request.params.mockToolId ?? "";

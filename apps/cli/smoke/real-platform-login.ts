@@ -93,7 +93,7 @@ function saysNothingAboutTenancy(shown: string, where: string): void {
 
 /** Whether a key opens a door on this instance. */
 async function keyWorks(origin: string, key: string): Promise<boolean> {
-  const used = await fetch(`${origin}/api/keys`, {
+  const used = await fetch(`${origin}/v1/keys`, {
     headers: { authorization: `Bearer ${key}` },
   });
   return used.status === 200;

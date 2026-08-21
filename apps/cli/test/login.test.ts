@@ -143,12 +143,12 @@ describe("signing a machine in", () => {
     });
 
     const held = await readCredentials(workspace.credentialsFile, platform.url);
-    const used = await fetch(`${platform.url}/api/keys`, {
+    const used = await fetch(`${platform.url}/v1/keys`, {
       headers: { authorization: `Bearer ${held?.key ?? ""}` },
     });
     expect(used.status).toBe(200);
 
-    const refused = await fetch(`${platform.url}/api/keys`, {
+    const refused = await fetch(`${platform.url}/v1/keys`, {
       headers: { authorization: "Bearer egma_sk_not-a-real-one" },
     });
     expect(refused.status).toBe(401);

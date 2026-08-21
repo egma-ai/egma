@@ -1,5 +1,12 @@
+import type {
+  GetTestResponse,
+  ListCapabilitiesResponse,
+  ListTestsResponse,
+  ListTestVersionsResponse,
+} from "@egma/platform-api/client";
+
 /**
- * The tests of one project, as `GET /api/tests` answers them.
+ * The tests of one project, as `GET /v1/tests` answers them.
  *
  * A **test** is one authored specification: the situation to put an agent in,
  * who calls about it, and what should happen. It lives in a project and applies
@@ -36,83 +43,17 @@
 export type ExpectedBehavior = string;
 
 /** A persona a test names, or an agent it applies to: identity, and state. */
-export type Named = {
-  readonly id: string;
-  readonly name: string;
-  readonly archived_at?: string | null;
-};
-
-export type ListedTest = {
-  readonly id: string;
-  readonly project_id: string;
-  readonly name: string;
-  readonly description: string | null;
-  readonly version: number;
-  readonly version_id: string;
-  readonly scenario: string;
-  readonly expected_behaviors: readonly ExpectedBehavior[];
-  readonly personas: readonly Named[];
-  readonly required_capabilities: readonly string[];
-  /**
-   * How many tools this test answers for itself.
-   *
-   * **A count, never the overrides.** This browser does not author mock tools
-   * and its form does not send them, which is exactly what stops a partial
-   * form erasing hidden versioned content — so what it shows is that they are
-   * there, and clone carries them.
-   */
-  readonly override_count: number;
-  readonly agents: readonly Named[];
-  readonly revision: string;
-  readonly applicability_revision: string;
-  readonly archived_at: string | null;
-  readonly archive_reason: string | null;
-  readonly created_at: string;
-  readonly updated_at: string;
-};
-
-export type TestPage = {
-  readonly items: readonly ListedTest[];
-  readonly next_cursor: string | null;
-};
+export type ListedTest = GetTestResponse;
+export type Named = ListedTest["agents"][number];
+export type TestPage = ListTestsResponse;
 
 /** One frozen version, as the history reader shows it. */
-export type TestVersionRow = {
-  readonly id: string;
-  readonly test_id: string;
-  readonly test_name: string;
-  readonly version: number;
-  readonly current: boolean;
-  readonly scenario: string;
-  readonly expected_behaviors: readonly ExpectedBehavior[];
-  readonly personas: readonly Named[];
-  /**
-   * No `graders` field, and its absence is the point. A test named its own
-   * graders through a junction, and the junction went with the redesign: what
-   * judges a simulation is the project's running copies, decided at the moment
-   * a run freezes its plan. A version that still carried a grader list would be
-   * this browser holding a fact the server stopped answering.
-   */
-  readonly required_capabilities: readonly string[];
-  readonly override_count: number;
-  readonly created_at: string;
-};
-
-export type TestVersionPage = {
-  readonly items: readonly TestVersionRow[];
-  readonly next_cursor: string | null;
-};
+export type TestVersionPage = ListTestVersionsResponse;
+export type TestVersionRow = TestVersionPage["versions"][number];
 
 /** One capability a test may require, as the server's own catalog describes it. */
-export type Capability = {
-  readonly key: string;
-  readonly label: string;
-  readonly description: string;
-};
-
-export type CapabilityCatalog = { readonly items: readonly Capability[] };
-
-export const TESTS_PATH = "/api/tests";
+export type CapabilityCatalog = ListCapabilitiesResponse;
+export type Capability = CapabilityCatalog["items"][number];
 
 /**
  * The capability catalog, from the route that already served it to the
@@ -120,39 +61,6 @@ export const TESTS_PATH = "/api/tests";
  * exist, and the whole worth of the catalog is that a test's requirement and a
  * connection's measurement name the same thing.
  */
-export const CAPABILITIES_PATH = "/api/capabilities";
-
-export function testsPath(options: {
-  readonly archived?: boolean;
-  readonly agent?: string;
-  readonly name?: string;
-  readonly cursor?: string;
-}): string {
-  const query = new URLSearchParams();
-  if (options.archived === true) query.set("archived", "true");
-  if (options.agent !== undefined && options.agent !== "") {
-    query.set("agent", options.agent);
-  }
-  if (options.name !== undefined && options.name.trim() !== "") {
-    query.set("name", options.name.trim());
-  }
-  if (options.cursor !== undefined) query.set("cursor", options.cursor);
-  const search = query.toString();
-  return search === "" ? TESTS_PATH : `${TESTS_PATH}?${search}`;
-}
-
-export function testPath(testId: string): string {
-  return `${TESTS_PATH}/${encodeURIComponent(testId)}`;
-}
-
-export function testVersionsPath(testId: string): string {
-  return `${testPath(testId)}/versions`;
-}
-
-export function testAgentsPath(testId: string): string {
-  return `${testPath(testId)}/agents`;
-}
-
 /**
  * Which fields of a test are live, which are versioned content, and which are
  * neither.
@@ -174,9 +82,9 @@ export const LIVE_FIELDS = ["name", "description"] as const;
 export const VERSIONED_FIELDS = [
   "scenario",
   "personas",
-  "expected_behaviors",
-  "required_capabilities",
-  "mock_tools",
+  "expectedBehaviors",
+  "requiredCapabilities",
+  "mockTools",
 ] as const;
 
 export type VersionedField = (typeof VERSIONED_FIELDS)[number];
@@ -198,16 +106,16 @@ export function availability(test: ListedTest): {
   readonly runnable: boolean;
   readonly why: string | null;
 } {
-  if (test.archived_at !== null) {
+  if (test.archivedAt !== null) {
     return {
       runnable: false,
       why:
-        test.archive_reason === "needs_agent"
+        test.archiveReason === "needs_agent"
           ? "Archived during an upgrade, because this project had no active agent to apply it to. Restore it with an agent selected."
           : "Archived. It keeps every version and every run that used it, and cannot enter a new run.",
     };
   }
-  if (test.agents.every((applies) => applies.archived_at !== null)) {
+  if (test.agents.every((applies) => applies.archivedAt !== null)) {
     return {
       runnable: false,
       why:
@@ -219,7 +127,7 @@ export function availability(test: ListedTest): {
 
 /** The agents a test applies to that a run could actually use. */
 export function activeAgents(test: ListedTest): readonly Named[] {
-  return test.agents.filter((applies) => (applies.archived_at ?? null) === null);
+  return test.agents.filter((applies) => applies.archivedAt === null);
 }
 
 /**

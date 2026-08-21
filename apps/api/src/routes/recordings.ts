@@ -1,4 +1,5 @@
 import { getSimulation, NotPermittedError } from "@egma/db";
+import { recordingOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -6,6 +7,7 @@ import { reachingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
+import { registerPlatformOperation } from "../http/platform-operation.ts";
 import {
   noObjectStore,
   notFound,
@@ -20,7 +22,7 @@ import {
 } from "../recordings/signed-link.ts";
 
 /**
- * `GET /api/simulations/:simulationId/recording` — the one route that turns a
+ * `GET /v1/simulations/:simulationId/recording` — the one route that turns a
  * recording's reference into something a browser can play.
  *
  * The contract has promised this for as long as the reference has existed:
@@ -91,12 +93,9 @@ export type RecordingRoutesOptions = {
   readonly blob: BlobStore | undefined;
 };
 
-export const SIMULATION_RECORDING_PATH =
-  "/api/simulations/:simulationId/recording";
-
 /** The path one simulation's recording is resolved at — the client's side. */
 export function recordingPathFor(simulationId: string): string {
-  return `/api/simulations/${encodeURIComponent(simulationId)}/recording`;
+  return `/v1/simulations/${encodeURIComponent(simulationId)}/recording`;
 }
 
 /**
@@ -106,7 +105,7 @@ export function recordingPathFor(simulationId: string): string {
  */
 const NO_SUCH_SIMULATION =
   "no simulation of yours has that id. Check the id, or open the run it " +
-  "belongs to with GET /api/runs/{run_id}.";
+  "belongs to with GET /v1/runs/{runId}.";
 
 export async function recordingRoutes(
   app: FastifyInstance,
@@ -117,7 +116,7 @@ export async function recordingRoutes(
     rateLimit: options.rateLimit,
   });
 
-  app.get(SIMULATION_RECORDING_PATH, async (request, reply) => {
+  registerPlatformOperation(app, recordingOperations.getSimulationRecording, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { simulationId } = request.params as { simulationId: string };
     const query = (request.query ?? {}) as Record<string, unknown>;
@@ -143,7 +142,7 @@ export async function recordingRoutes(
      * the whole organization into *name the project* — a 400 in place of the
      * audio, on the one surface whose whole point is that it need not know.
      */
-    const acting = await reachingIn(auth, given(text(query.project)));
+    const acting = await reachingIn(auth, given(text(query.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
     const simulation = await getSimulation(acting.auth, simulationId);
@@ -202,7 +201,7 @@ export async function recordingRoutes(
     }
 
     return reply.send({
-      simulation_id: simulation.id,
+      simulationId: simulation.id,
       // The link, and never the reference: what the reference means is this
       // side's business, and a client that learned to compose one for itself
       // would be a client that breaks the day the deployment moves its store.
@@ -212,7 +211,7 @@ export async function recordingRoutes(
       // "the link went stale" — the second is recoverable by asking again, and
       // a player that could not tell them apart would present a dead scrubber
       // as a broken recording.
-      expires_at: link.expiresAt.toISOString(),
+      expiresAt: link.expiresAt.toISOString(),
     });
   });
 

@@ -3,28 +3,30 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  addConnection,
+  discoverAgents,
+  getAgent,
+  listConnectionOptions,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { readJson, writeJson, type Refusal } from "../../../../../../../lib/api.ts";
-import {
-  agentDetailQuery,
-  connectionsPath,
-  type AgentDetail,
-  type ListedConnection,
-} from "../../../../../../../lib/agents.ts";
+import type { Refusal } from "../../../../../../../lib/api.ts";
+import type { AgentDetail } from "../../../../../../../lib/agents.ts";
 import {
   agentPlatformChoices,
-  CONNECTION_OPTIONS_PATH,
+  agentsForOption,
+  candidatesForOption,
+  optionNamed,
   optionsForPlatform,
-  RETELL_VOICE_AGENTS_PATH,
-  retellPhoneConnectionPath,
+  type ConnectionCandidate,
   type ConnectionOptionCatalog,
-  type RetellVoiceAgent,
-  type RetellVoiceAgents,
+  type DiscoveredAgent,
 } from "../../../../../../../lib/connection-options.ts";
 import { roleOf } from "../../../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
@@ -89,12 +91,12 @@ function NewConnection({
   const [livekitDispatch, setLivekitDispatch] =
     useState<LiveKitDispatch>(newLiveKitDispatch);
 
-  const [retellKey, setRetellKey] = useState("");
-  const [retellAgents, setRetellAgents] = useState<readonly RetellVoiceAgent[] | null>(
-    null,
-  );
-  const [retellAgentId, setRetellAgentId] = useState("");
-  const [retellNumber, setRetellNumber] = useState("");
+  const [discoveryKey, setDiscoveryKey] = useState("");
+  const [discoveredAgents, setDiscoveredAgents] = useState<
+    readonly DiscoveredAgent[] | null
+  >(null);
+  const [discoveredAgentId, setDiscoveredAgentId] = useState("");
+  const [candidateIndex, setCandidateIndex] = useState(0);
   const [discovering, setDiscovering] = useState(false);
   const [discoverRefused, setDiscoverRefused] = useState<Refusal | null>(null);
 
@@ -102,15 +104,21 @@ function NewConnection({
   const [refused, setRefused] = useState<Refusal | null>(null);
   const back = projectPath(projectId, "agents", agentId);
   const { answer: parentAgent } = useProjectRead<AgentDetail>(
-    agentDetailQuery(agentId, "active"),
+    (projectId) =>
+      platformAnswer(
+        getAgent({ agentId, projectId }, { client: platformClient }),
+      ),
     projectId,
+    agentId,
   );
 
   useEffect(() => {
     let current = true;
     setCatalog(null);
     setCatalogRefused(null);
-    void readJson<ConnectionOptionCatalog>(CONNECTION_OPTIONS_PATH).then((read) => {
+    void platformAnswer(
+      listConnectionOptions({ client: platformClient }),
+    ).then((read) => {
       if (!current) return;
       if (read.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -118,8 +126,8 @@ function NewConnection({
         setCatalog(read.value);
         const first = read.value.items[0];
         if (first !== undefined) {
-          setPlatformValue(first.agent_platform ?? "unknown");
-          setAccessVariant(first.access_variant);
+          setPlatformValue(first.agentPlatform ?? "unknown");
+          setAccessVariant(first.accessVariant);
         }
       } else {
         setCatalogRefused(read.refusal);
@@ -139,14 +147,27 @@ function NewConnection({
   const selectedPlatform = platformValue === "unknown" ? null : platformValue;
   const platformOptions = optionsForPlatform(catalog, selectedPlatform);
   const option = platformOptions.find(
-    (one) => one.access_variant === accessVariant,
+    (one) => one.accessVariant === accessVariant,
   );
-  const retellPhone =
-    option?.agent_platform === "retell" &&
-    option.connection_kind === "phone_number";
-  const chosenRetell = retellAgents?.find((one) => one.id === retellAgentId);
+  // Retell is the first platform served by account discovery. The operation and
+  // its candidates are platform-neutral, so adding another provider does not
+  // create another connection write path.
+  const usesAgentDiscovery = option?.agentPlatform === "retell";
+  const matchingAgents = agentsForOption(discoveredAgents, option);
+  const chosenDiscoveredAgent = matchingAgents.find(
+    (agent) => agent.platformAgentId === discoveredAgentId,
+  );
+  const matchingCandidates =
+    chosenDiscoveredAgent === undefined
+      ? []
+      : candidatesForOption(chosenDiscoveredAgent, option);
+  const chosenCandidate = matchingCandidates[candidateIndex];
+  const chosenCandidateOption =
+    chosenCandidate === undefined
+      ? undefined
+      : optionNamed(catalog, chosenCandidate);
   const liveKitForm = liveKitDispatchForm({
-    connectionKind: option?.connection_kind,
+    connectionKind: option?.connectionKind,
     option,
     config: draft.config,
     mode: livekitDispatch,
@@ -154,8 +175,8 @@ function NewConnection({
   const changed =
     name !== "" ||
     livekitDispatch !== newLiveKitDispatch() ||
-    retellKey !== "" ||
-    retellAgents !== null ||
+    discoveryKey !== "" ||
+    discoveredAgents !== null ||
     Object.values(draft.config).some((value) => value !== "") ||
     Object.values(draft.credentials).some((value) => value !== "");
   useUnsavedChanges(changed && !saving && !discovering, saving || discovering);
@@ -166,21 +187,27 @@ function NewConnection({
     const platform = next === "unknown" ? null : next;
     const chosen = optionsForPlatform(catalog, platform)[0];
     setPlatformValue(next);
-    setAccessVariant(chosen?.access_variant ?? "");
+    setAccessVariant(chosen?.accessVariant ?? "");
     setDraft({ config: {}, credentials: {} });
     setLivekitDispatch(newLiveKitDispatch());
-    setRetellKey("");
-    setRetellAgents(null);
-    setRetellAgentId("");
-    setRetellNumber("");
+    setDiscoveryKey("");
+    setDiscoveredAgents(null);
+    setDiscoveredAgentId("");
+    setCandidateIndex(0);
     setDiscoverRefused(null);
     setRefused(null);
   }
 
   function chooseOption(next: string): void {
+    const chosen = platformOptions.find(
+      (candidate) => candidate.accessVariant === next,
+    );
     setAccessVariant(next);
     setDraft({ config: {}, credentials: {} });
     setLivekitDispatch(newLiveKitDispatch());
+    chooseFirstDiscoveredCandidate(discoveredAgents ?? [], chosen);
+    setDiscoverRefused(null);
+    setRefused(null);
   }
 
   function chooseLiveKitDispatch(next: LiveKitDispatch): void {
@@ -191,21 +218,45 @@ function NewConnection({
     }));
   }
 
-  function chooseRetellAgent(next: string, agents = retellAgents): void {
-    setRetellAgentId(next);
-    const agent = agents?.find((one) => one.id === next);
-    setRetellNumber(agent?.numbers[0]?.number ?? "");
+  function chooseFirstDiscoveredCandidate(
+    agents: readonly DiscoveredAgent[],
+    selectedOption = option,
+  ): void {
+    const first = agents.find(
+      (agent) => candidatesForOption(agent, selectedOption).length > 0,
+    );
+    setDiscoveredAgentId(first?.platformAgentId ?? "");
+    setCandidateIndex(0);
   }
 
-  async function findRetellAgents(): Promise<void> {
-    if (discovering || retellKey.trim() === "") return;
+  function chooseDiscoveredAgent(next: string): void {
+    setDiscoveredAgentId(next);
+    setCandidateIndex(0);
+  }
+
+  async function findAgents(): Promise<void> {
+    if (
+      discovering ||
+      discoveryKey.trim() === "" ||
+      option?.agentPlatform !== "retell"
+    ) {
+      return;
+    }
     setDiscoverRefused(null);
+    setDiscoveredAgents(null);
+    setDiscoveredAgentId("");
+    setCandidateIndex(0);
     setDiscovering(true);
-    const answer = await writeJson<RetellVoiceAgents>(RETELL_VOICE_AGENTS_PATH, {
-      method: "POST",
-      project: projectId,
-      body: { api_key: retellKey },
-    });
+    const answer = await platformAnswer(
+      discoverAgents(
+        {
+          projectId,
+          agentPlatform: option.agentPlatform,
+          credentials: { apiKey: discoveryKey },
+        },
+        { client: platformClient },
+      ),
+    );
     setDiscovering(false);
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
@@ -215,13 +266,10 @@ function NewConnection({
       setDiscoverRefused(answer.refusal);
       return;
     }
-    // Keep the key only in this password field until the selected route is
-    // confirmed immediately before the provider-blind phone write.
-    setRetellAgents(answer.value.agents);
-    const first =
-      answer.value.agents.find((agent) => agent.numbers.length > 0) ??
-      answer.value.agents[0];
-    chooseRetellAgent(first?.id ?? "", answer.value.agents);
+    // Discovery never returns a credential. Keep the key in this password
+    // field until the selected candidate is confirmed for the generic write.
+    setDiscoveredAgents(answer.value.agents);
+    chooseFirstDiscoveredCandidate(answer.value.agents);
   }
 
   async function add(): Promise<void> {
@@ -229,61 +277,72 @@ function NewConnection({
       return;
     }
 
-    let body: Record<string, unknown>;
-    let path = connectionsPath(agentId);
-    if (retellPhone) {
+    if (usesAgentDiscovery) {
       if (
-        chosenRetell === undefined ||
-        retellNumber === "" ||
-        retellKey.trim() === ""
+        chosenCandidate === undefined ||
+        chosenCandidateOption === undefined ||
+        discoveryKey.trim() === ""
       ) {
         setRefused({
           error: "unprocessable",
-          message: "Select a Retell voice agent and one of its routed phone numbers.",
+          message: "Load the Retell account, then select an available connection.",
         });
         return;
       }
-      body = {
+    }
+
+    const connectionParameters = (() => {
+      const common = {
+        agentId,
+        projectId,
         ...(name.trim() === "" ? {} : { name: name.trim() }),
-        api_key: retellKey,
-        retell_agent_id: chosenRetell.id,
-        phone_number: retellNumber,
       };
-      path = retellPhoneConnectionPath(agentId);
-    } else {
+      if (
+        usesAgentDiscovery &&
+        chosenCandidate !== undefined &&
+        chosenCandidateOption !== undefined
+      ) {
+        return {
+          ...common,
+          agentPlatform: chosenCandidate.agentPlatform,
+          connectionKind: chosenCandidate.connectionKind,
+          accessVariant: chosenCandidate.accessVariant,
+          modality: chosenCandidate.modality,
+          config: chosenCandidate.config,
+          ...(chosenCandidateOption.credentialRule === "required"
+            ? { credentials: { apiKey: discoveryKey } }
+            : {}),
+        };
+      }
+
       const config: Record<string, string> = {};
       for (const field of option.fields) {
         const written = draft.config[field.key]?.trim() ?? "";
         if (written !== "") config[field.key] = written;
       }
       const credentials: Record<string, string> = {};
-      for (const field of option.credential_fields) {
+      for (const field of option.credentialFields) {
         const written = draft.credentials[field.field]?.trim() ?? "";
         if (written !== "") credentials[field.field] = written;
       }
-      body = {
-        ...(name.trim() === "" ? {} : { name: name.trim() }),
-        agent_platform: option.agent_platform,
-        connection_kind: option.connection_kind,
-        access_variant: option.access_variant,
+      return {
+        ...common,
+        agentPlatform: option.agentPlatform,
+        connectionKind: option.connectionKind,
+        accessVariant: option.accessVariant,
         modality: option.modality,
         config,
-        ...(option.credential_rule === "forbidden" ||
+        ...(option.credentialRule === "forbidden" ||
         Object.keys(credentials).length === 0
           ? {}
           : { credentials }),
       };
-    }
+    })();
 
     setRefused(null);
     setSaving(true);
-    const answer = await writeJson<{ readonly connection: ListedConnection }>(
-      path,
-      {
-        method: "POST",
-        project: projectId,
-        body,
-      },
+    const answer = await platformAnswer(
+      addConnection(connectionParameters, { client: platformClient }),
     );
     setSaving(false);
     if (answer.status === "signed-out") {
@@ -291,7 +350,7 @@ function NewConnection({
     } else if (answer.status !== "ready") {
       setRefused(answer.refusal);
     } else {
-      if (retellPhone) setRetellKey("");
+      if (usesAgentDiscovery) setDiscoveryKey("");
       router.push(
         onboarding
           ? projectPath(projectId, "agents", agentId, "onboarding")
@@ -380,14 +439,14 @@ function NewConnection({
     );
   }
 
-  const retellReady =
-    !retellPhone ||
-    (chosenRetell !== undefined &&
-      retellNumber !== "" &&
-      retellKey.trim() !== "");
-  const canSubmit = retellReady && liveKitForm.ready;
-  const submitWhy = !retellReady
-    ? "Load the Retell account, then select a voice agent and phone number."
+  const discoveryReady =
+    !usesAgentDiscovery ||
+    (chosenCandidate !== undefined &&
+      chosenCandidateOption !== undefined &&
+      discoveryKey.trim() !== "");
+  const canSubmit = discoveryReady && liveKitForm.ready;
+  const submitWhy = !discoveryReady
+    ? "Load the Retell account, then select an available connection."
     : !liveKitForm.ready
       ? "Enter the exact LiveKit agent name, or choose automatic dispatch."
       : undefined;
@@ -402,6 +461,7 @@ function NewConnection({
             <Select
               id="agent-platform"
               value={platformValue}
+              disabled={discovering}
               onChange={(event) => choosePlatform(event.target.value)}
             >
               {agentPlatformChoices(catalog).map((item) => (
@@ -416,12 +476,13 @@ function NewConnection({
             <Field label="Access" htmlFor="access-variant">
               <Select
                 id="access-variant"
-                value={option.access_variant}
+                value={option.accessVariant}
+                disabled={discovering}
                 onChange={(event) => chooseOption(event.target.value)}
               >
                 {platformOptions.map((item) => (
-                  <option key={item.access_variant} value={item.access_variant}>
-                    {item.access_variant_label}
+                  <option key={item.accessVariant} value={item.accessVariant}>
+                    {item.accessVariantLabel}
                   </option>
                 ))}
               </Select>
@@ -443,24 +504,26 @@ function NewConnection({
             <Help>The label shown for this connection in Egma.</Help>
           </Field>
 
-          {retellPhone ? (
-            <RetellSetup
-              apiKey={retellKey}
-              agents={retellAgents}
-              selectedAgent={retellAgentId}
-              selectedNumber={retellNumber}
+          {usesAgentDiscovery ? (
+            <AgentDiscoverySetup
+              apiKey={discoveryKey}
+              loaded={discoveredAgents !== null}
+              agents={matchingAgents}
+              selectedAgent={discoveredAgentId}
+              candidates={matchingCandidates}
+              selectedCandidate={candidateIndex}
               discovering={discovering}
               refusal={discoverRefused}
               onKeyChange={(value) => {
-                setRetellKey(value);
-                setRetellAgents(null);
-                setRetellAgentId("");
-                setRetellNumber("");
+                setDiscoveryKey(value);
+                setDiscoveredAgents(null);
+                setDiscoveredAgentId("");
+                setCandidateIndex(0);
                 setDiscoverRefused(null);
               }}
-              onDiscover={() => void findRetellAgents()}
-              onAgentChange={chooseRetellAgent}
-              onNumberChange={setRetellNumber}
+              onDiscover={() => void findAgents()}
+              onAgentChange={chooseDiscoveredAgent}
+              onCandidateChange={setCandidateIndex}
             />
           ) : (
             <>
@@ -517,30 +580,33 @@ function NewConnection({
   );
 }
 
-function RetellSetup({
+function AgentDiscoverySetup({
   apiKey,
+  loaded,
   agents,
   selectedAgent,
-  selectedNumber,
+  candidates,
+  selectedCandidate,
   discovering,
   refusal,
   onKeyChange,
   onDiscover,
   onAgentChange,
-  onNumberChange,
+  onCandidateChange,
 }: {
   readonly apiKey: string;
-  readonly agents: readonly RetellVoiceAgent[] | null;
+  readonly loaded: boolean;
+  readonly agents: readonly DiscoveredAgent[];
   readonly selectedAgent: string;
-  readonly selectedNumber: string;
+  readonly candidates: readonly ConnectionCandidate[];
+  readonly selectedCandidate: number;
   readonly discovering: boolean;
   readonly refusal: Refusal | null;
   readonly onKeyChange: (value: string) => void;
   readonly onDiscover: () => void;
   readonly onAgentChange: (value: string) => void;
-  readonly onNumberChange: (value: string) => void;
+  readonly onCandidateChange: (value: number) => void;
 }) {
-  const agent = agents?.find((item) => item.id === selectedAgent);
   return (
     <>
       <Field label="Retell API key" htmlFor="retell-api-key">
@@ -550,11 +616,13 @@ function RetellSetup({
           type="password"
           autoComplete="off"
           spellCheck={false}
+          disabled={discovering}
           onChange={(event) => onKeyChange(event.target.value)}
         />
         <Help>
-          Egma uses this key to load your Retell voice agents and their routed
-          phone numbers. It is not stored on the connection.
+          Egma uses this key to load your Retell agents and their available
+          connections. Egma stores it only when the selected access method
+          needs it.
         </Help>
       </Field>
       <Button
@@ -568,50 +636,53 @@ function RetellSetup({
       </Button>
       {refusal === null ? null : <Problem>{refusal.message}</Problem>}
 
-      {agents === null ? null : agents.length === 0 ? (
+      {!loaded ? null : agents.length === 0 ? (
         <Empty
-          title="No Retell voice agents found"
-          lead="Use a key for the account that holds the voice agent you want to test."
+          title="No Retell agents support this access"
+          lead="Select another access method, or use a key for the account that holds the agent you want to test."
         />
       ) : (
         <>
-          <Field label="Retell voice agent" htmlFor="retell-agent">
+          <Field label="Retell agent" htmlFor="retell-agent">
             <Select
               id="retell-agent"
               value={selectedAgent}
               onChange={(event) => onAgentChange(event.target.value)}
             >
               {agents.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name === "" ? item.id : item.name}
+                <option key={item.platformAgentId} value={item.platformAgentId}>
+                  {item.name === "" ? item.platformAgentId : item.name}
                 </option>
               ))}
             </Select>
           </Field>
-          {agent === undefined || agent.numbers.length === 0 ? (
-            <Problem>
-              Retell routes no phone number to this agent. Assign a number in
-              Retell, or select another voice agent.
-            </Problem>
-          ) : (
-            <Field label="Phone number" htmlFor="retell-number">
-              <Select
-                id="retell-number"
-                value={selectedNumber}
-                onChange={(event) => onNumberChange(event.target.value)}
-              >
-                {agent.numbers.map((number) => (
-                  <option key={number.number} value={number.number}>
-                    {number.label === ""
-                      ? number.number
-                      : `${number.label} · ${number.number}`}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
+          <Field label="Connection" htmlFor="discovered-connection">
+            <Select
+              id="discovered-connection"
+              value={String(selectedCandidate)}
+              onChange={(event) =>
+                onCandidateChange(Number.parseInt(event.target.value, 10))
+              }
+            >
+              {candidates.map((candidate, index) => (
+                <option
+                  key={`${candidate.accessVariant}:${index}`}
+                  value={String(index)}
+                >
+                  {candidateLabel(candidate)}
+                </option>
+              ))}
+            </Select>
+          </Field>
         </>
       )}
     </>
   );
+}
+
+function candidateLabel(candidate: ConnectionCandidate): string {
+  const phoneNumber = candidate.config.phoneNumber;
+  return phoneNumber === undefined
+    ? candidate.productLabel
+    : `${candidate.productLabel} · ${phoneNumber}`;
 }

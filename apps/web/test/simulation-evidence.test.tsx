@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SimulationEvidencePage from "../app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx";
 import type { Me } from "../lib/me.ts";
+import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
  * One simulation's evidence page, rendered and driven.
@@ -88,17 +89,14 @@ function apiAnswers(
 
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: string, options?: RequestInit) => {
-      const address = new URL(input, "http://egma.test");
-      const path = address.pathname;
+    vi.fn(async (input: FetchInput, options?: RequestInit) => {
+      const request = await observeRequest(input, options);
+      const { address, path } = request;
       sent.push({
         url: `${path}${address.search}`,
         path,
-        method: options?.method ?? "GET",
-        body:
-          typeof options?.body === "string"
-            ? (JSON.parse(options.body) as Record<string, unknown>)
-            : undefined,
+        method: request.method,
+        body: request.body as Record<string, unknown> | undefined,
       });
 
       const held = answers[path];
@@ -123,7 +121,7 @@ function apiAnswers(
  * What the page sent to one address **by one method**.
  *
  * The method is not optional and that is the whole point: this page reads the
- * address it writes under. A wait on "anything sent to `/api/simulations/sim_1`"
+ * address it writes under. A wait on "anything sent to `/v1/simulations/sim_1`"
  * is satisfied by the page's own load and says nothing whatever about a regrade
  * or a correction — and under load the assertion then runs against the `GET`,
  * whose body is undefined.
@@ -141,18 +139,18 @@ function turn(
   offsetSeconds: number,
 ) {
   return {
-    span_id: id,
-    parent_span_id: "root",
+    spanId: id,
+    parentSpanId: "root",
     name: kind,
     kind,
     status: "ok",
-    started_at: `2026-08-15T10:00:${String(offsetSeconds).padStart(2, "0")}.000000Z`,
-    duration_ns: "1000000000",
+    startedAt: `2026-08-15T10:00:${String(offsetSeconds).padStart(2, "0")}.000000Z`,
+    durationNs: "1000000000",
     text,
-    audio_url: "",
-    tool_name: "",
-    tool_arguments: "",
-    tool_result: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
     spans: [],
   };
 }
@@ -160,20 +158,20 @@ function turn(
 /**
  * One judgment, as the read carries it: the assertion by **key**, the words
  * behind that key resolved from the pinned version, and which lane the row is
- * in. `judged_by` retired with human corrections (ADR-0009) and `priority`
+ * in. `judgedBy` retired with human corrections (ADR-0009) and `priority`
  * with the P0/P1/P2 ladder, so neither is here to be drawn.
  */
 function machineVerdict(overrides: Record<string, unknown> = {}) {
   return {
-    grader_id: "grd_1",
+    graderId: "grd_1",
     assertion: "behavior_1",
-    assertion_text: "confirms the new time back before finishing",
+    assertionText: "confirms the new time back before finishing",
     required: true,
     verdict: "failed",
     score: 0,
     rationale: "The agent never said the new time back.",
-    cited_turns: ["span_agent"],
-    judged_at: "2026-08-15T10:05:00.000000Z",
+    citedTurns: ["span_agent"],
+    judgedAt: "2026-08-15T10:05:00.000000Z",
     ...overrides,
   };
 }
@@ -181,9 +179,9 @@ function machineVerdict(overrides: Record<string, unknown> = {}) {
 function evidence(overrides: Record<string, unknown> = {}) {
   return {
     id: "sim_1",
-    project_id: "prj_1",
-    run_id: "run_1",
-    run_label: "Nightly smoke",
+    projectId: "prj_1",
+    runId: "run_1",
+    runLabel: "Nightly smoke",
     position: 1,
     status: "completed",
     grading: "graded",
@@ -191,68 +189,68 @@ function evidence(overrides: Record<string, unknown> = {}) {
     score: 0,
     counts: { ...NO_COUNTS, failed: 1, total: 1 },
     reason: null,
-    skip_reason: null,
-    skipped_capabilities: null,
+    skipReason: null,
+    skippedCapabilities: null,
     modality: "voice",
-    created_at: "2026-08-15T09:59:00.000Z",
-    started_at: "2026-08-15T10:00:00.000Z",
-    ended_at: "2026-08-15T10:00:40.000Z",
-    provider_reference: "call_abc123",
-    has_recording: false,
-    measures: { duration_ms: 40000, turn_count: 2, tool_call_count: 1 },
+    createdAt: "2026-08-15T09:59:00.000Z",
+    startedAt: "2026-08-15T10:00:00.000Z",
+    endedAt: "2026-08-15T10:00:40.000Z",
+    providerReference: "call_abc123",
+    hasRecording: false,
+    measures: { durationMs: 40000, turnCount: 2, toolCallCount: 1 },
     test: {
       id: "tst_1",
-      version_id: "tstv_1",
+      versionId: "tstv_1",
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
-      expected_behaviors: ["confirms the new time back before finishing"],
-      required_capabilities: [],
+      expectedBehaviors: ["confirms the new time back before finishing"],
+      requiredCapabilities: [],
     },
     persona: {
       id: "prs_1",
       name: "Impatient Rita",
-      version_id: "prsv_7",
+      versionId: "prsv_7",
       traits: { personality: "Speaks plainly." },
     },
     agent: { id: "agt_1", name: "Front desk", archived: false },
     connection: { id: "con_1", name: "retell-staging", archived: false },
-    connection_snapshot: {
-      agent_platform: "retell",
-      connection_kind: "phone_number",
-      access_variant: "phone_number.public_e164",
+    connectionSnapshot: {
+      agentPlatform: "retell",
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
       modality: "voice",
       topology: "egma-dials-in",
       environment: "staging",
       config: { phoneNumber: "+15551234567" },
     },
-    mock_tool_coverage: {
+    mockToolCoverage: {
       discovered: ["book_appointment", "charge_card"],
       covered: ["book_appointment"],
       uncovered: ["charge_card"],
     },
-    mock_tools: { defaults: [{ tool_name: "book_appointment" }], overrides: [] },
-    grading_plan: {
+    mockTools: { defaults: [{ toolName: "book_appointment" }], overrides: [] },
+    gradingPlan: {
       state: "run_start",
-      captured_at: "2026-08-15T09:59:00.000Z",
+      capturedAt: "2026-08-15T09:59:00.000Z",
       items: [
         {
           kind: "authored",
-          grader_id: "grd_1",
-          grader_version_id: "grv_1",
+          graderId: "grd_1",
+          graderVersionId: "grv_1",
           name: "expected_behaviors",
-          library_id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+          libraryId: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
           required: true,
           scope: "simulations",
         },
       ],
     },
-    grading_jobs: [
+    gradingJobs: [
       {
         status: "graded",
-        regrade_grader_id: null,
+        regradeGraderId: null,
         attempts: 1,
-        last_error: null,
-        finished_at: "2026-08-15T10:05:00.000Z",
+        lastError: null,
+        finishedAt: "2026-08-15T10:05:00.000Z",
       },
     ],
     verdicts: [machineVerdict()],
@@ -265,9 +263,9 @@ function evidence(overrides: Record<string, unknown> = {}) {
       counts: { ...NO_COUNTS, failed: 1, total: 1 },
     },
     diagnostics: null,
-    by_grader: [
+    byGrader: [
       {
-        grader_id: "grd_1",
+        graderId: "grd_1",
         required: true,
         verdict: "failed",
         score: 0,
@@ -275,32 +273,32 @@ function evidence(overrides: Record<string, unknown> = {}) {
       },
     ],
     transcript: {
-      trace_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      started_at: "2026-08-15T10:00:00.000000Z",
-      ended_at: "2026-08-15T10:00:40.000000Z",
-      duration_ns: "40000000000",
-      span_count: 5,
-      turn_counts: { human: 1, agent: 1 },
-      tool_span_count: 1,
-      errored_span_count: 1,
+      traceId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      startedAt: "2026-08-15T10:00:00.000000Z",
+      endedAt: "2026-08-15T10:00:40.000000Z",
+      durationNs: "40000000000",
+      spanCount: 5,
+      turnCounts: { human: 1, agent: 1 },
+      toolSpanCount: 1,
+      erroredSpanCount: 1,
       turns: [
         turn("span_human", "turn:human", "Move Thursday's clean to next week.", 1),
         {
           ...turn("span_agent", "turn:agent", "You are all set.", 4),
           spans: [
             {
-              span_id: "span_tool",
-              parent_span_id: "span_agent",
+              spanId: "span_tool",
+              parentSpanId: "span_agent",
               name: "reschedule_appointment",
               kind: "tool",
               status: "error",
-              started_at: "2026-08-15T10:00:05.000000Z",
-              duration_ns: "500000000",
+              startedAt: "2026-08-15T10:00:05.000000Z",
+              durationNs: "500000000",
               text: "",
-              audio_url: "",
-              tool_name: "reschedule_appointment",
-              tool_arguments: "{}",
-              tool_result: "{}",
+              audioUrl: "",
+              toolName: "reschedule_appointment",
+              toolArguments: "{}",
+              toolResult: "{}",
               spans: [],
             },
           ],
@@ -309,10 +307,10 @@ function evidence(overrides: Record<string, unknown> = {}) {
       spans: [
         {
           ...turn("span_root", "turn:agent", "", 0),
-          parent_span_id: "",
+          parentSpanId: "",
           name: "simulation",
           kind: "simulation",
-          duration_ns: "40000000000",
+          durationNs: "40000000000",
           spans: [
             {
               ...turn(
@@ -321,22 +319,22 @@ function evidence(overrides: Record<string, unknown> = {}) {
                 "Move Thursday's clean to next week.",
                 1,
               ),
-              parent_span_id: "span_root",
+              parentSpanId: "span_root",
             },
             {
               ...turn("span_agent", "turn:agent", "You are all set.", 4),
-              parent_span_id: "span_root",
+              parentSpanId: "span_root",
             },
           ],
         },
         {
           ...turn("span_system", "turn:agent", "", 3),
-          parent_span_id: "",
+          parentSpanId: "",
           name: "dispatch",
           kind: "system",
         },
       ],
-      spans_truncated: false,
+      spansTruncated: false,
     },
     ...overrides,
   };
@@ -354,21 +352,21 @@ function page(
   const read = options.read ?? evidence();
   apiAnswers({
     "/api/me": { status: 200, body: meWith(options.role ?? "admin") },
-    "/api/simulations/sim_1": Array.isArray(read)
+    "/v1/simulations/sim_1": Array.isArray(read)
       ? read.map((body) => ({ status: 200, body }))
       : { status: 200, body: read },
-    "/api/simulations/sim_1/regrade": options.regrade ?? {
+    "/v1/simulations/sim_1/regrade": options.regrade ?? {
       status: 200,
       body: {
-        simulation_id: "sim_1",
-        grader_id: null,
+        simulationId: "sim_1",
+        graderId: null,
         reopened: 1,
         already_waiting: 0,
       },
     },
     ...(options.recording === true
       ? {
-          "/api/simulations/sim_1/recording": {
+          "/v1/simulations/sim_1/recording": {
             status: 200,
             body: { url: "http://egma.test/recording.wav" },
           },
@@ -412,12 +410,12 @@ describe("one simulation's evidence", () => {
         grading: "waiting",
         verdict: null,
         counts: null,
-        started_at: startedAt,
-        ended_at: null,
-        has_recording: false,
-        grading_jobs: [],
+        startedAt: startedAt,
+        endedAt: null,
+        hasRecording: false,
+        gradingJobs: [],
         verdicts: [],
-        by_grader: [],
+        byGrader: [],
       }),
     });
     render(<SimulationEvidencePage />);
@@ -449,13 +447,13 @@ describe("one simulation's evidence", () => {
     // Wait for the read that produces everything below, then count what was
     // asked for. `/api/me` is the shell's own and is not this page's read.
     await screen.findByRole("region", { name: "Simulation summary" });
-    expect(sentWith("/api/simulations/sim_1", "GET")).toHaveLength(1);
+    expect(sentWith("/v1/simulations/sim_1", "GET")).toHaveLength(1);
     expect(
-      sent.filter((one) => one.path.startsWith("/api/simulations")),
+      sent.filter((one) => one.path.startsWith("/v1/simulations")),
     ).toHaveLength(1);
     // The project travels with it, because a simulation is read inside one.
-    expect(sentWith("/api/simulations/sim_1", "GET")[0]?.url).toContain(
-      "project=prj_1",
+    expect(sentWith("/v1/simulations/sim_1", "GET")[0]?.url).toContain(
+      "projectId=prj_1",
     );
   });
 
@@ -487,19 +485,19 @@ describe("one simulation's evidence", () => {
   });
 
   it("puts human-named graders behind default-open transcript and audio", async () => {
-    const read = evidence({ has_recording: true });
+    const read = evidence({ hasRecording: true });
     page({
       recording: true,
       read: {
         ...read,
-        grading_plan: {
-          ...read.grading_plan,
+        gradingPlan: {
+          ...read.gradingPlan,
           items: [
-            ...read.grading_plan.items,
+            ...read.gradingPlan.items,
             {
-              ...read.grading_plan.items[0],
-              grader_id: "grd_2",
-              grader_version_id: "grv_2",
+              ...read.gradingPlan.items[0],
+              graderId: "grd_2",
+              graderVersionId: "grv_2",
               name: "brand_tone",
               required: false,
             },
@@ -508,27 +506,27 @@ describe("one simulation's evidence", () => {
         verdicts: [
           ...read.verdicts,
           machineVerdict({
-            grader_id: "grd_2",
+            graderId: "grd_2",
             assertion: "keeps_brand_voice",
-            assertion_text: null,
+            assertionText: null,
             required: false,
             verdict: "passed",
             score: 1,
             rationale: "The agent kept the approved voice.",
-            cited_turns: [],
+            citedTurns: [],
           }),
         ],
-        by_grader: [
-          ...read.by_grader,
+        byGrader: [
+          ...read.byGrader,
           {
-            grader_id: "grd_2",
+            graderId: "grd_2",
             required: false,
             verdict: "passed",
             score: 1,
             counts: { ...NO_COUNTS, passed: 1, total: 1 },
           },
           {
-            grader_id: "grd_without_plan",
+            graderId: "grd_without_plan",
             required: false,
             verdict: null,
             score: null,
@@ -661,7 +659,7 @@ describe("one simulation's evidence", () => {
 
   it("can leave the recording view after its waveform is ready", async () => {
     for (const failure of ["throws", "rejects"] as const) {
-      page({ recording: true, read: evidence({ has_recording: true }) });
+      page({ recording: true, read: evidence({ hasRecording: true }) });
       let opened = 0;
       let closeAttempts = 0;
       class ClosingAudioContext {
@@ -751,11 +749,11 @@ describe("one simulation's evidence", () => {
         verdict: "skipped",
         score: null,
         counts: { ...NO_COUNTS, skipped: 1, total: 1 },
-        skip_reason: "required_capability_unsupported",
-        skipped_capabilities: ["raw_audio"],
+        skipReason: "required_capability_unsupported",
+        skippedCapabilities: ["raw_audio"],
         verdicts: [],
-        by_grader: [],
-        grading_jobs: [],
+        byGrader: [],
+        gradingJobs: [],
       }),
     });
     render(<SimulationEvidencePage />);
@@ -779,14 +777,14 @@ describe("grading that is still running", () => {
       score: null,
       counts: null,
       verdicts: [],
-      by_grader: [],
-      grading_jobs: [
+      byGrader: [],
+      gradingJobs: [
         {
           status: "pending",
-          regrade_grader_id: null,
+          regradeGraderId: null,
           attempts: 0,
-          last_error: null,
-          finished_at: null,
+          lastError: null,
+          finishedAt: null,
         },
       ],
     });
@@ -810,7 +808,7 @@ describe("grading that is still running", () => {
       timeout: 5000,
     });
     expect(
-      sentWith("/api/simulations/sim_1", "GET").length,
+      sentWith("/v1/simulations/sim_1", "GET").length,
     ).toBeGreaterThan(1);
   });
 });
@@ -827,16 +825,16 @@ describe("asking for it to be judged again", () => {
 
     // The method is named because this page reads the address it writes under.
     await waitFor(() => {
-      expect(sentWith("/api/simulations/sim_1/regrade", "POST")).toHaveLength(1);
+      expect(sentWith("/v1/simulations/sim_1/regrade", "POST")).toHaveLength(1);
     });
     // No grader was named, so the whole applicable set is resolved again.
     expect(
-      sentWith("/api/simulations/sim_1/regrade", "POST")[0]?.body,
-    ).toEqual({});
+      sentWith("/v1/simulations/sim_1/regrade", "POST")[0]?.body,
+    ).toBeUndefined();
     // The project travels in the address, which is where this browser's write
     // helper puts it and where the route looks first.
-    expect(sentWith("/api/simulations/sim_1/regrade", "POST")[0]?.url).toContain(
-      "project=prj_1",
+    expect(sentWith("/v1/simulations/sim_1/regrade", "POST")[0]?.url).toContain(
+      "projectId=prj_1",
     );
     await screen.findByText(/queued to be judged again/u);
   });
@@ -882,8 +880,8 @@ describe("asking for it to be judged again", () => {
         {
           status: 200,
           body: {
-            simulation_id: "sim_1",
-            grader_id: null,
+            simulationId: "sim_1",
+            graderId: null,
             reopened: 1,
             already_waiting: 0,
           },
@@ -904,7 +902,7 @@ describe("asking for it to be judged again", () => {
     // ask is genuinely a second one rather than a race with the first.
     await screen.findByText(/queued to be judged again/u);
     await waitFor(() => {
-      expect(sentWith("/api/simulations/sim_1/regrade", "POST")).toHaveLength(1);
+      expect(sentWith("/v1/simulations/sim_1/regrade", "POST")).toHaveLength(1);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Regrade" }));
@@ -925,11 +923,11 @@ describe("asking for it to be judged again", () => {
 /**
  * **Three proofs about disagreeing with a judgement used to stand here.** They
  * opened a Disagree form on a verdict row, sent a `POST` to
- * `/api/simulations/:id/corrections`, and held that a person's word replaced
+ * `/v1/simulations/:id/corrections`, and held that a person's word replaced
  * the machine's with the machine's still readable underneath.
  *
  * ADR-0009 takes corrections and their calibration data out of v0: the form,
- * the endpoint and the `judged_by` column that carried the second author are
+ * the endpoint and the `judgedBy` column that carried the second author are
  * all gone. The capability returns as the reserved `human` grader type, which
  * writes its own verdict rows under its own grader id — so what supersedes
  * what becomes the ordinary supersession this page already draws, and needs no

@@ -161,15 +161,15 @@ export function validDelay(milliseconds: number | undefined): number {
   if (milliseconds === undefined) return 0;
   if (!Number.isInteger(milliseconds) || milliseconds < 0) {
     throw new UnprocessableInputError(
-      `delay_ms is a whole number of milliseconds, zero or more, and this ` +
+      `delayMs is a whole number of milliseconds, zero or more, and this ` +
         `request sent ${JSON.stringify(milliseconds)}.`,
     );
   }
   if (milliseconds > LONGEST_MOCK_TOOL_DELAY_MILLISECONDS) {
     throw new UnprocessableInputError(
-      `delay_ms is ${milliseconds}, and a mock tool may delay its answer by ` +
+      `delayMs is ${milliseconds}, and a mock tool may delay its answer by ` +
         `at most ${LONGEST_MOCK_TOOL_DELAY_MILLISECONDS} milliseconds — the ` +
-        `budget the exchange carrying it is given. Send a smaller delay_ms.`,
+        `budget the exchange carrying it is given. Send a smaller delayMs.`,
     );
   }
   return milliseconds;

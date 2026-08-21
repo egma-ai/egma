@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { listRuns } from "@egma/platform-api/client";
 
+import { platformAnswer, platformClient } from "../lib/platform-client.ts";
 import { projectPath } from "../lib/project-context.ts";
 import {
-  runsQuery,
   type GradingWord,
-  type RunFilters,
   type RunHistoryPage,
   type RunRow,
   type RunStatusWord,
@@ -619,12 +619,29 @@ export function RecentRuns({
   readonly title: string;
   readonly lead: string;
   /** Which runs these are: one agent's, or one test's. */
-  readonly filters: RunFilters;
+  readonly filters: {
+    readonly agentId?: string;
+    readonly connectionId?: string;
+    readonly testId?: string;
+    readonly status?: RunStatusWord;
+    readonly verdict?: VerdictWord;
+    readonly since?: string;
+  };
   readonly limit?: number;
 }) {
   const now = useMinuteClock();
-  const path = runsQuery({ ...filters, limit });
-  const { answer, reload } = useProjectRead<RunHistoryPage>(path, projectId);
+  const requestKey = JSON.stringify({ filters, limit });
+  const { answer, reload } = useProjectRead<RunHistoryPage>(
+    (projectId) =>
+      platformAnswer(
+        listRuns(
+          { projectId, ...filters, pageSize: limit },
+          { client: platformClient },
+        ),
+      ),
+    projectId,
+    requestKey,
+  );
 
   const columns: readonly Column<RunRow>[] = [
     {
@@ -633,7 +650,7 @@ export function RecentRuns({
       primary: true,
       cell: (run) => (
         <Link href={projectPath(projectId, "runs", run.id)}>
-          {run.label ?? <RelativeInstant instant={run.created_at} now={now} />}
+          {run.label ?? <RelativeInstant instant={run.createdAt} now={now} />}
         </Link>
       ),
     },
@@ -648,7 +665,7 @@ export function RecentRuns({
       header: "Simulations",
       hideOnMobile: true,
       width: "200px",
-      cell: (run) => <SimulationTally counts={run.simulation_counts} />,
+      cell: (run) => <SimulationTally counts={run.simulationCounts} />,
     },
     {
       key: "verdict",
@@ -671,7 +688,7 @@ export function RecentRuns({
       {answer === null || answer.status === "signed-out" ? (
         <Loading what="recent runs" />
       ) : answer.status === "ready" ? (
-        answer.value.items.length === 0 ? (
+        answer.value.runs.length === 0 ? (
           <Empty
             title="Nothing has been run here yet"
             lead="Create a run and its results appear here, with a link to each one."
@@ -680,7 +697,7 @@ export function RecentRuns({
           <DataTable
             label={title}
             columns={columns}
-            rows={answer.value.items}
+            rows={answer.value.runs}
             keyOf={(run) => run.id}
             stretchPrimaryLink
             stackWhenConstrained

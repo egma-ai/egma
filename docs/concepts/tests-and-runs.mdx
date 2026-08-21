@@ -114,12 +114,13 @@ egma run --headless --no-follow
 You can also use the API directly:
 
 ```bash
-curl -X POST https://your-egma/api/runs \
+curl -X POST https://your-egma/v1/runs \
   -H "Authorization: Bearer egma_..." \
   -H "Content-Type: application/json" \
   -d '{
-    "connection": "con_01K…",
-    "test_versions": ["tstv_01K…", "tstv_01K…"]
+    "connectionId": "con_01K…",
+    "testVersionIds": ["tstv_01K…", "tstv_01K…"],
+    "idempotencyKey": "release-2026-08-20"
   }'
 ```
 
