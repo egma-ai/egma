@@ -85,9 +85,9 @@ const config: NextConfig = {
           source: "/api/password-reset/:path*",
           destination: `${api}/api/password-reset/:path*`,
         },
-        // The public origin proves the API and both stores, while
-        // `/api/health` continues to prove only this Next process.
-        { source: "/health", destination: `${api}/health` },
+        // `/api/health` proves only this Next process. The platform deployment
+        // waits for the API and its stores directly; it must not depend on a
+        // web deployment that has not happened yet.
         { source: "/openapi.json", destination: `${api}/openapi.json` },
         // The complete versioned platform API. The API remains the only routing
         // table; this process only keeps the browser on the page's origin.

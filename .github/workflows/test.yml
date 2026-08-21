@@ -470,7 +470,7 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Replace what is running, and wait for it
+      - name: Replace what is running, and wait for its health checks
         if: steps.decide.outputs.platform == 'true'
         run: |
           set -euo pipefail
@@ -499,22 +499,6 @@ jobs:
             --command-id "$command_id" --instance-id "$INSTANCE" \
             --query Status --output text)
           [ "$status" = "Success" ] || { echo "Deployment failed: $status" >&2; exit 1; }
-
-      - name: Prove the platform answers
-        if: steps.decide.outputs.platform == 'true'
-        run: |
-          set -euo pipefail
-          url="${{ vars.PLATFORM_URL || 'https://app.egma.ai' }}/health"
-          for attempt in 1 2 3 4 5 6; do
-            code=$(curl -sS -o /tmp/platform.json -w '%{http_code}' --max-time 20 "$url" || echo 000)
-            if [ "$code" = "200" ]; then
-              echo "$url answered 200:"; cat /tmp/platform.json; exit 0
-            fi
-            echo "attempt $attempt: $code"
-            sleep 10
-          done
-          echo "$url never answered 200 after the deployment." >&2
-          exit 1
 
       - name: Yield when a newer merge owns the web deployment
         id: yield
