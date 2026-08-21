@@ -1,0 +1,128 @@
+---
+title: "Create and manage test suites via API"
+sidebarTitle: "Test suites"
+description: "Create, list, rename, read, and permanently delete project test suites."
+---
+
+A test suite is a named container of tests inside one project. Create the suite
+before you create its first test. Empty suites and duplicate suite names are
+valid.
+
+A suite has a stable `ste_…` ID and a mutable name. It has no version and no
+run settings. Every test belongs to one suite for its full life.
+
+## Create a suite
+
+`POST /v1/test-suites`
+
+<ParamField query="projectId" type="string">
+  Project ID or name. Omit it when the API key already selects one project.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  A nonblank display name. It does not need to be unique in the project.
+</ParamField>
+
+```bash
+curl -X POST https://your-egma-host/v1/test-suites \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Northside Ford"}'
+```
+
+The response is `201 Created` with the new suite.
+
+<ResponseField name="id" type="string">
+  The stable suite ID (`ste_…`).
+</ResponseField>
+
+<ResponseField name="projectId" type="string">
+  The project that owns the suite.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The current display name.
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 creation time.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  ISO 8601 time of the latest rename or lifecycle change.
+</ResponseField>
+
+## List suites
+
+`GET /v1/test-suites`
+
+Returns active suites in the current project as a paginated list.
+
+<ParamField query="projectId" type="string">
+  Project ID or name. Omit it when the API key already selects one project.
+</ParamField>
+
+<ParamField query="pageToken" type="string">
+  The `nextPageToken` value from the previous page.
+</ParamField>
+
+<ParamField query="pageSize" type="integer">
+  Number of suites to return. The maximum is `200`.
+</ParamField>
+
+```bash
+curl https://your-egma-host/v1/test-suites \
+  -H "Authorization: Bearer <api-key>"
+```
+
+```json
+{
+  "testSuites": [],
+  "nextPageToken": null
+}
+```
+
+## Get a suite
+
+`GET /v1/test-suites/:suiteId`
+
+<ParamField path="suiteId" type="string" required>
+  The stable `ste_…` suite ID.
+</ParamField>
+
+Returns the active suite. Use `GET /v1/tests?suiteId=ste_…` to page through its
+tests.
+
+All suite read and write operations accept an optional `projectId` query
+parameter when the credential does not already select one project.
+
+## Rename a suite
+
+`PATCH /v1/test-suites/:suiteId`
+
+Renaming changes only the display name. The suite ID and its tests stay the
+same. Earlier runs show the current name through that stable ID.
+
+<ParamField body="name" type="string" required>
+  The new nonblank display name.
+</ParamField>
+
+```bash
+curl -X PATCH https://your-egma-host/v1/test-suites/ste_01ABC \
+  -H "Authorization: Bearer <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Northside Ford release contract"}'
+```
+
+## Delete a suite
+
+`DELETE /v1/test-suites/:suiteId`
+
+This permanently removes the suite and every test inside it from authoring and
+future runs. There is no Restore action. Completed runs remain readable and
+show the suite's last name with `(deleted)`.
+
+<Warning>
+  Deleting a suite also deletes every test inside it. Confirm the suite and its
+  tests before you send this request.
+</Warning>

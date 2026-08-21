@@ -147,6 +147,12 @@ async function aCustomerReadyToRun(
   const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
 
+  const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+    name: "Appointment changes",
+  });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  const suiteId = String(suite.body.id);
+
   // The persona is authored at the seam — no route ships for one — and the
   // test then names her, which is what the claimed spec's traits come from.
   await createPersona(contextFor(ada, "member"), {
@@ -155,6 +161,7 @@ async function aCustomerReadyToRun(
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
+    suiteId,
     personas: ["Impatient Rita"],
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
@@ -191,6 +198,12 @@ async function aRealtimeVoiceCustomerReadyToRun(
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const connectionId = (registered.body.connection as { id: string }).id;
 
+  const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+    name: "Realtime appointment changes",
+  });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  const suiteId = String(suite.body.id);
+
   await createPersona(contextFor(ada, "member"), {
     name: "Realtime Rita",
     traits: NEUTRAL_TRAITS,
@@ -207,6 +220,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
   });
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
     ...RESCHEDULING,
+    suiteId,
     personas: ["Realtime Rita"],
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
@@ -219,19 +233,12 @@ async function aRealtimeVoiceCustomerReadyToRun(
   };
 }
 
-/**
- * Which agents a pinned version's test applies to, set through the door that
- * owns that relation.
- *
- * A run may only pair an agent with a test linked to it, and a test authored
- * before a second agent existed applies only to the first. Nothing here is
- * under test — it is the world a claim needs before it can be asked for.
- */
-async function applyTo(
+/** A run over the customer's connection, whose simulation lands queued. */
+async function aQueuedRun(
   key: string,
+  connectionId: string,
   versionId: string,
-  agentIds: readonly string[],
-): Promise<void> {
+): Promise<{ runId: string; simulationId: string }> {
   const version = await ask(
     api.app,
     "GET",
@@ -239,29 +246,33 @@ async function applyTo(
     key,
   );
   expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
-  const linked = await ask(
-    api.app,
-    "POST",
-    `/v1/tests/${String(version.body.testId)}/agents`,
-    key,
-    { agents: [...agentIds] },
-  );
-  expect(linked.statusCode, JSON.stringify(linked.body)).toBe(200);
-}
+  const agents = await ask(api.app, "GET", "/v1/agents?pageSize=200", key);
+  expect(agents.statusCode, JSON.stringify(agents.body)).toBe(200);
+  const agent = (agents.body.agents as Array<{
+    id: string;
+    connections: Array<{ id: string }>;
+  }>).find((one) => one.connections.some((connection) => connection.id === connectionId));
+  if (agent === undefined) throw new Error("the connection has no agent");
 
-/** A run over the customer's connection, whose simulation lands queued. */
-async function aQueuedRun(
-  key: string,
-  connectionId: string,
-  versionId: string,
-): Promise<{ runId: string; simulationId: string }> {
   const started = await ask(api.app, "POST", "/v1/runs", key, {
-    connectionId: connectionId,
-    testVersionIds: [versionId],
+    suiteId: String(version.body.suiteId),
+    agentId: agent.id,
+    connectionId,
     idempotencyKey: newId("run"),
+    expectedTestVersions: [{
+      testId: String(version.body.testId),
+      versionId,
+    }],
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-  const simulations = started.body.simulations as { id: string }[];
+  const page = await ask(
+    api.app,
+    "GET",
+    `/v1/runs/${String(started.body.id)}/simulations?pageSize=1`,
+    key,
+  );
+  expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
+  const simulations = page.body.simulations as { id: string }[];
   const first = simulations[0];
   if (first === undefined) throw new Error("the run has no simulation");
   return { runId: String(started.body.id), simulationId: first.id };
@@ -415,6 +426,10 @@ describe("claiming work", () => {
       name: "Impatient Rita",
       traits: NEUTRAL_TRAITS,
     });
+    const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+      name: "Mock tool branches",
+    });
+    expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
 
     // The project's world: two tools answered for every test it runs.
     for (const written of [
@@ -428,6 +443,7 @@ describe("claiming work", () => {
     // And one test that forces a branch the project's world does not have.
     const pushed = await ask(api.app, "POST", "/v1/tests", key, {
       ...RESCHEDULING,
+      suiteId: String(suite.body.id),
       personas: ["Impatient Rita"],
       mockTools: [
         { tool: "check_availability", answer: { slots: [] } },
@@ -486,12 +502,17 @@ describe("claiming work", () => {
       name: "Impatient Rita",
       traits: NEUTRAL_TRAITS,
     });
+    const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+      name: "Frozen mock tool world",
+    });
+    expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
     const authored = await ask(api.app, "POST", "/v1/mock-tools", key, {
       tool: "check_availability",
       answer: { slots: ["Tuesday 14:00"] },
     });
     const pushed = await ask(api.app, "POST", "/v1/tests", key, {
       ...RESCHEDULING,
+      suiteId: String(suite.body.id),
       personas: ["Impatient Rita"],
     });
     await aQueuedRun(key, connectionId, String(pushed.body.versionId));
@@ -852,7 +873,7 @@ describe("a simulation the platform cannot hand over", () => {
         else signal.addEventListener("abort", stopped, { once: true });
       });
     };
-    const { key, agentId, connectionId, versionId } =
+    const { key, connectionId, versionId } =
       await aCustomerReadyToRun("claims_retell_bounded_batch", {
         retellFetch,
       });
@@ -864,9 +885,7 @@ describe("a simulation the platform cannot hand over", () => {
       },
     });
     expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
-    const secondAgent = (second.body.agent as { id: string }).id;
     const secondConnection = (second.body.connection as { id: string }).id;
-    await applyTo(key, versionId, [agentId, secondAgent]);
     await Promise.all([
       aQueuedRun(key, connectionId, versionId),
       aQueuedRun(key, secondConnection, versionId),
@@ -903,7 +922,7 @@ describe("a simulation the platform cannot hand over", () => {
   });
 
   it("lands as dispatch_failed at once, while the rest of the batch still dispatches", async () => {
-    const { ada, key, agentId, connectionId, versionId } =
+    const { ada, key, connectionId, versionId } =
       await aCustomerReadyToRun("claims_skip");
 
     // Two runs over two connections; one connection stops resolving before the
@@ -913,12 +932,7 @@ describe("a simulation the platform cannot hand over", () => {
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });
-    const secondAgent = (registered.body.agent as { id: string }).id;
     const secondConnection = (registered.body.connection as { id: string }).id;
-    // The test was authored before this agent existed, so nothing yet says it
-    // is worth running against it — and a run may only pair the two once
-    // somebody has.
-    await applyTo(key, versionId, [agentId, secondAgent]);
     const healthy = await aQueuedRun(key, secondConnection, versionId);
 
     // Marked archived in the row rather than through the Archive verb, on
@@ -969,7 +983,7 @@ describe("a simulation the platform cannot hand over", () => {
   });
 
   it("lands a credential that will not unseal the same way, and the batch dispatches whole", async () => {
-    const { ada, key, agentId, connectionId, versionId } =
+    const { ada, key, connectionId, versionId } =
       await aCustomerReadyToRun("claims_corrupt");
 
     const doomed = await aQueuedRun(key, connectionId, versionId);
@@ -977,12 +991,7 @@ describe("a simulation the platform cannot hand over", () => {
       name: "Second desk",
       connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
     });
-    const secondAgent = (registered.body.agent as { id: string }).id;
     const secondConnection = (registered.body.connection as { id: string }).id;
-    // The test was authored before this agent existed, so nothing yet says it
-    // is worth running against it — and a run may only pair the two once
-    // somebody has.
-    await applyTo(key, versionId, [agentId, secondAgent]);
     const healthy = await aQueuedRun(key, secondConnection, versionId);
 
     // The one write no seam should offer: a sealed envelope replaced with

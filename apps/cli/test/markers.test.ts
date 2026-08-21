@@ -42,7 +42,7 @@ describe("a marker line", () => {
     expect(markerIn("egma:wrote one-thing")).toEqual({ kind: "wrote", name: "one-thing" });
     // An agent that answers with the file rather than the name has said the
     // same thing, and is read as having said it.
-    expect(markerIn("egma:wrote egma/tests/one-thing.md")).toEqual({
+    expect(markerIn("egma:wrote egma/tests/generated/one-thing.md")).toEqual({
       kind: "wrote",
       name: "one-thing",
     });

@@ -29,6 +29,7 @@
 import type { Fetch } from "../platform/device-flow.ts";
 import {
   getRun,
+  hydrateRun,
   runEvents,
   type PlatformRun,
   type PlatformSimulation,
@@ -199,7 +200,7 @@ export class RunFollower {
   get awaitingVerdicts(): boolean {
     return this.rows.some(
       (row) =>
-        ["completed", "failed", "canceled", "skipped"].includes(row.status) &&
+        ["completed", "failed", "canceled"].includes(row.status) &&
         row.verdict === null,
     );
   }
@@ -218,7 +219,6 @@ export class RunFollower {
       completed: 3,
       failed: 3,
       canceled: 3,
-      skipped: 3,
     };
     const statusChanged = statusOrder[incoming.status] > statusOrder[held.status];
     const status = statusChanged ? incoming.status : held.status;
@@ -269,10 +269,10 @@ export class RunFollower {
   }
 
   /**
-   * Merge the platform's current run snapshot.
+   * Merge the platform's current run state.
    *
    * Grading is asynchronous and does not append to the execution event feed,
-   * so verdicts arrive here. The merge is monotonic: a snapshot or a later
+   * so verdicts arrive here. The merge is monotonic: a current read or a later
    * event can move a row forward, but neither can clear a verdict or rewind a
    * finished simulation.
    */
@@ -373,15 +373,18 @@ export async function followRun(options: FollowOptions): Promise<FollowEnding> {
     for (const change of follower.take(page.events, page.next)) onChange(change);
 
     if (follower.awaitingVerdicts) {
-      let snapshot;
+      let current;
       try {
-        snapshot = await getRun(signedIn, follower.runId, options.fetchImpl, signal);
+        const header = await getRun(signedIn, follower.runId, options.fetchImpl, signal);
+        current = header === null
+          ? null
+          : await hydrateRun(signedIn, header, options.fetchImpl, signal);
       } catch (cause) {
         if (stopped()) return "interrupted";
         throw cause;
       }
-      if (snapshot !== null) {
-        for (const change of follower.refresh(snapshot)) onChange(change);
+      if (current !== null) {
+        for (const change of follower.refresh(current)) onChange(change);
       }
     }
 

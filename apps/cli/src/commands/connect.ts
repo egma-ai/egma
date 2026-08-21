@@ -15,12 +15,11 @@
 
 import {
   bindRepositoryPlatform,
-  DEFAULT_SUITE_NAME,
   folderPathsIn,
-  readConfig,
   updateConfig,
 } from "../folder/egma-folder.ts";
 import { readCredentials, type PlatformAccess } from "../platform/credentials.ts";
+import { readProject } from "../platform/projects.ts";
 import { RetellKey } from "../retell/key.ts";
 import {
   connect,
@@ -322,21 +321,21 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
   switch (outcome.kind) {
     case "connected": {
       const { registered, config } = outcome;
-      // The same four things the wizard writes, from the same place, so a
-      // repository connected by the verb and one connected by the wizard hold
-      // the same file. A suite somebody has already named is left alone: it is
-      // their committed file, and this step learned nothing about it.
+      // The repository target is separate from its suites. Suites are created
+      // through their own platform-backed command and live in manifests.
       const paths = folderPathsIn(options.cwd);
-      const beforeThis = await readConfig(paths.config).catch(() => null);
+      const project = await readProject(
+        { url: held.url, key: held.key },
+        registered.agent.projectId,
+        options.fetchImpl,
+      );
       await updateConfig(paths.config, {
+        project,
         agent: { name: registered.agent.name, id: registered.agent.id },
         connection: {
           name: registered.connection.name,
           id: registered.connection.id,
         },
-        ...(beforeThis?.suite == null
-          ? { suite: { name: DEFAULT_SUITE_NAME, id: null } }
-          : {}),
       });
       options.out(`retell_agents: ${outcome.onTheAccount}`);
       options.out(`retell_agent_id: ${config.agentId}`);

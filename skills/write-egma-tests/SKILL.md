@@ -1,6 +1,6 @@
 ---
 name: write-egma-tests
-description: Write or edit Egma Markdown tests in egma/tests/ for a voice agent. Use when creating test situations, expected behaviors, persona-specific tests, capability requirements, or test-level mock-tool answers, including when converting existing test notes into Egma files.
+description: Write or edit Egma Markdown tests inside an existing egma/tests/<suite-directory>/ for a voice agent. Use when creating test situations, expected behaviors, persona-specific tests, or test-level mock-tool answers, including when converting existing test notes into Egma files.
 ---
 
 # Write Egma tests
@@ -8,18 +8,19 @@ description: Write or edit Egma Markdown tests in egma/tests/ for a voice agent.
 An Egma **test** describes one situation for a voice agent and the expected
 behaviors that must hold. Egma executes it as one **simulation** per persona.
 
-Write one Markdown file per test in `egma/tests/`. Keep each test reviewable as
-ordinary repository content.
+Write one Markdown file per test in one existing direct suite directory under
+`egma/tests/`. Keep each test reviewable as ordinary repository content.
 
 ## Read before writing
 
-1. Read `egma/config.yaml` and the existing files in `egma/tests/`. If the
-   folder or config does not exist, stop and ask the developer to identify or
-   initialize the target. Do not choose the nearest voice-agent example.
+1. Read `egma/config.yaml`, every direct suite manifest, and the existing test
+   files. Use the suite directory named by the task. If none is named and more
+   than one exists, ask which suite. If no suite exists, ask the developer to
+   run `egma suite create <directory> --name <name>`.
 2. Read the voice agent's committed prompts and tool definitions when the task
    depends on them.
-3. Reuse the file shape and known persona or capability values already present
-   in the repository.
+3. Reuse the format 4 file shape and known persona values already present in
+   the selected suite.
 4. Leave `.env` files unread. Work from committed source and the facts supplied
    by the developer.
 
@@ -35,6 +36,7 @@ actual tool contract before using this answer shape.
 
 ````markdown
 ---
+format: 4
 name: missed-appointment-reschedule
 description: The person missed an appointment and needs another time this week.
 ---
@@ -66,15 +68,11 @@ Apply these rules:
   `answer` or `error` in its JSON block. Make `answer` the same JSON shape that
   the real tool returns. Do not infer that shape from this example.
 
-## Handle personas and capabilities carefully
+## Handle personas carefully
 
 Omit `personas` for the project's default persona. Name a persona only when the
 test depends on who speaks to the agent. Use a name or id already supplied by
 Egma or already present in this repository.
-
-Add `required_capabilities` only when the test cannot mean the same thing
-without that connection ability. Reuse capability keys already supplied by
-Egma. Leave the field out when no capability is required.
 
 Treat ids and sync pins as references, not prose. Inventing an id makes the
 file point at something that does not exist.
@@ -89,7 +87,7 @@ Preserve every machine-owned field already in the frontmatter, including:
 - persona ids and their display names
 
 Preserve authored fields that the task does not change, including description,
-required capabilities, personas, expected behaviors, and mock tools. Make the
+personas, expected behaviors, and mock tools. Make the
 smallest edit that completes the developer's request.
 
 ## Write strong expected behaviors
@@ -99,8 +97,7 @@ smallest edit that completes the developer's request.
   requirement.
 - Cover the ordinary path, important refusals, weak tool answers, and difficult
   user behavior when they matter to the task.
-- Keep transport details out of a test unless the behavior truly depends on a
-  connection capability.
+- Keep transport details out of a behavioral test.
 
 An expected behavior is a product requirement, not a way to force a green
 verdict. Keep it strict when the requirement is real.
@@ -111,5 +108,5 @@ Read every changed file back. Confirm that its YAML frontmatter closes, its two
 required headings exist, its expected-behavior list is not empty, and every
 mock-tool JSON block parses.
 
-Stop after the requested local files are correct. Run `egma push` or `egma run`
+Stop after the requested local files are correct. Run `egma push` or `egma run <suite-directory>`
 only when the developer asks for that next action.

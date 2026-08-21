@@ -39,14 +39,6 @@ export const CODES = {
   // so a client that could not tell them apart could not offer either.
   identity_conflict: 409,
   version_conflict: 409,
-  /**
-   * A link edit written against an applicability revision the test has moved
-   * past. Its own code beside the two above because it is the third of three
-   * separately recoverable losses: a client that could not tell it from an
-   * identity conflict would tell somebody to reread and retype a name when
-   * what actually moved was which agents the test applies to.
-   */
-  applicability_conflict: 409,
   parent_agent_archived: 409,
   // A persona an active test still names, and the persona a project points at
   // by default. Two rules that refuse one Archive, and two sentences, because
@@ -61,47 +53,6 @@ export const CODES = {
   // the request was valid on the way in, nothing was written, and sending it
   // again is the whole of the fix — which a client can do by itself.
   write_aborted: 409,
-  /**
-   * A grader an active test names directly, refused Archive. Its own code
-   * because the fix is specific — go and take it off those tests — and the
-   * refusal names them.
-   */
-  grader_in_use: 409,
-  /**
-   * A test left with no agent to run against, refused. Three codes rather than
-   * one because the fixes are three different places: choose an agent on the
-   * form, link another agent before removing this one, and choose an agent
-   * that is actually active in this project.
-   */
-  test_needs_agent: 422,
-  last_test_agent: 409,
-  agent_not_available: 409,
-  /**
-   * A repository push at a test the browser has unlinked from the agent that
-   * repository is bound to. A fourth code beside the three above because the
-   * reader is a terminal rather than a form and the fix is somewhere else
-   * entirely: relink the test in the browser, or delete the local file. Neither
-   * side was changed, which the sentence says out loud because a push that
-   * stopped half way is the fear this refusal exists to settle.
-   */
-  repository_agent_not_applicable: 409,
-  /**
-   * A run that paired an agent with a test not linked to it. Its own code so a
-   * run builder can offer the fix — link the test, or choose another — rather
-   * than showing a general refusal about a version.
-   */
-  test_not_applicable: 409,
-  /**
-   * A test's Restore refused because its current version names an archived
-   * persona or scenario grader. Restoring is a promise the test can run, and
-   * this is the answer when it cannot.
-   */
-  test_dependency_inactive: 409,
-  /**
-   * A capability nothing offered. Its own code so a form can put the refusal
-   * beside the capability list rather than at the top of the page.
-   */
-  unknown_capability: 422,
   /**
    * A file naming a persona by a name two living personas answer to. Its own
    * code because the fix belongs to a file rather than to a form: put the
@@ -278,64 +229,15 @@ export const REFUSALS = {
     `has moved on to ${current}. Read the ${resource} again, keep or reapply ` +
     `your edits, and send them with expectedVersionId set to ${current}.`,
 
-  testNeedsAgent:
-    "Every test must apply to at least one active agent. Select an active " +
-    "agent and save the test again.",
-
-  lastTestAgent: (testId: string, agentId: string): string =>
-    `Test ${testId} must apply to at least one agent. Link another active ` +
-    `agent before you remove ${agentId}.`,
-
-  agentNotAvailable: (agentId: string): string =>
-    `Agent ${agentId} is not active in this project. Choose an active agent ` +
-    "from this project's Agents page.",
-
-  /**
-   * A push at a test the browser has unlinked from the repository's own agent.
-   *
-   * **Said twice, in one wording.** `push` preflights the whole folder against
-   * the tests its bound agent still has, so the ordinary path never sends the
-   * request at all — the client says this sentence itself, from its own copy.
-   * This one is the door's, for the race where the link is removed between that
-   * preflight and the write. Both readers get the same instruction, which is
-   * the only reason a client can be told to act on the code.
-   */
-  repositoryAgentNotApplicable: (testId: string, agentId: string): string =>
-    `Test ${testId} no longer applies to the agent bound to this repository. ` +
-    `Link it to agent ${agentId} in Egma, or remove this local file; egma ` +
-    "push changed neither side.",
-
   personaNameAmbiguous: (name: string): string =>
     `Persona name ${name} matches more than one active persona in this ` +
     "project. Put the intended persona's stable ID in the file and try again; " +
     "for a pinned file, egma pull can write the IDs after the file is safe to " +
     "migrate.",
 
-  testNotApplicable: (
-    testId: string,
-    agentId: string,
-    versionId: string,
-  ): string =>
-    `Test ${testId} does not apply to agent ${agentId}, so version ` +
-    `${versionId} cannot start. Choose a test linked to this agent, or link ` +
-    "the test in the Tests page before starting the run.",
-
-  testDependencyInactive: (testId: string, resources: string): string =>
-    `Test ${testId} cannot be restored because ${resources} in its current ` +
-    "version are archived. Restore those resources, then restore the test.",
-
-  applicabilityConflict: (testId: string): string =>
-    `Test ${testId}'s applicable agents changed after you opened it. Read the ` +
-    "test again, keep or reapply your link changes, and send them with " +
-    "expectedApplicabilityRevision set to its new applicability revision.",
-
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
     "the first page.",
-
-  graderInUse: (graderId: string, tests: string): string =>
-    `Grader ${graderId} is added directly to active tests ${tests}. Remove ` +
-    "it from those tests, or archive the tests, then archive this grader.",
 
   projectSlugTaken: (slug: string): string =>
     `Project slug ${slug} is already in use in this organization. Choose a ` +

@@ -9,12 +9,11 @@ import {
   primaryKey,
   text,
   unique,
-  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 import { agent, connection, MODALITIES } from "./agents.ts";
 import { personaVersion } from "./personas.ts";
-import { test, testVersion } from "./tests.ts";
+import { test, testSuite, testVersion } from "./tests.ts";
 import { organization, project } from "./tenancy.ts";
 import { user } from "./identity.ts";
 import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
@@ -23,17 +22,12 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
  * A run is the trigger's record — who asked for simulations, when, how, and
  * what was requested. A simulation is one conversation inside it, born
  * `queued` before anything else happens, so nothing a team triggers can
- * silently vanish. Retry is a new run pointing back at the old one; a
- * terminal run's numbers are frozen and never reopened.
+ * silently vanish. A terminal run's numbers are frozen and never reopened.
  *
- * **A run executes frozen test versions.** The test linkage was deliberately
- * absent-but-shaped-for, and this is the meeting point: the header keeps the
- * versions it was asked to pin, and each simulation carries the version it
- * conducts beside the persona who calls about it — so one test with three
+ * **A run executes frozen test versions.** Each simulation carries the exact
+ * test version it conducts beside the persona who calls about it — so one test with three
  * personas is three conversations, and improving that test tomorrow rewrites
- * none of them. The simulation's pin is nullable because an instance upgraded
- * across the migration that added it holds conversations that executed no
- * stored test, and they say so rather than naming one they never ran.
+ * none of them. Every simulation always has both exact pins.
  *
  * Verdict counts and the gate result are the graders' side of the line; the
  * counts on this header are simulation outcomes — did each conversation happen
@@ -73,14 +67,6 @@ export type RunTrigger = (typeof RUN_TRIGGERS)[number];
  * is the cancel-before-claim path, and a canceled row can never be claimed. A
  * terminal row is frozen entirely.
  *
- * `skipped` is outside that lifecycle entirely and is the one status a row can
- * be **born** in. It is written by run creation, terminal from its first
- * moment, for a conversation egma decided in advance it could not honestly
- * conduct — a test requiring something the connection was measured not to have,
- * or something nobody has measured. It never enters the claim queue, no
- * simulator ever sees it, and it produces no grading job, because there is no
- * conversation to judge. It is emphatically not `failed`: nothing about the
- * agent under test is being said.
  */
 export const SIMULATION_STATUSES = [
   "queued",
@@ -89,26 +75,8 @@ export const SIMULATION_STATUSES = [
   "completed",
   "failed",
   "canceled",
-  "skipped",
 ] as const;
 export type SimulationStatus = (typeof SIMULATION_STATUSES)[number];
-
-/**
- * Why run creation wrote a conversation off before it began. Two, and they must
- * never collapse into one, because they are a settled fact and an unasked
- * question and their fixes are in different places: one means this test cannot
- * be meaningfully run over this connection at all, the other means nobody has
- * measured the connection yet and a Refresh may change the answer.
- *
- * They are the catalog's own two standings said in the run's vocabulary — see
- * `capabilityStanding` in `access/capabilities.ts`, which is the one place the
- * three answers are told apart.
- */
-export const SIMULATION_SKIP_REASONS = [
-  "required_capability_unsupported",
-  "required_capability_unknown",
-] as const;
-export type SimulationSkipReason = (typeof SIMULATION_SKIP_REASONS)[number];
 
 /**
  * How a completed conversation ended — a fact about the conversation, not a
@@ -155,10 +123,9 @@ export type SimulationEndingReason =
  * What the graders made of a simulation. Four, and never three.
  *
  * `skipped` and `errored` are answers in their own right and are never folded
- * into `failed`: a test that could not run is not a test that failed, and a
- * product that said otherwise would mark a suite red on the strength of its own
- * outage. The pairing with the status is held by a check below, so the fold is
- * unwritable rather than merely discouraged.
+ * into `failed`: a grader may skip evidence outside its modality, and a
+ * platform outage is not an agent that did the wrong thing. The pairing with
+ * the status is held by a check below.
  */
 export const VERDICTS = ["passed", "failed", "skipped", "errored"] as const;
 export type Verdict = (typeof VERDICTS)[number];
@@ -179,10 +146,11 @@ export const run = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
+    suiteId: idText("suite_id").notNull(),
     agentId: idText("agent_id").notNull(),
     connectionId: idText("connection_id").notNull(),
     /** Something to recognise the run by in a list; never an identity. */
-    label: text("label"),
+    name: text("name"),
     status: text("status").notNull(),
     /**
      * Who asked and how. The user comes from the credential; a run of a
@@ -193,24 +161,6 @@ export const run = pgTable(
     triggeredBy: idText("triggered_by").references(() => user.id, {
       onDelete: "set null",
     }),
-    /**
-     * The frozen test versions this run was asked to execute, in the order
-     * they were named. The pin itself is each simulation's own column; this is
-     * what the trigger asked for, kept whole so the request stays readable
-     * even for a version whose test has since been deleted.
-     *
-     * Empty only on a run written before a run could pin one at all — the
-     * migration that added this column says so about the rows it found, rather
-     * than inventing a selection nobody made.
-     */
-    pinnedTestVersions: jsonb("pinned_test_versions").notNull(),
-    /**
-     * The personas those versions named, in the order they were met, kept as
-     * provenance. What was actually conducted is each simulation's own pinned
-     * version; this answers "who was this run about" after the personas
-     * themselves move on.
-     */
-    requestedPersonas: jsonb("requested_personas").notNull(),
     /**
      * The connection's non-secret shape as the run executed over it — type,
      * modality, topology, environment, config. Connections are deliberately
@@ -228,16 +178,14 @@ export const run = pgTable(
      * creation is what makes "every simulation in one run sees one world" a
      * fact about the row rather than a hope about timing.
      *
-     * It holds the project's mock tools that apply to this run's agent —
-     * scoping already applied — beside what each pinned test version overrode,
-     * rather than a resolved list per version: an override replaces a default
-     * by tool name, and storing the merge per version would copy every default
-     * once per test for nothing. `resolveMockTools` does the merge, and is the
-     * one place it happens.
+     * It holds the project's mock tools that apply to this run's agent, with
+     * scoping already applied. Test overrides remain on the immutable
+     * test-version rows that each Simulation pins. A Simulation evidence read
+     * joins only its own version to these defaults, so no run-header read grows
+     * with the number of tests in the Suite.
      *
-     * Empty on a run written before mock tools existed, and empty on any run
-     * whose project answers for no tool at all — the two read identically
-     * because they mean the same thing: nothing was mocked.
+     * A run whose project answers for no tool holds the explicit final shape:
+     * `{ defaults: [], overrides: {} }`.
      */
     mockToolSnapshot: jsonb("mock_tool_snapshot").notNull(),
     /** Set at start; the denominator a progress page divides by. */
@@ -250,23 +198,6 @@ export const run = pgTable(
     completedCount: integer("completed_count"),
     failedCount: integer("failed_count"),
     canceledCount: integer("canceled_count"),
-    /**
-     * How many conversations this run never attempted, because a test required
-     * something the connection could not be shown to do.
-     *
-     * Its own count beside the other three rather than folded into any of them.
-     * Folding it into `failed` would report an agent broken by egma's own
-     * capability gap; folding it into `canceled` would say somebody stopped
-     * this work, and nobody did. A run whose every conversation is skipped
-     * completes with this number and three zeroes, which is exactly the shape
-     * a headline has to read as "nothing was judged" rather than as a pass.
-     */
-    skippedCount: integer("skipped_count"),
-    /** A new run, retrying an old one — never the old run reopened. */
-    retryOfRunId: idText("retry_of_run_id").references(
-      (): AnyPgColumn => run.id,
-      { onDelete: "set null" },
-    ),
     startedAt: moment("started_at"),
     finishedAt: moment("finished_at"),
     createdAt: createdAt(),
@@ -285,14 +216,13 @@ export const run = pgTable(
       "run_counts_written_together",
       sql`((${table.completedCount} is null) = (${table.failedCount} is null))
         and ((${table.failedCount} is null) = (${table.canceledCount} is null))
-        and ((${table.canceledCount} is null) = (${table.skippedCount} is null))
         and ((${table.canceledCount} is null) = (${table.finishedAt} is null))`,
     ),
     check(
       "run_counts_are_counts",
       sql`(${table.completedCount} is null)
         or (${table.completedCount} >= 0 and ${table.failedCount} >= 0
-          and ${table.canceledCount} >= 0 and ${table.skippedCount} >= 0)`,
+          and ${table.canceledCount} >= 0)`,
     ),
     // Finished means terminal, and completed means finished; only a canceled
     // run may hold its terminal status while stragglers land.
@@ -321,6 +251,11 @@ export const run = pgTable(
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "run_suite_project_fk",
+      columns: [table.suiteId, table.projectId],
+      foreignColumns: [testSuite.id, testSuite.projectId],
+    }),
     // One level down: the agent is that same project's.
     foreignKey({
       name: "run_agent_project_fk",
@@ -350,6 +285,7 @@ export const run = pgTable(
     // What the agent's own hard delete checks, and the per-agent history read
     // when it arrives; the id-ordered pair above already serves every list.
     index("run_agent_id_idx").on(table.agentId),
+    index("run_suite_id_idx").on(table.suiteId),
   ],
 );
 
@@ -383,15 +319,12 @@ export const simulation = pgTable(
      * keys below pair on: the version is this test's, and the test is this
      * project's.
      *
-     * **Absent only on a row written before the two halves of the product
-     * met.** Nothing can write one now — `startRun` names a version for every
-     * conversation it creates — but an instance upgraded across that migration
-     * holds simulations that executed no stored test, and they say so rather
-     * than being handed a test somebody invented for them. The check below
-     * keeps the pair whole either way.
+     * Required on every row. `startRun` names both pins for every conversation,
+     * and the clean suite cutover removed the older rows that had no stored
+     * test evidence.
      */
-    testId: idText("test_id"),
-    testVersionId: idText("test_version_id"),
+    testId: idText("test_id").notNull(),
+    testVersionId: idText("test_version_id").notNull(),
     /** Where in the run's requested order this conversation sits, from one. */
     position: integer("position").notNull(),
     /**
@@ -465,24 +398,6 @@ export const simulation = pgTable(
      * came back.
      */
     mockToolCoverage: jsonb("mock_tool_coverage"),
-    /**
-     * Why this conversation was never attempted, on the one status that is
-     * written terminal at birth. Null on every other row, including a `failed`
-     * one — a failure has an ending reason, and the two vocabularies are kept
-     * apart because they answer different questions: *the test never ran* and
-     * *the test never started*.
-     */
-    skipReason: text("skip_reason"),
-    /**
-     * Which required capabilities produced the skip, as catalog keys.
-     *
-     * On the row rather than left to be worked out from the pinned version and
-     * the connection, because both of those move: a Refresh tomorrow changes
-     * what the connection is known to do, and the reason this conversation was
-     * written off has to stay readable exactly as it was decided. It is the
-     * same reason the connection snapshot sits on the run.
-     */
-    skippedCapabilities: jsonb("skipped_capabilities"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -515,13 +430,6 @@ export const simulation = pgTable(
         )}
         else ${table.endingReason} is null
       end`,
-    ),
-    // The test pin is one fact in two columns and arrives whole or not at all,
-    // so no reader ever meets a version without the identity it pairs on — or
-    // an identity whose version nothing recorded.
-    check(
-      "simulation_test_pin_columns_agree",
-      sql`(${table.testId} is null) = (${table.testVersionId} is null)`,
     ),
     // The three claim columns are one fact and arrive together.
     check(
@@ -564,30 +472,6 @@ export const simulation = pgTable(
       "simulation_canceled_shape",
       sql`${table.status} <> 'canceled'
         or (${table.endedAt} is not null and ${table.cancelRequestedAt} is not null)`,
-    ),
-    // A skipped row is terminal from birth and carries its whole explanation:
-    // it ended when it was written, it was never claimed and never started,
-    // and it names both why and which capabilities decided it. Nothing else
-    // may carry either field — a reason on a conversation that actually
-    // happened would be a sentence about a decision nobody made.
-    check(
-      "simulation_skipped_shape",
-      sql`${table.status} <> 'skipped'
-        or (${table.endedAt} is not null and ${table.claimedAt} is null
-          and ${table.startedAt} is null and ${table.cancelRequestedAt} is null
-          and ${table.skipReason} is not null
-          and ${table.skippedCapabilities} is not null)`,
-    ),
-    check(
-      "simulation_skip_reason_belongs_to_a_skip",
-      sql`${table.status} = 'skipped'
-        or (${table.skipReason} is null and ${table.skippedCapabilities} is null)`,
-    ),
-    check(
-      "simulation_skip_reason_allowed",
-      sql`${table.skipReason} is null or ${table.skipReason} in ${quoted(
-        SIMULATION_SKIP_REASONS,
-      )}`,
     ),
     // The recording is a terminal fact; nothing running holds one yet. The
     // check keeps its name because a constraint's name is what a violation
@@ -658,10 +542,7 @@ export const simulation = pgTable(
     // 0037 installs the database trigger that enforces that availability rule.
     // And the test pin closes the same way the persona pin does: the version
     // is the named test's, and the test is this project's, so a raw write
-    // cannot pin another customer's test. Nullable both, and Postgres lets a
-    // composite key with a null column pass — which is exactly the upgraded
-    // instance's older row. Filled, both edges are checked, and the check
-    // above is what stops half of one being written.
+    // cannot pin another customer's test. Both pins are required.
     foreignKey({
       name: "simulation_test_version_test_fk",
       columns: [table.testVersionId, table.testId],
@@ -790,19 +671,15 @@ export const runEvent = pgTable(
       "run_event_verdict_allowed",
       sql`${table.verdict} is null or ${table.verdict} in ${quoted(VERDICTS)}`,
     ),
-    // The pairing, held by the database: a conversation that ran is passed,
-    // failed or skipped; one that never ran errored; one somebody stopped was
-    // never judged and is skipped; and one egma declined to start in the first
-    // place is skipped too. `skipped` and `errored` can therefore never be
-    // written as `failed`, which is the one normalisation a test product cannot
-    // get wrong.
+    // The pairing, held by the database: a completed conversation may be
+    // passed, failed, or skipped by a grader; a machinery failure is errored;
+    // and a canceled conversation has no grading evidence and reads skipped.
     check(
       "run_event_verdict_agrees",
       sql`${table.verdict} is null
         or (${table.status} = 'completed' and ${table.verdict} in ('passed', 'failed', 'skipped'))
         or (${table.status} = 'failed' and ${table.verdict} = 'errored')
-        or (${table.status} = 'canceled' and ${table.verdict} = 'skipped')
-        or (${table.status} = 'skipped' and ${table.verdict} = 'skipped')`,
+        or (${table.status} = 'canceled' and ${table.verdict} = 'skipped')`,
     ),
     // And the ending reason keeps to its own class, exactly as it does on the
     // simulation row it came from.

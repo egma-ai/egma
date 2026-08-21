@@ -38,8 +38,8 @@ import { getSimulationTestVersion } from "./runs.ts";
  * sentence on a judgment about something else entirely.
  *
  * **Nothing resolvable is invented.** A key this cannot place — a copy of an
- * entry with no words to look up, a position past the end of a version somebody
- * has since shortened, a conversation with no test at all — comes back absent,
+ * entry with no words to look up or a position past the end of a version
+ * somebody has since shortened comes back absent,
  * and a reader shows the key. An absent answer is honest; a made-up one is not.
  */
 
@@ -105,11 +105,10 @@ export async function readAssertionShelf(
   return {
     forSimulation: async (simulationId) => {
       // The pinned version, and nothing about the test as it now stands. It
-      // answers `undefined` for a conversation that pinned none, and for one
-      // whose version this credential cannot reach — in both cases there are no
-      // behaviors to read, which is not the same as having nothing at all to
-      // say: a whole-grader key still resolves, because what it names is the
-      // shelf rather than the test.
+      // It answers `undefined` only when this credential cannot reach the
+      // required pinned version. There are then no behaviors to read, which is
+      // not the same as having nothing at all to say: a whole-grader key still
+      // resolves, because what it names is the shelf rather than the test.
       const version = await getSimulationTestVersion(auth, simulationId);
       const behaviors = version?.expectedBehaviors ?? [];
 

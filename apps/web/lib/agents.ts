@@ -39,27 +39,6 @@ export type ListedAgent = Omit<ListedAgentWithConnections, "connections">;
  */
 export type AgentPage = ListAgentsResponse;
 
-/**
- * What is known about one target — or the fact that nobody has measured it.
- *
- * `unknown` and a `known` state with nothing in its list are different
- * sentences and lead somewhere different: one is a Refresh away from an answer,
- * the other is a settled fact about the target. A page must never collapse
- * them, which is why the state is its own field rather than an empty array.
- */
-export type Capabilities = ListedAgentWithConnections["connections"][number]["capabilities"];
-export type CapabilityStanding = Capabilities["standing"][keyof Capabilities["standing"]];
-
-/** The keys this record settles one way or the other, in catalog order. */
-export function standingIn(
-  capabilities: Capabilities,
-  standing: CapabilityStanding,
-): readonly string[] {
-  return Object.entries(capabilities.standing)
-    .filter(([, held]) => held === standing)
-    .map(([key]) => key);
-}
-
 export type ListedConnection = ListedAgentWithConnections["connections"][number];
 
 /**

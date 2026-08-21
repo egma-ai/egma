@@ -205,6 +205,8 @@ const EMPTIED_TABLES = ["grader", "grader_version", "test_grader"] as const;
 let database: EmptyDatabase;
 /** The migration files up to 0026's predecessor, as that release shipped. */
 let asItWas: string;
+/** The historical upgrade under test, stopping before the later suite reset. */
+let through0039: string;
 /**
  * One connection, held open, writing raw SQL. Both halves matter: `begin` and
  * `commit` have to land on the same session for the deferred pointers below,
@@ -505,6 +507,13 @@ beforeAll(async () => {
   const before = await runMigrations(database.url, asItWas);
   expect(before.applied.at(-1)).toBe("0025_priorities_retire.sql");
 
+  through0039 = await mkdtemp(path.join(os.tmpdir(), "egma-0026-through-0039-"));
+  for (const migration of await readMigrations()) {
+    if (migration.name >= "0026" && migration.name < "0040") {
+      await writeFile(path.join(through0039, migration.name), migration.sql);
+    }
+  }
+
   legacy = await openSingleConnection(database.url);
   for (const tenant of customers) await seedATenantAsItWas(tenant);
 
@@ -520,6 +529,7 @@ afterAll(async () => {
   await disconnect().catch(() => undefined);
   await legacy.close();
   await rm(asItWas, { recursive: true, force: true });
+  await rm(through0039, { recursive: true, force: true });
   await database.drop();
 });
 
@@ -546,9 +556,9 @@ describe("the release that turns graders into running copies (0026)", () => {
   });
 
   it("applies over a database that actually holds graders", async () => {
-    // The real directory this time, so the upgrade is every file from 0026 on
-    // — which is what a self-hoster's `docker compose pull` runs.
-    const upgraded = await runMigrations(database.url);
+    // Stop before 0040, whose separate proof owns the deliberate reset of
+    // pre-suite simulation history. This file isolates the 0026 promise.
+    const upgraded = await runMigrations(database.url, through0039);
 
     expect(upgraded.applied).toContain("0026_running_copies.sql");
     expect(upgraded.applied[0]).toBe("0026_running_copies.sql");

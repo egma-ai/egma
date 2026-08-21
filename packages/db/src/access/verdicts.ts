@@ -502,100 +502,125 @@ export async function readRunVerdicts(
   };
 }
 
+type RunVerdictSummaryRow = {
+  readonly run_id: string;
+  readonly passed: number | string;
+  readonly failed: number | string;
+  readonly skipped: number | string;
+  readonly errored: number | string;
+  readonly total: number | string;
+};
+
 /**
- * What every conversation of several runs has been judged, folded per
- * conversation — one query for a whole page of runs.
+ * One bounded judgment summary per requested run.
  *
- * **It exists so a run list can show a verdict per row without asking this store
- * once per run.** A page of fifty runs read one at a time is fifty round trips
- * to a columnar store, on the one surface somebody scrolls; the run ids are the
- * second column of this table's sorting key, so naming all of them at once is
- * one prune rather than fifty.
- *
- * The answer is deliberately per **conversation** rather than per run. A run's
- * verdict is folded over its conversations' verdicts — one vote each — and
- * folding a run's rows whole would let a test with forty expected behaviors
- * outvote a test with two. `foldRun` in `verdicts/read-fold.ts` does that
- * arithmetic, and it needs each conversation's own answer to do it.
- *
- * **Only the required lane is folded here, and the diagnostics are resolved the
- * same way every other read here resolves them.** A `required: false` copy
- * reports its fraction and can fail nothing, so a list that folded its rows in
- * would show a run as failed on the strength of a check that is not allowed to
- * fail anything — and it would disagree with the run's own detail page, which
- * splits the lanes. One read of the graders named by these rows covers every run
- * on the page.
- *
- * A run with nothing judged is absent from the outer map rather than present and
- * empty: absence is what "nobody has looked" already means everywhere else here,
- * and inventing an entry would be this module guessing at the run table's
- * business.
+ * ClickHouse folds assertion versions and then conversations inside the query.
+ * The application receives at most one row per run, regardless of suite size.
+ * Exact rows stay behind the paged simulation and simulation-detail reads.
  */
-export async function readVerdictsAcrossRuns(
+export async function readRunVerdictSummaries(
   auth: AuthContext,
   runIds: readonly string[],
   options: ReadVerdictsOptions = {},
-): Promise<ReadonlyMap<string, ReadonlyMap<string, FoldedOutcome>>> {
+): Promise<ReadonlyMap<string, FoldedOutcome>> {
   authorize(auth, "read", here(auth));
-
-  if (runIds.length === 0) {
-    return new Map<string, ReadonlyMap<string, FoldedOutcome>>();
-  }
+  if (runIds.length === 0) return new Map();
 
   const named = (value: string | undefined): string | undefined =>
     value === undefined || value === "" ? undefined : value;
   const projectId = named(auth.projectId) ?? named(options.projectId);
+  const queryParams = {
+    organization_id: auth.organizationId,
+    ...(projectId === undefined ? {} : { project_id: projectId }),
+    run_ids: [...runIds],
+  };
 
-  const answered = await traceStore().query({
-    query: `select
-              trace_id,
-              grader_id,
-              grader_version_id,
-              assertion,
-              source,
-              verdict,
-              score,
-              rationale,
-              cited_span_ids,
-              run_id,
-              agent_id,
-              agent_version_id,
-              toString(toUnixTimestamp64Micro(event_ts)) as judged_at_micros
+  const namedGraders = await traceStore().query({
+    query: `select distinct grader_id
             from ${VERDICTS_TABLE} final
             where organization_id = {organization_id:String}
               ${projectId === undefined ? "" : "and project_id = {project_id:String}"}
-              and run_id in {run_ids:Array(String)}
-            order by run_id, trace_id, grader_id, assertion, grader_version_id`,
-    query_params: {
-      organization_id: auth.organizationId,
-      ...(projectId === undefined ? {} : { project_id: projectId }),
-      run_ids: [...runIds],
-    },
+              and run_id in {run_ids:Array(String)}`,
+    query_params: queryParams,
+    format: "JSONEachRow",
+  });
+  const graderIds = (await namedGraders.json<{ readonly grader_id: string }>())
+    .map((row) => row.grader_id);
+  const facts = await graderFacts(auth, graderIds);
+  const diagnostics = [...facts]
+    .filter(([, one]) => !one.required)
+    .map(([graderId]) => graderId);
+
+  const answered = await traceStore().query({
+    query: `with latest as (
+              select
+                run_id,
+                trace_id,
+                argMax(
+                  toString(verdict),
+                  tuple(
+                    toUnixTimestamp64Micro(event_ts),
+                    grader_version_id,
+                    multiIf(verdict = 'failed', 3, verdict = 'errored', 2,
+                      verdict = 'skipped', 1, 0)
+                  )
+                ) as verdict
+              from ${VERDICTS_TABLE} final
+              where organization_id = {organization_id:String}
+                ${projectId === undefined ? "" : "and project_id = {project_id:String}"}
+                and run_id in {run_ids:Array(String)}
+                and grader_id not in {diagnostic_grader_ids:Array(String)}
+              group by run_id, trace_id, grader_id, assertion, source
+            ), by_simulation as (
+              select
+                run_id,
+                trace_id,
+                multiIf(
+                  countIf(verdict = 'failed') > 0, 'failed',
+                  countIf(verdict = 'errored') > 0, 'errored',
+                  countIf(verdict != 'skipped') > 0, 'passed',
+                  'skipped'
+                ) as verdict
+              from latest
+              group by run_id, trace_id
+            )
+            select
+              run_id,
+              countIf(verdict = 'passed') as passed,
+              countIf(verdict = 'failed') as failed,
+              countIf(verdict = 'skipped') as skipped,
+              countIf(verdict = 'errored') as errored,
+              count() as total
+            from by_simulation
+            group by run_id
+            order by run_id`,
+    query_params: { ...queryParams, diagnostic_grader_ids: diagnostics },
     format: "JSONEachRow",
   });
 
-  const rows = (await answered.json<VerdictRow>()).map(verdictOf);
-  const diagnostics = await onlyReporting(auth, rows);
-
-  const byRun = new Map<string, Map<string, RecordedVerdict[]>>();
-  for (const row of rows) {
-    const conversations = byRun.get(row.runId) ?? new Map();
-    byRun.set(row.runId, conversations);
-    const held = conversations.get(row.traceId);
-    if (held === undefined) conversations.set(row.traceId, [row]);
-    else held.push(row);
-  }
-
   return new Map(
-    [...byRun].map(([runId, conversations]) => [
-      runId,
-      new Map(
-        [...conversations].map(([simulationId, its]) => [
-          simulationId,
-          foldVerdicts(verdictLanes(its, diagnostics).required),
-        ]),
-      ),
-    ]),
+    (await answered.json<RunVerdictSummaryRow>()).map((row) => {
+      const counts = {
+        passed: Number(row.passed),
+        failed: Number(row.failed),
+        skipped: Number(row.skipped),
+        errored: Number(row.errored),
+        total: Number(row.total),
+      };
+      const scored = counts.total - counts.skipped;
+      const verdict: Verdict = counts.failed > 0
+        ? "failed"
+        : counts.errored > 0
+          ? "errored"
+          : scored > 0
+            ? "passed"
+            : "skipped";
+      return [row.run_id, {
+        verdict,
+        score: scored === 0 ? undefined : counts.passed / scored,
+        counts,
+      }] as const;
+    }),
   );
 }
 

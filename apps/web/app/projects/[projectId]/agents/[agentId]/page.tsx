@@ -24,7 +24,6 @@ import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
-import { useMinuteClock } from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
@@ -34,7 +33,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import { CapabilityState, modalityLabel } from "../connection-facts.tsx";
+import { modalityLabel } from "../connection-facts.tsx";
 
 /**
  * One agent: what egma owns about it, and every way egma can reach it.
@@ -81,7 +80,6 @@ export default function AgentDetailPage() {
 function connectionColumns(
   projectId: string,
   agentId: string,
-  now: number,
 ): readonly Column<ListedConnection>[] {
   return [
     {
@@ -121,11 +119,6 @@ function connectionColumns(
       width: "100px",
       cell: (one) => modalityLabel(one.modality),
     },
-    {
-      key: "capabilities",
-      header: "Capabilities",
-      cell: (one) => <CapabilityState capabilities={one.capabilities} now={now} />,
-    },
   ];
 }
 
@@ -138,8 +131,6 @@ function AgentDetailView({
 }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
-  /** One clock for every relative instant on the page, rather than one per row. */
-  const now = useMinuteClock();
 
   const { answer, reload } = useProjectRead<AgentDetail>(
     (projectId) =>
@@ -295,7 +286,7 @@ function AgentDetailView({
           ) : (
             <DataTable
               label="Connections for this agent"
-              columns={connectionColumns(projectId, agentId, now)}
+              columns={connectionColumns(projectId, agentId)}
               rows={connections}
               keyOf={(one) => one.id}
               stretchPrimaryLink

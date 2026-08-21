@@ -3,13 +3,20 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { cancelRun, listAgents, listRuns } from "@egma/platform-api/client";
+import {
+  cancelRun,
+  listAgents,
+  listRuns,
+} from "@egma/platform-api/client";
 
 import { cn } from "@/lib/utils";
 import type { Refusal } from "../../../../lib/api.ts";
-import type { AgentPage, ListedAgent } from "../../../../lib/agents.ts";
+import type { AgentPage } from "../../../../lib/agents.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
-import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../lib/platform-client.ts";
 import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
@@ -58,8 +65,7 @@ import {
  * one, because "nobody has finished looking" is not a result. A list that showed
  * one column called *status* would have to choose which of those four it meant,
  * and whichever it chose would be wrong for somebody: a completed run may hold
- * nothing but failures, and a run full of skipped conversations has failed
- * nothing at all.
+ * nothing but failures.
  *
  * Every filter is the server's, in the address of the request. A filter applied
  * to what came back would answer differently depending on what had already been
@@ -74,15 +80,12 @@ export default function RunsPage() {
   );
 }
 
-/** What a row says a run was against. Ids where a name has been archived away. */
-function ranAgainst(run: RunRow, agents: readonly ListedAgent[]): string {
-  const named = agents.find((one) => one.id === run.agentId);
-  return named?.name ?? run.agentId;
+function suiteLabel(run: RunRow): string {
+  return `${run.suiteName}${run.suiteDeleted ? " (deleted)" : ""}`;
 }
 
 function columnsFor(
   projectId: string,
-  agents: readonly ListedAgent[],
   /** Null while the session read has not answered, so no control is drawn. */
   mayControl: boolean | null,
   onCancel: (runId: string) => void,
@@ -95,9 +98,21 @@ function columnsFor(
       primary: true,
       cell: (run) => (
         <Link href={projectPath(projectId, "runs", run.id)}>
-          {run.label ?? ranAgainst(run, agents)}
+          {run.name ?? suiteLabel(run)}
         </Link>
       ),
+    },
+    {
+      key: "suite",
+      header: "Test suite",
+      cell: (run) =>
+        run.suiteDeleted ? (
+          suiteLabel(run)
+        ) : (
+          <Link href={projectPath(projectId, "tests", "suites", run.suiteId)}>
+            {suiteLabel(run)}
+          </Link>
+        ),
     },
     {
       key: "started",
@@ -138,9 +153,8 @@ function columnsFor(
       /*
        * A row control, said to the table rather than only drawn like one.
        *
-       * The run's own page already marks its *Run again* column this way and
-       * this one did not, so the same concept was drawn two ways: the shared
-       * table keeps an `action` cell at the trailing edge, lets it out of the
+       * The shared table keeps a row control in an `action` cell at the trailing
+       * edge, lets it out of the
        * one-line ellipsis every other cell gets, and drops the cell entirely
        * on a narrow layout when the row has no control — which is every
        * finished run in a healthy history.
@@ -191,7 +205,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
   const [since, setSince] = useState("");
   const now = useMinuteClock();
 
-  const question = `${agent}:${connection}:${status}:${verdict}:${since}`;
+  const asked = JSON.stringify({ agent, connection, status, verdict, since });
   const { answer, reload } = useProjectRead<RunHistoryPage>(
     (projectId) =>
       platformAnswer(
@@ -208,11 +222,13 @@ function Runs({ projectId }: { readonly projectId: string }) {
         ),
       ),
     projectId,
-    question,
+    asked,
   );
   const { answer: agents } = useProjectRead<AgentPage>(
     (projectId) =>
-      platformAnswer(listAgents({ projectId }, { client: platformClient })),
+      platformAnswer(
+        listAgents({ projectId }, { client: platformClient }),
+      ),
     projectId,
   );
 
@@ -259,7 +275,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
   const [stopping, setStopping] = useState(false);
 
   const carried =
-    after !== null && after.project === projectId && after.asked === question
+    after !== null && after.project === projectId && after.asked === asked
       ? after.page
       : null;
 
@@ -292,10 +308,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
     // on the run's own page.
     const answered = await platformAnswer(
       cancelRun(
-        {
-          runId,
-          projectId,
-        },
+        { runId, projectId },
         { client: platformClient },
       ),
     );
@@ -388,15 +401,15 @@ function Runs({ projectId }: { readonly projectId: string }) {
     async function showMore(): Promise<void> {
       if (cursor === null) return;
 
-      const asked = projectId;
-      const askedQuestion = question;
+      const projectAsked = projectId;
+      const question = asked;
       setMoreRefused(null);
       setLoadingMore(true);
 
       const next = await platformAnswer(
         listRuns(
           {
-            projectId: asked,
+            projectId: projectAsked,
             pageToken: cursor,
             ...(agent === "" ? {} : { agentId: agent }),
             ...(connection === "" ? {} : { connectionId: connection }),
@@ -409,7 +422,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
       );
 
       setLoadingMore(false);
-      if (showing.current !== asked) return;
+      if (showing.current !== projectAsked) return;
 
       if (next.status === "signed-out") {
         window.location.replace("/sign-in");
@@ -421,8 +434,8 @@ function Runs({ projectId }: { readonly projectId: string }) {
       }
 
       setAfter({
-        project: asked,
-        asked: askedQuestion,
+        project: projectAsked,
+        asked: question,
         page: {
           runs: [...(carried?.runs ?? []), ...next.value.runs],
           nextPageToken: next.value.nextPageToken,
@@ -446,7 +459,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
                   // folded at read time, so the server sweeps rather than
                   // filtering in the query.
                   "Clear the filters to see everything this project has run. A run that is still being judged has no verdict yet and matches no verdict filter."
-                : "A run executes a selection of tests against one agent over one connection, and freezes exactly what it used."
+                : "A run executes one full test suite against one agent over one connection, and freezes exactly what it used."
             }
             action={
               narrowed ? (
@@ -488,7 +501,6 @@ function Runs({ projectId }: { readonly projectId: string }) {
           label="Runs in this project"
           columns={columnsFor(
             projectId,
-            agentRows,
             role === null ? null : mayStart,
             openCancel,
             now,
@@ -523,7 +535,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
           >
             {/* A heading carries no size of its own; the class is the size. */}
             <h3 className="m-0 text-sm font-medium text-foreground">
-              Cancel {opened.label ?? "this run"}?
+              Cancel {opened.name ?? "this run"}?
             </h3>
             <p className="m-0 max-w-[72ch] text-sm text-muted-foreground">
               Simulations still waiting stop here and now. Simulations

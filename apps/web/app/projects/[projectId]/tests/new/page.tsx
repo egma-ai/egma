@@ -1,18 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { createTest } from "@egma/platform-api/client";
+import {
+  createTest,
+  getTestSuite,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { Refusal } from "../../../../../lib/api.ts";
-import { projectPath } from "../../../../../lib/project-context.ts";
 import { roleOf } from "../../../../../lib/me.ts";
-import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
+import {
+  platformAnswer,
+  platformClient,
+} from "../../../../../lib/platform-client.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
+import {
+  suitePagePath,
+  type TestSuite,
+} from "../../../../../lib/test-suites.ts";
 import {
   behaviorsAreUsable,
   whyBehaviorsRefuse,
@@ -27,6 +36,8 @@ import {
   Problem,
   Refused,
 } from "../../../../../ui/form.tsx";
+import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
+import { useProjectRead } from "../../../../../ui/resource.ts";
 import { Section } from "../../../../../ui/section.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
@@ -36,47 +47,46 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
-import {
-  Behaviors,
-  NamedSelector,
-} from "../editor.tsx";
+import { Behaviors, NamedSelector } from "../editor.tsx";
 
-/**
- * Writing a test.
- *
- * **The form asks for a target, because a test has to have one.** A
- * specification nothing can be executed against is one nobody can act on, and
- * the platform refuses it — so the choice is on the form rather than a refusal
- * afterwards. It is the only field here whose absence stops the save, alongside
- * the expected behaviors, which are what make the test able to fail at all.
- *
- * Everything a test is made of goes in one write, because until it is written
- * there is nothing to version: the split between live identity, versioned
- * content and applicable agents starts on the detail page, where each of the
- * three has something to be stale against.
- */
 export default function NewTestPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const suiteId = useSearchParams().get("suite");
   return (
     <AppShell>
-      <NewTest projectId={projectId} />
+      <NewTest projectId={projectId} suiteId={suiteId} />
     </AppShell>
   );
 }
 
-function NewTest({ projectId }: { readonly projectId: string }) {
+function NewTest({
+  projectId,
+  suiteId,
+}: {
+  readonly projectId: string;
+  readonly suiteId: string | null;
+}) {
   const router = useRouter();
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const mayAuthor = role !== null && canAuthor(role);
+  const { answer: suite, reload } = useProjectRead<TestSuite>(
+    (projectId) =>
+      platformAnswer(
+        getTestSuite(
+          { suiteId: suiteId ?? "", projectId },
+          { client: platformClient },
+        ),
+      ),
+    suiteId === null ? null : projectId,
+    suiteId ?? "",
+  );
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [scenario, setScenario] = useState("");
   const [behaviors, setBehaviors] = useState<readonly ExpectedBehavior[]>([""]);
-  const [chosenAgents, setChosenAgents] = useState<readonly string[]>([]);
   const [chosenPersonas, setChosenPersonas] = useState<readonly string[]>([]);
-
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
 
@@ -86,82 +96,123 @@ function NewTest({ projectId }: { readonly projectId: string }) {
     scenario !== "" ||
     behaviors.length !== 1 ||
     behaviors[0] !== "" ||
-    chosenAgents.length > 0 ||
     chosenPersonas.length > 0;
   useUnsavedChanges(changed && !saving, saving);
 
-  /**
-   * Everything typed belongs to this project's form, so a project change starts
-   * a new one. The alternative is a scenario written for Outbound landing in
-   * Support because the selector moved while somebody was typing.
-   */
   useEffect(() => {
     setName("");
     setDescription("");
     setScenario("");
     setBehaviors([""]);
-    setChosenAgents([]);
     setChosenPersonas([]);
     setRefused(null);
-  }, [projectId]);
+  }, [projectId, suiteId]);
+
+  useEffect(() => {
+    if (suite?.status === "signed-out") window.location.replace("/sign-in");
+  }, [suite]);
 
   const behaviorProblem = whyBehaviorsRefuse(behaviors);
   const usable =
+    suiteId !== null &&
+    suite?.status === "ready" &&
     name.trim() !== "" &&
     scenario.trim() !== "" &&
-    chosenAgents.length > 0 &&
     behaviorsAreUsable(behaviors);
 
   async function write(): Promise<void> {
+    if (suiteId === null || !usable) return;
     setRefused(null);
     setSaving(true);
     const written = await platformAnswer(
       createTest(
         {
-          projectId,
+        projectId,
+        suiteId,
         name: name.trim(),
         ...(description.trim() === "" ? {} : { description: description.trim() }),
         scenario: scenario.trim(),
-          expectedBehaviors: behaviors
+        expectedBehaviors: behaviors
           .map((one) => one.trim())
           .filter((one) => one !== ""),
         personas: [...chosenPersonas],
-        agents: [...chosenAgents],
         },
         { client: platformClient },
       ),
     );
     setSaving(false);
-
     if (written.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
     }
     if (written.status !== "ready") {
-      // The refusal's own sentence, shown unchanged above the form — and the
-      // form keeps everything typed into it, because retyping an afternoon's
-      // work to find out whether it fails the same way is how a person learns
-      // to stop trying.
       setRefused(written.refusal);
       return;
     }
-    router.push(projectPath(projectId, "tests", written.value.id));
+    router.push(
+      `/projects/${encodeURIComponent(projectId)}/tests/${encodeURIComponent(written.value.id)}`,
+    );
+  }
+
+  if (suiteId === null) {
+    return (
+      <ProductPage>
+        <PageHeader title="Write a test" eyebrow="Tests" />
+        <PageBody>
+          <Empty
+            title="Choose a test suite first"
+            lead="Every test belongs to one suite for its full lifetime. Open a suite, then write the test there."
+            action={
+              <Button asChild variant="secondary">
+                <Link href={`/projects/${encodeURIComponent(projectId)}/tests`}>
+                  Open test suites
+                </Link>
+              </Button>
+            }
+          />
+        </PageBody>
+      </ProductPage>
+    );
+  }
+
+  if (suite === null || suite.status === "signed-out") {
+    return (
+      <ProductPage>
+        <PageHeader title="Write a test" eyebrow="Tests" />
+        <PageBody><Loading what="test suite" /></PageBody>
+      </ProductPage>
+    );
+  }
+  if (suite.status === "missing") {
+    return (
+      <ProductPage>
+        <PageHeader title="Write a test" eyebrow="Tests" />
+        <PageBody><NotFound message={suite.refusal.message} /></PageBody>
+      </ProductPage>
+    );
+  }
+  if (suite.status === "failed") {
+    return (
+      <ProductPage>
+        <PageHeader title="Write a test" eyebrow="Tests" />
+        <PageBody><Failure message={suite.refusal.message} onRetry={reload} /></PageBody>
+      </ProductPage>
+    );
   }
 
   return (
     <ProductPage>
       <PageHeader
-        eyebrow="Tests"
         title="Write a test"
         breadcrumbs={[
-          { label: "Tests", href: projectPath(projectId, "tests") },
+          { label: "Tests", href: `/projects/${encodeURIComponent(projectId)}/tests` },
+          { label: suite.value.name, href: suitePagePath(projectId, suiteId) },
           { label: "New test" },
         ]}
-        lead="The situation to put an agent in, who calls about it, and what should happen."
+        lead={`This test will stay in ${suite.value.name}.`}
       />
       <PageBody>
         {refused === null ? null : <Refused message={refused.message} />}
-
         <Form onSubmit={() => void write()}>
           <Section
             title="What it is"
@@ -211,47 +262,18 @@ function NewTest({ projectId }: { readonly projectId: string }) {
 
           <Section
             title="What should happen"
-            lead="Statements about the agent's conduct. Every one has to hold, and a test keeps at least one — a test that cannot fail is not a test."
+            lead="Every statement has to hold. Keep at least one so the test can fail."
           >
-            <Behaviors
-              behaviors={behaviors}
-              disabled={!mayAuthor}
-              onChange={setBehaviors}
-            />
-            {behaviorProblem === null ? null : (
-              <Problem>{behaviorProblem}</Problem>
-            )}
+            <Behaviors behaviors={behaviors} disabled={!mayAuthor} onChange={setBehaviors} />
+            {behaviorProblem === null ? null : <Problem>{behaviorProblem}</Problem>}
             <Help>
-              The expected-behaviors grader judges every simulation against this
-              list. It is a predefined grader, and every project starts with a
-              running copy of it switched on — a test never names its own.
+              The expected-behaviors grader judges every simulation against this list. A test does not choose its own grader.
             </Help>
           </Section>
 
           <Section
-            title="Which agents it applies to"
-            lead="The targets a run may execute this test against. At least one, and every one active in this project."
-          >
-            <NamedSelector
-              label="Agents"
-              resource="agents"
-              project={projectId}
-              chosen={chosenAgents}
-              emptyMessage="This project has no active agent. Register an agent first."
-              disabled={!mayAuthor}
-              onChange={setChosenAgents}
-            />
-            {chosenAgents.length === 0 ? (
-              <Problem>
-                Every test must apply to at least one active agent. Select an
-                active agent and save the test again.
-              </Problem>
-            ) : null}
-          </Section>
-
-          <Section
             title="Who calls"
-            lead="Choose none and Egma takes the project's default persona, so a first test never waits on authoring a caller."
+            lead="Choose none and Egma uses the project's default persona."
           >
             <NamedSelector
               label="Personas"
@@ -276,7 +298,7 @@ function NewTest({ projectId }: { readonly projectId: string }) {
               {saving ? "Writing…" : "Write the test"}
             </Button>
             <Button asChild variant="secondary">
-              <Link href={projectPath(projectId, "tests")}>Cancel</Link>
+              <Link href={suitePagePath(projectId, suiteId)}>Cancel</Link>
             </Button>
           </FormActions>
         </Form>

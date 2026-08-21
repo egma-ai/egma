@@ -1,167 +1,150 @@
-/**
- * What a run is going to pin, worked out from the folder in front of the
- * developer.
- *
- * A run pins the versions it executes, and the whole value of that is being
- * able to say afterwards exactly what ran. So this resolves each file in the
- * folder to the version egma currently holds for it, and reports the two ways
- * a folder and a platform can disagree — **both of which refuse the run**:
- *
- * - **egma has never heard of this test.** Nothing can be pinned for it, so the
- *   run is refused rather than started one test short of what the developer is
- *   looking at. `egma push` is the fix and the refusal names it.
- * - **the file says something egma does not hold.** The run is refused for the
- *   same reason, and this is the deliberate change: it used to warn and run.
- *   A developer who edited a test this morning and forgot to push would have
- *   read green over a warning line, and reported an edit verified that never
- *   ran. Trust in what ran is the whole product, so a divergence is a door
- *   rather than a note. `egma push` is the fix and the refusal names it.
- *
- * **The comparison is content, field by field, and never a version number.**
- * Numbers agree while content differs precisely when a local edit was not
- * pushed — which is the case this gate exists for — so a number is the one
- * thing that cannot answer the question.
- *
- * Neither refusal is a merge and neither is a guess. The folder is a working
- * copy and the platform is the versioned store; this only says where the two
- * stand, and refuses to run while they stand apart.
- */
+/** Resolve one direct suite directory to one exact platform run precondition. */
 
-import type { FolderPaths, FolderTest } from "../folder/egma-folder.ts";
-import { readFolderTests } from "../folder/egma-folder.ts";
+import {
+  RepositoryValidationError,
+  readRepository,
+  type FolderPaths,
+} from "../folder/egma-folder.ts";
 import type { Fetch } from "../platform/device-flow.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
-import { listTests, type PlatformTest } from "../platform/tests.ts";
-import { pinsAgainst } from "../sync/pins.ts";
+import { getTestSuite } from "../platform/test-suites.ts";
+import { getTestVersion, listTests, type PlatformTest } from "../platform/tests.ts";
 import { sameAsPlatform } from "../sync/push.ts";
 
-/** One test the run will execute, and the version it will pin. */
 export type Pinned = {
+  readonly testId: string;
   readonly name: string;
-  /** `egma/tests/…`, as every report says a path. */
   readonly shown: string;
-  /** The version egma currently holds — what the run executes. */
   readonly versionId: string;
 };
 
-/** One test the run cannot pin, and why. */
-export type Unpinnable = {
-  readonly name: string;
-  readonly shown: string;
-};
-
 export type Selection = {
+  readonly suiteId: string;
+  readonly suiteName: string;
+  readonly suiteDirectory: string;
   readonly pinned: readonly Pinned[];
-  /** Files egma has no test for. A run with any of these is refused. */
-  readonly unknown: readonly Unpinnable[];
-  /**
-   * Files that say something other than what egma holds. A run with any of
-   * these is refused too, and for the harder reason: the test is real and a run
-   * would look completely ordinary, right up to a green result about content
-   * nobody executed.
-   */
-  readonly diverged: readonly Unpinnable[];
 };
 
-/** The one sentence a refusal ends on, naming what to do about it. */
-export function pushFirstRefusal(unknown: readonly Unpinnable[]): string {
-  const names = unknown.map((one) => one.name).join(", ");
-  const one = unknown.length === 1;
-  return `Egma has no test for ${one ? "this file" : "these files"}: ${names}. Run egma push to put ${one ? "it" : "them"} on Egma, then run this again. Nothing was started.`;
-}
+export class RunSelectionError extends Error {
+  readonly issues: readonly string[];
 
-/**
- * The refusal for a file that says something egma does not hold.
- *
- * It names the push, because the push is the whole of the fix: what the
- * developer wants run is in their repository, and one verb puts it where a run
- * can pin it. Nothing was started, and it says so — a refusal a reader could
- * mistake for a run that half-happened is worse than no refusal at all.
- */
-export function pushEditsRefusal(diverged: readonly Unpinnable[]): string {
-  const names = diverged.map((one) => one.name).join(", ");
-  const one = diverged.length === 1;
-  return `Egma holds something other than what ${one ? "this file says" : "these files say"}: ${names}. Run egma push to put your ${one ? "edit" : "edits"} on Egma, then run this again. Nothing was started.`;
+  constructor(issues: readonly string[]) {
+    super(`${issues.join(" ")} Run egma push or egma pull until this suite exactly matches Egma. Nothing was started.`);
+    this.name = "RunSelectionError";
+    this.issues = issues;
+  }
 }
 
 export type SelectOptions = {
   readonly signedIn: SignedIn;
   readonly paths: FolderPaths;
+  readonly directory: string;
   readonly fetchImpl?: Fetch;
 };
 
-/**
- * Every test in the folder, resolved to the version a run would pin for it.
- *
- * A file that pins a version is resolved through the pin, because the pin is
- * what says which test this file is a draft of even after somebody renamed it.
- * A file that pins nothing has never been synced, so the only thing it can be
- * matched by is its name.
- */
-export async function selectFromFolder(options: SelectOptions): Promise<Selection> {
-  const { signedIn, paths, fetchImpl } = options;
-  const extra = fetchImpl === undefined ? [] : ([fetchImpl] as const);
-
-  const inTheFolder = await readFolderTests(paths);
-  if (inTheFolder.length === 0) return { pinned: [], unknown: [], diverged: [] };
-
-  // Every test this credential reaches, not only the ones the bound agent
-  // applies to: a run names an agent of its own, and the platform's own
-  // `test_not_applicable` is the authority on that pairing. Narrowing here
-  // would turn its refusal into a test this verb silently could not find.
-  const platformTests = await listTests(signedIn, {
-    ...(fetchImpl === undefined ? {} : { fetchImpl }),
-  });
-  const resolve = pinsAgainst(signedIn, platformTests, ...extra);
-  const byName = new Map(platformTests.map((test) => [test.name, test] as const));
-  const byId = new Map(platformTests.map((test) => [test.id, test] as const));
-
-  const pinned: Pinned[] = [];
-  const unknown: Unpinnable[] = [];
-  const diverged: Unpinnable[] = [];
-
-  /**
-   * One file, placed against the test egma holds for it.
-   *
-   * The whole of the gate is here: content, field by field. A file that says
-   * what egma holds is pinned; a file that says anything else is named as a
-   * divergence and nothing is pinned for it, because there is no version of
-   * what it says for a run to execute.
-   */
-  const take = (file: FolderTest, test: PlatformTest): void => {
-    if (!sameAsPlatform(file.test, test)) {
-      diverged.push({ name: test.name, shown: file.shown });
-      return;
-    }
-    pinned.push({ name: test.name, shown: file.shown, versionId: test.versionId });
-  };
-
-  for (const file of inTheFolder) {
-    const pin = file.test.version;
-    if (pin === null) {
-      const named = byName.get(file.test.name);
-      if (named === undefined) unknown.push({ name: file.test.name, shown: file.shown });
-      else take(file, named);
-      continue;
-    }
-
-    const held = await resolve(pin);
-    if (held.kind === "current") {
-      take(file, held.test);
-      continue;
-    }
-    if (held.kind === "behind") {
-      // The pin is a version this test has moved past, so the test is real and
-      // what is current is what a run could pin. Whether it may is still the
-      // content question and not this one: a file left behind by somebody
-      // else's edit says something egma does not hold, and `take` refuses it.
-      const test = byId.get(held.testId);
-      if (test === undefined) unknown.push({ name: held.testName, shown: file.shown });
-      else take(file, test);
-      continue;
-    }
-    unknown.push({ name: file.test.name, shown: file.shown });
+/** A run never guesses identity from a name or path and never runs a subset. */
+export async function selectSuiteForRun(options: SelectOptions): Promise<Selection> {
+  const repository = await readRepository(options.paths);
+  const projectId = repository.config.project?.id ?? "";
+  if (projectId === "") {
+    throw new RepositoryValidationError([
+      "egma/config.yaml does not name a project. Run egma connect here first.",
+    ]);
+  }
+  if (
+    options.directory === "" ||
+    options.directory === "." ||
+    options.directory === ".." ||
+    options.directory.includes("/") ||
+    options.directory.includes("\\")
+  ) {
+    throw new RunSelectionError([
+      "Choose exactly one direct directory under egma/tests, such as `egma run release`.",
+    ]);
+  }
+  const suite = repository.suites.find((entry) => entry.directory === options.directory);
+  if (suite === undefined) {
+    throw new RunSelectionError([
+      `egma/tests/${options.directory} is not a local suite directory.`,
+    ]);
   }
 
-  return { pinned, unknown, diverged };
+  const remoteSuite = await getTestSuite(
+    options.signedIn,
+    suite.manifest.id,
+    options.fetchImpl,
+  );
+  if (remoteSuite === null || remoteSuite.projectId !== projectId) {
+    throw new RunSelectionError([
+      `Suite ${suite.manifest.id} does not exist in this project on Egma.`,
+    ]);
+  }
+  if (remoteSuite.name !== suite.manifest.name) {
+    throw new RunSelectionError([
+      `The local suite name is ${JSON.stringify(suite.manifest.name)}, but Egma says ${JSON.stringify(remoteSuite.name)}.`,
+    ]);
+  }
+
+  const remote = await listTests(options.signedIn, {
+    projectId,
+    suiteId: suite.manifest.id,
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  });
+  const currentByVersion = new Map(remote.map((test) => [test.versionId, test] as const));
+  const matchedIds = new Set<string>();
+  const pinned: Pinned[] = [];
+  const issues: string[] = [];
+
+  for (const file of suite.tests) {
+    const pin = file.test.version;
+    if (pin === null) {
+      issues.push(`${file.shown} has not been pushed.`);
+      continue;
+    }
+    let test: PlatformTest | undefined = currentByVersion.get(pin);
+    if (test === undefined) {
+      const version = await getTestVersion(options.signedIn, pin, options.fetchImpl);
+      if (version !== null && version.suiteId !== suite.manifest.id) {
+        issues.push(`${file.shown} belongs to suite ${version.suiteId}; tests cannot move between suites.`);
+      } else {
+        issues.push(`${file.shown} does not pin the current platform version.`);
+      }
+      continue;
+    }
+    if (test.suiteId !== suite.manifest.id) {
+      issues.push(`${file.shown} belongs to suite ${test.suiteId}; tests cannot move between suites.`);
+      continue;
+    }
+    if (matchedIds.has(test.id)) {
+      issues.push(`Test ${test.id} is represented more than once in egma/tests/${suite.directory}.`);
+      continue;
+    }
+    matchedIds.add(test.id);
+    if (file.test.identityRevision !== test.revision || !sameAsPlatform(file.test, test)) {
+      issues.push(`${file.shown} does not exactly match Egma.`);
+      continue;
+    }
+    pinned.push({
+      testId: test.id,
+      name: test.name,
+      shown: file.shown,
+      versionId: test.versionId,
+    });
+  }
+
+  for (const test of remote) {
+    if (!matchedIds.has(test.id)) {
+      issues.push(`Egma test ${JSON.stringify(test.name)} is missing from egma/tests/${suite.directory}.`);
+    }
+  }
+  if (suite.tests.length === 0) {
+    issues.push(`egma/tests/${suite.directory} is empty. Add and push a test before you run it.`);
+  }
+  if (issues.length > 0) throw new RunSelectionError(issues);
+  return {
+    suiteId: suite.manifest.id,
+    suiteName: suite.manifest.name,
+    suiteDirectory: suite.directory,
+    pinned,
+  };
 }

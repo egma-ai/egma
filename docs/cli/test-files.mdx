@@ -1,95 +1,121 @@
 ---
-title: "Egma Test Files — Format, Structure, and Sync Workflow"
-sidebarTitle: "Test Files"
-description: "Learn the egma/ folder layout, test file anatomy, mock-tools format, and the pull → review → push workflow for keeping local files in sync with Egma."
+title: "Store test suites and tests in your repository"
+sidebarTitle: "Test files"
+description: "Use suite directories, suite.yaml manifests, Markdown tests, and explicit push and pull commands."
 ---
 
-Your tests are files in your repository. Every test is a Markdown file with YAML front matter, stored in `egma/tests/`. Nothing secret ever lands in the `egma/` folder, so there are no `.gitignore` lines to write and none to forget. Your team reviews tests in pull requests, edits them in the same editor as your agent code, and keeps their full history in git.
+The `egma/` directory is a working copy of one Egma project. Commit it to Git.
+It contains no secrets.
 
 ## Folder structure
 
-`egma init` (or the interactive wizard) creates the following layout:
+One repository can contain several suites. Every direct child of `egma/tests/`
+is one suite directory:
 
-```
+```text
 egma/
-  config.yaml      names and IDs — which Egma instance, which agent, which suite
-  mock-tools.md    mocked tool responses used during simulations
-  tests/           one .md file per test case
+  config.yaml
+  mock-tools.md
+  tests/
+    receptionist-core/
+      suite.yaml
+      booking.md
+      after-hours.md
+    northside-ford/
+      suite.yaml
+      service-appointment.md
 ```
 
-Everything under `egma/` is committed. The `config.yaml` file records the non-secret platform URL that owns these resource identifiers, so every command run in this repository finds it automatically.
+Do not put tests directly in `egma/tests/`. Do not nest suite directories. The
+CLI parses the complete repository before a push, pull, suite create, or run.
+One invalid file refuses the operation before a platform write.
 
-## Test file anatomy
+## Create a suite before its tests
 
-Each file in `egma/tests/` has two parts: a YAML front matter block and a set of Markdown sections.
+Create a platform suite and its local manifest with:
 
-### Front matter
+```bash
+egma suite create receptionist-core --name "Receptionist core"
+```
+
+The directory name is only a local path. You may rename it. The suite's stable
+ID in `suite.yaml` is its product identity.
+
+You can also create a suite in the browser and run `egma pull`. Egma creates a
+portable local directory for the remote suite.
+
+## The suite.yaml manifest
+
+Every suite directory, including an empty suite, has one `suite.yaml` with
+exactly two keys:
 
 ```yaml
+id: ste_01JXMK8P2QN4R6S9T1UV3WX5Y
+name: Receptionist core
+```
+
+- `id` is the stable suite identity. Do not copy it into another directory.
+- `name` is the current display name. Edit it and push to rename the suite.
+
+The manifest has no version, agent, connection, grader, schedule, or run
+setting. Pull updates a renamed suite's `name` but does not move its directory.
+
+## Test file format
+
+Each test is one Markdown file inside its suite directory. Format 4 is the only
+supported file format:
+
+```markdown
 ---
-format: 3
+format: 4
 name: missed-appointment-reschedule
 description: The caller missed an appointment and needs another time this week.
-version: tstv_01K…
-identity_revision: rev_01K…
-required_capabilities: [dtmf]
+version: tstv_01JXMK8P2QN4R6S9T1UV3WX5Y
+identity_revision: rev_01JXMK8P2QN4R6S9T1UV3WX5Y
 personas:
-  - id: prs_01K…
+  - id: prs_01JXMK8P2QN4R6S9T1UV3WX5Y
     name: Impatient caller
 ---
+
+## Scenario
+
+The caller missed yesterday's appointment and wants to reschedule this week.
+
+## Expected behaviors
+
+1. The agent offers at least two alternative times.
+2. The agent confirms the new booking before ending the call.
 ```
 
 | Field | Required | Description |
 |---|---|---|
-| `format` | No | The file format Egma writes. A new hand-authored file can omit it |
-| `name` | Yes | A short identifier for the test. Used as the filename and displayed in run output |
-| `description` | No | A short explanation shown beside the name |
-| `version` | No | The test-content version. `egma pull` and `egma push` write it |
-| `identity_revision` | No | The synced revision of the name and description. `egma pull` and `egma push` write it |
-| `required_capabilities` | No | Connection features that this test needs, such as `dtmf` |
-| `personas` | No | Persona identities used for the simulation. Omit the field to use the default persona |
+| `format` | Yes | Must be `4` |
+| `name` | Yes | The test display name |
+| `description` | No | A short explanation |
+| `version` | No for a new test | The last synced immutable test-version ID |
+| `identity_revision` | No for a new test | The last synced live identity revision |
+| `personas` | No | Persona IDs and display names; omit to use the default persona |
 
-Name a persona only when the situation calls for a particular kind of caller. Use an identity already written by `egma pull`; do not invent an ID. Most tests work fine with the default.
+Test files do not contain a suite ID. Their containing suite directory owns
+them. A tracked test found under another suite is refused. Tests cannot move
+between suites.
 
-### Sections
+Older Markdown formats and `required_capabilities` are not supported. There is
+no compatibility reader.
 
-<Tabs>
-  <Tab title="## Scenario">
-    A natural-language description of the call. Write it as a brief situation the caller is in, not as a script. The simulator uses this to set the scene.
+## Scenario and expected behaviors
 
-    ```markdown
-    ## Scenario
-    The caller missed yesterday's appointment and wants to
-    reschedule this week. They are short on time and irritated.
-    ```
+Write the scenario as a concrete situation, not as a call script. Say who the
+caller is, what they want, and any useful context.
 
-    Keep it concrete: who the caller is, what they want, and any relevant context (time pressure, emotional state, prior history). The more specific the scenario, the more useful the simulation.
-  </Tab>
-  <Tab title="## Expected behaviors">
-    A numbered list of things the agent should do during the call. Each item becomes one graded expected behavior — Egma writes a verdict for each one with a rationale and the conversation turns it cites.
+Every expected behavior is a sentence that the agent should satisfy. A test
+needs at least one expected behavior.
 
-    ```markdown
-    ## Expected behaviors
-    1. The agent acknowledges the missed appointment without blame.
-    2. The agent offers at least two concrete alternative slots.
-    3. The agent confirms the new booking before ending the call.
-    ```
+## Test-level mock tool overrides
 
-    A test with no expected behaviors can never fail, so Egma will not store one. Write at least one behavior per test.
-  </Tab>
-</Tabs>
-
-### Test-level tool overrides
-
-Below the expected behaviors, you can add the same `### <tool-name>` sections used in `mock-tools.md`. These override the project-wide mock for this test only, and are versioned with the test file itself.
-
-Use this when a test needs a specific backend state — an empty calendar, a failed payment, a service that is down — that the project-wide mock should not enforce globally.
+Add a `## Mock tools` section when one test needs a different backend state:
 
 ````markdown
-## Expected behaviors
-1. The agent tells the caller that no slots are available this week.
-2. The agent offers to put the caller on a waitlist.
-
 ## Mock tools
 
 ### check_availability
@@ -101,22 +127,12 @@ Use this when a test needs a specific backend state — an empty calendar, a fai
 ```
 ````
 
-## The mock-tools.md file
+These overrides version with the test.
 
-`egma/mock-tools.md` defines the mocked world for your simulations. A **mock tool** intercepts calls to one of your agent's real tools during a simulation, so tests never hit your production backend and can ask for exactly the branch you want to exercise.
+## Project mock tools
 
-### Format
-
-Each tool gets its own `###` section. The body is a JSON code block with the following fields:
-
-| Field | Required | Description |
-|---|---|---|
-| `answer` | Yes (or `error`) | The value returned to the agent when it calls this tool |
-| `error` | Yes (or `answer`) | An error raised instead of returning a value — use this to test failure handling |
-| `delay_ms` | No | How long Egma waits before returning the answer, so the mock behaves like the real backend |
-| `agents` | No | A list of agent IDs to scope this mock to. Omit it and the mock applies to all agents in the project |
-
-### Example
+`egma/mock-tools.md` defines project-wide Mock Tool answers. Each tool uses a
+`###` heading and one JSON block:
 
 ````markdown
 ## Mock tools
@@ -124,157 +140,47 @@ Each tool gets its own `###` section. The body is a JSON code block with the fol
 ### check_availability
 ```json
 {
-  "answer": { "slots": ["Mon 9am", "Mon 2pm", "Tue 10am"] },
-  "delay_ms": 250
-}
-```
-
-### book_appointment
-```json
-{
-  "answer": { "confirmation_number": "APT-4821" },
-  "delay_ms": 500
-}
-```
-
-### get_customer_record
-```json
-{
-  "answer": {
-    "name": "Alex Rivera",
-    "last_appointment": "2024-01-15",
-    "status": "active"
-  }
-}
-```
-
-### send_confirmation_sms
-```json
-{
-  "error": "SMS service unavailable",
-  "agents": ["agt_01K…"]
+  "answer": { "slots": ["Mon 9am", "Tue 2pm"] }
 }
 ```
 ````
 
-<Note>
-  The project's `mock-tools.md` is the one file Egma does not version — pushing
-  an edit writes over what was there. Test-level tool overrides (inside a test
-  file) are versioned with the test itself.
-</Note>
+Project Mock Tools are unversioned. Push writes the local values. Pull writes
+the current platform values.
 
-## Complete example test file
+## Push the complete repository
 
-Here is a full test file showing every feature: front matter, scenario, expected behaviors, and a test-level tool override.
-
-````markdown
----
-format: 3
-name: missed-appointment-reschedule
-description: The caller missed an appointment and needs another time this week.
-version: tstv_01JXMK8P2QN4R6S9T1UV3WX5Y
-identity_revision: rev_01JXMK8P2QN4R6S9T1UV3WX5Y
-required_capabilities: [dtmf]
-personas:
-  - id: prs_01JXMK8P2QN4R6S9T1UV3WX5Y
-    name: Impatient caller
----
-
-## Scenario
-
-The caller missed yesterday's appointment and wants to reschedule
-this week. They are short on time and irritated. They previously
-had a booking confirmed by SMS, but the confirmation never arrived.
-
-## Expected behaviors
-
-1. The agent acknowledges the missed appointment without blaming the caller.
-2. The agent offers at least two concrete alternative slots this week.
-3. The agent confirms the new booking before ending the call.
-4. The agent does not promise an SMS confirmation given the service outage.
-
-## Mock tools
-
-### check_availability
-```json
-{
-  "answer": { "slots": ["Wed 3pm", "Thu 11am", "Fri 9am"] },
-  "delay_ms": 200
-}
+```bash
+egma push
 ```
 
-### send_confirmation_sms
-```json
-{
-  "error": "SMS service unavailable"
-}
-```
-````
+Push validates every suite, test, and Mock Tool first. It then applies one
+all-or-nothing project change. A late conflict writes nothing.
 
-## Keeping local files in sync with Egma
+A missing local suite or test never means deletion. Push refuses when the
+platform has a resource that is absent locally. Pull first, or delete the
+resource explicitly in the browser or API.
 
-The `egma/` folder and Egma each hold a copy of your tests. Sync is explicit — nothing happens in the background — because silent two-way saves are how this goes wrong everywhere it has been tried.
+## Pull safely
 
-<Steps>
-  <Step title="Pull Egma's current versions">
-    Run `egma pull` to write Egma's current version of every test into your local files. This updates the sync fields and known persona identities in each file's front matter.
-
-    ```bash
-    egma pull
-    ```
-
-    ```
-    url: http://localhost:3101
-    folder: /repo/egma
-    test: missed-appointment-reschedule
-    file: egma/tests/missed-appointment-reschedule.md
-    version: tstv_01K…
-    status: updated
-    ```
-  </Step>
-  <Step title="Review and edit">
-    Open the files in your editor. Review what your teammate changed in the dashboard. Make your own edits. Commit to a branch and open a pull request if you want team review before pushing.
-  </Step>
-  <Step title="Push your versions">
-    Run `egma push` to upload your local tests. Egma creates a new version of each test and writes the new version ID back into the file's front matter.
-
-    ```bash
-    egma push
-    ```
-
-    A push that succeeds never overwrites earlier versions — results from last week still reference exactly what they ran.
-  </Step>
-</Steps>
-
-### Conflict detection
-
-`egma push` compares the version your file last synced at with the version Egma currently holds. If Egma has moved on — because a teammate edited the test in the dashboard after your last pull — the push is refused:
-
-```
-conflict: missed-appointment-reschedule
-file: egma/tests/missed-appointment-reschedule.md
-uploaded: nothing
-status: refused
+```bash
+egma pull
 ```
 
-Nothing is merged and nothing is uploaded. Run `egma pull`, review the changes, then push again. The comparison is done field by field on the test content — not just version numbers — so editing a file and not pushing it is also caught correctly.
+Pull plans the complete update before it changes local files. It preserves
+changed versioned tests and unpushed test drafts. If a later local write fails,
+Egma restores earlier bytes and removes new paths created by that pull.
 
-<Warning>
-  `egma push` also relays Egma's own refusals. A test with no expected behaviors
-  is rejected by Egma (not just by the local check), and the exact reason Egma
-  returns is printed verbatim so you know exactly what to fix.
-</Warning>
+Suite names and known project Mock Tools are the unversioned exceptions. Pull
+writes their current platform values.
 
-### Exit codes for pull and push
+## Run one exact suite
 
-Both commands print one fact per line and exit with a number you can branch on in CI or from a coding agent.
+```bash
+egma run receptionist-core
+```
 
-| Code | Meaning |
-|---|---|
-| `0` | Done |
-| `1` | No `egma/` folder found here |
-| `2` | Not signed in to Egma |
-| `4` | Egma did not answer, or refused |
-| `5` | Push refused: Egma has moved on — run `egma pull` first |
-| `6` | Egma rejected a test at its door |
-| `130` | Stopped partway through |
+The argument is one local suite directory. Egma checks that its tests and
+current versions exactly match the platform. Missing, extra, stale, unreadable,
+or unpushed content refuses the run. The server checks the same set inside the
+run transaction, then runs every current test in the suite.

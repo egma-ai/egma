@@ -218,7 +218,6 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `--url <address>` | Which Egma platform URL to bind this repository to. Egma writes the normalized URL to `egma/config.yaml` |
     | `--agent <name>` | What to call the voice agent this folder's tests are for |
     | `--connection <name>` | What to call the connection Egma uses to reach it |
-    | `--suite <name>` | What to call this folder's test suite |
 
     **Exit codes**
 
@@ -228,8 +227,39 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `4` | Egma did not answer, or refused (only when `--url` is passed) |
   </Accordion>
 
+  <Accordion title="egma suite create — create a test suite">
+    Creates a real suite on Egma before local test authoring starts. It then
+    writes `egma/tests/<directory>/suite.yaml` with the stable suite ID and
+    current name. The complete repository must be valid before the platform
+    write.
+
+    **Usage**
+
+    ```bash
+    egma suite create <directory> --name <name>
+    ```
+
+    **Example**
+
+    ```bash
+    egma suite create northside-ford --name "Northside Ford"
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Suite created and manifest written |
+    | `1` | The repository or directory input is invalid |
+    | `2` | Not signed in to Egma |
+    | `4` | Egma did not answer, or refused |
+    | `8` | The suite exists on Egma, but the local manifest write failed; pull to recover it |
+  </Accordion>
+
   <Accordion title="egma pull — fetch Egma's test versions">
-    Writes Egma's current versions of every test in the `egma/` folder into your local files, updating the `version:` field in each file's front matter. Use `pull` to get changes made by teammates in the Egma dashboard before you start editing locally.
+    Reads every active suite, test, and project Mock Tool from Egma. It plans
+    and validates the complete local update before it writes. A failed later
+    write restores earlier files and removes paths created by this pull.
 
     **Usage**
 
@@ -243,7 +273,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     url: http://localhost:3101
     folder: /repo/egma
     test: missed-appointment-reschedule
-    file: egma/tests/missed-appointment-reschedule.md
+    file: egma/tests/receptionist-core/missed-appointment-reschedule.md
     version: tstv_01K…
     status: updated
     ```
@@ -260,7 +290,9 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
   </Accordion>
 
   <Accordion title="egma push — upload your tests">
-    Uploads the tests in your `egma/` folder to Egma, creating a new version of each test and writing the new version ID back into the file's front matter. A successful push never overwrites previous versions — results from last week still reference exactly what they ran.
+    Uploads suite names, tests, and project Mock Tools as one all-or-nothing
+    project change. It validates the complete repository first. A conflict in
+    any item writes nothing.
 
     `push` refuses when Egma holds a version newer than the one your file last synced at. It names every conflicting file on a `conflict:` line, uploads nothing, and exits `5`. Run `egma pull` first, review what changed, then push again.
 
@@ -274,7 +306,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     ```
     conflict: missed-appointment-reschedule
-    file: egma/tests/missed-appointment-reschedule.md
+    file: egma/tests/receptionist-core/missed-appointment-reschedule.md
     uploaded: nothing
     status: refused
     ```
@@ -299,20 +331,25 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
   </Accordion>
 
   <Accordion title="egma run — run your test suite">
-    Runs every test in your `egma/` folder against your connected voice agent. Each test is pinned to its current version before the run starts, so the run record is an exact snapshot of what executed. The command follows the run, printing every change as it arrives.
+    Runs every current test in one local suite directory against your connected
+    voice agent. Each simulation records the exact test and persona versions it
+    executed. The suite itself has no version or snapshot.
 
-    Before starting, `egma run` checks that your local folder and Egma agree on every test file's content. Any file Egma has never seen is listed on an `unknown:` line; any file whose content differs from Egma's version appears on a `not-pushed:` line. Either condition refuses the whole run — the fix is `egma push`.
+    Before starting, `egma run` checks that the selected suite has exactly the
+    same active tests and current versions locally and on Egma. Missing, extra,
+    stale, unreadable, or unpushed content refuses the whole run.
 
     **Usage**
 
     ```bash
-    egma run [options]
+    egma run <suite-directory> [options]
     ```
 
     **Key flags**
 
     | Flag | Description |
     |---|---|
+    | `--name <name>` | Optional display name for this run |
     | `--no-follow` | Start the run and return immediately, without waiting for a verdict. The run continues on Egma |
 
     **Example output**
@@ -320,6 +357,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     ```
     url: http://localhost:3101
     folder: /repo/egma
+    suite: ste_01K…
     agent: agt_01K…
     connection: con_01K…
     pin: quoted-a-price tstv_01K…
@@ -345,7 +383,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | Code | Meaning |
     |---|---|
     | `0` | Run finished; nothing failed or errored |
-    | `1` | No tests found in the `egma/` folder |
+    | `1` | The selected suite has no tests, or the local suite is invalid |
     | `2` | Not signed in to Egma |
     | `3` | At least one test failed |
     | `4` | Egma did not answer, or refused |
@@ -354,10 +392,9 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | `130` | Stopped partway through |
 
     <Note>
-      A `skipped` result is not a failure. It means the test required something
-      the connection cannot do (e.g. DTMF on a Chat connection). A `failed` result
-      means the agent did not meet an expected behavior. Only `errored` means
-      something went wrong with the simulation infrastructure itself.
+      A grader can return `skipped` when its own modality does not apply. Egma
+      does not skip a test because of a connection capability. Every test in
+      the suite gets a simulation.
     </Note>
   </Accordion>
 

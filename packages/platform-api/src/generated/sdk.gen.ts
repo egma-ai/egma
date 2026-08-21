@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, ArchiveTestErrors, ArchiveTestResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CloneTestErrors, CloneTestResponses, ConfigureLiveKitMonitoringErrors, ConfigureLiveKitMonitoringResponses, ConfigureRetellMonitoringErrors, ConfigureRetellMonitoringResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateGraderErrors, CreateGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteGraderErrors, DeleteGraderResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteMonitoringSourceErrors, DeleteMonitoringSourceResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunPlanErrors, GetRunPlanResponses, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListCapabilitiesErrors, ListCapabilitiesResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListMonitoringSourcesErrors, ListMonitoringSourcesResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RefreshConnectionCapabilitiesErrors, RefreshConnectionCapabilitiesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, ReplayMonitoringImportFailureErrors, ReplayMonitoringImportFailureResponses, RerunSimulationErrors, RerunSimulationResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RestoreTestErrors, RestoreTestResponses, RetryRunErrors, RetryRunResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, SetTestAgentsErrors, SetTestAgentsResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ConfigureLiveKitMonitoringErrors, ConfigureLiveKitMonitoringResponses, ConfigureRetellMonitoringErrors, ConfigureRetellMonitoringResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateGraderErrors, CreateGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteGraderErrors, DeleteGraderResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteMonitoringSourceErrors, DeleteMonitoringSourceResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListMonitoringSourcesErrors, ListMonitoringSourcesResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, ReplayMonitoringImportFailureErrors, ReplayMonitoringImportFailureResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -60,19 +60,6 @@ export const listConnectionOptions = <ThrowOnError extends boolean = false>(opti
             type: 'apiKey'
         }],
     url: '/v1/connection-options',
-    ...options
-});
-
-/**
- * List agent capabilities
- */
-export const listCapabilities = <ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>): RequestResult<ListCapabilitiesResponses, ListCapabilitiesErrors, ThrowOnError> => (options?.client ?? client).get<ListCapabilitiesResponses, ListCapabilitiesErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }, {
-            in: 'cookie',
-            name: 'egma.session_token',
-            type: 'apiKey'
-        }],
-    url: '/v1/capabilities',
     ...options
 });
 
@@ -476,31 +463,6 @@ export const restoreConnection = <ThrowOnError extends boolean = false>(paramete
             ...options?.headers,
             ...params.headers
         }
-    });
-};
-
-/**
- * Refresh connection capabilities
- */
-export const refreshConnectionCapabilities = <ThrowOnError extends boolean = false>(parameters: {
-    agentId: string;
-    connectionId: string;
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<RefreshConnectionCapabilitiesResponses, RefreshConnectionCapabilitiesErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'agentId' },
-                { in: 'path', key: 'connectionId' },
-                { in: 'query', key: 'projectId' }
-            ] }]);
-    return (options?.client ?? client).post<RefreshConnectionCapabilitiesResponses, RefreshConnectionCapabilitiesErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/agents/{agentId}/connections/{connectionId}/capabilities/refresh',
-        ...options,
-        ...params
     });
 };
 
@@ -1606,29 +1568,72 @@ export const getSimulationRecording = <ThrowOnError extends boolean = false>(par
 };
 
 /**
- * Preview a run
+ * Apply the complete authored state from a repository
+ *
+ * The complete authored suites, tests, and mock tools are applied atomically. Missing resources refuse rather than delete.
  */
-export const getRunPlan = <ThrowOnError extends boolean = false>(parameters: {
+export const applyRepositoryChangeSet = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
-    agentId?: string;
-    connectionId: string;
-    testVersionIds: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<GetRunPlanResponses, GetRunPlanErrors, ThrowOnError> => {
+    suites: Array<{
+        id: string;
+        name: string;
+    }>;
+    tests: Array<{
+        clientRef: string;
+        suiteId: string;
+        name: string;
+        description: string;
+        scenario: string;
+        expectedBehaviors: Array<string>;
+        personas: Array<string>;
+        mockTools: Array<{
+            tool: string;
+            delayMs?: number;
+            answer: unknown;
+            error?: unknown;
+        } | {
+            tool: string;
+            delayMs?: number;
+            answer?: unknown;
+            error: string;
+        }>;
+        expectedVersionId?: string;
+        expectedRevision?: string;
+    }>;
+    mockTools: Array<{
+        tool: string;
+        delayMs?: number;
+        answer: unknown;
+        error?: unknown;
+        agents?: Array<string>;
+    } | {
+        tool: string;
+        delayMs?: number;
+        answer?: unknown;
+        error: string;
+        agents?: Array<string>;
+    }>;
+}, options?: Options<never, ThrowOnError>): RequestResult<ApplyRepositoryChangeSetResponses, ApplyRepositoryChangeSetErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
-                { in: 'query', key: 'agentId' },
-                { in: 'query', key: 'connectionId' },
-                { in: 'query', key: 'testVersionIds' }
+                { in: 'body', key: 'suites' },
+                { in: 'body', key: 'tests' },
+                { in: 'body', key: 'mockTools' }
             ] }]);
-    return (options?.client ?? client).get<GetRunPlanResponses, GetRunPlanErrors, ThrowOnError>({
+    return (options?.client ?? client).post<ApplyRepositoryChangeSetResponses, ApplyRepositoryChangeSetErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',
                 name: 'egma.session_token',
                 type: 'apiKey'
             }],
-        url: '/v1/run-plan',
+        url: '/v1/repository/change-set',
         ...options,
-        ...params
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
     });
 };
 
@@ -1637,6 +1642,7 @@ export const getRunPlan = <ThrowOnError extends boolean = false>(parameters: {
  */
 export const listRuns = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
+    suiteId?: string;
     agentId?: string;
     connectionId?: string;
     testId?: string;
@@ -1649,6 +1655,7 @@ export const listRuns = <ThrowOnError extends boolean = false>(parameters?: {
 }, options?: Options<never, ThrowOnError>): RequestResult<ListRunsResponses, ListRunsErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
+                { in: 'query', key: 'suiteId' },
                 { in: 'query', key: 'agentId' },
                 { in: 'query', key: 'connectionId' },
                 { in: 'query', key: 'testId' },
@@ -1672,23 +1679,28 @@ export const listRuns = <ThrowOnError extends boolean = false>(parameters?: {
 };
 
 /**
- * Start a run
+ * Run one complete test suite
  */
 export const createRun = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
-    agentId?: string;
+    suiteId: string;
+    agentId: string;
     connectionId: string;
-    testVersionIds: Array<string>;
     idempotencyKey: string;
-    label?: string;
+    name?: string;
+    expectedTestVersions?: Array<{
+        testId: string;
+        versionId: string;
+    }>;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateRunResponses, CreateRunErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'suiteId' },
                 { in: 'body', key: 'agentId' },
                 { in: 'body', key: 'connectionId' },
-                { in: 'body', key: 'testVersionIds' },
                 { in: 'body', key: 'idempotencyKey' },
-                { in: 'body', key: 'label' }
+                { in: 'body', key: 'name' },
+                { in: 'body', key: 'expectedTestVersions' }
             ] }]);
     return (options?.client ?? client).post<CreateRunResponses, CreateRunErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1728,6 +1740,33 @@ export const getRun = <ThrowOnError extends boolean = false>(parameters: {
 };
 
 /**
+ * List simulations in a run
+ */
+export const listRunSimulations = <ThrowOnError extends boolean = false>(parameters: {
+    runId: string;
+    projectId?: string;
+    pageSize?: number;
+    pageToken?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<ListRunSimulationsResponses, ListRunSimulationsErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'runId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'query', key: 'pageSize' },
+                { in: 'query', key: 'pageToken' }
+            ] }]);
+    return (options?.client ?? client).get<ListRunSimulationsResponses, ListRunSimulationsErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/runs/{runId}/simulations',
+        ...options,
+        ...params
+    });
+};
+
+/**
  * List run events
  */
 export const listRunEvents = <ThrowOnError extends boolean = false>(parameters: {
@@ -1749,68 +1788,6 @@ export const listRunEvents = <ThrowOnError extends boolean = false>(parameters: 
         url: '/v1/runs/{runId}/events',
         ...options,
         ...params
-    });
-};
-
-/**
- * Retry a run
- */
-export const retryRun = <ThrowOnError extends boolean = false>(parameters: {
-    runId: string;
-    projectId?: string;
-    idempotencyKey: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<RetryRunResponses, RetryRunErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'runId' },
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'idempotencyKey' }
-            ] }]);
-    return (options?.client ?? client).post<RetryRunResponses, RetryRunErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/runs/{runId}/retry',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Run one simulation again
- */
-export const rerunSimulation = <ThrowOnError extends boolean = false>(parameters: {
-    simulationId: string;
-    projectId?: string;
-    idempotencyKey: string;
-    label: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<RerunSimulationResponses, RerunSimulationErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'simulationId' },
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'idempotencyKey' },
-                { in: 'body', key: 'label' }
-            ] }]);
-    return (options?.client ?? client).post<RerunSimulationResponses, RerunSimulationErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/simulations/{simulationId}/rerun',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
     });
 };
 
@@ -1885,21 +1862,141 @@ export const regradeSimulation = <ThrowOnError extends boolean = false>(paramete
 };
 
 /**
- * List tests
+ * List test suites
  */
-export const listTests = <ThrowOnError extends boolean = false>(parameters?: {
+export const listTestSuites = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
     pageToken?: string;
-    archived?: string;
-    agentId?: string;
-    name?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ListTestsResponses, ListTestsErrors, ThrowOnError> => {
+    pageSize?: number;
+}, options?: Options<never, ThrowOnError>): RequestResult<ListTestSuitesResponses, ListTestSuitesErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'query', key: 'pageToken' },
-                { in: 'query', key: 'archived' },
-                { in: 'query', key: 'agentId' },
-                { in: 'query', key: 'name' }
+                { in: 'query', key: 'pageSize' }
+            ] }]);
+    return (options?.client ?? client).get<ListTestSuitesResponses, ListTestSuitesErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/test-suites',
+        ...options,
+        ...params
+    });
+};
+
+/**
+ * Create a test suite
+ */
+export const createTestSuite = <ThrowOnError extends boolean = false>(parameters: {
+    projectId?: string;
+    name: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<CreateTestSuiteResponses, CreateTestSuiteErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }, { in: 'body', key: 'name' }] }]);
+    return (options?.client ?? client).post<CreateTestSuiteResponses, CreateTestSuiteErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/test-suites',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
+    });
+};
+
+/**
+ * Permanently delete a test suite from authoring
+ *
+ * The suite and its tests leave authoring permanently. Existing run evidence stays readable.
+ */
+export const deleteTestSuite = <ThrowOnError extends boolean = false>(parameters: {
+    suiteId: string;
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<DeleteTestSuiteResponses, DeleteTestSuiteErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'suiteId' }, { in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).delete<DeleteTestSuiteResponses, DeleteTestSuiteErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/test-suites/{suiteId}',
+        ...options,
+        ...params
+    });
+};
+
+/**
+ * Get a test suite
+ */
+export const getTestSuite = <ThrowOnError extends boolean = false>(parameters: {
+    suiteId: string;
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<GetTestSuiteResponses, GetTestSuiteErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'suiteId' }, { in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).get<GetTestSuiteResponses, GetTestSuiteErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/test-suites/{suiteId}',
+        ...options,
+        ...params
+    });
+};
+
+/**
+ * Rename a test suite
+ */
+export const updateTestSuite = <ThrowOnError extends boolean = false>(parameters: {
+    suiteId: string;
+    projectId?: string;
+    name: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<UpdateTestSuiteResponses, UpdateTestSuiteErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'suiteId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'name' }
+            ] }]);
+    return (options?.client ?? client).patch<UpdateTestSuiteResponses, UpdateTestSuiteErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/test-suites/{suiteId}',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
+    });
+};
+
+/**
+ * List the active tests in a test suite
+ */
+export const listTests = <ThrowOnError extends boolean = false>(parameters: {
+    projectId?: string;
+    suiteId: string;
+    pageToken?: string;
+    pageSize?: number;
+}, options?: Options<never, ThrowOnError>): RequestResult<ListTestsResponses, ListTestsErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'query', key: 'projectId' },
+                { in: 'query', key: 'suiteId' },
+                { in: 'query', key: 'pageToken' },
+                { in: 'query', key: 'pageSize' }
             ] }]);
     return (options?.client ?? client).get<ListTestsResponses, ListTestsErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1914,10 +2011,11 @@ export const listTests = <ThrowOnError extends boolean = false>(parameters?: {
 };
 
 /**
- * Create a test
+ * Create a test in a test suite
  */
 export const createTest = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
+    suiteId: string;
     name: string;
     description?: string | null;
     scenario: string;
@@ -1934,19 +2032,16 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
         answer?: unknown;
         error: string;
     }>;
-    requiredCapabilities?: Array<string>;
-    agents?: Array<string>;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateTestResponses, CreateTestErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'suiteId' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'description' },
                 { in: 'body', key: 'scenario' },
                 { in: 'body', key: 'expectedBehaviors' },
                 { in: 'body', key: 'personas' },
-                { in: 'body', key: 'mockTools' },
-                { in: 'body', key: 'requiredCapabilities' },
-                { in: 'body', key: 'agents' }
+                { in: 'body', key: 'mockTools' }
             ] }]);
     return (options?.client ?? client).post<CreateTestResponses, CreateTestErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1980,6 +2075,28 @@ export const getTestVersion = <ThrowOnError extends boolean = false>(parameters:
                 type: 'apiKey'
             }],
         url: '/v1/test-versions/{versionId}',
+        ...options,
+        ...params
+    });
+};
+
+/**
+ * Permanently delete a test from authoring
+ *
+ * The test leaves authoring permanently. Existing run evidence stays readable.
+ */
+export const deleteTest = <ThrowOnError extends boolean = false>(parameters: {
+    testId: string;
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<DeleteTestResponses, DeleteTestErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'testId' }, { in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).delete<DeleteTestResponses, DeleteTestErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/tests/{testId}',
         ...options,
         ...params
     });
@@ -2027,10 +2144,8 @@ export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
         answer?: unknown;
         error: string;
     }>;
-    requiredCapabilities?: Array<string>;
     expectedVersionId?: string;
     expectedRevision?: string;
-    repositoryAgentId?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateTestResponses, UpdateTestErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'testId' },
@@ -2041,10 +2156,8 @@ export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
                 { in: 'body', key: 'expectedBehaviors' },
                 { in: 'body', key: 'personas' },
                 { in: 'body', key: 'mockTools' },
-                { in: 'body', key: 'requiredCapabilities' },
                 { in: 'body', key: 'expectedVersionId' },
-                { in: 'body', key: 'expectedRevision' },
-                { in: 'body', key: 'repositoryAgentId' }
+                { in: 'body', key: 'expectedRevision' }
             ] }]);
     return (options?.client ?? client).patch<UpdateTestResponses, UpdateTestErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -2070,11 +2183,13 @@ export const listTestVersions = <ThrowOnError extends boolean = false>(parameter
     testId: string;
     projectId?: string;
     pageToken?: string;
+    pageSize?: number;
 }, options?: Options<never, ThrowOnError>): RequestResult<ListTestVersionsResponses, ListTestVersionsErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'testId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'query', key: 'pageToken' }
+                { in: 'query', key: 'pageToken' },
+                { in: 'query', key: 'pageSize' }
             ] }]);
     return (options?.client ?? client).get<ListTestVersionsResponses, ListTestVersionsErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -2085,120 +2200,6 @@ export const listTestVersions = <ThrowOnError extends boolean = false>(parameter
         url: '/v1/tests/{testId}/versions',
         ...options,
         ...params
-    });
-};
-
-/**
- * Set the agents a test applies to
- */
-export const setTestAgents = <ThrowOnError extends boolean = false>(parameters: {
-    testId: string;
-    projectId?: string;
-    agents: Array<string>;
-    expectedApplicabilityRevision?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<SetTestAgentsResponses, SetTestAgentsErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'testId' },
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'agents' },
-                { in: 'body', key: 'expectedApplicabilityRevision' }
-            ] }]);
-    return (options?.client ?? client).post<SetTestAgentsResponses, SetTestAgentsErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/tests/{testId}/agents',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Clone a test
- */
-export const cloneTest = <ThrowOnError extends boolean = false>(parameters: {
-    testId: string;
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<CloneTestResponses, CloneTestErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'testId' }, { in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).post<CloneTestResponses, CloneTestErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/tests/{testId}/clone',
-        ...options,
-        ...params
-    });
-};
-
-/**
- * Archive a test
- */
-export const archiveTest = <ThrowOnError extends boolean = false>(parameters: {
-    testId: string;
-    projectId?: string;
-    expectedRevision?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ArchiveTestResponses, ArchiveTestErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'testId' },
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' }
-            ] }]);
-    return (options?.client ?? client).post<ArchiveTestResponses, ArchiveTestErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/tests/{testId}/archive',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Restore a test
- */
-export const restoreTest = <ThrowOnError extends boolean = false>(parameters: {
-    testId: string;
-    projectId?: string;
-    expectedRevision?: string;
-    agents?: Array<string>;
-}, options?: Options<never, ThrowOnError>): RequestResult<RestoreTestResponses, RestoreTestErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'path', key: 'testId' },
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' },
-                { in: 'body', key: 'agents' }
-            ] }]);
-    return (options?.client ?? client).post<RestoreTestResponses, RestoreTestErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/tests/{testId}/restore',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
     });
 };
 

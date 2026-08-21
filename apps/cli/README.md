@@ -265,17 +265,29 @@ status: connected
 egma/
   config.yaml     what this folder points at — names and ids
   mock-tools.md   what Egma answers for the agent's tools with
-  tests/          one markdown file per test
+  tests/
+    release/      one local directory per suite
+      suite.yaml  stable suite id and mutable display name
+      *.md        zero or more tests in this suite
 ```
 
 `egma init` makes it. Everything in it is committed: nothing secret ever lands
 here, so there are no gitignore lines to write and none to forget. Your tests
 are code your team reviews in pull requests.
 
+Create a suite with `egma suite create release --name "Release contract"`.
+Egma creates the platform record first, then writes exactly:
+
+```yaml
+id: ste_01K3XQ7M4E8YB2FVN0H9TZQWER
+name: Release contract
+```
+
 One test is one file:
 
 ```markdown
 ---
+format: 4
 name: missed-appointment-reschedule
 description: The caller missed an appointment and needs another time this week.
 ---
@@ -289,9 +301,9 @@ reschedule this week. They are short on time and irritated.
 ```
 
 Name a persona only when the situation needs a particular kind of person on the
-other end; leave `personas` out and the default one applies. A new file can also
-leave out `format`, `version`, `identity_revision`, and persona IDs. `pull` or
-`push` writes the current machine fields.
+other end; leave `personas` out and the default one applies. A new format 4 file
+can leave out `version`, `identity_revision`, and persona IDs. `pull` or `push`
+writes the current machine fields.
 
 `egma/mock-tools.md` is the mocked world: a **mock tool** answers for one of
 your agent's tools while a simulation runs, so a test never reaches your real
@@ -327,8 +339,9 @@ nothing goes looking on your disk; the file has to be inside the folder you ran
 Egma in, and `.env` files are never read. Press `[n]` and Egma writes the whole
 suite itself.
 
-Then your coding agent writes tests into `egma/tests/`, grounded in what your
-provider is actually running and in what it found in your repository. They
+Egma creates the real platform suite and writes its `suite.yaml` first. Then
+your coding agent writes tests into that direct suite directory, grounded in
+what your provider is actually running and in what it found in your repository. They
 arrive one file at a time, with what is still to come beside them:
 
 ```
@@ -354,7 +367,7 @@ it is for you to fix.
 Then one keystroke:
 
 ```
-12 tests generated · suite "first-suite"
+12 tests generated · suite "order-line tests"
 
   › quoted-a-price          default persona
     lost-the-order-number   default persona
@@ -409,8 +422,8 @@ A **verdict** is one of four, and Egma never turns four into three:
 
 - `passed` — the agent did what the test expected.
 - `failed` — it did not. Something in your agent is wrong.
-- `skipped` — nothing was judged. The test needed something this connection
-  cannot do, or a grader had nothing it could score here.
+- `skipped` — a grader recorded no verdict, such as when its supported modality
+  did not match this simulation.
 - `errored` — the simulation never happened. The agent was not reached, or Egma
   broke.
 
@@ -422,7 +435,7 @@ the run **at creation**, in its own words, and the wizard prints those words as
 they came. You never wait on a run that could not happen.
 
 ```
-egma run
+egma run generated
 ```
 
 is the same thing with nobody watching. It pins the version of every test it
@@ -444,7 +457,7 @@ verdict: quoted-a-price default-persona passed
 first-verdict: quoted-a-price default-persona passed
 simulation: lost-the-order-number default-persona completed
 verdict: lost-the-order-number default-persona skipped
-reason: this test needs DTMF, and this connection has none
+reason: no active grader supported this simulation's modality
 passed: 1
 failed: 0
 skipped: 1
@@ -463,17 +476,13 @@ status: completed
 `--no-follow` starts the run and returns at once, without waiting for a verdict
 — for when you want the suite going and will read the results page later.
 
-It runs what Egma holds, pinning the current version of each test, so a run is a
-record of exactly what executed.
+It runs the complete suite named by the local directory. The manifest supplies
+the stable suite ID, and each simulation records the exact test version it ran.
 
 **Your folder and Egma have to agree, or nothing starts.** A file Egma has never
-seen is named on an `unknown:` line; a file Egma holds different content for is
-named on a `not-pushed:` line. Either one refuses the whole run and names the
-fix, which is `egma push` both times. The comparison is the content of each
-test, field by field, and never a version number — the numbers agree with each
-other exactly when you edited a file and did not push it, which is the case this
-gate is for. A run that went ahead over the difference would come back green
-about words nobody executed.
+seen, a stale file, or a missing or extra test refuses the whole run. Run
+`egma push` or `egma pull` until the local suite and Egma match exactly. The
+server checks the same exact test/version set inside the start transaction.
 
 ## The skill, if you want it
 
@@ -518,21 +527,20 @@ the address: no token, no key, no query at all.
 ## Keeping the folder and Egma in step
 
 ```
-egma pull     writes Egma's current versions into your files
-egma push     uploads yours
+egma pull     stages and writes all suites, tests, and Mock Tools
+egma push     sends one atomic full-repository change set
 ```
 
 Sync is a verb you run. Nothing syncs in the background, because two things
 saving over each other silently is how this goes wrong everywhere it has been
 tried.
 
-Each file remembers the version it was last synced at. `push` compares that
-with what Egma currently holds, and **refuses when Egma has moved on**, naming
-every test that moved:
+Each file remembers the version it was last synced at. `push` sends the complete
+repository with its expected versions. A conflict refuses the atomic change set:
 
 ```
 conflict: missed-appointment-reschedule
-file: egma/tests/missed-appointment-reschedule.md
+file: egma/tests/release/missed-appointment-reschedule.md
 uploaded: nothing
 status: refused
 ```
@@ -626,12 +634,14 @@ egma connect [options]   Register your voice agent and a way to reach it.
                          The key comes in on standard input or from the
                          environment, never as an argument.
 egma init [options]      Make the egma folder this repository's tests live
-                         in. --url can bind the repository to a platform
-                         without contacting it. Safe to run again.
-egma pull [options]      Write Egma's current test versions into it.
-egma push [options]      Upload the tests in it. Refuses, naming names, when
-                         Egma has moved on since your last pull.
-egma run [options]       Run this folder's tests, pinning the version of each.
+                         in. Talks to nobody, unless --url names an Egma to
+                         bind this repository to. Safe to run again.
+egma suite create <directory> --name <name>
+                         Create a platform suite, then its local manifest.
+egma pull [options]      Stage and write the complete project repository.
+egma push [options]      Send one atomic complete repository change set.
+egma run <suite-directory> [options]
+                         Run the complete suite after an exact sync check.
                          Follows the run and prints every change.
 
   --coding-agent <id>  Use one installed coding agent without asking.
@@ -664,7 +674,8 @@ egma run [options]       Run this folder's tests, pinning the version of each.
   --agent <name>       With init: what to call the voice agent this
                        folder's tests are for.
   --connection <name>  With init: what to call the way Egma reaches it.
-  --suite <name>       With init: what to call this folder's test suite.
+  --name <name>        With suite create: the suite display name. With run:
+                       an optional run name.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.

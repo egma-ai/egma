@@ -52,7 +52,10 @@ let instance: Instance;
 
 /** Somebody with a key, an agent, and a test — everything a run needs. */
 let key: string;
+let suiteId: string;
+let agentId: string;
 let connectionId: string;
+let testId: string;
 let versionId: string;
 
 async function api(
@@ -100,9 +103,11 @@ async function aQueuedRun(): Promise<void> {
     "/v1/runs",
     { authorization: `Bearer ${key}` },
     {
-      connectionId: connectionId,
-      testVersionIds: [versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
+      expectedTestVersions: [{ testId, versionId }],
     },
   );
   expect(started.status, JSON.stringify(started.body)).toBe(201);
@@ -153,7 +158,17 @@ beforeAll(async () => {
     },
   );
   expect(registered.status, JSON.stringify(registered.body)).toBe(201);
+  agentId = (registered.body.agent as { id: string }).id;
   connectionId = (registered.body.connection as { id: string }).id;
+
+  const suite = await api(
+    "POST",
+    "/v1/test-suites",
+    { authorization: `Bearer ${key}` },
+    { name: "Appointment changes" },
+  );
+  expect(suite.status, JSON.stringify(suite.body)).toBe(201);
+  suiteId = String(suite.body.id);
 
   // The persona is authored at the seam — no route ships for one — which the
   // in-process half of this instance makes reachable.
@@ -174,6 +189,7 @@ beforeAll(async () => {
     "/v1/tests",
     { authorization: `Bearer ${key}` },
     {
+      suiteId,
       name: "Reschedules a booked appointment",
       scenario:
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
@@ -182,6 +198,7 @@ beforeAll(async () => {
     },
   );
   expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
+  testId = String(pushed.body.id);
   versionId = String(pushed.body.versionId);
 });
 

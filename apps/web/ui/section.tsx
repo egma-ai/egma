@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  */
 
 /**
- * A titled block of one page: connections, capabilities, traits, history.
+ * A titled block of one page: connections, traits, or history.
  *
  * A detail page is a stack of these rather than one long form, because the
  * blocks answer different questions and are written at different times — and

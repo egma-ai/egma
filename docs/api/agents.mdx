@@ -28,14 +28,13 @@ response cannot expose the stored secret.
 Read this catalog before drawing a connection form. The server returns each
 supported combination of agent platform, connection kind, access variant, and
 modality. It also returns the derived product label, required configuration
-fields, credential rule, and whether this deployment has a simulator adapter
-and capability discovery.
+fields, credential rule, and whether this deployment has a simulator adapter.
 
 <ResponseField name="items" type="array">
   Supported simulation connection options. Each item includes
   `agentPlatform`, `agentPlatformLabel`, `connectionKind`,
   `accessVariant`, `accessVariantLabel`, `modality`, `productLabel`,
-  `topology`, `simulatorAdapter`, `capabilityDiscovery`, `fields`,
+  `topology`, `simulatorAdapter`, `fields`,
   `credentialRule`, `credentialHelp`, and `credentialFields`.
 </ResponseField>
 
@@ -46,94 +45,6 @@ function or a stored credential.
 curl "https://your-egma-host/v1/connection-options" \
   -H "Authorization: Bearer <api-key>"
 ```
-
----
-
-## Discover agents and connection candidates
-
-`POST /v1/agents:discover`
-
-Use discovery when you have agent-platform credentials but do not yet know
-which simulation connection to create. Discovery reads the agent platform and
-returns normalized connection candidates. It creates no agent or connection,
-does not save the supplied credential, and never returns it.
-
-Discovery is a point-in-time setup read. When you create a discovered
-connection, include `agentPlatformSelection` so Egma can revalidate the selected
-agent and connection candidate immediately before the write. Egma never stores
-the selection object. A phone connection stores only the selected E.164 number;
-if that number is routed to another agent later, update the Egma connection.
-
-The optional `projectId` query parameter selects the project that authorizes
-the discovery. Omit it when the credential already selects a project, or when
-an organization-wide credential has only one project.
-
-### Request body
-
-<ParamField body="agentPlatform" type="string" required>
-  The platform to read. Only `retell` is implemented. Support for another
-  platform requires its own value and credential branch in this operation.
-</ParamField>
-
-<ParamField body="credentials" type="object" required>
-  Credentials used only for this discovery request. For Retell, send
-  `{ "apiKey": "..." }`.
-</ParamField>
-
-```bash
-curl -X POST \
-  "https://your-egma-host/v1/agents:discover?projectId=<project-id>" \
-  -H "Authorization: Bearer <api-key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agentPlatform": "retell",
-    "credentials": { "apiKey": "<retell-api-key>" }
-  }'
-```
-
-### Response
-
-Each item in `agents` has a `platformAgentId`, a `name`, and zero or more
-`connectionCandidates`. Every candidate contains the four connection facts:
-`agentPlatform`, `connectionKind`, `accessVariant`, and `modality`. It also
-contains the server-derived `productLabel` and a safe `config` object.
-
-```json
-{
-  "agents": [
-    {
-      "platformAgentId": "agent_voice_1",
-      "name": "Front desk",
-      "connectionCandidates": [
-        {
-          "agentPlatform": "retell",
-          "connectionKind": "phone_number",
-          "accessVariant": "phone_number.public_e164",
-          "modality": "voice",
-          "productLabel": "Retell phone",
-          "config": { "phoneNumber": "+14155550100" }
-        }
-      ]
-    }
-  ]
-}
-```
-
-A Retell chat candidate has `config.retellAgentId`. Each public phone number
-routed to a Retell voice agent is a separate candidate with
-`config.phoneNumber`. A voice agent with no routed public number has an empty
-`connectionCandidates` array.
-
-For a new agent, put the selected fields in the `connection` object of
-`POST /v1/agents`. For an existing agent, send them as the body of
-`POST /v1/agents/:agentId/connections`. Send `agentPlatform`, `connectionKind`,
-`accessVariant`, `modality`, and `config`. Do not send `productLabel`; Egma
-derives it. Also send `agentPlatformSelection` with the selected
-`platformAgentId` and the same account `credentials` used for discovery. Egma
-revalidates the candidate during the create operation and does not store the
-selection. It retains the API key as a sealed connection credential only for a
-Retell chat candidate. It discards the key after validating a phone-number
-candidate.
 
 ---
 
@@ -155,15 +66,15 @@ The `result` field in the response tells you exactly what happened:
 
 ### Request body
 
-<ParamField body="name" type="string" required>
-  Display name for the agent. Must be unique within the project.
+<ParamField body="name" type="string">
+  Display name for the agent. Required unless you want Egma to pick a numbered default. Must be unique within the project.
 </ParamField>
 
 <ParamField body="description" type="string">
   Optional free-text description.
 </ParamField>
 
-<ParamField body="projectId" type="string">
+<ParamField query="projectId" type="string">
   Project id or name to write this agent into. Defaults to the project your API key belongs to. In a single-project organization you never need this field.
 </ParamField>
 
@@ -211,16 +122,6 @@ The `result` field in the response tells you exactly what happened:
       before storage and never returned in full. A public phone-number variant
       forbids connection credentials.
     </ParamField>
-
-    <ParamField body="agentPlatformSelection" type="object">
-      The `platformAgentId` and account `credentials` used to select a candidate
-      through `POST /v1/agents:discover`. Egma revalidates this selection during
-      creation and never stores the selection object. For Retell chat, the API
-      key is retained separately as the sealed connection credential. For a
-      Retell phone number, this field is required and the key is discarded
-      after validation. A generic phone connection with `agentPlatform: null`
-      does not use this field.
-    </ParamField>
   </Expandable>
 </ParamField>
 
@@ -238,9 +139,6 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="projectId" type="string">The project this agent belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
     <ResponseField name="description" type="string | null">Free-text description, or `null`.</ResponseField>
-    <ResponseField name="revision" type="string">Revision to send with a later edit or archive request.</ResponseField>
-    <ResponseField name="archived" type="boolean">Whether the agent is archived.</ResponseField>
-    <ResponseField name="archivedAt" type="string | null">Archive time, or `null`.</ResponseField>
     <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
     <ResponseField name="updatedAt" type="string">ISO 8601 timestamp.</ResponseField>
   </Expandable>
@@ -264,10 +162,6 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="config" type="object">Safe configuration for the access variant.</ResponseField>
     <ResponseField name="credentialPresent" type="boolean">Whether this connection stores a sealed credential.</ResponseField>
     <ResponseField name="credentialsHint" type="string | null">Safe hint for the stored credential, or `null`.</ResponseField>
-    <ResponseField name="capabilities" type="object">Provider capabilities detected at registration time.</ResponseField>
-    <ResponseField name="revision" type="string">Revision to send with a later edit or archive request.</ResponseField>
-    <ResponseField name="archived" type="boolean">Whether the connection is archived.</ResponseField>
-    <ResponseField name="archivedAt" type="string | null">Archive time, or `null`.</ResponseField>
     <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
     <ResponseField name="updatedAt" type="string">ISO 8601 timestamp.</ResponseField>
   </Expandable>
@@ -335,18 +229,6 @@ Return a paginated list of agents your credential can reach, ordered newest firs
   The `nextPageToken` value from the previous page. Omit to start from the newest agent.
 </ParamField>
 
-<ParamField query="search" type="string">
-  Filter by agent name.
-</ParamField>
-
-<ParamField query="archived" type="boolean">
-  Set to `true` to list archived agents instead of active agents.
-</ParamField>
-
-<ParamField query="pageSize" type="integer">
-  Maximum number of agents to return, from 1 to 200.
-</ParamField>
-
 ### Response fields
 
 <ResponseField name="agents" type="array">
@@ -366,7 +248,7 @@ Return a paginated list of agents your credential can reach, ordered newest firs
 ### Example
 
 ```bash
-curl "https://your-egma-host/v1/agents?projectId=prj_abc123&pageToken=agt_prev" \
+curl "https://your-egma-host/v1/agents?projectId=my-project&pageToken=agt_prev" \
   -H "Authorization: Bearer <api-key>"
 ```
 

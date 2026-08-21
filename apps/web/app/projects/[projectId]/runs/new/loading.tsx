@@ -10,7 +10,7 @@ import { ProductStatePage } from "../../../../../ui/shell.tsx";
  * What the router draws between the press and
  * `/projects/:projectId/runs/new` arriving.
  *
- * Planning a run starts by choosing an agent, so the agents are what this
+ * Planning a run starts with one suite and one agent, so those are what this
  * page is genuinely waiting for, and it says so.
  *
  * Its header is the page's own down to its shape — the same eyebrow or the
@@ -26,11 +26,11 @@ export default function NewRunLoading() {
       <ProductStatePage
         title="Create a run"
         breadcrumbs={[
-          { label: "Runs", href: projectPath(projectId, "runs") },
+          { label: "Simulation runs", href: projectPath(projectId, "runs") },
           { label: "New run" },
         ]}
       >
-        <Loading what="the agents in this project" />
+        <Loading what="the test suites and agents in this project" />
       </ProductStatePage>
     </div>
   );

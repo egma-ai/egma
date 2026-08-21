@@ -109,8 +109,6 @@ export { ROLES, VIA } from "./context.ts";
 export {
   AgentWriteRefusedError,
   AlreadyBelongsToAnOrganizationError,
-  ApplicabilityConflictError,
-  CapabilityCheckFailedError,
   ConnectionRestoreRefusedError,
   DefaultPersonaReplacementError,
   GraderLibraryEntryInUseError,
@@ -118,7 +116,6 @@ export {
   IdentityConflictError,
   LastAdminError,
   MockToolTakenError,
-  NoCapabilityAdapterError,
   NotPermittedError,
   PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
@@ -126,27 +123,18 @@ export {
   PredefinedGraderError,
   ProjectOutsideOrganizationError,
   ProjectSlugTakenError,
-  RunRetryRefusedError,
   RunWriteRefusedError,
-  SimulationRerunRefusedError,
-  TestAgentRefusedError,
-  TestDependencyInactiveError,
   TestMovedOnError,
   TraceStoreRefusedError,
-  UnknownCapabilityError,
   UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
   VersionConflictError,
   WriteAbortedError,
   type AgentWriteRefusal,
-  type ArchivedDependency,
   type ConnectionRestoreRefusal,
   type GraderUsingLibraryEntry,
-  type RetryBlocker,
   type RunWriteRefusal,
-  type SimulationRerunRefusal,
-  type TestAgentRefusal,
   type TestNamingPersona,
 } from "./errors.ts";
 
@@ -328,7 +316,6 @@ export {
   getConnection,
   listAgents,
   listConnections,
-  refreshConnectionCapabilities,
   registerAgent,
   restoreAgent,
   restoreConnection,
@@ -352,7 +339,6 @@ export {
 export type {
   AccessVariant,
   AgentPlatform,
-  CapabilityState,
   ConnectionKind,
   Modality,
   Topology,
@@ -460,27 +446,37 @@ export {
 } from "../schema/mock-tools.ts";
 
 export {
-  archiveTest,
-  cloneTest,
+  createTestSuite,
+  deleteTestSuite,
+  getTestSuite,
+  listTestSuites,
+  renameTestSuite,
+  type NewTestSuite,
+  type RenameTestSuite,
+  type TestSuite,
+  type TestSuitePage,
+} from "./suites.ts";
+
+export {
+  applyRepositoryChangeSet,
+  type AppliedRepositoryChangeSet,
+  type RepositoryChangeSet,
+} from "./repository-change-set.ts";
+
+export {
   createTest,
+  deleteTest,
   editTest,
   getTest,
   getTestVersion,
   listTests,
   listTestVersions,
-  restoreTest,
-  setTestAgents,
-  type ApplicabilityChange,
-  type ArchiveTestRequest,
   type ExpectedBehavior,
   type MockOverride,
   type MockOverrideInput,
   type NewTest,
-  type RestoreTestRequest,
   type Test,
-  type TestAgent,
   type TestChanges,
-  type TestListRequest,
   type TestPage,
   type TestPersona,
   type TestVersion,
@@ -582,6 +578,7 @@ export {
   failSimulationDispatch,
   getRun,
   getSimulation,
+  getSimulationExecutionEvidence,
   getSimulationTestVersion,
   listRunEvents,
   listRuns,
@@ -591,6 +588,7 @@ export {
   releaseSimulationClaim,
   resolveSimulationConnection,
   resolveSimulationStanding,
+  runAlreadyStartedFor,
   startRun,
   startSimulation,
   sweepOrphanedSimulations,
@@ -598,6 +596,7 @@ export {
   type ConductedSimulation,
   type ConnectionSnapshot,
   type FailedEndingReason,
+  type ExpectedTestVersion,
   type MockToolCoverage,
   type NewRun,
   type Run,
@@ -608,8 +607,10 @@ export {
   type SimulationClaim,
   type SimulationClaimRequest,
   type SimulationConnection,
+  type SimulationExecutionEvidence,
   type SimulationFailure,
   type SimulationHeartbeat,
+  type SimulationPage,
   type SimulationReport,
   type SimulationStanding,
   type SimulationSummaryFacts,
@@ -621,7 +622,6 @@ export type {
   RunStatus,
   RunTrigger,
   SimulationEndingReason,
-  SimulationSkipReason,
   SimulationStatus,
   Verdict,
 } from "../schema/runs.ts";
@@ -634,47 +634,29 @@ export type {
 export { RUN_STATUSES } from "../schema/runs.ts";
 
 /**
- * A project's run history, and Retry.
+ * A project's run history.
  *
  * The history is where a run's machinery and its judgment are read together —
- * two stores, one answer, and the fold below is what keeps the four facts apart
- * inside it. Retry is here rather than beside `startRun` because it must never
- * become a second way to start one: it derives everything from an earlier run
- * and then goes through `startRun` like every other caller.
+ * two stores, one answer, and the fold below is what keeps the four facts apart.
  */
 export {
   listRunHistory,
   readRunFold,
-  rerunSimulation,
-  simulationRerunAlreadyStarted,
-  retryRun,
-  type RetryRequest,
   type RunHistoryEntry,
   type RunHistoryPage,
   type RunHistoryRequest,
-  type SimulationRerunRequest,
 } from "./run-history.ts";
 export type { RunFilter } from "./runs.ts";
 
 /**
- * What a run would freeze, and what one already froze.
- *
- * `planRun` is the review step's read and `startRun`'s own resolver, which is
- * the whole point of it being one function: what the review showed is what
- * starts. `getGradingPlan` answers with what a run actually froze, including
- * the honest `not_recorded` state for history that predates plans.
+ * What a run froze for grading.
  */
 export {
   getGradingPlan,
   pinnedSimulationGraders,
-  planRun,
-  type CapabilityDecision,
   type GradingPlan,
   type PlanGroup,
   type PlanItem,
-  type PlannedSimulationGroup,
-  type RunPlan,
-  type RunPlanRequest,
 } from "./run-plans.ts";
 export type { GradingPlanState } from "../schema/plans.ts";
 

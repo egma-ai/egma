@@ -27,28 +27,10 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
 /**
  * When a run's grading plan was decided, and whether one was decided at all.
  *
- * Three states, and the third is the honest one for history nobody can
- * reconstruct.
- *
- * - `run_start` — the plan was frozen in the transaction that created the run.
- *   Every run created from now on has this.
- * - `migration_snapshot` — the run predates frozen plans, and something about
- *   it was still outstanding when egma was upgraded: a nonterminal simulation,
- *   or a grading job still `pending` or `claimed`. The upgrade captured the
- *   plan as it stood *then*, because that work is about to be graded and has to
- *   be graded against something written down. `captured_at` says when, and a
- *   reader must be told it was captured during an upgrade rather than at start.
- * - `not_recorded` — the run predates frozen plans and had nothing outstanding.
- *   **No plan is invented for it.** Reconstructing one from today's graders
- *   would put a sentence on an old run claiming it was judged by things that
- *   may not have existed when it ran, and a page must never present that as a
- *   pin.
+ * Every post-cutover run freezes its plan at start. Pre-cutover runs are
+ * removed, so there is no migration-only or unrecorded runtime state.
  */
-export const GRADING_PLAN_STATES = [
-  "run_start",
-  "migration_snapshot",
-  "not_recorded",
-] as const;
+export const GRADING_PLAN_STATES = ["run_start"] as const;
 export type GradingPlanState = (typeof GRADING_PLAN_STATES)[number];
 
 export const gradingPlan = pgTable(
@@ -62,22 +44,14 @@ export const gradingPlan = pgTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
     state: text("state").notNull(),
+    /** When the plan below was frozen during run start. */
+    capturedAt: moment("captured_at").notNull(),
     /**
-     * When the plan below was decided. Null exactly on `not_recorded`, where
-     * there is no plan and therefore no moment — the two are one fact and the
-     * check holds them together.
-     */
-    capturedAt: moment("captured_at"),
-    /**
-     * The plan: groups under a tagged test reference, each holding the ordinary
-     * running copies that judge it. Every item has one grader identity and one
-     * pinned immutable grader version. The seeded expected-behaviors copy has
-     * the same shape as every other copy.
-     *
-     * The group tag distinguishes a pinned test version from the historical
-     * testless group an upgraded database can hold. `access/run-plans.ts` owns
-     * the shape and is the only writer. Empty on `not_recorded`, where the state
-     * is the whole answer.
+     * The Suite-level grader snapshot. It is stored as a one-entry list so the
+     * existing column remains a JSON list, but grader items are recorded once
+     * per run instead of repeated once per test. Each Simulation row holds its
+     * own exact test and test-version pins. `access/run-plans.ts` owns the shape
+     * and is the only writer.
      */
     groups: jsonb("groups").notNull(),
     createdAt: createdAt(),
@@ -89,24 +63,9 @@ export const gradingPlan = pgTable(
     // would leave two answers to "what judges this" with nothing to choose
     // between them.
     unique("grading_plan_run_id_unique").on(table.runId),
-    // A plan and the moment it was decided arrive together, and `not_recorded`
-    // has neither. Held here so that no reader has to decide what an empty
-    // plan with a timestamp would mean.
-    check(
-      "grading_plan_recorded_plans_carry_their_moment",
-      sql`(${table.state} = 'not_recorded')
-        = (${table.capturedAt} is null)`,
-    ),
     check(
       "grading_plan_groups_are_a_list",
       sql`jsonb_typeof(${table.groups}) = 'array'`,
-    ),
-    // An unrecorded plan holds nothing at all, so nothing can be read off it
-    // as though it were a pin.
-    check(
-      "grading_plan_unrecorded_holds_nothing",
-      sql`${table.state} <> 'not_recorded'
-        or ${table.groups} = '[]'::jsonb`,
     ),
     // The tenancy triangle, edge by edge, as everywhere else: the project is
     // this organization's, and the run is that project's.

@@ -284,9 +284,10 @@ node ~/egma/apps/cli/dist/bin.js --url http://localhost:3101
 It lists the installed Claude Code, Codex, Cursor, and OpenCode agents and asks
 which one to use. It then signs that machine in — a short code, approved in the
 browser you signed up in — registers your voice agent together with the way
-Egma reaches it, writes a first suite of tests with that coding agent, puts them on your
-instance, and starts a run over the exact versions it pushed. Every step is also
-a verb (`egma login`, `egma connect`, `egma push`, `egma run`) that prints one
+Egma reaches it, creates a real test suite, writes its tests with that coding
+agent, puts them on your instance, and starts one complete-suite run. Every
+step is also a verb (`egma login`, `egma connect`, `egma suite create`,
+`egma push`, `egma run <suite-directory>`) that prints one
 fact per line and answers with a number, for a coding agent driving it with
 nobody watching. `apps/cli/README.md` is the whole of it.
 

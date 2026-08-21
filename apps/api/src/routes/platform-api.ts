@@ -17,8 +17,10 @@ import { organizationRoutes } from "./organization.ts";
 import { personaRoutes } from "./personas.ts";
 import { projectRoutes } from "./projects.ts";
 import { recordingRoutes } from "./recordings.ts";
+import { repositoryRoutes } from "./repository.ts";
 import { runRoutes } from "./runs.ts";
 import { simulationRoutes } from "./simulations.ts";
+import { testSuiteRoutes } from "./test-suites.ts";
 import { testRoutes } from "./tests.ts";
 import { traceReadRoutes } from "./trace-reads.ts";
 
@@ -106,7 +108,9 @@ export async function platformApiRoutes(
   void app.register(organizationRoutes, credentialed);
   void app.register(projectRoutes, credentialed);
   void app.register(personaRoutes, credentialed);
+  void app.register(testSuiteRoutes, credentialed);
   void app.register(testRoutes, credentialed);
+  void app.register(repositoryRoutes, credentialed);
   void app.register(graderLibraryRoutes, credentialed);
   void app.register(graderRoutes, credentialed);
   void app.register(mockToolRoutes, credentialed);

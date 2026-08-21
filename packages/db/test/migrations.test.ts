@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { newId } from "@egma/ids";
+import { mintedAt, newId } from "@egma/ids";
 import { is } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import pg from "pg";
@@ -31,6 +31,20 @@ import {
   type EmptyDatabase,
 } from "./support/database.ts";
 import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
+
+/** Add the historical tail without applying the destructive suite cutover. */
+async function addHistoricalMigration(
+  directory: string,
+  name: string,
+): Promise<void> {
+  const migrations = (await readMigrations()).filter(
+    (one) => one.name >= name && one.name < "0040",
+  );
+  if (migrations[0]?.name !== name) throw new Error(`missing migration ${name}`);
+  for (const migration of migrations) {
+    await writeFile(path.join(directory, migration.name), migration.sql);
+  }
+}
 
 describe("the migration files", () => {
   it("are numbered plain SQL, applied in that order", async () => {
@@ -826,7 +840,8 @@ describe("the simulation's test pin (0009)", () => {
   });
 
   it("is what is still pending on a database that already holds simulations", async () => {
-    const result = await runMigrations(database.url);
+    await addHistoricalMigration(beforeThePin, "0009_simulation_test_pin.sql");
+    const result = await runMigrations(database.url, beforeThePin);
     expect(result.applied[0]).toBe("0009_simulation_test_pin.sql");
     expect(result.applied.every((name) => name >= "0009")).toBe(true);
   });
@@ -1106,7 +1121,8 @@ describe("the run-events record and the run's pin (0014)", () => {
   });
 
   it("is what is still pending on a database that already holds work", async () => {
-    const result = await runMigrations(database.url);
+    await addHistoricalMigration(beforeTheRecord, "0014_run_events.sql");
+    const result = await runMigrations(database.url, beforeTheRecord);
     expect(result.applied[0]).toBe("0014_run_events.sql");
     expect(result.applied.every((name) => name >= "0014")).toBe(true);
   });
@@ -1277,7 +1293,8 @@ describe("the dispatch-failure vocabulary (0015)", () => {
   });
 
   it("is what is still pending on a database that already holds landed work", async () => {
-    const result = await runMigrations(database.url);
+    await addHistoricalMigration(beforeTheWord, "0015_dispatch_failure.sql");
+    const result = await runMigrations(database.url, beforeTheWord);
     expect(result.applied[0]).toBe("0015_dispatch_failure.sql");
     expect(result.applied.every((name) => name >= "0015")).toBe(true);
   });
@@ -1579,7 +1596,8 @@ describe("the simulation's summary facts (0016)", () => {
   });
 
   it("is what is still pending on a database that already holds landed work", async () => {
-    const result = await runMigrations(database.url);
+    await addHistoricalMigration(beforeTheFacts, "0016_simulation_summary_facts.sql");
+    const result = await runMigrations(database.url, beforeTheFacts);
     expect(result.applied[0]).toBe("0016_simulation_summary_facts.sql");
     expect(result.applied.every((name) => name >= "0016")).toBe(true);
   });
@@ -1948,7 +1966,11 @@ describe("the connection type leaving the simulation row (0019)", () => {
   });
 
   it("is what is still pending on a database that already holds conversations", async () => {
-    const result = await runMigrations(database.url);
+    await addHistoricalMigration(
+      beforeTheDrop,
+      "0019_simulation_connection_type_leaves_the_row.sql",
+    );
+    const result = await runMigrations(database.url, beforeTheDrop);
     expect(result.applied[0]).toBe(
       "0019_simulation_connection_type_leaves_the_row.sql",
     );
@@ -4079,7 +4101,8 @@ describe("the direct Monitoring cutover (0038)", () => {
       [`rwr_${"A".repeat(26)}`],
     );
 
-    ({ applied } = await runMigrations(database.url));
+    await addHistoricalMigration(before, "0038_parched_goblin_queen.sql");
+    ({ applied } = await runMigrations(database.url, before));
   });
 
   afterAll(async () => {
@@ -4289,5 +4312,324 @@ describe("the direct Monitoring cutover (0038)", () => {
           )`,
     );
     expect(legacyColumns).toEqual([]);
+  });
+});
+
+describe("the clean test-suite cutover (0040)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+  let applied: readonly string[];
+  let cutoverStartedAt: number;
+  let cutoverFinishedAt: number;
+
+  const organizationId = newId("org");
+  const projectWithTests = newId("prj");
+  const emptyProject = newId("prj");
+  const userId = newId("usr");
+  const agentId = newId("agt");
+  const connectionId = newId("con");
+  const personaId = newId("prs");
+  const personaVersionId = newId("prsv");
+  const activeTestId = newId("tst");
+  const activeVersionId = newId("tstv");
+  const hiddenTestId = newId("tst");
+  const hiddenVersionId = newId("tstv");
+  const oldRunId = newId("run");
+  const oldSimulationId = newId("sim");
+  const simulationJobId = newId("gjb");
+  const productionJobId = newId("gjb");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("test_suite_cutover");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0040-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0040") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      `insert into organization (id, name, slug) values ($1, 'Cutover', 'suite-cutover')`,
+      [organizationId],
+    );
+    await client.query(
+      `insert into "user" (id, email, email_verified)
+       values ($1, 'suite-cutover@example.test', true)`,
+      [userId],
+    );
+    for (const [id, slug] of [
+      [projectWithTests, "with-tests"],
+      [emptyProject, "empty"],
+    ] as const) {
+      await client.query(
+        `insert into project (id, organization_id, name, slug, revision)
+         values ($1, $2, $3, $3, $4)`,
+        [id, organizationId, slug, newId("rev")],
+      );
+    }
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name, revision)
+       values ($1, $2, $3, 'Front desk', $4)`,
+      [agentId, organizationId, projectWithTests, newId("rev")],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, agent_platform,
+          connection_kind, modality, topology, access_variant, config,
+          capability_state, capabilities_measured, capabilities_supported,
+          capabilities_checked_at, capability_source, revision)
+       values ($1, $2, $3, $4, 'Chat', 'retell', 'retell_chat_api', 'chat',
+          'hosted-broker', 'retell_chat_api.api_key',
+          '{"retellAgentId":"agent_cutover"}'::jsonb, 'known',
+          '["raw_audio"]'::jsonb, '["raw_audio"]'::jsonb, now(),
+          'retell_chat_api', $5)`,
+      [
+        connectionId,
+        organizationId,
+        projectWithTests,
+        agentId,
+        newId("rev"),
+      ],
+    );
+
+    await client.query("begin");
+    await client.query(
+      `insert into persona
+         (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $2, $3, 'Caller', $4, $5)`,
+      [
+        personaId,
+        organizationId,
+        projectWithTests,
+        personaVersionId,
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits, models)
+       values ($1, $2, 1, $3::jsonb, $4::jsonb)`,
+      [
+        personaVersionId,
+        personaId,
+        JSON.stringify({ personality: "calm", language: "English" }),
+        JSON.stringify(RECOMMENDED_PERSONA_MODELS),
+      ],
+    );
+    await client.query("commit");
+
+    const insertTest = async (
+      id: string,
+      versionId: string,
+      name: string,
+      hidden: boolean,
+    ) => {
+      await client.query("begin");
+      await client.query(
+        `insert into test
+           (id, organization_id, project_id, name, current_version_id,
+            revision, applicability_revision, archived_at)
+         values ($1, $2, $3, $4, $5, $6, $7,
+            ${hidden ? "now()" : "null"})`,
+        [
+          id,
+          organizationId,
+          projectWithTests,
+          name,
+          versionId,
+          newId("rev"),
+          newId("rev"),
+        ],
+      );
+      await client.query(
+        `insert into test_version (id, test_id, version, content)
+         values ($1, $2, 1, $3::jsonb)`,
+        [
+          versionId,
+          id,
+          JSON.stringify({
+            scenario: "A booking must move",
+            expectedBehaviors: ["confirms the new time"],
+            requiredCapabilities: ["raw_audio"],
+          }),
+        ],
+      );
+      await client.query("commit");
+      await client.query(
+        `insert into test_agent (test_id, agent_id, project_id)
+         values ($1, $2, $3)`,
+        [id, agentId, projectWithTests],
+      );
+    };
+    await insertTest(activeTestId, activeVersionId, "Active", false);
+    await insertTest(hiddenTestId, hiddenVersionId, "Hidden", true);
+
+    await client.query(
+      `insert into run
+         (id, organization_id, project_id, agent_id, connection_id, status,
+          triggered_via, pinned_test_versions, requested_personas,
+          connection_snapshot, mock_tool_snapshot, expected_simulation_count)
+       values ($1, $2, $3, $4, $5, 'pending', 'manual', $6::jsonb,
+          $7::jsonb, $8::jsonb, $9::jsonb, 1)`,
+      [
+        oldRunId,
+        organizationId,
+        projectWithTests,
+        agentId,
+        connectionId,
+        JSON.stringify({ testVersionIds: [activeVersionId] }),
+        JSON.stringify({ personaIds: [personaId] }),
+        JSON.stringify({
+          agentPlatform: "retell",
+          connectionKind: "retell_chat_api",
+          accessVariant: "retell_chat_api.api_key",
+          modality: "chat",
+          topology: "hosted-broker",
+          environment: null,
+          config: { retellAgentId: "agent_cutover" },
+        }),
+        JSON.stringify({ defaults: [], overrides: {} }),
+      ],
+    );
+    await client.query(
+      `insert into simulation
+         (id, run_id, organization_id, project_id, agent_id, connection_id,
+          persona_id, persona_version_id, test_id, test_version_id, position,
+          modality, status)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1, 'chat', 'queued')`,
+      [
+        oldSimulationId,
+        oldRunId,
+        organizationId,
+        projectWithTests,
+        agentId,
+        connectionId,
+        personaId,
+        personaVersionId,
+        activeTestId,
+        activeVersionId,
+      ],
+    );
+    await client.query(
+      `insert into grading_plan
+         (id, run_id, organization_id, project_id, state, captured_at, groups)
+       values ($1, $2, $3, $4, 'run_start', now(), '[]'::jsonb)`,
+      [newId("gpl"), oldRunId, organizationId, projectWithTests],
+    );
+    await client.query(
+      `insert into grading_job
+         (id, organization_id, project_id, source, simulation_id, status)
+       values ($1, $2, $3, 'simulation', $4, 'pending')`,
+      [simulationJobId, organizationId, projectWithTests, oldSimulationId],
+    );
+    await client.query(
+      `insert into grading_job
+         (id, organization_id, project_id, source, trace_id, first_span_at,
+          last_span_at, last_seen_at, root_closed_at, status)
+       values ($1, $2, $3, 'production', $4, now(), now(), now(), now(), 'pending')`,
+      [productionJobId, organizationId, projectWithTests, "c".repeat(32)],
+    );
+    await client.query(
+      `insert into idempotent_operation
+         (organization_id, project_id, actor_id, operation, idempotency_key,
+          request_digest, result_id)
+       values ($1, $2, $3, 'start_run', 'lost-answer', 'digest', $4)`,
+      [organizationId, projectWithTests, userId, oldRunId],
+    );
+
+    const migration = (await readMigrations()).find((one) =>
+      one.name.startsWith("0040_"),
+    );
+    if (migration === undefined) throw new Error("0040 is missing");
+    await writeFile(path.join(before, migration.name), migration.sql);
+    cutoverStartedAt = Date.now();
+    ({ applied } = await runMigrations(database.url, before));
+    cutoverFinishedAt = Date.now();
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("applies one clean cutover", () => {
+    expect(applied).toEqual(["0040_test_suites.sql"]);
+  });
+
+  it("creates one ordinary Default suite only for the project with tests", async () => {
+    const { rows } = await client.query<{
+      id: string;
+      project_id: string;
+      name: string;
+      deleted_at: Date | null;
+    }>("select id, project_id, name, deleted_at from test_suite order by project_id");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      project_id: projectWithTests,
+      name: "Default",
+      deleted_at: null,
+    });
+    expect(rows[0]?.id).toMatch(/^ste_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(mintedAt(rows[0]?.id ?? "").getTime()).toBeGreaterThanOrEqual(
+      cutoverStartedAt,
+    );
+    expect(mintedAt(rows[0]?.id ?? "").getTime()).toBeLessThanOrEqual(
+      cutoverFinishedAt,
+    );
+    expect(rows.some((row) => row.project_id === emptyProject)).toBe(false);
+
+    const { rows: helpers } = await client.query<{ helper: string | null }>(
+      "select to_regprocedure('_migration_0040_test_suite_id()')::text as helper",
+    );
+    expect(helpers).toEqual([{ helper: null }]);
+  });
+
+  it("keeps active and hidden tests in that required suite and removes capability content", async () => {
+    const { rows } = await client.query<{
+      id: string;
+      suite_id: string;
+      deleted_at: Date | null;
+      content: Record<string, unknown>;
+    }>(
+      `select t.id, t.suite_id, t.deleted_at, v.content
+         from test t join test_version v on v.id = t.current_version_id
+        order by t.id`,
+    );
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.suite_id)).size).toBe(1);
+    expect(rows.find((row) => row.id === activeTestId)?.deleted_at).toBeNull();
+    expect(rows.find((row) => row.id === hiddenTestId)?.deleted_at).not.toBeNull();
+    expect(rows.every((row) => !("requiredCapabilities" in row.content))).toBe(true);
+  });
+
+  it("removes old simulation control-plane state and its start ledger", async () => {
+    for (const table of [
+      "run",
+      "simulation",
+      "grading_plan",
+      "idempotent_operation",
+    ]) {
+      const { rows } = await client.query<{ count: string }>(
+        `select count(*)::text as count from ${table}`,
+      );
+      expect(rows).toEqual([{ count: "0" }]);
+    }
+    const { rows: simulationJobs } = await client.query<{ id: string }>(
+      "select id from grading_job where id = $1",
+      [simulationJobId],
+    );
+    expect(simulationJobs).toEqual([]);
+  });
+
+  it("preserves production grading work", async () => {
+    const { rows } = await client.query<{ id: string; source: string }>(
+      "select id, source from grading_job where id = $1",
+      [productionJobId],
+    );
+    expect(rows).toEqual([{ id: productionJobId, source: "production" }]);
   });
 });

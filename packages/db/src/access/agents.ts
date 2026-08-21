@@ -25,15 +25,6 @@ import {
 } from "../schema/agents.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
-  CAPABILITIES_UNKNOWN,
-  capabilityCheckFailedMessage,
-  capabilityDiscoveryFor,
-  measuredCapabilities,
-  noCapabilityAdapterMessage,
-  type ConnectionCapabilities,
-  type Discovered,
-} from "./capabilities.ts";
-import {
   credentialRuleOf,
   descriptorOf,
   productLabelOf,
@@ -45,10 +36,8 @@ import {
 import type { AuthContext } from "./context.ts";
 import {
   AgentWriteRefusedError,
-  CapabilityCheckFailedError,
   ConnectionRestoreRefusedError,
   IdentityConflictError,
-  NoCapabilityAdapterError,
   ProjectOutsideOrganizationError,
 } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
@@ -118,8 +107,6 @@ export type Connection = {
   readonly config: Readonly<Record<string, string>>;
   /** The last characters of the sealed secret, or null where none belongs. */
   readonly credentialsHint: string | null;
-  /** Measured by an adapter, never declared by a caller. Unknown until one has. */
-  readonly capabilities: ConnectionCapabilities;
   /** What an edit says it was written against. New after every change. */
   readonly revision: string;
   /** When it stopped being reachable for new work, or null while it is. */
@@ -147,7 +134,7 @@ export type ConnectionChanges = {
 /** What a connection Archive answers: the row, and the work it stopped. */
 export type ArchivedConnection = {
   readonly connection: Connection;
-  readonly canceledRuns: readonly string[];
+  readonly canceledRunCount: number;
 };
 
 /**
@@ -242,8 +229,8 @@ export type ArchivedAgent = {
   readonly agent: Agent;
   /** Every child connection this Archive took, active until now. */
   readonly connections: readonly string[];
-  /** Every run whose header this Archive set to canceled. */
-  readonly canceledRuns: readonly string[];
+  /** How many run headers this Archive set to canceled. */
+  readonly canceledRunCount: number;
 };
 
 const notArchived: SQL = isNull(agent.archivedAt);
@@ -275,11 +262,6 @@ const CONNECTION_COLUMNS = {
   environment: connection.environment,
   config: connection.config,
   credentialsHint: connection.credentialsHint,
-  capabilityState: connection.capabilityState,
-  capabilitiesMeasured: connection.capabilitiesMeasured,
-  capabilitiesSupported: connection.capabilitiesSupported,
-  capabilitiesCheckedAt: connection.capabilitiesCheckedAt,
-  capabilitySource: connection.capabilitySource,
   revision: connection.revision,
   archivedAt: connection.archivedAt,
   createdAt: connection.createdAt,
@@ -448,47 +430,11 @@ type ConnectionRow = {
   readonly environment: string | null;
   readonly config: unknown;
   readonly credentialsHint: string | null;
-  readonly capabilityState: string;
-  readonly capabilitiesMeasured: unknown;
-  readonly capabilitiesSupported: unknown;
-  readonly capabilitiesCheckedAt: Date | null;
-  readonly capabilitySource: string | null;
   readonly revision: string;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
-
-/**
- * The capability record a row carries, as one value rather than four columns.
- *
- * The schema's own check keeps the four in step — a `known` state has all three
- * pieces of evidence or the row is refused — so the shape this returns cannot
- * be half a measurement. Anything else is `unknown`, which is what an
- * unmeasured connection has always been.
- */
-function capabilitiesFromRow(row: ConnectionRow): ConnectionCapabilities {
-  if (
-    row.capabilityState !== "known" ||
-    row.capabilitiesMeasured === null ||
-    row.capabilitiesCheckedAt === null ||
-    row.capabilitySource === null
-  ) {
-    return CAPABILITIES_UNKNOWN;
-  }
-  const keys = (held: unknown): readonly string[] =>
-    Array.isArray(held)
-      ? held.filter((entry): entry is string => typeof entry === "string")
-      : [];
-
-  return {
-    state: "known",
-    measured: keys(row.capabilitiesMeasured),
-    supported: keys(row.capabilitiesSupported),
-    checkedAt: row.capabilitiesCheckedAt,
-    source: row.capabilitySource,
-  };
-}
 
 /**
  * A selected row as the caller sees it. The three enumerated columns are
@@ -515,7 +461,6 @@ function connectionFromRow(row: ConnectionRow): Connection {
       modality,
     ),
     config: configFromRow(row.config, row.id),
-    capabilities: capabilitiesFromRow(row),
   };
 }
 
@@ -1272,8 +1217,8 @@ function guardProjectScoped(auth: AuthContext, what: string): void {
  * work that was going to use one.
  *
  * **Archive is always allowed, and it is not deletion.** Past runs name this
- * agent and stay readable; tests that apply to it keep their links. The whole
- * of what Archive does is stop it entering anything new — and stop what had
+ * agent and stay readable. Tests belong only to suites and do not link to an
+ * agent. The whole of what Archive does is stop it entering anything new — and stop what had
  * already been started over it, because a queued simulation whose connection
  * has been archived would sit in the claim queue for a target no simulator can
  * resolve a credential for and would eventually fail, putting an operational
@@ -1318,7 +1263,7 @@ export async function archiveAgent(
         .limit(1);
       if (standing === undefined) return undefined;
       if (standing.archivedAt !== null) {
-        return { agent: standing, connections: [], canceledRuns: [] };
+        return { agent: standing, connections: [], canceledRunCount: 0 };
       }
       return refuseOrVanish(auth, id, options.expectedRevision, "agent");
     }
@@ -1335,7 +1280,7 @@ export async function archiveAgent(
       )
       .returning({ id: connection.id });
 
-    const canceledRuns = await stopWorkOverConnections(
+    const canceledRunCount = await stopWorkOverConnections(
       tx,
       auth,
       children.map((row) => row.id),
@@ -1345,7 +1290,7 @@ export async function archiveAgent(
     return {
       agent: archived,
       connections: children.map((row) => row.id),
-      canceledRuns,
+      canceledRunCount,
     };
   });
 }
@@ -1612,13 +1557,6 @@ export async function listConnections(
  * the hint moved along. Editing what the caller cannot see returns what
  * reading it would have: `undefined`, with nothing disturbed.
  *
- * **A config change makes the capability record unknown, in the same write.**
- * Capabilities are facts about a target, and changing the config changes which
- * target this is: a measurement of the old one is not evidence about the new
- * one, and leaving it in place would let a run be admitted on the strength of
- * something that was never checked. It becomes known again only when an
- * adapter measures the target as it now stands.
- *
  * **Agent platform, connection kind, access variant, and modality are
  * immutable.** Changing any axis creates a new connection. Config is validated
  * against the stored access variant and never selects another one.
@@ -1704,17 +1642,6 @@ export async function updateConnection(
             credentials: sealCredentials(sealed.sealed),
             credentialsHint: sealed.hint,
           }),
-      // The target moved, so what anybody measured about it is no longer about
-      // this connection.
-      ...(config === undefined
-        ? {}
-        : {
-            capabilityState: "unknown",
-            capabilitiesMeasured: null,
-            capabilitiesSupported: null,
-            capabilitiesCheckedAt: null,
-            capabilitySource: null,
-          }),
       revision: newId("rev"),
       updatedAt: new Date(),
     })
@@ -1793,7 +1720,7 @@ export async function archiveConnection(
         .limit(1);
       if (standing === undefined) return undefined;
       if (standing.archivedAt !== null) {
-        return { connection: connectionFromRow(standing), canceledRuns: [] };
+        return { connection: connectionFromRow(standing), canceledRunCount: 0 };
       }
       return refuseOrVanish(
         auth,
@@ -1804,14 +1731,14 @@ export async function archiveConnection(
       );
     }
 
-    const canceledRuns = await stopWorkOverConnections(
+    const canceledRunCount = await stopWorkOverConnections(
       tx,
       auth,
       [connectionId],
       now,
     );
 
-    return { connection: connectionFromRow(archived), canceledRuns };
+    return { connection: connectionFromRow(archived), canceledRunCount };
   });
 }
 
@@ -1965,105 +1892,4 @@ export async function restoreConnection(
     "connection",
     agentId,
   );
-}
-
-/**
- * Ask this connection's adapter what its target can actually do, and write
- * down what it answered.
- *
- * **A measurement, never a claim.** The adapter reads the target and reports
- * the catalog keys it *found*; anything it did not find is unsupported, and an
- * adapter that could establish nothing leaves the record exactly as it was
- * rather than overwriting a good measurement with a bad moment. Nothing here
- * infers a capability from the provider's brand, which is why a kind with no
- * adapter is told so plainly instead of being handed a plausible answer.
- *
- * The write is guarded by the revision the connection had when the check
- * started, so a measurement of the old target cannot land on a config somebody
- * edited while the adapter was talking to it.
- */
-export async function refreshConnectionCapabilities(
-  auth: AuthContext,
-  agentId: string,
-  connectionId: string,
-): Promise<Connection | undefined> {
-  authorize(auth, "configure_agents", here(auth));
-
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
-
-  const [current] = await db()
-    .select({
-      id: connection.id,
-      connectionKind: connection.connectionKind,
-      accessVariant: connection.accessVariant,
-      // What the transport carries, which is what most of what an adapter can
-      // establish turns on.
-      modality: connection.modality,
-      config: connection.config,
-      revision: connection.revision,
-      archivedAt: connection.archivedAt,
-    })
-    .from(connection)
-    .where(theConnection(auth, agentId, connectionId))
-    .limit(1);
-  if (current === undefined) return undefined;
-
-  const connectionKind = current.connectionKind as ConnectionKind;
-  const discovery = capabilityDiscoveryFor(connectionKind);
-  if (discovery === undefined) {
-    throw new NoCapabilityAdapterError(
-      connectionKind,
-      noCapabilityAdapterMessage(connectionKind),
-    );
-  }
-
-  let found: Discovered;
-  try {
-    found = await discovery({
-      connectionKind,
-      accessVariant: current.accessVariant as AccessVariant,
-      modality: current.modality as Modality,
-      config: configFromRow(current.config, current.id),
-    });
-  } catch (cause) {
-    throw new CapabilityCheckFailedError(
-      connectionId,
-      capabilityCheckFailedMessage(connectionId),
-      { cause },
-    );
-  }
-
-  const checkedAt = new Date();
-  const measured = measuredCapabilities(
-    found,
-    `${connectionKind} adapter`,
-    checkedAt,
-  );
-  if (measured.state !== "known") return getConnection(auth, agentId, connectionId);
-
-  const [updated] = await db()
-    .update(connection)
-    .set({
-      capabilityState: "known",
-      capabilitiesMeasured: measured.measured,
-      capabilitiesSupported: measured.supported,
-      capabilitiesCheckedAt: measured.checkedAt,
-      capabilitySource: measured.source,
-      revision: newId("rev"),
-      updatedAt: checkedAt,
-    })
-    .where(
-      and(
-        theConnection(auth, agentId, connectionId),
-        eq(connection.revision, current.revision),
-      ),
-    )
-    .returning(CONNECTION_COLUMNS);
-
-  // The config moved while the adapter was talking to the old target, so what
-  // came back is not about the connection as it now stands. The edit already
-  // set the state to unknown, which is the honest answer, and this leaves it.
-  return updated === undefined
-    ? getConnection(auth, agentId, connectionId)
-    : connectionFromRow(updated);
 }

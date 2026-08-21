@@ -80,7 +80,7 @@ const INSTANCE_SCOPED = ["instanceIsClaimed", "platformFacts"];
  * resolves to nobody, silence is noticed by nobody in particular, and a
  * report about a held row is answered from the row.
  *
- * Six names, and a seventh is a decision somebody makes on purpose. None takes
+ * Every name is deliberate. None takes
  * an argument by which a caller could name a customer, and a build rule refuses
  * one that grows one; the only rows any of them reaches are egma's own queues —
  * grading jobs, and the simulations egma itself wrote and claimed. A claim
@@ -146,9 +146,9 @@ const CONTEXT_REQUIRING = [
   "archivePersona",
   "appendSpans",
   "appendVerdicts",
+  "applyRepositoryChangeSet",
   "cancelRun",
   "changeRole",
-  "cloneTest",
   "completeSimulation",
   "configureLiveKitMonitoring",
   "configureRetellMonitoring",
@@ -166,6 +166,7 @@ const CONTEXT_REQUIRING = [
   "createPersona",
   "createProject",
   "createTest",
+  "createTestSuite",
   "archiveAgent",
   "archiveConnection",
   "deactivateUser",
@@ -175,15 +176,9 @@ const CONTEXT_REQUIRING = [
   // writes them again.
   "deleteGraderLibraryEntry",
   "deleteMockTool",
-  // Archive and Restore, never a delete: a test a run pinned has to stay
-  // interpretable forever, and a removal somebody regrets at four o'clock has
-  // to be undoable at five.
-  "archiveTest",
-  "restoreTest",
-  // Which agents a test applies to. Its own door because it moves its own
-  // revision and mints no version — target coverage is not test content.
+  "deleteTest",
+  "deleteTestSuite",
   "setDefaultPersona",
-  "setTestAgents",
   "editGrader",
   "editMockTool",
   "editPersona",
@@ -215,8 +210,10 @@ const CONTEXT_REQUIRING = [
   "getPersonaVersion",
   "getRun",
   "getSimulation",
+  "getSimulationExecutionEvidence",
   "getSimulationTestVersion",
   "getTest",
+  "getTestSuite",
   "getTestVersion",
   "listAgents",
   "listApiKeys",
@@ -242,21 +239,9 @@ const CONTEXT_REQUIRING = [
   // row and the page it opens can never disagree.
   "listRunHistory",
   "readRunFold",
-  // A new run derived from an earlier one, under today's conditions. It is a
-  // verb of its own rather than a flag on `startRun` because everything it uses
-  // comes off the earlier run and nothing a caller sends can name any of it —
-  // which is what makes the link a retry writes worth trusting.
-  "retryRun",
-  // One stored simulation, derived into one new named run. Its own verb keeps
-  // the source selection server-side rather than widening ordinary start.
-  "rerunSimulation",
-  // The read-only half of running one simulation again. A product door asks
-  // this before mutable deployment-readiness checks, so a repeated key answers
-  // the run it already created rather than being refused by conditions that
-  // changed after that run began.
-  "simulationRerunAlreadyStarted",
   "listSimulations",
   "listTests",
+  "listTestSuites",
   "listTraces",
   "markSimulationCanceled",
   "readOrganization",
@@ -290,11 +275,7 @@ const CONTEXT_REQUIRING = [
   "claimRetellIngestionFailureReplay",
   "claimProductionTrace",
   "finishProductionTrace",
-  // The measurement door: it asks this connection's adapter what its target
-  // can do and writes down what came back. Its own verb rather than a flag on
-  // an edit, because a measurement is not an authored change and must not be
-  // able to arrive with one.
-  "refreshConnectionCapabilities",
+  // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
   "recoverRetellMonitoringSetup",
@@ -311,9 +292,11 @@ const CONTEXT_REQUIRING = [
   "restoreAgent",
   "restoreConnection",
   "removeMonitoringSetup",
+  "renameTestSuite",
   "renewRetellMonitoringLease",
   "retellCallIsAccountedFor",
   "resolveRetellIngestionFailureReplay",
+  "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
   // back from: it is made by pressing **Use** and deleted whole. Internally each
@@ -355,12 +338,8 @@ const CONTEXT_REQUIRING = [
   "seedRunningGraders",
   "startRun",
   "startSimulation",
-  // What a run would freeze, answered before anybody starts it — and the same
-  // resolver `startRun` uses, so a review step and the run it produces can
-  // never disagree about which tests are skipped or which graders judge.
-  "planRun",
-  // What a run actually froze, including the honest `not_recorded` state for
-  // history that predates frozen plans.
+  // What a run froze at start. Pre-cutover run history is reset, so every run
+  // this surface can read has one recorded plan.
   "getGradingPlan",
   // The exact grader versions one simulation froze. The grading worker uses
   // this rather than following today's current-version pointers.
@@ -466,16 +445,6 @@ const VALUES = [
   // have to read the sentence to tell them apart.
   "AgentWriteRefusedError",
   "AlreadyBelongsToAnOrganizationError",
-  // A link edit written against an applicability revision the test has moved
-  // past. The third of three conflicts, and genuinely a third thing: it guards
-  // a set that is neither the live identity nor the versioned content.
-  "ApplicabilityConflictError",
-  // Egma was asked to measure a target and the adapter could not establish
-  // anything. Its own class beside the one below, because "the target did not
-  // answer, try again" and "there is nothing here to try" are different next
-  // moves and a caller that could not tell them apart would retry forever.
-  "CapabilityCheckFailedError",
-  "NoCapabilityAdapterError",
   // A connection could not be brought back on the terms its own shape sets.
   // Four rules, four codes, and the reason travels beside the sentence.
   "ConnectionRestoreRefusedError",
@@ -523,20 +492,10 @@ const VALUES = [
   // and a cancel that arrived after the run had already finished. Five rules,
   // four codes between them, and a sentence apiece — which is why the reason
   // travels as a value rather than being read back out of the prose.
-  // A Retry that could not be derived, because something the earlier run used is
-  // no longer active or no longer applies. Its own class beside the one below
-  // because it never refuses a request somebody composed — it refuses to
-  // silently substitute, and it names the resource that stopped it.
-  "RunRetryRefusedError",
   "RunWriteRefusedError",
-  "SimulationRerunRefusedError",
   // An edit refused because somebody moved the test since it was written. It
   // carries both versions and the test's identity, because the caller's next
   // move is to go and read the test as it now stands.
-  // A test with no agent to run against, refused; and a Restore refused
-  // because the current version names an archived persona or grader.
-  "TestAgentRefusedError",
-  "TestDependencyInactiveError",
   "TestMovedOnError",
   // Use named an entry this caller cannot see, or none at all. One refusal for
   // both, because telling them apart would answer a question about somebody
@@ -544,10 +503,6 @@ const VALUES = [
   "UnknownGraderLibraryEntryError",
   // A write refused for what it says, told apart from a fault so that a layer
   // above can relay the factory's sentence instead of answering with a stack.
-  // A capability nothing offered. A subclass of the general refusal, so every
-  // relay of that one is right about this one too, with a code of its own for
-  // a form that wants to point at the capability list.
-  "UnknownCapabilityError",
   // A persona named by a name two living personas answer to. The same subclass
   // arrangement, and its own code because the reader is usually a repository
   // file: the fix is to put the stable identifier in the file, which is an
@@ -569,34 +524,6 @@ const VALUES = [
   // page token that was not issued here. Both are 400s, and neither is a fault.
   "UnreadableTraceQueryError",
   "VIA",
-  // The capability catalog, and the two readers that hold a key to it. Pure
-  // values: they reach no store, take no context, and are the one list a test
-  // requirement and a connection measurement are both written from.
-  "CAPABILITY_CATALOG",
-  "CAPABILITY_KEYS",
-  "admittedCapabilities",
-  "isCapabilityKey",
-  // The three answers a capability record gives, and the door an adapter's
-  // report goes through to become one. `unsupported` and `not_measured` are a
-  // settled fact and an unasked question; collapsing them puts a false skip
-  // reason on every simulation an adapter's blind spot touched.
-  "capabilityStanding",
-  "CAPABILITY_STANDINGS",
-  "measuredCapabilities",
-  "unknownCapabilityMessage",
-  "capabilityCheckFailedMessage",
-  "noCapabilityAdapterMessage",
-  // Whether egma ships something that can measure a connection kind's targets,
-  // and the door a deployment installs one through.
-  "hasCapabilityDiscovery",
-  "registerCapabilityDiscovery",
-  // The one shipped adapter, registered for every connection kind egma can reach. It
-  // answers only what egma's own transport settles — whether a simulation
-  // carries audio, and that nothing can send a digit over any of them — so it
-  // states no fact about a provider, which is the rule it had to be written
-  // against. Exported so a deployment can put it back after standing another
-  // one in its place.
-  "transportCapabilities",
   // The simulation options a browser may be told about — the five connection facts,
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.

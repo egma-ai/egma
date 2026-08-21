@@ -8,10 +8,12 @@ import {
   createAgent,
   createPersona,
   createTest,
+  createTestSuite,
   deleteGrader,
   finishGradingJob,
   getGradingJob,
   listGradingJobsForSimulation,
+  listSimulations,
   NotPermittedError,
   regrade,
   reopenGradingJob,
@@ -75,8 +77,7 @@ const outsider: AuthContext = {
 let agentId: string;
 let connectionId: string;
 let personaId: string;
-/** What a run executes: a run pins frozen versions, and never names none. */
-let testVersionId: string;
+let suiteId: string;
 /** One of this project's graders, for the asks that narrow to one. */
 let graderId: string;
 
@@ -108,11 +109,12 @@ type Conducted = { readonly runId: string; readonly simulationId: string };
 async function aFinishedSimulation(): Promise<Conducted> {
   const claimant = "simulator-1";
   const started = await startRun(auth, {
+    suiteId,
     agentId,
     connectionId,
-    testVersionIds: [testVersionId],
+    idempotencyKey: newId("run"),
   });
-  const [only] = started.simulations;
+  const [only] = (await listSimulations(auth, started.id))?.items ?? [];
   if (only === undefined) throw new Error("the run has no simulation");
 
   await claimSimulations({ claimant, capacity: 50 });
@@ -197,14 +199,15 @@ beforeAll(async () => {
     })
   ).id;
 
-  testVersionId = (
-    await createTest(auth, {
-      name: "Reschedules a booked appointment",
-      scenario: "Their cleaning has to move to any afternoon next week.",
-      expectedBehaviors: ["confirms the new time back before finishing"],
-      personaIds: [personaId],
-    })
-  ).versionId;
+  suiteId = (await createTestSuite(auth, { name: "Core regrading" })).id;
+
+  await createTest(auth, {
+    suiteId,
+    name: "Reschedules a booked appointment",
+    scenario: "Their cleaning has to move to any afternoon next week.",
+    expectedBehaviors: ["confirms the new time back before finishing"],
+    personaIds: [personaId],
+  });
 
   graderId = await aGrader();
 });
@@ -407,7 +410,11 @@ describe("re-grading one conversation", () => {
       ),
     );
 
-    const pair = await createTest(auth, {
+    const pairSuite = await createTestSuite(auth, {
+      name: `Two-persona regrading ${suffix}`,
+    });
+    await createTest(auth, {
+      suiteId: pairSuite.id,
       name: `Reschedules for two callers ${suffix}`,
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -416,14 +423,16 @@ describe("re-grading one conversation", () => {
 
     const claimant = `simulator-${suffix}`;
     const started = await startRun(auth, {
+      suiteId: pairSuite.id,
       agentId,
       connectionId,
-      testVersionIds: [pair.versionId],
+      idempotencyKey: newId("run"),
     });
-    expect(started.simulations).toHaveLength(2);
+    const simulations = (await listSimulations(auth, started.id))?.items ?? [];
+    expect(simulations).toHaveLength(2);
 
     await claimSimulations({ claimant, capacity: 50 });
-    for (const one of started.simulations) {
+    for (const one of simulations) {
       await startSimulation(auth, one.id, claimant);
       await completeSimulation(auth, one.id, claimant, {
         endingReason: "persona_concluded",
@@ -432,14 +441,14 @@ describe("re-grading one conversation", () => {
 
     const grader = `grader-${suffix}`;
     const claimed = await claimGradingJobs({ claimant: grader, capacity: 50 });
-    for (const one of started.simulations) {
+    for (const one of simulations) {
       const job = await theJobFor(one.id);
       const mine = claimed.find((claim) => claim.id === job.id);
       if (mine === undefined) throw new Error("the job was not claimed");
       await finishGradingJob(mine.auth, job.id, grader);
     }
 
-    const [opened, neighbour] = started.simulations;
+    const [opened, neighbour] = simulations;
     if (opened === undefined || neighbour === undefined) {
       throw new Error("the run has fewer than two conversations");
     }

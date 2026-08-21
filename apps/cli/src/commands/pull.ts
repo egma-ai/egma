@@ -1,30 +1,50 @@
-/**
- * `egma pull`: write what the platform holds into the folder.
- *
- * Nothing here reads standard input and nothing here draws, so a coding agent
- * can run it, read what it prints, and act on it. One fact per line, in the same
- * shape `egma login` prints: the state of a test, then the test.
- */
+/** `egma pull`: stage and apply one complete non-destructive repository pull. */
 
+import { RepositoryValidationError } from "../folder/egma-folder.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
-import { MOCK_TOOLS_SHOWN, pullMockTools } from "../sync/mock-tools.ts";
-import { pullTests } from "../sync/pull.ts";
+import { pullRepository } from "../sync/pull.ts";
 import { FOLDER_EXIT, readyToSync, type FolderCommandOptions } from "./folder-verbs.ts";
 
 export async function runPullCommand(options: FolderCommandOptions): Promise<number> {
   options.out(`url: ${options.access.url}`);
-
   const ready = await readyToSync(options);
   if (ready.kind === "stop") return ready.code;
   options.out(`folder: ${ready.paths.root}`);
 
-  let report;
-  let mocked;
   try {
-    report = await pullTests({ signedIn: ready.signedIn, paths: ready.paths });
-    mocked = await pullMockTools({ signedIn: ready.signedIn, paths: ready.paths });
+    const report = await pullRepository({
+      signedIn: ready.signedIn,
+      paths: ready.paths,
+      ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+    });
+    for (const suite of report.suites) {
+      options.out(`suite-${suite.state}: ${suite.name}`);
+      options.out(`directory: egma/tests/${suite.directory}`);
+    }
+    for (const test of report.tests) {
+      options.out(`${test.state}: ${test.name}`);
+      options.out(`file: ${test.shown}`);
+      options.out(`version: ${test.versionId}`);
+    }
+    for (const draft of report.kept) {
+      options.out(`kept: ${draft.name}`);
+      options.out(`file: ${draft.shown}`);
+      options.out(`reason: ${draft.reason}`);
+    }
+    for (const tool of report.mockTools) options.out(`mock-tool: ${tool}`);
+    options.out(`suites: ${report.suites.length}`);
+    options.out(`tests: ${report.tests.length}`);
+    options.out(`mock-tools: ${report.mockTools.length}`);
+    options.out("status: pulled");
+    return FOLDER_EXIT.done;
   } catch (cause) {
+    if (cause instanceof RepositoryValidationError) {
+      options.out("status: invalid-folder");
+      for (const reason of cause.issues) options.out(`reason: ${reason}`);
+      options.fail(cause.message);
+      return FOLDER_EXIT.nothing;
+    }
     if (cause instanceof PlatformUnreachableError || cause instanceof PlatformRefusedError) {
       options.out("status: unreachable");
       options.out(`reason: ${cause.message}`);
@@ -33,39 +53,4 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
     }
     throw cause;
   }
-
-  // One fact per line and every line flat: what happened to a test, then the
-  // file it happened to, then the version the file now pins.
-  for (const test of report.tests) {
-    options.out(`${test.state}: ${test.name}`);
-    options.out(`file: ${test.shown}`);
-    options.out(`version: ${test.versionId}`);
-  }
-  for (const name of report.kept) options.out(`kept: ${name}`);
-
-  // An old file a pull would have rewritten in the current format and did not,
-  // because it holds a draft or a name egma cannot attribute to one side. Under
-  // the same key as anything else a pull left alone, with the recovery on its
-  // own line — the developer has to do this by hand, and the line is the
-  // instructions.
-  for (const draft of report.drafts) {
-    options.out(`kept: ${draft.name}`);
-    options.out(`file: ${draft.shown}`);
-    options.out(`reason: ${draft.reason}`);
-  }
-
-  // Under a key of their own, never under the tests': a mock tool and a test
-  // are two things, and something reading these lines has to be able to tell
-  // one from the other without knowing which order they came in.
-  for (const tool of mocked.tools) options.out(`mock-tool: ${tool}`);
-  if (mocked.unreadable !== null) {
-    options.out("kept: mock-tools");
-    options.out(`file: ${MOCK_TOOLS_SHOWN}`);
-    options.out(`reason: ${mocked.unreadable}`);
-  }
-
-  options.out(`tests: ${report.tests.length}`);
-  options.out(`mock-tools: ${mocked.tools.length}`);
-  options.out(`status: pulled`);
-  return FOLDER_EXIT.done;
 }

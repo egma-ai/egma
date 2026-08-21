@@ -1,6 +1,6 @@
 import { Progress } from "@/components/ui/progress";
 
-export type AgentOnboardingStage = "agent" | "connection" | "tests";
+export type AgentOnboardingStage = "agent" | "connection";
 
 const STAGES: readonly {
   readonly id: AgentOnboardingStage;
@@ -8,14 +8,13 @@ const STAGES: readonly {
 }[] = [
   { id: "agent", label: "Agent details" },
   { id: "connection", label: "Connection" },
-  { id: "tests", label: "Tests" },
 ];
 
 /**
  * The one compact orientation aid shared by every page in agent onboarding.
  *
  * Each page still has one task and one title. This small list says where the
- * task sits without repeating numbered progress copy or putting three forms in
+ * task sits without repeating numbered progress copy or putting two forms in
  * one large wizard card.
  *
  * **The bar is the kit's `Progress` rather than a shape drawn here**, which is
@@ -25,8 +24,8 @@ const STAGES: readonly {
  * asks a state for a word as well as a shape, so the two are shown together and
  * neither is asked to carry the meaning alone.
  *
- * **It counts stages finished, not stages behind**, so it reads 0 of 3 on the
- * first page and never reaches 3 — finishing the last stage leaves onboarding,
+ * **It counts stages finished, not stages behind**, so it reads 0 of 2 on the
+ * first page and never reaches 2 — finishing the last stage leaves onboarding,
  * and a bar that filled completely on a page still asking for something would
  * be claiming the work was done.
  */
@@ -40,9 +39,7 @@ export function AgentOnboardingProgress({
    * state word to show beside it.
    *
    * **Being behind the current stage is not the same as being finished**, and
-   * onboarding has a stage where the two part company: somebody can reach the
-   * tests page with the connection stage behind them and no connection on the
-   * agent.
+   * onboarding can grow another stage where the two part company.
    *
    * **The word comes from the caller, and that is the point of the shape.**
    * This component can see that a stage is not done; it cannot see *why*, and
@@ -73,12 +70,12 @@ export function AgentOnboardingProgress({
         max={STAGES.length}
         aria-label="Agent setup progress"
         /*
-         * A percentage is the wrong unit for three named stages: "33%" is a
-         * number nobody can act on, while "1 of 3 stages finished" is the same
+         * A percentage is the wrong unit for two named stages: "50%" is a
+         * number nobody can act on, while "1 of 2 stages finished" is the same
          * fact said in the words the list beside it already uses.
          *
          * A stage left behind is named rather than folded into the count,
-         * because "1 of 3 finished" with two stages behind you is the one
+         * because "0 of 2 finished" with a stage behind you is the one
          * arithmetic a reader should not have to do. It is named as *not
          * finished*, which is all this component knows and all that is true on
          * every path into it.
@@ -111,7 +108,7 @@ export function AgentOnboardingProgress({
                 // attribute the screen reader announces and the weight the eye
                 // reads cannot then disagree.
                 "aria-[current=step]:font-medium aria-[current=step]:text-foreground " +
-                // Too narrow for three stages on one line. Each takes an equal
+                // Too narrow for two stages on one line. Each takes an equal
                 // share of the room rather than leaving a ragged right edge.
                 "max-[36rem]:flex-auto"
               }

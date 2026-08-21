@@ -65,6 +65,7 @@ export type Registration = {
 export type RegisteredAgent = {
   readonly id: string;
   readonly name: string;
+  readonly projectId: string;
 };
 
 export type RegisteredConnection = {
@@ -120,8 +121,16 @@ function errorCode(error: unknown): string {
     : "";
 }
 
-function cleanAgent(agent: { readonly id: string; readonly name: string }): RegisteredAgent {
-  return { id: platformText(agent.id), name: platformText(agent.name) };
+function cleanAgent(agent: {
+  readonly id: string;
+  readonly name: string;
+  readonly projectId: string;
+}): RegisteredAgent {
+  return {
+    id: platformText(agent.id),
+    name: platformText(agent.name),
+    projectId: platformText(agent.projectId),
+  };
 }
 
 function cleanConnection(connection: AnsweredConnection): RegisteredConnection {

@@ -1,10 +1,4 @@
-/**
- * Tests stored on the selected Egma platform.
- *
- * The generated client owns the HTTP contract. This module keeps repository
- * sync behavior: versions are pinned, identity and content conflicts stay
- * separate, and the committed file shape is translated at one boundary.
- */
+/** The platform adapter for versioned tests with immutable suite ownership. */
 
 import {
   createTest as createTestRequest,
@@ -12,10 +6,20 @@ import {
   getTestVersion as getTestVersionRequest,
   listTests as listTestsRequest,
   updateTest as updateTestRequest,
-  type CreateTestData,
   type GetTestResponse,
   type GetTestVersionResponse,
 } from "@egma/platform-api/client";
+
+type CreateTestParameters = Parameters<typeof createTestRequest>[0];
+type TestMockTool = NonNullable<CreateTestParameters["mockTools"]>[number];
+type TestWriteParameters = {
+  readonly name: string;
+  readonly description: string;
+  readonly scenario: string;
+  readonly expectedBehaviors: string[];
+  readonly personas: string[];
+  readonly mockTools: TestMockTool[];
+};
 
 import type { MockToolEntry } from "../folder/mock-tools.ts";
 import type { ExpectedBehavior, FilePersona } from "../folder/test-file.ts";
@@ -34,23 +38,23 @@ export type PlatformContent = {
   readonly scenario: string;
   readonly expectedBehaviors: readonly ExpectedBehavior[];
   readonly personas: readonly FilePersona[];
-  readonly requiredCapabilities: readonly string[];
   readonly mockTools: readonly MockToolEntry[];
 };
 
 export type PlatformTest = PlatformContent & {
   readonly id: string;
+  readonly suiteId: string;
   readonly name: string;
   readonly description: string;
   readonly versionId: string;
   readonly version: number;
   readonly revision: string;
-  readonly agentIds: readonly string[];
 };
 
 export type PlatformTestVersion = PlatformContent & {
   readonly id: string;
   readonly testId: string;
+  readonly suiteId: string;
   readonly testName: string;
   readonly version: number;
   readonly current: boolean;
@@ -59,80 +63,90 @@ export type PlatformTestVersion = PlatformContent & {
 export type WriteAnswer =
   | { readonly kind: "written"; readonly test: PlatformTest }
   | {
-      readonly kind: "moved";
+      readonly kind: "version-conflict";
       readonly testName: string;
       readonly currentVersionId: string;
     }
-  | { readonly kind: "identity-moved"; readonly reason: string }
-  | { readonly kind: "not-applicable"; readonly reason: string }
+  | { readonly kind: "identity-conflict"; readonly reason: string }
   | { readonly kind: "turned-away"; readonly reason: string };
 
-type TestBody = GetTestResponse;
+function personasIn(value: GetTestResponse["personas"]): readonly FilePersona[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
+    const id = platformText(entry.id);
+    const name = platformText(entry.name);
+    return id === "" && name === "" ? [] : [{ id, name }];
+  });
+}
 
-function contentFrom(body: {
-  readonly scenario: string;
-  readonly expectedBehaviors: readonly string[];
-  readonly personas: readonly { readonly id: string; readonly name: string }[];
-  readonly requiredCapabilities: readonly string[];
-  readonly mockTools: readonly {
-    readonly tool: string;
-    readonly answer?: unknown;
-    readonly error?: unknown;
-    readonly delayMs: number;
-  }[];
-}): PlatformContent {
+function behaviorsIn(
+  value: GetTestResponse["expectedBehaviors"],
+): readonly ExpectedBehavior[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(platformText).filter((entry) => entry !== "");
+}
+
+function mockToolsIn(value: GetTestResponse["mockTools"]): readonly MockToolEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    typeof entry === "object" && entry !== null && !Array.isArray(entry)
+      ? [
+          overrideFrom({
+            tool: platformText(entry.tool),
+            ...("error" in entry
+              ? { error: entry.error }
+              : { answer: entry.answer }),
+            delayMs: typeof entry.delayMs === "number" ? entry.delayMs : 0,
+          }),
+        ]
+      : [],
+  );
+}
+
+function contentFrom(body: GetTestResponse | GetTestVersionResponse): PlatformContent {
   return {
     scenario: platformText(body.scenario),
-    expectedBehaviors: body.expectedBehaviors
-      .map(platformText)
-      .filter((behavior) => behavior !== ""),
-    personas: body.personas
-      .map((persona) => ({
-        id: platformText(persona.id),
-        name: platformText(persona.name),
-      }))
-      .filter((persona) => persona.id !== "" || persona.name !== ""),
-    requiredCapabilities: body.requiredCapabilities
-      .map(platformText)
-      .filter((capability) => capability !== ""),
-    mockTools: body.mockTools.map(overrideFrom),
+    expectedBehaviors: behaviorsIn(body.expectedBehaviors),
+    personas: personasIn(body.personas),
+    mockTools: mockToolsIn(body.mockTools),
   };
 }
 
-function testFrom(body: TestBody): PlatformTest {
-  return {
-    ...contentFrom(body),
-    id: platformText(body.id),
-    name: platformText(body.name),
-    description: body.description === null ? "" : platformText(body.description),
-    versionId: platformText(body.versionId),
-    version: body.version,
-    revision: platformText(body.revision),
-    agentIds: body.agents
-      .map((agent) => platformText(agent.id))
-      .filter((id) => id !== ""),
+export function platformTestFrom(value: GetTestResponse): PlatformTest | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const test: PlatformTest = {
+    ...contentFrom(value),
+    id: platformText(value.id),
+    suiteId: platformText(value.suiteId),
+    name: platformText(value.name),
+    description: platformText(value.description),
+    versionId: platformText(value.versionId),
+    version: typeof value.version === "number" ? value.version : 0,
+    revision: platformText(value.revision),
   };
+  return test.id === "" || test.suiteId === "" || test.versionId === "" ? null : test;
 }
 
 export type ListOptions = {
-  readonly agentId?: string | null;
+  readonly projectId: string;
+  readonly suiteId: string;
   readonly fetchImpl?: Fetch;
 };
 
-/** Everything the credential reaches, newest first, following every page. */
+/** Walk the complete project or suite list through bounded platform pages. */
 export async function listTests(
   signedIn: SignedIn,
-  options: ListOptions = {},
+  options: ListOptions,
 ): Promise<readonly PlatformTest[]> {
-  const { agentId = null, fetchImpl } = options;
   const found: PlatformTest[] = [];
-  const client = platformClient(signedIn, fetchImpl);
+  const client = platformClient(signedIn, options.fetchImpl);
   let pageToken: string | undefined;
-
   for (;;) {
     const answer = await listTestsRequest(
       {
-        ...(agentId === null || agentId === "" ? {} : { agentId }),
+        projectId: options.projectId,
+        suiteId: options.suiteId,
         ...(pageToken === undefined ? {} : { pageToken }),
       },
       { client },
@@ -144,20 +158,27 @@ export async function listTests(
         platformRefusalMessage(answer.error, response.status),
       );
     }
-    found.push(...(answer.data?.tests ?? []).map(testFrom));
-
+    for (const entry of answer.data?.tests ?? []) {
+      const test = platformTestFrom(entry);
+      if (test === null) {
+        throw new PlatformRefusedError(
+          response.status,
+          "Egma answered with a test this CLI cannot read. Check that this Egma platform is up to date.",
+        );
+      }
+      found.push(test);
+    }
     const next = answer.data?.nextPageToken ?? null;
     if (next === null || next === "") return found;
     pageToken = next;
   }
 }
 
-/** One test by its own id, whatever state it is in. */
 export async function getTest(
   signedIn: SignedIn,
   testId: string,
   fetchImpl?: Fetch,
-): Promise<{ readonly test: PlatformTest; readonly archived: boolean } | null> {
+): Promise<PlatformTest | null> {
   const answer = await getTestRequest(
     { testId },
     { client: platformClient(signedIn, fetchImpl) },
@@ -170,13 +191,16 @@ export async function getTest(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-  return {
-    test: testFrom(answer.data),
-    archived: answer.data.archivedAt !== null,
-  };
+  const test = platformTestFrom(answer.data);
+  if (test === null) {
+    throw new PlatformRefusedError(
+      response.status,
+      "Egma answered with a test this CLI cannot read. Check that this Egma platform is up to date.",
+    );
+  }
+  return test;
 }
 
-/** One frozen test version by its own id. */
 export async function getTestVersion(
   signedIn: SignedIn,
   versionId: string,
@@ -194,16 +218,19 @@ export async function getTestVersion(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-
   const body: GetTestVersionResponse = answer.data;
-  return {
+  const version: PlatformTestVersion = {
     ...contentFrom(body),
     id: platformText(body.id),
     testId: platformText(body.testId),
+    suiteId: platformText(body.suiteId),
     testName: platformText(body.testName),
-    version: body.version,
-    current: body.current,
+    version: typeof body.version === "number" ? body.version : 0,
+    current: body.current === true,
   };
+  return version.id === "" || version.testId === "" || version.suiteId === ""
+    ? null
+    : version;
 }
 
 export type TestInput = PlatformContent & {
@@ -212,38 +239,29 @@ export type TestInput = PlatformContent & {
 };
 
 export type CreateInput = TestInput & {
-  readonly agentId: string | null;
+  readonly suiteId: string;
 };
 
 function personaFor(persona: FilePersona): string {
   return persona.id.trim() === "" ? persona.name : persona.id;
 }
 
-type TestMockToolInput = NonNullable<CreateTestData["body"]["mockTools"]>[number];
-
-function mockToolForApi(entry: MockToolEntry): TestMockToolInput {
-  const { delay_ms: delayMs, error, ...says } = entry.says;
-  // A repository file is deliberately read before it is trusted. Keep every
-  // value so the platform can return its authoritative refusal for both,
-  // neither, or an unknown key; the normal generated-client type stays strict
-  // for callers that are not relaying an untrusted file.
-  return {
-    ...says,
-    tool: entry.tool,
-    ...(error === undefined ? {} : { error: platformText(error) }),
-    ...(typeof delayMs === "number" ? { delayMs } : {}),
-  } as unknown as TestMockToolInput;
-}
-
-function writeParameters(input: TestInput) {
+/** The exact authored test body shared by direct and atomic write adapters. */
+export function testWriteBody(input: TestInput): TestWriteParameters {
   return {
     name: input.name,
     description: input.description,
     scenario: input.scenario,
     expectedBehaviors: [...input.expectedBehaviors],
     personas: input.personas.map(personaFor),
-    requiredCapabilities: [...input.requiredCapabilities],
-    mockTools: input.mockTools.map(mockToolForApi),
+    mockTools: input.mockTools.map((entry): TestMockTool => {
+      const { delay_ms: delayMs, ...says } = entry.says;
+      return {
+        ...says,
+        tool: entry.tool,
+        ...(typeof delayMs === "number" ? { delayMs } : {}),
+      } as TestMockTool;
+    }),
   };
 }
 
@@ -259,22 +277,15 @@ function answerFor(
 ): WriteAnswer | null {
   const response = platformResponse(answer, signedIn.url);
   if (response.status === 409) {
-    const code = platformText(fieldIn(answer.error, "error"));
-    if (code === "identity_conflict") {
+    if (platformText(fieldIn(answer.error, "error")) === "identity_conflict") {
       return {
-        kind: "identity-moved",
-        reason: platformRefusalMessage(answer.error, response.status),
-      };
-    }
-    if (code === "repository_agent_not_applicable") {
-      return {
-        kind: "not-applicable",
+        kind: "identity-conflict",
         reason: platformRefusalMessage(answer.error, response.status),
       };
     }
     const test = fieldIn(answer.error, "test");
     return {
-      kind: "moved",
+      kind: "version-conflict",
       testName:
         typeof test === "object" && test !== null && "name" in test
           ? platformText(test.name)
@@ -282,12 +293,13 @@ function answerFor(
       currentVersionId: platformText(fieldIn(answer.error, "currentVersionId")),
     };
   }
-  return response.status === 422
-    ? {
-        kind: "turned-away",
-        reason: platformRefusalMessage(answer.error, response.status),
-      }
-    : null;
+  if (response.status === 422) {
+    return {
+      kind: "turned-away",
+      reason: platformRefusalMessage(answer.error, response.status),
+    };
+  }
+  return null;
 }
 
 export async function createTest(
@@ -296,13 +308,9 @@ export async function createTest(
   fetchImpl?: Fetch,
 ): Promise<WriteAnswer> {
   const answer = await createTestRequest(
-    {
-      ...writeParameters(input),
-      ...(input.agentId === null ? {} : { agents: [input.agentId] }),
-    },
+    { suiteId: input.suiteId, ...testWriteBody(input) },
     { client: platformClient(signedIn, fetchImpl) },
   );
-
   const expected = answerFor(answer, signedIn);
   if (expected !== null) return expected;
   const response = platformResponse(answer, signedIn.url);
@@ -312,16 +320,18 @@ export async function createTest(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-  return { kind: "written", test: testFrom(answer.data) };
+  const test = platformTestFrom(answer.data);
+  if (test === null) {
+    throw new PlatformRefusedError(response.status, "Egma wrote a test but did not answer with it.");
+  }
+  return { kind: "written", test };
 }
 
 export type EditExpectations = {
   readonly versionId: string;
   readonly revision: string;
-  readonly agentId: string | null;
 };
 
-/** Edit one test against the content and identity pins in the file. */
 export async function editTest(
   signedIn: SignedIn,
   testId: string,
@@ -332,18 +342,14 @@ export async function editTest(
   const answer = await updateTestRequest(
     {
       testId,
-      ...writeParameters(input),
+      ...testWriteBody(input),
       expectedVersionId: expectations.versionId,
       ...(expectations.revision === ""
         ? {}
         : { expectedRevision: expectations.revision }),
-      ...(expectations.agentId === null || expectations.agentId === ""
-        ? {}
-        : { repositoryAgentId: expectations.agentId }),
     },
     { client: platformClient(signedIn, fetchImpl) },
   );
-
   const expected = answerFor(answer, signedIn);
   if (expected !== null) return expected;
   const response = platformResponse(answer, signedIn.url);
@@ -353,5 +359,9 @@ export async function editTest(
       platformRefusalMessage(answer.error, response.status),
     );
   }
-  return { kind: "written", test: testFrom(answer.data) };
+  const test = platformTestFrom(answer.data);
+  if (test === null) {
+    throw new PlatformRefusedError(response.status, "Egma wrote a test but did not answer with it.");
+  }
+  return { kind: "written", test };
 }

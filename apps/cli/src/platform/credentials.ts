@@ -20,6 +20,7 @@ import {
   folderPathsIn,
   platformOwnedIds,
   readConfig,
+  readRepository,
   teachingTheMove,
   type FolderConfig,
   type PlatformBinding,
@@ -487,7 +488,7 @@ export class UnboundPlatformIdentifiersError extends Error {
   constructor(held: readonly string[]) {
     super(
       teachingTheMove(
-        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — under ${held.join(", ")} in egma/config.yaml. Egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and connect again on whichever platform you name next. Nothing was sent.`,
+        `This repository names no Egma platform, and it still holds identifiers that only the platform which issued them can resolve — ${held.join(", ")}. Egma will not send them anywhere, because the line that said which platform they came from is the one that is gone. Two ways on: put the platform: block back in egma/config.yaml, which is committed and so is in this repository's history, or delete the identifiers below and connect again on whichever platform you name next. Nothing was sent.`,
       ),
     );
     this.name = "UnboundPlatformIdentifiersError";
@@ -498,7 +499,7 @@ export class UnboundPlatformIdentifiersError extends Error {
 export class RepositoryPlatformConfigError extends Error {
   constructor(cause: unknown) {
     super(
-      "Egma could not read this repository's egma/config.yaml, so it did not select a platform. Fix that file and run this again. Egma did not fall back to its own platform.",
+      "Egma could not read this repository's complete egma folder, so it did not select a platform. Fix the repository contract and run this again. Egma did not fall back to its own platform.",
       { cause },
     );
     this.name = "RepositoryPlatformConfigError";
@@ -513,9 +514,20 @@ export class RepositoryPlatformConfigError extends Error {
  * question: which platform it names, and — when it names none — whether it is
  * still holding identifiers that belong to one.
  */
-async function committedIn(repository: string): Promise<FolderConfig | null> {
+type CommittedRepository = {
+  readonly config: FolderConfig;
+  readonly suiteIds: readonly string[];
+};
+
+async function committedIn(repository: string): Promise<CommittedRepository | null> {
   try {
-    return await readConfig(folderPathsIn(repository).config);
+    const paths = folderPathsIn(repository);
+    const config = await readConfig(paths.config);
+    const complete = await readRepository(paths);
+    return {
+      config,
+      suiteIds: complete.suites.map((suite) => suite.manifest.id),
+    };
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new RepositoryPlatformConfigError(cause);
@@ -550,7 +562,7 @@ export async function choosePlatform(choice: {
 }): Promise<ChosenPlatform> {
   const credentialsFile = credentialsFileIn(choice.env);
   const committed = await committedIn(choice.cwd);
-  const binding = committed?.platform ?? null;
+  const binding = committed?.config.platform ?? null;
   const selected = selectPlatform({
     flag: choice.flag,
     binding: binding?.origin ?? null,
@@ -586,7 +598,7 @@ export async function choosePlatform(choice: {
   // `egma init`'s own output — a bare `platform:` line and three names —
   // working exactly as it did.
   if (binding === null && committed !== null) {
-    const held = platformOwnedIds(committed);
+    const held = platformOwnedIds(committed.config, committed.suiteIds);
     if (held.length > 0) throw new UnboundPlatformIdentifiersError(held);
   }
 

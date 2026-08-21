@@ -120,17 +120,14 @@ describe("the public skill source", () => {
   it("keeps the documented complete test in the shape the real parser reads", async () => {
     const docs = await readFile(path.join(CODE_ROOT, "docs", "cli", "test-files.mdx"), "utf8");
     const example = markdownExamples(docs).find(
-      (shown) => shown.includes("identity_revision:") && shown.includes("send_confirmation_sms"),
+      (shown) => shown.includes("identity_revision:"),
     );
     expect(example).toBeDefined();
 
     const test = parseTestFile(example ?? "", "docs/cli/test-files.mdx", "fallback");
-    expect(test.format).toBe(3);
-    expect(test.expectedBehaviors).toHaveLength(4);
-    expect(test.mockTools.map((tool) => tool.tool)).toEqual([
-      "check_availability",
-      "send_confirmation_sms",
-    ]);
+    expect(test.format).toBe(4);
+    expect(test.expectedBehaviors).toHaveLength(2);
+    expect(test.mockTools).toEqual([]);
   });
 });
 

@@ -85,6 +85,7 @@ describe("editing what a test checks", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       scenario: "Their cleaning is booked for Thursday and has to move.",
     });
 
@@ -129,6 +130,7 @@ describe("editing what a test checks", () => {
       "never states a price it was not given",
     ];
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       expectedBehaviors: sharper,
     });
 
@@ -144,6 +146,7 @@ describe("editing what a test checks", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       personaIds: [rita, nadia],
     });
 
@@ -166,6 +169,7 @@ describe("editing what a test checks", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       personaIds: [omar, nadia],
     });
 
@@ -184,6 +188,7 @@ describe("editing what a test checks", () => {
     const before = await rowCounts();
 
     const saved = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       scenario: rescheduling.scenario,
       expectedBehaviors: [...rescheduling.expectedBehaviors],
       personaIds: [rita, nadia],
@@ -201,9 +206,12 @@ describe("editing what a test checks", () => {
   it("numbers each edit after the last, and keeps every version fetchable by its tstv_ id", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
     const second = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       scenario: "They want the Tuesday slot instead.",
     });
+    if (second === undefined) throw new Error("no second version");
     const third = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: second.versionId,
       scenario: "They want the Wednesday slot instead.",
     });
 
@@ -215,7 +223,6 @@ describe("editing what a test checks", () => {
     expect(first?.version).toBe(1);
     expect(first?.scenario).toBe(rescheduling.scenario);
 
-    if (second?.versionId === undefined) throw new Error("no second version");
     const middle = await getTestVersion(actingAsAcme(), second.versionId);
     expect(middle?.version).toBe(2);
     expect(middle?.scenario).toBe("They want the Tuesday slot instead.");
@@ -230,10 +237,16 @@ describe("editing what a test checks", () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     await expect(
-      editTest(actingAsAcme(), created.id, { expectedBehaviors: [] }),
+      editTest(actingAsAcme(), created.id, {
+        expectedVersionId: created.versionId,
+        expectedBehaviors: [],
+      }),
     ).rejects.toThrow(/expected behavior/);
     await expect(
-      editTest(actingAsAcme(), created.id, { scenario: "   " }),
+      editTest(actingAsAcme(), created.id, {
+        expectedVersionId: created.versionId,
+        scenario: "   ",
+      }),
     ).rejects.toThrow(/scenario/);
 
     const fetched = await getTest(actingAsAcme(), created.id);
@@ -246,7 +259,10 @@ describe("editing what a test checks", () => {
     const before = await rowCounts();
 
     await expect(
-      editTest(actingAsAcme(), created.id, { personaIds: [newId("prs")] }),
+      editTest(actingAsAcme(), created.id, {
+        expectedVersionId: created.versionId,
+        personaIds: [newId("prs")],
+      }),
     ).rejects.toThrow(/no persona/);
 
     expect(await rowCounts()).toEqual(before);
@@ -257,6 +273,7 @@ describe("editing what a test checks", () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       scenario: "  They want a refund and have no receipt.  ",
       expectedBehaviors: ["  states the refund policy  "],
     });
@@ -272,6 +289,7 @@ describe("editing what a test checks", () => {
 
     await expect(
       editTest(actingAsAcme("viewer"), created.id, {
+        expectedVersionId: created.versionId,
         scenario: "Anything at all.",
       }),
     ).rejects.toThrow(NotPermittedError);
@@ -324,6 +342,7 @@ describe("renaming a test", () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       name: "Moves a booked appointment",
       scenario: "They want the Friday slot instead.",
     });
@@ -341,6 +360,7 @@ describe("an edit naming no persona", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       scenario: "They want the Monday slot instead.",
     });
 
@@ -369,6 +389,7 @@ describe("an edit naming no persona", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       personaIds: [],
     });
 
@@ -384,6 +405,7 @@ describe("an edit naming no persona", () => {
     const before = await rowCounts();
 
     const saved = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       personaIds: [],
     });
 
@@ -466,6 +488,7 @@ describe("tenancy", () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const stolen = await editTest(actingAsGlobex("admin"), created.id, {
+      expectedVersionId: created.versionId,
       name: "Globex's now",
       scenario: "Anything at all.",
     });
@@ -489,6 +512,7 @@ describe("tenancy", () => {
     ).toBeUndefined();
     expect(
       await editTest(inOutbound, created.id, {
+        expectedVersionId: created.versionId,
         scenario: "Outbound's scenario now.",
       }),
     ).toBeUndefined();
@@ -514,6 +538,7 @@ describe("tenancy", () => {
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const edited = await editTest(wholeCustomer, created.id, {
+      expectedVersionId: created.versionId,
       scenario: "They want the Sunday slot instead.",
     });
 

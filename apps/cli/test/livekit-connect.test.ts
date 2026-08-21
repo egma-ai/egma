@@ -191,10 +191,9 @@ describe("the token-endpoint shape", () => {
 describe("the server-owned connection form", () => {
   it("reads LiveKit's two variants instead of keeping a CLI field list", async () => {
     const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      const headers = _input instanceof Request
-        ? _input.headers
-        : new Headers(init?.headers);
-      expect(headers.get("authorization")).toBe("Bearer machine-key");
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        "Bearer machine-key",
+      );
       return new Response(
         JSON.stringify({
           items: [
@@ -208,7 +207,6 @@ describe("the server-owned connection form", () => {
               productLabel: "LiveKit project credentials",
               topology: "agent-dials-out",
               simulatorAdapter: true,
-              capabilityDiscovery: false,
               fields: [
                 {
                   key: "url",
@@ -241,7 +239,6 @@ describe("the server-owned connection form", () => {
               productLabel: "LiveKit token endpoint",
               topology: "agent-dials-out",
               simulatorAdapter: true,
-              capabilityDiscovery: false,
               fields: [],
               credentialRule: "required",
               credentialHelp: "Required auth headers.",
@@ -268,8 +265,7 @@ describe("the server-owned connection form", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    const requested = fetchImpl.mock.calls[0]?.[0];
-    expect(requested instanceof Request ? requested.url : String(requested)).toBe(
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
       "https://egma.example/v1/connection-options",
     );
     expect(result.kind).toBe("catalog");
@@ -284,7 +280,6 @@ describe("the server-owned connection form", () => {
       accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
       modality: "voice",
       simulatorAdapter: true,
-      capabilityDiscovery: false,
     });
     expect(livekit.map((variant) => variant.accessVariant)).toEqual([
       LIVEKIT_KEY_PAIR_VARIANT,

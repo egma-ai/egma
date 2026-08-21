@@ -5,7 +5,10 @@
  * egma/
  *   config.yaml     what this folder points at — names and ids
  *   mock-tools.md   what egma answers for the agent's tools with
- *   tests/          one markdown file per test
+ *   tests/          one direct directory per test suite
+ *     release/
+ *       suite.yaml  stable suite identity and current display name
+ *       *.md        the tests in that suite
  * ```
  *
  * Everything in it is committed. Nothing secret ever lands here — the key this
@@ -22,6 +25,7 @@
  * repository runs the same command as the first and loses nothing by it.
  */
 
+import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -35,24 +39,19 @@ import {
 import { normalizePlatformOrigin } from "../platform/url.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
 import { mappingAtKey, readYaml, textAt, yamlScalar } from "./yaml.ts";
+import {
+  isPortableSuiteDirectory,
+  isPortableTestFile,
+  MAX_PORTABLE_COMPONENT_LENGTH,
+} from "./portable-path.ts";
 
 export const FOLDER_NAME = "egma";
 export const CONFIG_FILE_NAME = "config.yaml";
 export const MOCK_TOOLS_FILE_NAME = "mock-tools.md";
 export const TESTS_FOLDER_NAME = "tests";
+export const SUITE_MANIFEST_FILE_NAME = "suite.yaml";
 /** Reserved for per-agent memory files. Nothing creates it. */
 export const MEMORY_FOLDER_NAME = "memory";
-
-/**
- * What this folder's first test suite is called when nobody has named one.
- *
- * Here rather than in the wizard, because both surfaces that fill this file in
- * write it and they have to write the same word: a repository connected by the
- * verb and a repository connected by the wizard are the same repository, and a
- * suite name that differed between them would be a difference a developer would
- * find later in a run label they did not choose.
- */
-export const DEFAULT_SUITE_NAME = "first-suite";
 
 /** Where each part of the folder is, once a repository root is known. */
 export type FolderPaths = {
@@ -97,20 +96,21 @@ export type PlatformBinding = {
  */
 export type FolderConfig = {
   readonly platform: PlatformBinding | null;
+  readonly project: NamedThing | null;
   readonly agent: NamedThing | null;
   readonly connection: NamedThing | null;
-  readonly suite: NamedThing | null;
 };
 
 export const EMPTY_CONFIG: FolderConfig = {
   platform: null,
+  project: null,
   agent: null,
   connection: null,
-  suite: null,
 };
 
-/** The three keys, in the order they are written and read. */
-const CONFIG_KEYS = ["agent", "connection", "suite"] as const;
+/** The resource keys, in the order they are written and read. */
+const CONFIG_KEYS = ["project", "agent", "connection"] as const;
+const ROOT_CONFIG_KEYS = ["platform", ...CONFIG_KEYS] as const;
 
 const CONFIG_HEADER = [
   "# What this folder points at on Egma.",
@@ -165,6 +165,14 @@ function committedOrigin(written: string): string {
 
 export function parseConfig(document: string, where: string): FolderConfig {
   const mapping = readYaml(document, where);
+  const unknown = Object.keys(mapping).filter(
+    (key) => !(ROOT_CONFIG_KEYS as readonly string[]).includes(key),
+  );
+  if (unknown.length > 0) {
+    throw new Error(
+      `${where} has unsupported ${unknown.length === 1 ? "key" : "keys"}: ${unknown.join(", ")}.`,
+    );
+  }
   const platformMapping = mappingAtKey(mapping, "platform");
   const platformScalar = textAt(mapping, "platform");
   const platform =
@@ -200,9 +208,9 @@ export function parseConfig(document: string, where: string): FolderConfig {
 
   return {
     platform,
+    project: read("project"),
     agent: read("agent"),
     connection: read("connection"),
-    suite: read("suite"),
   };
 }
 
@@ -226,69 +234,42 @@ export async function updateConfig(
   const held = await readConfig(file);
   const updated: FolderConfig = {
     platform: changes.platform === undefined ? held.platform : changes.platform,
+    project: changes.project === undefined ? held.project : changes.project,
     agent: changes.agent === undefined ? held.agent : changes.agent,
     connection: changes.connection === undefined ? held.connection : changes.connection,
-    suite: changes.suite === undefined ? held.suite : changes.suite,
   };
   await writeConfig(file, updated);
   return updated;
 }
 
 /**
- * Every line a developer deletes to move a repository to another platform, and
- * what moving costs them.
- *
- * No command performs this move, and none is planned: every line of it is in a
- * file they already commit, so the move is a diff their colleagues review like
- * any other. What egma owes them is the whole list at once — a refusal naming
- * one line at a time is a developer deleting it, running again, and meeting the
- * next refusal.
- *
- * It is a block of plain lines rather than a paragraph because a coding agent
- * reads this too, and it should be able to act on it without a person reading
- * the message out to it.
- *
- * **The platform block comes out last, and that order is the safety.** Deleting
- * it is what unbinds the repository, and an unbound repository falls back to
- * egma's own platform — so a list that named it first would have somebody
- * working top-down arrive, one line in, at a repository holding another
- * platform's identifiers and nothing left to keep them there. The next command
- * would carry them to hosted egma. Identifiers and version pins come out first
- * and the binding comes out last, so every partial application of this list
- * leaves the repository still bound, and ADR-0008's rule that resource
- * identifiers cannot silently cross platform boundaries holds at every step
- * rather than only at the end.
- */
-/**
  * Which committed names carry an identifier only one platform can resolve.
  *
- * These three are written by exactly two places — the `connect` verb and the
- * wizard's connect step — and **both of them bind the repository first**, at
- * the moment before anything is registered. So a folder holding one of these
- * and naming no platform is a shape egma never writes. It comes from a hand
- * edit, which makes it the half-applied move: the binding gone, the identifiers
- * still here, and the next command about to carry them to whichever platform
- * answers the built-in address.
- *
- * A version pin in a test file is deliberately not among them, and the reason
- * is that `push` writes pins and does not bind — so `egma init` followed by
- * `egma push` in a repository that names nothing leaves pins with no binding as
- * egma's own ordinary output. Refusing that shape would refuse the mainline it
- * was just written by.
+ * Config identities and suite manifest identities are issued by one platform.
+ * An unbound repository that still carries any of them is a half-applied move
+ * and must stop before a different platform is contacted.
  */
-export function platformOwnedIds(config: FolderConfig): readonly string[] {
-  return CONFIG_KEYS.filter((key) => {
-    const named = config[key];
-    return named !== null && named.id !== null && named.id !== "";
-  });
+export function platformOwnedIds(
+  config: FolderConfig,
+  suiteIds: readonly string[] = [],
+): readonly string[] {
+  return [
+    ...CONFIG_KEYS.filter((key) => {
+      const named = config[key];
+      return named !== null && named.id !== null && named.id !== "";
+    }).map((key) => `${key} in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`),
+    ...suiteIds.map((id) => `suite ${id} in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/*/${SUITE_MANIFEST_FILE_NAME}`),
+  ];
 }
 
+/** The ordered, reviewable local repair for an intentional platform move. */
 export const MOVE_TO_ANOTHER_PLATFORM: readonly string[] = [
   "To move this repository to another platform, delete these in this order and run egma again:",
   `  - the id: line under agent: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
   `  - the id: line under connection: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
-  `  - the id: line under suite: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
-  `  - the version: line at the top of every file in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/`,
+  `  - the id: line under project: in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
+  `  - every id: line in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/*/${SUITE_MANIFEST_FILE_NAME}`,
+  `  - the version: line at the top of every file in ${FOLDER_NAME}/${TESTS_FOLDER_NAME}/*/`,
   `  - last of all, the whole platform: block in ${FOLDER_NAME}/${CONFIG_FILE_NAME}`,
   "Delete the platform block last: it is what keeps every id above it on the platform that issued it, so until it is gone nothing can leave for another one.",
   "Keep every name. Your tests move with you and are created again on the new platform; the runs you have already done stay on the platform that ran them, because a run's numbers only mean anything against the versions that platform minted.",
@@ -427,8 +408,9 @@ export async function readMockToolsFile(
   let document: string;
   try {
     document = await readFile(file, "utf8");
-  } catch {
-    return [];
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw cause;
   }
   return parseMockToolsFile(document, `${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}`);
 }
@@ -508,12 +490,82 @@ export async function createEgmaFolder(
   return { paths, created: !already, config: await readConfig(paths.config) };
 }
 
-/** One test file on disk: where it is, and what it says. */
+/** The stable identity and mutable display name kept in one suite directory. */
+export type SuiteManifest = {
+  readonly id: string;
+  readonly name: string;
+};
+
+const SUITE_ID = /^ste_[0-9A-HJKMNP-TV-Z]{26}$/u;
+const SUITE_MANIFEST_KEYS = ["id", "name"] as const;
+
+export function serializeSuiteManifest(manifest: SuiteManifest): string {
+  return `id: ${yamlScalar(manifest.id)}\nname: ${yamlScalar(manifest.name)}\n`;
+}
+
+export function parseSuiteManifest(
+  document: string,
+  where: string,
+): SuiteManifest {
+  const mapping = readYaml(document, where);
+  const keys = Object.keys(mapping);
+  const unknown = keys.filter(
+    (key) => !(SUITE_MANIFEST_KEYS as readonly string[]).includes(key),
+  );
+  const missing = SUITE_MANIFEST_KEYS.filter((key) => !keys.includes(key));
+  if (unknown.length > 0 || missing.length > 0 || keys.length !== 2) {
+    const details = [
+      ...(missing.length === 0 ? [] : [`missing ${missing.join(", ")}`]),
+      ...(unknown.length === 0 ? [] : [`unsupported ${unknown.join(", ")}`]),
+    ].join("; ");
+    throw new Error(
+      `${where} must contain exactly id and name${details === "" ? "" : ` (${details})`}.`,
+    );
+  }
+  const id = textAt(mapping, "id");
+  const writtenName = mapping["name"];
+  const name = typeof writtenName === "string" ? writtenName : null;
+  if (id === null || !SUITE_ID.test(id)) {
+    throw new Error(
+      `${where} has an invalid suite id. Expected ste_ followed by 26 Crockford base32 characters.`,
+    );
+  }
+  if (name === null) {
+    throw new Error(`${where} has a non-string suite name.`);
+  }
+  if (name.trim() === "") {
+    throw new Error(`${where} has a blank suite name.`);
+  }
+  if (name !== name.trim()) {
+    throw new Error(`${where} has outer whitespace in its suite name.`);
+  }
+  return { id, name };
+}
+
+export async function writeSuiteManifest(
+  file: string,
+  manifest: SuiteManifest,
+): Promise<{ readonly changed: boolean }> {
+  const document = serializeSuiteManifest(manifest);
+  let held: string | null = null;
+  try {
+    held = await readFile(file, "utf8");
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+  }
+  if (held === document) return { changed: false };
+  await writeFile(file, document, "utf8");
+  return { changed: true };
+}
+
+/** One test file on disk: where it is, which suite owns it, and what it says. */
 export type FolderTest = {
   /** Absolute. */
   readonly file: string;
   /** As `egma/tests/…` reads in a report, so output is the same everywhere. */
   readonly shown: string;
+  readonly suiteId: string;
+  readonly suiteDirectory: string;
   readonly test: TestFile;
 };
 
@@ -543,51 +595,189 @@ export type FolderContents = {
   readonly unreadable: readonly UnreadableTest[];
 };
 
-/**
- * Everything in the folder, in file-name order so that two runs of the same
- * command report the same thing in the same order.
- *
- * Nothing here throws on one file. A folder is read at the end of a long run —
- * after a coding agent has spent two minutes writing into it — and an exception
- * at that moment loses every good file along with the bad one.
- */
-export async function readFolder(paths: FolderPaths): Promise<FolderContents> {
-  let names: string[];
-  try {
-    names = await readdir(paths.tests);
-  } catch {
-    return { found: [], unreadable: [] };
-  }
+/** One complete direct child of `egma/tests`. */
+export type FolderSuite = {
+  readonly directory: string;
+  readonly root: string;
+  readonly manifestFile: string;
+  readonly manifest: SuiteManifest;
+  readonly tests: readonly FolderTest[];
+};
 
-  const found: FolderTest[] = [];
-  const unreadable: UnreadableTest[] = [];
-  for (const name of names.filter((entry) => entry.endsWith(".md")).sort()) {
-    const file = path.join(paths.tests, name);
-    const shown = `${FOLDER_NAME}/${TESTS_FOLDER_NAME}/${name}`;
-    try {
-      const document = await readFile(file, "utf8");
-      found.push({
-        file,
-        shown,
-        test: parseTestFile(document, name, name.replace(/\.md$/u, "")),
-      });
-    } catch (problem) {
-      unreadable.push({
-        file,
-        shown,
-        reason: problem instanceof Error ? problem.message : String(problem),
-      });
-    }
+/** One complete validated repository value. */
+export type RepositoryContents = {
+  readonly config: FolderConfig;
+  readonly mockTools: readonly MockToolEntry[];
+  readonly suites: readonly FolderSuite[];
+};
+
+export class RepositoryValidationError extends Error {
+  public readonly issues: readonly string[];
+
+  public constructor(issues: readonly string[]) {
+    super(
+      [
+        "The Egma repository is invalid:",
+        ...issues.map((issue) => `- ${issue}`),
+        "No platform write was made.",
+      ].join("\n"),
+    );
+    this.name = "RepositoryValidationError";
+    this.issues = issues;
   }
-  return { found, unreadable };
+}
+
+function reasonOf(problem: unknown): string {
+  return problem instanceof Error ? problem.message : String(problem);
+}
+
+function shown(...parts: readonly string[]): string {
+  return path.posix.join(FOLDER_NAME, TESTS_FOLDER_NAME, ...parts);
 }
 
 /**
- * Every test file in the folder. The files that are not a test are left out,
- * and a caller that has to name them reads the folder itself.
+ * Parse the repository as one value before a command takes any side effect.
+ *
+ * The directory name is never identity. Only `suite.yaml.id` joins this local
+ * path to a platform suite, so renaming an existing directory changes no
+ * product data and a pull never needs to move it back.
  */
-export async function readFolderTests(paths: FolderPaths): Promise<readonly FolderTest[]> {
-  return (await readFolder(paths)).found;
+export async function readRepository(paths: FolderPaths): Promise<RepositoryContents> {
+  const issues: string[] = [];
+  let config: FolderConfig = EMPTY_CONFIG;
+  let mockTools: readonly MockToolEntry[] = [];
+
+  try {
+    config = await readConfig(paths.config);
+  } catch (problem) {
+    issues.push(`${FOLDER_NAME}/${CONFIG_FILE_NAME}: ${reasonOf(problem)}`);
+  }
+  try {
+    mockTools = await readMockToolsFile(paths.mockTools);
+  } catch (problem) {
+    issues.push(`${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}: ${reasonOf(problem)}`);
+  }
+
+  let entries: Dirent[] = [];
+  try {
+    entries = await readdir(paths.tests, { withFileTypes: true });
+  } catch (problem) {
+    issues.push(`${FOLDER_NAME}/${TESTS_FOLDER_NAME}: ${reasonOf(problem)}`);
+  }
+
+  const suites: FolderSuite[] = [];
+  const suitePathByFold = new Map<string, string>();
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const suiteRoot = path.join(paths.tests, entry.name);
+    const foldedSuitePath = entry.name.normalize("NFKC").toLowerCase();
+    const firstSuitePath = suitePathByFold.get(foldedSuitePath);
+    if (firstSuitePath !== undefined) {
+      issues.push(`${shown(entry.name)} collides with ${shown(firstSuitePath)} on a case-insensitive file system.`);
+      continue;
+    }
+    suitePathByFold.set(foldedSuitePath, entry.name);
+    if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      issues.push(`${shown(entry.name)} must be a direct suite directory.`);
+      continue;
+    }
+    if (!isPortableSuiteDirectory(entry.name)) {
+      issues.push(`${shown(entry.name)} is not a portable suite directory. Use at most ${String(MAX_PORTABLE_COMPONENT_LENGTH)} lower-case letters, numbers, and hyphens, and do not use a Windows device name.`);
+    }
+
+    const manifestFile = path.join(suiteRoot, SUITE_MANIFEST_FILE_NAME);
+    let manifest: SuiteManifest | null = null;
+    try {
+      manifest = parseSuiteManifest(
+        await readFile(manifestFile, "utf8"),
+        shown(entry.name, SUITE_MANIFEST_FILE_NAME),
+      );
+    } catch (problem) {
+      issues.push(
+        `${shown(entry.name, SUITE_MANIFEST_FILE_NAME)}: ${reasonOf(problem)}`,
+      );
+    }
+
+    let children: Dirent[] = [];
+    try {
+      children = await readdir(suiteRoot, { withFileTypes: true });
+    } catch (problem) {
+      issues.push(`${shown(entry.name)}: ${reasonOf(problem)}`);
+    }
+
+    const tests: FolderTest[] = [];
+    const testPathByFold = new Map<string, string>();
+    for (const child of children.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (child.name === SUITE_MANIFEST_FILE_NAME && child.isFile()) continue;
+      const foldedTestPath = child.name.normalize("NFKC").toLowerCase();
+      const firstTestPath = testPathByFold.get(foldedTestPath);
+      if (firstTestPath !== undefined) {
+        issues.push(`${shown(entry.name, child.name)} collides with ${shown(entry.name, firstTestPath)} on a case-insensitive file system.`);
+        continue;
+      }
+      testPathByFold.set(foldedTestPath, child.name);
+      if (!child.isFile() || child.isSymbolicLink() || !child.name.endsWith(".md")) {
+        issues.push(
+          `${shown(entry.name, child.name)} is not a direct Markdown test or ${SUITE_MANIFEST_FILE_NAME}.`,
+        );
+        continue;
+      }
+      if (!isPortableTestFile(child.name)) {
+        issues.push(`${shown(entry.name, child.name)} is not a portable test file. Use at most ${String(MAX_PORTABLE_COMPONENT_LENGTH)} lower-case letters, numbers, and hyphens including .md, and do not use a Windows device name.`);
+        continue;
+      }
+      if (manifest === null) continue;
+      const file = path.join(suiteRoot, child.name);
+      try {
+        const document = await readFile(file, "utf8");
+        tests.push({
+          file,
+          shown: shown(entry.name, child.name),
+          suiteId: manifest.id,
+          suiteDirectory: entry.name,
+          test: parseTestFile(document, shown(entry.name, child.name), child.name.replace(/\.md$/u, "")),
+        });
+      } catch (problem) {
+        issues.push(`${shown(entry.name, child.name)}: ${reasonOf(problem)}`);
+      }
+    }
+
+    if (manifest !== null) {
+      suites.push({
+        directory: entry.name,
+        root: suiteRoot,
+        manifestFile,
+        manifest,
+        tests,
+      });
+    }
+  }
+
+  const directoryBySuite = new Map<string, string>();
+  for (const suite of suites) {
+    const first = directoryBySuite.get(suite.manifest.id);
+    if (first !== undefined) {
+      issues.push(
+        `suite id ${suite.manifest.id} is used by both ${shown(first)} and ${shown(suite.directory)}.`,
+      );
+    } else {
+      directoryBySuite.set(suite.manifest.id, suite.directory);
+    }
+  }
+
+  const fileByVersion = new Map<string, string>();
+  for (const test of suites.flatMap((suite) => suite.tests)) {
+    const version = test.test.version;
+    if (version === null || version === "") continue;
+    const first = fileByVersion.get(version);
+    if (first !== undefined) {
+      issues.push(`test version ${version} is used by both ${first} and ${test.shown}.`);
+    } else {
+      fileByVersion.set(version, test.shown);
+    }
+  }
+
+  if (issues.length > 0) throw new RepositoryValidationError(issues);
+  return { config, mockTools, suites };
 }
 
 /**

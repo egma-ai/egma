@@ -102,7 +102,9 @@ describe("the egma command", () => {
     for (const verb of ["egma login", "egma connect", "egma init", "egma pull", "egma push"]) {
       expect(help.stdout, verb).toContain(verb);
     }
-    expect(help.stdout).toContain("egma run [options]");
+    expect(help.stdout).toContain("egma run <suite-directory> [options]");
+    expect(help.stdout).toContain("egma suite create <directory> --name <name>");
+    expect(help.stdout).not.toContain("--suite");
     expect(help.stdout).toContain("--no-follow");
     expect(help.stdout).toContain("What egma run answers with:");
     expect(help.stdout).toContain("egma self-host setup");

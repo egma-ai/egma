@@ -2,7 +2,7 @@
  * The project's mock tools on the platform.
  *
  * The generated client owns paths, verbs, and wire field names. This module
- * only translates between the platform contract and the committed Markdown
+ * only translates between the generated API client and the committed Markdown
  * format, where `delay_ms` remains file syntax.
  */
 

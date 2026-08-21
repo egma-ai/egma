@@ -9,43 +9,6 @@ import {
   stringIdSchema,
 } from "../schemas.ts";
 
-const capabilityKey = {
-  type: "string",
-  enum: ["dtmf", "barge_in", "raw_audio"],
-} as const;
-
-const capabilities = {
-  type: "object",
-  properties: {
-    state: { type: "string", enum: ["unknown", "known"] },
-    measured: nullable(arrayOf(capabilityKey)),
-    supported: nullable(arrayOf(capabilityKey)),
-    checkedAt: nullable(dateTimeSchema),
-    source: nullable({ type: "string" }),
-    standing: {
-      type: "object",
-      properties: {
-        dtmf: {
-          type: "string",
-          enum: ["supported", "unsupported", "not_measured"],
-        },
-        barge_in: {
-          type: "string",
-          enum: ["supported", "unsupported", "not_measured"],
-        },
-        raw_audio: {
-          type: "string",
-          enum: ["supported", "unsupported", "not_measured"],
-        },
-      },
-      required: ["dtmf", "barge_in", "raw_audio"],
-      additionalProperties: false,
-    },
-  },
-  required: ["state", "measured", "supported", "checkedAt", "source", "standing"],
-  additionalProperties: false,
-} as const;
-
 const agent = {
   type: "object",
   properties: {
@@ -107,7 +70,6 @@ const connection = {
     config: { type: "object", additionalProperties: { type: "string" } },
     credentialPresent: { type: "boolean" },
     credentialsHint: nullable({ type: "string" }),
-    capabilities,
     revision: stringIdSchema,
     archived: { type: "boolean" },
     archivedAt: nullable(dateTimeSchema),
@@ -129,7 +91,6 @@ const connection = {
     "config",
     "credentialPresent",
     "credentialsHint",
-    "capabilities",
     "revision",
     "archived",
     "archivedAt",
@@ -373,7 +334,6 @@ export const agentOperations = {
                   enum: ["agent-dials-out", "hosted-broker", "egma-dials-in"],
                 },
                 simulatorAdapter: { type: "boolean" },
-                capabilityDiscovery: { type: "boolean" },
                 fields: arrayOf({
                   type: "object",
                   properties: {
@@ -415,45 +375,11 @@ export const agentOperations = {
                 "productLabel",
                 "topology",
                 "simulatorAdapter",
-                "capabilityDiscovery",
                 "fields",
                 "credentialRule",
                 "credentialHelp",
                 "credentialFields",
               ],
-              additionalProperties: false,
-            }),
-          },
-          required: ["items"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
-
-  listCapabilities: defineOperation({
-    operationId: "listCapabilities",
-    method: "GET",
-    path: "/v1/capabilities",
-    summary: "List agent capabilities",
-    tag: "Agents",
-    security: "credentialed",
-    responses: {
-      200: {
-        description: "The server-owned capability catalog.",
-        schema: {
-          type: "object",
-          properties: {
-            items: arrayOf({
-              type: "object",
-              properties: {
-                key: capabilityKey,
-                label: { type: "string" },
-                description: { type: "string" },
-              },
-              required: ["key", "label", "description"],
               additionalProperties: false,
             }),
           },
@@ -643,9 +569,9 @@ export const agentOperations = {
           properties: {
             agent,
             archivedConnections: arrayOf(stringIdSchema),
-            canceledRuns: arrayOf(stringIdSchema),
+            canceledRunCount: { type: "integer", minimum: 0 },
           },
-          required: ["agent", "archivedConnections", "canceledRuns"],
+          required: ["agent", "archivedConnections", "canceledRunCount"],
           additionalProperties: false,
         },
       },
@@ -749,9 +675,9 @@ export const agentOperations = {
           type: "object",
           properties: {
             connection,
-            canceledRuns: arrayOf(stringIdSchema),
+            canceledRunCount: { type: "integer", minimum: 0 },
           },
-          required: ["connection", "canceledRuns"],
+          required: ["connection", "canceledRunCount"],
           additionalProperties: false,
         },
       },
@@ -804,18 +730,4 @@ export const agentOperations = {
     },
   }),
 
-  refreshConnectionCapabilities: defineOperation({
-    operationId: "refreshConnectionCapabilities",
-    method: "POST",
-    path: "/v1/agents/{agentId}/connections/{connectionId}/capabilities/refresh",
-    summary: "Refresh connection capabilities",
-    tag: "Connections",
-    security: "credentialed",
-    request: { params: connectionParams, query: projectQuery },
-    responses: {
-      200: { description: "The refreshed connection.", schema: connectionEnvelope },
-      ...mutatingRefusals,
-      502: refusalResponse,
-    },
-  }),
 } as const;

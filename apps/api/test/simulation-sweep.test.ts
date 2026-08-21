@@ -81,13 +81,21 @@ async function anOrphan(
     },
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+  const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
 
   await createPersona(contextFor(ada, "member"), {
     name: "Impatient Rita",
     traits: NEUTRAL_TRAITS,
   });
+  const suite = await ask(api.app, "POST", "/v1/test-suites", key, {
+    name: "Appointment changes",
+  });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  const suiteId = String(suite.body.id);
+
   const pushed = await ask(api.app, "POST", "/v1/tests", key, {
+    suiteId,
     name: "Reschedules a booked appointment",
     scenario: "Their cleaning is booked for Thursday and has to move.",
     expectedBehaviors: ["confirms the new time back before finishing"],
@@ -96,12 +104,21 @@ async function anOrphan(
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
   const started = await ask(api.app, "POST", "/v1/runs", key, {
-    connectionId: connectionId,
-    testVersionIds: [String(pushed.body.versionId)],
+    suiteId,
+    agentId,
+    connectionId,
     idempotencyKey: newId("run"),
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-  const simulations = started.body.simulations as { id: string }[];
+  const runId = String(started.body.id);
+  const page = await ask(
+    api.app,
+    "GET",
+    `/v1/runs/${runId}/simulations?pageSize=1`,
+    key,
+  );
+  expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
+  const simulations = page.body.simulations as { id: string }[];
   const simulationId = simulations[0]?.id ?? "";
 
   const claims = await claimSimulations({
@@ -117,7 +134,7 @@ async function anOrphan(
     [simulationId],
   );
 
-  return { ada, key, runId: String(started.body.id), simulationId, api };
+  return { ada, key, runId, simulationId, api };
 }
 
 describe("the standing sweep", () => {

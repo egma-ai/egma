@@ -57,7 +57,6 @@ function catalog(): Record<string, unknown> {
         productLabel: "LiveKit project credentials",
         topology: "agent-dials-out",
         simulatorAdapter: true,
-        capabilityDiscovery: false,
         fields: [
           { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server.", afterCredentials: false },
           { key: "agentName", label: "Agent name", kind: "text", required: false, help: "Optional dispatch name.", afterCredentials: false },
@@ -80,7 +79,6 @@ function catalog(): Record<string, unknown> {
         productLabel: "LiveKit token endpoint",
         topology: "agent-dials-out",
         simulatorAdapter: true,
-        capabilityDiscovery: false,
         fields: [
           { key: "url", label: "LiveKit server URL", kind: "url", required: true, help: "The server.", afterCredentials: false },
           { key: "tokenEndpoint", label: "Token endpoint", kind: "url", required: true, help: "Where Egma requests one token.", afterCredentials: false },
@@ -111,6 +109,7 @@ function connectionFetch(): typeof fetch {
 function testFile(): string {
   return [
     "---",
+    "format: 4",
     "name: greets-a-new-customer",
     "---",
     "## Scenario",
@@ -125,7 +124,11 @@ function writingSteps(): FakeStep[] {
   return [
     { kind: "say", text: "egma:plan greets-a-new-customer\n" },
     { kind: "say", text: "egma:writing greets-a-new-customer\n" },
-    { kind: "write-file", path: "egma/tests/greets-a-new-customer.md", content: testFile() },
+    {
+      kind: "write-file",
+      path: "egma/tests/generated/greets-a-new-customer.md",
+      content: testFile(),
+    },
     { kind: "say", text: "egma:wrote greets-a-new-customer\n" },
     { kind: "stop", reason: "end_turn" },
   ];

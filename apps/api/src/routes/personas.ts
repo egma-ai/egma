@@ -109,7 +109,7 @@ const REFUSALS = {
 
   personaInUse: (personaId: string, tests: string): string =>
     `Persona ${personaId} is used by active tests ${tests}. Select another ` +
-    `persona on those tests, or archive the tests, then archive this persona.`,
+    `persona on those tests, or delete the tests, then archive this persona.`,
 
   defaultPersonaRequired: (personaId: string): string =>
     `Persona ${personaId} is this project's default. Select an active ` +

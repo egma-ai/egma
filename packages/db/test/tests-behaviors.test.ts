@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  cloneTest,
   createTest,
   editTest,
   getTest,
@@ -57,8 +56,8 @@ describe("a test version's content", () => {
 
     const fetched = await getTest(actingAsAcme(), created.id);
     const frozen = await getTestVersion(actingAsAcme(), created.versionId);
-    const page = await listTests(actingAsAcme(), { limit: 200 });
-    const listed = page.items.find((item) => item.id === created.id);
+    const page = await listTests(actingAsAcme(), acme.suite, { limit: 200 });
+    const listed = page?.items.find((item) => item.id === created.id);
 
     for (const read of [created, fetched, frozen, listed]) {
       expect(read).toBeDefined();
@@ -76,17 +75,7 @@ describe("a test version's content", () => {
    * silent write, so what has to hold at run time is only that nothing is
    * stored for it: the version's content is the three fields it says it is.
    */
-  /**
-   * **Four keys, and `main`'s `0027` comment says three.** That comment —
-   * "a test version's content is the scenario, the expected behaviors and the
-   * mock overrides, and nothing else" — was written to say what the junction's
-   * removal took *out*: no grader array and no per-behavior metadata. The
-   * required capabilities went *in* separately, with the applicable-agent work,
-   * and are versioned for their own reason: a run pins a version and then asks
-   * whether the connection can do what that version needs, so the answer has to
-   * be frozen with the rest of what a run is judged against.
-   */
-  it("stores the scenario, the behaviors, the capabilities and the overrides, and nothing else", async () => {
+  it("stores the scenario, the behaviors, and the overrides, and nothing else", async () => {
     const created = await createTest(actingAsAcme(), rescheduling);
 
     const { rows } = await database.sql<{ keys: string[] }>(
@@ -98,7 +87,6 @@ describe("a test version's content", () => {
     expect(rows[0]?.keys).toEqual([
       "expectedBehaviors",
       "mockOverrides",
-      "requiredCapabilities",
       "scenario",
     ]);
   });
@@ -128,6 +116,7 @@ describe("a test's expected behaviors", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       expectedBehaviors: [
         "verifies who it is speaking to",
         "thanks the caller by name",
@@ -140,7 +129,9 @@ describe("a test's expected behaviors", () => {
       "thanks the caller by name",
     ]);
 
+    if (edited === undefined) throw new Error("the edited test is missing");
     const saved = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: edited.versionId,
       expectedBehaviors: [
         "verifies who it is speaking to",
         "thanks the caller by name",
@@ -156,6 +147,7 @@ describe("a test's expected behaviors", () => {
     });
 
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       expectedBehaviors: ["thanks the caller", "verifies who it is speaking to"],
     });
 
@@ -180,7 +172,10 @@ describe("a test's expected behaviors", () => {
     const written = await rowCounts();
 
     await expect(
-      editTest(actingAsAcme(), created.id, { expectedBehaviors: [] }),
+      editTest(actingAsAcme(), created.id, {
+        expectedVersionId: created.versionId,
+        expectedBehaviors: [],
+      }),
     ).rejects.toThrow(/at least one expected behavior/);
 
     expect(await rowCounts()).toEqual(written);
@@ -236,6 +231,7 @@ describe("a test's expected behaviors", () => {
     // And the next edit writes the shape egma writes now, without the caller
     // having said anything about behaviors at all.
     const edited = await editTest(actingAsAcme(), created.id, {
+      expectedVersionId: created.versionId,
       scenario: "They want to move Thursday afternoon.",
     });
     expect(edited?.version).toBe(2);
@@ -255,25 +251,5 @@ describe("a test's expected behaviors", () => {
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.expectedBehaviors).toEqual(["confirms the new time back"]);
-  });
-});
-
-describe("cloning a test", () => {
-  it("copies the behaviors in the same order into a fresh version 1", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
-    });
-
-    const clone = await cloneTest(actingAsAcme(), created.id);
-
-    expect(clone?.id).not.toBe(created.id);
-    expect(clone?.version).toBe(1);
-    expect(clone?.projectId).toBe(acme.project);
-    expect(clone?.expectedBehaviors).toEqual([
-      "verifies who it is speaking to",
-      "thanks the caller",
-    ]);
-    expect(clone).not.toHaveProperty("graders");
   });
 });

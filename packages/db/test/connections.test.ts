@@ -148,9 +148,6 @@ describe("adding a connection", () => {
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
       credentialsHint: "WXYZ",
-      // Nobody has measured this target, and that is written down as its own
-      // state rather than as an empty list of what it can do.
-      capabilities: { state: "unknown" },
     });
   });
 

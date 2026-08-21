@@ -19,12 +19,11 @@ export type PartialTestFile = Partial<TestFile> &
 
 export function aTestFile(said: PartialTestFile): TestFile {
   return {
-    format: 3,
+    format: 4,
     description: null,
     personas: [],
     version: null,
     identityRevision: null,
-    requiredCapabilities: [],
     mockTools: [],
     ...said,
   };

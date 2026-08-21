@@ -85,6 +85,12 @@ const LIVEKIT_VOICE = {
   },
 } as const;
 
+async function createSuite(key: string, name: string): Promise<string> {
+  const suite = await ask(api.app, "POST", "/v1/test-suites", key, { name });
+  expect(suite.statusCode, JSON.stringify(suite.body)).toBe(201);
+  return String(suite.body.id);
+}
+
 describe("a browser naming a project", () => {
   it("reads any project of its own organization, not only the oldest", async () => {
     api = await createApi("browser_sibling_project");
@@ -310,7 +316,7 @@ describe("a browser working in a project that is not the first", () => {
    * moves, and offers the one control that stops it. A browser that could open
    * a run it cannot follow would show a page frozen at the moment it loaded.
    */
-  it("reads, follows and cancels a run that is in the project it named", async () => {
+  it("reads a run and its simulations, follows it and cancels it in the project it named", async () => {
     const { ada, outbound, keyForOutbound } = await twoProjects(
       "browser_run_elsewhere",
     );
@@ -327,9 +333,12 @@ describe("a browser working in a project that is not the first", () => {
       },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+    const agentId = (registered.body.agent as { id: string }).id;
     const connectionId = (registered.body.connection as { id: string }).id;
 
+    const suiteId = await createSuite(keyForOutbound, "Appointment changes");
     const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
+      suiteId,
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -337,10 +346,11 @@ describe("a browser working in a project that is not the first", () => {
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
-      connectionId: connectionId,
-      testVersionIds: [String(pushed.body.versionId)],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
-      label: "The first run in Outbound",
+      name: "The first run in Outbound",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     const runId = String(started.body.id);
@@ -354,9 +364,26 @@ describe("a browser working in a project that is not the first", () => {
       headers: { cookie: ada.cookie },
     });
     expect(read.statusCode, read.body).toBe(200);
-    expect((read.json() as { label: string }).label).toBe(
+    expect((read.json() as { name: string }).name).toBe(
       "The first run in Outbound",
     );
+
+    // The simulations are a separate bounded page, under the same project
+    // rule as the run header.
+    const simulations = await api.app.inject({
+      method: "GET",
+      url:
+        `/v1/runs/${runId}/simulations?pageSize=1&` +
+        `projectId=${outbound}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(simulations.statusCode, simulations.body).toBe(200);
+    const simulationPage = simulations.json() as {
+      simulations: unknown[];
+      nextPageToken: string | null;
+    };
+    expect(simulationPage.simulations).toHaveLength(1);
+    expect(simulationPage.nextPageToken).toBeNull();
 
     // The feed the same page follows it with.
     const followed = await api.app.inject({
@@ -420,14 +447,22 @@ describe("a browser working in a project that is not the first", () => {
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
+    const agentId = (registered.body.agent as { id: string }).id;
+    const suiteId = await createSuite(
+      keyForOutbound,
+      "Recorded appointment changes",
+    );
     const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
+      suiteId,
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
     });
+    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      suiteId,
+      agentId,
       connectionId: (registered.body.connection as { id: string }).id,
-      testVersionIds: [String(pushed.body.versionId)],
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -507,14 +542,20 @@ describe("a browser working in a project that is not the first", () => {
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
       },
     });
+    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+    const agentId = (registered.body.agent as { id: string }).id;
+    const suiteId = await createSuite(keyForOutbound, "Unnamed run reads");
     const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
+      suiteId,
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
     });
+    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      suiteId,
+      agentId,
       connectionId: (registered.body.connection as { id: string }).id,
-      testVersionIds: [String(pushed.body.versionId)],
       idempotencyKey: newId("run"),
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
@@ -555,7 +596,7 @@ describe("a browser working in a project that is not the first", () => {
    * *and* the first project is still empty — because a door that ignored the
    * address would answer exactly the same status code.
    */
-  it("authors a test, a grader and a run in the project its address names", async () => {
+  it("authors a suite, a test, a grader and a run in the project its address names", async () => {
     const { ada, outbound } = await twoProjects("browser_writes_by_address");
     const inOutbound = { cookie: ada.cookie };
 
@@ -584,12 +625,32 @@ describe("a browser working in a project that is not the first", () => {
       },
     });
     expect(registered.statusCode, registered.body).toBe(201);
+    const agentId = (
+      registered.json() as { agent: { id: string } }
+    ).agent.id;
     const connectionId = (
       registered.json() as { connection: { id: string } }
     ).connection.id;
 
+    const suite = await asBrowser(
+      "POST",
+      `/v1/test-suites?projectId=${outbound}`,
+      { name: "Appointment changes" },
+    );
+    expect(suite.statusCode, suite.body).toBe(201);
+    const suiteId = (suite.json() as { id: string }).id;
+
+    const firstSuite = await asBrowser(
+      "POST",
+      `/v1/test-suites?projectId=${ada.projectId}`,
+      { name: "No tests here" },
+    );
+    expect(firstSuite.statusCode, firstSuite.body).toBe(201);
+    const firstSuiteId = (firstSuite.json() as { id: string }).id;
+
     /* POST /v1/tests */
     const authored = await asBrowser("POST", `/v1/tests?projectId=${outbound}`, {
+      suiteId,
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -604,7 +665,6 @@ describe("a browser working in a project that is not the first", () => {
       { name: "Reschedules a booked appointment, politely" },
     );
     expect(edited.statusCode, edited.body).toBe(200);
-    const versionId = (edited.json() as { versionId: string }).versionId;
 
     /* POST /v1/graders */
     const used = await asBrowser("POST", `/v1/graders?projectId=${outbound}`, {
@@ -625,16 +685,20 @@ describe("a browser working in a project that is not the first", () => {
 
     /* POST /v1/runs */
     const started = await asBrowser("POST", `/v1/runs?projectId=${outbound}`, {
-      connectionId: connectionId,
-      testVersionIds: [versionId],
+      suiteId,
+      agentId,
+      connectionId,
       idempotencyKey: newId("run"),
-      label: "Started from the address",
+      name: "Started from the address",
     });
     expect(started.statusCode, started.body).toBe(201);
     expect((started.json() as { projectId: string }).projectId).toBe(outbound);
 
     /* Everything landed in Outbound... */
-    const outboundTests = await asBrowser("GET", `/v1/tests?projectId=${outbound}`);
+    const outboundTests = await asBrowser(
+      "GET",
+      `/v1/tests?projectId=${outbound}&suiteId=${suiteId}`,
+    );
     expect(
       (outboundTests.json() as { tests: { name: string }[] }).tests.map(
         (one) => one.name,
@@ -653,11 +717,14 @@ describe("a browser working in a project that is not the first", () => {
 
     const outboundRuns = await asBrowser("GET", `/v1/runs?projectId=${outbound}`);
     expect(
-      (outboundRuns.json() as { runs: { label: string }[] }).runs,
+      (outboundRuns.json() as { runs: { name: string }[] }).runs,
     ).toHaveLength(1);
 
     /* ...and nothing landed in the project the session is standing in. */
-    const firstTests = await asBrowser("GET", `/v1/tests?projectId=${ada.projectId}`);
+    const firstTests = await asBrowser(
+      "GET",
+      `/v1/tests?projectId=${ada.projectId}&suiteId=${firstSuiteId}`,
+    );
     expect((firstTests.json() as { tests: unknown[] }).tests).toEqual([]);
 
     const firstRuns = await asBrowser("GET", `/v1/runs?projectId=${ada.projectId}`);
@@ -674,74 +741,8 @@ describe("a browser working in a project that is not the first", () => {
         (one) => one.name,
       ),
     ).toEqual(["expected_behaviors"]);
-
   });
 
-  /**
-   * Retry, from the same page and in the same project.
-   *
-   * Its own case because it is the one write on that page with a body of its
-   * own — an idempotency key — so the project rides beside something rather
-   * than alone, which is exactly the shape that got it typed into the query.
-   */
-  it("retries a run that is in the project it named", async () => {
-    const { ada, outbound, keyForOutbound } = await twoProjects(
-      "browser_retry_elsewhere",
-    );
-
-    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
-      name: "Outbound desk",
-      connection: {
-        agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
-        config: { retellAgentId: "agent_in_retell_retry" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-      },
-    });
-    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
-
-    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
-      name: "Reschedules a booked appointment",
-      scenario: "Their cleaning has to move to any afternoon next week.",
-      expectedBehaviors: ["confirms the new time back before finishing"],
-    });
-    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
-      connectionId: (registered.body.connection as { id: string }).id,
-      testVersionIds: [String(pushed.body.versionId)],
-      idempotencyKey: newId("run"),
-    });
-    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-
-    const again = await api.app.inject({
-      method: "POST",
-      url: `/v1/runs/${String(started.body.id)}/retry`,
-      headers: { cookie: ada.cookie },
-      payload: { projectId: outbound, idempotencyKey: newId("run") },
-    });
-    expect(again.statusCode, again.body).toBe(201);
-    expect((again.json() as { retryOfRunId: string }).retryOfRunId).toBe(
-      String(started.body.id),
-    );
-
-    // **And in the address, which is the other honest spelling.** A terminal
-    // posts the project in the body beside everything else it is sending; a
-    // page appends it to the address, the way every read in this group is
-    // asked. Reading only one of the two is not strictness — it is a silent
-    // fall back to the session's own project, which is the organization's
-    // first, and the answer is a confident 201 about the wrong place.
-    const byAddress = await api.app.inject({
-      method: "POST",
-      url: `/v1/runs/${String(started.body.id)}/retry?projectId=${outbound}`,
-      headers: { cookie: ada.cookie },
-      payload: { idempotencyKey: newId("run") },
-    });
-    expect(byAddress.statusCode, byAddress.body).toBe(201);
-    expect((byAddress.json() as { projectId: string }).projectId).toBe(
-      outbound,
-    );
-  });
 });
 
 /**
@@ -818,7 +819,13 @@ describe("a key for the whole organization, where the organization holds two pro
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
 
+    const agentId = (registered.body.agent as { id: string }).id;
+    const suiteId = await createSuite(
+      keyForOutbound,
+      `Appointment changes ${label}`,
+    );
     const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
+      suiteId,
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
@@ -826,10 +833,11 @@ describe("a key for the whole organization, where the organization holds two pro
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
+      suiteId,
+      agentId,
       connectionId: (registered.body.connection as { id: string }).id,
-      testVersionIds: [String(pushed.body.versionId)],
       idempotencyKey: newId("run"),
-      label: "The first run in Outbound",
+      name: "The first run in Outbound",
     });
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
 
@@ -858,7 +866,7 @@ describe("a key for the whole organization, where the organization holds two pro
       headers: asTheOrganization,
     });
     expect(read.statusCode, read.body).toBe(200);
-    expect((read.json() as { label: string }).label).toBe(
+    expect((read.json() as { name: string }).name).toBe(
       "The first run in Outbound",
     );
 

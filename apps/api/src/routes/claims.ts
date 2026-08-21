@@ -6,7 +6,7 @@ import {
   failSimulationDispatch,
   getPersonaVersion,
   getRun,
-  getSimulationTestVersion,
+  getSimulationExecutionEvidence,
   markSimulationCanceled,
   releaseSimulationClaim,
   resolveMockTools,
@@ -343,10 +343,11 @@ async function assembledSpec(
     return { unbuildable: "its pinned persona version could not be read" };
   }
 
-  const testVersion = await getSimulationTestVersion(claim.auth, claim.id);
-  if (testVersion === undefined) {
+  const evidence = await getSimulationExecutionEvidence(claim.auth, claim.id);
+  if (evidence === undefined) {
     return { unbuildable: "its pinned test version could not be read" };
   }
+  const testVersion = evidence.testVersion;
 
   const connection = await resolveSimulationConnection(claim.auth, claim.id);
   if (connection === undefined) {
@@ -400,7 +401,7 @@ async function assembledSpec(
   // decided, exactly as it receives everything else: flattened, with
   // nothing left to look up and nothing left to choose between.
   const mockTools = resolveMockTools(
-    run.mockToolSnapshot,
+    evidence.mockToolSnapshot,
     claim.testVersionId,
   ).map((mock) => ({
     tool_name: mock.toolName,

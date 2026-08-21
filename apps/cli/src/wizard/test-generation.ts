@@ -28,6 +28,8 @@ export const DEFAULT_TEST_COUNT = 12;
 export type GenerationContext = {
   /** The folder the agent works in, and the whole of what it may touch. */
   readonly cwd: string;
+  /** Direct suite directory already created with a stable suite ID. */
+  readonly suiteDirectory: string;
   /** What the find-the-agent step reported, by fact name. */
   readonly facts: ReadonlyMap<string, string>;
   /** The words the provider is actually running, or `null` when it holds none. */
@@ -158,9 +160,9 @@ function takenBlock(taken: readonly string[]): readonly string[] {
 }
 
 /** Where the agent may write, said the same way in both tasks. */
-function boundaryBlock(cwd: string): readonly string[] {
+function boundaryBlock(cwd: string, suiteDirectory: string): readonly string[] {
   return [
-    `Work in ${cwd}. Write only inside egma/tests/, one file per test, and`,
+    `Work in ${cwd}. Write only inside egma/tests/${suiteDirectory}/, one file per test, and`,
     "change nothing else in the repository. Run no command that reaches the",
     "network and install nothing.",
   ];
@@ -198,9 +200,9 @@ export function generateTask(context: GenerationContext, howMany: number): strin
   return [
     "# Your task",
     "",
-    `Write ${howMany} ${howMany === 1 ? "test" : "tests"} for the voice agent below, as files in egma/tests/.`,
+    `Write ${howMany} ${howMany === 1 ? "test" : "tests"} for the voice agent below, as files in egma/tests/${context.suiteDirectory}/.`,
     "",
-    ...boundaryBlock(context.cwd),
+    ...boundaryBlock(context.cwd, context.suiteDirectory),
     "",
     "## What Egma knows about this repository",
     "",
@@ -240,6 +242,7 @@ export function generateInstructions(context: GenerationContext, howMany: number
 /** What egma asks the coding agent to convert, and the material itself. */
 export type ConvertContext = {
   readonly cwd: string;
+  readonly suiteDirectory: string;
   /** What the file is called, as the developer would name it. */
   readonly shown: string;
   /** The file, exactly as egma read it. */
@@ -254,10 +257,10 @@ export function convertTask(options: ConvertContext): string {
     "# Your task",
     "",
     `The developer already has test cases written down, in ${options.shown}. Turn`,
-    "each one into a test file in egma/tests/, in the format the notes above",
+    `each one into a test file in egma/tests/${options.suiteDirectory}/, in the format the notes above`,
     "describe.",
     "",
-    ...boundaryBlock(options.cwd),
+    ...boundaryBlock(options.cwd, options.suiteDirectory),
     "",
     "**Convert, do not invent.** Every test you write must come from something",
     "in the material below. Do not add situations it does not mention, and do",

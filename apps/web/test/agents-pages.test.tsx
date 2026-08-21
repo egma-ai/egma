@@ -12,11 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AgentDetailPage from "../app/projects/[projectId]/agents/[agentId]/page.tsx";
 import ConnectionDetailPage from "../app/projects/[projectId]/agents/[agentId]/connections/[connectionId]/page.tsx";
 import NewConnectionPage from "../app/projects/[projectId]/agents/[agentId]/connections/new/page.tsx";
-import AgentOnboardingPage from "../app/projects/[projectId]/agents/[agentId]/onboarding/page.tsx";
 import RegisterAgentPage from "../app/projects/[projectId]/agents/new/page.tsx";
 import AgentsPage from "../app/projects/[projectId]/agents/page.tsx";
 import type { Me } from "../lib/me.ts";
-import type { ListedTest } from "../lib/tests.ts";
 import {
   observeRequest,
   requestUrl,
@@ -152,18 +150,6 @@ const CONNECTION = {
   config: { retellAgentId: "agent_abc" },
   credentialPresent: true,
   credentialsHint: "WXYZ",
-  capabilities: {
-    state: "unknown" as const,
-    measured: null,
-    supported: null,
-    checkedAt: null,
-    source: null,
-    standing: {
-      dtmf: "not_measured" as const,
-      barge_in: "not_measured" as const,
-      raw_audio: "not_measured" as const,
-    },
-  },
   revision: "rev_con_one",
   archived: false,
   archivedAt: null,
@@ -172,9 +158,8 @@ const CONNECTION = {
 };
 
 /**
- * A second way into the same agent: another platform, another channel, and a
- * capability record somebody has actually measured. One connection of each kind
- * is what makes "the facts on a row" a claim a test can falsify.
+ * A second way into the same agent: another platform and another channel. One
+ * connection of each kind makes "the facts on a row" a claim a test can falsify.
  */
 const MEASURED_CONNECTION = {
   ...CONNECTION,
@@ -191,18 +176,6 @@ const MEASURED_CONNECTION = {
   config: { phoneNumber: "+14155550100" },
   credentialPresent: false,
   credentialsHint: null,
-  capabilities: {
-    state: "known" as const,
-    measured: ["dtmf"],
-    supported: ["dtmf"],
-    checkedAt: "2026-08-18T09:00:00.000Z",
-    source: "retell",
-    standing: {
-      dtmf: "supported" as const,
-      barge_in: "unsupported" as const,
-      raw_audio: "not_measured" as const,
-    },
-  },
 };
 
 /** An agent as the *list* answers it: the identity, and every way in. */
@@ -220,33 +193,6 @@ const UNREACHED_AGENT = {
   connections: [],
 };
 
-function onboardingTest(
-  overrides: Partial<ListedTest> = {},
-): ListedTest {
-  return {
-    id: "tst_1",
-    projectId: "prj_1",
-    name: "Books an appointment",
-    description: "The caller asks for a booking.",
-    version: 2,
-    versionId: "tstv_2",
-    scenario: "Ask for an appointment.",
-    expectedBehaviors: ["The agent offers a time."],
-    personas: [],
-    requiredCapabilities: [],
-    mockTools: [],
-    overrideCount: 0,
-    agents: [{ id: "agt_9", name: "Existing agent", archivedAt: null }],
-    revision: "rev_test_1",
-    applicabilityRevision: "rev_app_1",
-    archivedAt: null,
-    archiveReason: null,
-    createdAt: "2026-08-15T10:00:00.000Z",
-    updatedAt: "2026-08-15T10:00:00.000Z",
-    ...overrides,
-  };
-}
-
 const TYPES = {
   items: [
     {
@@ -259,7 +205,6 @@ const TYPES = {
       productLabel: "Retell chat",
       topology: "hosted-broker",
       simulatorAdapter: true,
-      capabilityDiscovery: false,
       fields: [
         {
           key: "retellAgentId",
@@ -292,10 +237,9 @@ const TYPES = {
       productLabel: "Retell phone",
       topology: "egma-dials-in",
       simulatorAdapter: true,
-      capabilityDiscovery: false,
       fields: [
         {
-          key: "phone_number",
+          key: "phoneNumber",
           label: "Phone number",
           kind: "e164",
           required: true,
@@ -317,7 +261,6 @@ const TYPES = {
       productLabel: "LiveKit project credentials",
       topology: "egma-dials-out",
       simulatorAdapter: true,
-      capabilityDiscovery: false,
       fields: [
         {
           key: "url",
@@ -373,7 +316,6 @@ const TYPES = {
       productLabel: "LiveKit token endpoint",
       topology: "egma-dials-out",
       simulatorAdapter: true,
-      capabilityDiscovery: false,
       fields: [
         {
           key: "url",
@@ -414,10 +356,9 @@ const TYPES = {
       productLabel: "Phone number",
       topology: "egma-dials-in",
       simulatorAdapter: true,
-      capabilityDiscovery: false,
       fields: [
         {
-          key: "phone_number",
+          key: "phoneNumber",
           label: "Phone number",
           kind: "e164",
           required: true,
@@ -526,10 +467,10 @@ describe("finding an agent in a long list", () => {
  * The question the list exists to answer: which agents egma can reach, and how.
  */
 describe("reading an agent's reach from the list", () => {
-  function listOf(...agents: readonly unknown[]): void {
+  function listOf(...items: readonly unknown[]): void {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
-      "/v1/agents": { status: 200, body: { agents, nextPageToken: null } },
+      "/v1/agents": { status: 200, body: { agents: items, nextPageToken: null } },
     });
   }
 
@@ -539,27 +480,22 @@ describe("reading an agent's reach from the list", () => {
       .mock.calls.map(([input]) => requestUrl(input as FetchInput));
   }
 
-  it("shows each connection's platform, channel, environment and capability state", async () => {
+  it("shows each connection's platform, channel and environment", async () => {
     listOf(LISTED_AGENT);
     render(<AgentsPage />);
     await screen.findAllByText("Front desk");
 
-    // The staging one, which nobody has measured. "Not checked" and "measured
-    // and found wanting" are different sentences and must not share one.
+    // The staging connection.
     expect(screen.getByText("staging")).toBeDefined();
     // The registry's customer-facing product label, not a token a client
     // branches on. The connection page and this row use the same words.
     expect(screen.getByText("Retell chat · Chat")).toBeDefined();
-    expect(screen.getByText("Not checked")).toBeDefined();
 
-    // The production one, which somebody has.
+    // The production connection.
     expect(screen.getByText("production")).toBeDefined();
     expect(screen.getByText("Phone number · Voice")).toBeDefined();
-    expect(screen.getByText("Checked")).toBeDefined();
-
-    // With its time, kept exactly rather than only as an age that drifts.
-    const when = document.querySelector("time");
-    expect(when?.getAttribute("datetime")).toBe("2026-08-18T09:00:00.000Z");
+    expect(screen.queryByText("Not checked")).toBeNull();
+    expect(screen.queryByText("Checked")).toBeNull();
 
     // And all of it out of the one read that painted the list. A page that
     // fetched per row would still look right here, which is why the requests
@@ -766,7 +702,7 @@ describe("registering an agent", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("onboarding an agent", () => {
-  it("reuses the connection form, then carries the new agent into test setup", async () => {
+  it("finishes after the connection step and never attaches tests", async () => {
     routed.search = "?onboarding=connection";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
@@ -782,259 +718,25 @@ describe("onboarding an agent", () => {
     });
     render(<NewConnectionPage />);
 
-    const progress = await screen.findByRole("navigation", {
-      name: "Agent setup",
-    });
-    expect(within(progress).getByText("Connection").getAttribute("aria-current"))
-      .toBe("step");
-    expect(screen.queryByText(/Step 2 of 3/u)).toBeNull();
-
-    /*
-     * The bar counts stages *finished*, so the second stage reads one of three
-     * rather than two. A bar that filled a stage ahead of the work would be
-     * claiming the page in front of somebody was already done.
-     */
-    const bar = within(progress).getByRole("progressbar", {
-      name: "Agent setup progress",
-    });
-    expect(bar.getAttribute("aria-valuenow")).toBe("1");
-    expect(bar.getAttribute("aria-valuemax")).toBe("3");
-    expect(bar.getAttribute("aria-valuetext")).toBe("1 of 3 stages finished");
-
-    /*
-     * What the eye is given, against what the screen reader is given.
-     *
-     * This is the assertion that guards the fix in `components/ui/progress.tsx`.
-     * The registry's indicator computes `100 - value` and ignores `max`, so this
-     * bar announced "1 of 3 stages finished" and was drawn 99% empty. The two
-     * must be the same fact: one stage of three is a third filled, which is
-     * two thirds still to travel.
-     */
-    const fill = bar.querySelector("[data-slot='progress-indicator']");
-    expect(fill?.getAttribute("style")).toContain("translateX(-66.6");
-    expect(fill?.getAttribute("style")).not.toContain("-99%");
+    const progress = await screen.findByRole("navigation", { name: "Agent setup" });
+    const bar = within(progress).getByRole("progressbar", { name: "Agent setup progress" });
+    expect(bar.getAttribute("aria-valuemax")).toBe("2");
+    expect(bar.getAttribute("aria-valuetext")).toBe("1 of 2 stages finished");
+    expect(within(progress).queryByText("Tests")).toBeNull();
     expect(
-      screen.getByRole("link", { name: "Skip connection for now" })
-        .getAttribute("href"),
-    ).toBe("/projects/prj_1/agents/agt_1/onboarding");
-    expect(
-      screen.getByText(/Without a connection, Egma cannot run a simulation/u),
-    ).toBeDefined();
+      screen.getByRole("link", { name: "Finish without a connection" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/agents/agt_1");
 
-    fireEvent.change(screen.getByLabelText("Platform"), {
-      target: { value: "unknown" },
-    });
+    fireEvent.change(screen.getByLabelText("Platform"), { target: { value: "unknown" } });
     fireEvent.change(await screen.findByLabelText("Phone number"), {
       target: { value: "+14155550100" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
 
-    await waitFor(() =>
-      expect(routed.push).toHaveBeenCalledWith(
-        "/projects/prj_1/agents/agt_1/onboarding",
-      ),
-    );
-  });
-
-  /**
-   * An agent with no connection, and the bar that has to tell the truth about
-   * it without guessing how it got that way.
-   *
-   * Being behind the current stage is not the same as being finished. Somebody
-   * reaches the tests page with two stages behind them and one of them not
-   * done, and an agent with no connection cannot run a simulation at all — so a
-   * bar reading "2 of 3 stages finished" would call the setup nearly complete
-   * when the part that makes it work is missing.
-   *
-   * **The word is asserted as a state rather than an intention**, and that is
-   * the point of this test rather than an incidental detail. This page reads
-   * the active connections, so an empty list is both "Skip connection for now"
-   * and "connected once, archived it later". A word like "Skipped" is right for
-   * one of those people and wrong for the other, and nothing on this page can
-   * tell which one is reading it.
-   *
-   * Both halves are checked, because `DESIGN.md` will not let a state rest on a
-   * mark and a colour: the count, and the words beside the stage.
-   */
-  it("says an agent with no connection needs one, without calling it a skip", async () => {
-    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/v1/agents/agt_1": {
-        status: 200,
-        body: { agent: AGENT, connections: [] },
-      },
-      "/v1/tests": [
-        { status: 200, body: { tests: [onboardingTest()], nextPageToken: null } },
-      ],
-    });
-    render(<AgentOnboardingPage />);
-
-    const progress = await screen.findByRole("navigation", {
-      name: "Agent setup",
-    });
-    const bar = within(progress).getByRole("progressbar", {
-      name: "Agent setup progress",
-    });
-    expect(bar.getAttribute("aria-valuenow")).toBe("1");
-    expect(bar.getAttribute("aria-valuetext")).toBe(
-      "1 of 3 stages finished, Connection not finished",
-    );
-
-    const connection = within(progress).getByText("Connection");
-    expect(connection.getAttribute("data-unfinished")).toBe("true");
-    expect(connection.getAttribute("data-complete")).toBeNull();
-    expect(within(progress).getByText("Needs a connection")).toBeTruthy();
-    /*
-     * The word this must never go back to. Both people who see this screen have
-     * the same empty list, and only one of them pressed Skip.
-     */
-    expect(within(progress).queryByText(/skipped/iu)).toBeNull();
-  });
-
-  /** The same page with a connection in place, so the count moves. */
-  it("counts a connection that is in place, and says nothing beside it", async () => {
-    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/v1/agents/agt_1": {
-        status: 200,
-        body: { agent: AGENT, connections: [CONNECTION] },
-      },
-      "/v1/tests": [
-        { status: 200, body: { tests: [onboardingTest()], nextPageToken: null } },
-      ],
-    });
-    render(<AgentOnboardingPage />);
-
-    const progress = await screen.findByRole("navigation", {
-      name: "Agent setup",
-    });
-    const bar = within(progress).getByRole("progressbar", {
-      name: "Agent setup progress",
-    });
-    expect(bar.getAttribute("aria-valuenow")).toBe("2");
-    expect(bar.getAttribute("aria-valuetext")).toBe("2 of 3 stages finished");
-
-    const connection = within(progress).getByText("Connection");
-    expect(connection.getAttribute("data-complete")).toBe("true");
-    expect(connection.getAttribute("data-unfinished")).toBeNull();
-    expect(within(progress).queryByText("Needs a connection")).toBeNull();
-  });
-
-  it("attaches selected existing tests through each test's applicability revision", async () => {
-    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
-    const test = onboardingTest();
-    const second = onboardingTest({
-      id: "tst_2",
-      name: "Handles a cancellation",
-      applicabilityRevision: "rev_app_2",
-    });
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/v1/agents/agt_1": {
-        status: 200,
-        body: { agent: AGENT, connections: [CONNECTION] },
-      },
-      "/v1/tests": [
-        { status: 200, body: { tests: [test], nextPageToken: "cursor_2" } },
-        { status: 200, body: { tests: [second], nextPageToken: null } },
-      ],
-      "/v1/tests/tst_1/agents": {
-        status: 200,
-        body: {
-          ...test,
-          agents: [...test.agents, { id: "agt_1", name: "Front desk" }],
-          applicabilityRevision: "rev_app_2",
-        },
-      },
-      "/v1/tests/tst_2/agents": {
-        status: 200,
-        body: {
-          ...second,
-          agents: [...second.agents, { id: "agt_1", name: "Front desk" }],
-          applicabilityRevision: "rev_app_3",
-        },
-      },
-    });
-    render(<AgentOnboardingPage />);
-
-    const choice = await screen.findByRole("checkbox", {
-      name: /Books an appointment/u,
-    });
-    fireEvent.click(choice);
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    const secondChoice = await screen.findByRole("checkbox", {
-      name: /Handles a cancellation/u,
-    });
-    expect((choice as HTMLInputElement).checked).toBe(true);
-    fireEvent.click(secondChoice);
-    expect(screen.getByRole("button", { name: "Attach 2 tests and finish" }))
-      .toBeDefined();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Attach 2 tests and finish" }),
-    );
-
     await waitFor(() => {
-      expect(sent.find((call) => call.url.startsWith("/v1/tests/tst_1/agents")))
-        .toBeDefined();
+      expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/agents/agt_1");
     });
-    const call = sent.find((item) => item.url.startsWith("/v1/tests/tst_1/agents"));
-    expect(call?.body).toEqual({
-      agents: ["agt_9", "agt_1"],
-      expectedApplicabilityRevision: "rev_app_1",
-    });
-    const secondCall = sent.find((item) =>
-      item.url.startsWith("/v1/tests/tst_2/agents"),
-    );
-    expect(secondCall?.body).toEqual({
-      agents: ["agt_9", "agt_1"],
-      expectedApplicabilityRevision: "rev_app_2",
-    });
-    await waitFor(() =>
-      expect(routed.push).toHaveBeenCalledWith(
-        "/projects/prj_1/agents/agt_1",
-      ),
-    );
-  });
-
-  it("keeps a selected test pinned while the server searches another page", async () => {
-    routed.pathname = "/projects/prj_1/agents/agt_1/onboarding";
-    const test = onboardingTest();
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/v1/agents/agt_1": {
-        status: 200,
-        body: { agent: AGENT, connections: [] },
-      },
-      "/v1/tests": [
-        { status: 200, body: { tests: [test], nextPageToken: null } },
-        { status: 200, body: { tests: [], nextPageToken: null } },
-      ],
-    });
-    render(<AgentOnboardingPage />);
-
-    const choice = await screen.findByRole("checkbox", {
-      name: /Books an appointment/u,
-    });
-    fireEvent.click(choice);
-    fireEvent.change(screen.getByLabelText("Search tests by name"), {
-      target: { value: "weekend" },
-    });
-
-    await waitFor(() => {
-      const asked = vi
-        .mocked(globalThis.fetch)
-        .mock.calls.map(([input]) => requestUrl(input as FetchInput));
-      expect(asked).toContain("/v1/tests?projectId=prj_1&name=weekend");
-    });
-    expect(
-      (screen.getByRole("checkbox", {
-        name: /Books an appointment/u,
-      }) as HTMLInputElement).checked,
-    ).toBe(true);
-    expect(screen.getByRole("button", { name: "Attach 1 test and finish" }))
-      .toBeDefined();
+    expect(sent.some((call) => call.url.startsWith("/v1/tests"))).toBe(false);
   });
 });
 
@@ -1071,9 +773,9 @@ describe("one agent's page", () => {
     expect(screen.getByRole("link", { name: "staging" })).toBeDefined();
     expect(screen.getByRole("link", { name: "phone line" })).toBeDefined();
 
-    // Wearing the same facts the list row wears, said the same way.
-    expect(screen.getAllByText("Not checked").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Checked").length).toBeGreaterThan(0);
+    // Capability status is not part of the connection surface.
+    expect(screen.queryByText("Not checked")).toBeNull();
+    expect(screen.queryByText("Checked")).toBeNull();
     // The environment label, which is this connection's own and not its name:
     // the phone line is named apart from the environment it points at.
     expect(screen.getByText("production")).toBeDefined();
@@ -1089,7 +791,7 @@ describe("one agent's page", () => {
     expect(screen.queryByRole("heading", { name: "Attached tests" })).toBeNull();
     const asked = vi
       .mocked(globalThis.fetch)
-      .mock.calls.map(([input]) => requestUrl(input as FetchInput));
+      .mock.calls.map(([url]) => String(url));
     expect(asked.some((one) => one.startsWith("/v1/runs"))).toBe(false);
     expect(asked.some((one) => one.startsWith("/v1/tests"))).toBe(false);
 
@@ -1209,7 +911,7 @@ describe("adding a connection", () => {
     ).toBeTruthy();
   });
 
-  it("stores a discovered Retell phone candidate through the generic connection route", async () => {
+  it("confirms a Retell phone route before it stores the provider-blind connection", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents/agt_1": {
@@ -1317,70 +1019,6 @@ describe("adding a connection", () => {
     expect(routed.push).toHaveBeenCalledWith(
       "/projects/prj_1/agents/agt_1/connections/con_1",
     );
-  });
-
-  it("sends a discovered chat selection without duplicate connection credentials", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("member") },
-      "/v1/agents/agt_1": {
-        status: 200,
-        body: { agent: AGENT, connections: [] },
-      },
-      "/v1/connection-options": { status: 200, body: TYPES },
-      "/v1/agents:discover": {
-        status: 200,
-        body: {
-          agents: [
-            {
-              platformAgentId: "agent_chat_1",
-              name: "Chat support",
-              connectionCandidates: [
-                {
-                  agentPlatform: "retell",
-                  connectionKind: "retell_chat_api",
-                  accessVariant: "retell_chat_api.api_key",
-                  modality: "chat",
-                  productLabel: "Retell chat",
-                  config: { retellAgentId: "agent_chat_1" },
-                },
-              ],
-            },
-          ],
-        },
-      },
-      "/v1/agents/agt_1/connections": {
-        status: 201,
-        body: { connection: CONNECTION },
-      },
-    });
-    render(<NewConnectionPage />);
-
-    const field = (await screen.findByLabelText(
-      "Retell API key",
-    )) as HTMLInputElement;
-    fireEvent.change(field, {
-      target: { value: "retell-secret-A1B2C3D4WXYZ" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Load Retell agents" }));
-    expect(
-      (await screen.findByLabelText("Retell agent") as HTMLSelectElement).value,
-    ).toBe("agent_chat_1");
-
-    fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
-
-    await waitFor(() => expect(sent).toHaveLength(2));
-    expect(sent[1]?.body).toEqual({
-      agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
-      modality: "chat",
-      config: { retellAgentId: "agent_chat_1" },
-      agentPlatformSelection: {
-        platformAgentId: "agent_chat_1",
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
-      },
-    });
-    expect(sent[1]?.body).not.toHaveProperty("credentials");
   });
 
   it("uses either honest LiveKit access method and defaults its channel to voice", async () => {

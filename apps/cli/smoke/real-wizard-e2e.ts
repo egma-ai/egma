@@ -81,7 +81,7 @@ import { fileURLToPath } from "node:url";
 
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
 import { discoverCodingAgents, installedCodingAgent } from "../src/acp/coding-agents.ts";
-import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
+import { folderPathsIn, readRepository } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { readCredentials } from "../src/platform/credentials.ts";
 import { skillPlacesFor } from "../src/skills/install.ts";
@@ -666,7 +666,7 @@ async function assertWhatLanded(options: {
   check(held.url === origin, "the key is stored against the egma it signed in to");
   check(held.key.startsWith("egma_sk_"), "the key is one the instance really minted");
 
-  const opened = await fetch(`${origin}/v1/keys`, {
+  const opened = await fetch(`${origin}/api/keys`, {
     headers: { authorization: `Bearer ${held.key}` },
   });
   check(opened.status === 200, `the key works on the real instance (it answered ${opened.status})`);
@@ -722,7 +722,7 @@ async function assertWhatLanded(options: {
       `the number is E.164 (${String(config.phoneNumber)})`,
     );
     check(
-      connection?.credentialsHint === null || connection?.credentialsHint === undefined,
+      connection?.credentials_hint === null || connection?.credentials_hint === undefined,
       "no credential was sealed against the phone connection",
     );
     check(
@@ -732,11 +732,11 @@ async function assertWhatLanded(options: {
   } else {
     check(
       connections.length === 1 &&
-        connection?.agentPlatform === "retell" &&
-        connection?.connectionKind === "retell_chat_api" &&
-        connection?.accessVariant === "retell_chat_api.api_key",
+        connection?.agent_platform === "retell" &&
+        connection?.connection_kind === "retell_chat_api" &&
+        connection?.access_variant === "retell_chat_api.api_key",
       `the walk created exactly one connection and it is the retell one (${connections
-        .map((one) => String(one.productLabel))
+        .map((one) => String(one.product_label))
         .join(", ")})`,
     );
     check(
@@ -744,29 +744,38 @@ async function assertWhatLanded(options: {
       `the text connection is a chat one (${String(connection?.modality)})`,
     );
     check(
-      connection?.credentialsHint === options.key.slice(-4),
+      connection?.credentials_hint === options.key.slice(-4),
       "the key was sealed on the platform, and only its last characters came back",
     );
   }
 
   /* the committed file, which is the whole of what this repository points at */
 
-  const written = await readConfig(folderPathsIn(outcome.repository).config);
+  const written = await readRepository(folderPathsIn(outcome.repository));
   check(
-    written.platform?.origin === origin,
-    `the repository is bound to the platform it walked against (${String(written.platform?.origin)})`,
+    written.config.platform?.origin === origin,
+    `the repository is bound to the platform it walked against (${String(written.config.platform?.origin)})`,
   );
   check(
-    written.agent?.id === agentId && written.connection?.id === String(connection?.id),
+    written.config.agent?.id === agentId &&
+      written.config.connection?.id === String(connection?.id),
     "the agent and the connection egma made are the ones the file names",
   );
-  check(written.suite?.name !== undefined, `the file names a test suite (${String(written.suite?.name)})`);
+  const localSuite = written.suites.at(-1);
+  check(
+    localSuite !== undefined,
+    `the repository holds a direct test suite (${String(localSuite?.manifest.name)})`,
+  );
   check(
     !JSON.stringify(written).includes(options.key),
     "and no supplied secret is anywhere in it",
   );
 
-  const tests = await ask(origin, held.key, "/v1/tests");
+  const tests = await ask(
+    origin,
+    held.key,
+    `/v1/tests?projectId=${encodeURIComponent(String(agent?.projectId))}&suiteId=${encodeURIComponent(String(localSuite?.manifest.id))}`,
+  );
   const landed = Array.isArray(tests.body.tests)
     ? (tests.body.tests as Record<string, unknown>[])
     : [];
@@ -778,7 +787,7 @@ async function assertWhatLanded(options: {
 
   // And the same tests are files in the repository, each pinned to the version
   // the platform answered with.
-  const folder = path.join(outcome.repository, "egma", "tests");
+  const folder = localSuite?.root ?? path.join(outcome.repository, "egma", "tests", "missing");
   const files = (await readdir(folder).catch(() => [] as string[])).filter((name) =>
     name.endsWith(".md"),
   );
@@ -800,9 +809,24 @@ async function assertWhatLanded(options: {
   /* the run the walk ended in, and what it was over */
 
   const run = await ask(origin, held.key, `/v1/runs/${outcome.runId}`);
-  const inTheRun = Array.isArray(run.body.simulations)
-    ? (run.body.simulations as Record<string, unknown>[])
-    : [];
+  const inTheRun: Record<string, unknown>[] = [];
+  let simulationCursor = "";
+  do {
+    const query = simulationCursor === ""
+      ? ""
+      : `?pageToken=${encodeURIComponent(simulationCursor)}`;
+    const page = await ask(
+      origin,
+      held.key,
+      `/v1/runs/${outcome.runId}/simulations${query}`,
+    );
+    if (Array.isArray(page.body.simulations)) {
+      inTheRun.push(...(page.body.simulations as Record<string, unknown>[]));
+    }
+    simulationCursor = typeof page.body.nextPageToken === "string"
+      ? page.body.nextPageToken
+      : "";
+  } while (simulationCursor !== "");
   check(outcome.runId.startsWith("run_"), "a run was created");
   check(
     inTheRun.length === pinnedFiles && inTheRun.length > 0,

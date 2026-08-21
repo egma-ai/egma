@@ -2381,6 +2381,7 @@ describe("the complete product, walked in order in a second project", () => {
   let agentAddress = "";
   let connectionAddress = "";
   let personaAddress = "";
+  let suiteAddress = "";
   let testAddress = "";
   let runAddress = "";
   let conversation = "";
@@ -2413,6 +2414,18 @@ describe("the complete product, walked in order in a second project", () => {
     )?.[1];
     expect(found, `${address} names a conversation`).toBeDefined();
     return found ?? "";
+  }
+
+  /** The test suite an address names, read off the address rather than copied. */
+  function suiteIdOf(address: string): string {
+    const found = /\/suites\/(ste_[0-9A-HJKMNP-TV-Z]{26})/u.exec(address)?.[1];
+    expect(found, `${address} names a test suite`).toBeDefined();
+    return found ?? "";
+  }
+
+  /** The only place a new test can be written: inside its permanent suite. */
+  function testWriterAddress(): string {
+    return `${at("tests", "new")}?suite=${suiteIdOf(suiteAddress)}`;
   }
 
   /** The project this control says the browser is standing in. */
@@ -2581,6 +2594,10 @@ describe("the complete product, walked in order in a second project", () => {
       agentAddress = walk
         .url()
         .replace(/\/connections\/new\?onboarding=connection$/u, "");
+      expect(
+        agentAddress,
+        "registering the agent left its detail address",
+      ).toMatch(new RegExp(`/projects/${second}/agents/agt_[^/]+$`));
       // The form is drawn from the registry rather than from a list in the
       // browser, so waiting for the first field is waiting for that read.
       await walk.waitForSelector("#agent-platform");
@@ -2619,7 +2636,26 @@ describe("the complete product, walked in order in a second project", () => {
       const connected = await connectionResponse;
       expect(connected.status(), await connected.text()).toBe(201);
 
-      await walk.waitForURL(/\/agents\/agt_[^/]+\/onboarding$/);
+      // Onboarding ends on the agent itself. The connection row there is the
+      // product's route to the detail page; keep that address for the direct
+      // route proof below instead of reconstructing it from a database id.
+      await walk.waitForURL(agentAddress);
+      await saysWithin(walk, "Retell staging");
+      const connection = walk
+        .getByRole("link", { name: "Retell staging", exact: true })
+        .first();
+      await connection.waitFor();
+      const connectionHref = await connection.getAttribute("href");
+      expect(
+        connectionHref,
+        "the created connection has a detail link",
+      ).toMatch(
+        new RegExp(
+          `^/projects/${second}/agents/agt_[^/]+/connections/con_[^/]+$`,
+        ),
+      );
+      connectionAddress = new URL(connectionHref ?? "/", origin).toString();
+
       // The selected discovery candidate goes through the generic connection
       // write. The stored connection is only the public phone destination; the
       // Retell key and agent id do not enter it.
@@ -2642,11 +2678,11 @@ describe("the complete product, walked in order in a second project", () => {
         config: { phoneNumber: BROWSER_RETELL_NUMBER },
         credentials: null,
       });
-      connectionAddress = `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`;
+      expect(connectionAddress).toBe(
+        `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`,
+      );
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
-      await walk.getByRole("link", { name: "Finish setup" }).click();
-      await walk.waitForURL(agentAddress);
 
       /*
        * The agent's page is its identity and its connections, and nothing else.
@@ -2665,9 +2701,8 @@ describe("the complete product, walked in order in a second project", () => {
       /*
        * And the list says egma can reach it, without anybody opening it. This
        * is the whole point of the widened read: the row carries the platform in
-       * the registry's own words, the channel, the environment label — written
-       * out, because this connection has none — and whether the target has been
-       * measured.
+       * the registry's own words, the channel, and the environment label —
+       * written out, because this connection has none.
        */
       await walk.goto(at("agents"));
       await saysWithin(walk, "The Support line");
@@ -2679,9 +2714,8 @@ describe("the complete product, walked in order in a second project", () => {
         .toContain("Retell phone · Voice");
       const said = await row.innerText();
       expect(said).toContain("Unlabelled");
-      // Read without regard to case: a chip is drawn in capitals, and the word
-      // is the fact rather than the letterform it is set in.
-      expect(said.toLowerCase()).toContain("not checked");
+      expect(said).toContain("The one that answers the phone at the front desk.");
+      expect(said.toLowerCase()).not.toContain("not checked");
       expect(said.toLowerCase()).not.toContain("no connections");
     },
     SETTLE,
@@ -2782,12 +2816,49 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "writes a test against that agent, with the persona who calls about it",
+    "creates the test suite before writing its first test",
     async () => {
       await walk.goto(at("tests"));
+      await saysWithin(walk, "No test suites yet");
+
+      await walk.getByRole("button", { name: "Create suite" }).click();
+      const dialog = walk.getByRole("dialog", {
+        name: "Create a test suite",
+      });
+      await dialog.waitFor();
+      await dialog.getByLabel("Suite name").fill("Support reception");
+
+      const createResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/v1/test-suites",
+      );
+      await dialog.getByRole("button", { name: "Create suite" }).click();
+      const created = await createResponse;
+      expect(created.status(), await created.text()).toBe(201);
+
+      await walk.waitForURL(
+        new RegExp(
+          `/projects/${second}/tests/suites/ste_[0-9A-HJKMNP-TV-Z]{26}$`,
+        ),
+      );
+      suiteAddress = walk.url();
+      await saysWithin(walk, "No tests in this suite");
+      expect(await walk.innerText("main")).toContain("Support reception");
+    },
+    SETTLE,
+  );
+
+  it(
+    "writes a test inside that suite, with the persona who calls about it",
+    async () => {
+      await walk.goto(suiteAddress);
       await walk.getByRole("link", { name: "Write a test" }).first().click();
-      await walk.waitForURL(new RegExp(`/projects/${second}/tests/new$`));
+      await walk.waitForURL(testWriterAddress());
       await saysWithin(walk, "What should happen");
+      expect(await walk.innerText("main")).toContain(
+        "This test will stay in Support reception.",
+      );
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -2797,9 +2868,10 @@ describe("the complete product, walked in order in a second project", () => {
       await walk
         .getByRole("textbox", { name: "Expected behavior 1" })
         .fill("confirms the new time back before finishing");
-      await walk.getByRole("button", { name: "Choose agents" }).click();
-      await walk.getByRole("checkbox", { name: "The Support line" }).click();
-      await walk.getByRole("button", { name: "Done" }).click();
+      expect(
+        await walk.getByRole("button", { name: "Choose agents" }).count(),
+        "a test has no agent assignment",
+      ).toBe(0);
       await walk.getByRole("button", { name: "Choose personas" }).click();
       await walk.getByRole("checkbox", { name: "Impatient Rita" }).click();
       await walk.getByRole("button", { name: "Done" }).click();
@@ -2821,23 +2893,32 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "creates a run over that connection and starts it",
+    "starts one complete-suite run over that connection",
     async () => {
       await walk.goto(at("runs"));
       await walk.getByRole("link", { name: "Create a run" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/runs/new$`));
 
+      await walk.waitForSelector("#run-suite");
+      await walk.selectOption("#run-suite", { label: "Support reception" });
       await walk.waitForSelector("#run-agent");
       await walk.selectOption("#run-agent", { label: "The Support line" });
       await walk.waitForSelector("#run-connection");
       await walk.selectOption("#run-connection", { index: 1 });
 
-      await walk
-        .getByRole("checkbox", { name: "Include Reschedules a booked appointment" })
-        .check();
+      const runBuilder = await walk.innerText("main");
+      expect(runBuilder).toContain(
+        "Egma runs the full suite. Individual tests cannot be picked here.",
+      );
+      expect(
+        await walk
+          .getByRole("checkbox", {
+            name: "Include Reschedules a booked appointment",
+          })
+          .count(),
+        "a run cannot select part of a suite",
+      ).toBe(0);
 
-      // The review is the same resolution the start performs, so waiting for it
-      // is waiting for egma to have said what it would freeze.
       await walk.waitForSelector("#run-name");
       await walk.fill("#run-name", "The first run in Support");
       // Nothing here is a run that judges nothing: a grader was switched on two
@@ -2846,17 +2927,14 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.locator("text=No grader is running in this project").count(),
       ).toBe(0);
 
-      await walk.getByRole("button", { name: "Start run" }).click();
-      const confirmation = walk.getByRole("dialog", { name: "Start this run?" });
-      await confirmation
-        .getByText("1 simulation will be conducted.")
-        .waitFor();
+      const start = walk.getByRole("button", { name: "Start run" });
+      await expect.poll(() => start.isEnabled()).toBe(true);
       const startResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
           new URL(response.url()).pathname === "/v1/runs",
       );
-      await confirmation.getByRole("button", { name: "Start run" }).click();
+      await start.click();
       const started = await startResponse;
       expect(started.status(), await started.text()).toBe(201);
       await walk.waitForURL(
@@ -2876,6 +2954,7 @@ describe("the complete product, walked in order in a second project", () => {
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
       expect(shown).toContain("Impatient Rita");
+      expect(shown).toContain("Support reception");
       // What the run was against, as it now stands — the agent, and the
       // connection exactly as this run went over it.
       expect(shown).toContain("The Support line");
@@ -3045,11 +3124,16 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Tests",
         address: at("tests"),
+        says: "Support reception",
+      },
+      {
+        what: "one test suite",
+        address: suiteAddress,
         says: "Reschedules a booked appointment",
       },
       {
         what: "Write a test",
-        address: at("tests", "new"),
+        address: testWriterAddress(),
         says: "What should happen",
       },
       {
@@ -3090,7 +3174,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("runs", "new"),
         // The whole page waits on the agents read, so its own sentence is
         // drawn only after that read answers.
-        says: "Choose one agent, one connection and the tests to run.",
+        says: "Run every current test in one suite against one agent and one connection.",
       },
       {
         what: "one run",
@@ -3176,16 +3260,23 @@ describe("the complete product, walked in order in a second project", () => {
   ): Promise<void> {
     const shown = await which.innerText("main");
 
-    // A test suite is a saved selector over tests and this version has none.
-    expect(shown, route.what).not.toMatch(/\bsuite/iu);
-    // Archive is reversible. No page deletes evidence for good.
+    // Historical run evidence cannot be removed from a product page.
     expect(shown, route.what).not.toMatch(/purge|delete permanently/iu);
 
     /*
      * `tag` and `replay` are valid words in some copy, so this checks only
      * controls that would let somebody use those excluded features.
      */
-    for (const absent of ["Tags", "Add tag", "New tag", "Replay"]) {
+    for (const absent of [
+      "Tags",
+      "Add tag",
+      "New tag",
+      "Replay",
+      "Retry",
+      "Retry run",
+      "Rerun",
+      "Rerun simulation",
+    ]) {
       expect(
         await which.getByRole("button", { name: absent }).count(),
         `${route.what} offers ${absent}`,
@@ -3257,7 +3348,7 @@ describe("the complete product, walked in order in a second project", () => {
      * following an application link, and the settled page must belong to the
      * Support project. While that page is open, the same case checks its
      * page-specific exclusions and resizes it to a phone width. That keeps the
-     * real layout proof without loading all 22 pages two more times.
+     * real layout proof without loading all 23 pages two more times.
      *
      * The shell is shared, so it is checked once. One stateful detail page is
      * reloaded as the representative proof that the address keeps its state;
@@ -3822,7 +3913,7 @@ describe("the complete product, walked in order in a second project", () => {
         const field = Math.round(await heightOf(walk, "#agent-name"));
         expect(field).toBe(tokens.control);
 
-        await walk.goto(at("tests", "new"));
+        await walk.goto(testWriterAddress());
         await reactHasTakenOver(walk, "form");
         expect(Math.round(await heightOf(walk, "#test-name"))).toBe(field);
 
@@ -4284,4 +4375,75 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
   });
+
+  it(
+    "keeps the run after its suite is renamed and then permanently deleted",
+    async () => {
+      await walk.goto(suiteAddress);
+      await saysWithin(walk, "Reschedules a booked appointment");
+
+      await walk.getByRole("button", { name: "Rename suite" }).click();
+      const rename = walk.getByRole("dialog", {
+        name: "Rename test suite",
+      });
+      await rename.waitFor();
+      await rename.getByLabel("Suite name").fill("Northside Ford");
+      const renameResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname ===
+            `/v1/test-suites/${suiteIdOf(suiteAddress)}`,
+      );
+      await rename.getByRole("button", { name: "Save name" }).click();
+      const renamed = await renameResponse;
+      expect(renamed.status(), await renamed.text()).toBe(200);
+      await saysWithin(walk, "Northside Ford");
+
+      // A run reads the suite's current name. Renaming does not create a suite
+      // version or change the suite identity recorded on the run.
+      await walk.goto(runAddress);
+      const summary = walk.getByRole("group", { name: "Run summary" });
+      await expect.poll(() => summary.innerText()).toContain("Northside Ford");
+      expect(await summary.innerText()).not.toContain("Support reception");
+      expect(await summary.innerText()).not.toContain("(deleted)");
+
+      await walk.goto(suiteAddress);
+      await saysWithin(walk, "Northside Ford");
+      await walk.getByRole("button", { name: "Delete suite" }).click();
+      const deletion = walk.getByRole("dialog", {
+        name: "Delete Northside Ford",
+      });
+      await deletion.waitFor();
+      expect(await deletion.innerText()).toContain(
+        "This permanently deletes Northside Ford and every test in it. You cannot restore them.",
+      );
+
+      const deleteResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "DELETE" &&
+          new URL(response.url()).pathname ===
+            `/v1/test-suites/${suiteIdOf(suiteAddress)}`,
+      );
+      await deletion.getByRole("button", { name: "Delete suite" }).click();
+      const deleted = await deleteResponse;
+      expect(deleted.status()).toBe(204);
+      await walk.waitForURL(at("tests"));
+      await saysWithin(walk, "No test suites yet");
+      expect(await walk.innerText("main")).not.toContain(
+        "Reschedules a booked appointment",
+      );
+
+      // Deleting authoring data does not delete execution evidence. The same
+      // run and simulation remain, and the last suite name is marked clearly.
+      await walk.goto(runAddress);
+      await expect.poll(() => summary.innerText()).toContain(
+        "Northside Ford (deleted)",
+      );
+      await walk
+        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .first()
+        .waitFor();
+    },
+    SETTLE,
+  );
 });

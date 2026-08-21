@@ -62,7 +62,7 @@ import type { Browser, Page } from "playwright-core";
 
 import { openBrowser } from "../../api/test/support/browser.ts";
 import { startInstance, type Instance } from "../../api/test/support/instance.ts";
-import { folderPathsIn, updateConfig } from "../src/folder/egma-folder.ts";
+import { folderPathsIn, readRepository } from "../src/folder/egma-folder.ts";
 import { parseTestFile } from "../src/folder/test-file.ts";
 import { startFakeRetell, type FakeRetell } from "../test/support/fake-retell.ts";
 import { NO_BROWSER, signUpAndApprove } from "./support/approving-person.ts";
@@ -225,7 +225,7 @@ const TESTS: readonly { readonly name: string; readonly body: string }[] = [
 ];
 
 function testFile(name: string, body: string): string {
-  return `---\nname: ${name}\n---\n${body}\n`;
+  return `---\nformat: 4\nname: ${name}\n---\n${body}\n`;
 }
 
 /* ── the walk ────────────────────────────────────────────────────────── */
@@ -316,7 +316,7 @@ async function signIn(
   check(held.url === instance.origin, "the key is stored against the egma it signed in to");
   check(held.key.startsWith("egma_sk_"), "the key is one this instance really minted");
 
-  const opened = await ask(instance.origin, held.key, "/v1/keys");
+  const opened = await ask(instance.origin, held.key, "/api/keys");
   check(opened.status === 200, `the key opens a real door (it answered ${opened.status})`);
 
   return held;
@@ -366,20 +366,20 @@ async function register(
   }
 
   // Everything that names the account, before a single line of this is printed.
-  for (const name of ["retell_agentId", "agent_name", "connection_name"]) {
+  for (const name of ["retell_agent_id", "agent_name", "connection_name"]) {
     for (const value of ran.said.get(name) ?? []) secrets.push(value);
   }
 
   exited(ran, "egma connect");
   check(first(ran.said, "status") === "connected", "egma connect said it connected");
   check(first(ran.said, "registration") === "created", "the registration was a fresh one");
-  check(first(ran.said, "agentPlatform") === "retell", "the agent platform is Retell");
+  check(first(ran.said, "agent_platform") === "retell", "the agent platform is Retell");
   check(
-    first(ran.said, "connectionKind") === "retell_chat_api",
+    first(ran.said, "connection_kind") === "retell_chat_api",
     "the connection uses the Retell chat API",
   );
   check(
-    first(ran.said, "accessVariant") === "retell_chat_api.api_key",
+    first(ran.said, "access_variant") === "retell_chat_api.api_key",
     "the connection uses a Retell API key",
   );
   check(
@@ -392,8 +392,8 @@ async function register(
     "a text connection dials nothing, and says so",
   );
 
-  const agentId = first(ran.said, "agentId");
-  const connectionId = first(ran.said, "connectionId");
+  const agentId = first(ran.said, "agent_id");
+  const connectionId = first(ran.said, "connection_id");
   check(agentId.startsWith("agt_"), "egma minted an agent id");
   check(connectionId.startsWith("con_"), "egma minted a connection id");
 
@@ -426,21 +426,39 @@ async function pushTheTests(
   say("");
   say("── the folder, and the tests pushed ──────────────────────");
 
-  const made = await egma(["init", "--cwd", repository, "--suite", "onboarding"], { env });
-  exited(made, "egma init");
-  check(first(made.said, "status") === "created", "egma init made the folder");
-
-  // The two ids egma connect printed, written into the folder that points at
-  // them. It is the one step the verbs leave to whoever is driving — the
-  // wizard does it for you — and it is the developer's own committed file.
   const paths = folderPathsIn(repository);
-  await updateConfig(paths.config, {
-    agent: { name: "agent-under-test", id: registered.agentId },
-    connection: { name: "retell-1", id: registered.connectionId },
-  });
+  const made = await egma(
+    [
+      "suite",
+      "create",
+      "onboarding",
+      "--name",
+      "Onboarding",
+      "--url",
+      instance.origin,
+      "--cwd",
+      repository,
+    ],
+    { env },
+  );
+  exited(made, "egma suite create");
+  check(first(made.said, "status") === "created", "egma suite create made the suite");
+
+  const beforePush = await readRepository(paths);
+  const suite = beforePush.suites.find((entry) => entry.directory === "onboarding");
+  check(suite !== undefined, "the onboarding suite is a direct repository directory");
+  check(
+    beforePush.config.agent?.id === registered.agentId &&
+      beforePush.config.connection?.id === registered.connectionId,
+    "the connected agent and connection remain in the repository config",
+  );
 
   for (const test of TESTS) {
-    await writeFile(path.join(paths.tests, `${test.name}.md`), testFile(test.name, test.body), "utf8");
+    await writeFile(
+      path.join(suite?.root ?? path.join(paths.tests, "onboarding"), `${test.name}.md`),
+      testFile(test.name, test.body),
+      "utf8",
+    );
   }
 
   const pushed = await egma(["push", "--url", instance.origin, "--cwd", repository], {
@@ -461,11 +479,12 @@ async function pushTheTests(
 
   // The files now pin what the platform froze, which is the whole point of
   // them being files: what ran is readable in the repository afterwards.
-  const files = (await readdir(paths.tests)).filter((name) => name.endsWith(".md")).sort();
+  const suiteRoot = suite?.root ?? path.join(paths.tests, "onboarding");
+  const files = (await readdir(suiteRoot)).filter((name) => name.endsWith(".md")).sort();
   let pinned = 0;
   for (const name of files) {
     const file = parseTestFile(
-      await readFile(path.join(paths.tests, name), "utf8"),
+      await readFile(path.join(suiteRoot, name), "utf8"),
       name,
       name.replace(/\.md$/u, ""),
     );
@@ -476,7 +495,13 @@ async function pushTheTests(
     `${pinned} of the ${files.length} files pin a version the platform answered with`,
   );
 
-  const listed = await ask(instance.origin, key, "/v1/tests");
+  const projectId = beforePush.config.project?.id ?? "";
+  const suiteId = suite?.manifest.id ?? "";
+  const listed = await ask(
+    instance.origin,
+    key,
+    `/v1/tests?projectId=${encodeURIComponent(projectId)}&suiteId=${encodeURIComponent(suiteId)}`,
+  );
   const items = itemsOf(listed.body, "tests");
   check(
     items.length === TESTS.length,
@@ -508,7 +533,10 @@ async function runAndFollow(
   say("");
   say("── the run, created and followed ─────────────────────────");
 
-  const running = start(["run", "--url", instance.origin, "--cwd", repository], { env });
+  const running = start(
+    ["run", "onboarding", "--url", instance.origin, "--cwd", repository],
+    { env },
+  );
   try {
     await waitUntil(
       () => /^run: run_\S+$/mu.test(running.out()) && /^results: \S+$/mu.test(running.out()),
@@ -535,7 +563,12 @@ async function runAndFollow(
   check(new URL(results).search === "", "no token rides the results address");
 
   const created = await ask(instance.origin, key, `/v1/runs/${runId}`);
-  const simulations = itemsOf(created.body, "simulations");
+  const simulationPage = await ask(
+    instance.origin,
+    key,
+    `/v1/runs/${runId}/simulations`,
+  );
+  const simulations = itemsOf(simulationPage.body, "simulations");
   check(created.status === 200, `the run is on the platform (it answered ${created.status})`);
   check(
     created.body.expectedSimulationCount === TESTS.length,

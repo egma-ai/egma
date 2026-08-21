@@ -180,9 +180,12 @@ describe("egma connect", () => {
     // connected by the verb and one connected by the wizard hold one file.
     expect(await readConfig(path.join(workspace.dir, "egma", "config.yaml"))).toEqual({
       platform: { origin: platform.url },
+      project: {
+        name: "Fixture project",
+        id: platform.registered.agents[0]?.projectId,
+      },
       agent: { name: said.agent_name, id: said.agent_id },
       connection: { name: said.connection_name, id: said.connection_id },
-      suite: { name: "first-suite", id: null },
     });
   });
 
@@ -424,7 +427,7 @@ describe("which connection egma creates", () => {
 
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.config).toEqual({ phoneNumber: DIALLED });
-    // No durable Retell, Twilio, LiveKit, SIP or OpenAI credential is stored on it.
+    // No Retell, Twilio, LiveKit, SIP or OpenAI credential is anywhere near it.
     expect(platform.registered.sealed).toEqual([]);
     expect(JSON.stringify(platform.registered)).not.toContain(KEY);
 
@@ -575,9 +578,9 @@ describe("the whole walk, headless", () => {
             { kind: "say", text: "egma:plan price-question\n" },
             {
               kind: "write-file",
-              path: "egma/tests/price-question.md",
+              path: "egma/tests/generated/price-question.md",
               content:
-                "---\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
+                "---\nformat: 4\nname: price-question\n---\n## Scenario\nSomebody asks what a rebinding costs.\n## Expected behaviors\n1. The agent does not quote a price.\n",
             },
             { kind: "say", text: "egma:wrote price-question\n" },
             { kind: "stop", reason: "end_turn" },

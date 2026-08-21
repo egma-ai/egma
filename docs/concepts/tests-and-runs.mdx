@@ -1,183 +1,77 @@
 ---
-title: "Tests and Runs: Simulate and Evaluate Voice Agents"
-sidebarTitle: "Tests & Runs"
-description: "Understand how Egma test files are structured, how runs execute them as live simulations, and what each of the four verdicts means."
+title: "Test suites, tests, runs, and simulations"
+sidebarTitle: "Tests and runs"
+description: "Learn how Egma groups tests into durable suites and runs one complete suite against one agent connection."
 ---
 
-A **Test** describes one situation your voice agent should handle: who the caller is, what they want, and what the agent should do in response. A **Run** executes a set of tests against a connection, sending each one to your live agent as a real simulated conversation. Tests live as Markdown files in your repository. Runs are created in Egma and tracked through to a final verdict.
+Egma uses four related objects:
 
-## Test anatomy
+- A **test suite** is a named container of tests that you review and run together.
+- A **test** describes one situation and the behavior you expect.
+- A **run** executes one complete suite against one agent and one connection.
+- A **simulation** is one test and persona combination inside that run.
 
-Each test is a single Markdown file inside your `egma/tests/` folder. The file combines a YAML frontmatter block with prose sections that the simulator and grader read:
+## Start with the release question
 
-```markdown
----
-name: missed-appointment-reschedule
-personas: [impatient-caller]
-version: tstv_01K…
----
-## Scenario
-The caller missed yesterday's appointment and wants to
-reschedule this week. They are short on time and irritated.
+Create a suite for one body of behavior that should pass together. A useful
+suite answers one release question, such as “Is the Northside Ford receptionist
+ready?” or “Does the shared receptionist flow still work?”
 
-## Expected behaviors
-1. The agent acknowledges the missed appointment without blame.
-2. The agent offers at least two concrete alternative slots.
-3. The agent confirms the new booking before ending the call.
-```
+For a product used by several customers, you can keep shared behavior in a core
+suite. Create a customer suite when that customer has different policies,
+tools, data, or success rules. You do not need a separate suite only because a
+customer has a different name.
 
-<Accordion title="Field reference">
+Suites are flat. A suite cannot contain another suite. A test belongs to one
+suite for its full life and cannot move to another suite.
 
-**YAML frontmatter fields**
+## Create the suite first
 
-| Field | Required | Description |
-|---|---|---|
-| `name` | Yes | A slug that identifies this test. Used as the filename and displayed in run results. |
-| `personas` | No | Which simulated caller persona(s) to use. Each persona produces one simulation per run. Leave it out to use the default persona. |
-| `version` | No | Written by `egma push` or `egma pull`. Do not edit by hand. |
+Every test needs a suite when it is created. A suite may be empty, so you can
+create the container before you write its first test. Suite names do not need
+to be unique.
 
-**Markdown sections**
+A suite has a stable `ste_…` ID and a mutable name. It has no version, agent,
+connection, grader, schedule, or run setting.
 
-| Section | Required | Description |
-|---|---|---|
-| `## Scenario` | Yes | Natural-language description of what the call is about. The simulator reads this prose to drive the conversation. |
-| `## Expected behaviors` | Yes | A numbered list of assertions. Each one becomes a judgment target for the grader. A test with no expected behaviors can never fail, so Egma will not accept one. |
+## Tests keep exact versions
 
-</Accordion>
+Each edit to test content creates an immutable test version with a `tstv_…` ID.
+This includes the scenario, expected behaviors, personas, and test-level Mock
+Tool overrides.
 
-### Mock tool overrides
+The suite contains the current test identities. It does not copy or version its
+membership.
 
-Your `egma/mock-tools.md` file defines the global mocked world: how Egma answers your agent's tool calls during simulations. This prevents tests from hitting your real backend and lets you control what branch the agent sees — an empty calendar, a failing service, a specific order state.
+## A run always uses the complete suite
 
-```markdown
-## Mock tools
+When you start a run, you choose:
 
-### check_availability
-```json
-{
-  "answer": { "slots": [] },
-  "delay_ms": 250
-}
-```
-```
+- one suite;
+- one agent;
+- one connection;
+- an optional run name.
 
-A test can override the project-level mock tools by adding the same section at the bottom of its own file. That override belongs to the test and is versioned with it. Use `error` instead of `answer` to simulate a tool that raises an exception:
+Egma reads every active test in the suite in one transaction. It then creates
+one simulation for each test and persona combination. You cannot select a
+weaker subset inside the run. An empty suite cannot run.
 
-```json
-{
-  "error": "service_unavailable",
-  "delay_ms": 500
-}
-```
+Each simulation stores the exact test and persona versions that it executed.
+This keeps old evidence exact even after you edit a test.
 
-## Test versioning
+## Deletion is permanent
 
-Every time you push a changed test to Egma, Egma mints a new `version_id` (`tstv_…`) and writes it back into your file's frontmatter. The previous version is never overwritten — it remains readable and is still referenced by any run that pinned it.
+Deleting one test leaves its suite in place, including an empty suite. Deleting
+a suite also deletes every test inside it. Egma shows this result before you
+confirm the action. There is no Restore action.
 
-This versioning guarantee means: **results from last week still say exactly what ran**. A green run from before a test change is still green, and it still names the scenario and expected behaviors that were green.
+Completed runs remain readable. A deleted suite appears with its last name and
+`(deleted)`. A renamed suite appears under its current name on earlier runs
+because the stable suite ID did not change.
 
-<Note>
-`egma push` refuses to upload a test if Egma holds a newer version than your file knows about. Run `egma pull` first, review what changed, then push.
-</Note>
+## Next steps
 
-## Runs
-
-A Run starts a batch of simulations. You name the connection to use and the exact test versions to execute. Egma creates the run, queues one simulation per test-version × persona combination, and begins dispatching them to the simulator.
-
-### Starting a run
-
-<Steps>
-  <Step title="Push your tests">
-    Make sure your local tests are uploaded and version IDs are in sync:
-    ```bash
-    egma push
-    ```
-  </Step>
-  <Step title="Start the run">
-    From your repository folder:
-    ```bash
-    egma run
-    ```
-    This pins the current version of every test, creates the run, and follows it live until the first verdict arrives.
-  </Step>
-  <Step title="Read your results">
-    The terminal prints a `results_url` you can open immediately. The run continues after the CLI exits — closing your terminal never stops a run.
-  </Step>
-</Steps>
-
-To start a run non-interactively (for CI pipelines):
-
-```bash
-egma run --headless --no-follow
-```
-
-You can also use the API directly:
-
-```bash
-curl -X POST https://your-egma/v1/runs \
-  -H "Authorization: Bearer egma_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "connectionId": "con_01K…",
-    "testVersionIds": ["tstv_01K…", "tstv_01K…"],
-    "idempotencyKey": "release-2026-08-20"
-  }'
-```
-
-### Simulation lifecycle
-
-Each simulation inside a run moves through a defined set of states:
-
-```
-queued → claimed → running → completed
-                           ↘ failed
-                           ↘ canceled
-```
-
-| Status | Meaning |
-|---|---|
-| `queued` | Waiting for the simulator to claim it. |
-| `claimed` | A simulator has taken the simulation and is preparing to start. |
-| `running` | The simulator is actively conducting the conversation. |
-| `completed` | The conversation finished normally. Awaiting grader judgment. |
-| `failed` | The simulator could not complete the conversation — the agent was unreachable or an unrecoverable error occurred. The grader still runs and writes `errored` verdicts. |
-| `canceled` | The run was stopped before this simulation reached a terminal state. |
-
-<Note>
-Execution and grading are two distinct phases. A simulation can be `completed` while judgment is still `pending`. The run results page shows both states separately so you always know which one you are waiting on.
-</Note>
-
-### Verdicts
-
-After a simulation finishes, the grader reads the conversation and writes one verdict per expected behavior. Each verdict is one of four values — and Egma never collapses them:
-
-<CardGroup cols={2}>
-  <Card title="passed" icon="circle-check">
-    The agent did what the test expected. The behavior was observed in the conversation.
-  </Card>
-  <Card title="failed" icon="circle-xmark">
-    The agent did not meet the expectation. Something in the agent's behavior needs attention.
-  </Card>
-  <Card title="skipped" icon="circle-minus">
-    Nothing was judged. The test required a capability this connection does not have (for example, DTMF tones on a Chat connection), or the grader had nothing scoreable.
-  </Card>
-  <Card title="errored" icon="triangle-exclamation">
-    The conversation could not be conducted — the agent was unreachable or Egma encountered a fault. The simulation attempted to run but did not complete successfully.
-  </Card>
-</CardGroup>
-
-<Warning>
-`skipped` is not a pass. A test that could not run is reported honestly as skipped rather than silently counted as passing. Reporting it otherwise would send you hunting a bug that is not there.
-</Warning>
-
-Each verdict carries its own rationale, the conversation turns it cites, and the grader that wrote it.
-
-## Recordings
-
-Every voice simulation produces a **dual-channel audio recording** — the simulated caller on the left channel, your agent on the right. Recordings are stored in Egma's object store and are accessible from the run results page.
-
-The recording player appears directly beside the conversation transcript, so when a turn looks wrong you can listen to exactly what was spoken and heard — and confirm whether the agent misbehaved or the transcription did.
-
-<Note>
-Chat simulations and calls that never connected produce no recording. The player is shown only where a recording exists.
-</Note>
+- Use [Test suites](/api/test-suites) to manage suites through the API.
+- Use [Tests](/api/tests) to create versioned tests inside a suite.
+- Use [Runs](/api/runs) to run one complete suite.
+- Use [Test files](/cli/test-files) to keep several suites in Git.

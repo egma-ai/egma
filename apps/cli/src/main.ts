@@ -33,6 +33,7 @@ import { runLoginCommand } from "./commands/login.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
+import { runSuiteCreateCommand } from "./commands/suite.ts";
 import {
   isSelfHostInvocation,
   runSelfHostCommand,
@@ -85,7 +86,7 @@ async function wizardMachinery(): Promise<{
  * because a verb is what a coding agent types and a coding agent has no
  * keystroke to give.
  */
-export const VERBS = ["login", "connect", "init", "pull", "push", "run"] as const;
+export const VERBS = ["login", "connect", "init", "pull", "push", "run", "suite"] as const;
 
 /**
  * The Retell the CLI talks to, for a check that stands one in.
@@ -134,7 +135,12 @@ export type Invocation = {
   /** What `egma init` should write into the folder's config file. */
   readonly agentName: string | null;
   readonly connectionName: string | null;
-  readonly suiteName: string | null;
+  /** The only suite subcommand this CLI exposes. */
+  readonly suiteAction: string | null;
+  /** A direct child under `egma/tests`, for suite create or run. */
+  readonly suiteDirectory: string | null;
+  /** Mutable suite display name on create, or optional run name. */
+  readonly name: string | null;
   /**
    * A test seam, not product surface: `-- <command>` starts a scripted agent in
    * place of a real one. It is not documented and it is not stable.
@@ -165,7 +171,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let existingTests: string | null = null;
   let agentName: string | null = null;
   let connectionName: string | null = null;
-  let suiteName: string | null = null;
+  let suiteAction: string | null = null;
+  let suiteDirectory: string | null = null;
+  let name: string | null = null;
   let drivenAgentCommand: string[] = [];
   const unknown: string[] = [];
 
@@ -196,8 +204,15 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--existing-tests") existingTests = argv[(index += 1)] ?? null;
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
     else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
-    else if (argument === "--suite") suiteName = argv[(index += 1)] ?? null;
+    else if (argument === "--name") name = argv[(index += 1)] ?? null;
     else if (verb === null && isVerb(argument)) verb = argument;
+    else if (verb === "suite" && suiteAction === null) suiteAction = argument;
+    else if (
+      suiteDirectory === null &&
+      (verb === "run" || (verb === "suite" && suiteAction === "create"))
+    ) {
+      suiteDirectory = argument;
+    }
     else unknown.push(argument);
   }
 
@@ -219,7 +234,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
     existingTests,
     agentName,
     connectionName,
-    suiteName,
+    suiteAction,
+    suiteDirectory,
+    name,
     drivenAgentCommand,
     unknown,
   };
@@ -243,8 +260,10 @@ export function helpText(): string {
     "                           tools it answers with, into it.",
     "  egma push [options]      Upload what is in it. Refuses, naming names,",
     "                           when Egma has moved on since your last pull.",
-    "  egma run [options]       Run this folder's tests, pinning the version of",
-    "                           each. Follows the run and prints every change.",
+    "  egma suite create <directory> --name <name>",
+    "                           Create the platform suite, then its local manifest.",
+    "  egma run <suite-directory> [options]",
+    "                           Run the complete suite after an exact sync check.",
     "",
     "In a platform workspace — the directory your Egma deployment lives in,",
     "which is never your agent repository:",
@@ -299,7 +318,8 @@ export function helpText(): string {
     "  --agent <name>       With init: what to call the voice agent this",
     "                       folder's tests are for.",
     "  --connection <name>  With init: what to call the way Egma reaches it.",
-    "  --suite <name>       With init: what to call this folder's test suite.",
+    "  --name <name>        With suite create: the suite display name. With run:",
+    "                       an optional name for this run.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
@@ -352,26 +372,23 @@ export function helpText(): string {
     "    which number   6 no key given   7 not signed in to Egma",
     "  8 Retell routes no number to that agent   130 stopped part way",
     "",
-    "What egma init, pull and push print, one fact per line:",
-    "  url, folder, and then one line per test: what happened to it, the file,",
-    "  and the version the file now pins. push names every conflicting test on",
-    "  its own conflict: line, with a reason-code: line saying which of the six",
-    "  it is — moved, identity-moved, unknown, format, not-applicable,",
-    "  archived — and a reason: line for the four that carry a sentence of",
-    "  their own. pull names a file it kept under kept:, with a reason: line",
-    "  when there is something to do about it by hand.",
+    "What egma init, suite create, pull and push print, one fact per line:",
+    "  url and folder, then each suite, test, and Mock Tool the complete",
+    "  repository operation handled. A pull names every local draft or deleted",
+    "  remote resource it kept, with the reason. An atomic push refusal writes",
+    "  no platform resource.",
     "  init adds a platform: line whenever this repository is bound, whether",
     "  this run bound it or found it already bound.",
     "",
     "What egma init, pull and push answer with:",
     "  0 done   1 no egma folder here   2 not signed in",
     "  4 Egma did not answer, or refused",
-    "  5 push refused: Egma has moved on, pull first",
+    "  5 atomic push conflict: pull and inspect first",
     "  6 Egma turned a test or a mock tool away at its door",
     "  130 stopped part way",
     "",
     "What egma run prints, one fact per line:",
-    "  url, folder, agent, connection, one pin: line per test version it pinned,",
+    "  url, folder, suite, directory, agent, connection, one pin: line per test,",
     "  run, tests, simulations, results, then one simulation: line per change,",
     "  one verdict: line per verdict, first-verdict: once, and the four counts",
     "  passed, failed, skipped, errored, plus pending and simulations.",
@@ -660,7 +677,7 @@ async function runInteractiveWizard(
  * rather than leaving half a folder behind.
  */
 async function runFolderVerb(
-  verb: "init" | "pull" | "push" | "run",
+  verb: "init" | "pull" | "push" | "run" | "suite",
   invocation: Invocation,
   access: PlatformAccess,
   /** For `init`: the selected platform URL to commit, when `--url` named one. */
@@ -685,7 +702,6 @@ async function runFolderVerb(
         names: {
           agent: invocation.agentName,
           connection: invocation.connectionName,
-          suite: invocation.suiteName,
         },
         binding,
       });
@@ -693,8 +709,17 @@ async function runFolderVerb(
     if (verb === "run") {
       return await runRunCommand({
         ...options,
+        suiteDirectory: invocation.suiteDirectory ?? "",
+        ...(invocation.name === null ? {} : { name: invocation.name }),
         noFollow: invocation.noFollow,
         signal: controller.signal,
+      });
+    }
+    if (verb === "suite") {
+      return await runSuiteCreateCommand({
+        ...options,
+        directory: invocation.suiteDirectory ?? "",
+        name: invocation.name ?? "",
       });
     }
     return verb === "pull" ? await runPullCommand(options) : await runPushCommand(options);
@@ -809,6 +834,32 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
   if (invocation.version) {
     process.stdout.write(`${version()}\n`);
+    return;
+  }
+  if (invocation.verb === "suite" && invocation.suiteAction !== "create") {
+    process.stderr.write(
+      "Egma supports `egma suite create <directory> --name <name>`. Suite deletion is an explicit browser or API action.\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (invocation.verb === "suite" && invocation.suiteDirectory === null) {
+    process.stderr.write(
+      "Name the local directory: egma suite create <directory> --name <name>.\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (invocation.verb === "suite" && invocation.name === null) {
+    process.stderr.write(
+      "Name the suite: egma suite create <directory> --name <name>.\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (invocation.verb === "run" && invocation.suiteDirectory === null) {
+    process.stderr.write("Name one local suite directory: egma run <suite-directory>.\n");
+    process.exitCode = 1;
     return;
   }
   if (invocation.unknown.length > 0) {
@@ -952,7 +1003,8 @@ export async function main(argv: readonly string[]): Promise<void> {
       if (
         invocation.verb === "pull" ||
         invocation.verb === "push" ||
-        invocation.verb === "run"
+        invocation.verb === "run" ||
+        invocation.verb === "suite"
       ) {
         process.exitCode = await runFolderVerb(invocation.verb, invocation, access);
         return;

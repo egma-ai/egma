@@ -25,8 +25,8 @@ import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
  * different.
  *
  * **Every step of it goes through the product.** The agent is registered, the
- * test is pushed and the run is started over HTTP, exactly as a terminal does
- * it; only the conversations' movement uses the data-access functions a
+ * suite is created, the test is written inside it and the complete suite is run
+ * over HTTP; only the simulations' movement uses the data-access functions a
  * simulator would call, because no simulator exists in these suites and a fake
  * feed would prove nothing. What lands on the row is what a real report lands.
  */
@@ -341,7 +341,17 @@ export async function aConductedRun(
     connection: modality === "voice" ? A_VOICE_AGENT : A_CHAT_AGENT,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
+  const agentId = (registered.body.agent as { id: string }).id;
   const connectionId = (registered.body.connection as { id: string }).id;
+
+  const createdSuite = await ask(app, "POST", "/v1/test-suites", who.key, {
+    name: `Recording evidence ${String(runs)}`,
+  });
+  expect(
+    createdSuite.statusCode,
+    JSON.stringify(createdSuite.body),
+  ).toBe(201);
+  const suiteId = String(createdSuite.body.id);
 
   // Two people to call about the one test, which is what makes a run of two
   // conversations rather than a run of one.
@@ -360,25 +370,40 @@ export async function aConductedRun(
 
   const pushed = await ask(app, "POST", "/v1/tests", who.key, {
     ...A_TEST,
+    suiteId,
     name: `Reschedules a booked appointment ${runs}`,
     personas: callers,
   });
   expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
   const started = await ask(app, "POST", "/v1/runs", who.key, {
-    connectionId: connectionId,
-    testVersionIds: [String(pushed.body.versionId)],
+    suiteId,
+    agentId,
+    connectionId,
     idempotencyKey: newId("run"),
-    label: options.label ?? "the whole folder",
+    name: options.label ?? "the whole folder",
   });
   expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
   const runId = String(started.body.id);
+
+  const page = await ask(
+    app,
+    "GET",
+    `/v1/runs/${runId}/simulations?pageSize=2`,
+    who.key,
+  );
+  expect(page.statusCode, JSON.stringify(page.body)).toBe(200);
+  expect(page.body.nextPageToken).toBeNull();
+  const simulations = page.body.simulations as readonly { id: string }[];
+  expect(simulations, "the two personas wrote two simulations").toHaveLength(2);
+  const simulationIds = new Set(simulations.map((simulation) => simulation.id));
 
   // Moved the way a simulator moves them: claimed, started, landed. The two
   // land differently on purpose — one reports audio and one reports none.
   const claimed = (await claimSimulations({ claimant: CLAIMANT, capacity: 50 }))
     .filter((claim) => claim.runId === runId);
   expect(claimed.length, "both conversations of this run were claimed").toBe(2);
+  expect(new Set(claimed.map((claim) => claim.id))).toEqual(simulationIds);
 
   const [heard, silent] = claimed as [
     (typeof claimed)[number],

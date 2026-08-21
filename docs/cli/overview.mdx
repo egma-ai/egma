@@ -44,7 +44,9 @@ Running `npx @egma/cli` with no arguments opens the full interactive wizard. It 
     For Retell, Egma asks for your API key and lists the agents it can read. A chat agent uses the Retell Chat API. A voice agent uses one of its public phone numbers. For LiveKit, project credentials are the recommended room setup; a public HTTPS token endpoint with auth headers is the advanced option. Egma uses credentials for discovery and sends them to the platform only when the selected connection needs sealed storage. Pipecat and Vapi setup are not supported yet.
   </Step>
   <Step title="Generate a test suite">
-    The wizard asks whether you already have test cases written down. Give it a path inside your repository and the selected coding agent turns each entry into a test file first. The same coding-agent session then writes the rest. Tests arrive one file at a time in `egma/tests/`, each grounded in the agent it found.
+    The wizard creates a real suite on Egma before it writes tests. It stores
+    the stable suite ID in `egma/tests/<suite-directory>/suite.yaml`. The same
+    coding-agent session then writes the tests inside that suite directory.
   </Step>
   <Step title="Review and run">
     The wizard shows the full list of generated tests. Press `[e]` to open any file in your `$EDITOR`, `[q]` to quit with every file saved to your repository for later, or `[Enter]` to push the suite and start a run immediately.
@@ -70,9 +72,10 @@ Every step the wizard takes is also available as a standalone command that print
 | `egma login` | Signs this machine in, no questions asked |
 | `egma connect` | Registers your voice agent and a reach method |
 | `egma init` | Creates the `egma/` folder in your repository |
+| `egma suite create <directory> --name <name>` | Creates a suite on Egma and writes its local manifest |
 | `egma pull` | Writes Egma's current test versions into your local files |
 | `egma push` | Uploads your local tests to Egma |
-| `egma run` | Runs this folder's tests against your connected agent |
+| `egma run <suite-directory>` | Runs one complete local suite against your connected agent |
 | `egma self-host up` | Starts a full local Egma instance |
 | `egma self-host setup` | Configures a running local instance |
 
@@ -86,7 +89,13 @@ The wizard (or `egma init`) creates an `egma/` folder in your repository. Everyt
 egma/
   config.yaml      names and IDs pointing at your Egma instance
   mock-tools.md    mocked tool responses for simulations
-  tests/           one .md file per test case
+  tests/
+    receptionist-core/
+      suite.yaml   stable suite ID and current display name
+      *.md         tests in this suite
+    northside-ford/
+      suite.yaml
+      *.md
 ```
 
 Your tests are code. Your team reviews them in pull requests, edits them in the same editor, and keeps their history in the same git log. See [Test Files](/cli/test-files) for a full explanation of the file format.

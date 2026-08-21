@@ -10,54 +10,54 @@ import {
   stringIdSchema,
 } from "../schemas.ts";
 
+const stringSchema = { type: "string" } as const;
+const pageSizeSchema = { type: "integer", minimum: 1, maximum: 200 } as const;
+
 const testParams = parameters({ testId: stringIdSchema }, ["testId"]);
 const versionParams = parameters({ versionId: stringIdSchema }, ["versionId"]);
-
 const projectQuery = parameters({ projectId: stringIdSchema });
-const testListQuery = parameters({
-  projectId: stringIdSchema,
-  pageToken: stringIdSchema,
-  archived: { type: "string" },
-  agentId: stringIdSchema,
-  name: { type: "string" },
-});
+const testListQuery = parameters(
+  {
+    projectId: stringIdSchema,
+    suiteId: stringIdSchema,
+    pageToken: stringIdSchema,
+    pageSize: pageSizeSchema,
+  },
+  ["suiteId"],
+);
 const versionListQuery = parameters({
   projectId: stringIdSchema,
   pageToken: stringIdSchema,
+  pageSize: pageSizeSchema,
 });
 
-const namedResource = {
+const namedResourceSchema = {
   type: "object",
-  properties: {
-    id: stringIdSchema,
-    name: { type: "string" },
-  },
+  properties: { id: stringIdSchema, name: stringSchema },
   required: ["id", "name"],
   additionalProperties: false,
 } as const;
 
-const testPersona = {
-  ...namedResource,
+const testPersonaSchema = {
+  ...namedResourceSchema,
   properties: {
-    ...namedResource.properties,
+    ...namedResourceSchema.properties,
     archivedAt: nullable(dateTimeSchema),
   },
-  required: [...namedResource.required, "archivedAt"],
+  required: [...namedResourceSchema.required, "archivedAt"],
 } as const;
 
-const testAgent = testPersona;
-
-const describedMockToolProperties = {
-  tool: { type: "string" },
+const mockToolProperties = {
+  tool: stringSchema,
   delayMs: { type: "integer", minimum: 0 },
 } as const;
 
-const mockTool = {
+export const testMockToolSchema = {
   oneOf: [
     {
       type: "object",
       properties: {
-        ...describedMockToolProperties,
+        ...mockToolProperties,
         answer: anySchema,
         error: { not: {} },
       },
@@ -67,9 +67,9 @@ const mockTool = {
     {
       type: "object",
       properties: {
-        ...describedMockToolProperties,
+        ...mockToolProperties,
         answer: { not: {} },
-        error: { type: "string" },
+        error: stringSchema,
       },
       required: ["tool", "delayMs", "error"],
       additionalProperties: false,
@@ -77,97 +77,12 @@ const mockTool = {
   ],
 } as const;
 
-const test = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    projectId: stringIdSchema,
-    name: { type: "string" },
-    description: nullable({ type: "string" }),
-    version: { type: "integer", minimum: 1 },
-    versionId: stringIdSchema,
-    scenario: { type: "string" },
-    expectedBehaviors: arrayOf({ type: "string" }),
-    personas: arrayOf(testPersona),
-    requiredCapabilities: arrayOf({ type: "string" }),
-    mockTools: arrayOf(mockTool),
-    overrideCount: { type: "integer", minimum: 0 },
-    agents: arrayOf(testAgent),
-    revision: stringIdSchema,
-    applicabilityRevision: stringIdSchema,
-    archivedAt: nullable(dateTimeSchema),
-    archiveReason: nullable({ type: "string" }),
-    createdAt: dateTimeSchema,
-    updatedAt: dateTimeSchema,
-  },
-  required: [
-    "id",
-    "projectId",
-    "name",
-    "description",
-    "version",
-    "versionId",
-    "scenario",
-    "expectedBehaviors",
-    "personas",
-    "requiredCapabilities",
-    "mockTools",
-    "overrideCount",
-    "agents",
-    "revision",
-    "applicabilityRevision",
-    "archivedAt",
-    "archiveReason",
-    "createdAt",
-    "updatedAt",
-  ],
-  additionalProperties: false,
-} as const;
-
-const testVersion = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    testId: stringIdSchema,
-    testName: { type: "string" },
-    version: { type: "integer", minimum: 1 },
-    current: { type: "boolean" },
-    scenario: { type: "string" },
-    expectedBehaviors: arrayOf({ type: "string" }),
-    personas: arrayOf(testPersona),
-    requiredCapabilities: arrayOf({ type: "string" }),
-    mockTools: arrayOf(mockTool),
-    overrideCount: { type: "integer", minimum: 0 },
-    createdAt: dateTimeSchema,
-  },
-  required: [
-    "id",
-    "testId",
-    "testName",
-    "version",
-    "current",
-    "scenario",
-    "expectedBehaviors",
-    "personas",
-    "requiredCapabilities",
-    "mockTools",
-    "overrideCount",
-    "createdAt",
-  ],
-  additionalProperties: false,
-} as const;
-
-const mockToolInputProperties = {
-  tool: { type: "string" },
-  delayMs: { type: "integer", minimum: 0 },
-} as const;
-
-const mockToolInput = {
+export const testMockToolInputSchema = {
   oneOf: [
     {
       type: "object",
       properties: {
-        ...mockToolInputProperties,
+        ...mockToolProperties,
         answer: anySchema,
         error: { not: {} },
       },
@@ -177,9 +92,9 @@ const mockToolInput = {
     {
       type: "object",
       properties: {
-        ...mockToolInputProperties,
+        ...mockToolProperties,
         answer: { not: {} },
-        error: { type: "string" },
+        error: stringSchema,
       },
       required: ["tool", "error"],
       additionalProperties: false,
@@ -187,80 +102,102 @@ const mockToolInput = {
   ],
 } as const;
 
+export const testSchema = {
+  type: "object",
+  properties: {
+    id: stringIdSchema,
+    projectId: stringIdSchema,
+    suiteId: stringIdSchema,
+    name: stringSchema,
+    description: nullable(stringSchema),
+    version: { type: "integer", minimum: 1 },
+    versionId: stringIdSchema,
+    scenario: stringSchema,
+    expectedBehaviors: arrayOf(stringSchema),
+    personas: arrayOf(testPersonaSchema),
+    mockTools: arrayOf(testMockToolSchema),
+    overrideCount: { type: "integer", minimum: 0 },
+    revision: stringIdSchema,
+    createdAt: dateTimeSchema,
+    updatedAt: dateTimeSchema,
+  },
+  required: [
+    "id", "projectId", "suiteId", "name", "description", "version",
+    "versionId", "scenario", "expectedBehaviors", "personas", "mockTools",
+    "overrideCount", "revision", "createdAt", "updatedAt",
+  ],
+  additionalProperties: false,
+} as const;
+
+const testVersionSchema = {
+  type: "object",
+  properties: {
+    id: stringIdSchema,
+    testId: stringIdSchema,
+    suiteId: stringIdSchema,
+    testName: stringSchema,
+    version: { type: "integer", minimum: 1 },
+    current: { type: "boolean" },
+    scenario: stringSchema,
+    expectedBehaviors: arrayOf(stringSchema),
+    personas: arrayOf(testPersonaSchema),
+    mockTools: arrayOf(testMockToolSchema),
+    overrideCount: { type: "integer", minimum: 0 },
+    createdAt: dateTimeSchema,
+  },
+  required: [
+    "id", "testId", "suiteId", "testName", "version", "current",
+    "scenario", "expectedBehaviors", "personas", "mockTools", "overrideCount",
+    "createdAt",
+  ],
+  additionalProperties: false,
+} as const;
+
 const testContentInput = {
-  scenario: { type: "string" },
-  expectedBehaviors: arrayOf({ type: "string" }),
-  personas: arrayOf({ type: "string" }),
-  mockTools: arrayOf(mockToolInput),
-  requiredCapabilities: arrayOf({ type: "string" }),
+  scenario: stringSchema,
+  expectedBehaviors: arrayOf(stringSchema),
+  personas: arrayOf(stringSchema),
+  mockTools: arrayOf(testMockToolInputSchema),
 } as const;
 
 const createTestBody = {
   type: "object",
   properties: {
-    name: { type: "string" },
-    description: nullable({ type: "string" }),
+    suiteId: stringIdSchema,
+    name: stringSchema,
+    description: nullable(stringSchema),
     ...testContentInput,
-    agents: arrayOf(stringIdSchema),
   },
-  required: ["name", "scenario", "expectedBehaviors"],
+  required: ["suiteId", "name", "scenario", "expectedBehaviors"],
   additionalProperties: false,
 } as const;
 
 const updateTestBody = {
   type: "object",
   properties: {
-    name: { type: "string" },
-    description: nullable({ type: "string" }),
+    name: stringSchema,
+    description: nullable(stringSchema),
     ...testContentInput,
     expectedVersionId: stringIdSchema,
     expectedRevision: stringIdSchema,
-    repositoryAgentId: stringIdSchema,
   },
   additionalProperties: false,
 } as const;
 
-const setTestAgentsBody = {
+const testListSchema = {
   type: "object",
   properties: {
-    agents: arrayOf(stringIdSchema),
-    expectedApplicabilityRevision: stringIdSchema,
-  },
-  required: ["agents"],
-  additionalProperties: false,
-} as const;
-
-const archiveTestBody = {
-  type: "object",
-  properties: {
-    expectedRevision: stringIdSchema,
-  },
-  additionalProperties: false,
-} as const;
-
-const restoreTestBody = {
-  type: "object",
-  properties: {
-    ...archiveTestBody.properties,
-    agents: arrayOf(stringIdSchema),
-  },
-  additionalProperties: false,
-} as const;
-
-const testList = {
-  type: "object",
-  properties: {
-    tests: arrayOf(test),
+    tests: arrayOf(testSchema),
     nextPageToken: nullable(stringIdSchema),
   },
   required: ["tests", "nextPageToken"],
   additionalProperties: false,
 } as const;
 
-const versionList = {
+const versionListSchema = {
   type: "object",
   properties: {
-    versions: arrayOf(testVersion),
+    versions: arrayOf(testVersionSchema),
     nextPageToken: nullable(stringIdSchema),
   },
   required: ["versions", "nextPageToken"],
@@ -275,11 +212,7 @@ const readRefusals = {
   422: refusalResponse,
   429: rateLimitResponse,
 } as const;
-
-const writeRefusals = {
-  ...readRefusals,
-  409: refusalResponse,
-} as const;
+const writeRefusals = { ...readRefusals, 409: refusalResponse } as const;
 
 const movedTestRefusal = {
   description: "The test moved after the version the edit was based on.",
@@ -288,18 +221,14 @@ const movedTestRefusal = {
       {
         type: "object",
         properties: {
-          error: { const: "conflict" },
-          message: { type: "string" },
-          test: namedResource,
+          error: { const: "version_conflict" },
+          message: stringSchema,
+          test: namedResourceSchema,
           expectedVersionId: stringIdSchema,
           currentVersionId: stringIdSchema,
         },
         required: [
-          "error",
-          "message",
-          "test",
-          "expectedVersionId",
-          "currentVersionId",
+          "error", "message", "test", "expectedVersionId", "currentVersionId",
         ],
         additionalProperties: false,
       },
@@ -313,16 +242,12 @@ export const testOperations = {
     operationId: "listTests",
     method: "GET",
     path: "/v1/tests",
-    summary: "List tests",
+    summary: "List the active tests in a test suite",
     tag: "Tests",
     security: "credentialed",
     request: { query: testListQuery },
-    responses: {
-      200: { description: "A page of tests.", schema: testList },
-      ...readRefusals,
-    },
+    responses: { 200: { description: "A page of tests.", schema: testListSchema }, ...readRefusals },
   }),
-
   getTestVersion: defineOperation({
     operationId: "getTestVersion",
     method: "GET",
@@ -331,12 +256,8 @@ export const testOperations = {
     tag: "Tests",
     security: "credentialed",
     request: { params: versionParams, query: projectQuery },
-    responses: {
-      200: { description: "The frozen test version.", schema: testVersion },
-      ...readRefusals,
-    },
+    responses: { 200: { description: "The frozen test version.", schema: testVersionSchema }, ...readRefusals },
   }),
-
   getTest: defineOperation({
     operationId: "getTest",
     method: "GET",
@@ -345,12 +266,8 @@ export const testOperations = {
     tag: "Tests",
     security: "credentialed",
     request: { params: testParams, query: projectQuery },
-    responses: {
-      200: { description: "The test.", schema: test },
-      ...readRefusals,
-    },
+    responses: { 200: { description: "The test.", schema: testSchema }, ...readRefusals },
   }),
-
   listTestVersions: defineOperation({
     operationId: "listTestVersions",
     method: "GET",
@@ -359,26 +276,18 @@ export const testOperations = {
     tag: "Tests",
     security: "credentialed",
     request: { params: testParams, query: versionListQuery },
-    responses: {
-      200: { description: "A page of frozen test versions.", schema: versionList },
-      ...readRefusals,
-    },
+    responses: { 200: { description: "A page of frozen test versions.", schema: versionListSchema }, ...readRefusals },
   }),
-
   createTest: defineOperation({
     operationId: "createTest",
     method: "POST",
     path: "/v1/tests",
-    summary: "Create a test",
+    summary: "Create a test in a test suite",
     tag: "Tests",
     security: "credentialed",
     request: { query: projectQuery, body: createTestBody },
-    responses: {
-      201: { description: "The new test.", schema: test },
-      ...writeRefusals,
-    },
+    responses: { 201: { description: "The new test.", schema: testSchema }, ...writeRefusals },
   }),
-
   updateTest: defineOperation({
     operationId: "updateTest",
     method: "PATCH",
@@ -387,83 +296,17 @@ export const testOperations = {
     tag: "Tests",
     security: "credentialed",
     request: { params: testParams, query: projectQuery, body: updateTestBody },
-    responses: {
-      200: { description: "The updated test.", schema: test },
-      ...writeRefusals,
-      409: movedTestRefusal,
-    },
+    responses: { 200: { description: "The updated test.", schema: testSchema }, ...writeRefusals, 409: movedTestRefusal },
   }),
-
-  setTestAgents: defineOperation({
-    operationId: "setTestAgents",
-    method: "POST",
-    path: "/v1/tests/{testId}/agents",
-    summary: "Set the agents a test applies to",
+  deleteTest: defineOperation({
+    operationId: "deleteTest",
+    method: "DELETE",
+    path: "/v1/tests/{testId}",
+    summary: "Permanently delete a test from authoring",
+    description: "The test leaves authoring permanently. Existing run evidence stays readable.",
     tag: "Tests",
     security: "credentialed",
-    request: {
-      params: testParams,
-      query: projectQuery,
-      body: setTestAgentsBody,
-    },
-    responses: {
-      200: { description: "The test with its new agent set.", schema: test },
-      ...writeRefusals,
-    },
-  }),
-
-  cloneTest: defineOperation({
-    operationId: "cloneTest",
-    method: "POST",
-    path: "/v1/tests/{testId}/clone",
-    summary: "Clone a test",
-    tag: "Tests",
-    security: "credentialed",
-    request: {
-      params: testParams,
-      query: projectQuery,
-    },
-    responses: {
-      201: { description: "The cloned test.", schema: test },
-      ...writeRefusals,
-    },
-  }),
-
-  archiveTest: defineOperation({
-    operationId: "archiveTest",
-    method: "POST",
-    path: "/v1/tests/{testId}/archive",
-    summary: "Archive a test",
-    tag: "Tests",
-    security: "credentialed",
-    request: {
-      params: testParams,
-      query: projectQuery,
-      body: archiveTestBody,
-      bodyRequired: false,
-    },
-    responses: {
-      200: { description: "The archived test.", schema: test },
-      ...writeRefusals,
-    },
-  }),
-
-  restoreTest: defineOperation({
-    operationId: "restoreTest",
-    method: "POST",
-    path: "/v1/tests/{testId}/restore",
-    summary: "Restore a test",
-    tag: "Tests",
-    security: "credentialed",
-    request: {
-      params: testParams,
-      query: projectQuery,
-      body: restoreTestBody,
-      bodyRequired: false,
-    },
-    responses: {
-      200: { description: "The restored test.", schema: test },
-      ...writeRefusals,
-    },
+    request: { params: testParams, query: projectQuery },
+    responses: { 204: { description: "The test was deleted." }, ...writeRefusals },
   }),
 } as const;

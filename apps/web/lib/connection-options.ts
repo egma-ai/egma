@@ -1,6 +1,5 @@
 import type {
   DiscoverAgentsResponse,
-  ListCapabilitiesResponse,
   ListConnectionOptionsResponse,
 } from "@egma/platform-api/client";
 
@@ -99,15 +98,4 @@ export function agentsForOption(
   return (
     agents?.filter((agent) => candidatesForOption(agent, option).length > 0) ?? []
   );
-}
-
-export type CapabilityCatalog = ListCapabilitiesResponse;
-export type CapabilityEntry = CapabilityCatalog["items"][number];
-
-/** What a person is told about a capability key, or the key itself. */
-export function capabilityLabel(
-  catalog: CapabilityCatalog | null,
-  key: string,
-): string {
-  return catalog?.items.find((one) => one.key === key)?.label ?? key;
 }

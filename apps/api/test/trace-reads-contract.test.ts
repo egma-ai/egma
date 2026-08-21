@@ -4,6 +4,8 @@ import {
   createPersona,
   createProject,
   createTest,
+  createTestSuite,
+  listSimulations,
   startRun,
   type AuthContext,
 } from "@egma/db";
@@ -882,26 +884,27 @@ describe("narrowing a list to one kind of traffic", () => {
       })
     ).id;
 
-    const testVersionIds: string[] = [];
+    const suite = await createTestSuite(auth, { name: "Mixed traffic" });
     for (const which of ["one", "two", "three"]) {
-      testVersionIds.push(
-        (
-          await createTest(auth, {
-            name: `Reschedules ${which}`,
-            scenario: "Their cleaning has to move to any afternoon next week.",
-            expectedBehaviors: ["confirms the new time back before finishing"],
-            personaIds: [personaId],
-          })
-        ).versionId,
-      );
+      await createTest(auth, {
+        suiteId: suite.id,
+        name: `Reschedules ${which}`,
+        scenario: "Their cleaning has to move to any afternoon next week.",
+        expectedBehaviors: ["confirms the new time back before finishing"],
+        personaIds: [personaId],
+      });
     }
 
     const started = await startRun(auth, {
+      suiteId: suite.id,
+      agentId: agent.id,
       connectionId: agent.connection?.id ?? "",
-      testVersionIds,
+      idempotencyKey: newId("run"),
     });
+    const simulationPage = await listSimulations(auth, started.id, { limit: 200 });
+    const simulations = simulationPage?.items ?? [];
 
-    for (const [index, simulation] of started.simulations.entries()) {
+    for (const [index, simulation] of simulations.entries()) {
       const traceId = traceIdOfSimulation(simulation.id);
       const at = SIMULATED_AT[index];
       if (traceId === undefined || at === undefined) {

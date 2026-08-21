@@ -7,20 +7,13 @@
  * scanning — what each test is about, and who calls about it — and nothing else.
  *
  * One thing is decided before the list is drawn. **A test with no expected
- * behaviors can never fail**, so egma will not put one on the platform. The
- * platform refuses it at its own door and would say so in its own words, and
- * that is still the authority — but a wizard that uploaded twelve files to be
- * told one of them was rubbish would have wasted the developer's time to learn
- * something it could see. So the file is held back here, named on the screen,
- * and left exactly where it is: it is the developer's file now, and deleting
- * their file to tidy up egma's own report would be the worse of the two.
+ * behaviors can never fail**, so it blocks the complete suite. The file is
+ * named on the screen and left exactly where it is. Nothing is pushed and no
+ * smaller suite is offered; the developer fixes the file and tries again.
  *
- * The other thing that holds a file back is the door itself, and it can only be
- * learned by knocking. A rule only the platform can check — today, a test naming
- * a persona the platform does not hold — is a refusal that arrives after the
- * keystroke. So the list is built a second time, carrying what the platform
- * said, and the same one keystroke is asked for over the list that would really
- * run. Nothing runs on a list the developer never read.
+ * Approval always names the complete suite. If any file is invalid, the wizard
+ * stops before the atomic repository push. It never asks whether a smaller set
+ * may continue.
  */
 
 import type { FolderContents } from "../folder/egma-folder.ts";
@@ -105,10 +98,8 @@ import { NO_BEHAVIORS_REASON } from "../sync/push.ts";
 export { NO_BEHAVIORS_REASON };
 
 /**
- * The other way a file in the folder is not a test: egma could not read it at
- * all. A coding agent writing twelve files writes a broken one sometimes, and
- * the eleven good ones are not forfeit because of it — so the broken one is
- * named on the same list, in the same place, for the same reason.
+ * The other way a file blocks the complete suite: egma could not read it at
+ * all. It is named on the same list so the developer can open and fix it.
  */
 export function unreadableReason(problem: string): string {
   return `Egma could not read it — ${problem}. Fix the file, then run egma push.`;
@@ -139,17 +130,6 @@ export function gateFrom(
     readonly destination: string | null;
     readonly suite: string;
   },
-  /**
-   * What the platform's own door turned away, from a push a keystroke has
-   * already agreed to. Empty the first time the list is drawn, because nothing
-   * has knocked on the door yet.
-   *
-   * These are files egma can read and would push again: they are kept off the
-   * list rather than on it, so that the keystroke over this list agrees to what
-   * would really run, and the platform's own sentence is on the screen beside
-   * the file it is about.
-   */
-  refused: readonly HeldBack[] = [],
 ): TestGate {
   const rows: GateRow[] = [];
   const heldBack: HeldBack[] = folder.unreadable.map((file) => ({
@@ -158,9 +138,7 @@ export function gateFrom(
     reason: unreadableReason(file.reason),
   }));
 
-  const refusedFiles = new Set(refused.map((held) => held.file));
   for (const held of folder.found) {
-    if (refusedFiles.has(held.file)) continue;
     if (held.test.expectedBehaviors.length === 0) {
       heldBack.push({ shown: held.shown, file: held.file, reason: NO_BEHAVIORS_REASON });
       continue;
@@ -172,13 +150,6 @@ export function gateFrom(
       file: held.file,
     });
   }
-
-  // One line per file. A file the door refused and egma can no longer read —
-  // the developer went in to fix it and left it half-written — is named in what
-  // egma can see about it now, which is the newer of the two answers and the
-  // one that says what to do next.
-  const named = new Set(heldBack.map((held) => held.file));
-  heldBack.push(...refused.filter((held) => !named.has(held.file)));
 
   // Both lists read in the folder's own order, whichever reason a file was
   // held back for, so the screen is the folder rather than egma's bookkeeping.

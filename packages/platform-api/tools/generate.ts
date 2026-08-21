@@ -106,13 +106,13 @@ async function generateClient(target: string): Promise<void> {
   replaceExactly(
     /error\?: unknown;/g,
     "error?: never;",
-    18,
+    17,
     "mock-tool forbidden error",
   );
   replaceExactly(
     /answer\?: unknown;(\n\s*error: string;)/g,
     "answer?: never;$1",
-    17,
+    16,
     "mock-tool forbidden answer",
   );
   replaceExactly(

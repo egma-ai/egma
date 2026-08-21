@@ -18,7 +18,6 @@
  * the *page* is about: which of several gradings of one assertion counts, and
  * which turns a judgment is pointing at.
  */
-
 import type {
   GetSimulationResponse,
   RegradeSimulationResponse,

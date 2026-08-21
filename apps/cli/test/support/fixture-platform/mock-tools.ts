@@ -82,6 +82,10 @@ export type MockToolControls = {
   add(seed: SeedMockTool): SeededMockTool;
   /** Edit one, as a teammate does while a developer is part way through. */
   editInDashboard(tool: string, changes: Partial<SeedMockTool>): SeededMockTool;
+  /** Validate a repository write now, then apply it with its sibling changes. */
+  prepareRepository(
+    entries: readonly Record<string, unknown>[],
+  ): { readonly apply: () => void } | { readonly refusal: FixtureAnswer };
   /** Every mock tool, oldest first, for a check that wants to look. */
   readonly mockTools: readonly (SeededMockTool & {
     readonly answer: MockAnswer;
@@ -552,6 +556,50 @@ export function mockToolRoutes(options: {
       }
       held.updatedAt = new Date();
       return seededFrom(held);
+    },
+    prepareRepository(entries) {
+      const names = new Set<string>();
+      const commits: (() => void)[] = [];
+      for (const entry of entries) {
+        // A repository entry is complete, so it must pass every create-time
+        // content rule even when it updates an existing tool.
+        const read = readWrite(entry, "create");
+        if ("refused" in read) return { refusal: read.refused };
+        const written = read.written;
+        const toolName = written.toolName as string;
+        if (names.has(toolName)) {
+          return {
+            refusal: refuse(
+              409,
+              "repository_conflict",
+              `the repository answers for ${toolName} more than once`,
+            ),
+          };
+        }
+        names.add(toolName);
+        const held = byTool(toolName);
+        if (held === undefined) {
+          commits.push(() => {
+            mockTools.push({
+              id: newId("mck"),
+              toolName,
+              answer: written.answer as MockAnswer,
+              delayMilliseconds: written.delay ?? 0,
+              agentIds: written.agentIds ?? [],
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+          });
+        } else {
+          commits.push(() => {
+            held.answer = written.answer as MockAnswer;
+            held.delayMilliseconds = written.delay ?? 0;
+            held.agentIds = written.agentIds ?? [];
+            held.updatedAt = new Date();
+          });
+        }
+      }
+      return { apply: () => commits.forEach((commit) => commit()) };
     },
     get mockTools() {
       return mockTools.map((one) => ({
