@@ -1304,7 +1304,12 @@ describe("adding a connection", () => {
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+14155550100" },
+      agentPlatformSelection: {
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
     });
+    expect(sent[1]?.body).not.toHaveProperty("credentials");
     expect(sent[1]?.url).toBe(
       "/v1/agents/agt_1/connections?projectId=prj_1",
     );
@@ -1314,7 +1319,7 @@ describe("adding a connection", () => {
     );
   });
 
-  it("stores the discovery key only when the selected candidate requires it", async () => {
+  it("sends a discovered chat selection without duplicate connection credentials", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents/agt_1": {
@@ -1370,8 +1375,12 @@ describe("adding a connection", () => {
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_chat_1" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      agentPlatformSelection: {
+        platformAgentId: "agent_chat_1",
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      },
     });
+    expect(sent[1]?.body).not.toHaveProperty("credentials");
   });
 
   it("uses either honest LiveKit access method and defaults its channel to voice", async () => {

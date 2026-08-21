@@ -58,9 +58,11 @@ which simulation connection to create. Discovery reads the agent platform and
 returns normalized connection candidates. It creates no agent or connection,
 does not save the supplied credential, and never returns it.
 
-Discovery is a point-in-time setup read. A phone connection stores the selected
-E.164 number, not a lasting Retell route to the discovered agent. If that phone
-number is routed to another agent later, update the Egma connection.
+Discovery is a point-in-time setup read. When you create a discovered
+connection, include `agentPlatformSelection` so Egma can revalidate the selected
+agent and connection candidate immediately before the write. Egma never stores
+the selection object. A phone connection stores only the selected E.164 number;
+if that number is routed to another agent later, update the Egma connection.
 
 The optional `projectId` query parameter selects the project that authorizes
 the discovery. Omit it when the credential already selects a project, or when
@@ -126,9 +128,12 @@ For a new agent, put the selected fields in the `connection` object of
 `POST /v1/agents`. For an existing agent, send them as the body of
 `POST /v1/agents/:agentId/connections`. Send `agentPlatform`, `connectionKind`,
 `accessVariant`, `modality`, and `config`. Do not send `productLabel`; Egma
-derives it. For a Retell chat candidate, also include the same API key in the
-selected connection's `credentials` field. A phone-number candidate needs no
-connection credential.
+derives it. Also send `agentPlatformSelection` with the selected
+`platformAgentId` and the same account `credentials` used for discovery. Egma
+revalidates the candidate during the create operation and does not store the
+selection. It retains the API key as a sealed connection credential only for a
+Retell chat candidate. It discards the key after validating a phone-number
+candidate.
 
 ---
 
@@ -205,6 +210,14 @@ The `result` field in the response tells you exactly what happened:
       Credentials required by the selected access variant. They are sealed
       before storage and never returned in full. A public phone-number variant
       forbids connection credentials.
+    </ParamField>
+
+    <ParamField body="agentPlatformSelection" type="object">
+      The `platformAgentId` and account `credentials` used to select a candidate
+      through `POST /v1/agents:discover`. Egma revalidates this selection during
+      creation and never stores the selection object. For Retell chat, the API
+      key is retained separately as the sealed connection credential. For a
+      Retell phone number, the key is discarded after validation.
     </ParamField>
   </Expandable>
 </ParamField>

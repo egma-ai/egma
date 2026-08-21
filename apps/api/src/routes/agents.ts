@@ -50,6 +50,7 @@ import { registerPlatformOperation } from "../http/platform-operation.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import {
+  confirmRetellCandidate,
   discoverRetellAgents,
 } from "../providers/retell.ts";
 import {
@@ -393,7 +394,66 @@ const CONNECTION_KEYS = [
   "environment",
   "config",
   "credentials",
+  "agentPlatformSelection",
 ] as const;
+
+type AgentPlatformSelection = {
+  readonly platformAgentId: string;
+  readonly apiKey: string;
+};
+
+/** The external agent selection to recheck, never a stored connection fact. */
+function agentPlatformSelectionIn(
+  value: unknown,
+): AgentPlatformSelection | undefined | Refusal {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return invalid("agentPlatformSelection is an object returned by agent discovery");
+  }
+  const selection = value as Body;
+  const unknown = unknownKeyIn(
+    selection,
+    ["platformAgentId", "credentials"],
+    "an agent platform selection",
+  );
+  if (unknown !== undefined) return unknown;
+
+  const platformAgentId = textWhenGiven(
+    selection.platformAgentId,
+    "a platform agent id",
+  );
+  if (isRefusal(platformAgentId)) return platformAgentId;
+  if (platformAgentId === undefined) {
+    return invalid("agentPlatformSelection needs platformAgentId");
+  }
+  if (
+    typeof selection.credentials !== "object" ||
+    selection.credentials === null ||
+    Array.isArray(selection.credentials)
+  ) {
+    return invalid("agentPlatformSelection needs account credentials");
+  }
+  const credentials = selection.credentials as Body;
+  const unknownCredential = unknownKeyIn(
+    credentials,
+    ["apiKey"],
+    "agent platform credentials",
+  );
+  if (unknownCredential !== undefined) return unknownCredential;
+  const apiKey = textWhenGiven(credentials.apiKey, "a Retell API key");
+  if (isRefusal(apiKey)) return apiKey;
+  if (apiKey === undefined || apiKey.trim().length < 8) {
+    return {
+      refused: true,
+      error: "unprocessable",
+      message: "Paste a Retell API key, then try again.",
+    };
+  }
+  return {
+    platformAgentId: platformAgentId.trim(),
+    apiKey: apiKey.trim(),
+  };
+}
 
 /**
  * One connection payload, read the one way — inline on a registration and
@@ -454,6 +514,95 @@ function connectionIn(value: unknown): NewConnection | Refusal {
       : {
           credentials: body.credentials as Readonly<Record<string, unknown>>,
         }),
+  };
+}
+
+/**
+ * Confirm a discovered Retell candidate inside the generic create request.
+ * The selection and its key stop here; only the normalized connection reaches
+ * the database, and only Retell chat keeps the key because that access method
+ * needs it for every simulation.
+ */
+async function confirmAgentPlatformSelection(
+  wanted: NewConnection,
+  selected: AgentPlatformSelection | undefined,
+  fetchImpl: typeof fetch | undefined,
+): Promise<NewConnection | Refusal> {
+  if (selected === undefined) return wanted;
+  if (wanted.credentials !== undefined) {
+    return invalid(
+      "a discovered connection puts account credentials in agentPlatformSelection, not credentials",
+    );
+  }
+  if (wanted.agentPlatform !== "retell") {
+    return invalid(
+      "agentPlatformSelection can confirm only a candidate returned by agent discovery",
+    );
+  }
+
+  const candidate = (() => {
+    if (
+      wanted.connectionKind === "retell_chat_api" &&
+      wanted.accessVariant === "retell_chat_api.api_key" &&
+      wanted.modality === "chat" &&
+      typeof wanted.config["retellAgentId"] === "string"
+    ) {
+      return {
+        connectionKind: "retell_chat_api" as const,
+        config: { retellAgentId: wanted.config["retellAgentId"] },
+      };
+    }
+    if (
+      wanted.connectionKind === "phone_number" &&
+      wanted.accessVariant === "phone_number.public_e164" &&
+      wanted.modality === "voice" &&
+      typeof wanted.config["phoneNumber"] === "string"
+    ) {
+      return {
+        connectionKind: "phone_number" as const,
+        config: { phoneNumber: wanted.config["phoneNumber"] },
+      };
+    }
+    return undefined;
+  })();
+  if (candidate === undefined) {
+    return invalid(
+      "agentPlatformSelection does not match a connection candidate returned by agent discovery",
+    );
+  }
+
+  const checked = await confirmRetellCandidate(
+    selected.apiKey,
+    selected.platformAgentId,
+    candidate,
+    fetchImpl,
+  );
+  if (checked.kind === "invalid_key") {
+    return {
+      refused: true,
+      error: "unprocessable",
+      message:
+        "Retell did not accept that API key. Copy it again from Retell, then try again.",
+    };
+  }
+  if (checked.kind === "rejected") {
+    return { refused: true, error: "unprocessable", message: checked.message };
+  }
+  if (checked.kind === "unavailable") {
+    return { refused: true, error: "unavailable", message: checked.message };
+  }
+
+  const { credentials: _unconfirmedCredentials, ...withoutCredentials } = wanted;
+  return {
+    ...withoutCredentials,
+    agentPlatform: checked.candidate.agentPlatform,
+    connectionKind: checked.candidate.connectionKind,
+    accessVariant: checked.candidate.accessVariant,
+    modality: checked.candidate.modality,
+    config: checked.candidate.config,
+    ...(checked.candidate.connectionKind === "retell_chat_api"
+      ? { credentials: { apiKey: selected.apiKey } }
+      : {}),
   };
 }
 
@@ -899,16 +1048,37 @@ export async function agentRoutes(
         ? undefined
         : connectionIn(body.connection);
     if (isRefusal(inline)) return refused(reply, inline);
+    const inlineSelection =
+      body.connection === undefined
+        ? undefined
+        : agentPlatformSelectionIn(
+            (body.connection as Body).agentPlatformSelection,
+          );
+    if (isRefusal(inlineSelection)) return refused(reply, inlineSelection);
 
     const acting = await writingIn(auth, project);
     if (isRefusal(acting)) return refused(reply, acting);
+    authorize(acting, "configure_agents", {
+      organizationId: acting.organizationId,
+      projectId: acting.projectId,
+    });
+
+    const confirmedInline =
+      inline === undefined
+        ? undefined
+        : await confirmAgentPlatformSelection(
+            inline,
+            inlineSelection,
+            options.retellFetch,
+          );
+    if (isRefusal(confirmedInline)) return refused(reply, confirmedInline);
 
     const registered = await registerAgent(acting, {
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
       name: name ?? "",
       ...(description === undefined ? {} : { description }),
-      ...(inline === undefined ? {} : { connection: inline }),
+      ...(confirmedInline === undefined ? {} : { connection: confirmedInline }),
     });
 
     // Created and extended each wrote a row; reused wrote none, and saying 201
@@ -1027,14 +1197,30 @@ export async function agentRoutes(
   registerPlatformOperation(app, agentOperations.addConnection, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { agentId } = request.params as { agentId: string };
+    const body = (request.body ?? {}) as Body;
 
-    const wanted = connectionIn(request.body ?? {});
+    const wanted = connectionIn(body);
     if (isRefusal(wanted)) return refused(reply, wanted);
+    const selection = agentPlatformSelectionIn(body.agentPlatformSelection);
+    if (isRefusal(selection)) return refused(reply, selection);
 
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
+    authorize(acting, "configure_agents", {
+      organizationId: acting.organizationId,
+      projectId: acting.projectId,
+    });
+    if (selection !== undefined && (await getAgent(acting, agentId)) === undefined) {
+      return refused(reply, NO_SUCH_AGENT);
+    }
+    const confirmed = await confirmAgentPlatformSelection(
+      wanted,
+      selection,
+      options.retellFetch,
+    );
+    if (isRefusal(confirmed)) return refused(reply, confirmed);
 
-    const added = await addConnection(acting, agentId, wanted);
+    const added = await addConnection(acting, agentId, confirmed);
     if (added === undefined) return refused(reply, NO_SUCH_AGENT);
 
     return reply.code(201).send({ connection: describedConnection(added) });

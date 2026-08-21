@@ -309,9 +309,13 @@ function NewConnection({
           accessVariant: chosenCandidate.accessVariant,
           modality: chosenCandidate.modality,
           config: chosenCandidate.config,
-          ...(chosenCandidateOption.credentialRule === "required"
-            ? { credentials: { apiKey: discoveryKey } }
-            : {}),
+          // The server revalidates this one-time selection immediately before
+          // the generic write. It discards the selection itself and retains the
+          // key only when the chosen access variant needs it for simulation.
+          agentPlatformSelection: {
+            platformAgentId: discoveredAgentId,
+            credentials: { apiKey: discoveryKey },
+          },
         };
       }
 

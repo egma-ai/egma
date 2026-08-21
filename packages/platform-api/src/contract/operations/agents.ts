@@ -148,6 +148,27 @@ const listedAgent = {
   required: [...agent.required, "connections"],
 } as const;
 
+/**
+ * The external agent chosen through `agents:discover`.
+ *
+ * It exists only on the create request. The API rechecks it against the agent
+ * platform immediately before the connection is written, then discards it.
+ */
+const agentPlatformSelection = {
+  type: "object",
+  properties: {
+    platformAgentId: { type: "string" },
+    credentials: {
+      type: "object",
+      properties: { apiKey: { type: "string" } },
+      required: ["apiKey"],
+      additionalProperties: false,
+    },
+  },
+  required: ["platformAgentId", "credentials"],
+  additionalProperties: false,
+} as const;
+
 const connectionInput = {
   type: "object",
   properties: {
@@ -173,6 +194,7 @@ const connectionInput = {
     environment: { type: "string" },
     config: { type: "object", additionalProperties: true },
     credentials: { type: "object", additionalProperties: true },
+    agentPlatformSelection,
   },
   required: ["agentPlatform", "connectionKind", "accessVariant", "modality"],
   additionalProperties: false,
@@ -218,6 +240,7 @@ const mutatingRefusals = {
   409: refusalResponse,
   422: refusalResponse,
   429: rateLimitResponse,
+  503: refusalResponse,
 } as const;
 
 export const agentOperations = {

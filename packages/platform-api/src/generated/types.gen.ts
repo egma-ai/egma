@@ -301,6 +301,12 @@ export type RegisterAgentData = {
             credentials?: {
                 [key: string]: unknown;
             };
+            agentPlatformSelection?: {
+                platformAgentId: string;
+                credentials: {
+                    apiKey: string;
+                };
+            };
         };
     };
     path?: never;
@@ -339,6 +345,10 @@ export type RegisterAgentErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type RegisterAgentError = RegisterAgentErrors[keyof RegisterAgentErrors];
@@ -589,6 +599,10 @@ export type UpdateAgentErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type UpdateAgentError = UpdateAgentErrors[keyof UpdateAgentErrors];
@@ -627,6 +641,12 @@ export type AddConnectionData = {
         };
         credentials?: {
             [key: string]: unknown;
+        };
+        agentPlatformSelection?: {
+            platformAgentId: string;
+            credentials: {
+                apiKey: string;
+            };
         };
     };
     path: {
@@ -667,6 +687,10 @@ export type AddConnectionErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type AddConnectionError = AddConnectionErrors[keyof AddConnectionErrors];
@@ -758,6 +782,10 @@ export type ArchiveAgentErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type ArchiveAgentError = ArchiveAgentErrors[keyof ArchiveAgentErrors];
@@ -828,6 +856,10 @@ export type RestoreAgentErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type RestoreAgentError = RestoreAgentErrors[keyof RestoreAgentErrors];
@@ -986,6 +1018,10 @@ export type UpdateConnectionErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type UpdateConnectionError = UpdateConnectionErrors[keyof UpdateConnectionErrors];
@@ -1078,6 +1114,10 @@ export type ArchiveConnectionErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type ArchiveConnectionError = ArchiveConnectionErrors[keyof ArchiveConnectionErrors];
@@ -1180,6 +1220,10 @@ export type RestoreConnectionErrors = {
      * The request rate limit was reached.
      */
     429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type RestoreConnectionError = RestoreConnectionErrors[keyof RestoreConnectionErrors];
@@ -1274,6 +1318,10 @@ export type RefreshConnectionCapabilitiesErrors = {
      * The request was refused.
      */
     502: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
 };
 
 export type RefreshConnectionCapabilitiesError = RefreshConnectionCapabilitiesErrors[keyof RefreshConnectionCapabilitiesErrors];

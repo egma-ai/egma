@@ -657,6 +657,31 @@
                       "credentials": {
                         "type": "object",
                         "additionalProperties": true
+                      },
+                      "agentPlatformSelection": {
+                        "type": "object",
+                        "properties": {
+                          "platformAgentId": {
+                            "type": "string"
+                          },
+                          "credentials": {
+                            "type": "object",
+                            "properties": {
+                              "apiKey": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "apiKey"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "platformAgentId",
+                          "credentials"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -1444,6 +1469,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2608,6 +2643,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
           }
         }
       }
@@ -2705,6 +2750,31 @@
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true
+                  },
+                  "agentPlatformSelection": {
+                    "type": "object",
+                    "properties": {
+                      "platformAgentId": {
+                        "type": "string"
+                      },
+                      "credentials": {
+                        "type": "object",
+                        "properties": {
+                          "apiKey": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "apiKey"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "platformAgentId",
+                      "credentials"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -3073,6 +3143,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
           }
         }
       }
@@ -3304,6 +3384,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
           }
         }
       }
@@ -3515,6 +3605,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4344,6 +4444,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
           }
         }
       }
@@ -4765,6 +4875,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request was refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5228,6 +5348,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
           }
         }
       }
@@ -5633,6 +5763,16 @@
             }
           },
           "502": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "The request was refused.",
             "content": {
               "application/json": {

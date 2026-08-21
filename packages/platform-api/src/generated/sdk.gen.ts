@@ -125,6 +125,12 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
         credentials?: {
             [key: string]: unknown;
         };
+        agentPlatformSelection?: {
+            platformAgentId: string;
+            credentials: {
+                apiKey: string;
+            };
+        };
     };
 }, options?: Options<never, ThrowOnError>): RequestResult<RegisterAgentResponses, RegisterAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
@@ -227,6 +233,12 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     credentials?: {
         [key: string]: unknown;
     };
+    agentPlatformSelection?: {
+        platformAgentId: string;
+        credentials: {
+            apiKey: string;
+        };
+    };
 }, options?: Options<never, ThrowOnError>): RequestResult<AddConnectionResponses, AddConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
@@ -238,7 +250,8 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'modality' },
                 { in: 'body', key: 'environment' },
                 { in: 'body', key: 'config' },
-                { in: 'body', key: 'credentials' }
+                { in: 'body', key: 'credentials' },
+                { in: 'body', key: 'agentPlatformSelection' }
             ] }]);
     return (options?.client ?? client).post<AddConnectionResponses, AddConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {

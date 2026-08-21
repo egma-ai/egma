@@ -383,6 +383,138 @@ describe("discovering simulation agents", () => {
       credentialPresent: false,
     });
   });
+
+  it("rechecks a discovered phone candidate inside the ordinary connection write", async () => {
+    api = await createApi("retell_discovery_confirmed_connection");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/v2/list-agents") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: "Front desk",
+                  channel: "voice",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (path.startsWith("/get-phone-number/")) {
+          return new Response(
+            JSON.stringify({
+              phone_number: "+14155550100",
+              nickname: "Main",
+              inbound_agents: [{ agent_id: "agent_voice_1" }],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${path}`);
+      }),
+    );
+
+    const connected = await post(
+      `/v1/agents/${String(agentOf(created).id)}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        agentPlatformSelection: {
+          platformAgentId: "agent_voice_1",
+          credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+        },
+      },
+    );
+
+    expect(connected.status).toBe(201);
+    expect(connectionOf(connected)).toMatchObject({
+      agentPlatform: "retell",
+      connectionKind: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+14155550100" },
+      credentialPresent: false,
+    });
+  });
+
+  it("writes nothing when Retell rerouted a discovered phone candidate", async () => {
+    api = await createApi("retell_discovery_rerouted_connection");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/v2/list-agents") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_voice_1",
+                  agent_name: "Front desk",
+                  channel: "voice",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        if (path.startsWith("/get-phone-number/")) {
+          return new Response(
+            JSON.stringify({
+              phone_number: "+14155550100",
+              nickname: "Main",
+              inbound_agents: [{ agent_id: "agent_somebody_else" }],
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${path}`);
+      }),
+    );
+
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionKind: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        agentPlatformSelection: {
+          platformAgentId: "agent_voice_1",
+          credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+        },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "That phone number is no longer routed to the selected agent. Load the account again.",
+    });
+    const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(read.body.connections).toEqual([]);
+  });
 });
 
 describe("registering an agent", () => {
