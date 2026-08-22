@@ -77,9 +77,7 @@ describe("Retell production call reads", () => {
           agent_id: "agent_voice_1",
           call_status: "not_connected",
           call_type: "web_call",
-          access_token: "[REDACTED]",
           custom_sip_headers: {
-            Authorization: "[REDACTED]",
             "X-Customer-Route": "support",
           },
         },
@@ -183,9 +181,7 @@ describe("Retell production call reads", () => {
         call_type: "web_call",
         start_timestamp: 1_786_000_000_000,
         end_timestamp: 1_786_000_074_000,
-        access_token: "[REDACTED]",
         custom_sip_headers: {
-          "Proxy-Authorization": "[REDACTED]",
           "X-Customer-Route": "support",
         },
         transcript_with_tool_calls: [
@@ -193,6 +189,10 @@ describe("Retell production call reads", () => {
         ],
       },
     });
+    // Neither the listed item's token nor the hydrated document's reaches a
+    // caller, and nothing is written where they were.
+    expect(JSON.stringify(answer)).not.toContain("web-call-token");
+    expect(JSON.stringify(answer)).not.toContain("REDACTED");
   });
 
   it("separates a missing call from a malformed full document", async () => {

@@ -597,6 +597,7 @@ function simulationSpan(
     testVersionId: simulation.testVersionId ?? "",
     personaVersionId: simulation.personaVersionId,
     payload: "{}",
+    endsTrace: false,
     ...over,
   };
 }
@@ -876,6 +877,7 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...over,
   };
 }

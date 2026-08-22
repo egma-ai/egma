@@ -5,10 +5,7 @@
  * number routing, and immediate number confirmation. The caller owns the
  * credential. This client never logs, stores, or returns it.
  */
-export {
-  RETELL_REDACTED,
-  safeRetellProviderData,
-} from "./provider-data.ts";
+export { safeRetellProviderData } from "./provider-data.ts";
 
 /** The one thing this client needs from the world, so tests can stand in. */
 export type Fetch = typeof fetch;

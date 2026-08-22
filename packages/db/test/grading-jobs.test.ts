@@ -228,6 +228,7 @@ function aSpan(over: Partial<NewSpan> & { readonly traceId: string }): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...over,
   };
 }

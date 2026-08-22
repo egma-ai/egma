@@ -14,6 +14,7 @@ import {
   type EmailSender,
 } from "./auth/email.ts";
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
+import { closeAcceptance, openAcceptance } from "./ingestion/accept.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
@@ -361,6 +362,11 @@ export function buildApi(options: ServerOptions): Api {
   // the same loop without overlapping one target.
   let retellProductionIngestion: RetellProductionIngestion | undefined;
   app.addHook("onReady", async () => {
+    // Before anything can be accepted, and before the drainer that will read
+    // the same bucket: opening it recovers whatever the last stop left staged,
+    // so evidence that was in hand when a process died is on its way again
+    // within the first tick rather than after the first new request.
+    openAcceptance({ settings: config.ingestion, log: app.log });
     orphanSweep = startOrphanSweep({
       log: app.log,
       ...(options.orphanSweepIntervalMilliseconds === undefined
@@ -383,6 +389,9 @@ export function buildApi(options: ServerOptions): Api {
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
     await retellProductionIngestion?.stop();
+    // Last, and it uploads nothing on the way out: what is staged is on the
+    // disk with its checksums, and the next start is what sends it.
+    await closeAcceptance();
   });
 
   return { app, identity };

@@ -1,7 +1,21 @@
+import { gunzipSync } from "node:zlib";
+
+import { appendSpans, type AuthContext } from "@egma/db";
+
+import {
+  pendingObjectStore,
+  type IngestionStore,
+} from "../../src/ingestion/object-store.ts";
 import {
   RECORD_FORMAT_VERSION,
+  recordFrom,
+  spanFor,
   type IngestionRecord,
 } from "../../src/ingestion/record.ts";
+import {
+  segmentIdIn,
+  type SegmentHeader,
+} from "../../src/ingestion/segment.ts";
 
 /**
  * One normalized record, with evidence in it that a careless implementation
@@ -50,4 +64,65 @@ export function aRecord(
     ends_trace: false,
     ...overrides,
   };
+}
+
+/** One pending object, opened: its header line and the records under it. */
+export type PendingSegment = {
+  readonly key: string;
+  readonly header: SegmentHeader;
+  readonly records: readonly IngestionRecord[];
+};
+
+/** Every pending object in the bucket, opened and checked far enough to read. */
+export async function pendingSegments(
+  store: IngestionStore,
+): Promise<readonly PendingSegment[]> {
+  const bucket = pendingObjectStore(store);
+  const opened: PendingSegment[] = [];
+  for (const object of await bucket.list()) {
+    const lines = gunzipSync(Buffer.from(await bucket.read(object.key)))
+      .toString("utf8")
+      .split("\n")
+      .slice(0, -1);
+    const [header, ...records] = lines;
+    opened.push({
+      key: object.key,
+      header: JSON.parse(header ?? "{}") as SegmentHeader,
+      records: records.map((line) => recordFrom(JSON.parse(line))),
+    });
+  }
+  return opened;
+}
+
+/**
+ * Every pending object turned into rows, and then removed — the drainer's job,
+ * stood in for while the drainer itself is a later ticket's.
+ *
+ * It is here rather than inside a test file because the door stops at
+ * durability by design: a suite whose claim is about what a reader sees has to
+ * carry evidence the rest of the way itself, and every one of them must do it
+ * the same way or they would be proving different things. The scope comes from
+ * the sealed object's own header, never from a key or from anything a caller
+ * remembered, and the segment identity goes to the insert as its deduplication
+ * token, which is the shape the real drainer keeps.
+ */
+export async function drainPendingEvidence(
+  store: IngestionStore,
+): Promise<number> {
+  const bucket = pendingObjectStore(store);
+  const drained = await pendingSegments(store);
+  for (const segment of drained) {
+    const auth: AuthContext = {
+      userId: "",
+      organizationId: segment.header.organization_id,
+      projectId: segment.header.project_id,
+      role: "admin",
+      via: "engine",
+    };
+    await appendSpans(auth, segment.records.map(spanFor), {
+      segmentId: segmentIdIn(segment.key) ?? "",
+    });
+    await bucket.delete(segment.key);
+  }
+  return drained.length;
 }

@@ -246,7 +246,7 @@ export function recordFor(span: NewSpan): IngestionRecord {
     test_version_id: span.testVersionId,
     persona_version_id: span.personaVersionId,
     payload: span.payload,
-    ends_trace: span.endsTrace ?? false,
+    ends_trace: span.endsTrace,
   };
 }
 

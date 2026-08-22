@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import {
   connect,
   connectClickHouse,
@@ -16,6 +20,8 @@ import type { Email, EmailSender } from "../../src/auth/email.ts";
 import type { RateLimit } from "../../src/http/rate-limit.ts";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
+import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import { drainPendingEvidence } from "./ingestion.ts";
 import {
   createMigratedDatabase,
   TEST_ENCRYPTION_KEY,
@@ -50,6 +56,15 @@ export type TestApi = {
   readonly traceStore: MigratedTraceStore | undefined;
   /** Everything the email transport was handed, in order. */
   readonly mail: readonly Email[];
+  /**
+   * Turn every pending object into rows, the way the drainer will.
+   *
+   * The door answers on object-store durability and stops there, so a suite
+   * whose claim is about what a reader sees calls this between posting and
+   * reading. It answers how many segments it drained, which is also how a test
+   * says "one project, one segment". Nothing to drain answers zero.
+   */
+  drainEvidence(): Promise<number>;
   close(): Promise<void>;
 };
 
@@ -112,6 +127,20 @@ export type TestApiOptions = {
    */
   readonly traceStore?: boolean;
   /**
+   * The ingestion bucket this instance accepts evidence into, from
+   * `startObjectStorage`. Absent leaves the instance with nowhere to make
+   * evidence durable, which is what an unconfigured deployment is: the door
+   * answers `503` and nothing is staged.
+   */
+  readonly ingestStore?: IngestionStore;
+  /**
+   * How long the oldest staged record waits for company before its segment
+   * seals. Short here, because a suite posting thirty documents would otherwise
+   * spend fifteen seconds waiting out the deployment's own half-second — the
+   * timer's *behaviour* is proved where it is the claim.
+   */
+  readonly ingestionFlushMilliseconds?: number;
+  /**
    * Somewhere to keep the log lines, for a test whose claim is about what is
    * not in them. Off by default: the suite runs silent, and a file that does
    * not read the log has no reason to collect one.
@@ -168,7 +197,15 @@ export async function createApi(
     },
   };
 
-  const config = testConfig({
+  // One directory per instance, on the same terms as the database: a local log
+  // is a durable record, and two instances sharing one would each recover the
+  // other's staged evidence on the way up.
+  const ingestionLogDirectory =
+    options.ingestStore === undefined
+      ? undefined
+      : mkdtempSync(path.join(tmpdir(), `egma-ingestion-${label}-`));
+
+  const base = testConfig({
     databaseUrl: database.url,
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
@@ -179,6 +216,18 @@ export async function createApi(
       ? {}
       : { providerCredentials: options.providerCredentials }),
   });
+  const config: Config =
+    options.ingestStore === undefined || ingestionLogDirectory === undefined
+      ? base
+      : {
+          ...base,
+          ingestion: {
+            ...base.ingestion,
+            store: options.ingestStore,
+            logDirectory: ingestionLogDirectory,
+            flushMilliseconds: options.ingestionFlushMilliseconds ?? 20,
+          },
+        };
 
   // Through the deployment's own seeding door rather than written straight
   // into the table: what a test then reads back has been sealed and hinted the
@@ -225,10 +274,17 @@ export async function createApi(
     database,
     traceStore,
     mail,
+    async drainEvidence() {
+      if (options.ingestStore === undefined) return 0;
+      return drainPendingEvidence(options.ingestStore);
+    },
     async close() {
       await app.close();
       await disconnect();
       await database.drop();
+      if (ingestionLogDirectory !== undefined) {
+        rmSync(ingestionLogDirectory, { recursive: true, force: true });
+      }
       if (traceStore !== undefined) {
         await disconnectClickHouse();
         await traceStore.drop();

@@ -558,6 +558,7 @@ describe("what one measure looks like on the wire", () => {
       testVersionId: "",
       personaVersionId: "",
       payload: "{}",
+      endsTrace: false,
       ...over,
     };
   }

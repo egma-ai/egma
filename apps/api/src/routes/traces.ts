@@ -1,13 +1,9 @@
 import { gunzipSync } from "node:zlib";
 
 import {
-  appendSpans,
   authorize,
   NotPermittedError,
-  recordLiveKitMonitoringReceived,
-  recordProductionTraces,
   resolveSimulationStanding,
-  TraceStoreRefusedError,
   type AuthContext,
   type NewSpan,
   type SimulationStanding,
@@ -16,6 +12,12 @@ import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { requesterOf } from "../http/credentialed.ts";
+import {
+  acceptEvidence,
+  acceptEvidenceForProjects,
+  IngestionUnavailableError,
+  type EvidenceGroup,
+} from "../ingestion/accept.ts";
 import {
   notAuthenticated,
   tooManyRequests,
@@ -91,18 +93,22 @@ import {
  * because the specification is explicit that rejected data must not be retried
  * and the client must be told how much of it there was.
  *
- * **A conversation ending here becomes grading work, and nothing more.** The
- * spans are stored, and then one row per trace goes to the grading queue saying
- * when this trace was last heard from and whether its root span closed. That is
- * bookkeeping: a queue write and a notification, on the same terms as the
- * transaction that ends a simulation raising one. No grader is resolved here, no
- * conversation is read back, no judgment is made and no model is called.
- * Judging belongs to a service that holds no request open, and it stays there:
- * a door that judged would make an exporter's timeout depend on how many
- * graders a customer wrote and on how fast somebody else's judge model felt
- * like answering. The service path writes no queue row at all — a simulation's
- * grading work is minted by the transaction that lands it terminal, so a span
- * arriving here has nothing to add.
+ * **The door decodes and hands over, and that is the whole of what it does.**
+ * Authentication, decompression, decoding, tenant resolution and normalization
+ * happen here, and then the evidence goes to the one acceptance module — which
+ * answers when it is durable in the object store and not before. Nothing here
+ * writes a trace row, updates Monitoring health or names a grader. Those are
+ * effects of evidence being *query-visible*, which happens later and elsewhere,
+ * and a door that performed them would be claiming an outcome it cannot see:
+ * an exporter's timeout would depend on a store's cold start, and a request
+ * answered before a durable copy existed would be a promise nothing kept.
+ *
+ * **`503` is the one new answer, and it means *not yet*.** Evidence that could
+ * not be made durable inside the request's bound is still staged and is
+ * retryable, which is exactly what an OTLP exporter does with a 5xx. Evidence
+ * this side refuses — a malformed span, a reserved environment, a record over a
+ * documented bound — is still reported the way the specification says to report
+ * data that must not be retried: a 200 carrying a count and a reason.
  */
 
 export type TraceRoutesOptions = {
@@ -128,12 +134,15 @@ export const OTLP_TRACES_PATH = "/v1/traces";
 const MAXIMUM_BODY_BYTES = 20 * 1024 * 1024;
 
 /**
- * The gRPC status codes the specification's `Status` uses, and the two egma
+ * The gRPC status codes the specification's `Status` uses, and the three egma
  * answers with. `INVALID_ARGUMENT` is what a body egma cannot read is;
- * `PERMISSION_DENIED` is what a credential that may not write is.
+ * `PERMISSION_DENIED` is what a credential that may not write is; `UNAVAILABLE`
+ * is evidence this side could not make durable yet, which is the one refusal a
+ * sender is meant to try again.
  */
 const RPC_INVALID_ARGUMENT = 3;
 const RPC_PERMISSION_DENIED = 7;
+const RPC_UNAVAILABLE = 14;
 
 /**
  * The one compression OTLP/HTTP names, and what most exporters are configured
@@ -451,7 +460,7 @@ async function simulatorExport(
     count: 0,
     firstReason: "",
   };
-  const appends: { auth: AuthContext; spans: readonly NewSpan[] }[] = [];
+  const accepting: EvidenceGroup[] = [];
   for (const group of groups.values()) {
     // Normalised per gathering, so the row caps guard each customer's append
     // rather than the request: a bound loosened only by naming more
@@ -462,42 +471,31 @@ async function simulatorExport(
     );
     rejected.count += normalised.rejected.length;
     rejected.firstReason ||= normalised.rejected[0]?.reason ?? "";
-    appends.push({ auth: group.auth, spans: normalised.spans });
-  }
 
-  // Every group is attempted, whatever happened to the one before it: one
-  // customer's refused rows must never sink another customer's evidence, and
-  // never claim it was sunk. A store that *refuses* a group — rows it has
-  // looked at and will refuse forever — costs exactly that group, counted and
-  // answered as rejected below so the sender stops resending it. A store that
-  // merely *fails* still escapes as the error it is: the whole document comes
-  // back as a retry. Groups that landed are sent again as the same deterministic
-  // blocks, which is the recent exact-repeat case ClickHouse can suppress.
-  const storeRefused: { spans: number; firstMessage: string } = {
-    spans: 0,
-    firstMessage: "",
-  };
-  for (const append of appends) {
     // The same function every write in the product goes through, asked with
     // the narrowed context the row resolved to. It cannot refuse a context
     // the module itself built — which is the point of asking: a change that
     // made it refusable would surface here, not in a customer's missing rows.
-    authorize(append.auth, "ingest_traces", {
-      organizationId: append.auth.organizationId,
-      projectId: append.auth.projectId,
+    authorize(group.auth, "ingest_traces", {
+      organizationId: group.auth.organizationId,
+      projectId: group.auth.projectId,
     });
 
-    try {
-      await appendSpans(append.auth, append.spans);
-    } catch (cause) {
-      if (!(cause instanceof TraceStoreRefusedError)) throw cause;
+    accepting.push({ auth: group.auth, spans: normalised.spans });
+  }
 
-      request.log.error({ err: cause }, "the trace store refused a batch");
-      storeRefused.spans += append.spans.length;
-      storeRefused.firstMessage ||=
-        `the trace store refused these spans: ${cause.message}. They were ` +
-        "not stored and re-sending the same batch will not change that.";
-    }
+  // Every group in one call, and one answer for all of them: a batch naming
+  // several projects gets a segment each, and it is a success only once every
+  // one of them is durable. A per-group answer would tell the simulator its
+  // whole flush landed while one project's evidence was still in a local log —
+  // and the retry that follows a refusal replays the groups that did land,
+  // which stable span identity makes a no-op rather than a duplicate.
+  let accepted;
+  try {
+    accepted = await acceptEvidenceForProjects(accepting);
+  } catch (cause) {
+    if (!(cause instanceof IngestionUnavailableError)) throw cause;
+    return unavailable(request, reply, encoding, cause);
   }
 
   // And nothing goes to the grading queue, deliberately: a simulation's
@@ -505,15 +503,37 @@ async function simulatorExport(
   // telemetry path has nothing to add — a queue row from here would be the
   // second job the landing already guards against.
   //
-  // One truthful answer: what was rejected is the normaliser's rejects plus
-  // the refused groups' spans, and nothing that landed. The field is one
-  // string, and a store refusal is the graver news, so it speaks first.
+  // One truthful answer: the normaliser's rejects plus the records acceptance
+  // refused by name, and nothing that landed. The field is one string, and a
+  // named field over its bound is the more actionable of the two, so it speaks
+  // first.
   return exportResponse(
     reply,
     encoding,
-    rejected.count + storeRefused.spans,
-    storeRefused.firstMessage || rejected.firstReason,
+    rejected.count + accepted.refused.length,
+    accepted.refused[0]?.reason ?? rejected.firstReason,
   );
+}
+
+/**
+ * Evidence that could not be made durable in time, answered as *not yet*.
+ *
+ * `503` rather than a rejection, because the two are read differently and only
+ * one of them is true here: an OTLP exporter retries a 5xx and stops resending
+ * data reported as rejected. The staged copy is still on this side's disk and
+ * still on its way to the object store, so a retry meeting it is a replay of
+ * one immutable identity and produces one visible span. The body is the same
+ * `google.rpc.Status` every other refusal on this door uses, in the encoding
+ * the request arrived in.
+ */
+function unavailable(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  encoding: OtlpEncoding,
+  cause: IngestionUnavailableError,
+): FastifyReply {
+  request.log.error({ err: cause }, "evidence could not be made durable");
+  return statusResponse(reply, encoding, 503, RPC_UNAVAILABLE, cause.message);
 }
 
 export async function traceRoutes(
@@ -669,64 +689,28 @@ export async function traceRoutes(
       throw cause;
     }
 
-    // Appended once and complete: nothing is read first, nothing is patched,
-    // and a batch too large for one insert is split rather than trimmed.
+    // Handed over once and complete, and answered only when it is durable in
+    // the ingestion object store. Monitoring health and the grader-owned
+    // evidence-ready handoff are effects of that evidence becoming
+    // query-visible, so they belong to whatever reads the segment back — not
+    // to a door that would be asserting them about rows nobody has written.
+    let accepted;
     try {
-      await appendSpans(auth, normalised.spans);
+      accepted = await acceptEvidence(normalised.spans, { auth });
     } catch (cause) {
-      if (!(cause instanceof TraceStoreRefusedError)) throw cause;
-
-      // The store looked at these rows and said no, and it will say no to the
-      // identical bytes forever. A 5xx would be read as "try again later" and
-      // an exporter would retry this batch until its queue overflowed, so it
-      // is answered the way the specification says to answer data that must
-      // not be retried: accepted request, every span rejected, reason given.
-      request.log.error({ err: cause }, "the trace store refused a batch");
-      return exportResponse(
-        reply,
-        encoding,
-        normalised.spans.length + normalised.rejected.length,
-        `the trace store refused these spans: ${cause.message}. They were ` +
-          "not stored and re-sending the same batch will not change that.",
-      );
+      if (!(cause instanceof IngestionUnavailableError)) throw cause;
+      return unavailable(request, reply, encoding, cause);
     }
-
-    // Monitoring health means that a valid LiveKit Agents span reached the
-    // shared store. Update it only after the append succeeds. Other OTLP
-    // scopes do not prove a LiveKit Monitoring setup is working, and an empty
-    // or fully rejected export proves nothing arrived.
-    if (
-      normalised.spans.some(
-        (span) =>
-          span.source === "production" &&
-          span.agentPlatform === "livekit_agents",
-      )
-    ) {
-      await recordLiveKitMonitoringReceived(auth);
-    }
-
-    // And the conversations those spans belong to become known to the grading
-    // queue: one row per trace, saying when egma last heard about it and whether
-    // its root span closed. The same spans go to both calls, so what completion
-    // means is read off the telemetry in one place rather than agreed between
-    // two.
-    //
-    // Deliberately not caught. A trace nothing recorded is a trace nothing will
-    // ever grade, so an export whose bookkeeping did not land was not accepted:
-    // the failure reaches the exporter as a 5xx, which OTLP says to retry, and
-    // the retry is byte-identical so the store drops the spans it already has.
-    // The door's availability already depends on this database — the credential
-    // is resolved from it before a byte of the body is read — so this couples
-    // nothing that was not coupled.
-    await recordProductionTraces(auth, normalised.spans);
 
     return exportResponse(
       reply,
       encoding,
-      normalised.rejected.length,
-      // One message, because the field is one string. The first refusal is the
-      // one a developer needs; the rest are the same mistake repeated.
-      normalised.rejected[0]?.reason ?? "",
+      normalised.rejected.length + accepted.refused.length,
+      // One message, because the field is one string. A record over a
+      // documented bound names the field and the two numbers, which is the
+      // more actionable of the two, so it speaks first; the rest of either
+      // kind is the same mistake repeated.
+      accepted.refused[0]?.reason ?? normalised.rejected[0]?.reason ?? "",
     );
   });
 }

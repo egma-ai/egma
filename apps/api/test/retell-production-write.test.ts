@@ -135,10 +135,11 @@ describe("the shared Retell production writer", () => {
       platformAgentVersion: "7",
     });
     expect(recorded.claimed).not.toHaveProperty("connectionId");
-    expect(recorded.claimed?.payload).toContain('"access_token":"[REDACTED]"');
+    expect(recorded.claimed?.payload).not.toContain("access_token");
     expect(recorded.claimed?.payload).not.toContain(
       "provider-access-token-must-not-be-stored",
     );
+    expect(recorded.claimed?.payload).not.toContain("REDACTED");
     expect(recorded.appended).toBeGreaterThan(1);
     expect(recorded.grading).toBe(recorded.appended);
     expect(recorded.finished).toHaveLength(1);
