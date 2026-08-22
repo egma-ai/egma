@@ -168,6 +168,17 @@ type Group = {
   readonly scope: SegmentScope;
   waiting: Staged[];
   sealed: Sealed[];
+  /**
+   * Uploads of this group's sealed head that have failed since one last
+   * succeeded. Zero the moment one does.
+   */
+  failedAttempts: number;
+  /**
+   * When this group may be offered to the store again. Always in the past
+   * while nothing has failed, which is what makes the ordinary path free of
+   * any wait at all.
+   */
+  nextAttemptAtMilliseconds: number;
 };
 
 type Standing = {
@@ -203,7 +214,13 @@ function groupFor(held: Standing, scope: SegmentScope): Group {
   const key = keyFor(scope);
   const found = held.groups.get(key);
   if (found !== undefined) return found;
-  const made: Group = { scope, waiting: [], sealed: [] };
+  const made: Group = {
+    scope,
+    waiting: [],
+    sealed: [],
+    failedAttempts: 0,
+    nextAttemptAtMilliseconds: 0,
+  };
   held.groups.set(key, made);
   return made;
 }
@@ -238,6 +255,34 @@ function stagedFor(
       settle(cause);
     },
   };
+}
+
+/**
+ * How long a group whose upload just failed waits before it is offered again.
+ *
+ * **A sealed segment whose upload failed stays sealed**, which is what keeps
+ * the evidence — and it also leaves the group permanently due. Without a wait
+ * the loop would fail, wake and fail again with nothing in between: capacity
+ * spent here, and a flood landing on the store at the moment it is least able
+ * to take one. What paces that today is whichever retry policy the store
+ * client happens to apply inside one call, which is a dependency's property and
+ * not a promise this module can make.
+ *
+ * It doubles from the flush interval up to the request bound, and it borrows
+ * both rather than introducing a third number nobody has tuned. The floor is
+ * the interval a low-volume deployment already waits to seal, so the first
+ * retry costs no more than one ordinary flush; the ceiling is the longest a
+ * request is ever held open for this store, which is this path's own statement
+ * about how long the store is worth waiting on.
+ */
+function nextAttemptAfter(held: Standing, failedAttempts: number): number {
+  const longest = Math.max(
+    held.bounds.flushMilliseconds,
+    held.requestTimeoutMilliseconds,
+  );
+  const doubled =
+    held.bounds.flushMilliseconds * 2 ** Math.max(0, failedAttempts - 1);
+  return Math.min(doubled, longest);
 }
 
 /**
@@ -341,6 +386,11 @@ async function upload(held: Standing, group: Group): Promise<void> {
       group.sealed.shift();
       group.waiting = [...attempt.staged, ...group.waiting];
       held.log.release([attempt.sealEntry]);
+      // The store answered, and these records are about to be sealed under an
+      // identity of their own. Nothing here says the store will refuse the
+      // next one.
+      group.failedAttempts = 0;
+      group.nextAttemptAtMilliseconds = 0;
       return;
     }
 
@@ -352,6 +402,14 @@ async function upload(held: Standing, group: Group): Promise<void> {
       { err: cause, segmentId: attempt.segment.segmentId },
       "a sealed segment did not reach the ingestion bucket",
     );
+    // The waiting calls are told at once and keep their own bound: a sender
+    // learning about this is not something to make slower. What waits is the
+    // *next attempt* on this group, so a store that is refusing is asked again
+    // at a pace rather than as fast as it can say no.
+    group.failedAttempts += 1;
+    group.nextAttemptAtMilliseconds =
+      Date.now() + nextAttemptAfter(held, group.failedAttempts);
+
     const refusal = new IngestionUnavailableError(
       "this evidence was staged and could not be made durable in the " +
         "ingestion object store. It has not been discarded — send it again.",
@@ -362,6 +420,8 @@ async function upload(held: Standing, group: Group): Promise<void> {
   }
 
   group.sealed.shift();
+  group.failedAttempts = 0;
+  group.nextAttemptAtMilliseconds = 0;
   held.log.release([
     attempt.sealEntry,
     ...attempt.staged.map((staged) => staged.entry),
@@ -395,7 +455,15 @@ async function flush(held: Standing): Promise<void> {
     ) {
       seal(held, group);
     }
-    if (group.sealed.length > 0) await upload(held, group);
+    // A group whose last attempt failed is left alone until its wait is over.
+    // Read from the clock rather than from the pass's own start, because an
+    // earlier group's upload may have taken a while to fail.
+    if (
+      group.sealed.length > 0 &&
+      Date.now() >= group.nextAttemptAtMilliseconds
+    ) {
+      await upload(held, group);
+    }
     if (group.waiting.length === 0 && group.sealed.length === 0) {
       held.groups.delete(keyFor(group.scope));
     }
@@ -404,7 +472,8 @@ async function flush(held: Standing): Promise<void> {
 
 /**
  * Wake when the earliest group is due — or at once, where something is already
- * sealed or already over a bound.
+ * sealed or already over a bound, unless that group is waiting out a failed
+ * attempt.
  *
  * One timer for every group rather than one each: the answer is the smallest
  * wait any of them wants, and the pass that follows looks at all of them.
@@ -421,7 +490,7 @@ function schedule(held: Standing): void {
   for (const group of held.groups.values()) {
     const wait =
       group.sealed.length > 0
-        ? 0
+        ? Math.max(0, group.nextAttemptAtMilliseconds - now)
         : millisecondsUntilSeal(pendingGroup(group.waiting), held.bounds, now);
     if (wait === undefined) continue;
     soonest = soonest === undefined ? wait : Math.min(soonest, wait);
