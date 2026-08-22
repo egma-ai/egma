@@ -169,6 +169,19 @@ type Wanted = {
   readonly agentId: string | undefined;
 };
 
+/**
+ * One ticked platform agent that did not start, and why.
+ *
+ * Starting an agent is a whole act on its own, so a tick that loses is
+ * reported as itself rather than as the whole request failing — which would
+ * leave the ticks beside it switched on and unmentioned.
+ */
+type Refused = {
+  readonly platformAgentId: string;
+  readonly reason: "contested" | "name_taken" | "not_found";
+  readonly message: string;
+};
+
 /** What the commit answers about one agent it started. */
 type Started = {
   readonly agentId: string;
@@ -322,8 +335,13 @@ export async function monitoringRoutes(
     const wanted = watchListIn(body);
     if (typeof wanted === "string") return unprocessable(reply, wanted);
 
+    // One roster read for the whole commit. Inside the loop it re-asked the
+    // same question once per tick and could still answer staler than the
+    // write it guarded — the database is what decides, so once is enough.
+    const known = await registeredByPlatformAgent(resolved.auth, RETELL);
+
     const started: Started[] = [];
-    const contested: string[] = [];
+    const refused: Refused[] = [];
 
     for (const one of wanted) {
       let agentId = one.agentId;
@@ -332,24 +350,23 @@ export async function monitoringRoutes(
 
       if (agentId !== undefined) {
         // The caller named an egma agent, so the answer says that agent's
-        // name rather than the platform's word for it. A name the caller sent
-        // alongside would be the platform's, and the two need not agree.
+        // name rather than the platform's word for it. A name sent alongside
+        // would be the platform's, and the two need not agree.
         const held = await getAgent(resolved.auth, agentId);
         if (held === undefined) {
-          return sendRefusal(
-            reply,
-            "not_found",
-            `There is no agent ${agentId} available in this project. ` +
+          refused.push({
+            platformAgentId: one.platformAgentId,
+            reason: "not_found",
+            message:
+              `There is no agent ${agentId} available in this project. ` +
               "Check the link, or choose it from the current project.",
-          );
+          });
+          continue;
         }
         agentName = held.name;
-      }
-
-      if (agentId === undefined) {
+      } else {
         // No egma agent named, so the platform id decides: the agent already
         // bound to it, or a new roster entry for it.
-        const known = await registeredByPlatformAgent(resolved.auth, RETELL);
         const held = known.get(one.platformAgentId);
         if (held === undefined) {
           try {
@@ -362,13 +379,15 @@ export async function monitoringRoutes(
               error instanceof AgentWriteRefusedError &&
               error.reason === "name_taken"
             ) {
-              return sendRefusal(
-                reply,
-                "name_taken",
-                `This project already has an agent called “${agentName}”. ` +
+              refused.push({
+                platformAgentId: one.platformAgentId,
+                reason: "name_taken",
+                message:
+                  `This project already has an agent called \u201C${agentName}\u201D. ` +
                   "Open that agent and start monitoring from there, or rename " +
                   "the Retell agent.",
-              );
+              });
+              continue;
             }
             throw error;
           }
@@ -394,32 +413,22 @@ export async function monitoringRoutes(
         });
       } catch (error) {
         if (!lostToPullUniqueness(error)) throw error;
-        contested.push(one.platformAgentId);
+        // The database refused this one tick. The ticks beside it are
+        // untouched, and the sentence names the agent already watching.
+        const holder = known.get(one.platformAgentId);
+        refused.push({
+          platformAgentId: one.platformAgentId,
+          reason: "contested",
+          message:
+            `${one.platformAgentId} is already watched by ` +
+            `\u201C${holder?.agentName ?? "another agent"}\u201D. One Egma agent ` +
+            "watches one Retell agent, so turn that agent's switch off " +
+            "first, or start monitoring from it instead.",
+        });
       }
     }
 
-    if (contested.length > 0) {
-      // Read only now, and only to name the agent already watching. The
-      // answer was the database's; this is the sentence around it.
-      const known = await registeredByPlatformAgent(resolved.auth, RETELL);
-      const named = contested
-        .map((platformAgentId) => {
-          const held = known.get(platformAgentId);
-          return held === undefined
-            ? platformAgentId
-            : `${platformAgentId} (watched by “${held.agentName}”)`;
-        })
-        .join(", ");
-      return sendRefusal(
-        reply,
-        "conflict",
-        `One Egma agent watches one Retell agent, and something in this ` +
-          `project already watches ${named}. Turn that agent's switch off ` +
-          "first, or start monitoring from it instead.",
-      );
-    }
-
-    return reply.send({ watching: started });
+    return reply.send({ watching: started, refused });
   });
 
   /** Stop pulling. Everything stored stays stored, including the notebook. */

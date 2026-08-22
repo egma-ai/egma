@@ -109,6 +109,29 @@ const watched = {
   additionalProperties: false,
 } as const;
 
+/**
+ * One ticked platform agent that did not start, and why.
+ *
+ * **A refusal is per tick, not per request.** Starting one agent is a whole
+ * act on its own, so one entry losing the one-switched-on-agent rule cannot be
+ * allowed to hide the entries that did start — a request answered with only a
+ * refusal would leave switches on that nothing on screen mentions.
+ */
+const refusedWatch = {
+  type: "object",
+  properties: {
+    platformAgentId: { type: "string" },
+    reason: {
+      type: "string",
+      enum: ["contested", "name_taken", "not_found"],
+    },
+    /** The whole sentence, ready to show. Never a constraint name. */
+    message: { type: "string" },
+  },
+  required: ["platformAgentId", "reason", "message"],
+  additionalProperties: false,
+} as const;
+
 /** What the switch says about one agent. No health, no progress. */
 const pullState = {
   type: "object",
@@ -177,10 +200,12 @@ export const monitoringOperations = {
    * historical window. An agent row is created for a platform agent this
    * project does not register yet, because watching one *means* registering it.
    *
-   * A tick that would put two switched-on agents on one platform agent is
-   * refused with `409` and a sentence naming the agent already watching it.
-   * The refusal is the database's own uniqueness answer, caught — a check
-   * before the write would be a race with the next request.
+   * **Every entry is attempted and every entry is answered.** A tick that
+   * would put two switched-on agents on one platform agent comes back in
+   * `refused` with a sentence naming the agent already watching it, and the
+   * ticks beside it still start. The refusal is the database's own
+   * uniqueness answer, caught — a check before the write would be a race
+   * with the very next request.
    */
   startMonitoring: defineOperation({
     operationId: "startMonitoring",
@@ -204,19 +229,25 @@ export const monitoringOperations = {
     },
     responses: {
       200: {
-        description: "Every agent now pulling its production calls.",
+        description:
+          "What each ticked platform agent turned out to be: the ones now " +
+          "pulling their production calls, and the ones refused.",
         schema: {
           type: "object",
-          properties: { watching: arrayOf(watched) },
-          required: ["watching"],
+          properties: {
+            watching: arrayOf(watched),
+            refused: arrayOf(refusedWatch),
+          },
+          required: ["watching", "refused"],
           additionalProperties: false,
         },
       },
+      // No 404 and no 409: a request naming at least one platform agent is
+      // answered per entry, and an entry that could not start is a row in
+      // `refused` rather than the whole request failing.
       400: refusalResponse,
       401: refusalResponse,
       403: refusalResponse,
-      404: refusalResponse,
-      409: refusalResponse,
       422: refusalResponse,
       429: rateLimitResponse,
       503: refusalResponse,

@@ -8080,7 +8080,7 @@
         },
         "responses": {
           "200": {
-            "description": "Every agent now pulling its production calls.",
+            "description": "What each ticked platform agent turned out to be: the ones now pulling their production calls, and the ones refused.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8117,10 +8117,39 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "refused": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "platformAgentId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "contested",
+                              "name_taken",
+                              "not_found"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "platformAgentId",
+                          "reason",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
-                    "watching"
+                    "watching",
+                    "refused"
                   ],
                   "additionalProperties": false
                 }
@@ -8148,26 +8177,6 @@
             }
           },
           "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
             "description": "The request was refused.",
             "content": {
               "application/json": {

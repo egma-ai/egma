@@ -2273,14 +2273,6 @@ export type StartMonitoringErrors = {
     /**
      * The request was refused.
      */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
     422: Refusal;
     /**
      * The request rate limit was reached.
@@ -2296,7 +2288,7 @@ export type StartMonitoringError = StartMonitoringErrors[keyof StartMonitoringEr
 
 export type StartMonitoringResponses = {
     /**
-     * Every agent now pulling its production calls.
+     * What each ticked platform agent turned out to be: the ones now pulling their production calls, and the ones refused.
      */
     200: {
         watching: Array<{
@@ -2305,6 +2297,11 @@ export type StartMonitoringResponses = {
             platformAgentId: string;
             created: boolean;
             pullProductionCalls: boolean;
+        }>;
+        refused: Array<{
+            platformAgentId: string;
+            reason: 'contested' | 'name_taken' | 'not_found';
+            message: string;
         }>;
     };
 };
