@@ -2300,7 +2300,7 @@ export type StartMonitoringResponses = {
         }>;
         refused: Array<{
             platformAgentId: string;
-            reason: 'contested' | 'name_taken' | 'not_found';
+            reason: 'contested' | 'name_taken' | 'not_found' | 'archived';
             message: string;
         }>;
     };

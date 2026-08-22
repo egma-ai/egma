@@ -87,6 +87,9 @@ function projectNamed(query: Body, body: Body): string | undefined {
 /** The platform this flow supports. LiveKit is push and configures nothing. */
 const RETELL = "retell";
 
+/** Shorter than any key a platform issues, and the access layer's own bound. */
+const SHORTEST_KEY = 8;
+
 /** What this project already knows about one platform's agents. */
 type Registered = {
   readonly agentId: string;
@@ -178,7 +181,7 @@ type Wanted = {
  */
 type Refused = {
   readonly platformAgentId: string;
-  readonly reason: "contested" | "name_taken" | "not_found";
+  readonly reason: "contested" | "name_taken" | "not_found" | "archived";
   readonly message: string;
 };
 
@@ -329,7 +332,11 @@ export async function monitoringRoutes(
       );
     }
     const apiKey = apiKeyIn(body);
-    if (apiKey === undefined) {
+    // Checked once, here, because one key serves every entry: a key too short
+    // to be one the platform issued is the request's problem, and reporting it
+    // once per tick below would say the same thing as many times as there are
+    // ticks.
+    if (apiKey === undefined || apiKey.length < SHORTEST_KEY) {
       return unprocessable(reply, "Enter a Retell API key.");
     }
     const wanted = watchListIn(body);
@@ -364,6 +371,25 @@ export async function monitoringRoutes(
           continue;
         }
         agentName = held.name;
+        /*
+         * **Archived is this entry's own answer, not the request's.**
+         *
+         * `getAgent` answers an archived agent on purpose — a run that names
+         * it has to keep opening — and the switch refuses it. Letting that
+         * refusal out of the loop would end the whole request after earlier
+         * entries had already started and before later ones were tried, which
+         * is the one thing the per-entry contract promises never happens.
+         */
+        if (held.archivedAt !== null) {
+          refused.push({
+            platformAgentId: one.platformAgentId,
+            reason: "archived",
+            message:
+              `\u201C${held.name}\u201D is archived. Restore it, then start ` +
+              "monitoring it.",
+          });
+          continue;
+        }
       } else {
         // No egma agent named, so the platform id decides: the agent already
         // bound to it, or a new roster entry for it.
@@ -408,6 +434,19 @@ export async function monitoringRoutes(
           pullProductionCalls: state.pullProductionCalls,
         });
       } catch (error) {
+        /*
+         * The archive race: the agent was alive when this entry read it and
+         * archived before the switch was written. Same answer as the check
+         * above, in the access layer's own words, and still this entry's own.
+         */
+        if (error instanceof UnprocessableInputError) {
+          refused.push({
+            platformAgentId: one.platformAgentId,
+            reason: "archived",
+            message: error.message,
+          });
+          continue;
+        }
         if (
           error instanceof AgentWriteRefusedError &&
           error.reason === "name_taken"

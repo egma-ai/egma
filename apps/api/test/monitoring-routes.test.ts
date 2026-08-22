@@ -1,4 +1,5 @@
 import {
+  archiveAgent,
   claimDueMonitoringPull,
   createAgent,
   enablePullProductionCalls,
@@ -478,6 +479,63 @@ describe("starting monitoring", () => {
       "select name from agent",
     );
     expect(named.rows.map((row) => row.name)).toEqual(["Front desk"]);
+  });
+
+  /**
+   * **An archived agent is one tick's answer, never the request's.**
+   *
+   * The roster keeps an archived agent readable — a run that names it has to
+   * keep opening — so it is found, and the switch refuses it. Letting that
+   * refusal end the request would stop a batch after earlier entries had
+   * started and before later ones were tried, which is the one thing the
+   * per-entry contract promises never happens.
+   */
+  it("refuses an archived agent by name and starts the ticks around it", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_archived", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-archived@acme.example", "Acme");
+    const first = await createAgent(at(ada), { name: "Front desk" });
+    const gone = await createAgent(at(ada), { name: "Retired desk" });
+    await archiveAgent(at(ada), gone.id);
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [
+          { platformAgentId: "agent_voice_1", agentId: first.id },
+          // Archived, in the middle, where an abort would be most visible.
+          { platformAgentId: "agent_voice_2", agentId: gone.id },
+          { platformAgentId: "agent_voice_3", name: "Billing" },
+        ],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: { platformAgentId: string }[];
+      refused: { platformAgentId: string; reason: string; message: string }[];
+    };
+
+    // The entries around it started, including the one after it.
+    expect(outcome.watching.map((one) => one.platformAgentId)).toEqual([
+      "agent_voice_1",
+      "agent_voice_3",
+    ]);
+    expect(outcome.refused).toHaveLength(1);
+    expect(outcome.refused[0]?.platformAgentId).toBe("agent_voice_2");
+    expect(outcome.refused[0]?.reason).toBe("archived");
+    expect(outcome.refused[0]?.message).toContain("Retired desk");
+
+    // And the archived agent's switch is still off.
+    expect((await readAgentPullState(at(ada), gone.id))?.pullProductionCalls).toBe(
+      false,
+    );
   });
 
   it("refuses a viewer before starting anything", async () => {

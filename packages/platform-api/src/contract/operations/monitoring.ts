@@ -123,7 +123,7 @@ const refusedWatch = {
     platformAgentId: { type: "string" },
     reason: {
       type: "string",
-      enum: ["contested", "name_taken", "not_found"],
+      enum: ["contested", "name_taken", "not_found", "archived"],
     },
     /** The whole sentence, ready to show. Never a constraint name. */
     message: { type: "string" },

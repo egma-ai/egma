@@ -8131,7 +8131,8 @@
                             "enum": [
                               "contested",
                               "name_taken",
-                              "not_found"
+                              "not_found",
+                              "archived"
                             ]
                           },
                           "message": {
