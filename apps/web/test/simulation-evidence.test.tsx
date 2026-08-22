@@ -294,7 +294,8 @@ describe("one simulation's grades", () => {
     const history = within(expected).getByText("1 earlier grade").closest("details");
     expect(history).not.toBeNull();
     fireEvent.click(within(expected).getByText("1 earlier grade"));
-    expect(within(history!).getByText(/02:05:00.*score 1.00/iu)).toBeTruthy();
+    expect(within(history!).getByText(/score 1.00/iu)).toBeTruthy();
+    expect(within(history!).getByText("passed")).toBeTruthy();
 
     fireEvent.click(within(expected).getByRole("button", { name: "Read turn 2" }));
     expect(await screen.findByRole("dialog", { name: "Transcript and audio" }))
