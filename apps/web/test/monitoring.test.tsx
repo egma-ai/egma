@@ -492,7 +492,7 @@ describe("what a quiet Monitoring page says", () => {
    * them and the instructions written for them, so the page asks the wider
    * question instead.
    */
-  it("opens the platform setup on the default window when nothing has ever arrived", async () => {
+  it("points at the agent roster on the default window when nothing has ever arrived", async () => {
     const { asked } = stub({
       rows: [],
       everRecorded: [],
@@ -509,7 +509,7 @@ describe("what a quiet Monitoring page says", () => {
       screen
         .getByRole("link", { name: QUIET.setUp.action })
         .getAttribute("href"),
-    ).toBe("/projects/prj_2/monitoring/setup");
+    ).toBe("/projects/prj_2/agents");
   });
 
   /**

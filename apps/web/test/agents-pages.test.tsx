@@ -577,7 +577,7 @@ describe("reading an agent's reach from the list", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("registering an agent", () => {
-  it("sends the name and description, and nothing about the provider", async () => {
+  it("sends the name, and nothing about the provider", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents": { status: 201, body: { agent: AGENT } },
@@ -586,9 +586,6 @@ describe("registering an agent", () => {
 
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
-    });
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Answers the main line." },
     });
     const register = screen.getByRole("button", { name: "Register agent" });
     expectSharedFormLayout(register);
@@ -613,13 +610,10 @@ describe("registering an agent", () => {
      * has to know which half a door happens to read.
      */
     expect(sent[0]?.url).toBe("/v1/agents?projectId=prj_1");
-    expect(sent[0]?.body).toEqual({
-      name: "Front desk",
-      description: "Answers the main line.",
-    });
-    // No prompt, no model, no tools: this form does not have them, so it cannot
-    // send them.
-    for (const provider of ["prompt", "model", "tools"]) {
+    expect(sent[0]?.body).toEqual({ name: "Front desk" });
+    // No prompt, no model, no tools, and no description any more: this form
+    // does not have them, so it cannot send them.
+    for (const provider of ["prompt", "model", "tools", "description"]) {
       expect(Object.keys(sent[0]?.body ?? {})).not.toContain(provider);
     }
     await waitFor(() =>
@@ -663,9 +657,6 @@ describe("registering an agent", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
     });
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Answers the main line." },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Register agent" }));
 
     // Egma's own sentence, unchanged — and the typing still on screen, so the
@@ -678,9 +669,6 @@ describe("registering an agent", () => {
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Front desk",
     );
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("Answers the main line.");
   });
 
   it("tells a viewer the page is not theirs instead of pretending it worked", async () => {
@@ -842,17 +830,16 @@ describe("one agent's page", () => {
     ).toBe(false);
   });
 
-  it("sends the revision it was opened on, and keeps the edit when it is stale", async () => {
+  it("saves the name alone, and keeps the typing when egma refuses", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents/agt_1": [
         { status: 200, body: { agent: AGENT, connections: [] } },
         {
-          status: 409,
+          status: 422,
           body: {
-            error: "identity_conflict",
-            message:
-              "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
+            error: "unprocessable",
+            message: "an agent needs a name",
           },
         },
       ],
@@ -860,8 +847,8 @@ describe("one agent's page", () => {
     render(<AgentDetailPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Rewritten while somebody else was editing" },
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Renamed while somebody else was editing" },
     });
     const save = screen.getByRole("button", { name: "Save" });
     expectSharedFormLayout(save);
@@ -869,18 +856,15 @@ describe("one agent's page", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("PATCH");
-    expect(sent[0]?.body.expectedRevision).toBe("rev_one");
+    // No revision: two browsers editing one agent is last-writer-wins now.
+    expect(sent[0]?.body).toEqual({
+      name: "Renamed while somebody else was editing",
+    });
 
-    // The conflict is shown in egma's own words and the work stays on screen:
-    // reading again is one click, retyping is not.
-    expect(
-      await screen.findByText(
-        "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
-      ),
-    ).toBeDefined();
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("Rewritten while somebody else was editing");
+    expect(await screen.findByText("an agent needs a name")).toBeDefined();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      "Renamed while somebody else was editing",
+    );
   });
 
 });
@@ -1001,7 +985,6 @@ describe("adding a connection", () => {
       },
     });
     expect(sent[1]?.body).toEqual({
-      agentPlatform: "retell",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
@@ -1057,7 +1040,6 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
@@ -1124,7 +1106,6 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -1183,7 +1164,6 @@ describe("adding a connection", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -1348,7 +1328,6 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "Primary Retell connection",
       config: { retellAgentId: "agent_moved" },
-      expectedRevision: "rev_con_one",
     });
   });
 
@@ -1383,7 +1362,6 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "staging",
       config: { url: "wss://example.livekit.cloud" },
-      expectedRevision: "rev_con_one",
     });
 
     cleanup();
@@ -1429,7 +1407,6 @@ describe("one connection's page", () => {
         url: "wss://example.livekit.cloud",
         agentName: "customer-support",
       },
-      expectedRevision: "rev_con_one",
     });
   });
 

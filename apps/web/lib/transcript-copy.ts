@@ -113,8 +113,9 @@ export const QUIET = {
   setUp: {
     title: "Nothing has been recorded here yet",
     lead:
-      "Choose Retell or LiveKit Agents and complete its production Monitoring setup.",
-    action: "Set up monitoring",
+      "Turn on Pull production calls for a Retell agent, or send LiveKit " +
+      "spans to Egma from the agent's own process.",
+    action: "Start monitoring an agent",
   },
   organizationKey: {
     title: "A key here names the whole organization",
