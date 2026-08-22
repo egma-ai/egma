@@ -12,7 +12,11 @@ import {
   SegmentIdentityConflictError,
   type PendingObjectStore,
 } from "./object-store.ts";
-import { recordFor, type IngestionRecord } from "./record.ts";
+import {
+  LARGEST_STAGEABLE_RECORD_BYTES,
+  recordFor,
+  type IngestionRecord,
+} from "./record.ts";
 import {
   groupedByProject,
   millisecondsUntilSeal,
@@ -183,8 +187,6 @@ type Group = {
 
 type Standing = {
   readonly log: WriteAheadLog;
-  /** What that log refuses past, kept so the load below can say *how close*. */
-  readonly logBounds: { readonly maxBytes: number; readonly maxRecords: number };
   readonly store: PendingObjectStore;
   readonly bounds: SegmentBounds;
   readonly requestTimeoutMilliseconds: number;
@@ -548,10 +550,6 @@ export function openAcceptance(options: AcceptanceOptions): void {
 
   const held: Standing = {
     log,
-    logBounds: {
-      maxBytes: settings.logMaxBytes,
-      maxRecords: settings.logMaxRecords,
-    },
     store: pendingObjectStore(store, {
       requestTimeoutMilliseconds: settings.requestTimeoutMilliseconds,
     }),
@@ -840,13 +838,17 @@ export type StagedLoad = {
   /** Frames staged and not yet released. */
   readonly records: number;
   /**
-   * Either bound is reached, so the next append is refused.
+   * There is no longer room for the next record, so staging one is refused.
    *
-   * **Either**, because both bind and they bind on different things: half a
-   * gigabyte of transcripts and two hundred thousand tiny records are the same
-   * answer — *not now* — and a readiness check that watched only the count
-   * would report a writable log while every request was already being refused
-   * for bytes.
+   * **Room for one more, not merely under the bound.** A bound is on frames
+   * and a frame is a record plus the log's own header, so a log a few hundred
+   * bytes under its byte bound refuses every request that arrives — and a
+   * readiness check comparing usage against the bound would call that instance
+   * ready and keep it in front of traffic it cannot take.
+   *
+   * Both bounds bind, and they bind on different things: half a gigabyte of
+   * transcripts and two hundred thousand tiny records are the same answer,
+   * *not now*.
    */
   readonly full: boolean;
 };
@@ -857,6 +859,11 @@ export type StagedLoad = {
  * `undefined` on a process that opened no acceptance loop, which is a different
  * fact from an empty log and has to stay distinguishable: one is a deployment
  * with nowhere to stage evidence, the other is one with nothing staged.
+ *
+ * **The question is the log's to answer, and it is asked rather than
+ * reconstructed.** The refusal rule lives in one place — `append` and this
+ * share it — because two copies of it are two chances for readiness and the
+ * door to disagree about whether this instance can take a request.
  */
 export function stagedLoad(): StagedLoad | undefined {
   const held = standing;
@@ -865,7 +872,12 @@ export function stagedLoad(): StagedLoad | undefined {
   return {
     bytes,
     records,
-    full: bytes >= held.logBounds.maxBytes || records >= held.logBounds.maxRecords,
+    // Room for the largest record the path will stage, so readiness goes
+    // unavailable before the door starts refusing rather than after. On a
+    // boundary this fine that is one record early, which is the side to be
+    // wrong on: an instance called ready while refusing is one nothing can
+    // detect from outside.
+    full: !held.log.accepts(LARGEST_STAGEABLE_RECORD_BYTES),
   };
 }
 

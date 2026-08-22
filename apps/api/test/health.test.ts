@@ -9,7 +9,7 @@ import {
   disconnectClickHouse,
   runMigrations,
 } from "@egma/db";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   loggingEmailSender,
@@ -17,6 +17,7 @@ import {
   type Email,
 } from "../src/auth/email.ts";
 import { loadConfig } from "../src/config.ts";
+import { LARGEST_STAGEABLE_RECORD_BYTES } from "../src/ingestion/record.ts";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { buildApi } from "../src/server.ts";
 import { createApi, testConfig } from "./support/api.ts";
@@ -24,6 +25,7 @@ import {
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
+import { mintKey, signUp, syntheticExport } from "./support/traces.ts";
 import {
   createEmptyDatabase,
   type EmptyDatabase,
@@ -694,6 +696,85 @@ describe("write readiness", () => {
         localLog: "full",
         stagedRecords: 0,
       });
+    } finally {
+      await api.close();
+    }
+  });
+
+  /**
+   * The sliver between "under the bound" and "will take another record".
+   *
+   * A bound is on frames and a frame is a record plus the log's own header, so
+   * a log can sit under its byte bound with less room left than the next
+   * record needs. Readiness that compared usage against the bound called that
+   * instance ready and left it in front of traffic every request of which the
+   * door was already refusing — invisible from outside, because the health
+   * check and the door disagreed.
+   */
+  it("is unavailable while under the byte bound but out of room for a record", async () => {
+    if (!storage.available) return;
+    const api = await createApi("health_log_sliver", {
+      ingestStore: storage.ingestStore,
+      // Room for one largest-record reserve and 512 bytes over it, so an empty
+      // log is ready and the first staged record is what closes the gap.
+      ingestionLogMaxBytes: LARGEST_STAGEABLE_RECORD_BYTES + 512,
+      // Long enough that nothing seals and uploads during the case, so the
+      // record stays staged and the bytes stay held.
+      ingestionFlushMilliseconds: 60_000,
+    });
+    try {
+      const empty = await api.app.inject({ method: "GET", url: "/health" });
+      expect(empty.statusCode).toBe(200);
+      expect(empty.json()).toMatchObject({ localLog: "writable" });
+
+      const acme = await signUp(api.app, "ada@acme.example", "Acme");
+      const secret = await mintKey(
+        api.app,
+        acme.cookie,
+        "a terminal",
+        acme.projectId,
+      );
+      const accepted = api.app.inject({
+        method: "POST",
+        url: OTLP_TRACES_PATH,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${secret}`,
+        },
+        payload: syntheticExport({
+          traceId: "cc00000000000000000000000000cc00",
+          startedAt: new Date("2026-08-20T10:00:00.000Z"),
+        }),
+      });
+      // The request is still open — its evidence is staged and waiting for the
+      // flush that will not come inside this case — which is exactly the state
+      // the health check has to read correctly.
+      await vi.waitFor(async () => {
+        const held = await api.app.inject({ method: "GET", url: "/health" });
+        expect(held.json()).toMatchObject({ localLog: "full" });
+      });
+
+      const response = await api.app.inject({ method: "GET", url: "/health" });
+      const body = response.json() as {
+        stagedBytes: number;
+        stagedRecords: number;
+      };
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        status: "unavailable",
+        postgres: "reachable",
+        ingestion: "reachable",
+        localLog: "full",
+      });
+      // Under the bound the whole time, and out of room all the same.
+      expect(body.stagedRecords).toBeGreaterThan(0);
+      // Comfortably over the 512 bytes of slack and nowhere near the bound:
+      // the log is barely used and has no room for a record all the same.
+      expect(body.stagedBytes).toBeGreaterThan(512);
+      expect(body.stagedBytes).toBeLessThan(
+        LARGEST_STAGEABLE_RECORD_BYTES + 512,
+      );
+      void accepted;
     } finally {
       await api.close();
     }

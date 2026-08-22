@@ -223,6 +223,10 @@ export {
  * already stored. Two implementations of either is one of them deciding that a
  * conflict is a replay, or that a cut value is a whole one.
  */
-export { refuseOversizeRecord, spanContentHash } from "./access/spans.ts";
+export {
+  LARGEST_BOUNDED_RECORD_BYTES,
+  refuseOversizeRecord,
+  spanContentHash,
+} from "./access/spans.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

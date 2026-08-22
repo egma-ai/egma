@@ -1,4 +1,8 @@
-import { spanContentHash, type NewSpan } from "@egma/db";
+import {
+  LARGEST_BOUNDED_RECORD_BYTES,
+  spanContentHash,
+  type NewSpan,
+} from "@egma/db";
 
 /**
  * The one written-down form of one span of evidence, and what makes two copies
@@ -116,6 +120,37 @@ export type IngestionRecord = {
    */
   readonly ends_trace: boolean;
 };
+
+/**
+ * How much room one more record needs, in bytes of the frame it is staged as.
+ *
+ * What a caller reserves when it asks whether the local log will take more
+ * evidence. It has to be the *largest* record the acceptance path will stage
+ * rather than a typical one: readiness is a promise about the next request,
+ * whatever that request turns out to carry, and a reserve sized for an average
+ * record is a green health check in front of a door already refusing.
+ *
+ * Three parts, in the order they add up:
+ *
+ * - the evidence itself, at every bound the record module enforces at once;
+ * - the JSON it is written as — keys, quotes, separators, and the staged
+ *   frame's own envelope around all of it;
+ * - escaping, because a string is measured before it is written and written
+ *   longer than it was measured. One byte becomes six as `\uXXXX`, so the
+ *   worst case is the whole of the evidence at six times its size. That is a
+ *   transcript of nothing but control characters, which is not a thing anybody
+ *   sends — and a reserve that only covered what people usually send would
+ *   fail exactly on the request nobody expected.
+ *
+ * **It does not cover `payload`, which has no bound to cover.** A provider
+ * document arrives as it is, and no part of this path refuses one for its
+ * size. A record whose payload is larger than this reserve can still meet
+ * backpressure while readiness is green; what this rules out is the far more
+ * ordinary case, where a log with room for a hundred more records reports
+ * writable and refuses every one of them.
+ */
+export const LARGEST_STAGEABLE_RECORD_BYTES =
+  LARGEST_BOUNDED_RECORD_BYTES * 6 + 4_096;
 
 /** Every key of a record, in the one order canonical bytes are written in. */
 const RECORD_KEYS = [

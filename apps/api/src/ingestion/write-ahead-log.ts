@@ -125,6 +125,17 @@ export type WriteAheadLog = {
    * confirms durability can name exactly what it confirmed.
    */
   append(payload: Uint8Array): StagedEntry;
+  /**
+   * Whether one more frame carrying this many payload bytes would still fit.
+   *
+   * The same judgment `append` makes, asked without writing anything — and it
+   * is the same judgment because `append` asks this. A caller deciding whether
+   * this log will take more evidence must not re-derive the rule from `bytes`
+   * and the bound it was opened with: the bound is on frames, a frame is the
+   * payload plus this log's own header, and a caller comparing usage against
+   * the bound would call a log writable while the very next append refused it.
+   */
+  accepts(payloadBytes: number): boolean;
   /** Everything staged and not yet released, oldest first. */
   staged(): readonly StagedEntry[];
   /**
@@ -281,22 +292,33 @@ export function openWriteAheadLog(
     }
   };
 
+  // Both bounds, said once. The byte bound counts the frame that would be
+  // written rather than the payload — the log's disk cost is frames, and a
+  // bound that measured payloads would be exceeded by exactly the amount
+  // nobody counted.
+  const roomForBytes = (payloadBytes: number): boolean =>
+    totalBytes() + FRAME_HEADER_BYTES + payloadBytes <= bounds.maxBytes;
+  const roomForOneRecord = (): boolean =>
+    totalRecords() + 1 <= bounds.maxRecords;
+
   return {
+    accepts(payloadBytes) {
+      return roomForBytes(payloadBytes) && roomForOneRecord();
+    },
+
     append(payload) {
       const frame = frameFor(payload);
 
-      // Both bounds are checked before the file is touched, and the byte bound
-      // counts the frame that would be written rather than the payload — the
-      // log's disk cost is frames, and a bound that measured payloads would be
-      // exceeded by exactly the amount nobody counted.
-      if (totalBytes() + frame.byteLength > bounds.maxBytes) {
+      // Checked before the file is touched, and by the same two predicates
+      // anyone asking "will this log take more" is answered with.
+      if (!roomForBytes(payload.byteLength)) {
         throw new IngestionBackpressureError(
           `the local ingestion log holds ${totalBytes()} bytes and its bound is ` +
             `${bounds.maxBytes}, so this evidence cannot be staged. Nothing ` +
             `already staged has been discarded to make room for it.`,
         );
       }
-      if (totalRecords() + 1 > bounds.maxRecords) {
+      if (!roomForOneRecord()) {
         throw new IngestionBackpressureError(
           `the local ingestion log holds ${totalRecords()} staged records and ` +
             `its bound is ${bounds.maxRecords}, so this evidence cannot be ` +
