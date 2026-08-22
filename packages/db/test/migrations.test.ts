@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   MIGRATION_ADVISORY_LOCK,
+  MIGRATION_HASH_CORRECTIONS,
   MIGRATIONS_DIRECTORY,
   readMigrations,
   runMigrations,
@@ -396,6 +397,42 @@ describe("applying migrations on boot", () => {
     expect(result.alreadyApplied).toEqual(
       expect.arrayContaining(expected.map((migration) => migration.name)),
     );
+  });
+
+  it("reconciles the exact pre-hosted 0040 correction without reapplying it", async () => {
+    const [correction] = MIGRATION_HASH_CORRECTIONS;
+    if (correction === undefined) throw new Error("0040 correction is missing");
+    const migration = (await readMigrations()).find(
+      (candidate) => candidate.name === correction.name,
+    );
+    expect(migration?.hash).toBe(correction.correctedHash);
+
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    try {
+      await client.query(
+        `update egma_meta.migration set hash = $1 where name = $2`,
+        [correction.previouslyRecordedHash, correction.name],
+      );
+    } finally {
+      await client.end();
+    }
+
+    const result = await runMigrations(database.url);
+    expect(result.applied).toEqual([]);
+    expect(result.alreadyApplied).toContain(correction.name);
+
+    const checked = new pg.Client({ connectionString: database.url });
+    await checked.connect();
+    try {
+      const { rows } = await checked.query<{ hash: string }>(
+        `select hash from egma_meta.migration where name = $1`,
+        [correction.name],
+      );
+      expect(rows).toEqual([{ hash: correction.correctedHash }]);
+    } finally {
+      await checked.end();
+    }
   });
 
   it("refuses a migration file that changed after it was applied", async () => {
