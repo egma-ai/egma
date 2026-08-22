@@ -419,11 +419,10 @@ describe("platform-first Monitoring setup", () => {
    * so it is written where the segment is drained rather than where the request
    * is answered.
    *
-   * The door used to set it the moment a valid LiveKit span reached the store,
-   * which was true only while the door was the writer. It is not any more: a
-   * request is answered as accepted on object-store durability, and the
-   * conversation becomes readable afterwards. Setting it at the door would tell
-   * a customer their Monitoring was live while a store was still cold.
+   * A request is answered as accepted on object-store durability, and the
+   * conversation becomes readable afterwards. Setting this at the door would
+   * tell a customer their Monitoring was live while a trace store was still
+   * cold and their conversation could not be opened.
    */
   it.skipIf(!storage.available)("reports LiveKit as heard from once the accepted evidence is drained", async () => {
     api = await createApi("monitoring_routes_livekit_received", {

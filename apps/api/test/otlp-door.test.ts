@@ -169,11 +169,11 @@ describe.skipIf(!storage.available)("what the door stages for Monitoring", () =>
 
   /**
    * Monitoring's "last heard from" is a fact about evidence being
-   * *query-visible*, so the door no longer asserts it: it accepts, and what the
-   * drainer finds in the object is what moves that state. What the door still
-   * decides is which of these exports produces evidence at all, and that is
-   * what is read out of the pending object here — the setup's own bookkeeping is
-   * proved where the drainer writes it.
+   * *query-visible*, so the door does not assert it: it accepts, and what the
+   * drainer finds in the object is what moves that state. What the door decides
+   * is which of these exports produces evidence at all, and that is what is read
+   * out of the pending object here — the setup's own bookkeeping is proved where
+   * the drainer writes it.
    */
   it("stages nothing for evidence it refuses, and platform identity for what it takes", async () => {
     const configured = await configureLiveKitMonitoring(auth());
@@ -291,15 +291,14 @@ describe.skipIf(!storage.available)("the JSON encoding", () => {
    * The rule this replaced a scrubber with: **egma does not read evidence to
    * decide what evidence is.**
    *
-   * The old test asserted the opposite — that a value which looked like a
-   * credential was rewritten wherever it appeared. What that cost is exactly
-   * what is asserted here: a transcript containing the word `Bearer`, a tool
-   * argument a customer called `password`, an attribute named `api_key`, a
-   * metadata field called `access_token`. Every one of them is a thing a real
-   * caller says or a real customer names, and every one of them was being
-   * edited. Operational credentials are excluded by *position* instead — the
-   * `Authorization` header and the service token live outside the payload and
-   * never reach normalization at all — so nothing here has to guess.
+   * Each sentinel below is a thing a real caller says or a real customer names:
+   * a transcript containing the word `Bearer`, a tool argument called
+   * `password`, an attribute named `api_key`, a metadata field called
+   * `access_token`. A scanner that rewrote any of them would have edited the
+   * one thing the product exists to show a team. Operational credentials are
+   * excluded by *position* instead — the `Authorization` header and the service
+   * token live outside the payload and never reach normalization at all — so
+   * nothing here has to guess.
    */
   it("keeps every value a sender wrote, credential-looking ones included", async () => {
     const traceId = "19191919191919191919191919191919";
@@ -410,15 +409,14 @@ describe.skipIf(!storage.available)("the JSON encoding", () => {
       expect(stored).toContain(sentinel);
     }
 
-    // And the lifted columns hold what arrived rather than the blank a
-    // rewritten value used to leave behind.
+    // And the lifted columns hold exactly what arrived.
     expect(row).toMatchObject({
       provider_call_id: "Bearer resource-secret",
       text: "Bearer transcript-secret",
       platform_agent_name: "Basic agent-secret",
     });
 
-    // Nothing was written where anything used to be taken out.
+    // Nothing is written anywhere in place of anything.
     expect(stored).not.toContain("REDACTED");
   });
 

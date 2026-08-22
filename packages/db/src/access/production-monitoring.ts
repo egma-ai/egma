@@ -1209,21 +1209,21 @@ export async function releaseRetellMonitoringLease(
 /**
  * Move "last heard from" forward for one agent platform, and never backward.
  *
- * **One writer, because there was one fact and three writers.** A Retell call
- * landing, a stale Retell claim finishing after a restart and a LiveKit export
- * arriving were three functions saying the same sentence — *evidence for this
- * platform reached the store at this instant* — and all three said it with a
- * plain assignment. That was survivable while the writer was the door, because
- * the door only ever wrote now. It is not survivable now: evidence becomes
- * durable in one order and is drained in another, a replay carries the instant
- * the evidence was *received* rather than the instant it is being replayed at,
- * and an assignment would answer a customer's "last production conversation" by
- * winding it back to a call from an hour ago.
+ * **One writer, because there is one fact**: evidence for this platform reached
+ * the store at this instant. A Retell call landing, a Retell claim finishing
+ * after a restart and a LiveKit conversation arriving are the same sentence,
+ * and one sentence with three writers is three chances to say it differently.
  *
- * So the merge is monotone. `greatest` keeps whichever instant is later, and the
- * `coalesce` is what makes the first write work at all — a column that has never
- * been written is null, and `greatest(null, x)` is null in Postgres, so a setup
- * that had never heard from anybody would stay that way forever.
+ * **The merge is monotone, and it has to be.** Evidence becomes durable in one
+ * order and is drained in another, and the instant a caller passes is the one
+ * the evidence was *received* rather than the one it is being written at — so a
+ * replay or a historical import carries an older instant than the row already
+ * holds. A plain assignment would answer a customer's "last production
+ * conversation" by winding it back to a call from an hour ago. `greatest` keeps
+ * whichever instant is later, and the `coalesce` is what makes the first write
+ * work at all: a column that has never been written is null, and
+ * `greatest(null, x)` is null in Postgres, so a setup that had never heard from
+ * anybody would stay that way forever.
  *
  * Batched by construction: the caller names a platform and, where the platform
  * has selected agents, one of them — never a call. One drained segment carrying
@@ -1242,13 +1242,18 @@ export async function recordProductionEvidenceReceived(
   const { receivedAt } = input;
   const monotone = (column: AnyPgColumn): SQL =>
     sql`greatest(coalesce(${column}, ${receivedAt}), ${receivedAt})`;
+  // When the row was touched, which is a different fact from when the evidence
+  // was received: a replay or a historical import carries an old `receivedAt`
+  // and is happening now, and a row stamped with the older of the two would
+  // report that nothing has changed since.
+  const touchedAt = new Date();
 
   await db().transaction(async (tx) => {
     await tx
       .update(monitoringSetup)
       .set({
         lastReceivedAt: monotone(monitoringSetup.lastReceivedAt),
-        updatedAt: receivedAt,
+        updatedAt: touchedAt,
       })
       .where(
         and(
@@ -1267,7 +1272,7 @@ export async function recordProductionEvidenceReceived(
       .update(retellMonitoredAgent)
       .set({
         lastCallReceivedAt: monotone(retellMonitoredAgent.lastCallReceivedAt),
-        updatedAt: receivedAt,
+        updatedAt: touchedAt,
       })
       .where(
         and(

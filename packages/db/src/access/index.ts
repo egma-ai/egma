@@ -231,6 +231,7 @@ export {
 } from "./organizations.ts";
 
 export {
+  isProjectOfOrganization,
   listProjects,
   projectsOf,
   readProject,
@@ -399,6 +400,11 @@ export {
   type RetellMonitoringTarget,
   type SelectedRetellAgent,
 } from "./production-monitoring.ts";
+// The list beside the type, because a caller deciding whether a word names a
+// platform Monitoring keeps a setup for has to ask the shipped list rather than
+// write two names out again — the drainer does exactly that before it moves a
+// customer's last-received state.
+export { MONITORING_PLATFORMS } from "../schema/production.ts";
 export type {
   MonitoringHealthState,
   MonitoringPlatform,

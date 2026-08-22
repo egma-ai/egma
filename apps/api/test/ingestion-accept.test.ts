@@ -1,10 +1,19 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createProxy, request } from "node:http";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { NewSpan } from "@egma/db";
+
+import {
+  acceptEvidenceForProjects,
+  IngestionUnavailableError,
+  stagedEvidence,
+  type EvidenceGroup,
+} from "../src/ingestion/accept.ts";
 import { buildApi } from "../src/server.ts";
 import type { IngestionStore } from "../src/ingestion/object-store.ts";
 import { RECORD_FORMAT_VERSION } from "../src/ingestion/record.ts";
@@ -83,6 +92,128 @@ async function aStoreThatNeverAnswers(): Promise<{
       held.close();
       held.unref();
     },
+  };
+}
+
+/**
+ * Something wearing the store's address that refuses the Nth object it is asked
+ * to create, and forwards everything else untouched.
+ *
+ * A proxy rather than a stand-in client, because what has to be proved is the
+ * real client meeting a real refusal: the request is signed for this address
+ * and passed on byte for byte, headers included, so the store validates the
+ * signature it was given and the only thing that changes is which call comes
+ * back as a `503`.
+ */
+type RefusingStore = {
+  readonly store: IngestionStore;
+  /**
+   * Let this many object creations through and refuse every one after them.
+   *
+   * Every one, rather than a single call, because the client retries a `503`
+   * on its own: refusing once would be answered by a retry that succeeded, and
+   * the acceptance module would never see a failure at all.
+   */
+  refuseEveryPutAfter(calls: number): void;
+  /** Answer normally again. */
+  stopRefusing(): void;
+  close(): void;
+};
+
+async function aStoreRefusingOnePut(
+  real: IngestionStore,
+): Promise<RefusingStore> {
+  const upstream = new URL(real.endpoint);
+  let putsUntilRefusal: number | undefined;
+
+  const held = createProxy((incoming, answering) => {
+    if (incoming.method === "PUT" && putsUntilRefusal !== undefined) {
+      if (putsUntilRefusal === 0) {
+        answering.writeHead(503, { "content-type": "application/xml" });
+        answering.end(
+          "<Error><Code>SlowDown</Code><Message>not now</Message></Error>",
+        );
+        incoming.resume();
+        return;
+      }
+      putsUntilRefusal -= 1;
+    }
+
+    const forwarded = request(
+      {
+        host: upstream.hostname,
+        port: upstream.port,
+        method: incoming.method,
+        path: incoming.url,
+        headers: incoming.headers,
+      },
+      (answer) => {
+        answering.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(answering);
+      },
+    );
+    forwarded.on("error", () => {
+      answering.writeHead(502).end();
+      incoming.resume();
+    });
+    incoming.pipe(forwarded);
+  });
+
+  await new Promise<void>((listening) => {
+    held.listen(0, "127.0.0.1", listening);
+  });
+  const address = held.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the refusing store did not take a port");
+  }
+
+  return {
+    store: { ...real, endpoint: `http://127.0.0.1:${address.port}` },
+    refuseEveryPutAfter(calls) {
+      putsUntilRefusal = calls;
+    },
+    stopRefusing() {
+      putsUntilRefusal = undefined;
+    },
+    close() {
+      held.close();
+      held.unref();
+    },
+  };
+}
+
+/** One normalized span, as a door hands one over. */
+function aSpanOf(spanId: string): NewSpan {
+  return {
+    traceId: `${spanId}${spanId}`,
+    spanId,
+    parentSpanId: "",
+    source: "production",
+    emitter: "agent",
+    environment: "default",
+    startedAtMicroseconds: BigInt(Date.parse("2026-08-20T09:00:00Z")) * 1_000n,
+    durationNanoseconds: 1_000_000_000n,
+    name: "agent_session",
+    kind: "root",
+    status: "ok",
+    text: "",
+    audioUrl: "",
+    toolName: "",
+    toolArguments: "",
+    toolResult: "",
+    providerCallId: "",
+    agentPlatform: "livekit_agents",
+    platformAgentId: "",
+    platformAgentName: "",
+    platformAgentVersion: "",
+    connectionKind: "livekit",
+    runId: "",
+    agentId: "",
+    agentVersionId: "",
+    testVersionId: "",
+    personaVersionId: "",
+    payload: "{}",
+    endsTrace: true,
   };
 }
 
@@ -447,5 +578,110 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
         "where trace_id = 'ee55ee55ee55ee55ee55ee55ee55ee55'",
     );
     expect(Number(turns?.n)).toBe(1);
+  });
+});
+
+/**
+ * A batch naming two projects, one of whose segments the store refuses.
+ *
+ * **The answer is all or nothing, and no evidence is discarded either way.** A
+ * trusted service batch may carry more than one project, each project gets a
+ * segment of its own, and the request is a success only once every one of them
+ * is durable — so a store that takes one and refuses the other is a retryable
+ * refusal for the whole call.
+ *
+ * What the two halves then are is deliberately different, and both are safe.
+ * The project whose segment landed is **durable**, and stays so: an object in
+ * the store is not un-made by another project's failure. The project whose
+ * segment was refused is **still staged**, and stays so until the store
+ * confirms it. A sender's retry meets one of each, and stable identity makes
+ * the meeting a replay rather than a duplicate.
+ *
+ * The fault sits on the wire rather than behind an injected client, so what is
+ * proved is the real client meeting a real refusal from something wearing the
+ * store's address.
+ */
+describe.skipIf(!storage.available)("a store that refuses one project's segment", () => {
+  const running = storage as Extract<ObjectStorage, { available: true }>;
+
+  let refusing: RefusingStore;
+  let api: TestApi;
+  let acme: Customer;
+  let globex: Customer;
+
+  function groupFor(person: Customer, spanId: string): EvidenceGroup {
+    return {
+      auth: {
+        userId: person.userId,
+        organizationId: person.organizationId,
+        projectId: person.projectId,
+        role: "member",
+        via: "api_key",
+      },
+      spans: [aSpanOf(spanId)],
+    };
+  }
+
+  beforeAll(async () => {
+    if (!storage.available) return;
+    refusing = await aStoreRefusingOnePut(running.ingestStore);
+    api = await createApi("ingestion_partial_batch", {
+      traceStore: true,
+      ingestStore: refusing.store,
+      // Long enough that the refused segment is still staged when the
+      // assertions read it, and short enough that the retry below is prompt.
+      ingestionRequestTimeoutMilliseconds: 2_000,
+    });
+    acme = await signUp(api.app, "ada@acme.example", "Acme");
+    globex = await signUp(api.app, "grace@globex.example", "Globex");
+  });
+
+  afterAll(async () => {
+    await api?.close();
+    refusing?.close();
+  });
+
+  it("refuses the whole call retryably and keeps both projects' records staged", async () => {
+    refusing.refuseEveryPutAfter(1);
+
+    await expect(
+      acceptEvidenceForProjects([
+        groupFor(acme, "9a9a9a9a00000001"),
+        groupFor(globex, "9b9b9b9b00000001"),
+      ]),
+    ).rejects.toBeInstanceOf(IngestionUnavailableError);
+
+    // Nothing was discarded to make the refusal look tidy. One project's
+    // segment reached the store and stays there — a durable object is not
+    // un-made by another project's failure — and the project whose segment was
+    // refused is still staged, still in hand, still on its way.
+    const landed = await pendingSegments(running.ingestStore);
+    expect(landed).toHaveLength(1);
+    const stillStaged = stagedEvidence();
+    expect(stillStaged).toHaveLength(1);
+    expect(
+      [
+        ...landed.map((segment) => segment.header.project_id),
+        ...stillStaged.map((one) => one.scope.projectId),
+      ].sort(),
+    ).toEqual([acme.projectId, globex.projectId].sort());
+
+    // And with the store answering again, the standing loop finishes what is
+    // left: one segment for each project, the one that already landed
+    // untouched under the identity it was sealed with.
+    refusing.stopRefusing();
+    await expect
+      .poll(async () => (await pendingSegments(running.ingestStore)).length, {
+        timeout: 10_000,
+      })
+      .toBe(2);
+    expect(stagedEvidence()).toHaveLength(0);
+
+    const projects = (await pendingSegments(running.ingestStore))
+      .map((segment) => segment.header.project_id)
+      .sort();
+    expect(projects).toEqual([acme.projectId, globex.projectId].sort());
+
+    await drainPendingEvidence(running.ingestStore);
   });
 });

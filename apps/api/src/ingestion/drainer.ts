@@ -1,14 +1,22 @@
 import {
   appendSpans,
   committedSpans,
+  isProjectOfOrganization,
+  MONITORING_PLATFORMS,
   recordProductionEvidenceReceived,
   recordProductionTraces,
   TraceStoreRefusedError,
   type AuthContext,
+  type MonitoringPlatform,
   type NewSpan,
 } from "@egma/db";
 
-import { defectOf, retainedDefect, type IngestionLog } from "./defects.ts";
+import {
+  defectOf,
+  retainedDefect,
+  type IngestionDefect,
+  type IngestionLog,
+} from "./defects.ts";
 import type { PendingObjectStore } from "./object-store.ts";
 import { contentHashOf, spanFor, type IngestionRecord } from "./record.ts";
 import type { SegmentScope } from "./segment.ts";
@@ -108,6 +116,17 @@ type Running = {
   readonly options: DrainerOptions;
   /** Keys handed over by a successful upload and not yet tried. */
   readonly hinted: Set<string>;
+  /**
+   * Objects this process has already reported and left behind.
+   *
+   * A retained object stays under its key forever until a person deals with
+   * it, so every scan finds it again — and reporting it again would turn one
+   * damaged object into a rising count that measures how long the process has
+   * been up. It is reported once and then skipped. A restart reports it once
+   * more, which is honest: a new process has genuinely met it for the first
+   * time, and an operator who repaired the object wants it looked at again.
+   */
+  readonly retained: Set<string>;
   timer: NodeJS.Timeout | undefined;
   /** The tail of the pass chain. Passes never overlap. */
   chain: Promise<number>;
@@ -116,6 +135,9 @@ type Running = {
   stopped: boolean;
 };
 
+/** Who the drainer is, wherever a context has to name somebody. */
+const INTERNAL_USER = "ingestion-drainer";
+
 /**
  * The context one segment's effects are written under.
  *
@@ -123,19 +145,24 @@ type Running = {
  * not from anything a caller remembered, not from an attribute on the evidence.
  * A segment states its own organization and project inside the bytes the
  * checksum covers, so this is the one tenancy statement that exists and there
- * is nothing for it to disagree with.
+ * is nothing for it to disagree with. That the pair is a real one is a separate
+ * question and is asked below, against Postgres, before anything is written.
  *
  * `monitoring` for the same reason `claimDueRetellMonitoringAgent` uses it: this
  * names no person, it came from egma's own record of accepted work rather than
  * from a credential, and it opens neither the grading service's capabilities nor
  * the conductor's.
+ *
+ * `member` because that is the role `ingest_traces` admits, and a context that
+ * carried more than the work needs is a context somebody later reaches for to
+ * do something else with.
  */
 function authFor(scope: SegmentScope): AuthContext {
   return {
-    userId: "",
+    userId: INTERNAL_USER,
     organizationId: scope.organizationId,
     projectId: scope.projectId,
-    role: "admin",
+    role: "member",
     via: "monitoring",
   };
 }
@@ -218,6 +245,14 @@ export class IdentityConflictInSegmentError extends Error {
   }
 }
 
+/** A header naming a project that is not its organization's. */
+export class ImpossibleTenantBindingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ImpossibleTenantBindingError";
+  }
+}
+
 /**
  * Which platform's Monitoring state this segment moves, and to when.
  *
@@ -229,19 +264,30 @@ export class IdentityConflictInSegmentError extends Error {
  * customer's "last production conversation" forward to a moment nothing
  * happened at.
  */
-function monitoringFactsIn(
-  records: readonly IngestionRecord[],
-): readonly {
-  readonly agentPlatform: "retell" | "livekit_agents";
+type MonitoringFact = {
+  readonly agentPlatform: MonitoringPlatform;
   readonly platformAgentId: string;
   readonly receivedAt: Date;
-}[] {
-  const latest = new Map<string, { platform: string; agent: string; at: bigint }>();
+};
+
+/** Whether this word is a platform Monitoring keeps a setup for. */
+function monitored(platform: string): platform is MonitoringPlatform {
+  return (MONITORING_PLATFORMS as readonly string[]).includes(platform);
+}
+
+function monitoringFactsIn(
+  records: readonly IngestionRecord[],
+): readonly MonitoringFact[] {
+  const latest = new Map<
+    string,
+    { platform: MonitoringPlatform; agent: string; at: bigint }
+  >();
   for (const record of records) {
     if (record.source !== "production") continue;
-    if (record.agent_platform !== "retell" && record.agent_platform !== "livekit_agents") {
-      continue;
-    }
+    // Asked of the shipped list rather than of two names written out here, so
+    // a platform added to Monitoring gets its bookkeeping instead of silently
+    // losing it.
+    if (!monitored(record.agent_platform)) continue;
     const key = `${record.agent_platform}/${record.platform_agent_id}`;
     const at = BigInt(record.started_at_microseconds);
     const found = latest.get(key);
@@ -257,7 +303,7 @@ function monitoringFactsIn(
   }
 
   return [...latest.values()].map((one) => ({
-    agentPlatform: one.platform as "retell" | "livekit_agents",
+    agentPlatform: one.platform,
     platformAgentId: one.agent,
     // Milliseconds, which is what a timestamp column reads back into.
     receivedAt: new Date(Number(one.at / 1_000n)),
@@ -275,6 +321,13 @@ function monitoringFactsIn(
 async function drainOne(held: Running, key: string): Promise<boolean> {
   const { log, store } = held.options;
 
+  /** Leave it where it is, tell an operator, and stop looking at it. */
+  const retain = (defect: IngestionDefect, cause: unknown): false => {
+    held.retained.add(key);
+    retainedDefect(log, defect, key, cause);
+    return false;
+  };
+
   let segment: VerifiedSegment;
   try {
     segment = verifiedSegment(key, await store.read(key));
@@ -286,19 +339,41 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
       log.warn({ err: cause, key }, "a pending object could not be read");
       return false;
     }
-    retainedDefect(log, defect, key, cause);
-    return false;
+    return retain(defect, cause);
   }
 
   const auth = authFor(segment.scope);
   const spans: readonly NewSpan[] = segment.records.map(spanFor);
 
+  // The header binds a project to an organization and the checksum covers that
+  // binding, so nothing can have edited it — but a pair that was never real is
+  // a different failure, and it is one only Postgres can answer. Asked before a
+  // row is written, because a write under a pair the control database has never
+  // agreed to is one customer's evidence filed under another's name.
+  try {
+    if (!(await isProjectOfOrganization(auth, segment.scope.projectId))) {
+      return retain(
+        "impossible_tenant_binding",
+        new ImpossibleTenantBindingError(
+          `this segment names project ${segment.scope.projectId} under ` +
+            `organization ${segment.scope.organizationId}, and that project is ` +
+            `not one of theirs. It is retained: evidence whose customer cannot ` +
+            `be established is not evidence to write anywhere.`,
+        ),
+      );
+    }
+  } catch (cause) {
+    // The control database did not answer. Not a defect, and the object is
+    // untouched.
+    log.warn({ err: cause, key }, "a segment's tenancy could not be checked");
+    return false;
+  }
+
   try {
     await refuseConflictingEvidence(auth, segment);
   } catch (cause) {
     if (cause instanceof IdentityConflictInSegmentError) {
-      retainedDefect(log, "identity_conflict", key, cause);
-      return false;
+      return retain("identity_conflict", cause);
     }
     // The probe itself failed — an unreachable store, a query that timed out.
     // Nothing has been written and the object is untouched.
@@ -318,8 +393,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
       // Rows the store has looked at and will refuse forever. Retained rather
       // than replayed into a loop, and never answered to a customer — the
       // request that carried them was accepted long ago.
-      retainedDefect(log, "store_refused", key, cause);
-      return false;
+      return retain("store_refused", cause);
     }
     log.warn({ err: cause, key }, "a segment did not reach the trace store");
     return false;
@@ -375,6 +449,7 @@ async function pass(held: Running): Promise<number> {
   let drained = 0;
   for (const key of keys) {
     if (held.stopped) break;
+    if (held.retained.has(key)) continue;
     if (await drainOne(held, key)) drained += 1;
   }
   return drained;
@@ -415,6 +490,7 @@ export function startDrainer(options: DrainerOptions): Drainer {
   const held: Running = {
     options,
     hinted: new Set(),
+    retained: new Set(),
     timer: undefined,
     chain: Promise.resolve(0),
     waiting: undefined,

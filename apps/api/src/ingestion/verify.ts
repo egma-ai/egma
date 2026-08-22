@@ -1,9 +1,14 @@
-import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
-import { recordFrom, type IngestionRecord } from "./record.ts";
 import {
+  recordFrom,
+  RECORD_FORMAT_VERSION,
+  type IngestionRecord,
+} from "./record.ts";
+import {
+  segmentChecksum,
   segmentIdIn,
+  type SegmentBinding,
   type SegmentHeader,
   type SegmentScope,
 } from "./segment.ts";
@@ -31,21 +36,27 @@ import {
  *   states one; a key that has been copied or renamed makes them disagree, and
  *   a drainer that believed the key would file evidence under a segment it is
  *   not.
- * - **Checksum.** SHA-256 over the record lines exactly as they are written,
- *   uncompressed. It covers the evidence rather than the compression, so it
- *   still holds if a store or a proxy ever re-encodes the transfer. The header
- *   cannot cover itself, which is why the count and the scope are checked
- *   against the lines instead.
+ * - **Checksum.** One SHA-256 over the header and the record lines together,
+ *   uncompressed and in the canonical form `segmentChecksum` defines. It covers
+ *   the evidence rather than the compression, so it still holds if a store or a
+ *   proxy ever re-encodes the transfer — and it covers the scope, which is what
+ *   makes the two fields below safe to write under.
  * - **Record count and record shape.** Every line is a record of this version,
  *   with every field present and of the right type, and there are exactly as
  *   many of them as the header says.
  *
  * ## Tenancy comes from inside, and only from inside
  *
- * The scope is read from the sealed header, which the checksum's siblings sit
- * beside and which no rename can touch. It is never read from the key: the key
- * is a name, and a name a person can type is not a thing to file a customer's
- * evidence by.
+ * The scope is read from the sealed header and is **inside the checksum**, so
+ * an object whose organization or project has been edited fails verification
+ * rather than filing one customer's evidence under another's. It is never read
+ * from the key: the key is a name, and a name a person can type is not a thing
+ * to file a customer's evidence by.
+ *
+ * Whether the project the header names is *that organization's* project is a
+ * question this module cannot answer — it needs Postgres — so it is asked by
+ * the drainer, before any row is written, and a header that fails it is an
+ * impossible tenant binding rather than a corrupt object.
  */
 
 /** One pending object, opened and checked far enough to be written. */
@@ -95,8 +106,6 @@ export type SegmentDefect =
   | "record_count_mismatch"
   | "malformed_record";
 
-const RECORD_FORMAT_VERSION_READ = 1;
-
 function headerFrom(key: string, line: string): SegmentHeader {
   let parsed: unknown;
   try {
@@ -137,18 +146,18 @@ function headerFrom(key: string, line: string): SegmentHeader {
       `this segment's header states a record count of ${String(count)}`,
     );
   }
-  if (held["v"] !== RECORD_FORMAT_VERSION_READ) {
+  if (held["v"] !== RECORD_FORMAT_VERSION) {
     throw new UnreadableSegmentError(
       "unsupported_version",
       key,
       `this segment states format version ${String(held["v"])} and this Egma ` +
-        `reads ${RECORD_FORMAT_VERSION_READ}. It is left where it is: the ` +
+        `reads ${RECORD_FORMAT_VERSION}. It is left where it is: the ` +
         `deployment that can read it is the one that should.`,
     );
   }
 
   return {
-    v: RECORD_FORMAT_VERSION_READ,
+    v: RECORD_FORMAT_VERSION,
     segment_id: text("segment_id"),
     organization_id: text("organization_id"),
     project_id: text("project_id"),
@@ -203,12 +212,22 @@ export function verifiedSegment(key: string, body: Uint8Array): VerifiedSegment 
   // Everything after the first line, byte for byte as it was hashed — the
   // trailing newline included, because it was written and therefore counted.
   const body_ = text.slice(firstBreak + 1);
-  const digest = createHash("sha256").update(body_, "utf8").digest("hex");
+  // Rebuilt from the fields checked above rather than re-serialised from what
+  // was parsed, so the string hashed here is the string the writer hashed
+  // whatever order the object arrived in.
+  const binding: SegmentBinding = {
+    v: header.v,
+    segment_id: header.segment_id,
+    organization_id: header.organization_id,
+    project_id: header.project_id,
+    record_count: header.record_count,
+  };
+  const digest = segmentChecksum(binding, body_);
   if (digest !== header.content_sha256) {
     throw new UnreadableSegmentError(
       "checksum_mismatch",
       key,
-      `this segment's records hash to ${digest} and its header states ` +
+      `this segment hashes to ${digest} and its header states ` +
         `${header.content_sha256}`,
     );
   }

@@ -56,6 +56,12 @@ export type IngestionDefect =
    * `drainer.ts` for why the first account wins.
    */
   | "identity_conflict"
+  /**
+   * The header names a project that is not its organization's. The checksum
+   * covers that binding, so the pair is the one the segment was sealed with —
+   * and it is a pair the control database has never agreed to.
+   */
+  | "impossible_tenant_binding"
   /** The trace store refused these rows and would refuse the same bytes again. */
   | "store_refused";
 

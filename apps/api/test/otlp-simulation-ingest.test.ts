@@ -613,18 +613,15 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
    * **One immutable identity holds one account of one span, and the first
    * account is the one that stands.**
    *
-   * This case used to assert the opposite — that a second, different account of
-   * a span already stored was kept beside the first, so a reader met two rows
-   * saying different things about one moment and had no rule for choosing.
-   *
-   * What happens now is three things at once, and all three matter. The door
+   * Three things happen at once here, and all three matter. The door
    * **accepts** the changed bytes, because a sender resending is ordinary and
    * refusing at a wire boundary would be answering a storage question there.
    * The drainer **refuses to write them**, because the stored evidence is
-   * already somebody's record of that moment. And the object is **retained**
-   * rather than deleted, because Egma promised those bytes were safe before it
-   * ever read them back — so a defect in Egma is not a reason to throw a
-   * customer's evidence away.
+   * already somebody's record of that moment, and two rows saying different
+   * things about one moment leave a reader no rule for choosing. And the object
+   * is **retained** rather than deleted, because Egma promised those bytes were
+   * safe before it ever read them back — so a defect in Egma is not a reason to
+   * throw a customer's evidence away.
    */
   it("keeps the stored account and retains the object when protobuf evidence reuses span ids", async () => {
     const before = await countOf(
@@ -988,11 +985,11 @@ describe.skipIf(!storage.available)("a batch carrying two customers' evidence", 
   /**
    * **A trace store that is down is not an ingestion failure any more.**
    *
-   * This used to be answered as a 500 an exporter would retry, because the door
-   * wrote ClickHouse before it answered. The acceptance boundary is the object
-   * store now, so a ClickHouse outage costs query visibility and nothing else:
-   * the request is accepted, the evidence is durable, and the rows appear when
-   * the store comes back and the object is drained.
+   * The acceptance boundary is the object store, so a ClickHouse outage costs
+   * query visibility and nothing else: the request is accepted, the evidence is
+   * durable, and the rows appear when the store comes back and the object is
+   * drained. A 5xx here would send an exporter into a retry loop over evidence
+   * Egma already holds.
    */
   it("accepts evidence while the trace store is unreachable, and lands it on recovery", async () => {
     await disconnectClickHouse();

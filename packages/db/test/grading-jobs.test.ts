@@ -416,13 +416,13 @@ describe("a production trace at the door", () => {
   /**
    * **The platform's word, and only the platform's word.**
    *
-   * Completion used to be inferred from any span arriving with no parent, which
-   * reads like the same fact and is not one: a parentless span is a span whose
-   * parent did not arrive. An exporter flush that lost its parent produces one,
-   * and so does a span whose parent id came in malformed and was normalised to
-   * nothing at all — and either would have marked this conversation complete
-   * while the caller was still talking. A trace nobody states an end for stays
-   * open, and the idle sweep is what eventually picks it up.
+   * A parentless span reads like the same fact and is not one: it is a span
+   * whose parent did not arrive. An exporter flush that lost its parent
+   * produces one, and so does a span whose parent id came in malformed and was
+   * normalised to nothing at all — and either, read as an ending, would mark
+   * this conversation complete while the caller was still talking. A trace
+   * nobody states an end for stays open, and the idle sweep is what eventually
+   * picks it up.
    */
   it("is not completed by a span that merely arrived without a parent", async () => {
     const traceId = wireId(16);

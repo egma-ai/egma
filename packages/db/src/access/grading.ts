@@ -529,22 +529,21 @@ export async function recordProductionTraces(
  * platform — LiveKit's own session span, Retell's reported end — and is `false`
  * everywhere else, including on a platform this release does not support.
  *
- * It used to be inferred instead, from any span arriving with no parent. That
- * reads like the same fact and is not one. A parentless span is *a span whose
- * parent did not arrive*: an exporter flush that lost its parent, and a span
- * whose parent id came in malformed and was normalised to nothing at all, both
- * produce one — and either would mark a conversation complete while the caller
- * was still talking, which is a judgment written about half a call. The end is
- * a fact only the platform holds, so it is carried from where the platform
- * stated it rather than guessed from the shape of what arrived. Where no
- * supported platform stated one, this reports no completion and invents
- * nothing.
+ * **A span having no parent is not an ending**, and is never read as one here.
+ * A parentless span is a span whose parent did not arrive: an exporter flush
+ * that lost its parent produces one, and so does a span whose parent id came in
+ * malformed and was normalised to nothing at all. Either would mark a
+ * conversation complete while the caller was still talking, which is a judgment
+ * written about half a call. The end is a fact only the platform holds, so it
+ * is carried from where the platform stated it. Where no supported platform
+ * states one, this reports no completion and invents nothing.
  *
  * Simulation traces are excluded rather than treated as production: their
  * grading work is created by the transaction that ends the simulation, and this
  * filter is what stops the same evidence creating a second piece of it. It is
- * the only guard — the door that once skipped this call for the simulator path
- * no longer writes anything at all — so every span is asked, not every segment.
+ * the **only** guard, because the drainer reports every segment it drains
+ * without knowing whose conversation is whose — so the question is asked of
+ * every span rather than of a segment.
  *
  * Nothing here decides whether a trace *should* be graded. It reports what
  * arrived; which graders apply, and whether this trace is their turn, are

@@ -45,14 +45,22 @@ import {
  * ## The bytes
  *
  * Gzip-compressed NDJSON. The first line is the header — format version,
- * segment identity, trusted scope, record count and the checksum of everything
- * after it. Then one canonical record per line.
+ * segment identity, trusted scope, record count and one checksum binding all of
+ * it together. Then one canonical record per line.
  *
- * The header cannot cover itself, so `content_sha256` is over the **record
- * lines only**, uncompressed, exactly as they are written. A reader
- * decompresses, splits off the first line, hashes the rest and compares. That
- * is a check on the evidence rather than on the compression, so it still holds
- * if a store or a proxy ever re-encodes the transfer.
+ * **The checksum covers the header as well as the records**, which is what
+ * makes the sealed scope a fact rather than a label. A digest over the records
+ * alone would leave `organization_id` and `project_id` bound to nothing, and
+ * the drainer builds the context it writes under out of exactly those two
+ * fields — so an object whose header had been edited would file one customer's
+ * evidence under another's, and every checksum in the path would still agree.
+ * A field cannot cover itself, so what is hashed is the header **without**
+ * `content_sha256`, in one fixed field order, followed by the record lines
+ * exactly as they are written. A reader rebuilds that form from the fields it
+ * validated and compares.
+ *
+ * It is a check on the evidence and its binding rather than on the compression,
+ * so it still holds if a store or a proxy ever re-encodes the transfer.
  *
  * **The compressed object is deterministic for one sealed segment**, which is
  * what makes "same identity, same bytes" a fact a retry can be judged against
@@ -95,16 +103,51 @@ export type SegmentScope = {
   readonly projectId: string;
 };
 
-/** The first line of every segment. */
-export type SegmentHeader = {
+/**
+ * Everything the checksum binds: the header without the checksum itself.
+ *
+ * Its own type so that the one thing which may not be inside the digest is
+ * absent by construction rather than deleted by whoever remembers to.
+ */
+export type SegmentBinding = {
   readonly v: number;
   readonly segment_id: string;
   readonly organization_id: string;
   readonly project_id: string;
   readonly record_count: number;
-  /** SHA-256, lower-case hex, over the uncompressed record lines. */
+};
+
+/** The first line of every segment. */
+export type SegmentHeader = SegmentBinding & {
+  /** SHA-256, lower-case hex. See `segmentChecksum`. */
   readonly content_sha256: string;
 };
+
+/**
+ * The one digest a sealed segment is judged against, over the one canonical
+ * form of what it binds.
+ *
+ * The field order is written out here rather than taken from an object literal,
+ * for the reason `canonicalRecordJson` writes its own out: insertion order is a
+ * property of whichever construction site built the object, and a reader
+ * rebuilding the header from fields it parsed would otherwise hash a different
+ * string from the one the writer hashed.
+ */
+export function segmentChecksum(
+  binding: SegmentBinding,
+  recordLines: string,
+): string {
+  const bound = JSON.stringify({
+    organization_id: binding.organization_id,
+    project_id: binding.project_id,
+    record_count: binding.record_count,
+    segment_id: binding.segment_id,
+    v: binding.v,
+  });
+  return createHash("sha256")
+    .update(`${bound}\n${recordLines}`, "utf8")
+    .digest("hex");
+}
 
 /** One sealed segment: its identity, its key and its immutable bytes. */
 export type SealedSegment = {
@@ -318,13 +361,16 @@ export function sealSegment(options: {
   const lines = options.records.map((record) => canonicalRecordJson(record));
   const body = `${lines.join("\n")}\n`;
 
-  const header: SegmentHeader = {
+  const binding: SegmentBinding = {
     v: RECORD_FORMAT_VERSION,
     segment_id: segmentId,
     organization_id: options.scope.organizationId,
     project_id: options.scope.projectId,
     record_count: options.records.length,
-    content_sha256: createHash("sha256").update(body, "utf8").digest("hex"),
+  };
+  const header: SegmentHeader = {
+    ...binding,
+    content_sha256: segmentChecksum(binding, body),
   };
 
   return {

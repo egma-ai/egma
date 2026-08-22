@@ -629,18 +629,16 @@ describe.skipIf(!storage.available)("the conversation and its spans", () => {
    * **Simulation evidence goes through the same durable path, and is graded
    * once.**
    *
-   * Two guards used to stand between a simulation's spans and a second piece of
-   * grading work. The door's was one: the simulator branch deliberately never
-   * asked for the evidence-ready handoff. That guard is gone with the direct
-   * write — the door writes nothing at all now, and the drainer reports every
-   * segment it drains without knowing which conversation is whose.
+   * One rule stands between a simulation's spans and a second piece of grading
+   * work: a span whose source is not `production` is not reported through the
+   * evidence-ready boundary. The door writes nothing at all, and the drainer
+   * reports every segment it drains without knowing whose conversation is
+   * whose — so that per-span rule is the only guard there is.
    *
-   * What is left is the per-span rule, and it is the only thing standing there:
-   * a span whose source is not `production` is not the drainer's to report.
    * A simulation's grading work is minted by the transaction that lands it
    * terminal, so a second piece filed from telemetry would be one conversation
-   * judged twice — which is why the evidence going in **and** the evidence
-   * going through the drainer are both proved here rather than assumed.
+   * judged twice. That is why the evidence going in **and** the evidence going
+   * through the drainer are both proved here rather than assumed.
    */
   it("grades exactly once, however many segments its spans arrive in", async () => {
     const { who, run } = await aCustomerWhoHasRun("evidence_graded_once", {

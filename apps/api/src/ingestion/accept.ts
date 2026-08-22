@@ -141,8 +141,6 @@ export type AcceptanceOptions = {
    * happened here.
    */
   readonly onSegmentDurable?: (segment: SealedSegment) => void;
-  /** Stands in for the real bucket client in the suites that fault it. */
-  readonly store?: PendingObjectStore;
 };
 
 /** One record staged in the log, and the call waiting on it. */
@@ -468,9 +466,8 @@ export function openAcceptance(options: AcceptanceOptions): void {
   if (standing !== undefined) {
     throw new Error("this process already has a standing acceptance loop");
   }
-  if (settings.store === undefined && options.store === undefined) {
-    return;
-  }
+  const { store } = settings;
+  if (store === undefined) return;
 
   const log = openWriteAheadLog(settings.logDirectory, {
     maxBytes: settings.logMaxBytes,
@@ -480,13 +477,9 @@ export function openAcceptance(options: AcceptanceOptions): void {
 
   const held: Standing = {
     log,
-    store:
-      options.store ??
-      pendingObjectStore(
-        // Checked immediately above: one of the two is present.
-        settings.store as NonNullable<IngestionSettings["store"]>,
-        { requestTimeoutMilliseconds: settings.requestTimeoutMilliseconds },
-      ),
+    store: pendingObjectStore(store, {
+      requestTimeoutMilliseconds: settings.requestTimeoutMilliseconds,
+    }),
     bounds: {
       maxBytes: settings.segmentMaxBytes,
       maxRecords: settings.segmentMaxRecords,
@@ -503,14 +496,17 @@ export function openAcceptance(options: AcceptanceOptions): void {
 
   recover(held);
   standing = held;
-  // What was recovered has been waiting since before this process started, so
-  // it does not wait out a flush window as well.
+  // Recovery stamps what it found as already past its flush window, so the
+  // first pass seals and uploads it rather than starting its wait again.
   if (held.groups.size > 0) void tick(held);
 }
 
 /**
  * Everything the previous process staged and did not finish, back in the
  * groups it was staged in.
+ *
+ * Everything found here is due immediately — see the stamp below — so the first
+ * pass seals it and sends it rather than making it wait out another window.
  *
  * Records first, then the seals that claimed them. A seal frame names a count
  * rather than a list of identities, and it does not need to name one: records
@@ -522,7 +518,11 @@ export function openAcceptance(options: AcceptanceOptions): void {
  * is exactly the integrity defect this whole path exists to rule out.
  */
 function recover(held: Standing): void {
-  const now = Date.now();
+  // What is in the log has been waiting since before this process started, so
+  // it is stamped as having already waited out a flush window: a record whose
+  // wait began again at every restart would be a record a restart loop could
+  // hold forever.
+  const now = Date.now() - held.bounds.flushMilliseconds;
   const seals: {
     readonly frame: {
       readonly segment_id: string;
@@ -750,12 +750,13 @@ async function durableWithin(
 }
 
 /**
- * Every record staged and not yet durable, oldest first.
+ * Every record this process has staged and not yet made durable, oldest first,
+ * each with the trusted scope it was accepted under.
  *
- * The write-readiness surface and the suites that prove a refusal kept its
- * evidence both need to be able to say what is still in hand, and reading the
- * log's frames back is the only answer that cannot drift from what is on the
- * disk.
+ * It answers one question — *what is still in hand* — and answers it from the
+ * groups the standing loop is holding, which are the frames the local log holds
+ * on disk. A process that has opened no acceptance loop is holding nothing and
+ * answers so.
  */
 export function stagedEvidence(): readonly {
   readonly scope: SegmentScope;

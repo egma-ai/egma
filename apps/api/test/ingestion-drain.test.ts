@@ -499,13 +499,60 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     // organization or a segment id in a metric label is an unbounded set of
     // values, and the first bucket full of damaged objects would be the one
     // that took the metrics down.
-    expect([...retainedDefects().keys()].sort()).toEqual([
+    const counted = retainedDefects();
+    expect([...counted.keys()].sort()).toEqual([
       "checksum_mismatch",
       "not_gzip",
     ]);
+    expect([...counted.values()]).toEqual([1, 1]);
+
+    // A retained object stays under its key until a person deals with it, so
+    // every scan finds it again. It is reported once: a count that grew on
+    // every pass would measure how long this process has been up rather than
+    // how many objects are stuck.
+    expect(await drainer.drainNow()).toBe(0);
+    expect([...retainedDefects().values()]).toEqual([1, 1]);
+    expect((await pending()).map((object) => object.key)).toContain(
+      pendingKeyFor(damaged),
+    );
 
     await bucket.delete(pendingKeyFor(damaged));
     await bucket.delete(pendingKeyFor(lying));
+  });
+
+  /**
+   * **A tenancy the control database has never agreed to is not a tenancy.**
+   *
+   * The checksum covers the header, so the organization and project a segment
+   * names are the pair it was sealed with and nothing can have edited them.
+   * That the pair is a *real* one is a separate question and only Postgres can
+   * answer it — so it is asked before a row is written, because a write under a
+   * pair nobody owns is one customer's evidence filed under another's name.
+   */
+  it("retains a segment naming a project outside its own organization", async () => {
+    const traceId = "6600000000000000000000000000f600";
+    const elsewhere = await signUp(api.app, "grace@globex.example", "Globex");
+
+    const sealed = sealSegment({
+      // Acme's organization, Globex's project. Sealed and checksummed as such,
+      // so it verifies perfectly and is still a pair that does not exist.
+      scope: {
+        organizationId: acme.organizationId,
+        projectId: elsewhere.projectId,
+      },
+      records: aConversation(traceId),
+    });
+    await bucket.create(sealed);
+
+    expect(await drainer.drainNow()).toBe(0);
+    expect((await pending()).map((object) => object.key)).toContain(sealed.key);
+    expect(
+      await countOf(
+        `select count() as n from spans final where trace_id = '${traceId}'`,
+      ),
+    ).toBe(0);
+
+    await bucket.delete(sealed.key);
   });
 
   it("leaves an object it could not read where it is, and takes it on the next pass", async () => {

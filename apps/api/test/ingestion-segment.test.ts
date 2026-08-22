@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +16,10 @@ import {
   RECORD_FORMAT_VERSION,
   spanFor,
 } from "../src/ingestion/record.ts";
+import {
+  UnreadableSegmentError,
+  verifiedSegment,
+} from "../src/ingestion/verify.ts";
 import {
   groupedByProject,
   millisecondsUntilSeal,
@@ -110,13 +114,48 @@ describe("what a segment is allowed to contain", () => {
     expect(header["record_count"]).toBe(2);
     expect(read).toHaveLength(2);
 
-    // The checksum covers the record lines and not the header, because the
-    // header cannot cover itself. A reader splits off the first line, hashes
-    // what is left, and compares — which is what this does.
+    // The checksum covers the header as well as the records, which is what
+    // makes the scope above a fact rather than a label: an object whose
+    // `organization_id` had been edited would fail this comparison, and the
+    // drainer builds the context it writes under out of exactly that field.
+    // A field cannot cover itself, so what is hashed is everything except the
+    // checksum, in one fixed order, then the record lines.
     const body = gunzipSync(Buffer.from(sealed.body)).toString("utf8");
     const afterTheHeader = body.slice(body.indexOf("\n") + 1);
+    const bound = JSON.stringify({
+      organization_id: SCOPE.organizationId,
+      project_id: SCOPE.projectId,
+      record_count: 2,
+      segment_id: sealed.segmentId,
+      v: RECORD_FORMAT_VERSION,
+    });
     expect(header["content_sha256"]).toBe(
-      createHash("sha256").update(afterTheHeader, "utf8").digest("hex"),
+      createHash("sha256")
+        .update(`${bound}\n${afterTheHeader}`, "utf8")
+        .digest("hex"),
+    );
+  });
+
+  it("binds the scope it was sealed for, so an edited header cannot be read", () => {
+    // The whole point of the digest reaching over the header: a pending object
+    // whose tenancy has been rewritten — by a copy, a restore, or a hand — is
+    // refused rather than filed under whoever the new name says.
+    const sealed = sealSegment({ scope: SCOPE, records: [aRecord()] });
+    const lines = gunzipSync(Buffer.from(sealed.body)).toString("utf8").split("\n");
+    const header = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+
+    const rewritten = gzipSync(
+      Buffer.from(
+        [
+          JSON.stringify({ ...header, organization_id: "org_somebody_else" }),
+          ...lines.slice(1),
+        ].join("\n"),
+        "utf8",
+      ),
+    );
+
+    expect(() => verifiedSegment(sealed.key, rewritten)).toThrow(
+      UnreadableSegmentError,
     );
   });
 
