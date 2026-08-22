@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   appendGrades,
+  ProductionGradingPlanConflictError,
   recordProductionGradingPlan,
   readProductionGradingPlan,
   readTraceGrades,
@@ -188,6 +189,32 @@ describe("the immutable production selection receipt", () => {
          and trace_id = '${traceId}'`,
     );
     expect(physical).toEqual([{ count: "1" }]);
+  });
+
+  it("refuses a conflicting physical receipt instead of choosing one plan", async () => {
+    const traceId = "5555555555555555555555555555eeee";
+    const input = {
+      traceId,
+      traceStartedAtMicroseconds: micros("2026-08-21T09:15:00Z"),
+      entries: [],
+    } as const;
+    await recordProductionGradingPlan(auth, input);
+
+    await store.command(
+      `insert into production_grading_plans
+         (organization_id, project_id, trace_id, trace_started_at, plan_hash, entries)
+       values (
+         '${auth.organizationId}',
+         '${auth.projectId}',
+         '${traceId}',
+         toDateTime64('2026-08-21 09:15:00.000000', 6, 'UTC'),
+         unhex('${"11".repeat(32)}'),
+         []
+       )`,
+    );
+
+    await expect(recordProductionGradingPlan(auth, input)).rejects
+      .toBeInstanceOf(ProductionGradingPlanConflictError);
   });
 
   it("refuses definition version zero before writing a receipt", async () => {

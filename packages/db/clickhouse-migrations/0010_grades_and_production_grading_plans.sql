@@ -5,8 +5,8 @@
 
 -- Postgres migration 0042 removes every pre-cutover run and simulation because
 -- their grading plans point at the retired grader-version model. Remove the
--- matching simulation evidence in the same release. The earlier production
--- reset already removed production evidence in 0009.
+-- matching simulation evidence in the same release. ClickHouse migration 0006
+-- already removed the pre-cutover production evidence.
 ALTER TABLE spans DELETE WHERE source = 'simulation' SETTINGS mutations_sync = 2
 ;
 --> statement-breakpoint

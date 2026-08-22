@@ -154,7 +154,10 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
         {said === null ? null : <p role="status">{said}</p>}
         <DataTable
           label="Project graders"
-          columns={columnsFor(mayEdit, setEditing)}
+          columns={columnsFor(mayEdit, (grader) => {
+            setSaid(null);
+            setEditing(grader);
+          })}
           rows={graders}
           keyOf={(grader) => grader.id}
         />

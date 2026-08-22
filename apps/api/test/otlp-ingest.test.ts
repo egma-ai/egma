@@ -1,3 +1,8 @@
+import {
+  getGradingJobForTrace,
+  readProductionGradingPlan,
+  type AuthContext,
+} from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
@@ -105,6 +110,30 @@ async function post(
   });
   await api.drainEvidence();
   return response;
+}
+
+function jsonExport(
+  traceId: string,
+  spanId: string,
+  name: string,
+  scopeName = "livekit-agents",
+): string {
+  return JSON.stringify({
+    resourceSpans: [{
+      resource: { attributes: [] },
+      scopeSpans: [{
+        scope: { name: scopeName },
+        spans: [{
+          traceId,
+          spanId,
+          name,
+          kind: "SPAN_KIND_INTERNAL",
+          startTimeUnixNano: "1785693880281989804",
+          endTimeUnixNano: "1785693881281989804",
+        }],
+      }],
+    }],
+  });
 }
 
 /** Replay the whole capture, in order, as one exporter's fourteen flushes. */
@@ -490,5 +519,75 @@ describe("a request with no usable credential", () => {
     expect(wrongScheme.statusCode).toBe(401);
 
     expect(await countOf("select count() as n from spans final")).toBe(before);
+  });
+});
+
+describe("the production grading completion signal", () => {
+  it("creates work only for an explicit supported-platform end", async () => {
+    await api.database.sql(
+      `update project_grader
+          set scope = '{"simulations":[],"production":{"sample_percent":100}}'::jsonb
+        where organization_id = $1 and project_id = $2`,
+      [acme.organizationId, acme.projectId],
+    );
+    const auth: AuthContext = {
+      userId: "production-completion-test",
+      organizationId: acme.organizationId,
+      projectId: acme.projectId,
+      role: "member",
+      via: "session",
+    };
+    const genericRoot = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1";
+    const unsupportedEnd = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2";
+    const supportedEnd = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa3";
+
+    const generic = await post(
+      acme.secret,
+      jsonExport(
+        genericRoot,
+        "0000000000000001",
+        "a_generic_parentless_span",
+      ),
+      "application/json",
+    );
+    const unsupported = await post(
+      acme.secret,
+      jsonExport(
+        unsupportedEnd,
+        "0000000000000002",
+        "agent_session",
+        "another-platform",
+      ),
+      "application/json",
+    );
+    expect([generic.statusCode, unsupported.statusCode]).toEqual([200, 200]);
+    await expect(getGradingJobForTrace(auth, genericRoot)).resolves.toBeUndefined();
+    await expect(getGradingJobForTrace(auth, unsupportedEnd)).resolves
+      .toBeUndefined();
+    await expect(readProductionGradingPlan(auth, genericRoot)).resolves
+      .toBeUndefined();
+    await expect(readProductionGradingPlan(auth, unsupportedEnd)).resolves
+      .toBeUndefined();
+
+    const supported = await post(
+      acme.secret,
+      jsonExport(
+        supportedEnd,
+        "0000000000000003",
+        "agent_session",
+      ),
+      "application/json",
+    );
+    expect(supported.statusCode).toBe(200);
+    await expect(getGradingJobForTrace(auth, supportedEnd)).resolves
+      .toMatchObject({ source: "production", traceId: supportedEnd });
+    await expect(readProductionGradingPlan(auth, supportedEnd)).resolves
+      .toMatchObject({ traceId: supportedEnd, entries: [expect.any(Object)] });
+
+    // Processing another explicit end gives any background work a turn. The
+    // earlier parentless and unsupported traces still never become work.
+    await expect(getGradingJobForTrace(auth, genericRoot)).resolves.toBeUndefined();
+    await expect(getGradingJobForTrace(auth, unsupportedEnd)).resolves
+      .toBeUndefined();
   });
 });

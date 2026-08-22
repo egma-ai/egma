@@ -235,6 +235,7 @@
   --page-gutter: var(--space-6);
   --page-max: 1200px;
   --page-max-wide: 1440px;
+  --grade-fact-min: 150px;
 
   /* Orange-brown elevation is reserved for menus, dialogs, and showcase panels. */
   --shadow-menu: 0 12px 32px rgb(122 49 23 / 0.14);

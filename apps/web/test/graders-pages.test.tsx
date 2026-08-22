@@ -158,6 +158,9 @@ describe("the project Graders surface", () => {
       path: "/v1/graders/grd_1?projectId=prj_1",
       body: { passThreshold: 0.75 },
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit threshold" }));
+    expect(screen.queryByText("Pass threshold saved.")).toBeNull();
   });
 
   it("lets viewers read the policy but not edit it", async () => {

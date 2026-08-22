@@ -10,6 +10,7 @@ import {
   finishGradingJob,
   getGradingJob,
   getGradingJobForTrace,
+  readProductionGradingPlan,
   readTraceGrades,
   readTraceGrading,
   reconcileGraderCatalog,
@@ -88,12 +89,12 @@ function productionSpan(overrides: Partial<NewSpan> = {}): NewSpan {
   };
 }
 
-function request(traceId: string) {
+function request(traceId: string, endsTrace = true) {
   return requestGrading(auth, {
     source: "production",
     traceId,
     traceStartedAt: TRACE_START,
-    endsTrace: true,
+    endsTrace,
     evidenceReady: true,
     modality: "chat",
   });
@@ -181,6 +182,31 @@ afterAll(async () => {
 });
 
 describe("one frozen production job", () => {
+  it("creates no receipt or job until the explicit end arrives", async () => {
+    const traceId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaddd";
+
+    await expect(request(traceId, false)).resolves.toEqual({
+      kind: "waiting",
+      for: "completion",
+    });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves
+      .toBeUndefined();
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+
+    await expect(request(traceId, true)).resolves.toMatchObject({
+      kind: "queued",
+      created: true,
+    });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves
+      .toMatchObject({ traceId, entries: [expect.any(Object)] });
+    await expect(getGradingJobForTrace(auth, traceId)).resolves
+      .toMatchObject({ source: "production", traceId });
+
+    const claim = await claimTrace(traceId, "grader-after-explicit-end");
+    await appendOne(claim, 1, 1_777_000_000_000_000n);
+    await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+  });
+
   it("freezes the whole selected plan, leases it, and deletes success", async () => {
     const traceId = "1111111111111111111111111111aaaa";
     await expect(request(traceId)).resolves.toMatchObject({
@@ -292,7 +318,7 @@ describe("the durable production handoff", () => {
   });
 
   it("does not grade an end asserted by an unsupported producer", async () => {
-    const traceId = "6666666666666666666666666666ffff";
+    const traceId = "5555555555555555555555555555ffff";
     const unsupported = productionSpan({
       traceId,
       spanId: "6666666666666666",
@@ -310,6 +336,155 @@ describe("the durable production handoff", () => {
         where trace_id = '${traceId}'`,
     );
     expect(receiptCount?.count).toBe("0");
+  });
+});
+
+describe("production request replay at crash boundaries", () => {
+  it("replays safely when the receipt store refuses the first write", async () => {
+    const traceId = "6666666666666666666666666666ffff";
+    const constraint = "reject_receipt_before_durability";
+    await store.command(
+      `alter table production_grading_plans
+       add constraint ${constraint} check trace_id != '${traceId}'`,
+    );
+    try {
+      await expect(request(traceId)).rejects.toThrow();
+      await expect(readProductionGradingPlan(auth, traceId)).resolves
+        .toBeUndefined();
+      await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+    } finally {
+      await store.command(
+        `alter table production_grading_plans drop constraint ${constraint}`,
+      );
+    }
+
+    await expect(request(traceId)).resolves.toMatchObject({
+      kind: "queued",
+      created: true,
+    });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves
+      .toMatchObject({ entries: [{ graderPassThreshold: 0.7 }] });
+
+    const claim = await claimTrace(traceId, "grader-after-receipt-refusal");
+    await appendOne(claim, 1, 1_777_000_010_000_000n);
+    await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+  });
+
+  it("replays the frozen receipt after the job transaction aborts", async () => {
+    const traceId = "7777777777777777777777777777aaaa";
+    const trigger = "reject_job_after_receipt";
+    const guard = "reject_job_after_receipt";
+    await database.sql(
+      `create function ${guard}() returns trigger
+       language plpgsql as $$
+       begin
+         if new.trace_id = '${traceId}' then
+           raise exception 'simulated crash after receipt';
+         end if;
+         return new;
+       end
+       $$`,
+    );
+    await database.sql(
+      `create trigger ${trigger}
+       before insert on grading_job
+       for each row execute function ${guard}()`,
+    );
+    try {
+      await expect(request(traceId)).rejects.toThrow();
+    } finally {
+      await database.sql(`drop trigger ${trigger} on grading_job`);
+      await database.sql(`drop function ${guard}()`);
+    }
+
+    await expect(readProductionGradingPlan(auth, traceId)).resolves
+      .toMatchObject({ entries: [{ graderPassThreshold: 0.7 }] });
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+
+    await database.sql(
+      "update project_grader set pass_threshold = 0.2 where id = $1",
+      [projectGraderId],
+    );
+    try {
+      await expect(request(traceId)).resolves.toMatchObject({
+        kind: "queued",
+        created: true,
+      });
+      const claim = await claimTrace(traceId, "grader-after-job-abort");
+      expect(entryOf(claim).graderPassThreshold).toBe(0.7);
+      await appendOne(claim, 1, 1_777_000_011_000_000n);
+      await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+    } finally {
+      await database.sql(
+        "update project_grader set pass_threshold = 0.7 where id = $1",
+        [projectGraderId],
+      );
+    }
+  });
+
+  it("returns the one committed job when its first response is lost", async () => {
+    const traceId = "8888888888888888888888888888bbbb";
+
+    // The first caller disappears after this commit and before it can act on
+    // the response. Its retry therefore knows only the trace identity.
+    await request(traceId);
+    const committed = await getGradingJobForTrace(auth, traceId);
+    if (committed === undefined) throw new Error("the first request committed no job");
+
+    await expect(request(traceId)).resolves.toEqual({
+      kind: "queued",
+      jobId: committed.id,
+      created: false,
+    });
+    const { rows } = await database.sql<{ count: string }>(
+      "select count(*) as count from grading_job where trace_id = $1",
+      [traceId],
+    );
+    expect(Number(rows[0]?.count ?? 0)).toBe(1);
+
+    const claim = await claimTrace(traceId, "grader-after-response-loss");
+    await appendOne(claim, 1, 1_777_000_012_000_000n);
+    await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+  });
+});
+
+describe("expired grading leases", () => {
+  it("reclaims the same job and refuses cleanup by the old worker", async () => {
+    const traceId = "9999999999999999999999999999cccc";
+    await request(traceId);
+    const first = await claimTrace(traceId, "grader-before-expiry");
+
+    await database.sql(
+      `update grading_job
+          set heartbeat_at = now() - interval '10 seconds'
+        where id = $1`,
+      [first.id],
+    );
+    const reclaimed = (await claimGradingJobs({
+      claimant: "grader-after-expiry",
+      capacity: 50,
+      leaseSeconds: 1,
+    })).find((claim) => claim.traceId === traceId);
+    if (reclaimed === undefined) throw new Error("the expired job was not reclaimed");
+
+    expect(reclaimed).toMatchObject({
+      id: first.id,
+      claimedBy: "grader-after-expiry",
+      attempts: 2,
+    });
+    await expect(
+      finishGradingJob(first.auth, first.id, first.claimedBy),
+    ).resolves.toBeUndefined();
+    await expect(getGradingJob(auth, first.id)).resolves.toMatchObject({
+      status: "claimed",
+      claimedBy: "grader-after-expiry",
+    });
+
+    await appendOne(reclaimed, 1, 1_777_000_013_000_000n);
+    await expect(
+      finishGradingJob(reclaimed.auth, reclaimed.id, reclaimed.claimedBy),
+    ).resolves.toEqual({ id: reclaimed.id });
+    await expect(getGradingJob(auth, reclaimed.id)).resolves.toBeUndefined();
   });
 });
 

@@ -17,6 +17,7 @@ import {
   Refused,
 } from "../../../../ui/form.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
+import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
 
 export function ThresholdForm({
   grader,
@@ -38,6 +39,8 @@ export function ThresholdForm({
     Number.isFinite(value) &&
     value >= 0 &&
     value <= 1;
+  const changed = threshold !== String(grader.passThreshold);
+  useUnsavedChanges(changed && !busy, busy);
 
   async function save(): Promise<void> {
     if (busy || !valid) return;

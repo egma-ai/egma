@@ -22,14 +22,19 @@ import {
   citedTurnPositions,
   priorGrades,
   type EvidenceGrade,
-  type EvidenceGradeAssertion,
   type EvidencePlanItem,
   type SimulationEvidence,
 } from "../lib/simulations.ts";
 import { humanizeIdentifier, milliseconds } from "../lib/transcripts.ts";
 import { Dialog } from "./dialog.tsx";
 import { PlanItems } from "./evidence.tsx";
-import { StateMark, type StateMarkKind } from "./run-status.tsx";
+import {
+  GradeDetails,
+  GradeResultBadge,
+  gradeSummary,
+  type DisplayGradeAssertion,
+} from "./grade.tsx";
+import { StateMark } from "./run-status.tsx";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
@@ -449,7 +454,7 @@ function behaviorPosition(key: string): number | null {
 }
 
 function assertionName(
-  assertion: EvidenceGradeAssertion,
+  assertion: DisplayGradeAssertion,
   expected: readonly string[],
 ): string {
   const position = behaviorPosition(assertion.key);
@@ -804,117 +809,9 @@ function ChatTranscript({
   );
 }
 
-type GradeResult = EvidenceGrade["result"];
-
-const GRADE_RESULT_VARIANT = {
-  passed: "success",
-  failed: "failure",
-  errored: "warning",
-} as const;
-
-const GRADE_RESULT_MARK: Readonly<Record<GradeResult, StateMarkKind>> = {
-  passed: "complete",
-  failed: "failed",
-  errored: "error",
-};
-
-function GradeResultBadge({ result }: { readonly result: GradeResult }) {
-  return (
-    <Badge variant={GRADE_RESULT_VARIANT[result]}>
-      <StateMark kind={GRADE_RESULT_MARK[result]} />
-      {result}
-    </Badge>
-  );
-}
-
-function gradeSummary(grader: EvidenceGrader): string {
-  const grade = grader.grade;
-  const threshold = grade?.passThreshold ?? grader.plan?.passThreshold;
-  const version =
-    grade?.graderDefinitionVersion ?? grader.plan?.graderDefinitionVersion;
-  const parts: string[] = [];
-  if (grade !== null) parts.push(`Score ${scoreText(grade.score)}`);
-  if (threshold !== undefined) {
-    parts.push(`pass threshold ${threshold.toFixed(2)}`);
-  }
-  if (version !== undefined) parts.push(`definition v${String(version)}`);
-  return parts.join(" · ");
-}
-
 /** The quiet mono kicker over a title: what kind of thing this block is. */
 const PANE_KIND =
   "mb-1 block font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase";
-
-/** The name over each half of the expected-against-found comparison. */
-const COMPARISON_LABEL =
-  "m-0 mb-2 font-mono text-sm font-normal tracking-(--tracking-label) text-muted-foreground uppercase";
-
-/** Sentences inside an assertion. Grader details can run long. */
-const ASSERTION_TEXT = "m-0 min-w-0 text-sm wrap-anywhere text-foreground";
-
-function AssertionCard({
-  assertion,
-  at,
-  evidence,
-  onReadTurn,
-}: {
-  readonly assertion: EvidenceGradeAssertion;
-  readonly at: number;
-  readonly evidence: SimulationEvidence;
-  readonly onReadTurn: (turn: number) => void;
-}) {
-  const expected = evidence.test.expectedBehaviors ?? [];
-  const citedTurns = citedTurnPositions(
-    assertion.citedSpanIds ?? [],
-    evidence.transcript?.turns ?? [],
-  );
-  return (
-    <article className="min-w-0 overflow-hidden rounded-input border border-border bg-surface">
-      <header className="flex min-w-0 items-center justify-between gap-3 border-b border-border bg-surface-soft px-4 py-3">
-        <span className="font-mono text-sm text-muted-foreground uppercase">
-          Assertion {String(at + 1).padStart(2, "0")}
-        </span>
-        <span className="font-mono text-sm text-foreground">
-          {assertion.error !== undefined
-            ? "Error"
-            : assertion.score === undefined
-              ? "No score"
-              : `Score ${assertion.score.toFixed(2)}`}
-        </span>
-      </header>
-      <div className="flex min-w-0 flex-col gap-3 p-4">
-        <h4 className={COMPARISON_LABEL}>Assertion</h4>
-        <p className={ASSERTION_TEXT}>{assertionName(assertion, expected)}</p>
-        {assertion.rationale === undefined ||
-        assertion.rationale.trim() === "" ? null : (
-            <p className={ASSERTION_TEXT}>{assertion.rationale}</p>
-          )}
-        {assertion.error === undefined ? null : (
-          <p className={cn(ASSERTION_TEXT, "text-failure")}>{assertion.error}</p>
-        )}
-        {citedTurns.length === 0 ? null : (
-          <p className={cn(ASSERTION_TEXT, "font-mono text-muted-foreground")}>
-            {citedTurns.map((turn, turnAt) => (
-              <span key={turn}>
-                {turnAt === 0 ? "" : ", "}
-                <button
-                  className={cn(
-                    "m-0 cursor-pointer border-0 bg-transparent p-0 text-foreground",
-                    "underline decoration-brand underline-offset-[3px]",
-                  )}
-                  type="button"
-                  onClick={() => onReadTurn(turn)}
-                >
-                  Read turn {turn}
-                </button>
-              </span>
-            ))}
-          </p>
-        )}
-      </div>
-    </article>
-  );
-}
 
 function GraderGroup({
   grader,
@@ -928,9 +825,7 @@ function GraderGroup({
   readonly onReadTurn: (turn: number) => void;
 }) {
   const grade = grader.grade;
-  const assertions = grade?.details.assertions ?? [];
-  const rationale = grade?.details.rationale;
-  const error = grade?.details.error;
+  const expected = evidence.test.expectedBehaviors ?? [];
   return (
     <section
       className="min-w-0 not-first:border-t not-first:border-border"
@@ -944,7 +839,18 @@ function GraderGroup({
             {grader.name}
           </h3>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
-            {gradeSummary(grader)}
+            {gradeSummary({
+              grade,
+              ...(grader.plan?.passThreshold === undefined
+                ? {}
+                : { passThreshold: grader.plan.passThreshold }),
+              ...(grader.plan?.graderDefinitionVersion === undefined
+                ? {}
+                : {
+                    graderDefinitionVersion:
+                      grader.plan.graderDefinitionVersion,
+                  }),
+            })}
           </p>
         </div>
         {grade === null ? (
@@ -964,21 +870,32 @@ function GraderGroup({
         </p>
       ) : (
         <div className="flex min-w-0 flex-col gap-4 bg-background p-5 max-[40rem]:p-4">
-          {rationale === undefined || rationale.trim() === "" ? null : (
-            <p className={ASSERTION_TEXT}>{rationale}</p>
-          )}
-          {error === undefined ? null : (
-            <p className={cn(ASSERTION_TEXT, "text-failure")}>{error}</p>
-          )}
-          {assertions.map((assertion, at) => (
-            <AssertionCard
-              assertion={assertion}
-              at={at}
-              evidence={evidence}
-              key={`${assertion.key}:${String(at)}`}
-              onReadTurn={onReadTurn}
-            />
-          ))}
+          <GradeDetails
+            grade={grade}
+            assertionName={(assertion) => assertionName(assertion, expected)}
+            renderCitations={(assertion) => {
+              const citedTurns = citedTurnPositions(
+                assertion.citedSpanIds ?? [],
+                evidence.transcript?.turns ?? [],
+              );
+              if (citedTurns.length === 0) return null;
+              return citedTurns.map((turn, turnAt) => (
+                <span key={turn}>
+                  {turnAt === 0 ? "" : ", "}
+                  <button
+                    className={cn(
+                      "m-0 cursor-pointer border-0 bg-transparent p-0 text-foreground",
+                      "underline decoration-brand underline-offset-[3px]",
+                    )}
+                    type="button"
+                    onClick={() => onReadTurn(turn)}
+                  >
+                    Read turn {turn}
+                  </button>
+                </span>
+              ));
+            }}
+          />
           {grader.history.length === 0 ? null : (
             <details className="text-sm text-muted-foreground">
               <summary className="w-fit cursor-pointer text-foreground">
