@@ -7,7 +7,6 @@ import { getAgent, updateAgent } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import type { Refusal } from "../../../../../lib/api.ts";
 import {
   NO_ENVIRONMENT,

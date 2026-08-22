@@ -579,7 +579,7 @@ describe("reading an agent's reach from the list", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("registering an agent", () => {
-  it("sends the name and description, and nothing about the provider", async () => {
+  it("sends the name, and nothing about the provider", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents": { status: 201, body: { agent: AGENT } },
@@ -589,9 +589,9 @@ describe("registering an agent", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
     });
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Answers the main line." },
-    });
+    // No description field: the column was dropped pre-launch (ADR-0015), and
+    // a form that still collected one would be collecting what egma refuses.
+    expect(screen.queryByLabelText("Description")).toBeNull();
     const register = screen.getByRole("button", { name: "Register agent" });
     expectSharedFormLayout(register);
     fireEvent.click(register);
@@ -615,10 +615,7 @@ describe("registering an agent", () => {
      * has to know which half a door happens to read.
      */
     expect(sent[0]?.url).toBe("/v1/agents?projectId=prj_1");
-    expect(sent[0]?.body).toEqual({
-      name: "Front desk",
-      description: "Answers the main line.",
-    });
+    expect(sent[0]?.body).toEqual({ name: "Front desk" });
     // No prompt, no model, no tools: this form does not have them, so it cannot
     // send them.
     for (const provider of ["prompt", "model", "tools"]) {
@@ -665,9 +662,6 @@ describe("registering an agent", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
     });
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Answers the main line." },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Register agent" }));
 
     // Egma's own sentence, unchanged — and the typing still on screen, so the
@@ -680,9 +674,6 @@ describe("registering an agent", () => {
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Front desk",
     );
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("Answers the main line.");
   });
 
   it("tells a viewer the page is not theirs instead of pretending it worked", async () => {
