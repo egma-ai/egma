@@ -53,7 +53,7 @@ export const ID_PREFIXES = [
   "sim",
   "gjb",
   /**
-   * One run's frozen grading plan: which graders will judge each pinned test
+   * One run's frozen grading plan: which graders will grade each pinned test
    * version, at which immutable versions. Its own identity
    * because it is written once beside the run and read long afterwards by the
    * grader service, and because an archive refusal has to name the plan that

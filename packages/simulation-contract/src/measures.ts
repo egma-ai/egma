@@ -276,7 +276,7 @@ export const CATALOGED_MEASURES: readonly string[] = MEASURE_CATALOG.map(
 
 /**
  * The measures egma computes from a conversation's spans — the shorter list,
- * and the one that matters to anything judging.
+ * and the one that matters to any grader.
  *
  * **Three surfaces read exactly this, which is the point of it existing.** The
  * shared measure module implements it, the **Use** form's dropdown offers it,

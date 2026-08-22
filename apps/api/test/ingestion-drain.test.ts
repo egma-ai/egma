@@ -5,6 +5,7 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   DRAIN_ADVISORY_LOCK,
+  getSimulation,
   getGradingJobForTrace,
   listMonitoringSetups,
   openDrainOwnership,
@@ -12,6 +13,7 @@ import {
   type AuthContext,
 } from "@egma/db";
 import { newId } from "@egma/ids";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { gzipSync } from "node:zlib";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -41,11 +43,17 @@ import {
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import { aRecord } from "./support/ingestion.ts";
+import { aConductedRun } from "./support/recordings.ts";
 import {
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
-import { mintKey, signUp, type Customer } from "./support/traces.ts";
+import {
+  mintKey,
+  projectKeyFor,
+  signUp,
+  type Customer,
+} from "./support/traces.ts";
 
 /**
  * The segment lifecycle, with the faults that decide whether it is correct.
@@ -905,6 +913,87 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     } finally {
       await waiting.stop();
     }
+  });
+
+  it("wakes one simulation grading job when completion precedes its drain", async () => {
+    const run = await aConductedRun(
+      api.app,
+      { auth, key: await projectKeyFor(api.app, acme) },
+      {
+        label: "the late simulation evidence run",
+        modality: "chat",
+        reference: "recordings/late-simulation-evidence.wav",
+      },
+    );
+    const simulation = await getSimulation(auth, run.heard);
+    if (simulation?.startedAt === null || simulation?.startedAt === undefined) {
+      throw new Error(`simulation ${run.heard} has no start time`);
+    }
+    const traceId = traceIdOfSimulation(run.heard);
+    if (traceId === undefined) throw new Error(`${run.heard} has no trace id`);
+
+    // The simulation row is already completed, but no evidence is readable and
+    // its frozen run plan has not produced temporary worker work.
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+    expect(await gradingJobCount(traceId)).toBe(0);
+
+    const root = aRecord({
+      trace_id: traceId,
+      span_id: `${traceId.slice(0, 14)}01`,
+      parent_span_id: "",
+      source: "simulation",
+      emitter: "egma-runtime",
+      started_at_microseconds: String(BigInt(simulation.startedAt.getTime()) * 1_000n),
+      duration_nanoseconds: "1000000",
+      name: "simulation",
+      kind: "root",
+      status: "ok",
+      text: "",
+      audio_url: "",
+      tool_name: "",
+      tool_arguments: "",
+      tool_result: "",
+      provider_call_id: "",
+      agent_platform: "",
+      platform_agent_id: "",
+      platform_agent_name: "",
+      platform_agent_version: "",
+      connection_kind: "",
+      run_id: run.runId,
+      agent_id: simulation.agentId,
+      agent_version_id: "",
+      test_version_id: simulation.testVersionId,
+      persona_version_id: simulation.personaVersionId,
+      payload: "{}",
+      // The simulation row above, not this span, says the simulation completed.
+      ends_trace: false,
+    });
+    await accepted([root]);
+    expect(await drainer.drainNow()).toBe(1);
+
+    const first = await getGradingJobForTrace(auth, traceId);
+    expect(first).toMatchObject({
+      source: "simulation",
+      simulationId: run.heard,
+      traceId,
+      runId: run.runId,
+      status: "pending",
+      entries: [expect.objectContaining({
+        graderDefinitionVersion: 1,
+        graderPassThreshold: 1,
+      })],
+    });
+    expect(await gradingJobCount(traceId)).toBe(1);
+
+    // A second physical segment can replay the same evidence. It reaches the
+    // same frozen plan and job rather than creating another row.
+    await accepted([root]);
+    expect(await drainer.drainNow()).toBe(1);
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toMatchObject({
+      id: first?.id,
+      entries: first?.entries,
+    });
+    expect(await gradingJobCount(traceId)).toBe(1);
   });
 });
 

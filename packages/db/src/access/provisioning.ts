@@ -16,7 +16,7 @@ import { insertMembership } from "./memberships.ts";
  * Signup either fully succeeds or fully fails. An account with an organization
  * but no project is a developer with no way forward, a project with no default
  * persona is a first test waiting on one, and a project with no grader is a
- * first run nobody judges. The organization, its first project, the pointer to
+ * first run nobody grades. The organization, its first project, the pointer to
  * Egma's shared default persona, its expected-behaviors grader and the owner's
  * membership are therefore one transaction.
  */

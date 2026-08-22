@@ -156,7 +156,7 @@ describe("Expected behaviors produces one grade", () => {
     expect(result.details.assertions?.[0]).toMatchObject({
       key: "behavior_1",
       rationale: "the evidence does not settle it",
-      error: "the judge could not determine whether this behavior was met",
+      error: "the grader could not determine whether this behavior was met",
     });
   });
 

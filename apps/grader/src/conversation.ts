@@ -210,7 +210,7 @@ export function evidenceIsStillArriving(
 
 /** A simulation that produced no conversation, in the simulator's own words. */
 function neverRan(simulation: Simulation): string {
-  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to judge.`;
+  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to grade.`;
 }
 
 /**
@@ -228,11 +228,11 @@ function unreadable(
 ): string {
   const ended = `it ended ${simulation.endingReason ?? "without a recorded reason"}`;
   if (trace === undefined) {
-    return `Egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
+    return `Egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to grade.`;
   }
   return trace.truncated
     ? `${MORE_THAN_ONE_READING} — ${ended}, and ${OVERRAN}`
-    : `Egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
+    : `Egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was no complete conversation to grade.`;
 }
 
 /**
@@ -250,8 +250,8 @@ const MORE_THAN_ONE_READING =
   "Egma holds more of this conversation than one reading returns";
 
 const OVERRAN =
-  "its trace overran the reader's span limit — so judging the readable part " +
-  "would judge a different conversation.";
+  "its trace overran the reader's span limit — so grading the readable part " +
+  "would grade a different conversation.";
 
 /**
  * A production trace, read as a conversation — the settled production read path.

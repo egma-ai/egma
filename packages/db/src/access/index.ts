@@ -531,6 +531,7 @@ export {
   recordGradingHeartbeat,
   MOST_GRADING_ATTEMPTS,
   recordProductionTraces,
+  recordSimulationTraces,
   readRunGradingProgress,
   readSimulationGradingStates,
   readTraceGrading,

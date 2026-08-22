@@ -19,6 +19,7 @@ import { db, listen, type Listening, type Queryable } from "../client.ts";
 import { combinedGradeScore } from "../grading/results.ts";
 import type { PlanGroup } from "../grading/plan.ts";
 import { graderDefinition, projectGrader } from "../schema/graders.ts";
+import type { Modality } from "../schema/agents.ts";
 import {
   gradingJob,
   type FrozenGradingEntry,
@@ -530,6 +531,93 @@ type CompletedProductionTrace = {
   readonly endAtMicroseconds: bigint;
   readonly modality: "chat" | "voice";
 };
+
+type DrainedSimulationTrace = {
+  readonly traceId: string;
+  readonly latestAtMicroseconds: bigint;
+};
+
+/** The simulation traces in one drained segment, keyed by their control row. */
+function simulationTracesIn(
+  spans: readonly NewSpan[],
+): ReadonlyMap<string, DrainedSimulationTrace> {
+  const traces = new Map<string, DrainedSimulationTrace>();
+  for (const span of spans) {
+    if (span.source !== "simulation") continue;
+    const simulationId = simulationIdOfTrace(span.traceId);
+    if (simulationId === undefined) continue;
+    const held = traces.get(simulationId);
+    if (
+      held === undefined ||
+      span.startedAtMicroseconds > held.latestAtMicroseconds
+    ) {
+      traces.set(simulationId, {
+        traceId: span.traceId,
+        latestAtMicroseconds: span.startedAtMicroseconds,
+      });
+    }
+  }
+  return traces;
+}
+
+/**
+ * Wake grading when durable simulation evidence becomes query-visible.
+ *
+ * A span never completes a simulation here. The existing simulation row is the
+ * only completion authority. This handoff covers the opposite ordering from
+ * `completeSimulation`: the row committed first, then its accepted evidence
+ * drained. Replays reach the frozen run plan and the same trace-level job.
+ */
+export async function recordSimulationTraces(
+  auth: AuthContext,
+  spans: readonly NewSpan[],
+): Promise<void> {
+  if (auth.projectId === undefined) return;
+  const traces = simulationTracesIn(spans);
+  if (traces.size === 0) return;
+
+  const rows = await db()
+    .select({
+      id: simulation.id,
+      runId: simulation.runId,
+      modality: simulation.modality,
+    })
+    .from(simulation)
+    .where(within(auth, simulation, and(
+      inArray(simulation.id, [...traces.keys()]),
+      eq(simulation.status, "completed"),
+    )))
+    .orderBy(asc(simulation.id));
+
+  for (const row of rows) {
+    const trace = traces.get(row.id);
+    if (trace === undefined) continue;
+    const traceStartedAt = await traceEvidenceStartedAt(auth, {
+      source: "simulation",
+      traceId: trace.traceId,
+      runId: row.runId,
+      // Evidence can use a provider clock far from the control-row clock. The
+      // drained span supplies the bounded evidence window; the row supplies
+      // completion authority and nothing else.
+      window: traceWindowEndingAt(trace.latestAtMicroseconds),
+    });
+    if (traceStartedAt === undefined) {
+      throw new Error(
+        `completed simulation trace ${trace.traceId} is not query-visible`,
+      );
+    }
+    await requestGrading(auth, {
+      source: "simulation",
+      traceId: trace.traceId,
+      traceStartedAt,
+      runId: row.runId,
+      // Ignored for simulations: the completed row above is the authority.
+      endsTrace: false,
+      evidenceReady: true,
+      modality: row.modality as Modality,
+    });
+  }
+}
 
 /**
  * The modality carried by an explicit end from a production platform this

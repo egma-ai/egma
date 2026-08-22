@@ -92,6 +92,7 @@ function simulationSpan(
     agentVersionId: "",
     testVersionId: claim.testVersionId,
     personaVersionId: claim.personaVersionId,
+    endsTrace: false,
     payload: "{}",
   };
 }

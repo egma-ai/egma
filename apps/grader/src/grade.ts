@@ -30,7 +30,7 @@ import {
   type JudgeMakers,
 } from "./judge/index.ts";
 
-/** What judging one claimed trace durably appended. */
+/** What grading one claimed trace durably appended. */
 export type Graded = {
   readonly source: GradingSource;
   readonly traceId: string;

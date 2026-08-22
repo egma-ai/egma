@@ -22,7 +22,7 @@ export function assertionResultOf(
       key,
       rationale: answer.rationale,
       citedSpanIds,
-      error: "the judge could not determine whether this behavior was met",
+      error: "the grader could not determine whether this behavior was met",
     };
   }
 

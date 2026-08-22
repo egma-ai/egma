@@ -90,16 +90,16 @@ export const LEARN_CARDS: readonly LearnCard[] = [
     ],
   },
   {
-    heading: "Measured, or judged",
+    heading: "Measured, then graded",
     lines: [
       "A metric measures: how long it",
       "took, how many turns, how late",
       "the replies were.",
       "",
-      "A grader judges. It reads the",
-      "transcript, the outcome, or a",
-      "metric, and returns one score",
-      "from 0 to 1.",
+      "A grader assigns one score.",
+      "It reads the transcript, the",
+      "outcome, or a metric. The score",
+      "is always from 0 to 1.",
     ],
   },
   {

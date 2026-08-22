@@ -267,7 +267,7 @@ function NewTest({
             <Behaviors behaviors={behaviors} disabled={!mayAuthor} onChange={setBehaviors} />
             {behaviorProblem === null ? null : <Problem>{behaviorProblem}</Problem>}
             <Help>
-              The expected-behaviors grader judges every simulation against this list. A test does not choose its own grader.
+              The expected-behaviors grader grades every simulation against this list. A test does not choose its own grader.
             </Help>
           </Section>
 

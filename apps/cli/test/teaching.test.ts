@@ -156,7 +156,7 @@ describe("the deck", () => {
     expect(said).toContain("One execution of a selection of");
     expect(said).toContain("One test executed once inside a");
     expect(said).toContain("A metric measures");
-    expect(said).toContain("A grader judges");
+    expect(said).toContain("A grader assigns one score");
     expect(said).toContain("one score");
     expect(said).toContain("pass threshold");
     expect(said).toContain("display-only combined score");

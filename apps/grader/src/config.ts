@@ -6,7 +6,7 @@ import { hostname } from "node:os";
  * Everything has a working default except where the two stores are, and those
  * are required on the same terms the API requires them: a grader that started
  * without somewhere to read conversations from and somewhere to write grades
- * to would look healthy and judge nothing. A misconfigured deployment is loud at
+ * to would look healthy and grade nothing. A misconfigured deployment is loud at
  * boot rather than silent for a week.
  */
 export type Config = {
@@ -14,7 +14,7 @@ export type Config = {
   readonly clickhouseUrl: string;
   /** This copy's own name for itself, in claims and in the log. */
   readonly claimant: string;
-  /** How many conversations this copy judges at once. */
+  /** How many conversations this copy grades at once. */
   readonly capacity: number;
   /** How often it says it is still alive while it holds one. */
   readonly heartbeatSeconds: number;
@@ -29,7 +29,7 @@ export const LOG_LEVELS = ["DEBUG", "INFO", "WARN", "ERROR"] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 /**
- * How many conversations one copy judges at once.
+ * How many conversations one copy grades at once.
  *
  * Four, matching the simulator's, and for the same reason: a copy claims only
  * what it has room for, so a burst of finished simulations degrades to a queue
