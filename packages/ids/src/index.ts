@@ -69,19 +69,12 @@ export const ID_PREFIXES = [
    */
   "rev",
   /**
-   * One project's setup for bringing production evidence in from an agent
-   * platform. This is separate from the connections used by simulations.
-   */
-  "mns",
-  /** One Retell voice agent selected inside a Retell Monitoring setup. */
-  "rma",
-  /**
-   * One Retell call whose fetch or normalization failed: the short-lived row
-   * holding its bounded retry budget, and then the identity-only marker that
-   * stops the five-minute overlap starting a second budget. It carries no
+   * One production call whose fetch or normalization failed: the short-lived
+   * row holding its bounded retry budget, and then the identity-only marker
+   * that stops the five-minute overlap starting a second budget. It carries no
    * provider document and disappears on success or expiry.
    */
-  "rcr",
+  "mnf",
   /**
    * One sealed segment of production evidence: the unit that is written to the
    * ingestion bucket once and read back by the drainer. It is minted when the

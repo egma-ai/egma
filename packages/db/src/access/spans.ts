@@ -117,7 +117,7 @@ export type NewSpan = {
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly platformAgentVersion: string;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly runId: string;
   readonly agentId: string;
   readonly agentVersionId: string;
@@ -210,7 +210,7 @@ const FIELD_BOUNDS = {
   platformAgentId: 512,
   platformAgentName: 512,
   platformAgentVersion: 128,
-  connectionKind: 64,
+  connectionType: 64,
   environment: 128,
 } as const satisfies Readonly<Record<string, number>>;
 
@@ -327,7 +327,7 @@ function canonicalEvidence(span: NewSpan): string {
     agent_platform: span.agentPlatform,
     agent_version_id: span.agentVersionId,
     audio_url: span.audioUrl,
-    connection_kind: span.connectionKind,
+    connection_kind: span.connectionType,
     duration_nanoseconds: span.durationNanoseconds.toString(),
     emitter: span.emitter,
     ends_trace: span.endsTrace,
@@ -408,7 +408,7 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
     platform_agent_id: span.platformAgentId,
     platform_agent_name: span.platformAgentName,
     platform_agent_version: span.platformAgentVersion,
-    connection_type: span.connectionKind,
+    connection_type: span.connectionType,
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,

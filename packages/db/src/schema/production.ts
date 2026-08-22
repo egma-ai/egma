@@ -10,7 +10,7 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
-import { user } from "./identity.ts";
+import { agent } from "./agents.ts";
 import { organization, project } from "./tenancy.ts";
 import {
   createdAt,
@@ -21,132 +21,44 @@ import {
   updatedAt,
 } from "./columns.ts";
 
-/** Agent platforms with a customer-facing production Monitoring setup. */
-export const MONITORING_PLATFORMS = ["retell", "livekit_agents"] as const;
-export type MonitoringPlatform = (typeof MONITORING_PLATFORMS)[number];
-
-/** How one platform sends production evidence to Egma. */
-export const MONITORING_STRATEGIES = [
-  "retell_api_polling",
-  "livekit_otlp",
-] as const;
-export type MonitoringStrategy = (typeof MONITORING_STRATEGIES)[number];
-
-/** A setup-wide Retell condition. Empty successful polls do not change it. */
-export const MONITORING_HEALTH_STATES = [
-  "healthy",
-  "invalid_credential",
-  "rate_limited",
-  "provider_unavailable",
-] as const;
-export type MonitoringHealthState = (typeof MONITORING_HEALTH_STATES)[number];
-
 /**
- * The fixed scan a selected Retell agent is currently completing.
+ * The fixed scan a monitored agent is currently completing.
  *
  * Two, and there is no third. An import is the deliberate deep read a customer
- * asks for by selecting the agent; a regular poll is the shallow one that keeps
- * up. Anything else would be Egma reading a customer's provider history on its
- * own schedule, which is exactly the cost this design removes.
+ * asks for by turning the switch on; a regular poll is the shallow one that
+ * keeps up. Anything else would be Egma reading a customer's provider history
+ * on its own schedule, which is exactly the cost this design removes.
  */
-export const RETELL_SCAN_KINDS = ["historical_import", "regular"] as const;
-export type RetellScanKind = (typeof RETELL_SCAN_KINDS)[number];
-
-/** Customer-visible progress for one selected Retell voice agent. */
-export const RETELL_MONITORED_AGENT_STATES = [
-  "importing",
-  "active",
-  "degraded",
-] as const;
-export type RetellMonitoredAgentState =
-  (typeof RETELL_MONITORED_AGENT_STATES)[number];
+export const MONITORING_SCAN_KINDS = ["historical_import", "regular"] as const;
+export type MonitoringScanKind = (typeof MONITORING_SCAN_KINDS)[number];
 
 /**
- * Project configuration for receiving production evidence from one platform.
+ * One agent's polling notebook: what the poller needs and nothing a person
+ * edits.
  *
- * This is not a simulation connection. Retell owns a sealed account key;
- * LiveKit owns no provider secret because the customer's worker pushes OTLP
- * with the existing Egma project key.
+ * **Machine-owned, and platform-neutral on purpose.** Cursors are opaque text
+ * and windows are generic instants, so a second platform's pull reuses this
+ * table unchanged. The name is mechanism-neutral for the same reason: push
+ * bookkeeping, if it is ever wanted, has a lawful home here instead of a
+ * second table beside it.
+ *
+ * **Keyed by the agent, one row per agent, created by the pull switch alone.**
+ * There is no health surface: `consecutive_failures` is a retry clock that
+ * pushes `next_poll_at` out, read by the poller and shown to nobody. Turning
+ * the switch off stops the polling and leaves the row, so turning it back on
+ * resumes from where the cursor stood rather than re-reading a customer's
+ * history.
  */
-export const monitoringSetup = pgTable(
-  "monitoring_setup",
+export const monitoringState = pgTable(
+  "monitoring_state",
   {
-    id: idText("id").primaryKey(),
+    agentId: idText("agent_id")
+      .primaryKey()
+      .references(() => agent.id, { onDelete: "cascade" }),
     organizationId: idText("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
-    agentPlatform: text("agent_platform").notNull(),
-    strategy: text("strategy").notNull(),
-    /** A sealed `{apiKey}` object for Retell; null for LiveKit OTLP. */
-    credentials: text("credentials"),
-    credentialsHint: text("credentials_hint"),
-    healthState: text("health_state").notNull().default("healthy"),
-    /** A key-wide Retell gate. No selected agent may bypass it. */
-    blockedUntil: moment("blocked_until"),
-    failureStartedAt: moment("failure_started_at"),
-    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-    lastErrorAt: moment("last_error_at"),
-    lastRecoveredAt: moment("last_recovered_at"),
-    lastReceivedAt: moment("last_received_at"),
-    createdBy: idText("created_by").references(() => user.id, {
-      onDelete: "set null",
-    }),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    prefixCheck("monitoring_setup_id_prefix", table.id, "mns"),
-    oneOf("monitoring_setup_platform_allowed", table.agentPlatform, [
-      ...MONITORING_PLATFORMS,
-    ]),
-    oneOf("monitoring_setup_strategy_allowed", table.strategy, [
-      ...MONITORING_STRATEGIES,
-    ]),
-    oneOf("monitoring_setup_health_allowed", table.healthState, [
-      ...MONITORING_HEALTH_STATES,
-    ]),
-    check(
-      "monitoring_setup_credentials_hint_agrees",
-      sql`(${table.credentials} is null) = (${table.credentialsHint} is null)`,
-    ),
-    check(
-      "monitoring_setup_platform_strategy_agrees",
-      sql`(${table.agentPlatform} = 'retell' and ${table.strategy} = 'retell_api_polling' and ${table.credentials} is not null) or (${table.agentPlatform} = 'livekit_agents' and ${table.strategy} = 'livekit_otlp' and ${table.credentials} is null)`,
-    ),
-    unique("monitoring_setup_project_platform_unique").on(
-      table.projectId,
-      table.agentPlatform,
-    ),
-    // The selected-agent row repeats the tenant facts so its composite foreign
-    // key can prove that it uses this project's setup and credential.
-    unique("monitoring_setup_id_tenant_unique").on(
-      table.id,
-      table.projectId,
-      table.organizationId,
-    ),
-    foreignKey({
-      name: "monitoring_setup_project_organization_fk",
-      columns: [table.projectId, table.organizationId],
-      foreignColumns: [project.id, project.organizationId],
-    }).onDelete("cascade"),
-    index("monitoring_setup_project_idx").on(table.projectId),
-  ],
-);
-
-/** One Retell voice agent selected inside a Retell Monitoring setup. */
-export const retellMonitoredAgent = pgTable(
-  "retell_monitored_agent",
-  {
-    id: idText("id").primaryKey(),
-    monitoringSetupId: idText("monitoring_setup_id").notNull(),
-    organizationId: idText("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: idText("project_id").notNull(),
-    platformAgentId: text("platform_agent_id").notNull(),
-    platformAgentName: text("platform_agent_name").notNull(),
-    state: text("state").notNull().default("importing"),
     /** The fixed provider window and opaque page cursor currently in flight. */
     scanKind: text("scan_kind"),
     scanFrom: moment("scan_from"),
@@ -163,91 +75,65 @@ export const retellMonitoredAgent = pgTable(
      */
     nextPollAt: moment("next_poll_at").notNull(),
     /**
-     * The earliest instant a regular scan may look back to, while it is set.
-     *
-     * A regular window normally starts five minutes before the last completed
-     * upper bound, so a call the provider exposes a little late is still found.
-     * A floor overrides that subtraction, which is what a cutover needs: the
-     * first window after one must not reach behind it and re-import evidence
-     * the release deliberately removed. It is cleared once a window has
-     * completed above it, and the overlap resumes.
-     */
-    regularFloorAt: moment("regular_floor_at"),
-    /**
      * Which explicit import this agent's transient call state belongs to.
      *
-     * Selecting the agent again is a new observation of the provider's history
-     * and starts a new generation. It is what lets a fresh import take its own
-     * bounded look at a call an earlier regular scan gave up on, without
-     * letting an ordinary repeated poll do the same.
+     * Turning the switch on again is a new observation of the provider's
+     * history and starts a new generation. It is what lets a fresh import take
+     * its own bounded look at a call an earlier regular scan gave up on,
+     * without letting an ordinary repeated poll do the same.
      */
     importGeneration: integer("import_generation").notNull().default(1),
-    /** One DB-backed owner prevents duplicate Retell reads across API replicas. */
+    /** One DB-backed owner prevents duplicate provider reads across replicas. */
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: moment("lease_expires_at"),
+    /** A retry clock, never a health surface: it pushes `next_poll_at` out. */
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-    lastErrorKind: text("last_error_kind"),
-    lastErrorAt: moment("last_error_at"),
-    lastSuccessAt: moment("last_success_at"),
-    lastCallReceivedAt: moment("last_call_received_at"),
+    /** Stamped as this agent's pulled calls become readable evidence. */
+    lastReceivedAt: moment("last_received_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
-    prefixCheck("retell_monitored_agent_id_prefix", table.id, "rma"),
-    oneOf("retell_monitored_agent_state_allowed", table.state, [
-      ...RETELL_MONITORED_AGENT_STATES,
-    ]),
-    oneOf("retell_monitored_agent_scan_kind_allowed", table.scanKind, [
-      ...RETELL_SCAN_KINDS,
+    prefixCheck("monitoring_state_agent_id_prefix", table.agentId, "agt"),
+    oneOf("monitoring_state_scan_kind_allowed", table.scanKind, [
+      ...MONITORING_SCAN_KINDS,
     ]),
     check(
-      "retell_monitored_agent_scan_agrees",
+      "monitoring_state_scan_agrees",
       sql`(${table.scanKind} is null and ${table.scanFrom} is null and ${table.scanThrough} is null and ${table.paginationKey} is null) or (${table.scanKind} is not null and ${table.scanFrom} is not null and ${table.scanThrough} is not null)`,
     ),
     check(
-      "retell_monitored_agent_lease_agrees",
+      "monitoring_state_lease_agrees",
       sql`(${table.leaseOwner} is null) = (${table.leaseExpiresAt} is null)`,
     ),
-    unique("retell_monitored_agent_setup_platform_agent_unique").on(
-      table.monitoringSetupId,
-      table.platformAgentId,
-    ),
-    // Transient call rows repeat the tenant facts, so they can prove that their
-    // selected agent belongs to the same project and organization.
-    unique("retell_monitored_agent_id_tenant_unique").on(
-      table.id,
+    // Repeated so the failure row's composite foreign key can prove that the
+    // agent it names belongs to the same project and organization.
+    unique("monitoring_state_agent_id_project_id_unique").on(
+      table.agentId,
       table.projectId,
-      table.organizationId,
     ),
     foreignKey({
-      name: "retell_monitored_agent_project_organization_fk",
+      name: "monitoring_state_project_organization_fk",
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
+    // The tenancy triangle, exactly as a connection closes it: this row cannot
+    // name one project and another project's agent.
     foreignKey({
-      name: "retell_monitored_agent_setup_tenant_fk",
-      columns: [
-        table.monitoringSetupId,
-        table.projectId,
-        table.organizationId,
-      ],
-      foreignColumns: [
-        monitoringSetup.id,
-        monitoringSetup.projectId,
-        monitoringSetup.organizationId,
-      ],
+      name: "monitoring_state_agent_project_fk",
+      columns: [table.agentId, table.projectId],
+      foreignColumns: [agent.id, agent.projectId],
     }).onDelete("cascade"),
-    index("retell_monitored_agent_due_idx").on(
+    index("monitoring_state_due_idx").on(
       table.nextPollAt,
       table.leaseExpiresAt,
     ),
-    index("retell_monitored_agent_project_idx").on(table.projectId),
+    index("monitoring_state_project_idx").on(table.projectId),
   ],
 );
 
 /**
- * One Retell call Egma could not turn into evidence, and nothing else.
+ * One production call Egma could not turn into evidence, and nothing else.
  *
  * **Short-lived control state, never a payload archive.** A call whose fetch or
  * normalization failed leaves an identity and a bounded budget here — never the
@@ -263,19 +149,19 @@ export const retellMonitoredAgent = pgTable(
  * Exactly one of the two instants is set, and the check makes the other shape
  * unwritable rather than merely unusual.
  *
- * A marker expires on its own once the call is outside every regular overlap
- * window, and deleting a selected agent or its Monitoring setup takes its rows
- * with it.
+ * Pull-only today, and named neutrally so a future push-side failure record has
+ * a lawful home. A marker expires on its own once the call is outside every
+ * regular overlap window, and deleting the agent takes its rows with it.
  */
-export const retellCallRetry = pgTable(
-  "retell_call_retry",
+export const monitoringFailure = pgTable(
+  "monitoring_failure",
   {
     id: idText("id").primaryKey(),
     organizationId: idText("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
-    retellMonitoredAgentId: idText("retell_monitored_agent_id").notNull(),
+    agentId: idText("agent_id").notNull(),
     providerCallId: text("provider_call_id").notNull(),
     /** Stable low-cardinality class, never the provider's message or body. */
     errorKind: text("error_kind").notNull(),
@@ -291,44 +177,35 @@ export const retellCallRetry = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
-    prefixCheck("retell_call_retry_id_prefix", table.id, "rcr"),
-    unique("retell_call_retry_project_call_unique").on(
+    prefixCheck("monitoring_failure_id_prefix", table.id, "mnf"),
+    unique("monitoring_failure_project_call_unique").on(
       table.projectId,
       table.providerCallId,
     ),
     check(
-      "retell_call_retry_one_schedule",
+      "monitoring_failure_one_schedule",
       sql`(${table.nextAttemptAt} is null) <> (${table.expiresAt} is null)`,
     ),
     check(
-      "retell_call_retry_attempts_bounded",
+      "monitoring_failure_attempts_bounded",
       sql`${table.attempts} between 1 and 4`,
     ),
     foreignKey({
-      name: "retell_call_retry_project_organization_fk",
+      name: "monitoring_failure_project_organization_fk",
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
     foreignKey({
-      name: "retell_call_retry_agent_tenant_fk",
-      columns: [
-        table.retellMonitoredAgentId,
-        table.projectId,
-        table.organizationId,
-      ],
-      foreignColumns: [
-        retellMonitoredAgent.id,
-        retellMonitoredAgent.projectId,
-        retellMonitoredAgent.organizationId,
-      ],
+      name: "monitoring_failure_agent_project_fk",
+      columns: [table.agentId, table.projectId],
+      foreignColumns: [agent.id, agent.projectId],
     }).onDelete("cascade"),
     // The batched page lookup reads `(project_id, provider_call_id)`, and the
     // unique constraint above already builds exactly that btree. A second
     // index on the same pair would be one more thing every retry write has to
     // maintain and nothing at all to read from.
-    index("retell_call_retry_due_idx")
-      .on(table.retellMonitoredAgentId, table.nextAttemptAt)
+    index("monitoring_failure_due_idx")
+      .on(table.agentId, table.nextAttemptAt)
       .where(sql`${table.nextAttemptAt} is not null`),
   ],
 );
-

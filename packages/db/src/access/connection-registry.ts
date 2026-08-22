@@ -1,18 +1,18 @@
 import { isIP } from "node:net";
 
 import {
-  CONNECTION_KINDS,
+  CONNECTION_TYPES,
   MODALITIES,
   type AccessVariant,
   type AgentPlatform,
-  type ConnectionKind,
+  type ConnectionType,
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
 import { AgentWriteRefusedError } from "./errors.ts";
 
 /**
- * What each simulation connection kind is made of. The registry is code, not
+ * What each simulation connection type is made of. The registry is code, not
  * a table, because a table could claim kinds the code cannot run: an entry lands here
  * in the same commit as its adapter, following the `VOICE_PROVIDERS`
  * precedent.
@@ -25,8 +25,8 @@ import { AgentWriteRefusedError } from "./errors.ts";
  * refused outright. Every failure is named at create, so a typo surfaces
  * immediately rather than at run time.
  *
- * The map is `Record<ConnectionKind, …>`, so it cannot drift from the schema:
- * a kind added to `CONNECTION_KINDS` refuses to build until it is described
+ * The map is `Record<ConnectionType, …>`, so it cannot drift from the schema:
+ * a kind added to `CONNECTION_TYPES` refuses to build until it is described
  * here, and an entry describing a kind the schema's CHECK would reject cannot
  * be written at all.
  */
@@ -176,7 +176,7 @@ export type CredentialRule =
     };
 
 /**
- * One access variant inside a connection kind: its config keys and credential
+ * One access variant inside a connection type: its config keys and credential
  * rule, together.
  *
  * Together rather than separately because an access variant is a fact about
@@ -185,7 +185,7 @@ export type CredentialRule =
  * headers — so gating config and credentials against separate rules would
  * admit connections that are half of each and can do neither.
  *
- * Most connection kinds have one access variant and use a one-entry list.
+ * Most connection types have one access variant and use a one-entry list.
  */
 export type AccessVariantDescriptor = {
   /**
@@ -238,14 +238,14 @@ export type AccessVariantDescriptor = {
 };
 
 export type ConnectionDescriptor = {
-  /** What a person choosing a connection kind reads. Safe to send to a browser. */
+  /** What a person choosing a connection type reads. Safe to send to a browser. */
   readonly label: string;
   /** Which agent platforms this direct path can reach, or every platform. */
   readonly agentPlatforms: readonly AgentPlatform[] | "any";
   readonly modalities: readonly Modality[];
   readonly topology: Topology;
   /**
-   * The access variants supported inside this connection kind. The request
+   * The access variants supported inside this connection type. The request
    * names one explicitly; config never selects one.
    */
   readonly accessVariants: readonly [
@@ -304,21 +304,21 @@ export function credentialRuleOf(
  *
  * An id no entry claims is this deployment running against rows a later
  * release wrote. It is a fault rather than a refusal — nothing the caller sent
- * is wrong — and it says which access variant id and connection kind, because that is
+ * is wrong — and it says which access variant id and connection type, because that is
  * what somebody needs to find it.
  */
 export function accessVariantById(
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
   accessVariant: string,
 ): AccessVariantDescriptor {
-  const found = descriptorOf(connectionKind).accessVariants.find(
+  const found = descriptorOf(connectionType).accessVariants.find(
     (variant) => variant.id === accessVariant,
   );
   if (found === undefined) {
     throw new Error(
       `access variant "${accessVariant}" is not one this Egma instance knows for a ` +
-        `${connectionKind} connection; the access variants it holds are ` +
-        descriptorOf(connectionKind)
+        `${connectionType} connection; the access variants it holds are ` +
+        descriptorOf(connectionType)
           .accessVariants.map((variant) => variant.id)
           .join(", "),
     );
@@ -346,7 +346,7 @@ export function accessVariantById(
 export type ConnectionOptionMetadata = {
   readonly agentPlatform: AgentPlatform | null;
   readonly agentPlatformLabel: string;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly accessVariantLabel: string;
   readonly modality: Modality;
@@ -438,8 +438,7 @@ const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
 };
 
 type ConnectionOption = {
-  readonly agentPlatform: AgentPlatform | null;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly productLabel: string;
@@ -447,61 +446,61 @@ type ConnectionOption = {
 
 const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   {
-    agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     productLabel: "Retell chat",
   },
   {
-    agentPlatform: "retell",
-    connectionKind: "phone_number",
-    accessVariant: "phone_number.public_e164",
-    modality: "voice",
-    productLabel: "Retell phone",
-  },
-  {
-    agentPlatform: "livekit_agents",
-    connectionKind: "livekit_room",
+    connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     productLabel: "LiveKit project credentials",
   },
   {
-    agentPlatform: "livekit_agents",
-    connectionKind: "livekit_room",
+    connectionType: "livekit_room",
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "voice",
     productLabel: "LiveKit token endpoint",
   },
   {
-    agentPlatform: "livekit_agents",
-    connectionKind: "phone_number",
-    accessVariant: "phone_number.public_e164",
-    modality: "voice",
-    productLabel: "Phone number",
-  },
-  {
-    agentPlatform: null,
-    connectionKind: "phone_number",
+    connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
     productLabel: "Phone number",
   },
 ] as const;
 
+/**
+ * The platform a connection type reaches, where the type pins exactly one.
+ *
+ * A chat connection is Retell's and a room connection is LiveKit's, because
+ * nothing else answers those APIs. A phone number spans every platform and
+ * pins none, so its answer is the agent's own binding — the one place an agent
+ * is known — and null where the agent has none either.
+ */
+export function platformPinnedBy(
+  connectionType: ConnectionType,
+): AgentPlatform | null {
+  const platforms = descriptorOf(connectionType).agentPlatforms;
+  if (platforms === "any" || platforms.length !== 1) return null;
+  return platforms[0] ?? null;
+}
+
 export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] {
   return CONNECTION_OPTIONS.map((option) => {
-    const descriptor = descriptorOf(option.connectionKind);
+    const descriptor = descriptorOf(option.connectionType);
     const variant = accessVariantMetadata(
-      accessVariantById(option.connectionKind, option.accessVariant),
+      accessVariantById(option.connectionType, option.accessVariant),
     );
+    const agentPlatform = platformPinnedBy(option.connectionType);
     return {
       ...option,
+      agentPlatform,
       agentPlatformLabel:
-        option.agentPlatform === null
+        agentPlatform === null
           ? "Any or unknown"
-          : PLATFORM_LABELS[option.agentPlatform],
+          : PLATFORM_LABELS[agentPlatform],
       topology: descriptor.topology,
       accessVariantLabel: variant.label,
       simulatorAdapter: descriptor.simulatorAdapter,
@@ -515,15 +514,13 @@ export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] 
 }
 
 export function productLabelOf(
-  agentPlatform: AgentPlatform | null,
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
   accessVariant: AccessVariant,
   modality: Modality,
 ): string {
   const exact = CONNECTION_OPTIONS.find(
     (option) =>
-      option.agentPlatform === agentPlatform &&
-      option.connectionKind === connectionKind &&
+      option.connectionType === connectionType &&
       option.accessVariant === accessVariant &&
       option.modality === modality,
   );
@@ -531,7 +528,7 @@ export function productLabelOf(
 
   throw new AgentWriteRefusedError(
     "not_admitted",
-    "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+    "connection type, access variant, and modality do not form a supported simulation connection",
   );
 }
 
@@ -796,7 +793,7 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
 }
 
 export const CONNECTION_REGISTRY: Readonly<
-  Record<ConnectionKind, ConnectionDescriptor>
+  Record<ConnectionType, ConnectionDescriptor>
 > = {
   retell_chat_api: {
     label: "Retell chat API",
@@ -1061,16 +1058,16 @@ export const CONNECTION_REGISTRY: Readonly<
 
 /** How a refusal names one access variant. */
 function nameOf(
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
   variant: AccessVariantDescriptor,
 ): string {
-  return variant.named ?? `a ${connectionKind} connection`;
+  return variant.named ?? `a ${connectionType} connection`;
 }
 
-/** The connection kinds something can actually conduct a run over today. */
-export function conductableConnectionKinds(): readonly ConnectionKind[] {
-  return CONNECTION_KINDS.filter(
-    (connectionKind) => CONNECTION_REGISTRY[connectionKind].simulatorAdapter,
+/** The connection types something can actually conduct a run over today. */
+export function conductableConnectionTypes(): readonly ConnectionType[] {
+  return CONNECTION_TYPES.filter(
+    (connectionType) => CONNECTION_REGISTRY[connectionType].simulatorAdapter,
   );
 }
 
@@ -1085,11 +1082,11 @@ export function conductableConnectionKinds(): readonly ConnectionKind[] {
  * second, provider-aware check.
  */
 export function connectionIsConductable(
-  connectionKind: string,
+  connectionType: string,
   accessVariant: string,
   modality: string,
 ): boolean {
-  const descriptor = CONNECTION_REGISTRY[connectionKind as ConnectionKind];
+  const descriptor = CONNECTION_REGISTRY[connectionType as ConnectionType];
   return (
     descriptor !== undefined &&
     descriptor.simulatorAdapter &&
@@ -1099,17 +1096,17 @@ export function connectionIsConductable(
 }
 
 /** Whether this kind needs the deployment carrier on its claimed work order. */
-export function connectionKindUsesPlatformCarrier(
-  connectionKind: string,
+export function connectionTypeUsesPlatformCarrier(
+  connectionType: string,
 ): boolean {
   return (
-    CONNECTION_REGISTRY[connectionKind as ConnectionKind]
+    CONNECTION_REGISTRY[connectionType as ConnectionType]
       ?.usesPlatformCarrier === true
   );
 }
 
 /**
- * What a run over a connection kind nothing can conduct is told.
+ * What a run over a connection type nothing can conduct is told.
  *
  * The wording is the platform's own and a client relays it word for word to
  * whoever is reading a terminal, so it says all of it in one place: what is
@@ -1119,50 +1116,50 @@ export function connectionKindUsesPlatformCarrier(
  * shipped or miss one that has.
  */
 export function noSimulatorAdapterMessage(
-  connectionKind: string,
+  connectionType: string,
   modality?: string,
 ): string {
   const reach =
     modality === undefined
-      ? `${connectionKind}`
-      : `${connectionKind} ${modality}`;
+      ? `${connectionType}`
+      : `${connectionType} ${modality}`;
   return (
     `Egma has no simulator adapter for a ${reach} connection yet, ` +
     `so it will not start a run it cannot conduct. Run these tests over a ` +
-    `connection Egma conducts today: ${conductableConnectionKinds().join(", ")}.`
+    `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`
   );
 }
 
 /** The descriptor, or a refusal naming what egma actually supports. */
-export function descriptorOf(connectionKind: string): ConnectionDescriptor {
-  const descriptor = CONNECTION_REGISTRY[connectionKind as ConnectionKind];
+export function descriptorOf(connectionType: string): ConnectionDescriptor {
+  const descriptor = CONNECTION_REGISTRY[connectionType as ConnectionType];
   if (descriptor === undefined) {
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `"${connectionKind}" is not a connection kind Egma knows; expected one of ` +
-        CONNECTION_KINDS.join(", "),
+      `"${connectionType}" is not a connection type Egma knows; expected one of ` +
+        CONNECTION_TYPES.join(", "),
     );
   }
   return descriptor;
 }
 
-/** The modality checked against the connection kind's own list. */
+/** The modality checked against the connection type's own list. */
 export function validModality(
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
   modality: string,
 ): Modality {
-  const descriptor = descriptorOf(connectionKind);
+  const descriptor = descriptorOf(connectionType);
   if (!descriptor.modalities.includes(modality as Modality)) {
     const speaks = descriptor.modalities.join(" or ");
     if (!MODALITIES.includes(modality as Modality)) {
       throw new AgentWriteRefusedError(
         "not_admitted",
-        `"${modality}" is not a modality; a ${connectionKind} connection speaks ${speaks}`,
+        `"${modality}" is not a modality; a ${connectionType} connection speaks ${speaks}`,
       );
     }
     throw new AgentWriteRefusedError(
       "not_admitted",
-      `a ${connectionKind} connection speaks ${speaks}, and this one was asked for ${modality}`,
+      `a ${connectionType} connection speaks ${speaks}, and this one was asked for ${modality}`,
     );
   }
   return modality as Modality;
@@ -1178,7 +1175,7 @@ export function validModality(
  * refusal is built from it, so one wording serves every access variant.
  *
  * It takes the gates rather than reading them off a variant, so the rule can be
- * exercised on its own and a new gate can be tried without a connection kind
+ * exercised on its own and a new gate can be tried without a connection type
  * to hang it on. `validConfig` below is the registry-aware door, and is what
  * everything in the product actually calls.
  */
@@ -1229,12 +1226,12 @@ export function gatedConfig(
 
 /** The config as stored, gated by the explicitly named access variant. */
 export function validConfig(
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
   accessVariant: AccessVariant,
   config: unknown,
 ): Record<string, string> {
-  const variant = accessVariantById(connectionKind, accessVariant);
-  return gatedConfig(nameOf(connectionKind, variant), variant.config, config);
+  const variant = accessVariantById(connectionType, accessVariant);
+  return gatedConfig(nameOf(connectionType, variant), variant.config, config);
 }
 
 /**
@@ -1276,13 +1273,13 @@ function couldBe(
  * for a typo that is not there.
  */
 export function validCredentials(
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
   accessVariant: AccessVariant,
   credentials: unknown,
 ): { readonly sealed: Record<string, string>; readonly hint: string } | null {
-  const descriptor = descriptorOf(connectionKind);
-  const variant = accessVariantById(connectionKind, accessVariant);
-  const what = nameOf(connectionKind, variant);
+  const descriptor = descriptorOf(connectionType);
+  const variant = accessVariantById(connectionType, accessVariant);
+  const what = nameOf(connectionType, variant);
   const rule = variant.credentials;
 
   if (

@@ -196,7 +196,7 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
-  connectionKindUsesPlatformCarrier,
+  connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   credentialRuleOf,
   productLabelOf,

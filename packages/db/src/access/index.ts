@@ -334,7 +334,7 @@ export {
   addConnection,
   archiveAgent,
   archiveConnection,
-  connectionKindOf,
+  connectionTypeOf,
   createAgent,
   getAgent,
   getConnection,
@@ -363,51 +363,39 @@ export {
 export type {
   AccessVariant,
   AgentPlatform,
-  ConnectionKind,
+  ConnectionType,
   Modality,
   Topology,
 } from "../schema/agents.ts";
+// The list beside the type, because a caller deciding whether a word names an
+// agent platform has to ask the shipped list rather than write two names out
+// again — the drainer does exactly that before it moves an agent's
+// last-received state.
+export { AGENT_PLATFORMS } from "../schema/agents.ts";
 
 export {
-  checkpointRetellMonitoringPage,
-  claimDueRetellMonitoringAgent,
-  configureLiveKitMonitoring,
-  configureRetellMonitoring,
-  deleteRetellCallRetry,
-  dueRetellCallRetries,
-  failRetellMonitoringTarget,
-  finishRetellMonitoringScan,
-  listMonitoringSetups,
-  MOST_RETELL_CALL_ATTEMPTS,
+  checkpointMonitoringPage,
+  claimDueMonitoringAgent,
+  deleteProductionCallFailure,
+  dueProductionCallRetries,
+  failMonitoringTarget,
+  finishMonitoringScan,
+  MOST_PRODUCTION_CALL_ATTEMPTS,
+  recordProductionCallAttempt,
   recordProductionEvidenceReceived,
-  recordRetellCallAttempt,
-  recoverRetellMonitoringSetup,
-  releaseRetellMonitoringLease,
-  removeMonitoringSetup,
-  renewRetellMonitoringLease,
-  sweepExpiredRetellCallMarkers,
-  transientRetellCallState,
-  yieldRetellMonitoringLease,
+  renewMonitoringLease,
+  startPullingProductionCalls,
+  stopPullingProductionCalls,
+  sweepExpiredProductionCallMarkers,
+  transientProductionCallState,
+  yieldMonitoringLease,
   type MonitoringFailureKind,
-  type MonitoringSetup,
-  type RetellCallAttemptOutcome,
-  type RetellMonitoredAgent,
-  type RetellMonitoringTarget,
-  type SelectedRetellAgent,
-  type TransientRetellCall,
+  type MonitoringTarget,
+  type ProductionCallAttemptOutcome,
+  type PullSwitch,
+  type TransientProductionCall,
 } from "./production-monitoring.ts";
-// The list beside the type, because a caller deciding whether a word names a
-// platform Monitoring keeps a setup for has to ask the shipped list rather than
-// write two names out again — the drainer does exactly that before it moves a
-// customer's last-received state.
-export { MONITORING_PLATFORMS } from "../schema/production.ts";
-export type {
-  MonitoringHealthState,
-  MonitoringPlatform,
-  MonitoringStrategy,
-  RetellMonitoredAgentState,
-  RetellScanKind,
-} from "../schema/production.ts";
+export type { MonitoringScanKind } from "../schema/production.ts";
 
 
 export {
