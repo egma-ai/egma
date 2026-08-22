@@ -24,6 +24,12 @@ import {
   EXPORT_TRACE_SERVICE_RESPONSE,
 } from "../src/otlp/schema.ts";
 import { createApi, type TestApi } from "./support/api.ts";
+import { pendingObjectStore } from "../src/ingestion/object-store.ts";
+import { pendingSegments } from "./support/ingestion.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import {
   contextFor,
   mintKey,
@@ -49,7 +55,20 @@ import {
  * SQL to the ids the fixtures pin — the one edit no exported function offers,
  * made before anything references the row, so the golden bytes can post
  * unchanged against a database whose every other fact is genuine.
+ *
+ * The door answers on object-store durability and writes no row, so a post is
+ * followed by a drain wherever the claim is about what a reader sees. The one
+ * claim that is about the boundary itself — a batch naming two projects — reads
+ * the pending objects before anything drains them.
  */
+
+const storage: ObjectStorage = await startObjectStorage("otlp-simulation");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the simulation ingest suite — ${storage.why}\n\n`,
+  );
+}
 
 const contractRoot = fileURLToPath(
   new URL("../../../packages/simulation-contract", import.meta.url),
@@ -96,6 +115,17 @@ async function post(
   token: string | null = SERVICE_TOKEN,
   contentType = "application/json",
 ) {
+  const response = await stage(body, token, contentType);
+  await api.drainEvidence();
+  return response;
+}
+
+/** The same post, stopping where the door does: durable and not yet drained. */
+async function stage(
+  body: string | Buffer,
+  token: string | null = SERVICE_TOKEN,
+  contentType = "application/json",
+) {
   return api.app.inject({
     method: "POST",
     url: OTLP_TRACES_PATH,
@@ -105,6 +135,12 @@ async function post(
     },
     payload: body,
   });
+}
+
+/** The ingestion bucket this instance accepts into, for reading it back. */
+function ingestStore() {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage.ingestStore;
 }
 
 /**
@@ -177,7 +213,11 @@ async function seedSimulationNamed(
 }
 
 beforeAll(async () => {
-  api = await createApi("otlp_simulation", { traceStore: true });
+  if (!storage.available) return;
+  api = await createApi("otlp_simulation", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   globex = await signUp(api.app, "grace@globex.example", "Globex");
 
@@ -191,9 +231,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
-describe("the contract's golden flushes, posted with the service token", () => {
+describe.skipIf(!storage.available)("the contract's golden flushes, posted with the service token", () => {
   it("land under the simulation's own customer and run, marked as simulation traffic from egma's runtime", async () => {
     const flush = await post(await fixture("valid", "chat-flush-1-turns.json"));
     expect(flush.statusCode, flush.body).toBe(200);
@@ -212,7 +253,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
     }>(
       "select distinct organization_id, project_id, source, emitter, run_id, " +
         "agent_id, test_version_id, persona_version_id, environment " +
-        `from spans where trace_id = '${CHAT_TRACE}'`,
+        `from spans final where trace_id = '${CHAT_TRACE}'`,
     );
 
     expect(rows).toEqual([
@@ -237,7 +278,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
       text: string;
       duration_ns: number;
     }>(
-      "select name, kind, text, duration_ns from spans " +
+      "select name, kind, text, duration_ns from spans final " +
         `where trace_id = '${CHAT_TRACE}' order by started_at, name`,
     );
 
@@ -268,7 +309,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
     // own turn vocabulary.
     expect(
       await countOf(
-        `select count() as n from turns where trace_id = '${CHAT_TRACE}'`,
+        `select count() as n from turns final where trace_id = '${CHAT_TRACE}'`,
       ),
     ).toBe(2);
   });
@@ -296,7 +337,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
     }
 
     const tools = await store().rows<{ tool_name: string; tool_arguments: string }>(
-      "select tool_name, tool_arguments from spans " +
+      "select tool_name, tool_arguments from spans final " +
         `where trace_id = '${CHAT_TRACE}' and kind = 'tool' order by started_at`,
     );
     expect(tools).toEqual([
@@ -311,13 +352,13 @@ describe("the contract's golden flushes, posted with the service token", () => {
     ]);
 
     const [root] = await store().rows<{ kind: string; parent_span_id: string }>(
-      `select kind, parent_span_id from spans where trace_id = '${CHAT_TRACE}' ` +
+      `select kind, parent_span_id from spans final where trace_id = '${CHAT_TRACE}' ` +
         "and name = 'simulation'",
     );
     expect(root).toEqual({ kind: "root", parent_span_id: "" });
 
     expect(
-      await countOf(`select count() as n from spans where trace_id = '${CHAT_TRACE}'`),
+      await countOf(`select count() as n from spans final where trace_id = '${CHAT_TRACE}'`),
     ).toBe(8);
   });
 
@@ -397,10 +438,10 @@ describe("the contract's golden flushes, posted with the service token", () => {
    */
   it("land nothing twice when every flush is sent again", async () => {
     const before = await countOf(
-      `select count() as n from spans where trace_id = '${CHAT_TRACE}'`,
+      `select count() as n from spans final where trace_id = '${CHAT_TRACE}'`,
     );
     const turnsBefore = await countOf(
-      `select count() as n from turns where trace_id = '${CHAT_TRACE}'`,
+      `select count() as n from turns final where trace_id = '${CHAT_TRACE}'`,
     );
     expect(before).toBe(8);
 
@@ -414,10 +455,10 @@ describe("the contract's golden flushes, posted with the service token", () => {
     }
 
     expect(
-      await countOf(`select count() as n from spans where trace_id = '${CHAT_TRACE}'`),
+      await countOf(`select count() as n from spans final where trace_id = '${CHAT_TRACE}'`),
     ).toBe(before);
     expect(
-      await countOf(`select count() as n from turns where trace_id = '${CHAT_TRACE}'`),
+      await countOf(`select count() as n from turns final where trace_id = '${CHAT_TRACE}'`),
     ).toBe(turnsBefore);
   });
 
@@ -432,7 +473,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
       n: number;
     }>(
       "select organization_id, project_id, run_id, toUInt32(count()) as n " +
-        `from spans where trace_id = '${VOICE_TRACE}' ` +
+        `from spans final where trace_id = '${VOICE_TRACE}' ` +
         "group by organization_id, project_id, run_id",
     );
     expect(rows).toEqual([
@@ -447,7 +488,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
     // The two turns genuinely overlap — the shape the vocabulary promises the
     // full-duplex persona — and both are stored as they were measured.
     const [overlap] = await store().rows<{ n: string }>(
-      "select count() as n from spans as human, spans as agent " +
+      "select count() as n from spans as human final, spans as agent final " +
         `where human.trace_id = '${VOICE_TRACE}' and agent.trace_id = '${VOICE_TRACE}' ` +
         "and human.kind = 'turn:human' and agent.kind = 'turn:agent' " +
         "and human.started_at < agent.started_at + intDivOrZero(agent.duration_ns, 1000) / 1000000 " +
@@ -476,7 +517,7 @@ describe("the contract's golden flushes, posted with the service token", () => {
       tool_result: string;
       payload: string;
     }>(
-      "select tool_name, tool_arguments, tool_result, payload from spans " +
+      "select tool_name, tool_arguments, tool_result, payload from spans final " +
         `where trace_id = '${MOCKED_TRACE}' and kind = 'tool' order by started_at`,
     );
 
@@ -554,13 +595,40 @@ function protobufBodyOf(fixtureJson: string): Buffer {
   );
 }
 
-describe("the same path in the other encoding", () => {
-  it("retains changed protobuf evidence that reuses span ids", async () => {
+describe.skipIf(!storage.available)("the same path in the other encoding", () => {
+  /**
+   * The object the conflict case leaves behind. Retention is the point, so it
+   * is removed the way an operator removes one — deliberately, and only once
+   * what it proves has been proved.
+   */
+  let conflicting = "";
+
+  afterAll(async () => {
+    if (storage.available && conflicting !== "") {
+      await pendingObjectStore(ingestStore()).delete(conflicting);
+    }
+  });
+
+  /**
+   * **One immutable identity holds one account of one span, and the first
+   * account is the one that stands.**
+   *
+   * Three things happen at once here, and all three matter. The door
+   * **accepts** the changed bytes, because a sender resending is ordinary and
+   * refusing at a wire boundary would be answering a storage question there.
+   * The drainer **refuses to write them**, because the stored evidence is
+   * already somebody's record of that moment, and two rows saying different
+   * things about one moment leave a reader no rule for choosing. And the object
+   * is **retained** rather than deleted, because Egma promised those bytes were
+   * safe before it ever read them back — so a defect in Egma is not a reason to
+   * throw a customer's evidence away.
+   */
+  it("keeps the stored account and retains the object when protobuf evidence reuses span ids", async () => {
     const before = await countOf(
-      `select count() as n from spans where trace_id = '${VOICE_TRACE}'`,
+      `select count() as n from spans final where trace_id = '${VOICE_TRACE}'`,
     );
     const turnsBefore = await countOf(
-      `select count() as n from turns where trace_id = '${VOICE_TRACE}'`,
+      `select count() as n from turns final where trace_id = '${VOICE_TRACE}'`,
     );
     expect(before).toBe(4);
     expect(turnsBefore).toBe(2);
@@ -580,36 +648,8 @@ describe("the same path in the other encoding", () => {
       key: "pipecat.changed",
       value: { stringValue: "retained" },
     });
-    Object.assign(richSpan, {
-      traceState: "vendor=kept",
-      flags: 257,
-      droppedAttributesCount: 2,
-      droppedEventsCount: 3,
-      droppedLinksCount: 4,
-      events: [
-        {
-          timeUnixNano: "1785924902199999999",
-          name: "model-ready",
-          droppedAttributesCount: 1,
-          attributes: [
-            { key: "pipecat.event", value: { stringValue: "kept" } },
-          ],
-        },
-      ],
-      links: [
-        {
-          traceId: "31313131313131313131313131313131",
-          spanId: "3131313131313131",
-          traceState: "link=kept",
-          flags: 769,
-          droppedAttributesCount: 5,
-          attributes: [
-            { key: "pipecat.link", value: { stringValue: "kept" } },
-          ],
-        },
-      ],
-    });
-    const resent = await post(
+
+    const resent = await stage(
       protobufBodyOf(JSON.stringify(changed)),
       SERVICE_TOKEN,
       "application/x-protobuf",
@@ -623,64 +663,40 @@ describe("the same path in the other encoding", () => {
       ),
     ).toEqual({});
 
+    // The drain writes nothing for this object and leaves it where it is.
+    expect(await api.drainEvidence()).toBe(0);
+    const retained = await pendingSegments(ingestStore());
+    expect(retained).toHaveLength(1);
+    conflicting = retained[0]?.key ?? "";
+    expect(conflicting).not.toBe("");
+
     expect(
       await countOf(
-        `select count() as n from spans where trace_id = '${VOICE_TRACE}'`,
+        `select count() as n from spans final where trace_id = '${VOICE_TRACE}'`,
       ),
-    ).toBe(before * 2);
-    // Changed rows reach the dependent view too. The reader does not collapse
-    // their reused span ids.
+    ).toBe(before);
+    // And the derived view holds one turn per identity too — a materialized
+    // view may process one replay more than once, and a reader must not see
+    // that.
     expect(
       await countOf(
-        `select count() as n from turns where trace_id = '${VOICE_TRACE}'`,
+        `select count() as n from turns final where trace_id = '${VOICE_TRACE}'`,
       ),
-    ).toBe(turnsBefore * 2);
-    const turnProjections = await store().rows<Record<string, unknown>>(
-      "select span_id, parent_span_id, toString(started_at) as started_at, " +
-        "duration_ns, kind, source, emitter, environment, connection_type, " +
-        "provider_call_id, run_id, agent_id, text_preview from turns " +
+    ).toBe(turnsBefore);
+    expect(
+      await countOf(
+        "select count() as n from turns final " +
+          `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002'`,
+      ),
+    ).toBe(1);
+
+    // The stored account is untouched: the attribute the resend added is
+    // nowhere in it.
+    const [stored] = await store().rows<{ payload: string }>(
+      "select payload from spans final " +
         `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002'`,
     );
-    expect(turnProjections).toHaveLength(2);
-    expect(turnProjections[1]).toEqual(turnProjections[0]);
-
-    const [richRow] = await store().rows<{ payload: string }>(
-      "select payload from spans " +
-        `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002' ` +
-        `and position(payload, '"pipecat.changed"') > 0`,
-    );
-    const raw = JSON.parse(richRow?.payload ?? "{}") as {
-      span?: Record<string, unknown>;
-    };
-    expect(raw.span).toMatchObject({
-      traceState: "vendor=kept",
-      flags: 257,
-      droppedAttributesCount: 2,
-      droppedEventsCount: 3,
-      droppedLinksCount: 4,
-      events: [
-        {
-          timeUnixNano: "1785924902199999999",
-          name: "model-ready",
-          droppedAttributesCount: 1,
-          attributes: [
-            { key: "pipecat.event", value: { stringValue: "kept" } },
-          ],
-        },
-      ],
-      links: [
-        {
-          traceId: "31313131313131313131313131313131",
-          spanId: "3131313131313131",
-          traceState: "link=kept",
-          flags: 769,
-          droppedAttributesCount: 5,
-          attributes: [
-            { key: "pipecat.link", value: { stringValue: "kept" } },
-          ],
-        },
-      ],
-    });
+    expect(stored?.payload).not.toContain("pipecat.changed");
   });
 
   it("lands a genuinely new protobuf flush, attributed exactly as the JSON ones", async () => {
@@ -724,7 +740,7 @@ describe("the same path in the other encoding", () => {
       status: string;
       payload: string;
     }>(
-      "select kind, duration_ns, run_id, source, status, payload from spans " +
+      "select kind, duration_ns, run_id, source, status, payload from spans final " +
         `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000006'`,
     );
     const [row] = rows;
@@ -745,9 +761,9 @@ describe("the same path in the other encoding", () => {
   });
 });
 
-describe("a resource that names no simulation, or one egma never conducted", () => {
+describe.skipIf(!storage.available)("a resource that names no simulation, or one egma never conducted", () => {
   it("is refused whole, with a body saying what to send", async () => {
-    const before = await countOf("select count() as n from spans");
+    const before = await countOf("select count() as n from spans final");
 
     const unnamed = await post(
       await fixture("invalid", "resource-naming-no-simulation.json"),
@@ -756,7 +772,7 @@ describe("a resource that names no simulation, or one egma never conducted", () 
     const refusal = unnamed.json() as { code: number; message: string };
     expect(refusal.message).toContain("egma.simulation_id");
 
-    expect(await countOf("select count() as n from spans")).toBe(before);
+    expect(await countOf("select count() as n from spans final")).toBe(before);
   });
 
   it("is refused by name when the simulation never existed, and stores nothing", async () => {
@@ -765,13 +781,13 @@ describe("a resource that names no simulation, or one egma never conducted", () 
       await fixture("valid", "chat-flush-1-turns.json")
     ).replaceAll(CHAT_SIMULATION, invented);
 
-    const before = await countOf("select count() as n from spans");
+    const before = await countOf("select count() as n from spans final");
     const refused = await post(body);
     expect(refused.statusCode).toBe(400);
     const refusal = refused.json() as { code: number; message: string };
     expect(refusal.message).toContain(invented);
 
-    expect(await countOf("select count() as n from spans")).toBe(before);
+    expect(await countOf("select count() as n from spans final")).toBe(before);
   });
 
   /**
@@ -796,7 +812,7 @@ describe("a resource that names no simulation, or one egma never conducted", () 
       await fixture("valid", "chat-flush-1-turns.json")
     ).replaceAll(CHAT_TRACE, VOICE_TRACE);
 
-    const before = await countOf("select count() as n from spans");
+    const before = await countOf("select count() as n from spans final");
     const refused = await post(body);
 
     expect(refused.statusCode, refused.body).toBe(400);
@@ -805,11 +821,11 @@ describe("a resource that names no simulation, or one egma never conducted", () 
     expect(refusal.message).toContain(VOICE_TRACE);
     expect(refusal.message).toContain(CHAT_TRACE);
 
-    expect(await countOf("select count() as n from spans")).toBe(before);
+    expect(await countOf("select count() as n from spans final")).toBe(before);
   });
 });
 
-describe("a payload that claims a tenant on the service path", () => {
+describe.skipIf(!storage.available)("a payload that claims a tenant on the service path", () => {
   it("is stored verbatim and decides nothing: the customer comes from the simulation row", async () => {
     const claimed = JSON.parse(
       await fixture("valid", "chat-flush-1-turns.json"),
@@ -841,7 +857,7 @@ describe("a payload that claims a tenant on the service path", () => {
       project_id: string;
       payload: string;
     }>(
-      "select organization_id, project_id, payload from spans " +
+      "select organization_id, project_id, payload from spans final " +
         `where trace_id = '${CHAT_TRACE}' and span_id = 'dd40000000000000'`,
     );
     expect(rows).toHaveLength(1);
@@ -852,7 +868,7 @@ describe("a payload that claims a tenant on the service path", () => {
   });
 });
 
-describe("a batch carrying two customers' evidence when the store refuses one of them", () => {
+describe.skipIf(!storage.available)("a batch carrying two customers' evidence", () => {
   /** One turn for each simulation, on span ids nothing else in this file mints. */
   function twoTenantBatch(): string {
     const turn = (
@@ -887,9 +903,8 @@ describe("a batch carrying two customers' evidence when the store refuses one of
       ],
     });
 
-    // The refusing tenant deliberately first: a door that stopped at the first
-    // refusal would never reach the second tenant at all, and this batch is
-    // shaped to catch exactly that.
+    // Globex's resource first, so that a door which stopped grouping at the
+    // first project would never reach Acme's at all.
     return JSON.stringify({
       resourceSpans: [
         turn(VOICE_SIMULATION, VOICE_TRACE, "ff60000000000001"),
@@ -899,79 +914,105 @@ describe("a batch carrying two customers' evidence when the store refuses one of
   }
 
   /**
-   * One customer's refused rows cost exactly that customer's spans — the
-   * other group still lands, and the answer counts as rejected only what was
-   * genuinely not stored. Nothing that landed is reported rejected: the
-   * sender's write-ahead log believes this count, and a landed span reported
-   * rejected would be evidence the sender stops owing.
+   * **A segment belongs to exactly one project, and the answer waits for all of
+   * them.**
+   *
+   * The trusted service batch is the only body that can carry two projects, and
+   * this is the one place the rule is visible: two projects may not share a
+   * durable object, so one request becomes two sealed segments — and the sender
+   * is not told the batch was accepted until every one of them is in the bucket.
+   * A per-group answer would report success while one project's evidence was
+   * still in a local log.
+   *
+   * No shipped client sends this. The simulator refuses a batch spanning more
+   * than one trace and delivers one reporter per simulation, so the body is
+   * built by hand here — the route's multi-project path is defensive, and a
+   * defence nothing exercises is a defence nobody knows is broken.
    */
-  it("lands the other customer's group, and counts only the refused one rejected", async () => {
-    await store().command(
-      "alter table spans add constraint refuses_globex check " +
-        `organization_id != '${globex.organizationId}'`,
+  it("seals one segment for each project and answers only when both are durable", async () => {
+    const response = await stage(twoTenantBatch());
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({});
+
+    // The request has been answered, so both projects' evidence is durable —
+    // in two objects, each naming one project and holding only its records.
+    const pending = await pendingSegments(ingestStore());
+    expect(pending).toHaveLength(2);
+
+    const byProject = new Map(
+      pending.map((segment) => [segment.header.project_id, segment]),
+    );
+    expect([...byProject.keys()].sort()).toEqual(
+      [acme.projectId, globex.projectId].sort(),
     );
 
-    try {
-      const response = await post(twoTenantBatch());
+    const acmeSegment = byProject.get(acme.projectId);
+    expect(acmeSegment?.header.organization_id).toBe(acme.organizationId);
+    expect(acmeSegment?.records.map((record) => record.span_id)).toEqual([
+      "ff60000000000002",
+    ]);
 
-      expect(response.statusCode, response.body).toBe(200);
-      expect(response.json()).toEqual({
-        partialSuccess: {
-          rejectedSpans: "1",
-          errorMessage: expect.stringContaining("the trace store refused"),
-        },
-      });
-    } finally {
-      await store().command("alter table spans drop constraint refuses_globex");
-    }
+    const globexSegment = byProject.get(globex.projectId);
+    expect(globexSegment?.header.organization_id).toBe(globex.organizationId);
+    expect(globexSegment?.records.map((record) => record.span_id)).toEqual([
+      "ff60000000000001",
+    ]);
 
-    // The tenant the store refused lost its span, and only it.
-    expect(
-      await countOf(
-        "select count() as n from spans where span_id = 'ff60000000000001'",
-      ),
-    ).toBe(0);
-    const landed = await store().rows<{ organization_id: string; text: string }>(
-      "select organization_id, text from spans where span_id = 'ff60000000000002'",
+    expect(await api.drainEvidence()).toBe(2);
+    const landed = await store().rows<{
+      organization_id: string;
+      span_id: string;
+      text: string;
+    }>(
+      "select organization_id, span_id, text from spans final " +
+        "where span_id in ('ff60000000000001', 'ff60000000000002') " +
+        "order by span_id",
     );
     expect(landed).toEqual([
       {
+        organization_id: globex.organizationId,
+        span_id: "ff60000000000001",
+        text: "Said while the store was fussy.",
+      },
+      {
         organization_id: acme.organizationId,
+        span_id: "ff60000000000002",
         text: "Said while the store was fussy.",
       },
     ]);
   });
 
   /**
-   * The other kind of store trouble stays the error it is: rows a minute of
-   * patience would land must reach the sender as a retry, never as a
-   * rejection its write-ahead log would believe forever. The resend is safe
-   * on the groups that landed before the fault within ClickHouse's recent
-   * exact-block window.
+   * **A trace store that is down is not an ingestion failure any more.**
+   *
+   * The acceptance boundary is the object store, so a ClickHouse outage costs
+   * query visibility and nothing else: the request is accepted, the evidence is
+   * durable, and the rows appear when the store comes back and the object is
+   * drained. A 5xx here would send an exporter into a retry loop over evidence
+   * Egma already holds.
    */
-  it("still answers a store that merely failed as an error the sender will retry", async () => {
+  it("accepts evidence while the trace store is unreachable, and lands it on recovery", async () => {
     await disconnectClickHouse();
+    let accepted;
     try {
-      const response = await post(twoTenantBatch());
-      expect(response.statusCode).toBe(500);
+      accepted = await stage(twoTenantBatch());
     } finally {
       connectClickHouse({ clickhouseUrl: store().url, maxOpenConnections: 4 });
     }
+    expect(accepted.statusCode, accepted.body).toBe(200);
+    expect(await pendingSegments(ingestStore())).toHaveLength(2);
 
-    // And the same document goes through whole once the store is back.
-    const retried = await post(twoTenantBatch());
-    expect(retried.statusCode, retried.body).toBe(200);
-    expect(retried.json()).toEqual({});
+    expect(await api.drainEvidence()).toBe(2);
     expect(
       await countOf(
-        "select count() as n from spans where span_id in " +
+        "select count() as n from spans final where span_id in " +
           "('ff60000000000001', 'ff60000000000002')",
       ),
     ).toBe(2);
   });
 });
 
-describe("the customer-key path, beside it", () => {
+describe.skipIf(!storage.available)("the customer-key path, beside it", () => {
   /**
    * The naming attribute belongs to the service path alone. A customer's
    * exporter is free to send it — nothing about a customer request is refused
@@ -1034,7 +1075,7 @@ describe("the customer-key path, beside it", () => {
       payload: string;
     }>(
       "select organization_id, project_id, source, emitter, run_id, kind, " +
-        `payload from spans where trace_id = '${traceId}'`,
+        `payload from spans final where trace_id = '${traceId}'`,
     );
 
     expect(rows).toHaveLength(1);
@@ -1067,7 +1108,7 @@ describe("the customer-key path, beside it", () => {
   });
 });
 
-describe("what the service path leaves alone", () => {
+describe.skipIf(!storage.available)("what the service path leaves alone", () => {
   /**
    * A simulation's grading work is minted by the transaction that lands it
    * terminal, so the door writes no queue row for simulation spans — one had

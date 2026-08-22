@@ -148,6 +148,7 @@ beforeAll(async () => {
     retellFetch: browserRetellFetch,
     platformSettings: BROWSER_PHONE_SETTINGS,
     ...(storage.available ? { blob: storage.store } : {}),
+    ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
   });
   origin = instance.origin;
 
@@ -1937,13 +1938,13 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
       // two views of one conversation.
       const at = new Date(AT.getTime() - 5 * 60 * 1000);
       const heard = await fileTranscriptOf(
-        instance.api,
+        instance,
         run.heard,
         { human: "I need to move my cleaning.", agent: "Of course — when to?" },
         at,
       );
       const silent = await fileTranscriptOf(
-        instance.api,
+        instance,
         run.silent,
         { human: "Hello? Is anybody there?", agent: "" },
         at,
@@ -3041,7 +3042,7 @@ describe("the complete product, walked in order in a second project", () => {
         );
       }
       await fileTranscriptOf(
-        instance.api,
+        instance,
         landed,
         {
           human: "I need to move my cleaning to next week.",

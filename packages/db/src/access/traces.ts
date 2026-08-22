@@ -20,17 +20,25 @@ import type { SpanSource } from "./spans.ts";
  * past the organization the credential resolved to.
  *
  * **Everything here is filed along the table's own sort key**, which is
- * `(organization_id, project_id, toStartOfMinute(started_at), xxHash32(trace_id),
- * span_id)`. So every query below names the organization, names the project when
- * there is one, and names a bounded window of time. There is no call in this file
- * that can be made without a window, which is what makes an unfiltered scan
- * unreachable rather than merely discouraged.
+ * `(organization_id, project_id, trace_id, span_id)` — the span's whole
+ * permanent identity. So every query below names the organization, names the
+ * project when there is one, and names a bounded window of time. There is no
+ * call in this file that can be made without a window, which is what makes an
+ * unfiltered scan unreachable rather than merely discouraged.
  *
- * **Nothing is deduplicated at read time.** No `FINAL`, no `LIMIT 1 BY`, nothing
- * of that family anywhere near `spans` — the obligation not to send a span twice
- * belongs to whoever wrote it, and ClickHouse's block-level insert dedup is the
- * backstop under that. The `group by trace_id` in the list aggregates every
- * stored row for one trace; it does not collapse rows that reuse an id.
+ * **Every correctness-sensitive read says `FINAL`.** `spans` and `turns`
+ * collapse on that identity, and a collapse happens on a merge that has not
+ * necessarily run — so two physical copies of one replayed span are ordinary
+ * and momentary, and a read without `FINAL` would show them as the human having
+ * said the same thing twice. `FINAL` is what makes the visible evidence the
+ * identity's evidence rather than whatever parts happen to exist right now. It
+ * is the first implementation on purpose: a cheaper read replacing it needs a
+ * proof that it answers the same, not an argument that duplicates are rare.
+ *
+ * What that is not is a way to reconcile *different* evidence under one
+ * identity. Nothing in this file chooses between two accounts of one span, and
+ * nothing may be added that does: the writer refuses a conflict before the
+ * second account is stored, so by the time a read happens there is one.
  *
  * **Reading is permitted to every role, `viewer` included.** The permission
  * table's `read` row names all three, and this file asks for it the way every
@@ -687,7 +695,7 @@ export async function listTraces(
     `select
        trace_id,
        ${TRACE_FACTS}
-     from ${SPANS_TABLE}
+     from ${SPANS_TABLE} final
      where ${tenancy.clause}
        and started_at >= ${asDateTime64(window.from)}
        and started_at < ${asDateTime64(window.to)}${narrowing}
@@ -791,7 +799,7 @@ async function previewsFor(
 
   const rows = await rowsOf<{ trace_id: string; preview: string }>(
     `select trace_id, argMin(text_preview, started_at) as preview
-     from ${TURNS_TABLE}
+     from ${TURNS_TABLE} final
      where ${tenancy.clause}
        and started_at >= ${asDateTime64(fromMicroseconds)}
        and started_at < ${asDateTime64(toMicroseconds)}
@@ -890,17 +898,18 @@ export async function readTrace(
   // tenancy and the same window, so the third can no more reach another
   // customer's row than the first two can.
   //
-  // A reused span id can carry changed evidence at the same timestamp. Payload
-  // leads the remaining tie-breakers because raw-only changes must be stable
-  // too; the returned fields finish the order when a direct writer supplied the
-  // same payload with a changed projection. Rows equal on every listed value
-  // are indistinguishable in this response, so their order cannot move a fact.
+  // The tree is ordered by when a span started and then by its id, and there is
+  // nothing after that. There used to be: a long tail of tie-breakers ending at
+  // the payload, which existed to give a stable order to two rows carrying
+  // different evidence under one span id. That is not a case to order any more —
+  // it is refused before the second row can be written — and an order that made
+  // it look settled would be the response quietly picking a winner.
   const [summaries, rows, roots] = await Promise.all([
     rowsOf<SummaryRow>(
       `select
        trace_id,
        ${TRACE_FACTS}
-     from ${SPANS_TABLE}
+     from ${SPANS_TABLE} final
      where ${where}
      group by trace_id`,
       parameters,
@@ -919,22 +928,9 @@ export async function readTrace(
        tool_name,
        tool_arguments,
        tool_result
-     from ${SPANS_TABLE}
+     from ${SPANS_TABLE} final
      where ${where}
-     order by
-       started_at asc,
-       span_id asc,
-       payload asc,
-       parent_span_id asc,
-       name asc,
-       kind asc,
-       status asc,
-       duration_ns asc,
-       text asc,
-       audio_url asc,
-       tool_name asc,
-       tool_arguments asc,
-       tool_result asc
+     order by started_at asc, span_id asc
      limit ${MAXIMUM_SPANS_PER_TRACE + 1}`,
       parameters,
     ),
@@ -951,7 +947,10 @@ export async function readTrace(
       // The same predicate also catches a span whose unusable parent id
       // normalised away at the door — the orphan `transcriptOf` files at the
       // top, below — so this is honestly *the first parentless row* and not
-      // "the root" by any stronger claim. Nothing is lost by it: a block only
+      // "the root" by any stronger claim. **That is a read concern and never a
+      // completion authority**: whether a trace has ended is a fact its platform
+      // states, and no query here may be read as answering it. Nothing is lost
+      // by it: a block only
       // ever rides the row a normalizer wrote it on, and a trace holding
       // several parentless rows is a flush whose parent never came, which
       // began at the earliest of them. The span id breaks a tie exactly as the
@@ -960,7 +959,7 @@ export async function readTrace(
       `select
        span_id,
        JSONExtractRaw(payload, '${NORMALISED_KEY}') as normalised
-     from ${SPANS_TABLE}
+     from ${SPANS_TABLE} final
      where ${where}
        and parent_span_id = ''
      order by started_at asc, span_id asc

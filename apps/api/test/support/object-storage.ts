@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 
+import type { IngestionStore } from "../../src/ingestion/object-store.ts";
 import {
   presignedObjectUrl,
   type BlobStore,
@@ -38,7 +39,20 @@ const ROOT_SECRET_ACCESS_KEY = "SENTINEL-object-storage-secret-3f8c1a9d47b2";
 const READ_ACCESS_KEY_ID = "SENTINEL-read-only-key-id-4b71";
 const READ_SECRET_ACCESS_KEY = "SENTINEL-read-only-secret-8c2fd05a91e6";
 
+/**
+ * What the ingestion path holds. A third credential, not a widening of either
+ * pair above: it can write, read, list and delete inside one prefix of one
+ * bucket, and it can do nothing at all to a recording. A sentinel like the
+ * others, so a test that finds one of these strings in a sealed segment or in a
+ * service's environment can say which credential leaked.
+ */
+const INGEST_ACCESS_KEY_ID = "SENTINEL-ingest-key-id-9e34";
+const INGEST_SECRET_ACCESS_KEY = "SENTINEL-ingest-secret-2a75be08cf13";
+
 export const BUCKET = "egma-recordings";
+
+/** The second bucket on the same store. Never the recordings one. */
+export const INGEST_BUCKET = "egma-ingestion";
 
 /**
  * The policy the read-only credential is given, written the way the compose
@@ -64,6 +78,40 @@ export const READ_ONLY_POLICY = {
   ],
 } as const;
 
+/**
+ * The policy the ingestion credential is given, written the way the compose
+ * file's bucket entrypoint writes it: one prefix of one bucket, and the four
+ * operations the pending spool needs.
+ *
+ * **The prefix is the containment**, and it is the whole reason this is a third
+ * credential rather than a wider second one. Ingestion writes, reads, lists and
+ * deletes — a spool is not much use otherwise — so what keeps a leak of this
+ * pair from reaching a customer's call recording cannot be the operations. It
+ * is the resource: `arn:aws:s3:::egma-ingestion/pending/*` names one prefix of
+ * one bucket and nothing in the recordings bucket at all, and the listing
+ * statement carries a prefix condition so the credential cannot even enumerate
+ * the ingestion bucket outside `pending/`.
+ *
+ * `deployment.test.ts` holds the compose file's own copy against this one, so
+ * the two cannot drift into proving different things.
+ */
+export const INGEST_POLICY = {
+  Version: "2012-10-17",
+  Statement: [
+    {
+      Effect: "Allow",
+      Action: ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      Resource: [`arn:aws:s3:::${INGEST_BUCKET}/pending/*`],
+    },
+    {
+      Effect: "Allow",
+      Action: ["s3:ListBucket"],
+      Resource: [`arn:aws:s3:::${INGEST_BUCKET}`],
+      Condition: { StringLike: { "s3:prefix": ["pending/*"] } },
+    },
+  ],
+} as const;
+
 /** How long the image is given to arrive, and then the container to answer. */
 const START_MILLISECONDS = 300_000;
 const READY_MILLISECONDS = 60_000;
@@ -74,6 +122,11 @@ export type RunningObjectStorage = {
   readonly store: BlobStore;
   /** The write half, for putting a recording there in the first place. */
   readonly writeStore: BlobStore;
+  /**
+   * The ingestion bucket and the credential confined to its pending prefix —
+   * the second bucket on the same store, as the deployment makes it.
+   */
+  readonly ingestStore: IngestionStore;
   /** Put bytes in the store under a key, and answer the reference. */
   put(key: string, body: Uint8Array): Promise<string>;
   stop(): void;
@@ -250,6 +303,15 @@ export async function startObjectStorage(
         "mc admin policy create egma egma-read-recordings /tmp/read-recordings.json",
         `mc admin user add egma ${READ_ACCESS_KEY_ID} ${READ_SECRET_ACCESS_KEY}`,
         `mc admin policy attach egma egma-read-recordings --user ${READ_ACCESS_KEY_ID}`,
+        // And the second bucket beside it, with its own user and its own
+        // policy. Two buckets on one store is the deployment's shape, so it is
+        // this file's shape too: a suite proving ingestion against a store that
+        // held no recordings would not be proving that the two stay apart.
+        `mc mb --ignore-existing egma/${INGEST_BUCKET}`,
+        `printf '%s' '${JSON.stringify(INGEST_POLICY)}' > /tmp/ingestion.json`,
+        "mc admin policy create egma egma-ingestion /tmp/ingestion.json",
+        `mc admin user add egma ${INGEST_ACCESS_KEY_ID} ${INGEST_SECRET_ACCESS_KEY}`,
+        `mc admin policy attach egma egma-ingestion --user ${INGEST_ACCESS_KEY_ID}`,
       ].join(" && "),
     ],
     READY_MILLISECONDS,
@@ -257,7 +319,7 @@ export async function startObjectStorage(
   if (!provisioned.ok) {
     stop();
     return absentObjectStorage(
-      "the object store started but its bucket and read-only user could " +
+      "the object store started but its buckets and confined users could " +
         `not be made, so the object-storage path is not proved here: ${provisioned.output}`,
     );
   }
@@ -277,6 +339,13 @@ export async function startObjectStorage(
       secretAccessKey: READ_SECRET_ACCESS_KEY,
     },
     writeStore,
+    ingestStore: {
+      endpoint,
+      bucket: INGEST_BUCKET,
+      region: "us-east-1",
+      accessKeyId: INGEST_ACCESS_KEY_ID,
+      secretAccessKey: INGEST_SECRET_ACCESS_KEY,
+    },
     async put(key, body) {
       // Through a presigned PUT with the *write* credential, which is the one
       // credential in this arrangement that is allowed to. It doubles as the

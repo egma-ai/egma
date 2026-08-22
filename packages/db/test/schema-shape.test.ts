@@ -75,12 +75,10 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   grading_job: "gjb",
   // One pulled agent's machine notebook: cursor, windows, lease, retry clock.
   monitoring_state: "mst",
-  // The exactly-once ledger for a conversation egma watched on somebody else's
-  // platform. Its identity is its own because the row outlives the write it
-  // guards: a sweep reads it back to replay an append that never landed.
-  production_trace_claim: "ptc",
-  // A provider call that could not be normalized or written, held for replay.
-  monitoring_failure: "mnf",
+  // A provider call egma could not fetch or normalize: its bounded retry
+  // budget, and then the identity-only marker that stops the overlap starting
+  // a second one. It holds no provider document and expires by itself.
+  retell_call_retry: "rcr",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -610,8 +608,6 @@ describe("every enumerated value", () => {
       { table: "run_event", column: "kind" },
       { table: "run_event", column: "verdict" },
       { table: "monitoring_state", column: "scan_kind" },
-      { table: "monitoring_failure", column: "status" },
-      { table: "production_trace_claim", column: "status" },
     ];
 
     const { rows } = await database.sql<{

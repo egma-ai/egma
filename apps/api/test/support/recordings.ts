@@ -11,6 +11,26 @@ import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../../src/routes/traces.ts";
+import type { TestApi } from "./api.ts";
+
+/**
+ * A running Egma, however this tree spells it.
+ *
+ * Two arrangements answer for one: the in-process test API calls its Fastify
+ * instance `app`, and the listening browser instance calls it `api`. Asking for
+ * either rather than picking one keeps a helper both of them use from forcing a
+ * rename through a suite that has nothing to do with it.
+ */
+export type RunningEgma =
+  | Pick<TestApi, "app" | "drainEvidence">
+  | {
+      readonly api: FastifyInstance;
+      drainEvidence(): Promise<number>;
+    };
+
+function doorOf(egma: RunningEgma): FastifyInstance {
+  return "app" in egma ? egma.app : egma.api;
+}
 import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
 
 /**
@@ -97,7 +117,7 @@ export type FiledTranscript = {
  * what proves a transcript and a run's results are looking at one conversation.
  */
 export async function fileTranscriptOf(
-  app: FastifyInstance,
+  egma: RunningEgma,
   simulationId: string,
   said: { readonly human: string; readonly agent: string },
   openedAt: Date,
@@ -130,7 +150,7 @@ export async function fileTranscriptOf(
         : [{ key: "egma.turn.text", value: { stringValue: text } }],
   });
 
-  const posted = await app.inject({
+  const posted = await doorOf(egma).inject({
     method: "POST",
     url: OTLP_TRACES_PATH,
     headers: {
@@ -167,6 +187,9 @@ export async function fileTranscriptOf(
     }),
   });
   expect(posted.statusCode, posted.body).toBe(200);
+  // The door answers on object-store durability; a transcript is read from
+  // rows, so the evidence is carried the rest of the way here.
+  await egma.drainEvidence();
 
   return {
     traceId: trace,

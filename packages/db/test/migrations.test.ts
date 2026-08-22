@@ -3973,7 +3973,9 @@ describe("the direct Monitoring cutover (0038)", () => {
     traceId: "a".repeat(32),
   };
   const oldProductionClaim = {
-    id: newId("ptc"),
+    // Literal rather than minted: the prefix belonged to a table this history
+    // still holds and the release under test removes.
+    id: `ptc_${"A".repeat(26)}`,
     traceId: "b".repeat(32),
     callId: "call_before_monitoring_cutover",
   };
@@ -4305,7 +4307,7 @@ describe("the direct Monitoring cutover (0038)", () => {
           platform_agent_id, payload, ended_at, status, claimed_at)
        values ($1, $2, $3, $4, $5, 'agent_retell_chat', '{}', now(), 'claimed', now())`,
       [
-        newId("ptc"),
+        `ptc_${"B".repeat(26)}`,
         organizationId,
         projectId,
         oldProductionClaim.traceId,
@@ -4682,5 +4684,270 @@ describe("the clean test-suite cutover (0040)", () => {
       [productionJobId],
     );
     expect(rows).toEqual([{ id: productionJobId, source: "production" }]);
+  });
+});
+
+describe("the Retell polling-control cutover (0041)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+  let cutoverStartedAt: Date;
+  let cutoverFinishedAt: Date;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  // Literal ids, because 0042 takes both prefixes out of the shipped minter:
+  // the rows this cutover reads are ones a build before 0042 wrote.
+  const setupId = `mns_${"A".repeat(26)}`;
+  const importingAgent = `rma_${"A".repeat(26)}`;
+  const pollingAgent = `rma_${"B".repeat(26)}`;
+  const oldClaim = { id: `ptc_${"A".repeat(26)}`, callId: "call_before_it" };
+  const oldFailure = { id: `rif_${"A".repeat(26)}`, callId: "call_lost" };
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("retell_polling_control_cutover");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0041-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0041") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      `insert into organization (id, name, slug) values ($1, 'Polling', 'polling')`,
+      [organizationId],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Polling', 'polling', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+    await client.query(
+      `insert into monitoring_setup
+         (id, organization_id, project_id, agent_platform, strategy,
+          credentials, credentials_hint)
+       values ($1, $2, $3, 'retell', 'retell_api_polling', 'sealed', 'key1')`,
+      [setupId, organizationId, projectId],
+    );
+
+    // The two states the old build could leave a selected agent in: one paused
+    // part-way through an import with a cursor and a live lease, and one
+    // settled into regular polling with a paused daily reconciliation window
+    // waiting beside it.
+    await client.query(
+      `insert into retell_monitored_agent
+         (id, monitoring_setup_id, organization_id, project_id,
+          platform_agent_id, platform_agent_name, state, scan_kind, scan_from,
+          scan_through, pagination_key, pagination_trail, completed_through,
+          next_regular_poll_at, next_poll_at, next_reconciliation_at,
+          lease_owner, lease_expires_at)
+       values ($1, $2, $3, $4, 'agent_importing', 'Importing', 'importing',
+          'historical_import', now() - interval '30 days', now(), 'page-7',
+          '["page-1","page-7"]', null, now() + interval '30 seconds', now(),
+          now() + interval '1 day', 'lease-owner-uuid',
+          now() + interval '90 seconds')`,
+      [importingAgent, setupId, organizationId, projectId],
+    );
+    await client.query(
+      `insert into retell_monitored_agent
+         (id, monitoring_setup_id, organization_id, project_id,
+          platform_agent_id, platform_agent_name, state, pagination_trail,
+          reconciliation_from, reconciliation_through,
+          reconciliation_pagination_key, reconciliation_pagination_trail,
+          reconciliation_needs_regular, completed_through,
+          next_regular_poll_at, next_poll_at, next_reconciliation_at)
+       values ($1, $2, $3, $4, 'agent_polling', 'Polling', 'active', '[]',
+          now() - interval '30 days', now() - interval '2 hours', 'recon-page',
+          '["recon-page"]', true, now() - interval '2 hours',
+          now() + interval '30 seconds', now() + interval '30 seconds',
+          now() + interval '22 hours')`,
+      [pollingAgent, setupId, organizationId, projectId],
+    );
+
+    await client.query(
+      `insert into production_trace_claim
+         (id, organization_id, project_id, trace_id, provider_call_id,
+          platform_agent_id, payload, ended_at, status, claimed_at, written_at)
+       values ($1, $2, $3, $4, $5, 'agent_polling',
+          '{"call_id":"call_before_it"}', now(), 'written', now(), now())`,
+      [oldClaim.id, organizationId, projectId, "c".repeat(32), oldClaim.callId],
+    );
+    await client.query(
+      `insert into retell_ingestion_failure
+         (id, organization_id, project_id, retell_monitored_agent_id,
+          provider_call_id, error_kind, payload, attempts, status,
+          last_attempt_at)
+       values ($1, $2, $3, $4, $5, 'malformed_provider_call', '{}', 3, 'open',
+          now())`,
+      [
+        oldFailure.id,
+        organizationId,
+        projectId,
+        pollingAgent,
+        oldFailure.callId,
+      ],
+    );
+
+    const cutover = (await readMigrations()).find(
+      (migration) => migration.name === "0041_retell_polling_control.sql",
+    );
+    if (cutover === undefined) throw new Error("missing migration 0041");
+    await writeFile(path.join(before, cutover.name), cutover.sql);
+
+    cutoverStartedAt = new Date();
+    await runMigrations(database.url, before);
+    cutoverFinishedAt = new Date();
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("removes the payload claim and the per-call failure tables", async () => {
+    const { rows } = await client.query<{ table_name: string }>(
+      `select table_name from information_schema.tables
+        where table_schema = 'public'
+          and table_name in ('production_trace_claim', 'retell_ingestion_failure')`,
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("removes every reconciliation column and leaves one next-poll time", async () => {
+    const { rows } = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'retell_monitored_agent'`,
+    );
+    const columns = rows.map((row) => row.column_name);
+    for (const gone of [
+      "reconciliation_from",
+      "reconciliation_through",
+      "reconciliation_pagination_key",
+      "reconciliation_pagination_trail",
+      "reconciliation_needs_regular",
+      "next_regular_poll_at",
+      "next_reconciliation_at",
+    ]) {
+      expect(columns).not.toContain(gone);
+    }
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        "next_poll_at",
+        "regular_floor_at",
+        "import_generation",
+      ]),
+    );
+  });
+
+  it("leaves no scan kind naming a scan this build cannot run", async () => {
+    const { rows } = await client.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition from pg_constraint
+        where conname = 'retell_monitored_agent_scan_kind_allowed'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.definition).toContain("historical_import");
+    expect(rows[0]?.definition).toContain("regular");
+    expect(rows[0]?.definition).not.toContain("reconciliation");
+  });
+
+  it("resets every selected agent to a regular poll due at the cutover, floored there", async () => {
+    const { rows } = await client.query<{
+      id: string;
+      scan_kind: string | null;
+      scan_from: Date | null;
+      scan_through: Date | null;
+      pagination_key: string | null;
+      pagination_trail: string;
+      lease_owner: string | null;
+      lease_expires_at: Date | null;
+      completed_through: Date;
+      next_poll_at: Date;
+      regular_floor_at: Date;
+      import_generation: number;
+    }>(
+      `select id, scan_kind, scan_from, scan_through, pagination_key,
+              pagination_trail, lease_owner, lease_expires_at,
+              completed_through, next_poll_at, regular_floor_at,
+              import_generation
+         from retell_monitored_agent order by platform_agent_id`,
+    );
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.scan_kind).toBeNull();
+      expect(row.scan_from).toBeNull();
+      expect(row.scan_through).toBeNull();
+      expect(row.pagination_key).toBeNull();
+      expect(row.pagination_trail).toBe("[]");
+      expect(row.lease_owner).toBeNull();
+      expect(row.lease_expires_at).toBeNull();
+      expect(row.import_generation).toBe(1);
+      for (const instant of [
+        row.completed_through,
+        row.next_poll_at,
+        row.regular_floor_at,
+      ]) {
+        expect(instant.getTime()).toBeGreaterThanOrEqual(
+          cutoverStartedAt.getTime() - 1_000,
+        );
+        expect(instant.getTime()).toBeLessThanOrEqual(
+          cutoverFinishedAt.getTime() + 1_000,
+        );
+      }
+      // The floor is what stops the first window's five-minute overlap
+      // reaching behind the release, so the two are the same instant.
+      expect(row.regular_floor_at.getTime()).toBe(
+        row.completed_through.getTime(),
+      );
+    }
+  });
+
+  it("holds transient call state to one schedule and a bounded budget", async () => {
+    await client.query(
+      `insert into retell_call_retry
+         (id, organization_id, project_id, retell_monitored_agent_id,
+          provider_call_id, error_kind, attempts, last_attempt_at,
+          next_attempt_at)
+       values ($1, $2, $3, $4, 'call_retrying', 'provider_call_refused', 1,
+          now(), now() + interval '30 seconds')`,
+      [newId("rcr"), organizationId, projectId, pollingAgent],
+    );
+    await expect(
+      client.query(
+        `insert into retell_call_retry
+           (id, organization_id, project_id, retell_monitored_agent_id,
+            provider_call_id, error_kind, attempts, last_attempt_at,
+            next_attempt_at, expires_at)
+         values ($1, $2, $3, $4, 'call_both', 'provider_call_refused', 1,
+            now(), now(), now())`,
+        [newId("rcr"), organizationId, projectId, pollingAgent],
+      ),
+    ).rejects.toMatchObject({ constraint: "retell_call_retry_one_schedule" });
+    await expect(
+      client.query(
+        `insert into retell_call_retry
+           (id, organization_id, project_id, retell_monitored_agent_id,
+            provider_call_id, error_kind, attempts, last_attempt_at,
+            next_attempt_at)
+         values ($1, $2, $3, $4, 'call_over_budget', 'provider_call_refused',
+            5, now(), now())`,
+        [newId("rcr"), organizationId, projectId, pollingAgent],
+      ),
+    ).rejects.toMatchObject({
+      constraint: "retell_call_retry_attempts_bounded",
+    });
+  });
+
+  it("takes a selected agent's transient call state with it", async () => {
+    await client.query("delete from retell_monitored_agent where id = $1", [
+      pollingAgent,
+    ]);
+    const { rows } = await client.query<{ count: string }>(
+      "select count(*)::text as count from retell_call_retry",
+    );
+    expect(rows).toEqual([{ count: "0" }]);
   });
 });

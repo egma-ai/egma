@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import {
   connect,
   connectClickHouse,
@@ -16,6 +20,8 @@ import type { Email, EmailSender } from "../../src/auth/email.ts";
 import type { RateLimit } from "../../src/http/rate-limit.ts";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import type { Identity } from "../../src/auth/better-auth.ts";
+import type { IngestionStore } from "../../src/ingestion/object-store.ts";
+import { drainPendingEvidence } from "./ingestion.ts";
 import {
   createMigratedDatabase,
   TEST_ENCRYPTION_KEY,
@@ -50,6 +56,16 @@ export type TestApi = {
   readonly traceStore: MigratedTraceStore | undefined;
   /** Everything the email transport was handed, in order. */
   readonly mail: readonly Email[];
+  /**
+   * Turn every pending object into rows, the way the deployment does.
+   *
+   * The door answers on object-store durability and stops there, so a suite
+   * whose claim is about what a reader sees calls this between posting and
+   * reading. It answers how many objects the pass drained. On an instance that
+   * drains on its own, that count is whatever this pass happened to find — the
+   * evidence is what to assert on, not the number.
+   */
+  drainEvidence(): Promise<number>;
   close(): Promise<void>;
 };
 
@@ -112,6 +128,60 @@ export type TestApiOptions = {
    */
   readonly traceStore?: boolean;
   /**
+   * The ingestion bucket this instance accepts evidence into, from
+   * `startObjectStorage`. Absent leaves the instance with nowhere to make
+   * evidence durable, which is what an unconfigured deployment is: the door
+   * answers `503` and nothing is staged.
+   */
+  readonly ingestStore?: IngestionStore;
+  /**
+   * How long the oldest staged record waits for company before its segment
+   * seals. Short here, because a suite posting thirty documents would otherwise
+   * spend fifteen seconds waiting out the deployment's own half-second — the
+   * timer's *behaviour* is proved where it is the claim.
+   */
+  readonly ingestionFlushMilliseconds?: number;
+  /**
+   * How long a request waits for object-store durability before it is answered
+   * retryably. Short here for the suites whose claim *is* the bound, so that
+   * proving it costs a second rather than the deployment's ten.
+   */
+  readonly ingestionRequestTimeoutMilliseconds?: number;
+  /**
+   * What the local log will hold before it refuses. Tiny here for the one suite
+   * whose claim is the refusal, so that reaching a bound costs one request
+   * rather than half a gigabyte.
+   */
+  readonly ingestionLogMaxBytes?: number;
+  /**
+   * How many staged records the local log will hold before it refuses. Zero is
+   * a log that is full before anything is staged, which is how the readiness
+   * suite reaches the refusal without writing half a gigabyte.
+   */
+  readonly ingestionLogMaxRecords?: number;
+  /**
+   * Which halves of ingestion this instance serves. `all` by default, which is
+   * what every shipped deployment runs.
+   */
+  readonly role?: Config["ingestion"]["role"];
+  /**
+   * Where the local log lives, for the one case that needs two instances to
+   * share one: a stop and a start over staged evidence that outlived the
+   * process. A directory named here belongs to the caller and is left where it
+   * is on close.
+   */
+  readonly ingestionLogDirectory?: string;
+  /**
+   * Whether this instance runs the standing drainer. Off by default, so that a
+   * suite can look at a sealed segment before anything drains it — the state a
+   * deployment passes through in about the time one upload takes.
+   *
+   * On, the instance behaves as a deployment does: a durable segment is drained
+   * without anybody asking. `drainEvidence` then waits for a pass that started
+   * after the call, which is what a suite needs instead of a sleep.
+   */
+  readonly drainsPendingEvidence?: boolean;
+  /**
    * Somewhere to keep the log lines, for a test whose claim is about what is
    * not in them. Off by default: the suite runs silent, and a file that does
    * not read the log has no reason to collect one.
@@ -168,7 +238,16 @@ export async function createApi(
     },
   };
 
-  const config = testConfig({
+  // One directory per instance, on the same terms as the database: a local log
+  // is a durable record, and two instances sharing one would each recover the
+  // other's staged evidence on the way up.
+  const ingestionLogDirectory =
+    options.ingestStore === undefined
+      ? undefined
+      : (options.ingestionLogDirectory ??
+        mkdtempSync(path.join(tmpdir(), `egma-ingestion-${label}-`)));
+
+  const base = testConfig({
     databaseUrl: database.url,
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
@@ -179,6 +258,31 @@ export async function createApi(
       ? {}
       : { providerCredentials: options.providerCredentials }),
   });
+  const config: Config =
+    options.ingestStore === undefined || ingestionLogDirectory === undefined
+      ? base
+      : {
+          ...base,
+          ingestion: {
+            ...base.ingestion,
+            store: options.ingestStore,
+            logDirectory: ingestionLogDirectory,
+            flushMilliseconds: options.ingestionFlushMilliseconds ?? 20,
+            ...(options.ingestionRequestTimeoutMilliseconds === undefined
+              ? {}
+              : {
+                  requestTimeoutMilliseconds:
+                    options.ingestionRequestTimeoutMilliseconds,
+                }),
+            ...(options.ingestionLogMaxBytes === undefined
+              ? {}
+              : { logMaxBytes: options.ingestionLogMaxBytes }),
+            ...(options.ingestionLogMaxRecords === undefined
+              ? {}
+              : { logMaxRecords: options.ingestionLogMaxRecords }),
+            ...(options.role === undefined ? {} : { role: options.role }),
+          },
+        };
 
   // Through the deployment's own seeding door rather than written straight
   // into the table: what a test then reads back has been sealed and hinted the
@@ -195,8 +299,9 @@ export async function createApi(
   await seedPersonaLibrary();
   await seedGraderLibrary();
 
-  const { app, identity } = buildApi({
+  const { app, identity, drainer } = buildApi({
     config,
+    drainsPendingEvidence: options.drainsPendingEvidence ?? false,
     ...(options.defaultEmailSender === true ? {} : { emailSender }),
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
     ...(options.logTo === undefined ? {} : { logTo: options.logTo }),
@@ -225,10 +330,24 @@ export async function createApi(
     database,
     traceStore,
     mail,
+    async drainEvidence() {
+      if (options.ingestStore === undefined) return 0;
+      // The instance's own drainer where it has one, so a suite that proves the
+      // standing behaviour is waiting on the same object it is asserting about.
+      const standing = drainer();
+      if (standing !== undefined) return standing.drainNow();
+      return drainPendingEvidence(options.ingestStore);
+    },
     async close() {
       await app.close();
       await disconnect();
       await database.drop();
+      if (
+        ingestionLogDirectory !== undefined &&
+        options.ingestionLogDirectory === undefined
+      ) {
+        rmSync(ingestionLogDirectory, { recursive: true, force: true });
+      }
       if (traceStore !== undefined) {
         await disconnectClickHouse();
         await traceStore.drop();

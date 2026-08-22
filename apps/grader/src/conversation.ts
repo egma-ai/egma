@@ -188,6 +188,38 @@ export function conversationOfSimulation(
   };
 }
 
+/**
+ * Whether this conversation's evidence is still on its way rather than absent.
+ *
+ * **The two are indistinguishable at a single read, and only one of them is a
+ * reason to wait.** A simulation's spans reach the trace store some time after
+ * the door accepted them — acceptance is a promise that evidence is safe, not
+ * that it is readable — while the transaction that lands the simulation
+ * terminal is what mints the work to judge it. So a conversation asked about
+ * the instant it ends can legitimately have nothing under it yet, and judging
+ * that would write a permanent verdict about a conversation egma is holding.
+ *
+ * Three things say waiting cannot help, and each is a fact rather than a guess:
+ *
+ * - **The simulator reported it did not complete.** No conversation happened
+ *   and no telemetry arriving later makes one.
+ * - **The reading overran the span limit.** What egma holds is whole and larger
+ *   than one reading returns; more of it arriving changes nothing.
+ * - **The trace is closed.** Its root span is the last thing the simulator
+ *   sends, so a trace holding one is a trace holding everything.
+ *
+ * Anything else is a conversation that completed and whose record is not all
+ * here yet, which is worth asking again about.
+ */
+export function evidenceIsStillArriving(
+  simulation: Simulation,
+  trace: TraceDetail | undefined,
+): boolean {
+  if (simulation.status !== "completed") return false;
+  if (trace === undefined) return true;
+  return !trace.truncated && !rootArrivedIn(trace);
+}
+
 /** A simulation that produced no conversation, in the simulator's own words. */
 function neverRan(simulation: Simulation): string {
   return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to judge.`;

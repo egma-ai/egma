@@ -32,8 +32,6 @@ import {
   sendRefusal,
   unprocessable,
 } from "../http/refusals.ts";
-import type { RetellReach as RetellCallReach } from "../retell/api.ts";
-import { replayRetellIngestionFailure } from "../retell-production-ingestion.ts";
 
 export type MonitoringRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -55,19 +53,6 @@ function accountReach(options: MonitoringRoutesOptions): RetellAccountReach {
     signal: AbortSignal.timeout(15_000),
   };
 }
-
-function callReach(options: MonitoringRoutesOptions): RetellCallReach {
-  return {
-    ...(options.retellFetch === undefined
-      ? {}
-      : { fetchImpl: options.retellFetch }),
-    ...(options.retellReach?.url === undefined
-      ? {}
-      : { url: options.retellReach.url }),
-    signal: AbortSignal.timeout(15_000),
-  };
-}
-
 
 async function acting(
   auth: ReturnType<typeof requesterOf>["auth"],
@@ -219,7 +204,7 @@ function watchListIn(body: Body): readonly Wanted[] | string {
   return wanted;
 }
 
-/** The pull state as the contract publishes it. No credential, no health. */
+/** The pull state as the contract publishes it. Never the sealed key. */
 function statedAs(state: AgentPullState) {
   return {
     agentId: state.agentId,
@@ -232,8 +217,6 @@ function statedAs(state: AgentPullState) {
   };
 }
 
-
-
 export async function monitoringRoutes(
   app: FastifyInstance,
   options: MonitoringRoutesOptions,
@@ -242,7 +225,6 @@ export async function monitoringRoutes(
     provider: options.provider,
     rateLimit: options.rateLimit,
   });
-
 
   /** Validate a key and return only Retell voice-agent identities. */
   registerPlatformOperation(app, monitoringOperations.discoverRetellVoiceAgents, async (request, reply) => {
@@ -506,101 +488,6 @@ export async function monitoringRoutes(
     }
     return reply.send({ monitoring: statedAs(state) });
   });
-
-
-
-  registerPlatformOperation(
-    app,
-    monitoringOperations.replayMonitoringImportFailure,
-    async (request, reply) => {
-      const { auth } = requesterOf(request);
-      const query = request.query as Record<string, unknown>;
-      const { failureId } = request.params as { failureId: string };
-      const resolved = await acting(auth, projectNamed(query, {}));
-      if (!("auth" in resolved)) return refuseActing(reply, resolved);
-
-      const replayed = await replayRetellIngestionFailure({
-        auth: resolved.auth,
-        failureId,
-        reach: callReach(options),
-        log: {
-          info: (event) => request.log.info(event),
-          warn: (event) => request.log.warn(event),
-          error: (event) => request.log.error(event),
-        },
-      });
-      if (replayed.kind === "not_found") {
-        return sendRefusal(
-          reply,
-          "not_found",
-          "There is no open Retell import failure with this id in this project.",
-        );
-      }
-      // Two reasons a replay is refused before it spends a provider request,
-      // and only two: another replay already holds the lease, or the agent is
-      // waiting out its own retry clock. There is no stored health state any
-      // more, so nothing else can be known here — a branch for a rate limit or
-      // a bad key would be answering a question the claim never asks.
-      if (replayed.kind === "busy") {
-        if (replayed.reason === "backing_off") {
-          return sendRefusal(
-            reply,
-            "too_many_requests",
-            "This agent is waiting before it asks Retell again, until " +
-              `${replayed.retryAt.toISOString()}. Try the retry after that.`,
-          );
-        }
-        return sendRefusal(
-          reply,
-          "conflict",
-          "This Retell import failure is already being retried. Refresh Monitoring in a moment.",
-        );
-      }
-      if (replayed.kind === "lease_lost") {
-        return sendRefusal(
-          reply,
-          "conflict",
-          "This Retell import retry changed while it was running. Refresh Monitoring and try again.",
-        );
-      }
-      if (replayed.kind === "still_failed") {
-        return sendRefusal(
-          reply,
-          "conflict",
-          "Retell still cannot provide a complete production transcript. The import failure remains open.",
-        );
-      }
-      if (replayed.kind === "invalid_credential") {
-        return unprocessable(
-          reply,
-          "Retell rejected this agent's monitoring key. Start monitoring " +
-            "again with a current Retell API key, then retry this import.",
-        );
-      }
-      if (replayed.kind === "rate_limited") {
-        return sendRefusal(
-          reply,
-          "too_many_requests",
-          "Retell rate-limited this retry. Wait and try again.",
-        );
-      }
-      if (replayed.kind === "provider_unavailable") {
-        return sendRefusal(
-          reply,
-          "provider_unavailable",
-          "Retell did not answer this retry. Try again.",
-        );
-      }
-      return reply.send({
-        monitoringImportFailure: {
-          id: replayed.failureId,
-          status: "resolved",
-        },
-        trace: { id: replayed.traceId, write: replayed.write },
-      });
-    },
-  );
-
 
   app.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof UnprocessableInputError) {

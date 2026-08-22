@@ -1,27 +1,26 @@
 import type {
-  ProductionTraceClaim,
-  MonitoringFailureReplayTarget,
+  NewSpan,
   MonitoringPullTarget,
+  TransientRetellCall,
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { IngestionUnavailableError } from "../src/ingestion/accept.ts";
 import {
-  replayRetellIngestionFailure,
+  acceptedIdentities,
   runRetellProductionIngestion,
   startRetellProductionIngestion,
-  type RetellIngestionFailureReplayStore,
+  type RetellCommittedLookup,
+  type RetellEvidenceAcceptance,
   type RetellProductionIngestionMetricTurn,
   type RetellProductionIngestionMetrics,
   type RetellProductionIngestionLog,
+  type RetellProductionIngestionResult,
   type RetellProductionIngestionStore,
   type RetellProductionProvider,
-  type RetellProductionWriter,
 } from "../src/retell-production-ingestion.ts";
-import {
-  hydrateRetellCall,
-  type RetellCallPageRequest,
-} from "../src/retell/api.ts";
-import type { RetellCall } from "../src/retell/normalise.ts";
+import { type RetellCallPageRequest } from "../src/retell/api.ts";
+import { traceIdFor, type RetellCall } from "../src/retell/normalise.ts";
 
 const BASE = new Date("2026-08-19T12:00:00.000Z");
 const AUTH = {
@@ -33,7 +32,7 @@ const AUTH = {
 } as const;
 
 const TARGET: MonitoringPullTarget = {
-  agentId: "agt_ingestion_test",
+  agentId: "rma_ingestion_test",
   platformAgentId: "agent-secret-id-must-not-be-logged",
   platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
@@ -42,52 +41,80 @@ const TARGET: MonitoringPullTarget = {
   scanThrough: BASE,
   paginationKey: null,
   seenPaginationKeys: [],
+  importGeneration: 1,
+  hasTransientCallState: false,
   consecutiveFailures: 0,
   leaseOwner: "lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
 };
 
-const REPLAY_TARGET: MonitoringFailureReplayTarget = {
-  agentId: TARGET.agentId,
-  failureId: "mnf_explicit_replay_test",
-  providerCallId: "call_older_than_import_window",
-  platformAgentId: TARGET.platformAgentId,
-  platformAgentName: TARGET.platformAgentName,
-  apiKey: TARGET.apiKey,
-  consecutiveFailures: 0,
-  leaseOwner: "replay-lease-secret-must-not-be-logged",
-  leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
-  auth: AUTH,
-};
+/** The same waits the poller schedules, so a test can move a clock past them. */
+const BACKOFF = [30_000, 60_000, 120_000];
+/** Three regular overlaps, which is how long a recent-drop marker applies. */
+const MARKER_MILLISECONDS = 15 * 60_000;
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
+/* ------------------------------------------------------------------- *
+ * The control database, modelled rather than mocked.
+ *
+ * The bounded budget is only real if it survives a restart, and a restart is
+ * exactly "the process forgets everything and the rows do not". So these rows
+ * live outside the poller and outlive every call into it, and the assertions
+ * about counts, markers and generations are assertions about them.
+ * ------------------------------------------------------------------- */
+
+type RetryRow = {
+  attempts: number;
+  errorKind: string;
+  nextAttemptAt: Date | null;
+  expiresAt: Date | null;
+  importGeneration: number;
+};
+
 type StoreRecord = {
   claims: number;
   renewals: number;
-  accounted: string[];
+  transientLookups: string[][];
   checkpoints: { paginationKey: string; seenPaginationKeys: readonly string[] }[];
   yields: Date[];
   finishes: number[];
   failures: { kind: string; retryAt: Date }[];
   releases: string[];
-  permanentFailures: string[];
+  rows: Map<string, RetryRow>;
+  sweeps: number;
+  deletes: string[];
 };
 
-function record(): StoreRecord {
+function record(rows: Map<string, RetryRow> = new Map()): StoreRecord {
   return {
     claims: 0,
     renewals: 0,
-    accounted: [],
+    transientLookups: [],
     checkpoints: [],
     yields: [],
     finishes: [],
     failures: [],
     releases: [],
-    permanentFailures: [],
+    rows,
+    sweeps: 0,
+    deletes: [],
+  };
+}
+
+function transientOf(
+  providerCallId: string,
+  row: RetryRow,
+): TransientRetellCall {
+  return {
+    providerCallId,
+    attempts: row.attempts,
+    errorKind: row.errorKind,
+    nextAttemptAt: row.nextAttemptAt,
+    expiresAt: row.expiresAt,
   };
 }
 
@@ -99,15 +126,17 @@ function store(
   changes: StoreChanges = {},
 ): RetellProductionIngestionStore {
   let offered = false;
+  const applies = (row: RetryRow, generation: number, now: Date): boolean =>
+    row.importGeneration === generation &&
+    (row.nextAttemptAt !== null ||
+      (row.expiresAt !== null && row.expiresAt > now));
+
   return {
-    async sweepStaleProductionClaims() {
-      return [];
-    },
     async claimDueMonitoringPull() {
       recorded.claims += 1;
-      if (offered) return undefined;
+      if (offered || target === undefined) return undefined;
       offered = true;
-      return target;
+      return { ...target, hasTransientCallState: recorded.rows.size > 0 };
     },
     async renewMonitoringLease() {
       recorded.renewals += 1;
@@ -127,54 +156,72 @@ function store(
     },
     async failMonitoringPull(_auth, _target, input) {
       recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
-      return { changed: true, failures: 1 };
+      return { changed: true, failures: 1, startedAt: input.now ?? BASE };
     },
     async releaseMonitoringLease(_auth, _target, input) {
       recorded.releases.push(input.errorKind);
     },
-    async productionCallIsAccountedFor(_auth, providerCallId) {
-      recorded.accounted.push(providerCallId);
-      return false;
+    async transientRetellCallState(_auth, input) {
+      recorded.transientLookups.push([...input.providerCallIds]);
+      const now = input.now ?? BASE;
+      const found = new Map<string, TransientRetellCall>();
+      for (const providerCallId of input.providerCallIds) {
+        const row = recorded.rows.get(providerCallId);
+        if (row === undefined) continue;
+        if (!applies(row, input.importGeneration, now)) continue;
+        found.set(providerCallId, transientOf(providerCallId, row));
+      }
+      return found;
     },
-    async recordMonitoringFailure(_auth, _target, input) {
-      recorded.permanentFailures.push(input.providerCallId);
-      return { changed: true };
+    async dueRetellCallRetries(_auth, input) {
+      const now = input.now ?? BASE;
+      const due: TransientRetellCall[] = [];
+      for (const [providerCallId, row] of recorded.rows) {
+        if (row.importGeneration !== input.importGeneration) continue;
+        if (row.nextAttemptAt === null || row.nextAttemptAt > now) continue;
+        due.push(transientOf(providerCallId, row));
+      }
+      return due;
     },
-    ...changes,
-  };
-}
-
-type ReplayRecord = {
-  claimed: string[];
-  released: string[];
-  providerFailures: string[];
-  resolved: number;
-};
-
-function replayRecord(): ReplayRecord {
-  return { claimed: [], released: [], providerFailures: [], resolved: 0 };
-}
-
-function replayStore(
-  recorded: ReplayRecord,
-  changes: Partial<RetellIngestionFailureReplayStore> = {},
-): RetellIngestionFailureReplayStore {
-  return {
-    async claimMonitoringFailureReplay(_auth, failureId) {
-      recorded.claimed.push(failureId);
-      return { kind: "claimed", target: REPLAY_TARGET };
+    async recordRetellCallAttempt(_auth, owner, input) {
+      const now = input.now ?? BASE;
+      const held = recorded.rows.get(input.providerCallId);
+      const carries =
+        held !== undefined && applies(held, owner.importGeneration, now);
+      const attempts = carries ? held.attempts + 1 : 1;
+      const dropped = attempts >= 4;
+      recorded.rows.set(input.providerCallId, {
+        attempts,
+        errorKind: input.errorKind,
+        nextAttemptAt: dropped
+          ? null
+          : new Date(
+              now.getTime() +
+                (input.retryBackoffMilliseconds[attempts - 1] ??
+                  input.retryBackoffMilliseconds.at(-1) ??
+                  0),
+            ),
+        expiresAt: dropped
+          ? new Date(now.getTime() + MARKER_MILLISECONDS)
+          : null,
+        importGeneration: owner.importGeneration,
+      });
+      return { recorded: true, attempts, dropped, changed: attempts === 1 };
     },
-    async releaseMonitoringFailureReplay(_auth, _target, input) {
-      recorded.released.push(input.errorKind);
-      return true;
+    async deleteRetellCallRetry(_auth, input) {
+      recorded.deletes.push(input.providerCallId);
+      recorded.rows.delete(input.providerCallId);
     },
-    async failMonitoringFailureReplay(_auth, _target, input) {
-      recorded.providerFailures.push(input.kind);
-      return { recorded: true, changed: true, failures: 1 };
-    },
-    async resolveMonitoringFailureReplay() {
-      recorded.resolved += 1;
-      return { resolved: true, agentRecovered: true };
+    async sweepExpiredRetellCallMarkers(_auth, input) {
+      recorded.sweeps += 1;
+      const now = input.now ?? BASE;
+      let swept = 0;
+      for (const [providerCallId, row] of [...recorded.rows]) {
+        if (row.expiresAt === null || row.expiresAt > now) continue;
+        recorded.rows.delete(providerCallId);
+        swept += 1;
+      }
+      return swept;
     },
     ...changes,
   };
@@ -211,27 +258,62 @@ function provider(
     async hydrateRetellCall(_apiKey, listed) {
       return { kind: "call", call: listed };
     },
+    async getRetellCall(_apiKey, callId) {
+      return { kind: "call", call: hydrated(callId) };
+    },
     ...changes,
   };
 }
 
-function writer(
-  written: RetellCall[] = [],
-  replayed: ProductionTraceClaim[] = [],
-): RetellProductionWriter {
+type AcceptanceRecord = {
+  calls: readonly NewSpan[][];
+  traceIds: string[];
+};
+
+function acceptance(
+  recorded: AcceptanceRecord = { calls: [], traceIds: [] },
+  refuse?: () => unknown,
+): {
+  readonly acceptance: RetellEvidenceAcceptance;
+  readonly recorded: AcceptanceRecord;
+} {
+  const calls: NewSpan[][] = [...recorded.calls.map((one) => [...one])];
+  const held: AcceptanceRecord = { calls, traceIds: recorded.traceIds };
   return {
-    async writeRetellCall(_target, call) {
-      written.push(call);
-      return {
-        kind: "written",
-        traceId: `trace_${String(call["call_id"])}`,
-        degraded: false,
-        endedAt: new Date(Number(call["end_timestamp"])),
-        endReported: true,
-      };
+    recorded: held,
+    acceptance: {
+      async acceptEvidence(spans) {
+        const cause = refuse?.();
+        if (cause !== undefined) throw cause;
+        calls.push([...spans]);
+        for (const span of spans) {
+          if (!held.traceIds.includes(span.traceId)) {
+            held.traceIds.push(span.traceId);
+          }
+        }
+        return { accepted: spans.length, refused: [] };
+      },
     },
-    async replayProductionClaim(claim) {
-      replayed.push(claim);
+  };
+}
+
+type LookupRecord = {
+  windows: { from: bigint; to: bigint }[];
+  asked: string[][];
+};
+
+function lookup(
+  recorded: LookupRecord,
+  committed: ReadonlySet<string> = new Set(),
+  fail?: () => unknown,
+): RetellCommittedLookup {
+  return {
+    async committedTraces(_auth, traceIds, options) {
+      const cause = fail?.();
+      if (cause !== undefined) throw cause;
+      recorded.windows.push(options.window);
+      recorded.asked.push([...traceIds]);
+      return new Set([...traceIds].filter((id) => committed.has(id)));
     },
   };
 }
@@ -268,6 +350,7 @@ type MetricRecord = {
   turns: RetellProductionIngestionMetricTurn[];
   lags: number[];
   providerFailures: string[];
+  dropped: string[];
 };
 
 function metricRecorder(): {
@@ -279,6 +362,7 @@ function metricRecorder(): {
     turns: [],
     lags: [],
     providerFailures: [],
+    dropped: [],
   };
   return {
     recorded,
@@ -295,26 +379,34 @@ function metricRecorder(): {
       recordProviderFailure(kind) {
         recorded.providerFailures.push(kind);
       },
+      recordDroppedCall(reason) {
+        recorded.dropped.push(reason);
+      },
     },
   };
 }
 
+function nothingClaimed(): RetellProductionIngestionResult {
+  return {
+    targetClaimed: false,
+    pages: 0,
+    accepted: 0,
+    settled: 0,
+    dropped: 0,
+  };
+}
+
 describe("Retell production ingestion", () => {
-  it("keeps one fixed window while it pages, hydrates only new calls, and checkpoints durable pages", async () => {
+  it("keeps one fixed window while it pages, accepts only new calls, and checkpoints durable pages", async () => {
     const recorded = record();
     const requests: RetellCallPageRequest[] = [];
     const hydratedIds: string[] = [];
-    const writes: RetellCall[] = [];
-    const first = summary("call_already_accounted");
+    const first = summary("call_already_committed");
     const second = summary("call_new_first_page");
     const third = summary("call_new_second_page");
     let page = 0;
-    const storage = store(recorded, TARGET, {
-      async productionCallIsAccountedFor(_auth, callId) {
-        recorded.accounted.push(callId);
-        return callId === "call_already_accounted";
-      },
-    });
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const taken = acceptance();
     const retell = provider({
       async listTerminalCalls(_key, request) {
         requests.push(request);
@@ -344,9 +436,13 @@ describe("Retell production ingestion", () => {
     const result = await runRetellProductionIngestion({
       log,
       metrics: observed.metrics,
-      store: storage,
+      store: store(recorded),
       provider: retell,
-      writer: writer(writes),
+      lookup: lookup(
+        asked,
+        new Set([traceIdFor(AUTH.projectId, "call_already_committed")]),
+      ),
+      acceptance: taken.acceptance,
       clock: () => BASE,
     });
 
@@ -362,7 +458,9 @@ describe("Retell production ingestion", () => {
       [TARGET.scanFrom.toISOString(), TARGET.scanThrough.toISOString()],
     ]);
     expect(hydratedIds).toEqual(["call_new_first_page", "call_new_second_page"]);
-    expect(writes.map((call) => call["call_id"])).toEqual(hydratedIds);
+    expect(taken.recorded.traceIds).toEqual(
+      hydratedIds.map((id) => traceIdFor(AUTH.projectId, id)),
+    );
     expect(recorded.checkpoints).toEqual([
       {
         paginationKey: "opaque-next-page",
@@ -372,21 +470,124 @@ describe("Retell production ingestion", () => {
     expect(recorded.finishes).toHaveLength(1);
     expect(recorded.finishes[0]).toBeGreaterThanOrEqual(27_000);
     expect(recorded.finishes[0]).toBeLessThanOrEqual(33_000);
-    expect(result).toMatchObject({ written: 2, already: 1, pages: 2 });
+    expect(result).toMatchObject({ accepted: 2, settled: 1, pages: 2 });
+    expect(recorded.rows.size).toBe(0);
     expect(observed.recorded).toMatchObject({
       attempts: ["historical_import"],
       turns: [
         {
           scanKind: "historical_import",
           outcome: "completed",
-          written: 2,
-          already: 1,
-          permanentFailures: 0,
+          accepted: 2,
+          settled: 1,
+          dropped: 0,
         },
       ],
       lags: [1_000, 1_000],
       providerFailures: [],
     });
+  });
+
+  it("asks one batched committed lookup and one batched transient lookup for each page", async () => {
+    const recorded = record();
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const listed = [summary("call_one"), summary("call_two")];
+    const { log } = logger();
+
+    await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          return { kind: "call", call: hydrated(String(one["call_id"])) };
+        },
+      }),
+      lookup: lookup(asked),
+      acceptance: acceptance().acceptance,
+      clock: () => BASE,
+    });
+
+    expect(asked.asked).toEqual([
+      ["call_one", "call_two"].map((id) => traceIdFor(AUTH.projectId, id)),
+    ]);
+    expect(recorded.transientLookups).toEqual([["call_one", "call_two"]]);
+  });
+
+  it("measures the committed window from the fixed scan bounds and never from now", async () => {
+    const recorded = record();
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const { log } = logger();
+    const muchLater = new Date(BASE.getTime() + 40 * 24 * 60 * 60 * 1_000);
+
+    await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: [summary("call_one")],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+      }),
+      lookup: lookup(asked),
+      acceptance: acceptance().acceptance,
+      clock: () => muchLater,
+    });
+
+    const window = asked.windows[0];
+    expect(window).toBeDefined();
+    // Below the scan's own lower bound, because the provider lists by the
+    // instant a call ended and the store files it by the instant it started.
+    expect(Number(window!.from / 1000n)).toBeLessThanOrEqual(
+      TARGET.scanFrom.getTime(),
+    );
+    expect(Number(window!.to / 1000n)).toBeLessThanOrEqual(
+      TARGET.scanThrough.getTime() + 1_000,
+    );
+  });
+
+  it("accepts the listed calls again when the committed lookup is unavailable", async () => {
+    const recorded = record();
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const taken = acceptance();
+    const { log, events } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: [summary("call_one")],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          return { kind: "call", call: hydrated(String(one["call_id"])) };
+        },
+      }),
+      lookup: lookup(asked, new Set(), () => new Error("private store detail")),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    expect(result).toMatchObject({ accepted: 1 });
+    expect(recorded.finishes).toHaveLength(1);
+    expect(events.warn).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain("private store detail");
   });
 
   it("stops a fixed scan when Retell repeats an opaque cursor", async () => {
@@ -409,7 +610,6 @@ describe("Retell production ingestion", () => {
       log,
       store: store(recorded),
       provider: retell,
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -431,7 +631,6 @@ describe("Retell production ingestion", () => {
           return { kind: "refused", reason: "provider-contract" };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -460,7 +659,6 @@ describe("Retell production ingestion", () => {
           return { kind: "calls", calls: [], hasMore: false, paginationKey: null };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -494,7 +692,6 @@ describe("Retell production ingestion", () => {
           };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -503,7 +700,7 @@ describe("Retell production ingestion", () => {
     expect(result.stoppedBecause).toBe("lease_lost");
   });
 
-  it("checks its own lease before hydrating a listed call", async () => {
+  it("checks the setup-wide request gate before hydrating a listed call", async () => {
     const recorded = record();
     let renewals = 0;
     let listRequests = 0;
@@ -537,7 +734,6 @@ describe("Retell production ingestion", () => {
           };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -559,15 +755,7 @@ describe("Retell production ingestion", () => {
       ingest: async () => {
         calls += 1;
         await held;
-        return {
-          targetClaimed: false,
-          pages: 0,
-          written: 0,
-          already: 0,
-          permanentFailures: 0,
-          replayed: 0,
-          replayFailed: 0,
-        };
+        return nothingClaimed();
       },
     });
 
@@ -592,13 +780,9 @@ describe("Retell production ingestion", () => {
         const targetClaimed = calls <= 2;
         if (!targetClaimed) drained();
         return {
+          ...nothingClaimed(),
           targetClaimed,
           pages: targetClaimed ? 1 : 0,
-          written: 0,
-          already: 0,
-          permanentFailures: 0,
-          replayed: 0,
-          replayFailed: 0,
         };
       },
     });
@@ -618,15 +802,7 @@ describe("Retell production ingestion", () => {
       ingest: async () => {
         attempts += 1;
         if (attempts < 3) throw new TypeError("private provider data");
-        return {
-          targetClaimed: false,
-          pages: 0,
-          written: 0,
-          already: 0,
-          permanentFailures: 0,
-          replayed: 0,
-          replayFailed: 0,
-        };
+        return nothingClaimed();
       },
     });
 
@@ -653,14 +829,6 @@ describe("Retell production ingestion", () => {
   it("records an unexpected target failure before the standing loop logs it", async () => {
     const recorded = record();
     const { log } = logger();
-    const failingWriter: RetellProductionWriter = {
-      async writeRetellCall() {
-        throw new Error("a private store failure");
-      },
-      async replayProductionClaim() {
-        return undefined;
-      },
-    };
 
     await expect(
       runRetellProductionIngestion({
@@ -682,7 +850,12 @@ describe("Retell production ingestion", () => {
             };
           },
         }),
-        writer: failingWriter,
+        lookup: lookup({ windows: [], asked: [] }),
+        acceptance: {
+          async acceptEvidence() {
+            throw new TypeError("a private store failure");
+          },
+        },
         clock: () => BASE,
       }),
     ).rejects.toThrow("a private store failure");
@@ -690,8 +863,11 @@ describe("Retell production ingestion", () => {
     expect(recorded.releases).toEqual(["internal_failure"]);
   });
 
-  it("keeps an empty successful poll quiet", async () => {
+  it("keeps an empty successful poll quiet, and asks nothing beyond the provider", async () => {
     const recorded = record();
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const taken = acceptance();
+    let hydrationRequests = 0;
     const { log, events } = logger();
     const observed = metricRecorder();
 
@@ -699,27 +875,31 @@ describe("Retell production ingestion", () => {
       log,
       metrics: observed.metrics,
       store: store(recorded),
-      provider: provider(),
-      writer: writer(),
+      provider: provider({
+        async hydrateRetellCall(_key, listed) {
+          hydrationRequests += 1;
+          return { kind: "call", call: listed };
+        },
+      }),
+      lookup: lookup(asked),
+      acceptance: taken.acceptance,
       clock: () => BASE,
     });
 
-    expect(result).toMatchObject({ written: 0, permanentFailures: 0 });
+    expect(result).toMatchObject({ accepted: 0, dropped: 0 });
+    expect(asked.asked).toEqual([]);
+    expect(recorded.transientLookups).toEqual([]);
+    expect(recorded.sweeps).toBe(0);
+    expect(hydrationRequests).toBe(0);
+    expect(taken.recorded.calls).toEqual([]);
     expect(events).toEqual({ info: [], warn: [], error: [] });
     expect(observed.recorded).toMatchObject({
       attempts: ["historical_import"],
-      turns: [
-        {
-          outcome: "completed",
-          written: 0,
-          already: 0,
-          permanentFailures: 0,
-        },
-      ],
+      turns: [{ outcome: "completed", accepted: 0, settled: 0, dropped: 0 }],
     });
   });
 
-  it("waits exactly as long as the provider asked, and says nothing", async () => {
+  it("uses one setup-wide Retry-After gate without a repeated log", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
       async failMonitoringPull(_auth, _target, input) {
@@ -744,7 +924,6 @@ describe("Retell production ingestion", () => {
           };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -758,7 +937,7 @@ describe("Retell production ingestion", () => {
     expect(observed.recorded.providerFailures).toEqual(["rate_limited"]);
   });
 
-  it("caps this agent's backoff and logs the failure once", async () => {
+  it("caps unavailable-provider backoff and logs only the class change", async () => {
     const recorded = record();
     const { log, events } = logger();
     const failedManyTimes: MonitoringPullTarget = {
@@ -778,7 +957,6 @@ describe("Retell production ingestion", () => {
           };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
@@ -792,29 +970,7 @@ describe("Retell production ingestion", () => {
     expect(events.error).toHaveLength(0);
   });
 
-  it("logs nothing at all when a provider turn simply works", async () => {
-    // There is no account-wide health to recover: the counter is a retry clock
-    // on this agent's own notebook, cleared by the scan that finished. So a
-    // good turn is silent (ADR-0015).
-    const recorded = record();
-    const { log, events } = logger();
-
-    await runRetellProductionIngestion({
-      log,
-      store: store(recorded, TARGET),
-      provider: provider(),
-      writer: writer(),
-      clock: () => BASE,
-    });
-
-    expect(events).toEqual({ info: [], warn: [], error: [] });
-  });
-
-  it("makes a refused key wait, bounded, without a health state to park it in", async () => {
-    // ADR-0015 drops `blocked_until` with the rest of the health machine. A
-    // refused key waits on this agent's own ladder — longer than a transient
-    // refusal, never for ever — so a key the customer fixes at Retell is tried
-    // again without anybody re-arming the switch here.
+  it("blocks an invalid key until configuration changes and logs only its state change", async () => {
     const recorded = record();
     const { log, events } = logger();
 
@@ -826,154 +982,16 @@ describe("Retell production ingestion", () => {
           return { kind: "invalid-key" };
         },
       }),
-      writer: writer(),
       clock: () => BASE,
     });
 
     expect(recorded.failures).toHaveLength(1);
     expect(recorded.failures[0]?.kind).toBe("invalid_credential");
-    const wait =
-      (recorded.failures[0]?.retryAt.getTime() ?? BASE.getTime()) -
-      BASE.getTime();
-    expect(wait).toBeGreaterThan(0);
-    expect(wait).toBeLessThanOrEqual(60 * 60_000);
+    expect(recorded.failures[0]?.retryAt.getUTCFullYear()).toBe(9999);
     expect(events.error).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain(TARGET.apiKey);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentId);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentName);
-  });
-
-  it("records a missing hydrated call, continues the page, and logs it once", async () => {
-    const recorded = record();
-    const writes: RetellCall[] = [];
-    let missingHydrationAttempts = 0;
-    const { log, events } = logger();
-
-    const result = await runRetellProductionIngestion({
-      log,
-      store: store(recorded),
-      provider: provider({
-        async listTerminalCalls() {
-          return {
-            kind: "calls",
-            calls: [summary("private-missing-call-id"), summary("private-good-call-id")],
-            hasMore: false,
-            paginationKey: null,
-          };
-        },
-        async hydrateRetellCall(_key, listed) {
-          if (listed["call_id"] === "private-missing-call-id") {
-            missingHydrationAttempts += 1;
-            return { kind: "not-found" };
-          }
-          return { kind: "call", call: hydrated("private-good-call-id") };
-        },
-      }),
-      writer: writer(writes),
-      clock: () => BASE,
-    });
-
-    expect(recorded.permanentFailures).toEqual(["private-missing-call-id"]);
-    expect(missingHydrationAttempts).toBe(3);
-    expect(writes.map((call) => call["call_id"])).toEqual([
-      "private-good-call-id",
-    ]);
-    expect(result).toMatchObject({ written: 1, permanentFailures: 1 });
-    expect(events.warn).toHaveLength(1);
-    expect(events.info).toHaveLength(1);
-    expect(JSON.stringify(events)).not.toContain("private-missing-call-id");
-    expect(JSON.stringify(events)).not.toContain("private-good-call-id");
-  });
-
-  it("stops a stale target when its permanent failure is not recorded", async () => {
-    const recorded = record();
-    const { log } = logger();
-    let providerRequests = 0;
-
-    const result = await runRetellProductionIngestion({
-      log,
-      store: store(recorded, TARGET, {
-        async recordMonitoringFailure() {
-          return { recorded: false, changed: false };
-        },
-      }),
-      provider: provider({
-        async listTerminalCalls() {
-          providerRequests += 1;
-          return {
-            kind: "calls",
-            calls: [summary("private-stale-call-id")],
-            hasMore: false,
-            paginationKey: null,
-          };
-        },
-        async hydrateRetellCall() {
-          return { kind: "not-found" };
-        },
-      }),
-      writer: writer(),
-      clock: () => BASE,
-    });
-
-    expect(providerRequests).toBe(1);
-    expect(result).toMatchObject({
-      stoppedBecause: "lease_lost",
-      permanentFailures: 0,
-    });
-  });
-
-  it("records a malformed full call after bounded retries and continues the page", async () => {
-    const recorded = record();
-    const writes: RetellCall[] = [];
-    let malformedHydrationAttempts = 0;
-    const { log } = logger();
-
-    const result = await runRetellProductionIngestion({
-      log,
-      store: store(recorded),
-      provider: provider({
-        async listTerminalCalls() {
-          return {
-            kind: "calls",
-            calls: [
-              summary("private-malformed-call-id"),
-              summary("private-good-call-id"),
-            ],
-            hasMore: false,
-            paginationKey: null,
-          };
-        },
-        hydrateRetellCall,
-      }),
-      writer: writer(writes),
-      reach: {
-        url: "https://retell.invalid",
-        fetchImpl: (async (input: string | URL | Request) => {
-          const callId = decodeURIComponent(String(input).split("/").at(-1) ?? "");
-          if (callId === "private-malformed-call-id") {
-            malformedHydrationAttempts += 1;
-            return new Response(
-              JSON.stringify({
-                ...hydrated(callId),
-                transcript_with_tool_calls: "Agent: Hello.",
-              }),
-              { status: 200 },
-            );
-          }
-          return new Response(JSON.stringify(hydrated(callId)), { status: 200 });
-        }) as typeof fetch,
-      },
-      clock: () => BASE,
-    });
-
-    expect(malformedHydrationAttempts).toBe(3);
-    expect(recorded.permanentFailures).toEqual([
-      "private-malformed-call-id",
-    ]);
-    expect(writes.map((call) => call["call_id"])).toEqual([
-      "private-good-call-id",
-    ]);
-    expect(result).toMatchObject({ written: 1, permanentFailures: 1 });
   });
 
   it("applies a request deadline and classifies a timed-out read as unavailable", async () => {
@@ -994,7 +1012,6 @@ describe("Retell production ingestion", () => {
           });
         },
       }),
-      writer: writer(),
       clock: () => BASE,
       requestTimeoutMilliseconds: 10,
     });
@@ -1025,7 +1042,6 @@ describe("Retell production ingestion", () => {
             };
           },
         }),
-        writer: writer(),
         clock,
         maxPagesPerTurn: boundedBy === "pages" ? 1 : 10,
         maxTurnMilliseconds: boundedBy === "time" ? 50 : 20_000,
@@ -1038,156 +1054,9 @@ describe("Retell production ingestion", () => {
     }
   });
 
-  it("replays stale cross-store claims before it asks for another target", async () => {
+  it("does not file a hydrated call under a different selected Retell agent", async () => {
     const recorded = record();
-    const stale: ProductionTraceClaim = {
-      id: "ptc_stale",
-      traceId: "0123456789abcdef0123456789abcdef",
-      providerCallId: "private-stale-call",
-      platformAgentId: "private-stale-agent",
-      platformAgentName: "Private stale agent",
-      platformAgentVersion: "3",
-      payload: JSON.stringify(hydrated("private-stale-call")),
-      endedAt: BASE,
-      degraded: false,
-      auth: AUTH,
-    };
-    const replayed: ProductionTraceClaim[] = [];
-    const { log, events } = logger();
-    const storage = store(recorded, undefined, {
-      async sweepStaleProductionClaims() {
-        return [stale];
-      },
-    });
-
-    const result = await runRetellProductionIngestion({
-      log,
-      store: storage,
-      provider: provider(),
-      writer: writer([], replayed),
-      clock: () => BASE,
-    });
-
-    expect(replayed).toEqual([stale]);
-    expect(result.replayed).toBe(1);
-    expect(events.info).toHaveLength(1);
-    expect(JSON.stringify(events)).not.toContain(stale.providerCallId);
-  });
-
-  it("replays one exact failed call without using the 30-day list window", async () => {
-    const recorded = replayRecord();
-    const requested: string[] = [];
-    const { log, events } = logger();
-
-    const result = await replayRetellIngestionFailure({
-      auth: AUTH,
-      failureId: REPLAY_TARGET.failureId,
-      log,
-      store: replayStore(recorded),
-      provider: {
-        async getRetellCall(_key, callId) {
-          requested.push(callId);
-          return { kind: "call", call: hydrated(callId) };
-        },
-      },
-      writer: {
-        async writeRetellCall(_target, call) {
-          return {
-            kind: "already",
-            traceId: `trace_${String(call["call_id"])}`,
-            endedAt: BASE,
-            endReported: true,
-          };
-        },
-      },
-      clock: () => BASE,
-    });
-
-    expect(requested).toEqual([REPLAY_TARGET.providerCallId]);
-    expect(result).toMatchObject({
-      kind: "resolved",
-      failureId: REPLAY_TARGET.failureId,
-      write: "already",
-      agentRecovered: true,
-    });
-    expect(recorded.resolved).toBe(1);
-    expect(events.info).toHaveLength(1);
-    expect(JSON.stringify(events)).not.toContain(REPLAY_TARGET.providerCallId);
-    expect(JSON.stringify(events)).not.toContain(REPLAY_TARGET.failureId);
-  });
-
-  it("keeps an exact failed call open when Retell still cannot return it", async () => {
-    const recorded = replayRecord();
-    const { log, events } = logger();
-
-    const result = await replayRetellIngestionFailure({
-      auth: AUTH,
-      failureId: REPLAY_TARGET.failureId,
-      log,
-      store: replayStore(recorded),
-      provider: {
-        async getRetellCall() {
-          return { kind: "not-found" };
-        },
-      },
-      writer: { writeRetellCall: writer().writeRetellCall },
-      clock: () => BASE,
-    });
-
-    expect(result).toMatchObject({
-      kind: "still_failed",
-      errorKind: "provider_call_not_found",
-    });
-    expect(recorded.released).toEqual(["provider_call_not_found"]);
-    expect(recorded.resolved).toBe(0);
-    expect(events).toEqual({ info: [], warn: [], error: [] });
-  });
-
-  it("classifies provider failures during an exact replay", async () => {
-    const cases = [
-      {
-        answer: { kind: "invalid-key" } as const,
-        expected: "invalid_credential",
-      },
-      {
-        answer: {
-          kind: "refused",
-          reason: "rate-limited",
-          status: 429,
-          retryAfterMilliseconds: 12_000,
-        } as const,
-        expected: "rate_limited",
-      },
-      {
-        answer: { kind: "unreachable", reason: "private network fact" } as const,
-        expected: "provider_unavailable",
-      },
-    ] as const;
-
-    for (const one of cases) {
-      const recorded = replayRecord();
-      const { log, events } = logger();
-      const result = await replayRetellIngestionFailure({
-        auth: AUTH,
-        failureId: REPLAY_TARGET.failureId,
-        log,
-        store: replayStore(recorded),
-        provider: { async getRetellCall() { return one.answer; } },
-        writer: { writeRetellCall: writer().writeRetellCall },
-        clock: () => BASE,
-      });
-
-      expect(result.kind).toBe(one.expected);
-      expect(recorded.providerFailures).toEqual([one.expected]);
-      expect(events.warn.length + events.error.length).toBe(1);
-      expect(JSON.stringify(events)).not.toContain("private network fact");
-      expect(JSON.stringify(events)).not.toContain(REPLAY_TARGET.providerCallId);
-    }
-  });
-
-  it("does not file a hydrated call under a different platform agent", async () => {
-    const recorded = record();
-    const writes: RetellCall[] = [];
+    const taken = acceptance();
     const { log, events } = logger();
     const mismatched = {
       ...hydrated("call_wrong_agent"),
@@ -1209,24 +1078,26 @@ describe("Retell production ingestion", () => {
           return { kind: "call", call: mismatched };
         },
       }),
-      writer: writer(writes),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
       clock: () => BASE,
     });
 
-    expect(result).toMatchObject({ written: 0, permanentFailures: 1 });
-    expect(recorded.permanentFailures).toEqual(["call_wrong_agent"]);
-    expect(writes).toHaveLength(0);
+    expect(result).toMatchObject({ accepted: 0, settled: 1 });
+    expect(recorded.rows.get("call_wrong_agent")).toMatchObject({
+      attempts: 1,
+      errorKind: "platform_agent_mismatch",
+    });
+    expect(taken.recorded.calls).toEqual([]);
     expect(JSON.stringify(events)).not.toContain("different-private-agent-id");
   });
 
   it("yields inside a large page without checkpointing past unprocessed calls", async () => {
     const recorded = record();
     const hydratedIds: string[] = [];
-    const writes: RetellCall[] = [];
     let advanced = 0;
     const clock = () => new Date(BASE.getTime() + advanced);
     const { log } = logger();
-    const writing = writer(writes);
 
     const result = await runRetellProductionIngestion({
       log,
@@ -1245,12 +1116,11 @@ describe("Retell production ingestion", () => {
           return { kind: "call", call: hydrated(String(listed["call_id"])) };
         },
       }),
-      writer: {
-        ...writing,
-        async writeRetellCall(target, call, receivedAt) {
-          const outcome = await writing.writeRetellCall(target, call, receivedAt);
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: {
+        async acceptEvidence(spans) {
           advanced = 60;
-          return outcome;
+          return { accepted: spans.length, refused: [] };
         },
       },
       clock,
@@ -1258,7 +1128,6 @@ describe("Retell production ingestion", () => {
     });
 
     expect(hydratedIds).toEqual(["call_first"]);
-    expect(writes.map((call) => call["call_id"])).toEqual(["call_first"]);
     expect(recorded.checkpoints).toEqual([]);
     expect(recorded.yields).toHaveLength(1);
     expect(result.stoppedBecause).toBe("bounded_turn");
@@ -1280,13 +1149,9 @@ describe("Retell production ingestion", () => {
           dueAt = now + 33_000;
         }
         return {
+          ...nothingClaimed(),
           targetClaimed,
           pages: targetClaimed ? 1 : 0,
-          written: 0,
-          already: 0,
-          permanentFailures: 0,
-          replayed: 0,
-          replayFailed: 0,
         };
       },
     });
@@ -1299,46 +1164,438 @@ describe("Retell production ingestion", () => {
       .toEqual([35_000, 35_000]);
     expect(events).toEqual({ info: [], warn: [], error: [] });
   });
+});
 
-  it("logs one stale-claim replay failure transition and one recovery", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(BASE);
-    let attempt = 0;
-    const { log, events } = logger();
-    const ingestion = startRetellProductionIngestion({
-      log,
-      intervalMilliseconds: 5,
-      ingest: async () => {
-        attempt += 1;
-        return {
-          targetClaimed: false,
-          pages: 0,
-          written: 0,
-          already: 0,
-          permanentFailures: 0,
-          replayed: attempt === 4 ? 1 : 0,
-          replayFailed: attempt === 1 || attempt === 3 ? 1 : 0,
-        };
+describe("the bounded Retell retry budget", () => {
+  /**
+   * One page listing one call that will not hydrate, then the same call owed a
+   * retry on later turns. Each `turn()` is one poll; the rows outlive them all,
+   * which is what makes "restart" mean something here.
+   */
+  function failingWorld(options: {
+    readonly rows?: Map<string, RetryRow> | undefined;
+    readonly hydrates?: boolean | undefined;
+  } = {}) {
+    const recorded = record(options.rows ?? new Map());
+    const hydrations: string[] = [];
+    const directReads: string[] = [];
+    const taken = acceptance();
+    // The trace store: a call is committed only once `drain()` moves it here,
+    // never the instant it is accepted. That gap — durable in the object store,
+    // not yet query-visible — is the one a standing poller crosses between
+    // turns, and the one the poller's own memory is there to cover.
+    const committed = new Set<string>();
+    // One memory for the standing poller, carried across every turn, exactly as
+    // the real loop carries one for the life of the process.
+    const accepted = acceptedIdentities();
+    const asked: LookupRecord = { windows: [], asked: [] };
+    const observed = metricRecorder();
+    const heard = logger();
+    let listedCalls: RetellCall[] = [summary("call_that_will_not_hydrate")];
+    let hydrates = options.hydrates ?? false;
+
+    const turn = async (
+      at: Date,
+      target: MonitoringPullTarget = TARGET,
+    ): Promise<RetellProductionIngestionResult> =>
+      runRetellProductionIngestion({
+        log: heard.log,
+        metrics: observed.metrics,
+        store: store(recorded, target),
+        provider: provider({
+          async listTerminalCalls() {
+            return {
+              kind: "calls",
+              calls: listedCalls,
+              hasMore: false,
+              paginationKey: null,
+            };
+          },
+          async hydrateRetellCall(_key, listed) {
+            const callId = String(listed["call_id"]);
+            hydrations.push(callId);
+            return hydrates
+              ? { kind: "call", call: hydrated(callId) }
+              : { kind: "not-found" };
+          },
+          async getRetellCall(_key, callId) {
+            directReads.push(callId);
+            return hydrates
+              ? { kind: "call", call: hydrated(callId) }
+              : { kind: "not-found" };
+          },
+        }),
+        lookup: lookup(asked, committed),
+        acceptance: taken.acceptance,
+        accepted,
+        clock: () => at,
+      });
+
+    return {
+      recorded,
+      hydrations,
+      directReads,
+      taken,
+      asked,
+      observed,
+      events: heard.events,
+      turn,
+      list(calls: RetellCall[]) {
+        listedCalls = calls;
       },
+      succeed() {
+        hydrates = true;
+      },
+      /** The drainer catches up: everything accepted becomes query-visible. */
+      drain() {
+        for (const traceId of taken.recorded.traceIds) committed.add(traceId);
+      },
+    };
+  }
+
+  it("keeps its stored count across a restart, makes no fourth automatic retry, and advances the page", async () => {
+    const world = failingWorld();
+
+    // The initial attempt, on the page that listed the call.
+    const first = await world.turn(BASE);
+    expect(world.hydrations).toEqual(["call_that_will_not_hydrate"]);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 1 },
+    );
+    expect(world.recorded.finishes).toHaveLength(1);
+    expect(first).toMatchObject({ accepted: 0, dropped: 0 });
+
+    // One automatic retry, then Egma stops and starts again. Nothing about the
+    // budget lived in the process, so the restart resumes rather than restarts.
+    const afterFirstRetry = new Date(BASE.getTime() + BACKOFF[0]!);
+    await world.turn(afterFirstRetry);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 2 },
+    );
+
+    const afterRestart = new Date(afterFirstRetry.getTime() + BACKOFF[1]!);
+    await world.turn(afterRestart);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 3 },
+    );
+
+    const lastRetry = new Date(afterRestart.getTime() + BACKOFF[2]!);
+    const terminal = await world.turn(lastRetry);
+    expect(terminal).toMatchObject({ dropped: 1 });
+
+    // Four attempts in all — one initial and three automatic retries — and the
+    // row is now a marker that cannot schedule a fifth.
+    expect(world.directReads).toHaveLength(3);
+    expect(world.hydrations).toHaveLength(1);
+    const marker = world.recorded.rows.get("call_that_will_not_hydrate");
+    expect(marker).toMatchObject({ attempts: 4, nextAttemptAt: null });
+    expect(marker?.expiresAt).not.toBeNull();
+
+    // A later turn finds nothing due and makes no further provider request.
+    const afterTheBudget = new Date(lastRetry.getTime() + 10 * 60_000);
+    await world.turn(afterTheBudget);
+    expect(world.directReads).toHaveLength(3);
+
+    // The page advanced every time: the identity always had an answer.
+    expect(world.recorded.finishes).toHaveLength(5);
+    expect(world.taken.recorded.calls).toEqual([]);
+
+    // One structured terminal event, carrying every identity an operator needs.
+    const dropped = world.events.error.filter(
+      (event) =>
+        event["otel.event.name"] === "egma.monitoring.retell.call.dropped",
+    );
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatchObject({
+      organization_id: AUTH.organizationId,
+      project_id: AUTH.projectId,
+      agent_id: TARGET.agentId,
+      provider_call_id: "call_that_will_not_hydrate",
+      error_kind: "provider_call_not_found",
+      automatic_retries: 3,
     });
 
-    await vi.advanceTimersByTimeAsync(25);
-    await ingestion.stop();
+    // And one counter increment whose label is the reason class alone.
+    expect(world.observed.recorded.dropped).toEqual([
+      "provider_call_not_found",
+    ]);
+  });
 
-    expect(
-      events.warn.filter(
-        (event) =>
-          event["otel.event.name"] ===
-          "egma.monitoring.retell.claims.replay.failed",
-      ),
-    ).toHaveLength(1);
-    expect(
-      events.info.filter(
-        (event) =>
-          event["otel.event.name"] ===
-          "egma.monitoring.retell.claims.replay.recovered",
-      ),
-    ).toHaveLength(1);
-    expect(JSON.stringify(events)).not.toContain("providerCallId");
+  it("filters a dropped call out of a later overlap page without a provider fetch, then lets its marker expire", async () => {
+    const world = failingWorld();
+    let at = BASE;
+    for (const wait of [0, ...BACKOFF]) {
+      at = new Date(at.getTime() + wait);
+      await world.turn(at);
+    }
+    expect(world.observed.recorded.dropped).toHaveLength(1);
+    const readsBefore = world.directReads.length;
+    const hydrationsBefore = world.hydrations.length;
+
+    // A later regular page lists the same provider call again, as the
+    // five-minute overlap is meant to. One batched transient lookup removes it
+    // before hydration, so Retell is not asked about it at all.
+    const overlapping = new Date(at.getTime() + 60_000);
+    const overlap = await world.turn(overlapping);
+    expect(world.recorded.transientLookups.at(-1)).toEqual([
+      "call_that_will_not_hydrate",
+    ]);
+    expect(world.hydrations).toHaveLength(hydrationsBefore);
+    expect(world.directReads).toHaveLength(readsBefore);
+    expect(overlap).toMatchObject({ settled: 1, accepted: 0, dropped: 0 });
+    expect(world.observed.recorded.dropped).toHaveLength(1);
+
+    // Past every overlap window the provider no longer lists the call, the
+    // marker has nothing left to do, and it goes without anybody deleting it.
+    world.list([]);
+    const wellPast = new Date(at.getTime() + MARKER_MILLISECONDS + 60_000);
+    await world.turn(wellPast);
+    expect(world.recorded.rows.size).toBe(0);
+  });
+
+  it("does not apply an old regular-scan marker to a new explicit import", async () => {
+    const world = failingWorld();
+    let at = BASE;
+    for (const wait of [0, ...BACKOFF]) {
+      at = new Date(at.getTime() + wait);
+      await world.turn(at);
+    }
+    const marker = world.recorded.rows.get("call_that_will_not_hydrate");
+    expect(marker).toMatchObject({ importGeneration: 1, nextAttemptAt: null });
+    const readsBefore = world.directReads.length;
+
+    // Selecting the agent again is a new observation of the provider's
+    // history, so the import runs under a new generation. Re-selection also
+    // deletes the rows belonging to the window it replaces, which is what
+    // `configureRetellMonitoring` does in the transaction that bumps the
+    // generation — modelled here, because this suite drives the poller and
+    // never the setup door.
+    world.succeed();
+    world.recorded.rows.clear();
+    const reimport: MonitoringPullTarget = {
+      ...TARGET,
+      scanKind: "historical_import",
+      importGeneration: 2,
+    };
+    const imported = await world.turn(new Date(at.getTime() + 60_000), reimport);
+
+    expect(imported).toMatchObject({ accepted: 1 });
+    expect(world.hydrations).toHaveLength(2);
+    expect(world.directReads).toHaveLength(readsBefore);
+    expect(world.taken.recorded.traceIds).toEqual([
+      traceIdFor(AUTH.projectId, "call_that_will_not_hydrate"),
+    ]);
+    expect(world.recorded.rows.size).toBe(0);
+  });
+
+  /**
+   * The same rule from the other side: a marker the re-selection did not
+   * remove — because the poller reached the page before the delete, or because
+   * a future change left one — is still invisible to the new generation, and
+   * the new import still takes its own bounded look.
+   */
+  it("ignores an old-generation marker that is still in the table", async () => {
+    const world = failingWorld();
+    let at = BASE;
+    for (const wait of [0, ...BACKOFF]) {
+      at = new Date(at.getTime() + wait);
+      await world.turn(at);
+    }
+    expect(world.recorded.rows.size).toBe(1);
+
+    world.succeed();
+    const reimport: MonitoringPullTarget = {
+      ...TARGET,
+      scanKind: "historical_import",
+      importGeneration: 2,
+    };
+    const imported = await world.turn(new Date(at.getTime() + 60_000), reimport);
+
+    expect(imported).toMatchObject({ accepted: 1 });
+    expect(world.taken.recorded.traceIds).toEqual([
+      traceIdFor(AUTH.projectId, "call_that_will_not_hydrate"),
+    ]);
+  });
+
+  /**
+   * The two passes of one turn can both reach the same call: the retry pass
+   * recovers it and deletes its row, and the page then lists it — with its
+   * transient row gone and its evidence not yet drained, so neither of the
+   * page's two batched questions can see the work.
+   *
+   * Accepting it twice would be two readings of one conversation under one
+   * immutable identity. Where the provider reports no timestamps of its own
+   * those readings differ, and the drainer would refuse the pair as an
+   * integrity defect that nothing outside the poller caused.
+   */
+  it("accepts a call recovered by the retry pass once, even though the same page lists it", async () => {
+    const world = failingWorld();
+    await world.turn(BASE);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 1 },
+    );
+    const acceptedBefore = world.taken.recorded.calls.length;
+
+    // The retry is due and the provider now answers. The same page still lists
+    // the call, because the overlap is meant to.
+    world.succeed();
+    const recovering = new Date(BASE.getTime() + BACKOFF[0]!);
+    const result = await world.turn(recovering);
+
+    expect(result).toMatchObject({ accepted: 1 });
+    expect(world.taken.recorded.calls).toHaveLength(acceptedBefore + 1);
+    // One provider read for it this turn — the retry pass's — and none from
+    // the page behind it.
+    expect(world.directReads).toEqual(["call_that_will_not_hydrate"]);
+    expect(world.hydrations).toEqual(["call_that_will_not_hydrate"]);
+    expect(world.recorded.rows.size).toBe(0);
+    expect(world.recorded.finishes).toHaveLength(2);
+  });
+
+  /**
+   * The same rule across turns, which is where it actually bites: a call made
+   * durable on one turn leaves no transient row and is not query-visible until
+   * the drainer takes its segment, so the five-minute overlap re-lists it while
+   * both of the page's batched questions are still blind to it. Only the
+   * poller's own memory of what it accepted keeps that repeat from importing one
+   * conversation twice — and once the drain catches up the memory hands the
+   * recognition back to the committed probe.
+   */
+  it("does not import a durable-but-not-yet-drained call again across turns", async () => {
+    const world = failingWorld({ hydrates: true });
+    world.list([summary("call_landed")]);
+    const traceId = traceIdFor(AUTH.projectId, "call_landed");
+
+    // Turn N accepts the call and makes it durable. Nothing is written to
+    // Postgres, and the drain has not run.
+    const first = await world.turn(BASE);
+    expect(first).toMatchObject({ accepted: 1, settled: 0 });
+    expect(world.taken.recorded.traceIds).toEqual([traceId]);
+    expect(world.recorded.rows.size).toBe(0);
+
+    // Turn N+1, inside the overlap. The committed probe is still blind and there
+    // is no transient row, so the only thing that can recognise this call is the
+    // memory — and it does: settled, not accepted, and no second provider fetch.
+    const overlap = await world.turn(new Date(BASE.getTime() + 30_000));
+    expect(overlap).toMatchObject({ accepted: 0, settled: 1 });
+    expect(world.taken.recorded.calls).toHaveLength(1);
+    expect(world.hydrations).toEqual(["call_landed"]);
+
+    // The drainer catches up. Now the probe sees the call, the memory hands the
+    // recognition back to it, and a still-later overlap settles it on the
+    // store's own word — still one accept, still one fetch.
+    world.drain();
+    const reconciled = await world.turn(new Date(BASE.getTime() + 60_000));
+    expect(reconciled).toMatchObject({ accepted: 0, settled: 1 });
+    expect(world.asked.asked.at(-1)).toEqual([traceId]);
+    expect(world.taken.recorded.calls).toHaveLength(1);
+    expect(world.hydrations).toEqual(["call_landed"]);
+  });
+
+  it("writes nothing to Postgres for a listed call that simply worked", async () => {
+    const recorded = record();
+    const taken = acceptance();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: [summary("call_that_works")],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, listed) {
+          return { kind: "call", call: hydrated(String(listed["call_id"])) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    expect(result).toMatchObject({ accepted: 1 });
+    // No row existed, so nothing was deleted: a page of ordinary conversations
+    // leaves this database exactly as it found it.
+    expect(recorded.deletes).toEqual([]);
+    expect(recorded.rows.size).toBe(0);
+  });
+
+  it("deletes the retry row only after the evidence is durable in the object store", async () => {
+    const world = failingWorld();
+    await world.turn(BASE);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 1 },
+    );
+
+    // The retry recovers, but the object store refuses. Egma has the evidence
+    // and nowhere durable to put it: the row stays, the count does not move,
+    // and the page does not advance past the call.
+    const recorded = world.recorded;
+    const refusing = new Date(BASE.getTime() + BACKOFF[0]!);
+    const finishesBefore = recorded.finishes.length;
+    world.succeed();
+    const refused = await runRetellProductionIngestion({
+      log: logger().log,
+      store: store(recorded, TARGET),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: [summary("call_that_will_not_hydrate")],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async getRetellCall(_key, callId) {
+          return { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: {
+        async acceptEvidence() {
+          throw new IngestionUnavailableError("the bucket did not answer");
+        },
+      },
+      clock: () => refusing,
+    });
+
+    expect(refused.stoppedBecause).toBe("ingestion_unavailable");
+    expect(recorded.finishes).toHaveLength(finishesBefore);
+    expect(recorded.deletes).toEqual([]);
+    expect(recorded.rows.get("call_that_will_not_hydrate")).toMatchObject({
+      attempts: 1,
+    });
+
+    // With the store back, the same retry lands and only then is the row gone.
+    const landed = await world.turn(new Date(refusing.getTime() + 1_000));
+    expect(landed).toMatchObject({ accepted: 1 });
+    expect(recorded.deletes).toEqual(["call_that_will_not_hydrate"]);
+    expect(recorded.rows.size).toBe(0);
+    expect(world.taken.recorded.traceIds).toEqual([
+      traceIdFor(AUTH.projectId, "call_that_will_not_hydrate"),
+    ]);
+  });
+
+  it("leaves a call waiting on a not-yet-due retry alone and still advances the page", async () => {
+    const world = failingWorld();
+    await world.turn(BASE);
+    const hydrationsBefore = world.hydrations.length;
+    const finishesBefore = world.recorded.finishes.length;
+
+    const tooSoon = new Date(BASE.getTime() + 1_000);
+    const result = await world.turn(tooSoon);
+
+    expect(world.hydrations).toHaveLength(hydrationsBefore);
+    expect(world.directReads).toEqual([]);
+    expect(result).toMatchObject({ settled: 1, accepted: 0 });
+    expect(world.recorded.finishes).toHaveLength(finishesBefore + 1);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 1 },
+    );
   });
 });

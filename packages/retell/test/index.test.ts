@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  RETELL_REDACTED,
   listAgents,
   listNumbers,
   safeRetellProviderData,
@@ -192,39 +191,51 @@ describe("Retell phone-number discovery", () => {
 });
 
 describe("Retell provider data", () => {
-  it("removes access tokens and authentication header values", () => {
-    expect(
-      safeRetellProviderData({
-        call_id: "call_1",
-        access_token: "web-call-token",
-        llm_token_usage: { values: [42], average: 42 },
-        custom_sip_headers: {
-          Authorization: "Bearer customer-secret",
-          "X-Api-Key": "customer-api-key",
-          "X-Customer-Route": "support",
-        },
-        nested: {
-          headers: [
-            { name: "Proxy-Authorization", value: "Basic customer-secret" },
-            { name: "X-Customer-Region", value: "west" },
-          ],
-        },
-      }),
-    ).toEqual({
+  it("omits the access token and the named SIP authentication headers", () => {
+    const safe = safeRetellProviderData({
       call_id: "call_1",
-      access_token: RETELL_REDACTED,
-      llm_token_usage: { values: [42], average: 42 },
+      access_token: "web-call-token",
       custom_sip_headers: {
-        Authorization: RETELL_REDACTED,
-        "X-Api-Key": RETELL_REDACTED,
+        Authorization: "Bearer customer-secret",
+        "proxy-authorization": "Basic customer-secret",
+        Cookie: "session=customer",
+        "Set-Cookie": "session=customer",
+        "API-Key": "customer-api-key",
+        "X-Api-Key": "customer-api-key",
         "X-Customer-Route": "support",
       },
+    });
+
+    expect(safe).toEqual({
+      call_id: "call_1",
+      custom_sip_headers: { "X-Customer-Route": "support" },
+    });
+    // Absent, and nothing standing where they were: a marker is a value, and a
+    // value is evidence.
+    expect(Object.keys(safe)).not.toContain("access_token");
+    expect(JSON.stringify(safe)).not.toContain("REDACTED");
+  });
+
+  it("keeps every other field exactly, credential-looking ones included", () => {
+    const document = {
+      call_id: "call_1",
+      transcript: "My password is hunter2 and the token is Bearer abc.123",
+      llm_token_usage: { values: [42], average: 42 },
+      metadata: { secret: "customer-chose-this-name", api_key: "not-ours" },
+      // The six names matter only inside Retell's own named map. A customer's
+      // own header collection is customer data.
       nested: {
         headers: [
-          { name: "Proxy-Authorization", value: RETELL_REDACTED },
+          { name: "Proxy-Authorization", value: "Basic customer-secret" },
           { name: "X-Customer-Region", value: "west" },
         ],
+        access_token: "a field a customer named, not the one Retell mints",
       },
-    });
+      call_analysis: { custom_analysis_data: { authorization: "kept" } },
+    };
+
+    expect(JSON.stringify(safeRetellProviderData(document))).toBe(
+      JSON.stringify(document),
+    );
   });
 });

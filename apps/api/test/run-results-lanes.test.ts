@@ -512,6 +512,7 @@ function aSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...over,
   };
 }

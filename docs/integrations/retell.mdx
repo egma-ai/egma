@@ -141,19 +141,26 @@ For each watched agent, Egma:
 
 - imports the previous 30 days;
 - checks for new terminal calls about every 30 seconds;
-- performs a daily 30-day reconciliation for a call that appeared late;
-- shows one production conversation per Retell call in the project, even when
-  an import page or historical window is retried.
+- rereads a five-minute overlap on every check, so a call Retell exposes a
+  little late is still found;
+- shows one production conversation per Retell call in the project, even when an
+  import page or historical window is retried.
+
+There is no daily rescan of your Retell history. The five-minute overlap is the
+whole late-arrival net.
 
 Open the agent to see whether its switch is on, which Retell agent it is bound
-to, and the last characters of the key it uses. **Stop pulling** turns the
-switch off; every conversation already imported stays, and so do the binding,
-the key, and the import progress a later start continues from.
+to, the last characters of the key it uses, and when a production call last
+arrived. **Stop pulling** turns the switch off; every conversation already
+imported stays, and so do the binding and the key. Starting again is a new
+observation from that moment, so Egma does not go back for the calls that
+happened while the switch was off.
 
-If Retell cannot supply one complete call after bounded retries, Egma keeps a
-safe failure record and continues importing later calls. This exact-call retry
-still works after the call has moved outside the normal 30-day list window, and
-the project claim prevents it from creating a second production conversation.
+If Retell cannot supply one complete call, Egma tries again automatically a few
+times and then gives up on that call. It records the loss in its own logs and
+counters, keeps importing later calls, and stores no copy of the failed call.
+There is no per-call retry action, because a call Retell will not return is an
+operational error rather than something for you to repair.
 
 Polling reads Retell's current v3 List Calls contract and then reads the full
 call document for transcript and tool evidence. It imports terminal `ended`,
@@ -178,13 +185,15 @@ Call endpoint before normalization.
 Each imported call keeps its Retell conversation ID and the Retell agent ID,
 name, and version when Retell supplies them. Retell-specific facts such as call
 status and `phone_call` or `web_call` remain in the safe provider payload. Egma
-replaces Retell access tokens and authentication header values with a redaction
-marker before any provider payload reaches storage. A Retell `recording_url`
+leaves out Retell access tokens and the values of named authentication headers
+before any provider payload reaches storage. It leaves them out rather than
+replacing them, so nothing Egma wrote can be mistaken for something you sent.
+A Retell `recording_url`
 also remains in that safe payload when Retell supplies one, but the current
 Monitoring UI does not expose a production recording player.
 
 The same trace store reconstructs the transcript, tool calls, supported
 measures, and production grader work for Retell and LiveKit Agents traffic.
 
-See [Monitoring API](/api/monitoring) for the source and retry request
+See [Monitoring API](/api/monitoring) for the monitoring source request
 shapes.

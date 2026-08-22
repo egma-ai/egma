@@ -1,5 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
@@ -14,6 +16,7 @@ import {
 import type { FastifyInstance } from "fastify";
 
 import { loadConfig, type Config } from "../../src/config.ts";
+import type { IngestionStore } from "../../src/ingestion/object-store.ts";
 import { buildApi, type ServerOptions } from "../../src/server.ts";
 import {
   holdWebOutputLock,
@@ -72,6 +75,12 @@ export type Instance = {
   readonly api: FastifyInstance;
   readonly database: MigratedDatabase;
   readonly traceStore: EmptyTraceStore;
+  /**
+   * Turn every pending object into rows, the way the deployment does. The door
+   * answers on object-store durability, so a flow whose claim is about what a
+   * page shows carries the evidence the rest of the way with this.
+   */
+  drainEvidence(): Promise<number>;
   close(): Promise<void>;
 };
 
@@ -106,6 +115,13 @@ export type InstanceOptions = {
    * one place is what keeps this arrangement from proving the wrong thing.
    */
   readonly blob?: Config["blob"];
+  /**
+   * The ingestion bucket evidence is accepted into, where the caller has a
+   * store running. Absent leaves this instance with nowhere to make evidence
+   * durable, which is what an unconfigured deployment is: the door answers
+   * `503` and nothing is staged.
+   */
+  readonly ingestStore?: IngestionStore;
   /** Deployment settings required by flows that exercise the phone adapter. */
   readonly platformSettings?: Config["platformSettings"];
   /**
@@ -155,7 +171,21 @@ async function freePort(): Promise<number> {
   });
 }
 
-/** Wait until something answers, or give up loudly rather than hang forever. */
+/**
+ * Wait until the process is serving, or give up loudly rather than hang.
+ *
+ * **Serving rather than ready, deliberately.** `/health` reports write
+ * readiness, and an instance given no ingestion bucket answers `503` there for
+ * as long as it lives — truthfully, because it has nowhere to make evidence
+ * durable. Most instances here are not about ingestion and are started without
+ * one, so waiting for a `200` would be waiting for something that is never
+ * coming.
+ *
+ * So this accepts any reply the route itself produced, which is every status
+ * below `500` plus the `503` readiness refusal. A `500` is not one of them: a
+ * process faulting on every request is not up, and treating that as "serving"
+ * would turn a broken instance into a suite that fails somewhere else later.
+ */
 async function answers(
   url: string,
   within: number,
@@ -168,7 +198,7 @@ async function answers(
 
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.status < 500 || response.status === 503) return;
     } catch {
       // Not up yet.
     }
@@ -208,25 +238,46 @@ export async function startInstance(
   const webPort = withPages ? await freePort() : apiPort;
   const origin = `http://127.0.0.1:${webPort}`;
 
-  const { app } = buildApi({
-    config: {
-      ...loadConfig({
-        DATABASE_URL: database.url,
-        CLICKHOUSE_URL: traceStore.url,
-        EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
-        EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
-        EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
-        EGMA_BASE_URL: origin,
-        EGMA_SINGLE_ORGANIZATION: "false",
-        // A self-host test deployment with one explicit key per provider
-        // account. They are nonsense and never reach a provider. Claim tests
-        // still exercise the real selection-to-credential path.
-        EGMA_OPENAI_API_KEY: "openai-key-held-by-this-test-instance",
-        EGMA_DEEPGRAM_API_KEY: "deepgram-key-held-by-this-test-instance",
-        EGMA_CARTESIA_API_KEY: "cartesia-key-held-by-this-test-instance",
-      }),
-      ...(options.blob === undefined ? {} : { blob: options.blob }),
-    },
+  // One directory per instance, on the same terms as the database: a local log
+  // is a durable record, and two instances sharing one would each recover the
+  // other's staged evidence on the way up.
+  const ingestionLogDirectory =
+    options.ingestStore === undefined
+      ? undefined
+      : mkdtempSync(path.join(tmpdir(), `egma-ingestion-${label}-`));
+
+  const base: Config = {
+    ...loadConfig({
+      DATABASE_URL: database.url,
+      CLICKHOUSE_URL: traceStore.url,
+      EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
+      EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
+      EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
+      EGMA_BASE_URL: origin,
+      EGMA_SINGLE_ORGANIZATION: "false",
+      // A self-host test deployment with one explicit key per provider
+      // account. They are nonsense and never reach a provider. Claim tests
+      // still exercise the real selection-to-credential path.
+      EGMA_OPENAI_API_KEY: "openai-key-held-by-this-test-instance",
+      EGMA_DEEPGRAM_API_KEY: "deepgram-key-held-by-this-test-instance",
+      EGMA_CARTESIA_API_KEY: "cartesia-key-held-by-this-test-instance",
+    }),
+    ...(options.blob === undefined ? {} : { blob: options.blob }),
+  };
+
+  const { app, drainer } = buildApi({
+    config:
+      options.ingestStore === undefined || ingestionLogDirectory === undefined
+        ? base
+        : {
+            ...base,
+            ingestion: {
+              ...base.ingestion,
+              store: options.ingestStore,
+              logDirectory: ingestionLogDirectory,
+              flushMilliseconds: 20,
+            },
+          },
     ...(options.deviceAuthorizationInterval === undefined
       ? {}
       : { deviceAuthorizationInterval: options.deviceAuthorizationInterval }),
@@ -329,6 +380,9 @@ export async function startInstance(
     api: app,
     database,
     traceStore,
+    async drainEvidence() {
+      return (await drainer()?.drainNow()) ?? 0;
+    },
     async close() {
       // Waits for the development server to be gone before the output
       // directory is anybody else's. See `releaseAfter`.
@@ -338,6 +392,9 @@ export async function startInstance(
       await disconnectClickHouse();
       await database.drop();
       await traceStore.drop();
+      if (ingestionLogDirectory !== undefined) {
+        rmSync(ingestionLogDirectory, { recursive: true, force: true });
+      }
     },
   };
 }

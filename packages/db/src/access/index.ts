@@ -70,11 +70,12 @@
  * unfiltered scan this boundary exists to make unreachable.
  *
  * `recordProductionTraces` sits beside `appendSpans` on that same path and is
- * the other half of what the ingest door does with an export. It is handed the
- * very same spans: the trace store gets the rows, and the grading queue gets one
- * row per conversation saying when egma last heard about it and whether its root
- * span closed. Taking the spans rather than a summary of them is what keeps
- * "when is a conversation over" written down once. It is a queue write and a
+ * the other half of what the drainer does with a segment. It is handed the very
+ * same spans, and only after they are query-visible: the trace store gets the
+ * rows, and the grader-owned boundary gets one row per conversation saying when
+ * egma last heard about it and whether a span the platform said ends it has
+ * arrived. Taking the spans rather than a summary of them is what keeps "when is
+ * a conversation over" written down once. It is a bookkeeping row and a
  * notification and never a judgment — grading happens in a service that holds no
  * request open.
  *
@@ -117,6 +118,7 @@ export {
   LastAdminError,
   MockToolTakenError,
   NotPermittedError,
+  OversizeRecordError,
   PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
   EgmaProvidedPersonaError,
@@ -129,6 +131,7 @@ export {
   UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
+  UnstorableInstantError,
   VersionConflictError,
   WriteAbortedError,
   type AgentWriteRefusal,
@@ -229,7 +232,9 @@ export {
 } from "./organizations.ts";
 
 export {
+  isProjectOfOrganization,
   listProjects,
+  projectOfOrganizationState,
   projectsOf,
   readProject,
   createProject,
@@ -237,6 +242,7 @@ export {
   type NewProject,
   type Project,
   type ProjectChanges,
+  type ProjectTenancyState,
 } from "./projects.ts";
 
 export {
@@ -259,11 +265,29 @@ export {
 
 export {
   appendSpans,
+  type AppendSpansOptions,
   type AppendedSpans,
   type NewSpan,
   type SpanEmitter,
   type SpanSource,
 } from "./spans.ts";
+
+/**
+ * The two identity probes, beside the write they exist for.
+ *
+ * Neither reads evidence: one answers which spans the store already holds and
+ * what each of them says as a fingerprint, the other answers which of a list of
+ * traces exist. They take the context like every other call here and stamp the
+ * tenancy from it, and each takes a window it cannot be called without.
+ */
+export {
+  committedSpans,
+  committedTraces,
+  type CommittedSpan,
+  type CommittedSpansOptions,
+  type CommittedTracesOptions,
+  type SpanIdentity,
+} from "./span-identity.ts";
 
 export {
   listTraces,
@@ -347,40 +371,34 @@ export type {
 export {
   checkpointMonitoringPage,
   claimDueMonitoringPull,
-  claimMonitoringFailureReplay,
-  claimProductionTrace,
+  deleteRetellCallRetry,
   disablePullProductionCalls,
+  dueRetellCallRetries,
   enablePullProductionCalls,
   failMonitoringPull,
-  failMonitoringFailureReplay,
-  finishProductionTrace,
   finishMonitoringScan,
-  listMonitoringFailures,
-  productionCallIsAccountedFor,
+  MOST_RETELL_CALL_ATTEMPTS,
   readAgentPullState,
-  recordMonitoringFailure,
   recordPulledCallReceived,
+  recordRetellCallAttempt,
   registerAgentPullingProductionCalls,
   releaseMonitoringLease,
-  releaseMonitoringFailureReplay,
   renewMonitoringLease,
-  resolveMonitoringFailureReplay,
-  sweepStaleProductionClaims,
+  sweepExpiredRetellCallMarkers,
+  transientRetellCallState,
   yieldMonitoringLease,
   type AgentPullState,
   type MonitoringFailureKind,
-  type MonitoringFailureReplayClaim,
-  type MonitoringFailureReplayProviderResult,
-  type MonitoringFailureReplayTarget,
-  type MonitoringFailureSummary,
   type MonitoringPullTarget,
-  type ProductionTraceClaim,
-  type ProductionTraceOffer,
+  type RetellCallAttemptOutcome,
+  type TransientRetellCall,
 } from "./production-monitoring.ts";
-export type {
-  MonitoringFailureStatus,
-  MonitoringScanKind,
-} from "../schema/production.ts";
+// The list beside the type, because a caller deciding whether a word names a
+// platform Egma knows has to ask the shipped list rather than write two names
+// out again — the drainer does exactly that before it moves a customer's
+// last-received state.
+export { AGENT_PLATFORMS } from "../schema/agents.ts";
+export type { MonitoringScanKind } from "../schema/production.ts";
 
 
 export {
@@ -659,6 +677,7 @@ export {
   getGradingJobForTrace,
   listGradingJobsForSimulation,
   recordGradingHeartbeat,
+  MOST_GRADING_ATTEMPTS,
   recordProductionTraces,
   regrade,
   releaseGradingJob,
@@ -673,3 +692,9 @@ export {
 } from "./grading.ts";
 export type { GradingJobStatus, GradingSource } from "../schema/grading.ts";
 export type { Listening } from "../client.ts";
+
+export {
+  DRAIN_ADVISORY_LOCK,
+  openDrainOwnership,
+  type DrainOwnership,
+} from "./drain-ownership.ts";

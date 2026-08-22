@@ -2,6 +2,9 @@ import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
+  OversizeRecordError,
+  refuseOversizeRecord,
+  spanContentHash,
   type AuthContext,
   type NewSpan,
 } from "@egma/db";
@@ -23,12 +26,12 @@ import {
  * belong to the module that owns the table, and they are the two Langfuse named
  * as real requirements rather than refinements. A transcript will reach them.
  *
- * Every storage assertion here runs against a real ClickHouse. Row counts
- * after a repeat, what a `LowCardinality` column does with a long string, and
- * whether an insert of ten thousand rows arrives whole are engine behaviours,
- * and a substitute would confirm only the strings egma sends. The one pure
- * planning assertion proves 130 months without repeating an engine behaviour
- * already proved by the small real multi-month append beside it.
+ * Every storage assertion here runs against a real ClickHouse. What a repeated
+ * span does to the visible row count, what a named insert does to a retry that
+ * regrouped its bytes, and whether an insert of ten thousand rows arrives whole
+ * are engine behaviours, and a substitute would confirm only the strings egma
+ * sends. The two pure assertions — the 130-month plan and the fingerprint —
+ * reach nothing and are proved as the arithmetic they are.
  */
 
 let store: MigratedTraceStore;
@@ -90,6 +93,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...overrides,
   };
 }
@@ -265,84 +269,164 @@ describe("a batch too big for one insert", () => {
 
 describe("a field too big for its column", () => {
   /**
-   * The cap costs presentation, never data. A transcript long enough to reach
-   * one is shortened in the column a page renders and kept whole in the payload
-   * beside it — which is the only reason capping is safe at all.
+   * **Refused, never shortened.** A transcript cut to fit is stored looking
+   * exactly like a whole one: no column says a cut happened, no reader can tell,
+   * and the customer whose evidence egma edited is the last person who could
+   * ever find out. So the record does not go in at all, and whoever sent it is
+   * told which field, what the bound is, and what arrived.
    */
-  it("is cut in the column and kept whole in the verbatim payload", async () => {
+  it("is refused by name, with the bound and the size it arrived at", async () => {
     const traceId = "4444444444444444444444444444eeee";
     const enormous = "x".repeat(200_000);
 
-    await appendSpans(at(acme), [
-      span({
-        traceId,
-        text: enormous,
-        toolArguments: enormous,
-        toolResult: enormous,
-        name: "n".repeat(5_000),
-        payload: JSON.stringify({ text: enormous }),
-      }),
-    ]);
+    const refused = appendSpans(at(acme), [span({ traceId, text: enormous })]);
 
-    const [row] = await store.rows<{
-      text_length: number;
-      arguments_length: number;
-      result_length: number;
-      name_length: number;
-      payload_length: number;
-    }>(
-      `select length(text) as text_length, ` +
-        `length(tool_arguments) as arguments_length, ` +
-        `length(tool_result) as result_length, ` +
-        `length(name) as name_length, ` +
-        `length(payload) as payload_length ` +
-        `from spans where trace_id = '${traceId}'`,
-    );
-
-    expect(row?.text_length).toBeLessThan(enormous.length);
-    expect(row?.arguments_length).toBeLessThan(enormous.length);
-    expect(row?.result_length).toBeLessThan(enormous.length);
-    expect(row?.name_length).toBeLessThan(5_000);
-    // Nothing happened to the payload, which is where the original still is.
-    expect(row?.payload_length).toBeGreaterThan(enormous.length);
+    await expect(refused).rejects.toThrow(OversizeRecordError);
+    await expect(refused).rejects.toMatchObject({
+      field: "text",
+      bound: 65_536,
+      bytes: 200_000,
+    });
   });
 
-  it("is never cut through the middle of a character", async () => {
+  it("takes nothing of the batch with it", async () => {
+    const traceId = "4444444444444444444444444444dddd";
+    const enormous = "x".repeat(200_000);
+
+    await expect(
+      appendSpans(at(acme), [
+        span({ traceId, spanId: "0000000000000001" }),
+        span({ traceId, spanId: "0000000000000002", toolResult: enormous }),
+      ]),
+    ).rejects.toThrow(OversizeRecordError);
+
+    // Not the good record either. The whole batch is checked before the first
+    // block is sent, so a refusal leaves nothing half-written to reconcile.
+    expect(
+      await countOf(
+        `select count() as n from spans where trace_id = '${traceId}'`,
+      ),
+    ).toBe(0);
+  });
+
+  /**
+   * The decision is a pure function of the record and is exported as one,
+   * because the acceptance path has to make it before anything is staged — a
+   * record egma will not store must never enter the log or ride a segment.
+   */
+  it("is the same answer before the write as at it", () => {
+    expect(() => refuseOversizeRecord(span({ text: "x".repeat(65_536) })))
+      .not.toThrow();
+    expect(() =>
+      refuseOversizeRecord(span({ text: "x".repeat(65_537) })),
+    ).toThrow(OversizeRecordError);
+  });
+
+  /**
+   * The bound is the store's, so it is counted in the store's unit: ClickHouse
+   * measures a `String` in bytes of UTF-8 and JavaScript measures a string in
+   * UTF-16 code units, and an emoji is four of the first and two of the second.
+   * A budget kept in the wrong unit would refuse a legitimate transcript at a
+   * quarter of the documented size.
+   */
+  it("is measured in bytes of UTF-8 rather than in characters", async () => {
     const traceId = "5555555555555555555555555555ffff";
-    // One byte in front of the emoji, so that the cap cannot land on a
-    // character boundary by luck: an emoji is four bytes of UTF-8 and a
-    // surrogate pair of UTF-16, and a cut between its halves would store
-    // something that is not text in any encoding.
-    await appendSpans(at(acme), [
-      span({ traceId, text: `a${"🙂".repeat(40_000)}` }),
-    ]);
+    // 16384 emoji is 65_536 bytes exactly, and 32_768 UTF-16 code units.
+    const atTheBound = "🙂".repeat(16_384);
+    expect(atTheBound.length).toBeLessThan(65_536);
+
+    await appendSpans(at(acme), [span({ traceId, text: atTheBound })]);
 
     const [row] = await store.rows<{ text: string; bytes: number }>(
-      `select text, length(text) as bytes from spans where trace_id = '${traceId}'`,
+      `select text, length(text) as bytes from spans final ` +
+        `where trace_id = '${traceId}'`,
     );
+    expect(row?.bytes).toBe(65_536);
+    // Byte for byte, and no character split in half by anything on the way.
+    expect(row?.text).toBe(atTheBound);
 
-    const text = row?.text ?? "";
-    expect(text).toMatch(/^a🙂+$/u);
-    // A lone high surrogate is what a naive cut leaves behind, and it is
-    // exactly what the column must never hold.
-    const last = text.charCodeAt(text.length - 1);
-    expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
-    // The limit is the store's, so it is counted in the store's unit. Kept in
-    // UTF-16 code units this string would have been 64 KiB of characters and
-    // 256 KiB of column.
-    expect(row?.bytes).toBeLessThanOrEqual(65_536);
-    expect(row?.bytes).toBeGreaterThan(65_000);
+    await expect(
+      appendSpans(at(acme), [
+        span({ traceId, spanId: "0000000000000009", text: `${atTheBound}a` }),
+      ]),
+    ).rejects.toThrow(OversizeRecordError);
+  });
+
+  /**
+   * The provider's own document has no bound and never had one. It is the copy
+   * no later migration can reconstruct, and the batch splitter is what keeps a
+   * large one writable.
+   */
+  it("does not apply to the verbatim payload", async () => {
+    const traceId = "5555555555555555555555555555eeee";
+    const enormous = JSON.stringify({ text: "x".repeat(200_000) });
+
+    await appendSpans(at(acme), [span({ traceId, payload: enormous })]);
+
+    const [row] = await store.rows<{ payload: string }>(
+      `select payload from spans final where trace_id = '${traceId}'`,
+    );
+    expect(row?.payload).toBe(enormous);
+  });
+});
+
+describe("what a span says, as one comparable value", () => {
+  /**
+   * Stored beside the row rather than recomputed from it. A hash taken from the
+   * stored columns could not survive `LowCardinality`, `DateTime64` rounding or
+   * the payload faithfully, so the fingerprint is taken from the record while
+   * the record is still whole.
+   */
+  it("is written on the row, and is the fingerprint of the record", async () => {
+    const traceId = "5656565656565656565656565656aaaa";
+    const one = span({ traceId, spanId: "0000000000000001" });
+
+    await appendSpans(at(acme), [one]);
+
+    const [row] = await store.rows<{ content_hash: string }>(
+      `select content_hash from spans final where trace_id = '${traceId}'`,
+    );
+    expect(row?.content_hash).toBe(spanContentHash(one));
+    expect(row?.content_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("does not move when the same evidence is built twice", () => {
+    expect(spanContentHash(span())).toBe(spanContentHash(span()));
+  });
+
+  it("moves when any part of the evidence does", () => {
+    const original = span();
+    for (const changed of [
+      span({ text: "something else" }),
+      span({ payload: '{"revision":2}' }),
+      span({ startedAtMicroseconds: original.startedAtMicroseconds + 1n }),
+      span({ durationNanoseconds: original.durationNanoseconds + 1n }),
+      span({ endsTrace: true }),
+    ]) {
+      expect(spanContentHash(changed)).not.toBe(spanContentHash(original));
+    }
+  });
+
+  /**
+   * The platform's explicit end fact is part of the evidence, and an absent one
+   * means `false` rather than something else. A writer that has learned to state
+   * it and one that has not must agree about a span neither of them ends.
+   */
+  it("reads an unstated end fact as the `false` it means", () => {
+    expect(spanContentHash(span({ endsTrace: false }))).toBe(
+      spanContentHash(span()),
+    );
   });
 });
 
 describe("sending the same batch twice", () => {
   /**
-   * The producer owes non-duplication and an exporter's retry is byte-identical
-   * by design, so this is the backstop under a path egma does not own. It only
-   * works because the rows are a pure function of the arguments: nothing here
-   * stamps a clock or a random token on the way past.
+   * A replay of one span is the same span, and the identity is what says so:
+   * organization, project, trace, span. It holds however long the replay took
+   * and however the bytes were regrouped on the way, which is what the two
+   * finite shields in front of it cannot promise.
    */
-  it("leaves the row count where it was", async () => {
+  it("leaves the visible row count where it was", async () => {
     const traceId = "6666666666666666666666666666aaaa";
     const batch = Array.from({ length: 20 }, (_, index) =>
       span({ traceId, spanId: index.toString(16).padStart(16, "0") }),
@@ -350,7 +434,7 @@ describe("sending the same batch twice", () => {
 
     await appendSpans(at(acme), batch);
     const after = await countOf(
-      `select count() as n from spans where trace_id = '${traceId}'`,
+      `select count() as n from spans final where trace_id = '${traceId}'`,
     );
     expect(after).toBe(batch.length);
 
@@ -359,12 +443,12 @@ describe("sending the same batch twice", () => {
 
     expect(
       await countOf(
-        `select count() as n from spans where trace_id = '${traceId}'`,
+        `select count() as n from spans final where trace_id = '${traceId}'`,
       ),
     ).toBe(batch.length);
     expect(
       await countOf(
-        `select count() as n from turns where trace_id = '${traceId}'`,
+        `select count() as n from turns final where trace_id = '${traceId}'`,
       ),
     ).toBe(batch.length);
   });
@@ -376,12 +460,25 @@ describe("sending the same batch twice", () => {
 
     expect(
       await countOf(
-        `select count() as n from spans where trace_id = '${traceId}'`,
+        `select count() as n from spans final where trace_id = '${traceId}'`,
       ),
     ).toBe(2);
   });
 
-  it("stores changed evidence even when it reuses the same span ids", async () => {
+  /**
+   * **One identity is one visible span, whatever arrives claiming it.** This
+   * used to assert the opposite — that changed evidence under a reused span id
+   * was stored beside the original as the different thing it was — and that is
+   * exactly the state the identity exists to make impossible: two accounts of
+   * one immutable span, both visible, with nothing to say which one happened.
+   *
+   * Which of the two ends up visible is deliberately not asserted, because the
+   * engine's answer is not the product's. A second, different account of one
+   * identity is an integrity defect, and it is refused before it is written —
+   * by the caller, against `committedSpans`, which is where that guarantee is
+   * proved. What this function owes is that no reader is ever handed both.
+   */
+  it("never leaves two accounts of one span visible", async () => {
     const traceId = "aaaa2222aaaa2222aaaa2222aaaa2222";
     const batch = Array.from({ length: 5 }, (_, index) =>
       span({ traceId, spanId: index.toString(16).padStart(16, "0") }),
@@ -390,31 +487,26 @@ describe("sending the same batch twice", () => {
     await appendSpans(at(acme), batch);
     await appendSpans(
       at(acme),
-      batch.map((one) => ({ ...one, text: "re-serialised on the way" })),
+      batch.map((one) => ({ ...one, text: "a second account" })),
     );
 
     expect(
       await countOf(
-        `select count() as n from spans where trace_id = '${traceId}'`,
-      ),
-    ).toBe(batch.length * 2);
-    expect(
-      await countOf(
-        `select count() as n from spans where trace_id = '${traceId}' ` +
-          `and text = 're-serialised on the way'`,
+        `select count() as n from spans final where trace_id = '${traceId}'`,
       ),
     ).toBe(batch.length);
-    // The turn view follows stored rows. It does not collapse reused ids.
+    // The turn grain collapses on the same identity, and separately: the view
+    // runs on the block that arrived, before the table has decided anything.
     expect(
       await countOf(
-        `select count() as n from turns where trace_id = '${traceId}'`,
+        `select count() as n from turns final where trace_id = '${traceId}'`,
       ),
-    ).toBe(batch.length * 2);
+    ).toBe(batch.length);
   });
 
-  /** Tenant stamps are part of each stored row. Two customers may mint the
-   * same ids, but their insert blocks are still different evidence. */
-  it("never mistakes two customers' identical ids for one batch", async () => {
+  /** Tenant stamps lead the identity. Two customers may mint the same trace and
+   * span ids, and those are still two different spans. */
+  it("never mistakes two customers' identical ids for one span", async () => {
     const traceId = "bbbb3333bbbb3333bbbb3333bbbb3333";
     const batch = [span({ traceId, spanId: "abcdefabcdefabcd" })];
 
@@ -423,9 +515,69 @@ describe("sending the same batch twice", () => {
 
     expect(
       await countOf(
-        `select count() as n from spans where trace_id = '${traceId}'`,
+        `select count() as n from spans final where trace_id = '${traceId}'`,
       ),
     ).toBe(2);
+  });
+});
+
+describe("a segment written twice", () => {
+  /**
+   * The shield the block-level one cannot be: a retry that re-serialised,
+   * regrouped or re-split the same drained segment is different bytes and the
+   * same output, so the block hash no longer matches and only a name given by
+   * the writer can recognise it. The name is the segment's own identity, chosen
+   * and persisted before the first upload, so every retry offers the same one.
+   */
+  it("is recognised by the name the writer gave it, not by its bytes", async () => {
+    const traceId = "cccc4444cccc4444cccc4444cccc4444";
+    const segmentId = "sgm_01JQZ0000000000000000000AA";
+    const one = span({ traceId, spanId: "0000000000000001" });
+
+    await appendSpans(at(acme), [one], { segmentId });
+    await appendSpans(at(acme), [{ ...one, payload: '{"re":"serialised"}' }], {
+      segmentId,
+    });
+
+    // Not one visible row out of two stored — one row, because the second
+    // insert never reached the table at all.
+    expect(
+      await countOf(
+        `select count() as n from spans where trace_id = '${traceId}'`,
+      ),
+    ).toBe(1);
+    const [row] = await store.rows<{ payload: string }>(
+      `select payload from spans where trace_id = '${traceId}'`,
+    );
+    expect(row?.payload).toBe("{}");
+  });
+
+  /**
+   * And the name is per block, because a segment large enough to split writes
+   * several. One name across all of them would suppress every block after the
+   * first and lose most of the segment to its own shield.
+   */
+  it("names each of its blocks, so a split segment lands whole", async () => {
+    const traceId = "dddd5555dddd5555dddd5555dddd5555";
+    const months = 3;
+    const spans = Array.from({ length: months }, (_, index) =>
+      span({
+        traceId,
+        spanId: index.toString(16).padStart(16, "0"),
+        startedAtMicroseconds: BigInt(Date.UTC(2025, index, 1)) * 1000n,
+      }),
+    );
+
+    const written = await appendSpans(at(acme), spans, {
+      segmentId: "sgm_01JQZ0000000000000000000BB",
+    });
+
+    expect(written.batches).toBe(months);
+    expect(
+      await countOf(
+        `select count() as n from spans final where trace_id = '${traceId}'`,
+      ),
+    ).toBe(months);
   });
 });
 

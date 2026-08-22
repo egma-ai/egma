@@ -614,6 +614,10 @@ function span(
     agentVersionId: "",
     testVersionId: "",
     personaVersionId: "",
+    // Only the root span of a call Retell reported an end for says otherwise,
+    // and it says so in so many words. Every turn and every tool call inside a
+    // conversation is mid-conversation by construction.
+    endsTrace: false,
     ...fields,
   };
 }
@@ -670,11 +674,28 @@ export function normaliseRetellCall(
     span({
       ...shared,
       spanId: rootId,
-      // Empty, which is how a root is recognised everywhere in this store —
-      // and how the grading bookkeeping learns the conversation is over.
+      // Empty, which is how a root is recognised everywhere in this store.
+      // Recognising a root is not the same fact as knowing a conversation
+      // ended, and this span carries the second one separately.
       parentSpanId: "",
       name: "retell_call",
       kind: "conversation",
+      /*
+       * Retell's own answer, and only Retell's.
+       *
+       * `endReported` is the same fact the poller's cursor already refuses to
+       * move without: `true` means the provider named an end timestamp for this
+       * call, and `false` means Egma stood in a plausible instant because the
+       * payload carried none. The two must not be confused — a call still in
+       * progress reads back with a start and no end, and treating that as an
+       * ending would close a conversation while the caller is still talking.
+       *
+       * It was already computed here and already surfaced on the normalised
+       * trace; carrying it onto the span is what lets everything downstream of
+       * storage read the platform's statement instead of inferring one from
+       * this span having no parent.
+       */
+      endsTrace: times.reported,
       startedAtMicroseconds: startedAt,
       durationNanoseconds: (endedAt - startedAt) * 1000n,
       status: degraded || providerFailed ? "error" : "ok",

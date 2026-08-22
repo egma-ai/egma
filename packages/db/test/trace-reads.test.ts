@@ -107,6 +107,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...overrides,
   };
 }
@@ -472,84 +473,93 @@ describe("a span whose parent never arrived", () => {
   });
 });
 
-describe("changed evidence that reuses span ids", () => {
-  const REUSED = "abab1111111111111111111111111111";
+/**
+ * A span replayed, which is the only way one identity ever arrives twice on a
+ * path that is working.
+ *
+ * This suite used to assert the opposite: that a second, different account of a
+ * span id was stored beside the first and that a reader handed back both. That
+ * was a reader faithfully reporting an integrity defect as if it were a
+ * transcript — a person reading it would see the human speak twice and have no
+ * way to learn that only one of those things was ever said. Two accounts of one
+ * immutable span are refused before the second is written now, so what a read
+ * has to prove is the case that remains: a replay is one span, however many
+ * physical copies of it the store is holding at this instant.
+ */
+describe("a replayed span in a trace somebody opens", () => {
+  const REPLAYED = "abab1111111111111111111111111111";
   const root = "dadadadadadadada";
   const turn = "dbdbdbdbdbdbdbdb";
   const child = "dcdcdcdcdcdcdcdc";
 
+  const trace = (): NewSpan[] => [
+    span({
+      traceId: REPLAYED,
+      spanId: root,
+      name: "agent_session",
+      payload: '{"revision":1}',
+    }),
+    span({
+      traceId: REPLAYED,
+      spanId: turn,
+      parentSpanId: root,
+      name: "user_turn",
+      kind: "turn:human",
+      text: "the only thing said",
+    }),
+    span({
+      traceId: REPLAYED,
+      spanId: child,
+      parentSpanId: root,
+      name: "shared-child",
+      kind: "model",
+    }),
+  ];
+
   beforeAll(async () => {
-    await appendSpans(at(acme, SUPPORT), [
-      span({
-        traceId: REUSED,
-        spanId: root,
-        name: "root-original",
-        payload: '{"revision":1}',
-      }),
-      span({
-        traceId: REUSED,
-        spanId: turn,
-        parentSpanId: root,
-        name: "user_turn",
-        kind: "turn:human",
-        text: "original evidence",
-      }),
-    ]);
-    await appendSpans(at(acme, SUPPORT), [
-      span({
-        traceId: REUSED,
-        spanId: root,
-        name: "root-changed",
-        payload: '{"revision":2}',
-      }),
-      span({
-        traceId: REUSED,
-        spanId: turn,
-        parentSpanId: root,
-        name: "user_turn",
-        kind: "turn:human",
-        text: "changed evidence",
-      }),
-    ]);
-    await appendSpans(at(acme, SUPPORT), [
-      span({
-        traceId: REUSED,
-        spanId: child,
-        parentSpanId: root,
-        name: "shared-child",
-        kind: "model",
-      }),
-    ]);
-    // The changed block is different evidence, so both reused-id rows exist in
-    // storage and this suite can prove that the reader does not collapse them.
-    // Force the parts together. The response order must come from stored
-    // content, not whichever source part ClickHouse happens to read first.
-    await store.command("optimize table spans final");
+    await appendSpans(at(acme, SUPPORT), trace());
+    // Delivered again, regrouped so that neither block-level shield can absorb
+    // it and the identity is the only thing left holding the line.
+    for (const one of trace()) await appendSpans(at(acme, SUPPORT), [one]);
   });
 
-  it("returns every stored row in a stable tree instead of collapsing by span id", async () => {
-    const first = await readTrace(at(acme, SUPPORT), REUSED, {
-      window: WINDOW,
-    });
-    const second = await readTrace(at(acme, SUPPORT), REUSED, {
+  it("is one span in the tree, one turn in the transcript, and one in the count", async () => {
+    const detail = await readTrace(at(acme, SUPPORT), REPLAYED, {
       window: WINDOW,
     });
 
-    expect(second).toEqual(first);
-    expect(first?.spanCount).toBe(5);
-    expect(everySpanOf(first)).toHaveLength(5);
-    expect(first?.turns.map((each) => each.text).sort()).toEqual([
-      "changed evidence",
-      "original evidence",
+    expect(detail?.spanCount).toBe(3);
+    expect(everySpanOf(detail)).toHaveLength(3);
+    expect(detail?.turns.map((each) => each.text)).toEqual([
+      "the only thing said",
     ]);
-    expect(first?.spans.map((each) => each.name)).toEqual([
-      "root-original",
-      "root-changed",
-    ]);
-    expect(first?.spans[0]?.spans.map((each) => each.name)).toEqual([
+    expect(detail?.spans.map((each) => each.name)).toEqual(["agent_session"]);
+    expect(detail?.spans[0]?.spans.map((each) => each.name)).toEqual([
       "shared-child",
     ]);
-    expect(first?.spans[1]?.spans).toEqual([]);
+  });
+
+  it("reads the same both times, before and after the parts are merged", async () => {
+    const before = await readTrace(at(acme, SUPPORT), REPLAYED, {
+      window: WINDOW,
+    });
+    // What a background merge would do, made to happen now. A read must not
+    // depend on whether it already has.
+    await store.command("optimize table spans final");
+    const after = await readTrace(at(acme, SUPPORT), REPLAYED, {
+      window: WINDOW,
+    });
+
+    expect(after).toEqual(before);
+  });
+
+  it("counts the trace once in the list", async () => {
+    const page = await listTraces(at(acme, SUPPORT), { window: WINDOW });
+    const listed = page.traces.filter((each) => each.traceId === REPLAYED);
+
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.spanCount).toBe(3);
+    expect(listed[0]?.preview).toBe("the only thing said");
   });
 });
 
@@ -616,9 +626,11 @@ describe("a parent cycle longer than one span", () => {
       }),
     ]);
 
-    // A later row reuses the root id inside one branch. Reaching that row also
-    // reaches the root's second child. A walk that filters all root children
-    // before it descends would therefore append that second child twice.
+    // A later row reuses the root id inside one branch — one batch offering two
+    // accounts of one span, which a producer can still send even though nothing
+    // downstream will show both. Reaching that row also reaches the root's
+    // second child, so a walk that filters all root children before it descends
+    // would append that second child twice.
     const repeatedRoot = spanId();
     const firstChild = spanId();
     const secondChild = spanId();
@@ -682,19 +694,35 @@ describe("a parent cycle longer than one span", () => {
     ]);
   });
 
-  it("returns each row once when a cycle also reuses an id", async () => {
+  /**
+   * Four rows in, three spans out, and the third is one span rather than two.
+   *
+   * The two rows sharing an id are two accounts of one immutable span, and the
+   * store collapses them onto the identity they both claim — which is why this
+   * asserts that the surviving account appears once and deliberately does not
+   * assert *which* one survived. Choosing between them is not a read's job and
+   * never becomes one: a second, different account is refused before it is
+   * written, so a working path never produces this at all.
+   *
+   * What the walk still owes is the property this case was built for: the
+   * second child, reachable both directly and through the knot, appears once.
+   */
+  it("returns each span once when a cycle also reuses an id", async () => {
     const detail = await readTrace(at(acme, SUPPORT), REUSED_IN_CYCLE, {
       window: WINDOW,
     });
 
-    expect(detail?.spanCount).toBe(4);
-    expect(everySpanOf(detail)).toHaveLength(4);
-    expect(everySpanOf(detail).map((each) => each.name).sort()).toEqual([
-      "first-child",
-      "root-id-reused-in-cycle",
-      "root-original",
-      "second-child",
-    ]);
+    expect(detail?.spanCount).toBe(3);
+    expect(everySpanOf(detail)).toHaveLength(3);
+
+    const names = everySpanOf(detail).map((each) => each.name);
+    expect(names.filter((name) => name === "first-child")).toHaveLength(1);
+    expect(names.filter((name) => name === "second-child")).toHaveLength(1);
+    expect(
+      names.filter(
+        (name) => name === "root-original" || name === "root-id-reused-in-cycle",
+      ),
+    ).toHaveLength(1);
   });
 });
 

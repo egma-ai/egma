@@ -105,18 +105,28 @@ const WORK_DISPATCHING = [
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
   "claimDueMonitoringPull",
-  "sweepStaleProductionClaims",
+  // Which process, out of however many are running, drains the pending prefix.
+  // One claim per deployment rather than one per customer: the prefix holds
+  // every project's evidence, so there is no customer to name.
+  "openDrainOwnership",
 ];
 
 /**
  * Everything that touches a customer's data. All of it needs the context.
  *
- * The trace store's three are `appendSpans`, which writes, and `listTraces` and
+ * The trace store's are `appendSpans`, which writes, and `listTraces` and
  * `readTrace`, which arrived with the two v1 endpoints that call them — an
  * exported read with no caller would be a hole in the boundary that nothing is
  * watching, which is the same objection as a permission row nothing enforces.
  * Both reads take a required time window on top of the context, so neither can
  * be called in a way that scans the whole table.
+ *
+ * `committedSpans` and `committedTraces` are the write path's own two questions
+ * about the same store, and they take the window for the reads' reason: the
+ * partition key is the month a span started in, so a probe with no window is a
+ * scan of every month the customer ever had. Neither returns evidence — one
+ * answers fingerprints, the other answers which ids exist — which is why they
+ * are a pair of their own rather than a third and fourth read.
  *
  * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
  * other table. They need no window because a verdict is filed under the
@@ -157,6 +167,13 @@ const CONTEXT_REQUIRING = [
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
   "connectionTypeOf",
+  // What the trace store already holds, asked about a batch at a time and
+  // answered without any evidence in it: which spans are committed and what
+  // each of their fingerprints is, and which of a list of trace ids exist.
+  // They take a window they cannot be called without, on the read surface's
+  // terms, and they answer nothing a caller did not already name.
+  "committedSpans",
+  "committedTraces",
   "createAgent",
   "createApiKey",
   "createInvitation",
@@ -190,7 +207,6 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failMonitoringFailureReplay",
   "failMonitoringPull",
   "finishGradingJob",
   "finishMonitoringScan",
@@ -216,7 +232,6 @@ const CONTEXT_REQUIRING = [
   "listAgents",
   "listApiKeys",
   "listConnections",
-  "listMonitoringFailures",
   "listGraderLibrary",
   "listGraders",
   "listGradingJobsForSimulation",
@@ -257,30 +272,42 @@ const CONTEXT_REQUIRING = [
   "readAssertionShelf",
   "readAssertionWords",
   "readAgentPullState",
+  // Asks one question and answers it about the acting customer: does this
+  // project belong to them. The drainer holds a scope it read out of a sealed
+  // object and must not write under a pair Postgres has never agreed to.
+  "isProjectOfOrganization",
+  // The same question with deletion in the answer: whether the pair is live,
+  // archived since the evidence was accepted, or was never real. The drainer
+  // tells a project removed after the fact from a binding that could not exist.
+  "projectOfOrganizationState",
   "readProject",
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
+  // The one writer for "a pulled call reached the store". Its merge is
+  // monotone, because the instant it is given comes from the evidence and a
+  // replayed segment therefore carries an older one than the row already holds.
   "recordPulledCallReceived",
-  "recordMonitoringFailure",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger chooses one writer for a production call. Poll progress belongs
-  // to the pulled agent's own notebook, never to a simulation connection.
+  // Poll progress belongs to the pulled agent's own notebook, never to a
+  // simulation connection. A call that lands writes nothing here at all; only
+  // one that did not leaves a short-lived retry row behind it.
   "checkpointMonitoringPage",
-  "claimMonitoringFailureReplay",
+  "deleteRetellCallRetry",
   "disablePullProductionCalls",
+  "dueRetellCallRetries",
   "enablePullProductionCalls",
-  "claimProductionTrace",
-  "finishProductionTrace",
+  "recordRetellCallAttempt",
+  "sweepExpiredRetellCallMarkers",
+  "transientRetellCallState",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   // Register a platform agent egma does not know and start pulling it, as one
   // write. Split in two, a refused switch leaves an unbound agent behind.
   "registerAgentPullingProductionCalls",
   "regrade",
-  "releaseMonitoringFailureReplay",
   "releaseMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
@@ -294,8 +321,6 @@ const CONTEXT_REQUIRING = [
   "restoreConnection",
   "renameTestSuite",
   "renewMonitoringLease",
-  "productionCallIsAccountedFor",
-  "resolveMonitoringFailureReplay",
   "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
@@ -462,6 +487,15 @@ const VALUES = [
   // which is a different answer in kind.
   "MockToolTakenError",
   "NotPermittedError",
+  // A record naming a field longer than the column it would be filed in. Its
+  // own class because it is about the evidence rather than about the store:
+  // nothing failed and trying again will not help, and it carries the field,
+  // the bound and the size so that whoever sent the record is told all three.
+  "OversizeRecordError",
+  // The other refusal about the evidence rather than the store: a start instant
+  // the store cannot hold. Its own class beside the oversize one — nothing
+  // failed, and trying again will not help.
+  "UnstorableInstantError",
   "EgmaProvidedPersonaError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
@@ -561,6 +595,37 @@ const READ_LIMITS = [
 ];
 
 /**
+ * The shipped list of agent platforms, beside the type spelled from it.
+ *
+ * Deciding whether a word names one is a question about that list, and a list
+ * written out a second time somewhere else is a list that will one day disagree
+ * with itself — quietly, as a platform whose bookkeeping stopped being written.
+ */
+const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
+
+/**
+ * How many times one conversation is handed out before egma stops trying.
+ *
+ * Exported for the same reason the read limits are: the service that judges
+ * decides on its own last attempt to answer with what it can see rather than
+ * decline again, and a bound named in two places is a bound that will one day
+ * disagree with itself.
+ */
+const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
+
+/**
+ * The bounded budget one listed Retell call gets, and the lock that decides
+ * which process drains.
+ *
+ * The ceiling is exported for the reason every other number here is: the poller
+ * has to schedule against the same bound the table's own check enforces, and a
+ * bound written out twice is a bound that will one day disagree with itself.
+ * The lock's key is exported so an operator reading `pg_locks` can tell egma's
+ * two advisory locks apart without reading the source.
+ */
+const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
+
+/**
  * What a mock tool's answer may cost the exchange that carries it, and the two
  * pure functions that read one.
  *
@@ -656,10 +721,42 @@ const THE_MEASURES = [
   "reportedMeasurementsPayload",
 ];
 
+/**
+ * The two decisions about one span's evidence, taken on the fold's terms and
+ * for the fold's reason: a record goes in, a fingerprint or a refusal comes
+ * out, and neither reaches a store. There is no tenancy to stamp because there
+ * is nothing to stamp it on.
+ *
+ * They cross the boundary because each has to be worked out in exactly one
+ * place, and each has two halves in two packages. An acceptance path refuses an
+ * oversize record before it is staged; this module refuses it again at the
+ * write, and a second implementation of the bound is one of them storing a cut
+ * value as if it were whole. An acceptance path fingerprints what it stages;
+ * this module fingerprints the row and compares it against what is stored, and
+ * a second implementation of the fingerprint is one of them calling a conflict
+ * a replay.
+ *
+ * The ceiling of the refusal's bounds crosses with it: a caller reserving room
+ * for the largest record this module would accept must take that size from the
+ * bounds themselves, because a restated number drifts the first time a bound
+ * moves.
+ */
+const THE_EVIDENCE_RULES = [
+  "LARGEST_BOUNDED_RECORD_BYTES",
+  "refuseOversizeRecord",
+  // The other refusal over the same door: a span whose start instant a
+  // DateTime64 row and the partitioned read that guards every replay cannot be
+  // built around. Refused before staging as an oversize field is, so a segment
+  // that could never be read back is never sealed.
+  "refuseUnstorableInstant",
+  "spanContentHash",
+];
+
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
       [
+        ...THE_EVIDENCE_RULES,
         ...CONNECTION,
         ...MIGRATIONS,
         ...IDENTITY,
@@ -670,6 +767,9 @@ describe("the data-access module's surface", () => {
         ...PERMISSION,
         ...VALUES,
         ...READ_LIMITS,
+        ...THE_AGENT_PLATFORMS,
+        ...THE_GRADING_BUDGET,
+        ...THE_RETELL_BUDGET,
         ...THE_FOLD,
         ...THE_MEASURES,
         ...THE_MOCKED_WORLD,

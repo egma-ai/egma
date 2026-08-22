@@ -1,5 +1,5 @@
 {
-  "id": "efa5808c-d94c-4f41-a15b-a8f91e379e06",
+  "id": "007bb90d-f166-42a5-a258-ae8bbe0113a1",
   "prevId": "2a33d7e2-d056-4b6e-a9cf-5bd068157b24",
   "version": "7",
   "dialect": "postgresql",
@@ -1734,36 +1734,17 @@
           "primaryKey": false,
           "notNull": true
         },
-        "agent_platform": {
-          "name": "agent_platform",
+        "description": {
+          "name": "description",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "platform_agent_id": {
-          "name": "platform_agent_id",
-          "type": "text",
+        "revision": {
+          "name": "revision",
+          "type": "text COLLATE \"C\"",
           "primaryKey": false,
-          "notNull": false
-        },
-        "monitoring_api_key": {
-          "name": "monitoring_api_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "monitoring_api_key_hint": {
-          "name": "monitoring_api_key_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pull_production_calls": {
-          "name": "pull_production_calls",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
+          "notNull": true
         },
         "archived_at": {
           "name": "archived_at",
@@ -1836,34 +1817,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "agent_pulled_platform_agent_unique": {
-          "name": "agent_pulled_platform_agent_unique",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "agent_platform",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "platform_agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"agent\".\"pull_production_calls\"",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -1925,22 +1878,6 @@
         "agent_id_prefix": {
           "name": "agent_id_prefix",
           "value": "\"agent\".\"id\" ~ '^agt_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "agent_platform_allowed": {
-          "name": "agent_platform_allowed",
-          "value": "\"agent\".\"agent_platform\" in ('retell', 'livekit_agents')"
-        },
-        "agent_monitoring_key_hint_agrees": {
-          "name": "agent_monitoring_key_hint_agrees",
-          "value": "(\"agent\".\"monitoring_api_key\" is null) = (\"agent\".\"monitoring_api_key_hint\" is null)"
-        },
-        "agent_monitoring_key_needs_platform": {
-          "name": "agent_monitoring_key_needs_platform",
-          "value": "\"agent\".\"monitoring_api_key\" is null or \"agent\".\"agent_platform\" is not null"
-        },
-        "agent_pull_needs_binding": {
-          "name": "agent_pull_needs_binding",
-          "value": "\"agent\".\"pull_production_calls\" = false or (\"agent\".\"agent_platform\" is not null and \"agent\".\"platform_agent_id\" is not null and \"agent\".\"monitoring_api_key\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -1979,8 +1916,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "connection_type": {
-          "name": "connection_type",
+        "agent_platform": {
+          "name": "agent_platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "connection_kind": {
+          "name": "connection_kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -2026,6 +1969,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
         },
         "archived_at": {
           "name": "archived_at",
@@ -2182,9 +2131,13 @@
           "name": "connection_id_prefix",
           "value": "\"connection\".\"id\" ~ '^con_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "connection_type_allowed": {
-          "name": "connection_type_allowed",
-          "value": "\"connection\".\"connection_type\" in ('retell_chat_api', 'phone_number', 'livekit_room')"
+        "connection_agent_platform_allowed": {
+          "name": "connection_agent_platform_allowed",
+          "value": "\"connection\".\"agent_platform\" in ('retell', 'livekit_agents')"
+        },
+        "connection_kind_allowed": {
+          "name": "connection_kind_allowed",
+          "value": "\"connection\".\"connection_kind\" in ('retell_chat_api', 'phone_number', 'livekit_room')"
         },
         "connection_access_variant_allowed": {
           "name": "connection_access_variant_allowed",
@@ -2205,20 +2158,14 @@
       },
       "isRLSEnabled": false
     },
-    "public.monitoring_failure": {
-      "name": "monitoring_failure",
+    "public.monitoring_setup": {
+      "name": "monitoring_setup",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
           "type": "text COLLATE \"C\"",
           "primaryKey": true,
-          "notNull": true
-        },
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
           "notNull": true
         },
         "organization_id": {
@@ -2229,6 +2176,232 @@
         },
         "project_id": {
           "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_platform": {
+          "name": "agent_platform",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "strategy": {
+          "name": "strategy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credentials": {
+          "name": "credentials",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credentials_hint": {
+          "name": "credentials_hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "health_state": {
+          "name": "health_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'healthy'"
+        },
+        "blocked_until": {
+          "name": "blocked_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failure_started_at": {
+          "name": "failure_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consecutive_failures": {
+          "name": "consecutive_failures",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_error_at": {
+          "name": "last_error_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_recovered_at": {
+          "name": "last_recovered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_received_at": {
+          "name": "last_received_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "monitoring_setup_project_idx": {
+          "name": "monitoring_setup_project_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "monitoring_setup_organization_id_organization_id_fk": {
+          "name": "monitoring_setup_organization_id_organization_id_fk",
+          "tableFrom": "monitoring_setup",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "monitoring_setup_created_by_user_id_fk": {
+          "name": "monitoring_setup_created_by_user_id_fk",
+          "tableFrom": "monitoring_setup",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "monitoring_setup_project_organization_fk": {
+          "name": "monitoring_setup_project_organization_fk",
+          "tableFrom": "monitoring_setup",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "monitoring_setup_project_platform_unique": {
+          "name": "monitoring_setup_project_platform_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "project_id",
+            "agent_platform"
+          ]
+        },
+        "monitoring_setup_id_tenant_unique": {
+          "name": "monitoring_setup_id_tenant_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "project_id",
+            "organization_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "monitoring_setup_id_prefix": {
+          "name": "monitoring_setup_id_prefix",
+          "value": "\"monitoring_setup\".\"id\" ~ '^mns_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "monitoring_setup_platform_allowed": {
+          "name": "monitoring_setup_platform_allowed",
+          "value": "\"monitoring_setup\".\"agent_platform\" in ('retell', 'livekit_agents')"
+        },
+        "monitoring_setup_strategy_allowed": {
+          "name": "monitoring_setup_strategy_allowed",
+          "value": "\"monitoring_setup\".\"strategy\" in ('retell_api_polling', 'livekit_otlp')"
+        },
+        "monitoring_setup_health_allowed": {
+          "name": "monitoring_setup_health_allowed",
+          "value": "\"monitoring_setup\".\"health_state\" in ('healthy', 'invalid_credential', 'rate_limited', 'provider_unavailable')"
+        },
+        "monitoring_setup_credentials_hint_agrees": {
+          "name": "monitoring_setup_credentials_hint_agrees",
+          "value": "(\"monitoring_setup\".\"credentials\" is null) = (\"monitoring_setup\".\"credentials_hint\" is null)"
+        },
+        "monitoring_setup_platform_strategy_agrees": {
+          "name": "monitoring_setup_platform_strategy_agrees",
+          "value": "(\"monitoring_setup\".\"agent_platform\" = 'retell' and \"monitoring_setup\".\"strategy\" = 'retell_api_polling' and \"monitoring_setup\".\"credentials\" is not null) or (\"monitoring_setup\".\"agent_platform\" = 'livekit_agents' and \"monitoring_setup\".\"strategy\" = 'livekit_otlp' and \"monitoring_setup\".\"credentials\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.retell_call_retry": {
+      "name": "retell_call_retry",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retell_monitored_agent_id": {
+          "name": "retell_monitored_agent_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
@@ -2245,25 +2418,12 @@
           "primaryKey": false,
           "notNull": true
         },
-        "payload": {
-          "name": "payload",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "attempts": {
           "name": "attempts",
-          "type": "integer",
+          "type": "smallint",
           "primaryKey": false,
           "notNull": true,
           "default": 1
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
         },
         "last_attempt_at": {
           "name": "last_attempt_at",
@@ -2271,23 +2431,24 @@
           "primaryKey": false,
           "notNull": true
         },
-        "replay_lease_owner": {
-          "name": "replay_lease_owner",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "replay_lease_expires_at": {
-          "name": "replay_lease_expires_at",
+        "next_attempt_at": {
+          "name": "next_attempt_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
-        "resolved_at": {
-          "name": "resolved_at",
+        "expires_at": {
+          "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "import_generation": {
+          "name": "import_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2298,33 +2459,33 @@
         }
       },
       "indexes": {
-        "monitoring_failure_open_idx": {
-          "name": "monitoring_failure_open_idx",
+        "retell_call_retry_due_idx": {
+          "name": "retell_call_retry_due_idx",
           "columns": [
             {
-              "expression": "agent_id",
+              "expression": "retell_monitored_agent_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "last_attempt_at",
+              "expression": "next_attempt_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": false,
-          "where": "\"monitoring_failure\".\"status\" = 'open'",
+          "where": "\"retell_call_retry\".\"next_attempt_at\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         }
       },
       "foreignKeys": {
-        "monitoring_failure_organization_id_organization_id_fk": {
-          "name": "monitoring_failure_organization_id_organization_id_fk",
-          "tableFrom": "monitoring_failure",
+        "retell_call_retry_organization_id_organization_id_fk": {
+          "name": "retell_call_retry_organization_id_organization_id_fk",
+          "tableFrom": "retell_call_retry",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -2335,9 +2496,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "monitoring_failure_project_organization_fk": {
-          "name": "monitoring_failure_project_organization_fk",
-          "tableFrom": "monitoring_failure",
+        "retell_call_retry_project_organization_fk": {
+          "name": "retell_call_retry_project_organization_fk",
+          "tableFrom": "retell_call_retry",
           "tableTo": "project",
           "columnsFrom": [
             "project_id",
@@ -2350,17 +2511,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "monitoring_failure_agent_project_fk": {
-          "name": "monitoring_failure_agent_project_fk",
-          "tableFrom": "monitoring_failure",
-          "tableTo": "agent",
+        "retell_call_retry_agent_tenant_fk": {
+          "name": "retell_call_retry_agent_tenant_fk",
+          "tableFrom": "retell_call_retry",
+          "tableTo": "retell_monitored_agent",
           "columnsFrom": [
-            "agent_id",
-            "project_id"
+            "retell_monitored_agent_id",
+            "project_id",
+            "organization_id"
           ],
           "columnsTo": [
             "id",
-            "project_id"
+            "project_id",
+            "organization_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -2368,8 +2531,8 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "monitoring_failure_project_call_unique": {
-          "name": "monitoring_failure_project_call_unique",
+        "retell_call_retry_project_call_unique": {
+          "name": "retell_call_retry_project_call_unique",
           "nullsNotDistinct": false,
           "columns": [
             "project_id",
@@ -2379,27 +2542,23 @@
       },
       "policies": {},
       "checkConstraints": {
-        "monitoring_failure_id_prefix": {
-          "name": "monitoring_failure_id_prefix",
-          "value": "\"monitoring_failure\".\"id\" ~ '^mnf_[0-9A-HJKMNP-TV-Z]{26}$'"
+        "retell_call_retry_id_prefix": {
+          "name": "retell_call_retry_id_prefix",
+          "value": "\"retell_call_retry\".\"id\" ~ '^rcr_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "monitoring_failure_status_allowed": {
-          "name": "monitoring_failure_status_allowed",
-          "value": "\"monitoring_failure\".\"status\" in ('open', 'resolved')"
+        "retell_call_retry_one_schedule": {
+          "name": "retell_call_retry_one_schedule",
+          "value": "(\"retell_call_retry\".\"next_attempt_at\" is null) <> (\"retell_call_retry\".\"expires_at\" is null)"
         },
-        "monitoring_failure_resolved_agrees": {
-          "name": "monitoring_failure_resolved_agrees",
-          "value": "(\"monitoring_failure\".\"status\" = 'resolved') = (\"monitoring_failure\".\"resolved_at\" is not null)"
-        },
-        "monitoring_failure_replay_lease_agrees": {
-          "name": "monitoring_failure_replay_lease_agrees",
-          "value": "(\"monitoring_failure\".\"replay_lease_owner\" is null) = (\"monitoring_failure\".\"replay_lease_expires_at\" is null)"
+        "retell_call_retry_attempts_bounded": {
+          "name": "retell_call_retry_attempts_bounded",
+          "value": "\"retell_call_retry\".\"attempts\" between 1 and 4"
         }
       },
       "isRLSEnabled": false
     },
-    "public.monitoring_state": {
-      "name": "monitoring_state",
+    "public.retell_monitored_agent": {
+      "name": "retell_monitored_agent",
       "schema": "",
       "columns": {
         "id": {
@@ -2408,8 +2567,8 @@
           "primaryKey": true,
           "notNull": true
         },
-        "agent_id": {
-          "name": "agent_id",
+        "monitoring_setup_id": {
+          "name": "monitoring_setup_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
@@ -2425,6 +2584,25 @@
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
+        },
+        "platform_agent_id": {
+          "name": "platform_agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "platform_agent_name": {
+          "name": "platform_agent_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'importing'"
         },
         "scan_kind": {
           "name": "scan_kind",
@@ -2457,49 +2635,11 @@
           "notNull": true,
           "default": "'[]'"
         },
-        "reconciliation_from": {
-          "name": "reconciliation_from",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reconciliation_through": {
-          "name": "reconciliation_through",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reconciliation_pagination_key": {
-          "name": "reconciliation_pagination_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reconciliation_pagination_trail": {
-          "name": "reconciliation_pagination_trail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'"
-        },
-        "reconciliation_needs_regular": {
-          "name": "reconciliation_needs_regular",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "completed_through": {
           "name": "completed_through",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "next_regular_poll_at": {
-          "name": "next_regular_poll_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
         },
         "next_poll_at": {
           "name": "next_poll_at",
@@ -2507,11 +2647,18 @@
           "primaryKey": false,
           "notNull": true
         },
-        "next_reconciliation_at": {
-          "name": "next_reconciliation_at",
+        "regular_floor_at": {
+          "name": "regular_floor_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "import_generation": {
+          "name": "import_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
         },
         "lease_owner": {
           "name": "lease_owner",
@@ -2532,8 +2679,26 @@
           "notNull": true,
           "default": 0
         },
-        "last_received_at": {
-          "name": "last_received_at",
+        "last_error_kind": {
+          "name": "last_error_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error_at": {
+          "name": "last_error_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_success_at": {
+          "name": "last_success_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_call_received_at": {
+          "name": "last_call_received_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -2554,8 +2719,8 @@
         }
       },
       "indexes": {
-        "monitoring_state_due_idx": {
-          "name": "monitoring_state_due_idx",
+        "retell_monitored_agent_due_idx": {
+          "name": "retell_monitored_agent_due_idx",
           "columns": [
             {
               "expression": "next_poll_at",
@@ -2575,8 +2740,8 @@
           "method": "btree",
           "with": {}
         },
-        "monitoring_state_project_idx": {
-          "name": "monitoring_state_project_idx",
+        "retell_monitored_agent_project_idx": {
+          "name": "retell_monitored_agent_project_idx",
           "columns": [
             {
               "expression": "project_id",
@@ -2592,9 +2757,9 @@
         }
       },
       "foreignKeys": {
-        "monitoring_state_organization_id_organization_id_fk": {
-          "name": "monitoring_state_organization_id_organization_id_fk",
-          "tableFrom": "monitoring_state",
+        "retell_monitored_agent_organization_id_organization_id_fk": {
+          "name": "retell_monitored_agent_organization_id_organization_id_fk",
+          "tableFrom": "retell_monitored_agent",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -2605,9 +2770,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "monitoring_state_project_organization_fk": {
-          "name": "monitoring_state_project_organization_fk",
-          "tableFrom": "monitoring_state",
+        "retell_monitored_agent_project_organization_fk": {
+          "name": "retell_monitored_agent_project_organization_fk",
+          "tableFrom": "retell_monitored_agent",
           "tableTo": "project",
           "columnsFrom": [
             "project_id",
@@ -2620,17 +2785,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "monitoring_state_agent_project_fk": {
-          "name": "monitoring_state_agent_project_fk",
-          "tableFrom": "monitoring_state",
-          "tableTo": "agent",
+        "retell_monitored_agent_setup_tenant_fk": {
+          "name": "retell_monitored_agent_setup_tenant_fk",
+          "tableFrom": "retell_monitored_agent",
+          "tableTo": "monitoring_setup",
           "columnsFrom": [
-            "agent_id",
-            "project_id"
+            "monitoring_setup_id",
+            "project_id",
+            "organization_id"
           ],
           "columnsTo": [
             "id",
-            "project_id"
+            "project_id",
+            "organization_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -2638,15 +2805,16 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "monitoring_state_agent_unique": {
-          "name": "monitoring_state_agent_unique",
+        "retell_monitored_agent_setup_platform_agent_unique": {
+          "name": "retell_monitored_agent_setup_platform_agent_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "agent_id"
+            "monitoring_setup_id",
+            "platform_agent_id"
           ]
         },
-        "monitoring_state_id_tenant_unique": {
-          "name": "monitoring_state_id_tenant_unique",
+        "retell_monitored_agent_id_tenant_unique": {
+          "name": "retell_monitored_agent_id_tenant_unique",
           "nullsNotDistinct": false,
           "columns": [
             "id",
@@ -2657,205 +2825,25 @@
       },
       "policies": {},
       "checkConstraints": {
-        "monitoring_state_id_prefix": {
-          "name": "monitoring_state_id_prefix",
-          "value": "\"monitoring_state\".\"id\" ~ '^mst_[0-9A-HJKMNP-TV-Z]{26}$'"
+        "retell_monitored_agent_id_prefix": {
+          "name": "retell_monitored_agent_id_prefix",
+          "value": "\"retell_monitored_agent\".\"id\" ~ '^rma_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "monitoring_state_scan_kind_allowed": {
-          "name": "monitoring_state_scan_kind_allowed",
-          "value": "\"monitoring_state\".\"scan_kind\" in ('historical_import', 'regular', 'reconciliation')"
+        "retell_monitored_agent_state_allowed": {
+          "name": "retell_monitored_agent_state_allowed",
+          "value": "\"retell_monitored_agent\".\"state\" in ('importing', 'active', 'degraded')"
         },
-        "monitoring_state_scan_agrees": {
-          "name": "monitoring_state_scan_agrees",
-          "value": "(\"monitoring_state\".\"scan_kind\" is null and \"monitoring_state\".\"scan_from\" is null and \"monitoring_state\".\"scan_through\" is null and \"monitoring_state\".\"pagination_key\" is null) or (\"monitoring_state\".\"scan_kind\" is not null and \"monitoring_state\".\"scan_from\" is not null and \"monitoring_state\".\"scan_through\" is not null)"
+        "retell_monitored_agent_scan_kind_allowed": {
+          "name": "retell_monitored_agent_scan_kind_allowed",
+          "value": "\"retell_monitored_agent\".\"scan_kind\" in ('historical_import', 'regular')"
         },
-        "monitoring_state_reconciliation_agrees": {
-          "name": "monitoring_state_reconciliation_agrees",
-          "value": "(\"monitoring_state\".\"reconciliation_from\" is null and \"monitoring_state\".\"reconciliation_through\" is null and \"monitoring_state\".\"reconciliation_pagination_key\" is null and \"monitoring_state\".\"reconciliation_needs_regular\" = false) or (\"monitoring_state\".\"reconciliation_from\" is not null and \"monitoring_state\".\"reconciliation_through\" is not null)"
+        "retell_monitored_agent_scan_agrees": {
+          "name": "retell_monitored_agent_scan_agrees",
+          "value": "(\"retell_monitored_agent\".\"scan_kind\" is null and \"retell_monitored_agent\".\"scan_from\" is null and \"retell_monitored_agent\".\"scan_through\" is null and \"retell_monitored_agent\".\"pagination_key\" is null) or (\"retell_monitored_agent\".\"scan_kind\" is not null and \"retell_monitored_agent\".\"scan_from\" is not null and \"retell_monitored_agent\".\"scan_through\" is not null)"
         },
-        "monitoring_state_lease_agrees": {
-          "name": "monitoring_state_lease_agrees",
-          "value": "(\"monitoring_state\".\"lease_owner\" is null) = (\"monitoring_state\".\"lease_expires_at\" is null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.production_trace_claim": {
-      "name": "production_trace_claim",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "trace_id": {
-          "name": "trace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider_call_id": {
-          "name": "provider_call_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform_agent_id": {
-          "name": "platform_agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform_agent_name": {
-          "name": "platform_agent_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "platform_agent_version": {
-          "name": "platform_agent_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "payload": {
-          "name": "payload",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "degraded": {
-          "name": "degraded",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "claimed_at": {
-          "name": "claimed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "written_at": {
-          "name": "written_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "production_trace_claim_unwritten_idx": {
-          "name": "production_trace_claim_unwritten_idx",
-          "columns": [
-            {
-              "expression": "claimed_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"production_trace_claim\".\"status\" = 'claimed'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "production_trace_claim_organization_id_organization_id_fk": {
-          "name": "production_trace_claim_organization_id_organization_id_fk",
-          "tableFrom": "production_trace_claim",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "production_trace_claim_project_organization_fk": {
-          "name": "production_trace_claim_project_organization_fk",
-          "tableFrom": "production_trace_claim",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "production_trace_claim_project_call_unique": {
-          "name": "production_trace_claim_project_call_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "project_id",
-            "provider_call_id"
-          ]
-        },
-        "production_trace_claim_trace_id_unique": {
-          "name": "production_trace_claim_trace_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "trace_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "production_trace_claim_id_prefix": {
-          "name": "production_trace_claim_id_prefix",
-          "value": "\"production_trace_claim\".\"id\" ~ '^ptc_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "production_trace_claim_status_allowed": {
-          "name": "production_trace_claim_status_allowed",
-          "value": "\"production_trace_claim\".\"status\" in ('claimed', 'written')"
-        },
-        "production_trace_claim_written_agrees": {
-          "name": "production_trace_claim_written_agrees",
-          "value": "(\"production_trace_claim\".\"status\" = 'written') = (\"production_trace_claim\".\"written_at\" is not null)"
+        "retell_monitored_agent_lease_agrees": {
+          "name": "retell_monitored_agent_lease_agrees",
+          "value": "(\"retell_monitored_agent\".\"lease_owner\" is null) = (\"retell_monitored_agent\".\"lease_expires_at\" is null)"
         }
       },
       "isRLSEnabled": false

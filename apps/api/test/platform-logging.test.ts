@@ -1,8 +1,21 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 
 let api: TestApi;
+
+// A bucket, because one of the claims below is that a **healthy** health poll
+// writes no request record — and an instance with nowhere for evidence to
+// become durable is honestly unhealthy, which is a poll worth logging.
+const storage: ObjectStorage = await startObjectStorage("platform-logging");
+
+afterAll(() => {
+  if (storage.available) storage.stop();
+});
 
 afterEach(async () => {
   await api?.close();
@@ -15,6 +28,7 @@ describe("platform logging", () => {
       defaultEmailSender: true,
       logTo: { write: (line) => lines.push(line) },
       traceStore: true,
+      ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
     });
 
     const email = "private-recipient@example.com";
@@ -40,7 +54,9 @@ describe("platform logging", () => {
     const beforeHealth = lines.filter((line) =>
       line.includes('"otel.event.name":"egma.http.server.request.finished"'),
     ).length;
-    expect((await api.app.inject("/health")).statusCode).toBe(200);
+    if (storage.available) {
+      expect((await api.app.inject("/health")).statusCode).toBe(200);
+    }
 
     const records = lines.map(
       (line) => JSON.parse(line) as Record<string, unknown>,

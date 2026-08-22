@@ -1,11 +1,11 @@
 import { sql } from "drizzle-orm";
 import {
-  boolean,
   check,
   foreignKey,
   index,
   integer,
   pgTable,
+  smallint,
   text,
   unique,
 } from "drizzle-orm/pg-core";
@@ -33,40 +33,42 @@ import {
  * when a customer starts.
  *
  * So there is no monitoring setup object here and no health surface. What
- * remains is machinery: one notebook per pulled agent, one receipt book for
- * every production conversation, and one poison-call record. See ADR-0015.
+ * remains is machinery, and only for pull: one notebook per pulled agent, and
+ * one short-lived retry record per call that could not be turned into
+ * evidence. There is no receipt book — once a call arrives it belongs to the
+ * ingestion boundary: write-ahead log, object store, drainer, and exactly-once
+ * by committed span identity. See ADR-0014 and ADR-0015.
  */
 
-/** The fixed scan a pulled agent is currently completing. */
-export const MONITORING_SCAN_KINDS = [
-  "historical_import",
-  "regular",
-  "reconciliation",
-] as const;
+/**
+ * The fixed scan a pulled agent is currently completing.
+ *
+ * Two, and there is no third. An import is the deliberate deep read a customer
+ * asks for the first time they turn the switch on; a regular poll is the
+ * shallow one that keeps up. Anything else would be egma reading a customer's
+ * provider history on its own schedule, which is exactly the cost this design
+ * removes.
+ */
+export const MONITORING_SCAN_KINDS = ["historical_import", "regular"] as const;
 export type MonitoringScanKind = (typeof MONITORING_SCAN_KINDS)[number];
-
-/** The cross-store write has either been taken or completed. */
-export const PRODUCTION_CLAIM_STATUSES = ["claimed", "written"] as const;
-export type ProductionClaimStatus = (typeof PRODUCTION_CLAIM_STATUSES)[number];
-
-/** A permanent per-call import failure can later be replayed explicitly. */
-export const MONITORING_FAILURE_STATUSES = ["open", "resolved"] as const;
-export type MonitoringFailureStatus =
-  (typeof MONITORING_FAILURE_STATUSES)[number];
 
 /**
  * One agent's poller notebook — machine-owned, platform-neutral, and never
  * edited by a person.
  *
  * The row is created by the pull switch and, in v1, only by it; turning the
- * switch off leaves the row where it is so a re-enable resumes from the cursor
- * it already reached. Cursors are opaque text and windows are generic
- * moments, so a later Vapi or ElevenLabs pull reuses the table unchanged.
+ * switch off leaves the row where it is, and turning it on again is a new
+ * observation of the provider from that moment — a fresh `import_generation`
+ * and a `regular_floor_at` at the switch, never a backfill of what happened
+ * while it was off. The deep historical import runs once, on an agent's first
+ * ever switch-on. Cursors are opaque text and windows are generic moments, so
+ * a later Vapi or ElevenLabs pull reuses the table unchanged.
  *
- * `consecutive_failures` is a retry clock, not a health surface: it pushes
- * `next_poll_at` out and nothing reads it on a screen. There is no
+ * The failure columns are a retry clock, not a health surface: they push
+ * `next_poll_at` out and nothing reads them on a screen. There is no
  * account-wide gate, because there is no account-wide anything — a shared key
- * that starts refusing is discovered independently by each agent's poller.
+ * that starts refusing is discovered independently by each agent's poller, and
+ * each backs off on its own.
  */
 export const monitoringState = pgTable(
   "monitoring_state",
@@ -85,30 +87,52 @@ export const monitoringState = pgTable(
     paginationKey: text("pagination_key"),
     /** Every opaque cursor already followed in this fixed scan. */
     paginationTrail: text("pagination_trail").notNull().default("[]"),
-    /** A paused daily re-walk keeps its exact fixed window while regular polling runs. */
-    reconciliationFrom: moment("reconciliation_from"),
-    reconciliationThrough: moment("reconciliation_through"),
-    reconciliationPaginationKey: text("reconciliation_pagination_key"),
-    reconciliationPaginationTrail: text("reconciliation_pagination_trail")
-      .notNull()
-      .default("[]"),
-    /** A bounded re-walk slice must yield to one current scan. */
-    reconciliationNeedsRegular: boolean("reconciliation_needs_regular")
-      .notNull()
-      .default(false),
     /** Upper bound of the last completed import or regular scan. */
     completedThrough: moment("completed_through"),
-    /** Regular polling has its own cadence; the re-walk cannot move it. */
-    nextRegularPollAt: moment("next_regular_poll_at").notNull(),
-    /** The next scheduler wake for either regular or re-walk work. */
+    /**
+     * The one scheduler wake: a yielded scan resumed, the next regular poll,
+     * and provider backoff are the same fact — when this agent may be read
+     * again — and one column is the only way they cannot disagree. A refused
+     * key parks it far out; turning the switch on again is what wakes it.
+     */
     nextPollAt: moment("next_poll_at").notNull(),
-    nextReconciliationAt: moment("next_reconciliation_at").notNull(),
+    /**
+     * The earliest instant a regular scan may look back to, while it is set.
+     *
+     * A regular window normally starts five minutes before the last completed
+     * upper bound, so a call the provider exposes a little late is still found.
+     * A floor overrides that subtraction, which is what a resume needs: the
+     * first window after the switch comes on must not reach behind it and
+     * import the conversations that happened while it was off. It is cleared
+     * once a window has completed above it, and the overlap resumes.
+     */
+    regularFloorAt: moment("regular_floor_at"),
+    /**
+     * Which observation this agent's transient call state belongs to.
+     *
+     * Turning the switch on again is a new observation of the provider and
+     * starts a new generation. It is what lets a fresh start take its own
+     * bounded look at a call an earlier regular scan gave up on, without
+     * letting an ordinary repeated poll do the same.
+     */
+    importGeneration: integer("import_generation").notNull().default(1),
     /** One DB-backed owner prevents duplicate provider reads across API replicas. */
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: moment("lease_expires_at"),
     /** The retry clock: how far `next_poll_at` is pushed out. Never a screen. */
     consecutiveFailures: integer("consecutive_failures").notNull().default(0),
-    /** Stamped as pulled calls arrive. */
+    /** When the current run of failures began, so one log line can measure it. */
+    failureStartedAt: moment("failure_started_at"),
+    /**
+     * The class of the last provider refusal, and the reason a lesser failure
+     * cannot shorten a longer park: a refused key stays parked until the
+     * customer acts, whatever a rate limit says afterwards. Null once the
+     * provider answers again.
+     */
+    lastErrorKind: text("last_error_kind"),
+    lastErrorAt: moment("last_error_at"),
+    lastSuccessAt: moment("last_success_at"),
+    /** Stamped as pulled calls arrive. The one thing a screen may show. */
     lastReceivedAt: moment("last_received_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -123,24 +147,11 @@ export const monitoringState = pgTable(
       sql`(${table.scanKind} is null and ${table.scanFrom} is null and ${table.scanThrough} is null and ${table.paginationKey} is null) or (${table.scanKind} is not null and ${table.scanFrom} is not null and ${table.scanThrough} is not null)`,
     ),
     check(
-      "monitoring_state_reconciliation_agrees",
-      sql`(${table.reconciliationFrom} is null and ${table.reconciliationThrough} is null and ${table.reconciliationPaginationKey} is null and ${table.reconciliationNeedsRegular} = false) or (${table.reconciliationFrom} is not null and ${table.reconciliationThrough} is not null)`,
-    ),
-    check(
       "monitoring_state_lease_agrees",
       sql`(${table.leaseOwner} is null) = (${table.leaseExpiresAt} is null)`,
     ),
     // One notebook per agent, and the switch is what creates it.
     unique("monitoring_state_agent_unique").on(table.agentId),
-    // Nothing points here. The poison-call record keys on the agent, as this
-    // table does, so it proves its tenancy against `agent` directly and never
-    // needs this notebook as a composite-foreign-key target. Kept because it
-    // is free and because a later per-agent child would want exactly it.
-    unique("monitoring_state_id_tenant_unique").on(
-      table.id,
-      table.projectId,
-      table.organizationId,
-    ),
     foreignKey({
       name: "monitoring_state_project_organization_fk",
       columns: [table.projectId, table.organizationId],
@@ -160,126 +171,81 @@ export const monitoringState = pgTable(
 );
 
 /**
- * Durable production call identity and cross-store recovery point.
+ * One Retell call egma could not turn into evidence, and nothing else.
  *
- * The unique product promise is one visible historical-import trace per
- * `(project, provider call id)`. It does not depend on a setup row, an agent
- * row, a key, a page, or a simulation connection — which is what makes a
- * destructive redesign of everything around it safe for stored conversations.
+ * **Short-lived control state, never a payload archive.** A call whose fetch or
+ * normalization failed leaves an identity and a bounded budget here — never the
+ * provider's document, never a transcript, never a receipt. A call that lands
+ * leaves no row at all: Postgres growth follows failures, not conversations.
+ *
+ * **One table for two shapes, because it is one row changing state.** While
+ * automatic retries remain, `next_attempt_at` says when the next one is due.
+ * When the budget ends the same row loses that time and gains `expires_at`,
+ * becoming a marker that schedules nothing. It exists then for one reason: the
+ * regular five-minute overlap lists the same provider call again, and without a
+ * trace of the terminal drop that repeat would silently start a second budget.
+ * Exactly one of the two instants is set, and the check makes the other shape
+ * unwritable rather than merely unusual.
+ *
+ * A marker expires on its own once the call is outside every regular overlap
+ * window, and deleting the agent takes its rows with it. There is no replay
+ * door and no failure list: giving up is one structured event and one
+ * low-cardinality metric, and the product surface says nothing about it.
  */
-export const productionTraceClaim = pgTable(
-  "production_trace_claim",
+export const retellCallRetry = pgTable(
+  "retell_call_retry",
   {
     id: idText("id").primaryKey(),
     organizationId: idText("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
-    traceId: text("trace_id").notNull(),
-    providerCallId: text("provider_call_id").notNull(),
-    platformAgentId: text("platform_agent_id").notNull(),
-    platformAgentName: text("platform_agent_name"),
-    platformAgentVersion: text("platform_agent_version"),
-    /**
-     * The pulling agent's id beside the safe Retell document, with
-     * bearer-like fields removed. The id is in here rather than in a
-     * column of its own because this table references nothing — which is
-     * what makes it survive a redesign — and crash recovery still has to
-     * stamp the notebook of the agent that actually pulled the call.
-     */
-    payload: text("payload").notNull(),
-    endedAt: moment("ended_at").notNull(),
-    degraded: boolean("degraded").notNull().default(false),
-    status: text("status").notNull(),
-    claimedAt: moment("claimed_at").notNull(),
-    writtenAt: moment("written_at"),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    prefixCheck("production_trace_claim_id_prefix", table.id, "ptc"),
-    oneOf("production_trace_claim_status_allowed", table.status, [
-      ...PRODUCTION_CLAIM_STATUSES,
-    ]),
-    unique("production_trace_claim_project_call_unique").on(
-      table.projectId,
-      table.providerCallId,
-    ),
-    unique("production_trace_claim_trace_id_unique").on(table.traceId),
-    check(
-      "production_trace_claim_written_agrees",
-      sql`(${table.status} = 'written') = (${table.writtenAt} is not null)`,
-    ),
-    foreignKey({
-      name: "production_trace_claim_project_organization_fk",
-      columns: [table.projectId, table.organizationId],
-      foreignColumns: [project.id, project.organizationId],
-    }).onDelete("cascade"),
-    index("production_trace_claim_unwritten_idx")
-      .on(table.claimedAt)
-      .where(sql`${table.status} = 'claimed'`),
-  ],
-);
-
-/**
- * A safe record of one call that bounded retries could not import.
- *
- * Without it the cursor either stalls forever on one broken document or steps
- * over a production conversation with no record of having done so. Pull-only
- * today; named for the mechanism family rather than for Retell, so a future
- * push-side failure record has a lawful home.
- */
-export const monitoringFailure = pgTable(
-  "monitoring_failure",
-  {
-    id: idText("id").primaryKey(),
+    /** The pulled agent the call belongs to — the key the notebook uses too. */
     agentId: idText("agent_id").notNull(),
-    organizationId: idText("organization_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
-    projectId: idText("project_id").notNull(),
     providerCallId: text("provider_call_id").notNull(),
     /** Stable low-cardinality class, never the provider's message or body. */
     errorKind: text("error_kind").notNull(),
-    /** A sanitized list summary when one exists; never credentials. */
-    payload: text("payload"),
-    attempts: integer("attempts").notNull().default(1),
-    status: text("status").notNull().default("open"),
+    /** One initial attempt plus at most three automatic retries. */
+    attempts: smallint("attempts").notNull().default(1),
     lastAttemptAt: moment("last_attempt_at").notNull(),
-    /** A short lease for one explicit replay request. */
-    replayLeaseOwner: text("replay_lease_owner"),
-    replayLeaseExpiresAt: moment("replay_lease_expires_at"),
-    resolvedAt: moment("resolved_at"),
+    /** Set while retries remain. Null on a marker, which schedules nothing. */
+    nextAttemptAt: moment("next_attempt_at"),
+    /** Set on a marker alone, and the reason it cannot outlive its purpose. */
+    expiresAt: moment("expires_at"),
+    /** The observation generation this row was created under. */
+    importGeneration: integer("import_generation").notNull().default(1),
     createdAt: createdAt(),
   },
   (table) => [
-    prefixCheck("monitoring_failure_id_prefix", table.id, "mnf"),
-    oneOf("monitoring_failure_status_allowed", table.status, [
-      ...MONITORING_FAILURE_STATUSES,
-    ]),
-    unique("monitoring_failure_project_call_unique").on(
+    prefixCheck("retell_call_retry_id_prefix", table.id, "rcr"),
+    unique("retell_call_retry_project_call_unique").on(
       table.projectId,
       table.providerCallId,
     ),
     check(
-      "monitoring_failure_resolved_agrees",
-      sql`(${table.status} = 'resolved') = (${table.resolvedAt} is not null)`,
+      "retell_call_retry_one_schedule",
+      sql`(${table.nextAttemptAt} is null) <> (${table.expiresAt} is null)`,
     ),
     check(
-      "monitoring_failure_replay_lease_agrees",
-      sql`(${table.replayLeaseOwner} is null) = (${table.replayLeaseExpiresAt} is null)`,
+      "retell_call_retry_attempts_bounded",
+      sql`${table.attempts} between 1 and 4`,
     ),
     foreignKey({
-      name: "monitoring_failure_project_organization_fk",
+      name: "retell_call_retry_project_organization_fk",
       columns: [table.projectId, table.organizationId],
       foreignColumns: [project.id, project.organizationId],
     }).onDelete("cascade"),
     foreignKey({
-      name: "monitoring_failure_agent_project_fk",
+      name: "retell_call_retry_agent_project_fk",
       columns: [table.agentId, table.projectId],
       foreignColumns: [agent.id, agent.projectId],
     }).onDelete("cascade"),
-    index("monitoring_failure_open_idx")
-      .on(table.agentId, table.lastAttemptAt)
-      .where(sql`${table.status} = 'open'`),
+    // The batched page lookup reads `(project_id, provider_call_id)`, and the
+    // unique constraint above already builds exactly that btree. A second
+    // index on the same pair would be one more thing every retry write has to
+    // maintain and nothing at all to read from.
+    index("retell_call_retry_due_idx")
+      .on(table.agentId, table.nextAttemptAt)
+      .where(sql`${table.nextAttemptAt} is not null`),
   ],
 );

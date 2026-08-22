@@ -440,3 +440,30 @@ export async function isProjectOfOrganization(
     .limit(1);
   return row !== undefined;
 }
+
+/** Whether a project of this organization is live, soft-deleted, or not one at all. */
+export type ProjectTenancyState = "live" | "deleted" | "absent";
+
+/**
+ * The organization's project as a tenancy fact, deletion included.
+ *
+ * The counterpart to `isProjectOfOrganization` for a caller that has to tell a
+ * project the organization never had from one it had and later archived. Both
+ * come back `false` from the boolean above, and they are two different truths:
+ * evidence naming a pair that was never real is a binding that could not exist,
+ * while evidence for a project archived after the evidence was accepted names a
+ * pair that was real when it arrived. It reads the same one row, without the
+ * live filter, and answers which of the three it is.
+ */
+export async function projectOfOrganizationState(
+  auth: AuthContext,
+  projectId: string,
+): Promise<ProjectTenancyState> {
+  const [row] = await db()
+    .select({ deletedAt: project.deletedAt })
+    .from(project)
+    .where(within(auth, project, eq(project.id, projectId)))
+    .limit(1);
+  if (row === undefined) return "absent";
+  return row.deletedAt === null ? "live" : "deleted";
+}

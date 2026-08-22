@@ -178,9 +178,16 @@ const WORK_DISPATCHING = [
   // Retell Monitoring is claimed from Egma's own due-work table. The caller
   // cannot name a project or agent; the returned target carries the narrowed
   // `AuthContext` that every provider read and store write after the claim must
-  // use. Stale production claims follow the same rule.
+  // use.
   "claimDueMonitoringPull",
-  "sweepStaleProductionClaims",
+  // Which process, out of however many are running, drains the pending prefix.
+  // Added on 2026-08-22 with the ingestion roles, deliberately and after the
+  // rule stopped the build. It is the same shape as the claims above turned one
+  // step further out: the prefix holds every project's evidence and the process
+  // that walks it walks all of it, so there is no customer to name and no
+  // narrower claim that would be honest. It takes nothing and answers a lock,
+  // reaching no table at all.
+  "openDrainOwnership",
 ];
 
 /**

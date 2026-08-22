@@ -1,4 +1,9 @@
-import { ping, pingClickHouse } from "@egma/db";
+import {
+  openDrainOwnership,
+  ping,
+  pingClickHouse,
+  type DrainOwnership,
+} from "@egma/db";
 import { platformOpenApi } from "@egma/platform-api/openapi";
 import type { Fetch as RetellFetch } from "@egma/retell";
 import Fastify, { LogController, type FastifyInstance } from "fastify";
@@ -14,6 +19,17 @@ import {
   type EmailSender,
 } from "./auth/email.ts";
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
+import {
+  closeAcceptance,
+  openAcceptance,
+  stagedLoad,
+} from "./ingestion/accept.ts";
+import { retainedDefects } from "./ingestion/defects.ts";
+import { startDrainer, type Drainer } from "./ingestion/drainer.ts";
+import {
+  pendingObjectStore,
+  type PendingObjectStore,
+} from "./ingestion/object-store.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
@@ -88,6 +104,27 @@ export type ServerOptions = {
   readonly deviceAuthorizationInterval?: IdentityOptions["deviceAuthorizationInterval"];
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: RetellFetch | undefined;
+  /**
+   * Whether this process runs the standing drainer, over and above what its
+   * role already says. Defaults to whatever the role says.
+   *
+   * The role is the deployment's answer — `all` and `drain` drain, `ingest`
+   * does not — and this is the seam a proof uses to hold a sealed segment
+   * still and look inside it: in a running deployment that state lasts about
+   * as long as one upload, and a proof that raced it would be a proof about
+   * timing. It can only take draining away, never give it to a role that does
+   * not have it.
+   */
+  readonly drainsPendingEvidence?: boolean;
+  /**
+   * Whether the trace store's schema has finished being applied.
+   *
+   * The entrypoint owns that work — it is non-fatal and runs beside the server
+   * — and the drainer and the health surface both have to ask rather than
+   * assume. Absent means "nothing is applying it", which is the honest answer
+   * for a suite that migrated its own store before building the API.
+   */
+  readonly traceStoreReady?: (() => boolean) | undefined;
 };
 
 export type Api = {
@@ -98,10 +135,37 @@ export type Api = {
    * nobody can reach is a thing nobody can test.
    */
   readonly identity: Identity;
+  /**
+   * This process's drainer once the server is ready, or nothing where it names
+   * no ingestion store or was built not to drain.
+   *
+   * Handed back on the same terms as the identity provider: whoever owns the
+   * server owns its standing work, and `drainNow` is how a caller waits for a
+   * pass to have *finished* rather than to have been scheduled.
+   */
+  drainer(): Drainer | undefined;
 };
 
 export function buildApi(options: ServerOptions): Api {
   const { config } = options;
+  const { role } = config.ingestion;
+  /** `all` and `ingest` serve the acceptance path; `drain` serves none of it. */
+  const acceptsEvidence = role !== "drain";
+  /** `all` and `drain` walk the pending prefix; `ingest` never does. */
+  const drainsEvidence =
+    role !== "ingest" && options.drainsPendingEvidence !== false;
+
+  // One client for the whole process, shared by the drainer and the health
+  // check: two would be two connection pools to one bucket, and a health probe
+  // that used its own would be proving a path nothing else takes.
+  const ingestionStore: PendingObjectStore | undefined =
+    config.ingestion.store === undefined
+      ? undefined
+      : pendingObjectStore(config.ingestion.store, {
+          requestTimeoutMilliseconds:
+            config.ingestion.requestTimeoutMilliseconds,
+        });
+
   const logger = {
     level: options.logTo === undefined ? (process.env.LOG_LEVEL ?? "info") : "info",
     serializers: PRIVATE_LOG_SERIALIZERS,
@@ -172,11 +236,24 @@ export function buildApi(options: ServerOptions): Api {
   // The container health check polls this every few seconds; logging each poll
   // would bury everything else in `docker compose logs`.
   /**
-   * Both stores are answered for, and neither is optional: there is no second
-   * analytical path behind ClickHouse, so an instance that cannot reach it is
-   * not a degraded egma — it is one that would accept a trace and lose it. Both
-   * are asked every time rather than stopping at the first failure, so a health
-   * response says what is wrong rather than only that something is.
+   * `/health` answers one question: **can this process still accept evidence
+   * and keep the promise it makes when it does?**
+   *
+   * That promise is object-store durability, so the status code follows the
+   * three things acceptance actually needs — Postgres for authentication and
+   * control state, a writable local log below its refusal bound, and a
+   * reachable ingestion bucket. Nothing else may flip it.
+   *
+   * **ClickHouse deliberately cannot.** It used to: a slow trace store made
+   * this endpoint answer `503`, which took the container out of its own health
+   * check and, on the hosted platform, took the shared address down with it —
+   * while the write path was perfectly able to accept evidence and drain it
+   * later. Read health and drain health are real facts and they are reported
+   * here, but they are components rather than verdicts. A query outage is a
+   * query outage; it is not egma being unable to receive a conversation.
+   *
+   * The path and the existing body keys stay exactly as they were, because
+   * five `depends_on` edges and one hosted tunnel already read them.
    */
   const reachability = async (
     store: string,
@@ -191,16 +268,83 @@ export function buildApi(options: ServerOptions): Api {
     }
   };
 
+  /**
+   * Whether the local log will take more, in one word, asked of the log rather
+   * than guessed. The raw byte and record gauges are the log's live volume and
+   * stay in metrics; the health body carries only which of the three it is.
+   */
+  const localLogState = (): "writable" | "full" | "unavailable" => {
+    try {
+      const load = stagedLoad();
+      if (load === undefined) return "unavailable";
+      return load.full ? "full" : "writable";
+    } catch (cause) {
+      app.log.error({ err: cause }, "health check could not read the local log");
+      return "unavailable";
+    }
+  };
+
+  /**
+   * What this process is doing about the pending prefix, in one word.
+   *
+   * `degraded` is a drainer that has work and keeps making no progress on it —
+   * a trace store it cannot reach — reported here as a component and never as a
+   * verdict: the status code does not turn on it, exactly as a query outage does
+   * not make the acceptance path unhealthy. The raw backlog numbers behind it
+   * stay in metrics rather than in the unauthenticated body.
+   */
+  const drainState = ():
+    | "draining"
+    | "degraded"
+    | "standby"
+    | "migrating"
+    | "not_running" => {
+    if (!drainsEvidence || drainer === undefined) return "not_running";
+    const health = drainer.health();
+    if (health.standby === "trace_store_migrating") return "migrating";
+    if (health.standby === "standby") return "standby";
+    if (health.stalled) return "degraded";
+    return "draining";
+  };
+
   app.get("/health", { logLevel: "warn" }, async (_request, reply) => {
-    const [postgres, clickhouse] = await Promise.all([
+    const [postgres, clickhouse, ingestion] = await Promise.all([
       reachability("Postgres", ping),
       reachability("ClickHouse", pingClickHouse),
+      ingestionStore === undefined
+        ? Promise.resolve("unreachable" as const)
+        : reachability("the ingestion object store", () =>
+            ingestionStore.reachable(),
+          ),
     ]);
+    const localLog = localLogState();
 
-    const healthy = postgres === "reachable" && clickhouse === "reachable";
-    return reply
-      .code(healthy ? 200 : 503)
-      .send({ status: healthy ? "ok" : "unavailable", postgres, clickhouse });
+    // A `drain` process serves no acceptance path, so its write readiness is
+    // Postgres alone: holding it unhealthy for a bucket it never writes to
+    // would take a perfectly good drainer out of its own health check.
+    const ready =
+      postgres === "reachable" &&
+      (!acceptsEvidence ||
+        (ingestion === "reachable" && localLog === "writable"));
+
+    return reply.code(ready ? 200 : 503).send({
+      status: ready ? "ok" : "unavailable",
+      role,
+      postgres,
+      clickhouse,
+      ingestion,
+      // The component word, and not the raw byte and record gauges beside it: a
+      // per-second curve of evidence in flight is a live-volume signal an
+      // unauthenticated caller has no business reading, and it is in metrics
+      // instead. `full` is the word the door and this check must agree on.
+      localLog,
+      drain: drainState(),
+      // Whether any accepted segment is retained as an internal defect — a
+      // boolean, not the per-class breakdown. The counts are an operator signal
+      // that belongs in metrics; a caller with no credential learns only that
+      // something is owed a look.
+      retainedDefect: retainedDefects().size > 0,
+    });
   });
 
   app.get("/openapi.json", { logLevel: "warn" }, async (_request, reply) =>
@@ -329,11 +473,18 @@ export function buildApi(options: ServerOptions): Api {
   // beside the customer credentials because it is the one door with two: a
   // customer key files an agent's traces, and the simulator's own spans arrive
   // through this same door naming the simulation they are evidence of.
-  void app.register(traceRoutes, {
-    provider: identity.provider,
-    rateLimit,
-    serviceToken: config.simulatorServiceToken,
-  });
+  //
+  // Registered for the roles that accept evidence. A `drain` process has no
+  // local log open and no promise it could keep, so the honest answer there is
+  // that this door is not here — rather than a door that takes a request and
+  // refuses every one of them.
+  if (acceptsEvidence) {
+    void app.register(traceRoutes, {
+      provider: identity.provider,
+      rateLimit,
+      serviceToken: config.simulatorServiceToken,
+    });
+  }
 
   // Outside the credentialed scope on purpose: somebody following an
   // invitation has no membership, so there is no context to resolve them into
@@ -360,30 +511,86 @@ export function buildApi(options: ServerOptions): Api {
   // agent is DB-leased before a provider request, so every API replica can run
   // the same loop without overlapping one target.
   let retellProductionIngestion: RetellProductionIngestion | undefined;
+  // Exactly one process per deployment drains: pending objects into
+  // ClickHouse, the replay-safe handoffs, and then the object. A second
+  // `all` or `drain` instance starts its drainer, fails to take the
+  // deployment's claim, and stands by — which is the whole arrangement, and is
+  // why an operator can restart the one that holds it without doing anything.
+  let drainer: Drainer | undefined;
+  let drainOwnership: DrainOwnership | undefined;
   app.addHook("onReady", async () => {
+    // The drainer first, so the hand-off below has somewhere to hand to. Its
+    // own startup scan is what makes that hand-off optional: a segment whose
+    // hint is lost costs a scan interval and never an object.
+    if (ingestionStore !== undefined && drainsEvidence) {
+      drainOwnership = await openDrainOwnership();
+      drainer = startDrainer({
+        store: ingestionStore,
+        log: app.log,
+        scanIntervalMilliseconds: config.ingestion.scanIntervalMilliseconds,
+        ownership: drainOwnership,
+        ...(options.traceStoreReady === undefined
+          ? {}
+          : { traceStoreReady: options.traceStoreReady }),
+      });
+    }
+
+    // Opening acceptance recovers whatever the last stop left staged, so
+    // evidence that was in hand when a process died is on its way again within
+    // the first tick rather than after the first new request. A `drain`
+    // process opens none: it serves no door, and a local log nothing writes to
+    // is a directory and a file handle for nothing.
+    if (acceptsEvidence) {
+      openAcceptance({
+        settings: config.ingestion,
+        log: app.log,
+        onSegmentDurable: (segment) => {
+          drainer?.wake(segment.key);
+        },
+      });
+    }
     orphanSweep = startOrphanSweep({
       log: app.log,
       ...(options.orphanSweepIntervalMilliseconds === undefined
         ? {}
         : { intervalMilliseconds: options.orphanSweepIntervalMilliseconds }),
     });
-    retellProductionIngestion = startRetellProductionIngestion({
-      log: app.log,
-      ...(options.retellProductionIngestionIntervalMilliseconds === undefined
-        ? {}
-        : {
-            intervalMilliseconds:
-              options.retellProductionIngestionIntervalMilliseconds,
-          }),
-      ...(options.retellReach === undefined ? {} : { reach: options.retellReach }),
-    });
+    // Retell has to be pulled, and pulling is how evidence arrives — so it
+    // belongs to the roles that accept. Every selected agent is DB-leased
+    // before a provider request, so several accepting replicas can run the
+    // same loop without overlapping one target.
+    if (acceptsEvidence) {
+      retellProductionIngestion = startRetellProductionIngestion({
+        log: app.log,
+        ...(options.retellProductionIngestionIntervalMilliseconds === undefined
+          ? {}
+          : {
+              intervalMilliseconds:
+                options.retellProductionIngestionIntervalMilliseconds,
+            }),
+        ...(options.retellReach === undefined
+          ? {}
+          : { reach: options.retellReach }),
+      });
+    }
   });
   app.addHook("onClose", async () => {
     // Awaited, so closing drains any tick in flight: whoever closes the app
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
     await retellProductionIngestion?.stop();
+    // Acceptance before the drainer, so nothing new is uploaded into a bucket
+    // nobody is reading; and neither uploads nor drains anything on the way
+    // out. What is staged is on the disk with its checksums and what is pending
+    // is in the bucket, and the next start is what moves both.
+    await closeAcceptance();
+    await drainer?.stop();
+    // Last, so the claim is given up only once this process has stopped
+    // draining. Postgres would drop it with the connection anyway; releasing it
+    // here is what lets the next instance take over immediately rather than
+    // after a socket timeout.
+    await drainOwnership?.release();
   });
 
-  return { app, identity };
+  return { app, identity, drainer: () => drainer };
 }

@@ -182,7 +182,7 @@ services:
       timeout: 5s
       retries: 30
 
-  # The bucket and the read-only user, made once and then never again.
+  # The two buckets and their confined users, made once and then never again.
   #
   # A fresh volume arrives empty, and an empty object store has no bucket in
   # it — so without this the first recording of every new deployment fails
@@ -228,6 +228,24 @@ services:
       # reads every recording a deployment has.
       EGMA_S3_READ_ACCESS_KEY_ID: ${EGMA_S3_READ_ACCESS_KEY_ID:?no default — the read-only credential playback links are signed with. openssl rand -hex 8 makes one, set it in .env}
       EGMA_S3_READ_SECRET_ACCESS_KEY: ${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, set it in .env beside EGMA_S3_READ_ACCESS_KEY_ID}
+      # The second bucket on this same store: the pending ingestion spool.
+      # Separate from the recordings bucket and reached by a separate
+      # credential, because one workload must not be able to read, delete or
+      # expire the other's objects — a recording is evidence and so is a pending
+      # segment, and each one's retention has to be a promise the other cannot
+      # break.
+      EGMA_INGEST_BUCKET: ${EGMA_INGEST_BUCKET:-egma-ingestion}
+      # **This pair refuses in the API rather than here**, which is the one
+      # place this file departs from the pattern the read-only pair above sets.
+      # Compose interpolates the whole file before it looks at which service you
+      # named, so a `:?` here would stop `docker compose down` and every
+      # developer command that touches this file. The API is where the refusal
+      # belongs anyway: it is the process that knows whether this deployment's
+      # role accepts evidence, and it names EGMA_INGEST_ACCESS_KEY_ID and stops.
+      # Left empty, the store below still gets the bucket and the policy and no
+      # user holds it.
+      EGMA_S3_INGEST_ACCESS_KEY_ID: ${EGMA_S3_INGEST_ACCESS_KEY_ID:-}
+      EGMA_S3_INGEST_SECRET_ACCESS_KEY: ${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}
     # Everything reaches `mc` through the environment rather than as arguments,
     # and `$$` is an escaped `$`: compose leaves it alone and the shell inside
     # the container reads it.
@@ -258,7 +276,19 @@ services:
         mc admin user add egma
         "$$EGMA_S3_READ_ACCESS_KEY_ID" "$$EGMA_S3_READ_SECRET_ACCESS_KEY" &&
         mc admin policy attach egma egma-read-recordings
-        --user "$$EGMA_S3_READ_ACCESS_KEY_ID"
+        --user "$$EGMA_S3_READ_ACCESS_KEY_ID" &&
+        mc mb --ignore-existing "egma/$$EGMA_INGEST_BUCKET" &&
+        printf '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:PutObject","s3:GetObject","s3:DeleteObject"],"Resource":["arn:aws:s3:::%s/pending/*"]},{"Effect":"Allow","Action":["s3:ListBucket"],"Resource":["arn:aws:s3:::%s"],"Condition":{"StringLike":{"s3:prefix":["pending/*"]}}}]}'
+        "$$EGMA_INGEST_BUCKET" "$$EGMA_INGEST_BUCKET" > /tmp/ingestion.json &&
+        mc admin policy create egma egma-ingestion /tmp/ingestion.json &&
+        if [ -n "$$EGMA_S3_INGEST_ACCESS_KEY_ID" ]; then
+        mc admin user add egma
+        "$$EGMA_S3_INGEST_ACCESS_KEY_ID" "$$EGMA_S3_INGEST_SECRET_ACCESS_KEY" &&
+        mc admin policy attach egma egma-ingestion
+        --user "$$EGMA_S3_INGEST_ACCESS_KEY_ID";
+        else echo "no EGMA_S3_INGEST_ACCESS_KEY_ID was set, so the ingestion
+        bucket and its policy exist and no user holds them. The API refuses to
+        start and names EGMA_INGEST_ACCESS_KEY_ID."; fi
     depends_on:
       minio:
         condition: service_healthy
@@ -390,6 +420,60 @@ services:
       EGMA_TELEMETRY_OTLP_ENDPOINT: ${EGMA_TELEMETRY_OTLP_ENDPOINT:-}
       EGMA_POSTHOG_KEY: ${EGMA_POSTHOG_KEY:-}
       EGMA_POSTHOG_HOST: ${EGMA_POSTHOG_HOST:-}
+      # Which halves of ingestion this process serves. `all` accepts evidence
+      # and drains the pending spool in one process, which is what this
+      # deployment runs and what the hosted platform runs. `ingest` and `drain`
+      # exist so that splitting them apart later is this setting rather than a
+      # second image and a second protocol.
+      EGMA_ROLE: ${EGMA_ROLE:-all}
+      # **The address this container reaches the ingestion store at**, which is
+      # the opposite of EGMA_BLOB_PUBLIC_URL above and the first internal store
+      # address this service has ever held. Recordings are signed arithmetic
+      # fetched by a browser; a segment is uploaded by this process, so this one
+      # is the compose network's own name for the store and never a browser's.
+      EGMA_INGEST_ENDPOINT: ${EGMA_INGEST_ENDPOINT:-http://minio:9000}
+      EGMA_INGEST_BUCKET: ${EGMA_INGEST_BUCKET:-egma-ingestion}
+      EGMA_INGEST_REGION: ${EGMA_INGEST_REGION:-${EGMA_S3_REGION:-}}
+      # The ingestion credential, interpolated from the same pair the bucket
+      # entrypoint creates the user with so the two can never disagree. It is
+      # confined to this bucket's `pending/` prefix — it can write, read, list
+      # and delete a pending segment and can do nothing whatever to a recording.
+      # Neither recordings pair may appear on this service; `deployment.test.ts`
+      # holds that.
+      EGMA_INGEST_ACCESS_KEY_ID: ${EGMA_INGEST_ACCESS_KEY_ID:-${EGMA_S3_INGEST_ACCESS_KEY_ID:-}}
+      EGMA_INGEST_SECRET_ACCESS_KEY: ${EGMA_INGEST_SECRET_ACCESS_KEY:-${EGMA_S3_INGEST_SECRET_ACCESS_KEY:-}}
+      # Where accepted evidence waits between being staged and being durable.
+      # It is on the named volume below rather than in the container's own
+      # layer, because what is in it is evidence Egma has taken responsibility
+      # for and has not made durable yet.
+      EGMA_INGESTION_LOG_DIR: ${EGMA_INGESTION_LOG_DIR:-/var/lib/egma/ingestion}
+      # What the staging log will hold before acceptance starts refusing. Both
+      # bind: a bound in bytes alone would be reached by one deployment after
+      # ten records and by another after ten million. Over either, the door
+      # answers retryably and nothing already staged is discarded.
+      EGMA_INGESTION_LOG_MAX_BYTES: ${EGMA_INGESTION_LOG_MAX_BYTES:-536870912}
+      EGMA_INGESTION_LOG_MAX_RECORDS: ${EGMA_INGESTION_LOG_MAX_RECORDS:-200000}
+      # How long the oldest staged record waits for company. A low-volume
+      # deployment lives on this: one conversation's spans must not wait for a
+      # batch that will never fill.
+      EGMA_INGESTION_FLUSH_MILLISECONDS: ${EGMA_INGESTION_FLUSH_MILLISECONDS:-500}
+      # And how large one segment gets before it seals. The byte bound is
+      # uncompressed and sits under the trace store's own insert bound, so one
+      # segment is at most one or two inserts.
+      EGMA_INGESTION_SEGMENT_MAX_BYTES: ${EGMA_INGESTION_SEGMENT_MAX_BYTES:-8388608}
+      EGMA_INGESTION_SEGMENT_MAX_RECORDS: ${EGMA_INGESTION_SEGMENT_MAX_RECORDS:-5000}
+      # How long a request waits for the object store before it is answered
+      # retryably with its staged evidence retained.
+      EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS: ${EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS:-10000}
+      # How often the whole pending prefix is listed. The scan is the recovery
+      # authority; the in-process handoff after an upload is only a speed hint.
+      EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS: ${EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS:-30000}
+    volumes:
+      # The first writable volume this service has ever had, and it holds
+      # accepted evidence that is not durable yet. `docker image prune` does not
+      # touch a named volume; `docker compose down -v` deletes it, and doing
+      # that with a backlog in it throws away evidence Egma answered success to.
+      - api-ingestion:/var/lib/egma/ingestion
     ports:
       # Published on the host, so that a self-hoster who already runs
       # something on these can move Egma rather than move the other thing —
@@ -870,3 +954,9 @@ volumes:
   # the write-ahead log that protects a report lives in it, and that log is
   # the only record of a report the control plane never took.
   simulator-data:
+  # The same idea one service over: accepted production evidence waits here
+  # between being staged and being durable in the ingestion bucket. It survives
+  # a container replacement, which is what makes a restart a recovery rather
+  # than a loss; `docker compose down -v` deletes it, and doing that with a
+  # backlog in it throws away evidence Egma answered success to.
+  api-ingestion:

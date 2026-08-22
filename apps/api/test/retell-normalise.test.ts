@@ -426,7 +426,7 @@ describe("the spans a captured payload becomes", () => {
     );
   });
 
-  it("removes provider credentials before they enter any span payload", () => {
+  it("omits the two named transport fields before any span payload", () => {
     const accessToken = "SENTINEL-web-call-access-token";
     const authorization = "Bearer SENTINEL-customer-authorization";
     const normalised = normaliseRetellCall(
@@ -444,14 +444,45 @@ describe("the spans a captured payload becomes", () => {
     const stored = asBytes(normalised.spans);
     expect(stored).not.toContain(accessToken);
     expect(stored).not.toContain(authorization);
+    // Gone, with nothing written where they were. A marker is a value a
+    // customer can also send, so a reader meeting one could not tell who put
+    // it there.
+    expect(stored).not.toContain("REDACTED");
     const payload = JSON.parse(normalised.spans[0]?.payload ?? "{}") as Record<
       string,
       unknown
     >;
-    expect(payload["access_token"]).toBe("[REDACTED]");
+    expect(Object.keys(payload)).not.toContain("access_token");
     expect(payload["custom_sip_headers"]).toEqual({
-      Authorization: "[REDACTED]",
       "X-Customer-Route": "support",
+    });
+  });
+
+  it("keeps credential-looking customer evidence byte for byte", () => {
+    const transcript =
+      "Agent: what is the code? User: my password is hunter2, " +
+      "Authorization: Bearer not-a-credential-of-ours";
+    const normalised = normaliseRetellCall(
+      capturedCall({
+        transcript,
+        metadata: { secret: "customer-named-this", api_key: "customer-value" },
+        call_analysis: { custom_analysis_data: { authorization: "kept" } },
+      }),
+      FILED_INTO,
+      NOW,
+    );
+
+    const payload = JSON.parse(normalised.spans[0]?.payload ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(payload["transcript"]).toBe(transcript);
+    expect(payload["metadata"]).toEqual({
+      secret: "customer-named-this",
+      api_key: "customer-value",
+    });
+    expect(payload["call_analysis"]).toEqual({
+      custom_analysis_data: { authorization: "kept" },
     });
   });
 });

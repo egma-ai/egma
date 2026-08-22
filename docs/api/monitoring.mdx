@@ -143,8 +143,9 @@ curl -X POST \
 
 Turns one agent's pull switch off. Egma stops asking the platform and keeps
 everything it already has: the stored production conversations, the agent's
-platform binding, its sealed key, and its import progress. Starting again
-continues from where it stopped.
+platform binding, and its sealed key. Starting again is a new observation from
+that moment. Egma does not go back for the conversations that happened while
+the switch was off.
 
 <ParamField path="agentId" type="string" required>
   Egma agent id.
@@ -160,41 +161,8 @@ curl -X POST \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
-## Retry one Retell import
+## LiveKit Agents
 
-**`POST /v1/monitoring/retell/failures/:failureId/replay`**
-
-When Egma cannot import one production conversation after its allowed attempts,
-it records an import failure and moves on rather than stopping on that
-conversation. This retries the exact call the failure names.
-
-It reads that call directly, so it still works after the call has fallen
-outside the platform's normal 30-day list window. Egma claims each production
-conversation once, so a successful retry cannot create a second copy of a
-conversation that was already imported.
-
-<ParamField path="failureId" type="string" required>
-  Import failure id.
-</ParamField>
-
-<ResponseField name="monitoringImportFailure" type="object">
-  `{ id, status: "resolved" }` after a successful retry.
-</ResponseField>
-
-<ResponseField name="trace" type="object">
-  `{ id, write }`, where `write` is `written` for a conversation this retry stored, or `already` for one Egma had already stored.
-</ResponseField>
-
-| Status | Meaning |
-|---|---|
-| `404` | No open import failure with this id in this project. |
-| `409` | Another retry already owns this failure, or the platform still cannot supply a complete conversation. The failure stays open. |
-| `422` | The platform rejected the agent's stored key. Start monitoring again with a current key, then retry this import. |
-| `429` | The platform rate-limited the request, or this agent is already waiting before it asks again. The message says when to retry. |
-| `503` | The platform did not answer. Try again. |
-
-```bash
-curl -X POST \
-  "https://your-egma-host/v1/monitoring/retell/failures/mnf_abc123/replay?projectId=prj_abc123" \
-  -H "Authorization: Bearer egma_sk_..."
-```
+A LiveKit Agents agent pushes its own spans to the OTLP door with the project
+key. It has no switch, no key on the agent, and no route on this page. See
+[Egma Python SDK](/integrations/python-sdk) for the worker setup.
