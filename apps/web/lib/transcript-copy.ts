@@ -38,6 +38,13 @@ export const LIST = {
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
   setUp: "Set up Egma",
+  /**
+   * The one action this page offers, and it is a verb about an agent rather
+   * than a noun about an object: there is no monitoring setup to fill in any
+   * more. A per-agent switch turns pull on, and push needs nothing at all
+   * (ADR-0015).
+   */
+  startMonitoring: "Start monitoring",
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
   window: "Window",
@@ -113,8 +120,9 @@ export const QUIET = {
   setUp: {
     title: "Nothing has been recorded here yet",
     lead:
-      "Choose Retell or LiveKit Agents and complete its production Monitoring setup.",
-    action: "Set up monitoring",
+      "Start monitoring an agent. Egma pulls a Retell agent's calls with its " +
+      "own key; a LiveKit Agents agent pushes its own spans and needs no " +
+      "switch at all.",
   },
   organizationKey: {
     title: "A key here names the whole organization",

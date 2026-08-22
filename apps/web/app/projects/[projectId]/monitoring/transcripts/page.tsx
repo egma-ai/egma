@@ -17,7 +17,7 @@ import {
 } from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { rowsIn, type ApiKeyList } from "../../../../../lib/settings.ts";
-import { monitoringSetupPath } from "../../../../../lib/monitoring.ts";
+import { startMonitoringPath } from "../../../../../lib/monitoring.ts";
 import {
   COLUMNS,
   DEFAULT_WINDOW,
@@ -458,7 +458,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         lead={LIST.lead}
         action={
           <Button asChild>
-            <Link href={monitoringSetupPath(projectId)}>Set up monitoring</Link>
+            <Link href={startMonitoringPath(projectId)}>{LIST.startMonitoring}</Link>
           </Button>
         }
       />
