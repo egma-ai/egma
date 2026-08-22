@@ -2937,9 +2937,10 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await expected.innerText()).toContain(
         "Six of seven expected behaviors were present.",
       );
-      expect(
-        await expected.getByText(/^Assertion \d{2}$/u).count(),
-      ).toBe(7);
+      const assertionDetails = expected
+        .getByText("Assertion details")
+        .locator("..");
+      expect(await assertionDetails.getByRole("listitem").count()).toBe(7);
       expect(await expected.innerText()).toContain(expectedBehaviors[0]);
       expect(await expected.innerText()).toContain(expectedBehaviors[6]);
       expect(await expected.innerText()).toContain(
