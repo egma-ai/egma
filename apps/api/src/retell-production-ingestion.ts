@@ -1,21 +1,19 @@
 import {
-  checkpointRetellMonitoringPage,
-  claimDueRetellMonitoringAgent,
+  checkpointMonitoringPage,
+  claimDueMonitoringAgent,
   committedTraces,
-  deleteRetellCallRetry,
-  dueRetellCallRetries,
-  failRetellMonitoringTarget,
-  finishRetellMonitoringScan,
-  recordRetellCallAttempt,
-  recoverRetellMonitoringSetup,
-  releaseRetellMonitoringLease,
-  renewRetellMonitoringLease,
-  sweepExpiredRetellCallMarkers,
-  transientRetellCallState,
-  yieldRetellMonitoringLease,
+  deleteProductionCallFailure,
+  dueProductionCallRetries,
+  failMonitoringTarget,
+  finishMonitoringScan,
+  recordProductionCallAttempt,
+  renewMonitoringLease,
+  sweepExpiredProductionCallMarkers,
+  transientProductionCallState,
+  yieldMonitoringLease,
   type AuthContext,
   type MonitoringFailureKind,
-  type RetellMonitoringTarget,
+  type MonitoringTarget,
 } from "@egma/db";
 import { safeRetellProviderData } from "@egma/retell";
 import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
@@ -220,7 +218,7 @@ export type RetellProductionIngestionLog = {
 };
 
 export type RetellProductionIngestionMetricTurn = {
-  readonly scanKind: RetellMonitoringTarget["scanKind"];
+  readonly scanKind: MonitoringTarget["scanKind"];
   readonly outcome: "completed" | NonNullable<
     RetellProductionIngestionResult["stoppedBecause"]
   >;
@@ -232,10 +230,10 @@ export type RetellProductionIngestionMetricTurn = {
 
 /** Low-cardinality process metrics. Provider and customer ids never enter it. */
 export type RetellProductionIngestionMetrics = {
-  recordAttempt(scanKind: RetellMonitoringTarget["scanKind"]): void;
+  recordAttempt(scanKind: MonitoringTarget["scanKind"]): void;
   recordTurn(turn: RetellProductionIngestionMetricTurn): void;
   recordIngestionLag(
-    scanKind: RetellMonitoringTarget["scanKind"],
+    scanKind: MonitoringTarget["scanKind"],
     lagMilliseconds: number,
   ): void;
   recordProviderFailure(kind: MonitoringFailureKind): void;
@@ -252,19 +250,17 @@ export type RetellProductionIngestionMetrics = {
 
 /** Postgres operations at the production-ingestion seam. */
 export type RetellProductionIngestionStore = {
-  readonly claimDueRetellMonitoringAgent: typeof claimDueRetellMonitoringAgent;
-  readonly renewRetellMonitoringLease: typeof renewRetellMonitoringLease;
-  readonly checkpointRetellMonitoringPage: typeof checkpointRetellMonitoringPage;
-  readonly yieldRetellMonitoringLease: typeof yieldRetellMonitoringLease;
-  readonly finishRetellMonitoringScan: typeof finishRetellMonitoringScan;
-  readonly failRetellMonitoringTarget: typeof failRetellMonitoringTarget;
-  readonly recoverRetellMonitoringSetup: typeof recoverRetellMonitoringSetup;
-  readonly releaseRetellMonitoringLease: typeof releaseRetellMonitoringLease;
-  readonly transientRetellCallState: typeof transientRetellCallState;
-  readonly dueRetellCallRetries: typeof dueRetellCallRetries;
-  readonly recordRetellCallAttempt: typeof recordRetellCallAttempt;
-  readonly deleteRetellCallRetry: typeof deleteRetellCallRetry;
-  readonly sweepExpiredRetellCallMarkers: typeof sweepExpiredRetellCallMarkers;
+  readonly claimDueMonitoringAgent: typeof claimDueMonitoringAgent;
+  readonly renewMonitoringLease: typeof renewMonitoringLease;
+  readonly checkpointMonitoringPage: typeof checkpointMonitoringPage;
+  readonly yieldMonitoringLease: typeof yieldMonitoringLease;
+  readonly finishMonitoringScan: typeof finishMonitoringScan;
+  readonly failMonitoringTarget: typeof failMonitoringTarget;
+  readonly transientProductionCallState: typeof transientProductionCallState;
+  readonly dueProductionCallRetries: typeof dueProductionCallRetries;
+  readonly recordProductionCallAttempt: typeof recordProductionCallAttempt;
+  readonly deleteProductionCallFailure: typeof deleteProductionCallFailure;
+  readonly sweepExpiredProductionCallMarkers: typeof sweepExpiredProductionCallMarkers;
 };
 
 /** Retell HTTP reads at the production-ingestion seam. */
@@ -285,19 +281,17 @@ export type RetellEvidenceAcceptance = {
 };
 
 const STORE: RetellProductionIngestionStore = {
-  claimDueRetellMonitoringAgent,
-  renewRetellMonitoringLease,
-  checkpointRetellMonitoringPage,
-  yieldRetellMonitoringLease,
-  finishRetellMonitoringScan,
-  failRetellMonitoringTarget,
-  recoverRetellMonitoringSetup,
-  releaseRetellMonitoringLease,
-  transientRetellCallState,
-  dueRetellCallRetries,
-  recordRetellCallAttempt,
-  deleteRetellCallRetry,
-  sweepExpiredRetellCallMarkers,
+  claimDueMonitoringAgent,
+  renewMonitoringLease,
+  checkpointMonitoringPage,
+  yieldMonitoringLease,
+  finishMonitoringScan,
+  failMonitoringTarget,
+  transientProductionCallState,
+  dueProductionCallRetries,
+  recordProductionCallAttempt,
+  deleteProductionCallFailure,
+  sweepExpiredProductionCallMarkers,
 };
 
 const PROVIDER: RetellProductionProvider = {
@@ -445,8 +439,8 @@ function stableUnit(value: string): number {
 }
 
 /** A stable 27-33 second spread stops all selected agents polling together. */
-function regularPollMilliseconds(target: RetellMonitoringTarget): number {
-  const spread = 0.9 + stableUnit(target.monitoredAgentId) * 0.2;
+function regularPollMilliseconds(target: MonitoringTarget): number {
+  const spread = 0.9 + stableUnit(target.agentId) * 0.2;
   return Math.round(
     RETELL_PRODUCTION_POLL_INTERVAL_MILLISECONDS * spread,
   );
@@ -460,22 +454,28 @@ function regularPollMilliseconds(target: RetellMonitoringTarget): number {
  * of one schedule is how one path quietly starts polling at a different cadence
  * from the rest.
  */
-function nextPollAfter(target: RetellMonitoringTarget, now: Date): Date {
+function nextPollAfter(target: MonitoringTarget, now: Date): Date {
   return new Date(now.getTime() + regularPollMilliseconds(target));
 }
 
+/**
+ * How long this agent waits after a provider failure.
+ *
+ * **Per agent, and there is no account-wide gate.** Five agents sharing one
+ * dead key each hold their own retry clock and their own jitter, so they back
+ * off independently and the account never produces a request storm — which is
+ * what the key-wide health machine used to buy, at the cost of a surface
+ * nobody asked for.
+ */
 function backoffMilliseconds(
-  target: Pick<
-    RetellMonitoringTarget,
-    "setupId" | "setupConsecutiveFailures"
-  >,
+  target: Pick<MonitoringTarget, "agentId" | "consecutiveFailures">,
 ): number {
-  const exponent = Math.min(target.setupConsecutiveFailures, 6);
+  const exponent = Math.min(target.consecutiveFailures, 6);
   const base = Math.min(
     BACKOFF_CAP_MILLISECONDS,
     BACKOFF_BASE_MILLISECONDS * 2 ** exponent,
   );
-  const jitter = 0.8 + stableUnit(target.setupId) * 0.4;
+  const jitter = 0.8 + stableUnit(target.agentId) * 0.4;
   return Math.min(BACKOFF_CAP_MILLISECONDS, Math.round(base * jitter));
 }
 
@@ -496,7 +496,7 @@ function providerText(value: unknown): string {
  * anyway would put one customer's selection in front of another's evidence.
  */
 function retellCallBelongsToTarget(
-  target: Pick<RetellMonitoringTarget, "platformAgentId">,
+  target: Pick<MonitoringTarget, "platformAgentId">,
   call: RetellCall,
 ): boolean {
   const platformAgentId = providerText(call["agent_id"]);
@@ -510,7 +510,7 @@ function platformAgentVersionOf(call: RetellCall): string {
     : "";
 }
 
-function projectOf(target: RetellMonitoringTarget): string {
+function projectOf(target: MonitoringTarget): string {
   const projectId = target.auth.projectId;
   if (projectId === undefined) {
     throw new Error("Retell production ingestion requires a project context");
@@ -563,7 +563,7 @@ function targetResult(
 
 function logBatch(
   log: RetellProductionIngestionLog,
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   counts: TurnCounts,
   durationMilliseconds: number,
 ): void {
@@ -584,48 +584,24 @@ function logBatch(
   );
 }
 
-function logHealthChange(
+/**
+ * One agent's provider failure, reported once and to an operator alone.
+ *
+ * There is no health state and no customer-facing surface: the retry clock is
+ * internal, and what a person sees is that this agent's evidence is behind.
+ */
+function logProviderFailure(
   log: RetellProductionIngestionLog,
   kind: MonitoringFailureKind,
   failures: number,
 ): void {
   const event = platformEvent(
-    "egma.monitoring.retell.health.changed",
-    "Retell Monitoring health changed",
-    { health_state: kind, consecutive_failures: failures },
+    "egma.monitoring.retell.provider.failed",
+    "A Retell read for one agent failed",
+    { error_kind: kind, consecutive_failures: failures },
   );
   if (kind === "invalid_credential") log.error(event);
   else log.warn(event);
-}
-
-async function recover(
-  store: Pick<
-    RetellProductionIngestionStore,
-    "recoverRetellMonitoringSetup"
-  >,
-  target: RetellMonitoringTarget,
-  log: RetellProductionIngestionLog,
-  now: Date,
-): Promise<void> {
-  const result = await store.recoverRetellMonitoringSetup(
-    target.auth,
-    target,
-    now,
-  );
-  if (!result.recovered) return;
-  log.info(
-    platformEvent(
-      "egma.monitoring.retell.health.recovered",
-      "Retell Monitoring recovered",
-      {
-        outage_duration_ms: Math.max(
-          0,
-          now.getTime() - result.startedAt.getTime(),
-        ),
-        failure_count: result.failures,
-      },
-    ),
-  );
 }
 
 type ProviderFailure = Exclude<
@@ -642,10 +618,7 @@ function providerHealth(failure: ProviderFailure): MonitoringFailureKind {
 }
 
 function retryAtFor(
-  target: Pick<
-    RetellMonitoringTarget,
-    "setupId" | "setupConsecutiveFailures"
-  >,
+  target: Pick<MonitoringTarget, "agentId" | "consecutiveFailures">,
   failure: ProviderFailure,
   now: Date,
 ): Date {
@@ -663,20 +636,20 @@ function retryAtFor(
 
 async function failForProvider(
   store: RetellProductionIngestionStore,
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   failure: ProviderFailure,
   log: RetellProductionIngestionLog,
   metrics: RetellProductionIngestionMetrics,
   now: Date,
 ): Promise<void> {
   const kind = providerHealth(failure);
-  const result = await store.failRetellMonitoringTarget(
-    target.auth,
-    target,
-    { kind, retryAt: retryAtFor(target, failure, now), now },
-  );
+  const result = await store.failMonitoringTarget(target.auth, target, {
+    errorKind: kind,
+    retryAt: retryAtFor(target, failure, now),
+    now,
+  });
   metrics.recordProviderFailure(kind);
-  if (result.changed) logHealthChange(log, kind, result.failures);
+  if (result.recorded) logProviderFailure(log, kind, result.failures);
 }
 
 function providerEndMilliseconds(call: RetellCall): number | undefined {
@@ -706,7 +679,7 @@ function callFailureKind(failure: ProviderFailure): string | undefined {
 }
 
 /** The trace store's window for this page: the scan's own fixed bounds. */
-function committedWindow(target: RetellMonitoringTarget): {
+function committedWindow(target: MonitoringTarget): {
   readonly from: bigint;
   readonly to: bigint;
 } {
@@ -756,7 +729,7 @@ type CallOutcome =
  * looking at what evidence happens to contain.
  */
 async function acceptCall(
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   call: RetellCall,
   options: TurnOptions,
 ): Promise<{ readonly endedAt: number | undefined }> {
@@ -769,7 +742,7 @@ async function acceptCall(
       platformAgentId:
         providerText(safeCall["agent_id"]) || target.platformAgentId,
       platformAgentName:
-        providerText(safeCall["agent_name"]) || target.platformAgentName,
+        providerText(safeCall["agent_name"]) || target.agentName,
       platformAgentVersion: platformAgentVersionOf(safeCall),
     },
     options.clock().getTime(),
@@ -787,12 +760,12 @@ async function acceptCall(
  * The counter carries the reason class and nothing else.
  */
 async function countFailedAttempt(
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   providerCallId: string,
   errorKind: string,
   options: TurnOptions,
 ): Promise<CallOutcome> {
-  const recorded = await options.store.recordRetellCallAttempt(
+  const recorded = await options.store.recordProductionCallAttempt(
     target.auth,
     target,
     {
@@ -803,18 +776,7 @@ async function countFailedAttempt(
     },
   );
   if (!recorded.recorded) return { kind: "lease_lost" };
-  if (!recorded.dropped) {
-    if (recorded.changed) {
-      options.log.warn(
-        platformEvent(
-          "egma.monitoring.retell.health.changed",
-          "A Retell Monitoring target became degraded",
-          { health_state: "degraded" },
-        ),
-      );
-    }
-    return { kind: "scheduled" };
-  }
+  if (!recorded.dropped) return { kind: "scheduled" };
 
   options.log.error(
     platformEvent(
@@ -823,7 +785,7 @@ async function countFailedAttempt(
       {
         organization_id: target.auth.organizationId,
         project_id: projectOf(target),
-        retell_monitored_agent_id: target.monitoredAgentId,
+        agent_id: target.agentId,
         provider_call_id: providerCallId,
         error_kind: errorKind,
         automatic_retries: recorded.attempts - 1,
@@ -842,7 +804,7 @@ async function countFailedAttempt(
  * "survives a restart" meaningless.
  */
 async function handleCall(
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   providerCallId: string,
   retrieve: () => Promise<RetrievedCall>,
   options: TurnOptions,
@@ -892,9 +854,8 @@ async function handleCall(
   // trying and nobody has stored. And only where there is a row — a call that
   // simply worked leaves no Postgres write behind it at all.
   if (held) {
-    await options.store.deleteRetellCallRetry(target.auth, target, {
+    await options.store.deleteProductionCallFailure(target.auth, {
       providerCallId,
-      now: options.clock(),
     });
   }
   counts.accepted += 1;
@@ -948,7 +909,7 @@ function endsTurn(outcome: CallOutcome): boolean {
  * about to yield its lease must have nothing of its own still writing.
  */
 async function hydrateOutstanding(
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   outstanding: readonly OutstandingCall[],
   options: TurnOptions,
   counts: TurnCounts,
@@ -962,7 +923,7 @@ async function hydrateOutstanding(
   let stopping = false;
 
   const hydrateOne = async (owed: OutstandingCall): Promise<CallOutcome> => {
-    const renewed = await options.store.renewRetellMonitoringLease(
+    const renewed = await options.store.renewMonitoringLease(
       target.auth,
       target,
       { now: options.clock() },
@@ -1018,12 +979,12 @@ async function hydrateOutstanding(
 
 async function releaseAfterInternalFailure(
   store: RetellProductionIngestionStore,
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   clock: () => Date,
 ): Promise<void> {
   const now = clock();
   try {
-    await store.releaseRetellMonitoringLease(target.auth, target, {
+    await store.failMonitoringTarget(target.auth, target, {
       retryAt: nextPollAfter(target, now),
       errorKind: "internal_failure",
       now,
@@ -1035,7 +996,7 @@ async function releaseAfterInternalFailure(
 }
 
 async function runTarget(
-  target: RetellMonitoringTarget,
+  target: MonitoringTarget,
   options: TurnOptions,
 ): Promise<RetellProductionIngestionResult> {
   const counts: TurnCounts = { pages: 0, accepted: 0, settled: 0, dropped: 0 };
@@ -1080,8 +1041,7 @@ async function runTarget(
   const yieldBoundedTurn = async (): Promise<RetellProductionIngestionResult> => {
     const now = options.clock();
     leaseFinished = true;
-    await recover(options.store, target, options.log, now);
-    await options.store.yieldRetellMonitoringLease(target.auth, target, {
+    await options.store.yieldMonitoringLease(target.auth, target, {
       retryAt: nextPollAfter(target, now),
       now,
     });
@@ -1091,7 +1051,7 @@ async function runTarget(
   const releaseForContract =
     async (): Promise<RetellProductionIngestionResult> => {
       const now = options.clock();
-      await options.store.releaseRetellMonitoringLease(target.auth, target, {
+      await options.store.failMonitoringTarget(target.auth, target, {
         retryAt: nextPollAfter(target, now),
         errorKind: "provider_contract",
         now,
@@ -1129,7 +1089,7 @@ async function runTarget(
         ),
       );
       const now = options.clock();
-      await options.store.yieldRetellMonitoringLease(target.auth, target, {
+      await options.store.yieldMonitoringLease(target.auth, target, {
         retryAt: nextPollAfter(target, now),
         now,
       });
@@ -1156,19 +1116,19 @@ async function runTarget(
     // is what keeps an ordinary empty poll to one claim and one provider read.
     if (target.hasTransientCallState) {
       const now = options.clock();
-      await options.store.sweepExpiredRetellCallMarkers(target.auth, {
-        monitoredAgentId: target.monitoredAgentId,
+      await options.store.sweepExpiredProductionCallMarkers(target.auth, {
+        agentId: target.agentId,
         now,
       });
-      const due = await options.store.dueRetellCallRetries(target.auth, {
-        monitoredAgentId: target.monitoredAgentId,
+      const due = await options.store.dueProductionCallRetries(target.auth, {
+        agentId: target.agentId,
         importGeneration: target.importGeneration,
         now,
         limit: RETRIES_PER_TURN,
       });
       for (const owed of due) {
         if (turnBoundReached()) return yieldBoundedTurn();
-        const renewed = await options.store.renewRetellMonitoringLease(
+        const renewed = await options.store.renewMonitoringLease(
           target.auth,
           target,
           { now: options.clock() },
@@ -1208,7 +1168,7 @@ async function runTarget(
     while (counts.pages < options.maxPagesPerTurn) {
       if (counts.pages > 0 && turnBoundReached()) return yieldBoundedTurn();
 
-      const renewed = await options.store.renewRetellMonitoringLease(
+      const renewed = await options.store.renewMonitoringLease(
         target.auth,
         target,
         { now: options.clock() },
@@ -1290,10 +1250,10 @@ async function runTarget(
         // catch-up back to it: a trace it now reports is one the memory can stop
         // holding, and the same call re-listed by the overlap ages out here too.
         options.accepted.reconcile(committed, options.clock());
-        const transient = await options.store.transientRetellCallState(
+        const transient = await options.store.transientProductionCallState(
           target.auth,
           {
-            monitoredAgentId: target.monitoredAgentId,
+            agentId: target.agentId,
             providerCallIds: identities,
             importGeneration: target.importGeneration,
             now: options.clock(),
@@ -1383,8 +1343,7 @@ async function runTarget(
 
       if (!listed.hasMore) {
         const now = options.clock();
-        await recover(options.store, target, options.log, now);
-        const finished = await options.store.finishRetellMonitoringScan(
+        const finished = await options.store.finishMonitoringScan(
           target.auth,
           target,
           { now, pollMilliseconds: regularPollMilliseconds(target) },
@@ -1403,7 +1362,7 @@ async function runTarget(
       }
 
       seenPaginationKeys.add(nextPaginationKey);
-      const checkpointed = await options.store.checkpointRetellMonitoringPage(
+      const checkpointed = await options.store.checkpointMonitoringPage(
         target.auth,
         target,
         {
@@ -1419,8 +1378,7 @@ async function runTarget(
     }
 
     const now = options.clock();
-    await recover(options.store, target, options.log, now);
-    await options.store.yieldRetellMonitoringLease(target.auth, target, {
+    await options.store.yieldMonitoringLease(target.auth, target, {
       retryAt: nextPollAfter(target, now),
       now,
     });
@@ -1435,7 +1393,7 @@ async function runTarget(
     if (!leaseFinished) {
       const now = options.clock();
       try {
-        await options.store.yieldRetellMonitoringLease(target.auth, target, {
+        await options.store.yieldMonitoringLease(target.auth, target, {
           retryAt: nextPollAfter(target, now),
           now,
         });
@@ -1478,7 +1436,7 @@ export async function runRetellProductionIngestion(
     ),
   };
 
-  const target = await store.claimDueRetellMonitoringAgent({ now: clock() });
+  const target = await store.claimDueMonitoringAgent({ now: clock() });
   if (target === undefined) return emptyResult();
   return runTarget(target, options);
 }

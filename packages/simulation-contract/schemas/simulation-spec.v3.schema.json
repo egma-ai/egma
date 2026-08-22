@@ -32,12 +32,12 @@
       "enum": ["chat", "voice"]
     },
     "connection": {
-      "description": "How the simulator reaches the agent under test. Connection kind selects the adapter, access variant selects the authority and configuration inside it, and agent platform records what runs the target without selecting code.",
+      "description": "How the simulator reaches the agent under test. Connection type selects the adapter, access variant selects the authority and configuration inside it, and agent platform records what runs the target without selecting code.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "agent_platform",
-        "connection_kind",
+        "connection_type",
         "access_variant",
         "config",
         "credentials"
@@ -50,13 +50,13 @@
             { "type": "null" }
           ]
         },
-        "connection_kind": {
+        "connection_type": {
           "description": "The direct path the simulator selects. It is an open vocabulary so a simulator without the named adapter can refuse it clearly at runtime.",
           "type": "string",
           "minLength": 1
         },
         "access_variant": {
-          "description": "The configuration and authority used inside the selected connection kind. It is explicit and is never inferred from config keys.",
+          "description": "The configuration and authority used inside the selected connection type. It is explicit and is never inferred from config keys.",
           "type": "string",
           "minLength": 1
         },
@@ -320,9 +320,9 @@
           "connection": {
             "type": "object",
             "properties": {
-              "connection_kind": { "const": "phone_number" }
+              "connection_type": { "const": "phone_number" }
             },
-            "required": ["connection_kind"]
+            "required": ["connection_type"]
           }
         },
         "required": ["connection"]

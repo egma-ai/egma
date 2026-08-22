@@ -1,13 +1,13 @@
 import {
   appendSpans,
   committedSpans,
-  MONITORING_PLATFORMS,
+  AGENT_PLATFORMS,
   projectOfOrganizationState,
   recordProductionEvidenceReceived,
   recordProductionTraces,
   TraceStoreRefusedError,
   type AuthContext,
-  type MonitoringPlatform,
+  type AgentPlatform,
   type NewSpan,
 } from "@egma/db";
 import { mintedAt } from "@egma/ids";
@@ -385,25 +385,28 @@ export class ProjectDeletedAfterAcceptanceError extends Error {
 }
 
 /**
- * Which platform's Monitoring state this segment moves, and to when.
+ * Which agent's polling state this segment moves, and to when.
  *
- * Gathered per `(platform, selected agent)` rather than per conversation — one
+ * Gathered per `(platform, platform agent)` rather than per conversation — one
  * segment carrying two hundred calls of one agent is one statement — and the
  * instant comes from **the evidence** rather than from the clock. That is what
  * makes a replay monotone in practice as well as in the merge: a segment
  * drained today carrying yesterday's calls says yesterday, so it cannot move a
  * customer's "last production conversation" forward to a moment nothing
  * happened at.
+ *
+ * A pushing agent has no state row to move, so this writes nothing for one —
+ * which is the whole of what the door owes push: nothing.
  */
 type MonitoringFact = {
-  readonly agentPlatform: MonitoringPlatform;
+  readonly agentPlatform: AgentPlatform;
   readonly platformAgentId: string;
   readonly receivedAt: Date;
 };
 
-/** Whether this word is a platform Monitoring keeps a setup for. */
-function monitored(platform: string): platform is MonitoringPlatform {
-  return (MONITORING_PLATFORMS as readonly string[]).includes(platform);
+/** Whether this word is an agent platform Egma ships. */
+function monitored(platform: string): platform is AgentPlatform {
+  return (AGENT_PLATFORMS as readonly string[]).includes(platform);
 }
 
 function monitoringFactsIn(
@@ -411,12 +414,12 @@ function monitoringFactsIn(
 ): readonly MonitoringFact[] {
   const latest = new Map<
     string,
-    { platform: MonitoringPlatform; agent: string; at: bigint }
+    { platform: AgentPlatform; agent: string; at: bigint }
   >();
   for (const record of records) {
     if (record.source !== "production") continue;
     // Asked of the shipped list rather than of two names written out here, so
-    // a platform added to Monitoring gets its bookkeeping instead of silently
+    // a platform added to the product gets its bookkeeping instead of silently
     // losing it.
     if (!monitored(record.agent_platform)) continue;
     const key = `${record.agent_platform}/${record.platform_agent_id}`;

@@ -1,6 +1,6 @@
 """Connection plugs: the one place that knows how to reach an agent.
 
-A **plug** is the component behind a connection kind. It alone knows how
+A **plug** is the component behind a connection type. It alone knows how
 to open that connection, deliver the persona's turns, hear
 the agent's answers, and end the exchange. Everything else in the
 simulator is plug-blind: the persona brain, the walk, the claim loop, and
@@ -254,10 +254,10 @@ keywords, it returns one plug for one simulation — in practice, the plug
 class itself."""
 
 
-def plug_for(connection_kind: str) -> PlugFactory | None:
-    """The plug factory registered for one connection kind, or ``None``.
+def plug_for(connection_type: str) -> PlugFactory | None:
+    """The plug factory registered for one connection type, or ``None``.
 
-    The registry is deliberately a literal here: adding a connection kind is one
+    The registry is deliberately a literal here: adding a connection type is one
     import and one line, and the diff that adds it touches nothing else.
     """
     from .livekit import LiveKitRoom
@@ -272,4 +272,4 @@ def plug_for(connection_kind: str) -> PlugFactory | None:
         "phone_number": PhoneCall,
         "retell_chat_api": RetellChat,
         "scripted": ScriptedCounterpart,
-    }.get(connection_kind)
+    }.get(connection_type)

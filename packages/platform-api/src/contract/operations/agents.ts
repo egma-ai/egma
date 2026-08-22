@@ -15,8 +15,13 @@ const agent = {
     id: stringIdSchema,
     projectId: stringIdSchema,
     name: { type: "string" },
-    description: nullable({ type: "string" }),
-    revision: stringIdSchema,
+    agentPlatform: nullable({
+      type: "string",
+      enum: ["retell", "livekit_agents"],
+    }),
+    platformAgentId: nullable({ type: "string" }),
+    monitoringKeyHint: nullable({ type: "string" }),
+    pullProductionCalls: { type: "boolean" },
     archived: { type: "boolean" },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -26,8 +31,10 @@ const agent = {
     "id",
     "projectId",
     "name",
-    "description",
-    "revision",
+    "agentPlatform",
+    "platformAgentId",
+    "monitoringKeyHint",
+    "pullProductionCalls",
     "archived",
     "archivedAt",
     "createdAt",
@@ -47,7 +54,7 @@ const connection = {
       type: "string",
       enum: ["retell", "livekit_agents"],
     }),
-    connectionKind: {
+    connectionType: {
       type: "string",
       enum: ["retell_chat_api", "phone_number", "livekit_room"],
     },
@@ -70,7 +77,6 @@ const connection = {
     config: { type: "object", additionalProperties: { type: "string" } },
     credentialPresent: { type: "boolean" },
     credentialsHint: nullable({ type: "string" }),
-    revision: stringIdSchema,
     archived: { type: "boolean" },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -82,7 +88,7 @@ const connection = {
     "projectId",
     "name",
     "agentPlatform",
-    "connectionKind",
+    "connectionType",
     "accessVariant",
     "modality",
     "productLabel",
@@ -91,7 +97,6 @@ const connection = {
     "config",
     "credentialPresent",
     "credentialsHint",
-    "revision",
     "archived",
     "archivedAt",
     "createdAt",
@@ -136,11 +141,7 @@ const connectionInput = {
   type: "object",
   properties: {
     name: { type: "string" },
-    agentPlatform: nullable({
-      type: "string",
-      enum: ["retell", "livekit_agents"],
-    }),
-    connectionKind: {
+    connectionType: {
       type: "string",
       enum: ["retell_chat_api", "phone_number", "livekit_room"],
     },
@@ -159,7 +160,7 @@ const connectionInput = {
     credentials: { type: "object", additionalProperties: true },
     agentPlatformSelection,
   },
-  required: ["agentPlatform", "connectionKind", "accessVariant", "modality"],
+  required: ["connectionType", "accessVariant", "modality"],
   additionalProperties: false,
 } as const;
 
@@ -246,7 +247,7 @@ export const agentOperations = {
                   type: "object",
                   properties: {
                     agentPlatform: { type: "string", enum: ["retell"] },
-                    connectionKind: {
+                    connectionType: {
                       type: "string",
                       enum: ["retell_chat_api", "phone_number"],
                     },
@@ -266,7 +267,7 @@ export const agentOperations = {
                   },
                   required: [
                     "agentPlatform",
-                    "connectionKind",
+                    "connectionType",
                     "accessVariant",
                     "modality",
                     "productLabel",
@@ -313,7 +314,7 @@ export const agentOperations = {
                   enum: ["retell", "livekit_agents"],
                 }),
                 agentPlatformLabel: { type: "string" },
-                connectionKind: {
+                connectionType: {
                   type: "string",
                   enum: ["retell_chat_api", "phone_number", "livekit_room"],
                 },
@@ -368,7 +369,7 @@ export const agentOperations = {
               required: [
                 "agentPlatform",
                 "agentPlatformLabel",
-                "connectionKind",
+                "connectionType",
                 "accessVariant",
                 "accessVariantLabel",
                 "modality",
@@ -405,7 +406,6 @@ export const agentOperations = {
         type: "object",
         properties: {
           name: { type: "string" },
-          description: { type: "string" },
           connection: connectionInput,
         },
         required: ["name"],
@@ -532,8 +532,6 @@ export const agentOperations = {
         type: "object",
         properties: {
           name: { type: "string" },
-          description: nullable({ type: "string" }),
-          expectedRevision: stringIdSchema,
         },
         additionalProperties: false,
       },
@@ -556,7 +554,7 @@ export const agentOperations = {
       query: projectQuery,
       body: {
         type: "object",
-        properties: { expectedRevision: stringIdSchema },
+        properties: {},
         additionalProperties: false,
       },
       bodyRequired: false,
@@ -592,7 +590,6 @@ export const agentOperations = {
       body: {
         type: "object",
         properties: {
-          expectedRevision: stringIdSchema,
           name: { type: "string" },
         },
         additionalProperties: false,
@@ -640,7 +637,6 @@ export const agentOperations = {
           environment: nullable({ type: "string" }),
           config: { type: "object", additionalProperties: true },
           credentials: { type: "object", additionalProperties: true },
-          expectedRevision: stringIdSchema,
         },
         additionalProperties: false,
       },
@@ -663,7 +659,7 @@ export const agentOperations = {
       query: projectQuery,
       body: {
         type: "object",
-        properties: { expectedRevision: stringIdSchema },
+        properties: {},
         additionalProperties: false,
       },
       bodyRequired: false,
@@ -698,7 +694,6 @@ export const agentOperations = {
       body: {
         type: "object",
         properties: {
-          expectedRevision: stringIdSchema,
           name: { type: "string" },
           credential: {
             oneOf: [

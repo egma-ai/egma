@@ -1,7 +1,6 @@
 import { defineOperation } from "../definition.ts";
 import {
   arrayOf,
-  dateTimeSchema,
   nullable,
   parameters,
   rateLimitResponse,
@@ -9,80 +8,38 @@ import {
   stringIdSchema,
 } from "../schemas.ts";
 
-const optionalInstant = nullable(dateTimeSchema);
-
-const monitoredAgent = {
+/**
+ * Monitoring configuration is the agent's, so this tag holds only what the
+ * start-monitoring flow needs: reading a platform account with a key it has
+ * just been given, and the per-agent pull switch itself.
+ *
+ * There is no setup object and no source list. Pull is declared on the agent;
+ * push is observed through its traffic and has no server state at all.
+ */
+const pullSwitch = {
   type: "object",
   properties: {
-    id: stringIdSchema,
-    platformAgentId: { type: "string" },
-    platformAgentName: { type: "string" },
-    state: { type: "string" },
-    scanKind: nullable({ type: "string" }),
-    lastSuccessAt: optionalInstant,
-    lastConversationAt: optionalInstant,
-    lastErrorKind: nullable({ type: "string" }),
-    lastErrorAt: optionalInstant,
-    consecutiveFailures: { type: "integer", minimum: 0 },
+    agentId: stringIdSchema,
+    agentPlatform: nullable({
+      type: "string",
+      enum: ["retell", "livekit_agents"],
+    }),
+    platformAgentId: nullable({ type: "string" }),
+    monitoringKeyHint: nullable({ type: "string" }),
+    pullProductionCalls: { type: "boolean" },
   },
   required: [
-    "id",
-    "platformAgentId",
-    "platformAgentName",
-    "state",
-    "scanKind",
-    "lastSuccessAt",
-    "lastConversationAt",
-    "lastErrorKind",
-    "lastErrorAt",
-    "consecutiveFailures",
-  ],
-  additionalProperties: false,
-} as const;
-
-const monitoringSource = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    projectId: stringIdSchema,
-    agentPlatform: { type: "string" },
-    strategy: { type: "string" },
-    credentialsHint: nullable({ type: "string" }),
-    health: {
-      type: "object",
-      properties: {
-        state: { type: "string" },
-        blockedUntil: optionalInstant,
-        consecutiveFailures: { type: "integer", minimum: 0 },
-        lastErrorAt: optionalInstant,
-        lastRecoveredAt: optionalInstant,
-        lastReceivedAt: optionalInstant,
-      },
-      required: [
-        "state",
-        "blockedUntil",
-        "consecutiveFailures",
-        "lastErrorAt",
-        "lastRecoveredAt",
-        "lastReceivedAt",
-      ],
-      additionalProperties: false,
-    },
-    agents: arrayOf(monitoredAgent),
-  },
-  required: [
-    "id",
-    "projectId",
+    "agentId",
     "agentPlatform",
-    "strategy",
-    "credentialsHint",
-    "health",
-    "agents",
+    "platformAgentId",
+    "monitoringKeyHint",
+    "pullProductionCalls",
   ],
   additionalProperties: false,
 } as const;
 
 const projectQuery = parameters({ projectId: stringIdSchema });
+const agentParams = parameters({ agentId: stringIdSchema }, ["agentId"]);
 const retellAgent = {
   type: "object",
   properties: {
@@ -93,31 +50,17 @@ const retellAgent = {
   additionalProperties: false,
 } as const;
 
-export const monitoringOperations = {
-  listMonitoringSources: defineOperation({
-    operationId: "listMonitoringSources",
-    method: "GET",
-    path: "/v1/monitoring",
-    summary: "List monitoring sources",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: { query: projectQuery },
-    responses: {
-      200: {
-        description: "Configured monitoring sources.",
-        schema: {
-          type: "object",
-          properties: { monitoringSources: arrayOf(monitoringSource) },
-          required: ["monitoringSources"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
+const pullSwitchResponse = {
+  description: "The agent's pull switch as it now stands.",
+  schema: {
+    type: "object",
+    properties: { pullSwitch },
+    required: ["pullSwitch"],
+    additionalProperties: false,
+  },
+} as const;
 
+export const monitoringOperations = {
   discoverRetellVoiceAgents: defineOperation({
     operationId: "discoverRetellVoiceAgents",
     method: "POST",
@@ -152,83 +95,51 @@ export const monitoringOperations = {
     },
   }),
 
-  configureRetellMonitoring: defineOperation({
-    operationId: "configureRetellMonitoring",
+  startPullingProductionCalls: defineOperation({
+    operationId: "startPullingProductionCalls",
     method: "PUT",
-    path: "/v1/monitoring/retell",
-    summary: "Configure Retell monitoring",
+    path: "/v1/agents/{agentId}/production-pull",
+    summary: "Pull this agent's production calls",
     tag: "Monitoring",
     security: "credentialed",
     request: {
+      params: agentParams,
       query: projectQuery,
       body: {
         type: "object",
         properties: {
+          agentPlatform: { type: "string", enum: ["retell"] },
+          platformAgentId: { type: "string" },
           apiKey: { type: "string" },
-          agents: arrayOf(retellAgent),
         },
-        required: ["apiKey", "agents"],
+        required: ["agentPlatform", "platformAgentId", "apiKey"],
         additionalProperties: false,
       },
     },
     responses: {
-      200: {
-        description: "The configured monitoring source.",
-        schema: {
-          type: "object",
-          properties: { monitoringSource },
-          required: ["monitoringSource"],
-          additionalProperties: false,
-        },
-      },
+      200: pullSwitchResponse,
       401: refusalResponse,
       403: refusalResponse,
+      404: refusalResponse,
       422: refusalResponse,
       429: rateLimitResponse,
       503: refusalResponse,
     },
   }),
 
-  configureLiveKitMonitoring: defineOperation({
-    operationId: "configureLiveKitMonitoring",
-    method: "PUT",
-    path: "/v1/monitoring/livekit-agents",
-    summary: "Configure LiveKit Agents monitoring",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: {
-      query: projectQuery,
-    },
-    responses: {
-      200: {
-        description: "The configured monitoring source.",
-        schema: {
-          type: "object",
-          properties: { monitoringSource },
-          required: ["monitoringSource"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      422: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
-
-  deleteMonitoringSource: defineOperation({
-    operationId: "deleteMonitoringSource",
+  stopPullingProductionCalls: defineOperation({
+    operationId: "stopPullingProductionCalls",
     method: "DELETE",
-    path: "/v1/monitoring/{platform}",
-    summary: "Delete a monitoring source",
+    path: "/v1/agents/{agentId}/production-pull",
+    summary: "Stop pulling this agent's production calls",
     tag: "Monitoring",
     security: "credentialed",
     request: {
-      params: parameters({ platform: { type: "string" } }, ["platform"]),
+      params: agentParams,
       query: projectQuery,
     },
     responses: {
-      204: { description: "The monitoring source was deleted." },
+      200: pullSwitchResponse,
       401: refusalResponse,
       403: refusalResponse,
       404: refusalResponse,

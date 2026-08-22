@@ -648,10 +648,10 @@ export function normaliseOtlpExport(
             PLATFORM_AGENT_VERSION_ATTRIBUTES,
           ),
           // The service-token path is Egma's own simulator and may state the
-          // connection kind it used. Customer OTLP is production evidence;
+          // connection type it used. Customer OTLP is production evidence;
           // this release does not let an arbitrary payload create a shared
           // production connection-kind fact.
-          connectionKind:
+          connectionType:
             attribution.source === "simulation"
               ? firstAttribute(
                   [attributes, resourceSpans.resource?.attributes],
