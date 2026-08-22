@@ -727,8 +727,17 @@ const THE_MEASURES = [
  * this module fingerprints the row and compares it against what is stored, and
  * a second implementation of the fingerprint is one of them calling a conflict
  * a replay.
+ *
+ * The ceiling of the refusal's bounds crosses with it: a caller reserving room
+ * for the largest record this module would accept must take that size from the
+ * bounds themselves, because a restated number drifts the first time a bound
+ * moves.
  */
-const THE_EVIDENCE_RULES = ["refuseOversizeRecord", "spanContentHash"];
+const THE_EVIDENCE_RULES = [
+  "LARGEST_BOUNDED_RECORD_BYTES",
+  "refuseOversizeRecord",
+  "spanContentHash",
+];
 
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
