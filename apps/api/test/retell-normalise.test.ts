@@ -189,7 +189,7 @@ describe("the spans a captured payload becomes", () => {
       expect(span.source).toBe("production");
       expect(span.emitter).toBe("agent");
       expect(span.environment).toBe("production");
-      expect(span.connectionKind).toBe("");
+      expect(span.connectionType).toBe("");
       expect(span.agentId).toBe("");
       expect(span.agentPlatform).toBe("retell");
       expect(span.platformAgentId).toBe("agent_in_retell_1");

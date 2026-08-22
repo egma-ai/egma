@@ -1,7 +1,7 @@
 import {
-  claimDueRetellMonitoringAgent,
-  finishRetellMonitoringScan,
-  recordRetellIngestionFailure,
+  claimDueMonitoringPull,
+  finishMonitoringScan,
+  recordMonitoringFailure,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -253,15 +253,15 @@ describe("platform-first Monitoring setup", () => {
     });
     expect(configured.statusCode, configured.body).toBe(200);
 
-    const target = await claimDueRetellMonitoringAgent({ now: new Date() });
+    const target = await claimDueMonitoringPull({ now: new Date() });
     expect(target).toBeDefined();
     if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
+    await recordMonitoringFailure(target.auth, target, {
       providerCallId,
       errorKind: "provider_call_not_found",
       now: new Date(),
     });
-    await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
+    await finishMonitoringScan(target.auth, target, { now: new Date() });
 
     const before = await api.app.inject({
       method: "GET",
@@ -342,15 +342,15 @@ describe("platform-first Monitoring setup", () => {
     });
     expect(configured.statusCode, configured.body).toBe(200);
 
-    const target = await claimDueRetellMonitoringAgent({ now: new Date() });
+    const target = await claimDueMonitoringPull({ now: new Date() });
     expect(target).toBeDefined();
     if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
+    await recordMonitoringFailure(target.auth, target, {
       providerCallId,
       errorKind: "provider_call_not_found",
       now: new Date(),
     });
-    await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
+    await finishMonitoringScan(target.auth, target, { now: new Date() });
     const listed = await api.app.inject({
       method: "GET",
       url: `/v1/monitoring?projectId=${ada.projectId}`,

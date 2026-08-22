@@ -1,26 +1,26 @@
 import {
-  checkpointRetellMonitoringPage,
-  claimDueRetellMonitoringAgent,
-  claimRetellIngestionFailureReplay,
+  checkpointMonitoringPage,
+  claimDueMonitoringPull,
+  claimMonitoringFailureReplay,
   claimProductionTrace,
   configureLiveKitMonitoring,
   configureRetellMonitoring,
-  failRetellIngestionFailureReplay,
-  failRetellMonitoringTarget,
-  finishRetellMonitoringScan,
+  failMonitoringFailureReplay,
+  failMonitoringPull,
+  finishMonitoringScan,
   finishProductionTrace,
   listMonitoringSetups,
   NotPermittedError,
   recordLiveKitMonitoringReceived,
-  recordRetellCallReceived,
-  recordRetellIngestionFailure,
-  recordRetellMonitoringReceived,
+  recordPulledCallReceived,
+  recordMonitoringFailure,
+  recordPulledCallReceivedForPlatformAgent,
   recoverRetellMonitoringSetup,
-  releaseRetellIngestionFailureReplay,
-  releaseRetellMonitoringLease,
-  resolveRetellIngestionFailureReplay,
-  renewRetellMonitoringLease,
-  yieldRetellMonitoringLease,
+  releaseMonitoringFailureReplay,
+  releaseMonitoringLease,
+  resolveMonitoringFailureReplay,
+  renewMonitoringLease,
+  yieldMonitoringLease,
   type AuthContext,
 } from "@egma/db";
 import { newId } from "@egma/ids";
@@ -214,7 +214,7 @@ describe("Retell Monitoring setup", () => {
 
     const retellReceivedAt = new Date("2026-08-20T08:01:00.000Z");
     const liveKitReceivedAt = new Date("2026-08-20T08:02:00.000Z");
-    await recordRetellMonitoringReceived(acmeAuth, {
+    await recordPulledCallReceivedForPlatformAgent(acmeAuth, {
       platformAgentId: selected()[0].platformAgentId,
       receivedAt: retellReceivedAt,
     });
@@ -313,8 +313,8 @@ describe("Retell Monitoring setup", () => {
     });
 
     const [first, second] = await Promise.all([
-      claimDueRetellMonitoringAgent({ now: SETUP_TIME }),
-      claimDueRetellMonitoringAgent({ now: SETUP_TIME }),
+      claimDueMonitoringPull({ now: SETUP_TIME }),
+      claimDueMonitoringPull({ now: SETUP_TIME }),
     ]);
     const held = [first, second].filter(
       (target): target is NonNullable<typeof target> => target !== undefined,
@@ -341,7 +341,7 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const active = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const active = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(active).toBeDefined();
     if (active === undefined) return;
 
@@ -353,10 +353,10 @@ describe("Retell Monitoring setup", () => {
     });
 
     expect(
-      await claimDueRetellMonitoringAgent({ now: savedAt }),
+      await claimDueMonitoringPull({ now: savedAt }),
     ).toBeUndefined();
     expect(
-      await renewRetellMonitoringLease(active.auth, active, { now: savedAt }),
+      await renewMonitoringLease(active.auth, active, { now: savedAt }),
     ).toBe(true);
   });
 
@@ -367,7 +367,7 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const stale = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(stale).toBeDefined();
     if (stale === undefined) return;
 
@@ -377,7 +377,7 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: rotatedAt,
     });
-    await failRetellMonitoringTarget(stale.auth, stale, {
+    await failMonitoringPull(stale.auth, stale, {
       kind: "invalid_credential",
       retryAt: new Date("9999-12-31T23:59:59.999Z"),
       now: rotatedAt,
@@ -389,7 +389,7 @@ describe("Retell Monitoring setup", () => {
       consecutiveFailures: 0,
     });
     expect(
-      await claimDueRetellMonitoringAgent({ now: rotatedAt }),
+      await claimDueMonitoringPull({ now: rotatedAt }),
     ).toMatchObject({ apiKey: ROTATED_RETELL_KEY });
   });
 
@@ -400,15 +400,15 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const stale = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(stale).toBeDefined();
     if (stale === undefined) return;
-    await yieldRetellMonitoringLease(stale.auth, stale, {
+    await yieldMonitoringLease(stale.auth, stale, {
       retryAt: new Date(SETUP_TIME.getTime() + 30_000),
       now: SETUP_TIME,
     });
 
-    await failRetellMonitoringTarget(stale.auth, stale, {
+    await failMonitoringPull(stale.auth, stale, {
       kind: "invalid_credential",
       retryAt: new Date("9999-12-31T23:59:59.999Z"),
       now: SETUP_TIME,
@@ -428,7 +428,7 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const stale = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(stale).toBeDefined();
     if (stale === undefined) return;
 
@@ -440,7 +440,7 @@ describe("Retell Monitoring setup", () => {
     });
 
     expect(
-      await recordRetellIngestionFailure(stale.auth, stale, {
+      await recordMonitoringFailure(stale.auth, stale, {
         providerCallId: "call_from_previous_key",
         errorKind: "provider_call_not_found",
         now: rotatedAt,
@@ -459,31 +459,31 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const stale = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(stale).toBeDefined();
     if (stale === undefined) return;
 
     const reassignedAt = new Date(SETUP_TIME.getTime() + 30_000);
     expect(
-      await yieldRetellMonitoringLease(stale.auth, stale, {
+      await yieldMonitoringLease(stale.auth, stale, {
         retryAt: reassignedAt,
         now: SETUP_TIME,
       }),
     ).toBe(true);
-    const current = await claimDueRetellMonitoringAgent({ now: reassignedAt });
+    const current = await claimDueMonitoringPull({ now: reassignedAt });
     expect(current).toBeDefined();
     if (current === undefined) return;
     expect(current.leaseOwner).not.toBe(stale.leaseOwner);
 
     expect(
-      await recordRetellIngestionFailure(stale.auth, stale, {
+      await recordMonitoringFailure(stale.auth, stale, {
         providerCallId: "call_from_previous_lease",
         errorKind: "provider_call_not_found",
         now: reassignedAt,
       }),
     ).toEqual({ recorded: false, changed: false });
     expect(
-      await renewRetellMonitoringLease(current.auth, current, {
+      await renewMonitoringLease(current.auth, current, {
         now: reassignedAt,
       }),
     ).toBe(true);
@@ -500,7 +500,7 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const stale = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(stale).toBeDefined();
     if (stale === undefined) return;
 
@@ -510,7 +510,7 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: rotatedAt,
     });
-    await releaseRetellMonitoringLease(stale.auth, stale, {
+    await releaseMonitoringLease(stale.auth, stale, {
       retryAt: new Date(rotatedAt.getTime() + 30_000),
       errorKind: "provider_contract",
       now: rotatedAt,
@@ -521,7 +521,7 @@ describe("Retell Monitoring setup", () => {
       consecutiveFailures: 0,
     });
     expect(
-      await claimDueRetellMonitoringAgent({ now: rotatedAt }),
+      await claimDueMonitoringPull({ now: rotatedAt }),
     ).toMatchObject({ apiKey: ROTATED_RETELL_KEY });
   });
 
@@ -533,11 +533,11 @@ describe("Retell Monitoring setup", () => {
       now: SETUP_TIME,
     });
     const liveKit = await configureLiveKitMonitoring(auth);
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
 
-    await failRetellMonitoringTarget(
+    await failMonitoringPull(
       target.auth,
       { ...target, setupId: liveKit.id },
       {
@@ -548,7 +548,7 @@ describe("Retell Monitoring setup", () => {
     );
 
     expect(
-      await renewRetellMonitoringLease(target.auth, target, {
+      await renewMonitoringLease(target.auth, target, {
         now: SETUP_TIME,
       }),
     ).toBe(true);
@@ -562,15 +562,15 @@ describe("Retell Monitoring setup", () => {
       now: SETUP_TIME,
     });
     const liveKit = await configureLiveKitMonitoring(auth);
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
 
-    await recordRetellCallReceived(
+    await recordPulledCallReceived(
       target.auth,
       {
         setupId: liveKit.id,
-        monitoredAgentId: target.monitoredAgentId,
+        agentId: target.agentId,
       },
       new Date(SETUP_TIME.getTime() + 1_000),
     );
@@ -593,8 +593,8 @@ describe("Retell Monitoring setup", () => {
       ],
       now: SETUP_TIME,
     });
-    const first = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    const alreadyLeased = await claimDueRetellMonitoringAgent({
+    const first = await claimDueMonitoringPull({ now: SETUP_TIME });
+    const alreadyLeased = await claimDueMonitoringPull({
       now: SETUP_TIME,
     });
     expect(first).toBeDefined();
@@ -602,14 +602,14 @@ describe("Retell Monitoring setup", () => {
     if (first === undefined || alreadyLeased === undefined) return;
 
     const retryAt = new Date(SETUP_TIME.getTime() + 60_000);
-    await failRetellMonitoringTarget(first.auth, first, {
+    await failMonitoringPull(first.auth, first, {
       kind: "rate_limited",
       retryAt,
       now: SETUP_TIME,
     });
 
     expect(
-      await renewRetellMonitoringLease(
+      await renewMonitoringLease(
         alreadyLeased.auth,
         alreadyLeased,
         { now: new Date(SETUP_TIME.getTime() + 1_000) },
@@ -629,8 +629,8 @@ describe("Retell Monitoring setup", () => {
       ],
       now: SETUP_TIME,
     });
-    const failed = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    const staleSuccess = await claimDueRetellMonitoringAgent({
+    const failed = await claimDueMonitoringPull({ now: SETUP_TIME });
+    const staleSuccess = await claimDueMonitoringPull({
       now: SETUP_TIME,
     });
     expect(failed).toBeDefined();
@@ -638,7 +638,7 @@ describe("Retell Monitoring setup", () => {
     if (failed === undefined || staleSuccess === undefined) return;
 
     const retryAt = new Date(SETUP_TIME.getTime() + 60_000);
-    await failRetellMonitoringTarget(failed.auth, failed, {
+    await failMonitoringPull(failed.auth, failed, {
       kind: "rate_limited",
       retryAt,
       now: SETUP_TIME,
@@ -670,8 +670,8 @@ describe("Retell Monitoring setup", () => {
       ],
       now: SETUP_TIME,
     });
-    const invalid = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    const lateUnavailable = await claimDueRetellMonitoringAgent({
+    const invalid = await claimDueMonitoringPull({ now: SETUP_TIME });
+    const lateUnavailable = await claimDueMonitoringPull({
       now: SETUP_TIME,
     });
     expect(invalid).toBeDefined();
@@ -679,12 +679,12 @@ describe("Retell Monitoring setup", () => {
     if (invalid === undefined || lateUnavailable === undefined) return;
 
     const invalidUntil = new Date("9999-12-31T23:59:59.999Z");
-    await failRetellMonitoringTarget(invalid.auth, invalid, {
+    await failMonitoringPull(invalid.auth, invalid, {
       kind: "invalid_credential",
       retryAt: invalidUntil,
       now: SETUP_TIME,
     });
-    await failRetellMonitoringTarget(
+    await failMonitoringPull(
       lateUnavailable.auth,
       lateUnavailable,
       {
@@ -712,10 +712,10 @@ describe("Retell Monitoring setup", () => {
       ],
       now: SETUP_TIME,
     });
-    const rateLimited = await claimDueRetellMonitoringAgent({
+    const rateLimited = await claimDueMonitoringPull({
       now: SETUP_TIME,
     });
-    const lateUnavailable = await claimDueRetellMonitoringAgent({
+    const lateUnavailable = await claimDueMonitoringPull({
       now: SETUP_TIME,
     });
     expect(rateLimited).toBeDefined();
@@ -723,12 +723,12 @@ describe("Retell Monitoring setup", () => {
     if (rateLimited === undefined || lateUnavailable === undefined) return;
 
     const retryAt = new Date(SETUP_TIME.getTime() + 120_000);
-    await failRetellMonitoringTarget(rateLimited.auth, rateLimited, {
+    await failMonitoringPull(rateLimited.auth, rateLimited, {
       kind: "rate_limited",
       retryAt,
       now: SETUP_TIME,
     });
-    await failRetellMonitoringTarget(
+    await failMonitoringPull(
       lateUnavailable.auth,
       lateUnavailable,
       {
@@ -750,25 +750,25 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const first = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const first = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(first).toBeDefined();
     if (first === undefined) return;
 
     expect(
-      await checkpointRetellMonitoringPage(first.auth, first, {
+      await checkpointMonitoringPage(first.auth, first, {
         paginationKey: "opaque/page-2",
         seenPaginationKeys: ["opaque/page-2"],
       }),
     ).toBe(true);
     const resumeAt = new Date(SETUP_TIME.getTime() + 1_000);
     expect(
-      await yieldRetellMonitoringLease(first.auth, first, {
+      await yieldMonitoringLease(first.auth, first, {
         retryAt: resumeAt,
         now: SETUP_TIME,
       }),
     ).toBe(true);
 
-    const resumed = await claimDueRetellMonitoringAgent({ now: resumeAt });
+    const resumed = await claimDueMonitoringPull({ now: resumeAt });
     expect(resumed).toMatchObject({
       scanKind: "historical_import",
       scanFrom: new Date("2026-07-21T08:00:00.000Z"),
@@ -778,7 +778,7 @@ describe("Retell Monitoring setup", () => {
     });
     if (resumed === undefined) return;
     expect(
-      await checkpointRetellMonitoringPage(at(globex, gene), resumed, {
+      await checkpointMonitoringPage(at(globex, gene), resumed, {
         paginationKey: "opaque/cross-tenant",
         seenPaginationKeys: ["opaque/cross-tenant"],
       }),
@@ -791,11 +791,11 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const historical = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const historical = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(historical).toBeDefined();
     if (historical === undefined) return;
     expect(
-      await finishRetellMonitoringScan(historical.auth, historical, {
+      await finishMonitoringScan(historical.auth, historical, {
         now: SETUP_TIME,
       }),
     ).toBe(true);
@@ -808,7 +808,7 @@ describe("Retell Monitoring setup", () => {
         "next_regular_poll_at = $2",
       [reconciliationAt, nextRegularAt],
     );
-    const reconciliation = await claimDueRetellMonitoringAgent({
+    const reconciliation = await claimDueMonitoringPull({
       now: reconciliationAt,
     });
     expect(reconciliation).toMatchObject({
@@ -819,7 +819,7 @@ describe("Retell Monitoring setup", () => {
     });
     if (reconciliation === undefined) return;
     expect(
-      await checkpointRetellMonitoringPage(
+      await checkpointMonitoringPage(
         reconciliation.auth,
         reconciliation,
         {
@@ -831,7 +831,7 @@ describe("Retell Monitoring setup", () => {
 
     const boundedAt = new Date(reconciliationAt.getTime() + 20_000);
     expect(
-      await yieldRetellMonitoringLease(
+      await yieldMonitoringLease(
         reconciliation.auth,
         reconciliation,
         {
@@ -842,11 +842,11 @@ describe("Retell Monitoring setup", () => {
     ).toBe(true);
 
     expect(
-      await claimDueRetellMonitoringAgent({
+      await claimDueMonitoringPull({
         now: new Date(nextRegularAt.getTime() - 1),
       }),
     ).toBeUndefined();
-    const regular = await claimDueRetellMonitoringAgent({ now: nextRegularAt });
+    const regular = await claimDueMonitoringPull({ now: nextRegularAt });
     expect(regular).toMatchObject({
       scanKind: "regular",
       scanFrom: new Date(SETUP_TIME.getTime() - 5 * 60_000),
@@ -856,12 +856,12 @@ describe("Retell Monitoring setup", () => {
     });
     if (regular === undefined) return;
     expect(
-      await finishRetellMonitoringScan(regular.auth, regular, {
+      await finishMonitoringScan(regular.auth, regular, {
         now: nextRegularAt,
       }),
     ).toBe(true);
 
-    const resumed = await claimDueRetellMonitoringAgent({ now: nextRegularAt });
+    const resumed = await claimDueMonitoringPull({ now: nextRegularAt });
     expect(resumed).toMatchObject({
       scanKind: "reconciliation",
       scanFrom: new Date("2026-07-22T08:00:00.000Z"),
@@ -877,12 +877,12 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
 
     expect(
-      await recordRetellIngestionFailure(target.auth, target, {
+      await recordMonitoringFailure(target.auth, target, {
         providerCallId: "call_missing_1",
         errorKind: "call_not_found",
         safePayload: '{"call_id":"call_missing_1"}',
@@ -890,7 +890,7 @@ describe("Retell Monitoring setup", () => {
       }),
     ).toEqual({ changed: true });
     expect(
-      await recordRetellIngestionFailure(target.auth, target, {
+      await recordMonitoringFailure(target.auth, target, {
         providerCallId: "call_missing_1",
         errorKind: "call_not_found",
         now: SETUP_TIME,
@@ -898,7 +898,7 @@ describe("Retell Monitoring setup", () => {
     ).toEqual({ changed: false });
 
     expect(
-      await finishRetellMonitoringScan(target.auth, target, {
+      await finishMonitoringScan(target.auth, target, {
         now: SETUP_TIME,
       }),
     ).toBe(true);
@@ -925,10 +925,10 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
+    await recordMonitoringFailure(target.auth, target, {
       providerCallId: "call_exact_replay",
       errorKind: "provider_call_not_found",
       now: SETUP_TIME,
@@ -938,7 +938,7 @@ describe("Retell Monitoring setup", () => {
     expect(failureId).toBeDefined();
     if (failureId === undefined) return;
 
-    const first = await claimRetellIngestionFailureReplay(auth, failureId, {
+    const first = await claimMonitoringFailureReplay(auth, failureId, {
       now: SETUP_TIME,
     });
     expect(first).toMatchObject({
@@ -957,19 +957,19 @@ describe("Retell Monitoring setup", () => {
       },
     });
     expect(
-      await claimRetellIngestionFailureReplay(auth, failureId, {
+      await claimMonitoringFailureReplay(auth, failureId, {
         now: SETUP_TIME,
       }),
     ).toMatchObject({ kind: "busy" });
     expect(
-      await claimRetellIngestionFailureReplay(
+      await claimMonitoringFailureReplay(
         at(globex, gene),
         failureId,
         { now: SETUP_TIME },
       ),
     ).toEqual({ kind: "not_found" });
     expect(
-      await claimRetellIngestionFailureReplay(
+      await claimMonitoringFailureReplay(
         at(acmeOther, ada),
         failureId,
         { now: SETUP_TIME },
@@ -978,7 +978,7 @@ describe("Retell Monitoring setup", () => {
 
     if (first.kind !== "claimed") return;
     expect(
-      await releaseRetellIngestionFailureReplay(
+      await releaseMonitoringFailureReplay(
         first.target.auth,
         first.target,
         {
@@ -988,7 +988,7 @@ describe("Retell Monitoring setup", () => {
       ),
     ).toBe(true);
     expect(
-      await claimRetellIngestionFailureReplay(auth, failureId, {
+      await claimMonitoringFailureReplay(auth, failureId, {
         now: SETUP_TIME,
       }),
     ).toMatchObject({ kind: "claimed" });
@@ -1001,10 +1001,10 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
+    await recordMonitoringFailure(target.auth, target, {
       providerCallId: "call_rate_limited_replay",
       errorKind: "provider_call_not_found",
       now: SETUP_TIME,
@@ -1014,14 +1014,14 @@ describe("Retell Monitoring setup", () => {
     expect(failureId).toBeDefined();
     if (failureId === undefined) return;
 
-    const first = await claimRetellIngestionFailureReplay(auth, failureId, {
+    const first = await claimMonitoringFailureReplay(auth, failureId, {
       now: SETUP_TIME,
     });
     expect(first.kind).toBe("claimed");
     if (first.kind !== "claimed") return;
     const retryAt = new Date(SETUP_TIME.getTime() + 60_000);
     expect(
-      await failRetellIngestionFailureReplay(first.target.auth, first.target, {
+      await failMonitoringFailureReplay(first.target.auth, first.target, {
         kind: "rate_limited",
         retryAt,
         now: SETUP_TIME,
@@ -1029,7 +1029,7 @@ describe("Retell Monitoring setup", () => {
     ).toMatchObject({ recorded: true, changed: true });
 
     expect(
-      await claimRetellIngestionFailureReplay(auth, failureId, {
+      await claimMonitoringFailureReplay(auth, failureId, {
         now: new Date(SETUP_TIME.getTime() + 1_000),
       }),
     ).toEqual({
@@ -1038,7 +1038,7 @@ describe("Retell Monitoring setup", () => {
       retryAt,
     });
     expect(
-      await claimRetellIngestionFailureReplay(auth, failureId, {
+      await claimMonitoringFailureReplay(auth, failureId, {
         now: retryAt,
       }),
     ).toMatchObject({ kind: "claimed" });
@@ -1051,10 +1051,10 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
+    await recordMonitoringFailure(target.auth, target, {
       providerCallId: "call_rotated_replay",
       errorKind: "provider_call_not_found",
       now: SETUP_TIME,
@@ -1063,7 +1063,7 @@ describe("Retell Monitoring setup", () => {
       ?.failures[0]?.id;
     expect(failureId).toBeDefined();
     if (failureId === undefined) return;
-    const stale = await claimRetellIngestionFailureReplay(auth, failureId, {
+    const stale = await claimMonitoringFailureReplay(auth, failureId, {
       now: SETUP_TIME,
     });
     expect(stale.kind).toBe("claimed");
@@ -1076,7 +1076,7 @@ describe("Retell Monitoring setup", () => {
       now: rotatedAt,
     });
     expect(
-      await failRetellIngestionFailureReplay(
+      await failMonitoringFailureReplay(
         stale.target.auth,
         stale.target,
         {
@@ -1092,7 +1092,7 @@ describe("Retell Monitoring setup", () => {
       consecutiveFailures: 0,
     });
     expect(
-      await claimRetellIngestionFailureReplay(auth, failureId, {
+      await claimMonitoringFailureReplay(auth, failureId, {
         now: rotatedAt,
       }),
     ).toMatchObject({
@@ -1108,10 +1108,10 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const poll = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const poll = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(poll).toBeDefined();
     if (poll === undefined) return;
-    await recordRetellIngestionFailure(poll.auth, poll, {
+    await recordMonitoringFailure(poll.auth, poll, {
       providerCallId: "call_old_key_replay_result",
       errorKind: "provider_call_not_found",
       now: SETUP_TIME,
@@ -1120,7 +1120,7 @@ describe("Retell Monitoring setup", () => {
       ?.failures[0]?.id;
     expect(failureId).toBeDefined();
     if (failureId === undefined) return;
-    const stale = await claimRetellIngestionFailureReplay(auth, failureId, {
+    const stale = await claimMonitoringFailureReplay(auth, failureId, {
       now: SETUP_TIME,
     });
     expect(stale.kind).toBe("claimed");
@@ -1133,7 +1133,7 @@ describe("Retell Monitoring setup", () => {
       now: rotatedAt,
     });
     expect(
-      await releaseRetellIngestionFailureReplay(
+      await releaseMonitoringFailureReplay(
         stale.target.auth,
         stale.target,
         { errorKind: "platform_agent_mismatch", now: rotatedAt },
@@ -1146,7 +1146,7 @@ describe("Retell Monitoring setup", () => {
       }),
     ]);
     expect(
-      await claimRetellIngestionFailureReplay(auth, failureId, {
+      await claimMonitoringFailureReplay(auth, failureId, {
         now: rotatedAt,
       }),
     ).toMatchObject({
@@ -1162,11 +1162,11 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
     for (const providerCallId of ["call_invalid_key", "call_late_failure"]) {
-      await recordRetellIngestionFailure(target.auth, target, {
+      await recordMonitoringFailure(target.auth, target, {
         providerCallId,
         errorKind: "provider_call_not_found",
         now: SETUP_TIME,
@@ -1176,12 +1176,12 @@ describe("Retell Monitoring setup", () => {
       ?.failures;
     expect(failures).toHaveLength(2);
     if (failures === undefined) return;
-    const invalid = await claimRetellIngestionFailureReplay(
+    const invalid = await claimMonitoringFailureReplay(
       auth,
       failures[0]!.id,
       { now: SETUP_TIME },
     );
-    const late = await claimRetellIngestionFailureReplay(
+    const late = await claimMonitoringFailureReplay(
       auth,
       failures[1]!.id,
       { now: SETUP_TIME },
@@ -1191,7 +1191,7 @@ describe("Retell Monitoring setup", () => {
     if (invalid.kind !== "claimed" || late.kind !== "claimed") return;
 
     const invalidUntil = new Date("9999-12-31T23:59:59.999Z");
-    await failRetellIngestionFailureReplay(
+    await failMonitoringFailureReplay(
       invalid.target.auth,
       invalid.target,
       {
@@ -1200,7 +1200,7 @@ describe("Retell Monitoring setup", () => {
         now: SETUP_TIME,
       },
     );
-    await failRetellIngestionFailureReplay(late.target.auth, late.target, {
+    await failMonitoringFailureReplay(late.target.auth, late.target, {
       kind: "provider_unavailable",
       retryAt: new Date(SETUP_TIME.getTime() + 30_000),
       now: new Date(SETUP_TIME.getTime() + 1_000),
@@ -1219,10 +1219,10 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const poll = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const poll = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(poll).toBeDefined();
     if (poll === undefined) return;
-    await recordRetellIngestionFailure(poll.auth, poll, {
+    await recordMonitoringFailure(poll.auth, poll, {
       providerCallId: "call_lock_order",
       errorKind: "provider_call_not_found",
       now: SETUP_TIME,
@@ -1231,7 +1231,7 @@ describe("Retell Monitoring setup", () => {
       ?.failures[0]?.id;
     expect(failureId).toBeDefined();
     if (failureId === undefined) return;
-    const replay = await claimRetellIngestionFailureReplay(auth, failureId, {
+    const replay = await claimMonitoringFailureReplay(auth, failureId, {
       now: SETUP_TIME,
     });
     expect(replay.kind).toBe("claimed");
@@ -1246,7 +1246,7 @@ describe("Retell Monitoring setup", () => {
         [replay.target.setupId],
       );
 
-      const recording = failRetellIngestionFailureReplay(
+      const recording = failMonitoringFailureReplay(
         replay.target.auth,
         replay.target,
         {
@@ -1303,28 +1303,28 @@ describe("Retell Monitoring setup", () => {
       agents: selected(),
       now: SETUP_TIME,
     });
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
+    const target = await claimDueMonitoringPull({ now: SETUP_TIME });
     expect(target).toBeDefined();
     if (target === undefined) return;
     for (const providerCallId of ["call_replay_one", "call_replay_two"]) {
-      await recordRetellIngestionFailure(target.auth, target, {
+      await recordMonitoringFailure(target.auth, target, {
         providerCallId,
         errorKind: "provider_call_not_found",
         now: SETUP_TIME,
       });
     }
-    await finishRetellMonitoringScan(target.auth, target, { now: SETUP_TIME });
+    await finishMonitoringScan(target.auth, target, { now: SETUP_TIME });
     const [before] = await listMonitoringSetups(auth);
     const failures = before?.agents[0]?.failures ?? [];
     expect(failures).toHaveLength(2);
 
-    const first = await claimRetellIngestionFailureReplay(auth, failures[0]!.id, {
+    const first = await claimMonitoringFailureReplay(auth, failures[0]!.id, {
       now: SETUP_TIME,
     });
     expect(first.kind).toBe("claimed");
     if (first.kind !== "claimed") return;
     expect(
-      await resolveRetellIngestionFailureReplay(
+      await resolveMonitoringFailureReplay(
         first.target.auth,
         first.target,
         { now: SETUP_TIME },
@@ -1335,7 +1335,7 @@ describe("Retell Monitoring setup", () => {
       failures: [{ providerCallId: "call_replay_two" }],
     });
 
-    const second = await claimRetellIngestionFailureReplay(
+    const second = await claimMonitoringFailureReplay(
       auth,
       failures[1]!.id,
       { now: SETUP_TIME },
@@ -1343,7 +1343,7 @@ describe("Retell Monitoring setup", () => {
     expect(second.kind).toBe("claimed");
     if (second.kind !== "claimed") return;
     expect(
-      await resolveRetellIngestionFailureReplay(
+      await resolveMonitoringFailureReplay(
         second.target.auth,
         second.target,
         { now: SETUP_TIME },
@@ -1411,7 +1411,7 @@ describe("Retell Monitoring setup", () => {
     });
     const replayedAt = new Date("2026-08-20T08:03:00.000Z");
 
-    await recordRetellMonitoringReceived(auth, {
+    await recordPulledCallReceivedForPlatformAgent(auth, {
       platformAgentId: selected()[0].platformAgentId,
       receivedAt: replayedAt,
     });

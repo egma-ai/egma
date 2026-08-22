@@ -47,7 +47,7 @@ const connection = {
       type: "string",
       enum: ["retell", "livekit_agents"],
     }),
-    connectionKind: {
+    connectionType: {
       type: "string",
       enum: ["retell_chat_api", "phone_number", "livekit_room"],
     },
@@ -82,7 +82,7 @@ const connection = {
     "projectId",
     "name",
     "agentPlatform",
-    "connectionKind",
+    "connectionType",
     "accessVariant",
     "modality",
     "productLabel",
@@ -140,7 +140,7 @@ const connectionInput = {
       type: "string",
       enum: ["retell", "livekit_agents"],
     }),
-    connectionKind: {
+    connectionType: {
       type: "string",
       enum: ["retell_chat_api", "phone_number", "livekit_room"],
     },
@@ -159,7 +159,7 @@ const connectionInput = {
     credentials: { type: "object", additionalProperties: true },
     agentPlatformSelection,
   },
-  required: ["agentPlatform", "connectionKind", "accessVariant", "modality"],
+  required: ["agentPlatform", "connectionType", "accessVariant", "modality"],
   additionalProperties: false,
 } as const;
 
@@ -246,7 +246,7 @@ export const agentOperations = {
                   type: "object",
                   properties: {
                     agentPlatform: { type: "string", enum: ["retell"] },
-                    connectionKind: {
+                    connectionType: {
                       type: "string",
                       enum: ["retell_chat_api", "phone_number"],
                     },
@@ -266,7 +266,7 @@ export const agentOperations = {
                   },
                   required: [
                     "agentPlatform",
-                    "connectionKind",
+                    "connectionType",
                     "accessVariant",
                     "modality",
                     "productLabel",
@@ -313,7 +313,7 @@ export const agentOperations = {
                   enum: ["retell", "livekit_agents"],
                 }),
                 agentPlatformLabel: { type: "string" },
-                connectionKind: {
+                connectionType: {
                   type: "string",
                   enum: ["retell_chat_api", "phone_number", "livekit_room"],
                 },
@@ -368,7 +368,7 @@ export const agentOperations = {
               required: [
                 "agentPlatform",
                 "agentPlatformLabel",
-                "connectionKind",
+                "connectionType",
                 "accessVariant",
                 "accessVariantLabel",
                 "modality",

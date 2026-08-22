@@ -1,6 +1,6 @@
 import type {
   ProductionTraceClaim,
-  RetellMonitoringTarget,
+  MonitoringPullTarget,
 } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
@@ -19,9 +19,9 @@ const AUTH = {
   via: "monitoring",
 } as const;
 
-const TARGET: RetellMonitoringTarget = {
+const TARGET: MonitoringPullTarget = {
   setupId: "mns_write_test",
-  monitoredAgentId: "rma_write_test",
+  agentId: "rma_write_test",
   platformAgentId: "agent_in_retell_1",
   platformAgentName: "Front desk",
   apiKey: "retell-key-never-logged",
@@ -30,7 +30,7 @@ const TARGET: RetellMonitoringTarget = {
   scanThrough: new Date("2026-08-19T00:00:00.000Z"),
   paginationKey: null,
   seenPaginationKeys: [],
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "lease_write_test",
   leaseExpiresAt: new Date("2026-08-19T00:01:30.000Z"),
   auth: AUTH,
@@ -80,10 +80,10 @@ function writeStore(
     async finishProductionTrace(_auth, finished) {
       recorded.finished.push(finished.traceId);
     },
-    async recordRetellCallReceived() {
+    async recordPulledCallReceived() {
       recorded.received += 1;
     },
-    async recordRetellMonitoringReceived(_auth, input) {
+    async recordPulledCallReceivedForPlatformAgent(_auth, input) {
       recorded.received += 1;
       recorded.replayedPlatformAgentIds.push(input.platformAgentId);
     },

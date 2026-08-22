@@ -104,7 +104,7 @@ const WORK_DISPATCHING = [
   // The poller names no customer. It claims the next due selected agent and
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringPull",
   "sweepStaleProductionClaims",
 ];
 
@@ -192,10 +192,10 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failRetellIngestionFailureReplay",
-  "failRetellMonitoringTarget",
+  "failMonitoringFailureReplay",
+  "failMonitoringPull",
   "finishGradingJob",
-  "finishRetellMonitoringScan",
+  "finishMonitoringScan",
   "getAgent",
   "getConnection",
   "getGrader",
@@ -263,24 +263,24 @@ const CONTEXT_REQUIRING = [
   "readTrace",
   "readVerdicts",
   "recordLiveKitMonitoringReceived",
-  "recordRetellCallReceived",
-  "recordRetellIngestionFailure",
-  "recordRetellMonitoringReceived",
+  "recordPulledCallReceived",
+  "recordMonitoringFailure",
+  "recordPulledCallReceivedForPlatformAgent",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
   // The ledger chooses one writer for a Retell call. Poll progress belongs to
   // the selected Monitoring agent, never to a simulation connection.
-  "checkpointRetellMonitoringPage",
-  "claimRetellIngestionFailureReplay",
+  "checkpointMonitoringPage",
+  "claimMonitoringFailureReplay",
   "claimProductionTrace",
   "finishProductionTrace",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
   "recoverRetellMonitoringSetup",
-  "releaseRetellIngestionFailureReplay",
-  "releaseRetellMonitoringLease",
+  "releaseMonitoringFailureReplay",
+  "releaseMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
   "reopenGradingJob",
@@ -293,9 +293,9 @@ const CONTEXT_REQUIRING = [
   "restoreConnection",
   "removeMonitoringSetup",
   "renameTestSuite",
-  "renewRetellMonitoringLease",
-  "retellCallIsAccountedFor",
-  "resolveRetellIngestionFailureReplay",
+  "renewMonitoringLease",
+  "productionCallIsAccountedFor",
+  "resolveMonitoringFailureReplay",
   "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
@@ -364,7 +364,7 @@ const CONTEXT_REQUIRING = [
   // and the answers to whatever that entry's form asked.
   "useLibraryEntry",
   "writePlatformSettings",
-  "yieldRetellMonitoringLease",
+  "yieldMonitoringLease",
 ];
 
 /**

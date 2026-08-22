@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ConfigureLiveKitMonitoringErrors, ConfigureLiveKitMonitoringResponses, ConfigureRetellMonitoringErrors, ConfigureRetellMonitoringResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateGraderErrors, CreateGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteGraderErrors, DeleteGraderResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteMonitoringSourceErrors, DeleteMonitoringSourceResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListMonitoringSourcesErrors, ListMonitoringSourcesResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, ReplayMonitoringImportFailureErrors, ReplayMonitoringImportFailureResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateGraderErrors, CreateGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteGraderErrors, DeleteGraderResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, ReplayMonitoringImportFailureErrors, ReplayMonitoringImportFailureResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -102,7 +102,7 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
     connection?: {
         name?: string;
         agentPlatform: 'retell' | 'livekit_agents' | null;
-        connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
         accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
         environment?: string;
@@ -213,7 +213,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     projectId?: string;
     name?: string;
     agentPlatform: 'retell' | 'livekit_agents' | null;
-    connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+    connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
     accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
     modality: 'voice' | 'chat';
     environment?: string;
@@ -235,7 +235,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'agentPlatform' },
-                { in: 'body', key: 'connectionKind' },
+                { in: 'body', key: 'connectionType' },
                 { in: 'body', key: 'accessVariant' },
                 { in: 'body', key: 'modality' },
                 { in: 'body', key: 'environment' },
@@ -916,25 +916,6 @@ export const updateMockTool = <ThrowOnError extends boolean = false>(parameters:
 };
 
 /**
- * List monitoring sources
- */
-export const listMonitoringSources = <ThrowOnError extends boolean = false>(parameters?: {
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ListMonitoringSourcesResponses, ListMonitoringSourcesErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).get<ListMonitoringSourcesResponses, ListMonitoringSourcesErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/monitoring',
-        ...options,
-        ...params
-    });
-};
-
-/**
  * Discover Retell voice agents
  */
 export const discoverRetellVoiceAgents = <ThrowOnError extends boolean = false>(parameters: {
@@ -960,58 +941,6 @@ export const discoverRetellVoiceAgents = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Configure Retell monitoring
- */
-export const configureRetellMonitoring = <ThrowOnError extends boolean = false>(parameters: {
-    projectId?: string;
-    apiKey: string;
-    agents: Array<{
-        id: string;
-        name: string;
-    }>;
-}, options?: Options<never, ThrowOnError>): RequestResult<ConfigureRetellMonitoringResponses, ConfigureRetellMonitoringErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'apiKey' },
-                { in: 'body', key: 'agents' }
-            ] }]);
-    return (options?.client ?? client).put<ConfigureRetellMonitoringResponses, ConfigureRetellMonitoringErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/monitoring/retell',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
-    });
-};
-
-/**
- * Configure LiveKit Agents monitoring
- */
-export const configureLiveKitMonitoring = <ThrowOnError extends boolean = false>(parameters?: {
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ConfigureLiveKitMonitoringResponses, ConfigureLiveKitMonitoringErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).put<ConfigureLiveKitMonitoringResponses, ConfigureLiveKitMonitoringErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/monitoring/livekit-agents',
-        ...options,
-        ...params
-    });
-};
-
-/**
  * Replay a monitoring import failure
  */
 export const replayMonitoringImportFailure = <ThrowOnError extends boolean = false>(parameters: {
@@ -1026,26 +955,6 @@ export const replayMonitoringImportFailure = <ThrowOnError extends boolean = fal
                 type: 'apiKey'
             }],
         url: '/v1/monitoring/retell/failures/{failureId}/replay',
-        ...options,
-        ...params
-    });
-};
-
-/**
- * Delete a monitoring source
- */
-export const deleteMonitoringSource = <ThrowOnError extends boolean = false>(parameters: {
-    platform: string;
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<DeleteMonitoringSourceResponses, DeleteMonitoringSourceErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'platform' }, { in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).delete<DeleteMonitoringSourceResponses, DeleteMonitoringSourceErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/monitoring/{platform}',
         ...options,
         ...params
     });

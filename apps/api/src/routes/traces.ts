@@ -4,7 +4,6 @@ import {
   appendSpans,
   authorize,
   NotPermittedError,
-  recordLiveKitMonitoringReceived,
   recordProductionTraces,
   resolveSimulationStanding,
   TraceStoreRefusedError,
@@ -689,20 +688,6 @@ export async function traceRoutes(
         `the trace store refused these spans: ${cause.message}. They were ` +
           "not stored and re-sending the same batch will not change that.",
       );
-    }
-
-    // Monitoring health means that a valid LiveKit Agents span reached the
-    // shared store. Update it only after the append succeeds. Other OTLP
-    // scopes do not prove a LiveKit Monitoring setup is working, and an empty
-    // or fully rejected export proves nothing arrived.
-    if (
-      normalised.spans.some(
-        (span) =>
-          span.source === "production" &&
-          span.agentPlatform === "livekit_agents",
-      )
-    ) {
-      await recordLiveKitMonitoringReceived(auth);
     }
 
     // And the conversations those spans belong to become known to the grading

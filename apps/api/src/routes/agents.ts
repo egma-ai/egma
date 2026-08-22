@@ -24,7 +24,7 @@ import {
   type AgentWithConnections,
   type AuthContext,
   type Connection,
-  type ConnectionKind,
+  type ConnectionType,
   type Modality,
   type NewConnection,
   type RestoreCredential,
@@ -296,32 +296,6 @@ function boundedLimit(value: unknown): number | undefined | Refusal {
 }
 
 /**
- * The revision an edit was written against, which a browser always sends.
- *
- * Compulsory here rather than in the access layer, and that is the split: the
- * layer below makes the check impossible to get wrong, and this decides who has
- * to make it. A terminal writing a rename has no editor to have gone stale, and
- * demanding a revision there would turn every scripted change into two
- * requests. A browser has a form somebody had open, and that is exactly the
- * thing this protects.
- */
-function revisionIn(body: Body, required: boolean): string | undefined | Refusal {
-  const given = textWhenGiven(body.expectedRevision, "expectedRevision");
-  if (isRefusal(given)) return given;
-  if (given === undefined && required) {
-    return {
-      refused: true,
-      error: "unprocessable",
-      message:
-        "this edit did not say which revision it was written against. Read " +
-        "the resource, then send the update with expectedRevision set to " +
-        "the revision it names.",
-    };
-  }
-  return given;
-}
-
-/**
  * The project a request about one agent acts in.
  *
  * **Every route that names an agent or a connection goes through this, reads
@@ -363,9 +337,9 @@ function fromBrowser(auth: AuthContext): boolean {
   return auth.via === "session";
 }
 
-const AGENT_EDIT_KEYS = ["name", "description", "expectedRevision"] as const;
-const ARCHIVE_KEYS = ["expectedRevision"] as const;
-const AGENT_RESTORE_KEYS = ["expectedRevision", "name"] as const;
+const AGENT_EDIT_KEYS = ["name"] as const;
+const ARCHIVE_KEYS = [] as const;
+const AGENT_RESTORE_KEYS = ["name"] as const;
 const CONNECTION_EDIT_KEYS = [
   "name",
   "environment",
@@ -379,11 +353,11 @@ const CONNECTION_RESTORE_KEYS = [
   "credential",
 ] as const;
 
-const AGENT_KEYS = ["name", "description", "projectId", "connection"] as const;
+const AGENT_KEYS = ["name", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
-  "connectionKind",
+  "connectionType",
   "accessVariant",
   "modality",
   "environment",
@@ -461,7 +435,7 @@ function agentPlatformSelectionIn(
  * does own is the shape of the envelope: which keys exist at all, and that the
  * ones carrying text carry text.
  *
- * **Topology is not in the list on purpose.** It is derived from the connection kind — it
+ * **Topology is not in the list on purpose.** It is derived from the connection type — it
  * predicts who moves first when a simulation starts — so a guess would just be
  * wrong, and a supplied one is refused as the unknown key it is.
  */
@@ -493,9 +467,9 @@ function connectionIn(value: unknown): NewConnection | Refusal {
         : ((typeof body.agentPlatform === "string"
             ? body.agentPlatform
             : "") as AgentPlatform),
-    connectionKind: (typeof body.connectionKind === "string"
-      ? body.connectionKind
-      : "") as ConnectionKind,
+    connectionType: (typeof body.connectionType === "string"
+      ? body.connectionType
+      : "") as ConnectionType,
     accessVariant: (typeof body.accessVariant === "string"
       ? body.accessVariant
       : "") as AccessVariant,
@@ -526,7 +500,7 @@ async function confirmAgentPlatformSelection(
   if (selected === undefined) {
     if (
       wanted.agentPlatform === "retell" &&
-      wanted.connectionKind === "phone_number" &&
+      wanted.connectionType === "phone_number" &&
       wanted.accessVariant === "phone_number.public_e164" &&
       wanted.modality === "voice"
     ) {
@@ -549,24 +523,24 @@ async function confirmAgentPlatformSelection(
 
   const candidate = (() => {
     if (
-      wanted.connectionKind === "retell_chat_api" &&
+      wanted.connectionType === "retell_chat_api" &&
       wanted.accessVariant === "retell_chat_api.api_key" &&
       wanted.modality === "chat" &&
       typeof wanted.config["retellAgentId"] === "string"
     ) {
       return {
-        connectionKind: "retell_chat_api" as const,
+        connectionType: "retell_chat_api" as const,
         config: { retellAgentId: wanted.config["retellAgentId"] },
       };
     }
     if (
-      wanted.connectionKind === "phone_number" &&
+      wanted.connectionType === "phone_number" &&
       wanted.accessVariant === "phone_number.public_e164" &&
       wanted.modality === "voice" &&
       typeof wanted.config["phoneNumber"] === "string"
     ) {
       return {
-        connectionKind: "phone_number" as const,
+        connectionType: "phone_number" as const,
         config: { phoneNumber: wanted.config["phoneNumber"] },
       };
     }
@@ -603,11 +577,11 @@ async function confirmAgentPlatformSelection(
   return {
     ...withoutCredentials,
     agentPlatform: checked.candidate.agentPlatform,
-    connectionKind: checked.candidate.connectionKind,
+    connectionType: checked.candidate.connectionType,
     accessVariant: checked.candidate.accessVariant,
     modality: checked.candidate.modality,
     config: checked.candidate.config,
-    ...(checked.candidate.connectionKind === "retell_chat_api"
+    ...(checked.candidate.connectionType === "retell_chat_api"
       ? { credentials: { apiKey: selected.apiKey } }
       : {}),
   };
@@ -618,8 +592,8 @@ async function confirmAgentPlatformSelection(
  *
  * **The provider's half of an agent has no line here and never will.** Prompt,
  * model and tools live at the provider, where egma cannot freeze them and has
- * no business editing them; what egma owns is the name, the description and
- * the identity every result accumulates against. A read that carried a copy of
+ * no business editing them; what egma owns is the name, the platform binding
+ * and the identity every result accumulates against. A read that carried a copy of
  * provider configuration would be a copy going stale from the moment it was
  * taken, and an editor built on it would be egma quietly becoming a second
  * place to configure an agent.
@@ -629,10 +603,14 @@ function describedAgent(one: Agent): Record<string, unknown> {
     id: one.id,
     projectId: one.projectId,
     name: one.name,
-    description: one.description,
-    // What an edit has to be written against. Absent from no read, so a client
-    // never has to make a second request to be able to make a first edit.
-    revision: one.revision,
+    // Which platform runs this agent, that platform's own id for it, and
+    // whether egma is pulling its production calls. Null until somebody binds
+    // it; the key itself never leaves the row, only its hint.
+    agentPlatform: one.agentPlatform,
+    platformAgentId: one.platformAgentId,
+    monitoringKeyPresent: one.monitoringApiKeyHint !== null,
+    monitoringApiKeyHint: one.monitoringApiKeyHint,
+    pullProductionCalls: one.pullProductionCalls,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -655,7 +633,7 @@ function describedConnection(one: Connection): Record<string, unknown> {
     projectId: one.projectId,
     name: one.name,
     agentPlatform: one.agentPlatform,
-    connectionKind: one.connectionKind,
+    connectionType: one.connectionType,
     accessVariant: one.accessVariant,
     modality: one.modality,
     // The registry derives this from the four technical facts above. It is the
@@ -668,7 +646,6 @@ function describedConnection(one: Connection): Record<string, unknown> {
     // and never a blank field a serializer could one day be taught to fill.
     credentialPresent: one.credentialsHint !== null,
     credentialsHint: one.credentialsHint,
-    revision: one.revision,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -926,7 +903,7 @@ export async function agentRoutes(
         items: connectionOptionMetadata().map((option) => ({
           agentPlatform: option.agentPlatform,
           agentPlatformLabel: option.agentPlatformLabel,
-          connectionKind: option.connectionKind,
+          connectionType: option.connectionType,
           accessVariant: option.accessVariant,
           accessVariantLabel: option.accessVariantLabel,
           modality: option.modality,
@@ -978,8 +955,6 @@ export async function agentRoutes(
 
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
-    const description = textWhenGiven(body.description, "an agent's description");
-    if (isRefusal(description)) return refused(reply, description);
     /*
      * **The query and the body**, with the query winning when both name a
      * project. A door that reads only one of the two ignores the other rather
@@ -1029,7 +1004,6 @@ export async function agentRoutes(
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
       name: name ?? "",
-      ...(description === undefined ? {} : { description }),
       ...(confirmedInline === undefined ? {} : { connection: confirmedInline }),
     });
 
@@ -1179,10 +1153,10 @@ export async function agentRoutes(
   });
 
   /**
-   * The Egma-owned half of an agent, edited against the revision the editor
+   * The Egma-owned half of an agent, edited last-writer-wins (the revision
    * was opened on.
    *
-   * Name and description and nothing else. The provider's prompt, model and
+   * The name and nothing else. The provider's prompt, model and
    * tools are not here, are not in the read, and are not coming: they live
    * where the customer configures them, and egma being a second place to edit
    * them would make two answers to one question with no rule to choose between.
@@ -1197,14 +1171,7 @@ export async function agentRoutes(
 
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
-    const revision = revisionIn(body, fromBrowser(auth));
-    if (isRefusal(revision)) return refused(reply, revision);
 
-    const description =
-      body.description === null
-        ? null
-        : textWhenGiven(body.description, "an agent's description");
-    if (isRefusal(description)) return refused(reply, description);
 
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
@@ -1213,8 +1180,6 @@ export async function agentRoutes(
       ...(name === undefined ? {} : { name }),
       // Absent keeps it; an explicit null clears it. The two are different
       // requests and are read as different requests.
-      ...(body.description === undefined ? {} : { description }),
-      ...(revision === undefined ? {} : { expectedRevision: revision }),
     });
 
     if (updated === undefined) return refused(reply, NO_SUCH_AGENT);
@@ -1232,15 +1197,11 @@ export async function agentRoutes(
 
     const unknown = unknownKeyIn(body, ARCHIVE_KEYS, "an archive");
     if (unknown !== undefined) return refused(reply, unknown);
-    const revision = revisionIn(body, fromBrowser(auth));
-    if (isRefusal(revision)) return refused(reply, revision);
 
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
 
-    const archived = await archiveAgent(acting, agentId, {
-      ...(revision === undefined ? {} : { expectedRevision: revision }),
-    });
+    const archived = await archiveAgent(acting, agentId);
     if (archived === undefined) return refused(reply, NO_SUCH_AGENT);
 
     return reply.send({
@@ -1263,8 +1224,6 @@ export async function agentRoutes(
 
     const unknown = unknownKeyIn(body, AGENT_RESTORE_KEYS, "a restore");
     if (unknown !== undefined) return refused(reply, unknown);
-    const revision = revisionIn(body, fromBrowser(auth));
-    if (isRefusal(revision)) return refused(reply, revision);
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
 
@@ -1272,7 +1231,6 @@ export async function agentRoutes(
     if (isRefusal(acting)) return refused(reply, acting);
 
     const restored = await restoreAgent(acting, agentId, {
-      ...(revision === undefined ? {} : { expectedRevision: revision }),
       ...(name === undefined ? {} : { name }),
     });
     if (restored === undefined) return refused(reply, NO_SUCH_AGENT);
@@ -1331,8 +1289,6 @@ export async function agentRoutes(
           ? null
           : textWhenGiven(body.environment, "a connection's environment");
       if (isRefusal(environment)) return refused(reply, environment);
-      const revision = revisionIn(body, fromBrowser(auth));
-      if (isRefusal(revision)) return refused(reply, revision);
 
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
@@ -1350,7 +1306,6 @@ export async function agentRoutes(
                 Record<string, unknown>
               >,
             }),
-        ...(revision === undefined ? {} : { expectedRevision: revision }),
       });
 
       if (updated === undefined) return refused(reply, NO_SUCH_CONNECTION);
@@ -1373,15 +1328,11 @@ export async function agentRoutes(
 
       const unknown = unknownKeyIn(body, ARCHIVE_KEYS, "an archive");
       if (unknown !== undefined) return refused(reply, unknown);
-      const revision = revisionIn(body, fromBrowser(auth));
-      if (isRefusal(revision)) return refused(reply, revision);
 
       const acting = await actingProject(auth, request, "writes into");
       if (isRefusal(acting)) return refused(reply, acting);
 
-      const archived = await archiveConnection(acting, agentId, connectionId, {
-        ...(revision === undefined ? {} : { expectedRevision: revision }),
-      });
+      const archived = await archiveConnection(acting, agentId, connectionId);
       if (archived === undefined) return refused(reply, NO_SUCH_CONNECTION);
 
       return reply.send({
@@ -1412,8 +1363,6 @@ export async function agentRoutes(
         "a restore",
       );
       if (unknown !== undefined) return refused(reply, unknown);
-      const revision = revisionIn(body, fromBrowser(auth));
-      if (isRefusal(revision)) return refused(reply, revision);
       const name = textWhenGiven(body.name, "a connection's name");
       if (isRefusal(name)) return refused(reply, name);
 
@@ -1424,7 +1373,6 @@ export async function agentRoutes(
       if (isRefusal(acting)) return refused(reply, acting);
 
       const restored = await restoreConnection(acting, agentId, connectionId, {
-        ...(revision === undefined ? {} : { expectedRevision: revision }),
         ...(name === undefined ? {} : { name }),
         ...(credential === undefined ? {} : { credential }),
       });

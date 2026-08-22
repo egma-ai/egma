@@ -73,7 +73,7 @@ type ConnectionBody = {
   readonly id: string;
   readonly name: string;
   readonly agentPlatform: string | null;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly accessVariant: string;
   readonly productLabel: string;
   readonly revision: string;
@@ -102,7 +102,7 @@ async function aConnection(
     who,
     {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -537,7 +537,7 @@ describe("a connection's stored credential", () => {
     const items = held<
       readonly {
         readonly agentPlatform: string | null;
-        readonly connectionKind: string;
+        readonly connectionType: string;
         readonly accessVariant: string;
         readonly simulatorAdapter: boolean;
         readonly credentialRule: string;
@@ -549,7 +549,7 @@ describe("a connection's stored credential", () => {
     const livekit = items.filter(
       (one) =>
         one.agentPlatform === "livekit_agents" &&
-        one.connectionKind === "livekit_room",
+        one.connectionType === "livekit_room",
     );
     expect(livekit.map((one) => one.accessVariant)).toEqual([
       "livekit_room.project_credentials",
@@ -559,14 +559,14 @@ describe("a connection's stored credential", () => {
     // The three credential rules the product's Restore is written against,
     // each named on the shape that has it.
     expect(
-      items.find((one) => one.connectionKind === "retell_chat_api")
+      items.find((one) => one.connectionType === "retell_chat_api")
         ?.credentialRule,
     ).toBe("required");
     expect(
       items.find(
         (one) =>
           one.agentPlatform === null &&
-          one.connectionKind === "phone_number",
+          one.connectionType === "phone_number",
       )?.credentialRule,
     ).toBe("forbidden");
     expect(
@@ -594,7 +594,7 @@ describe("a connection's shape", () => {
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id, {
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
@@ -695,7 +695,7 @@ describe("restoring a connection", () => {
     const phone = await aConnection(ada, agent.id, {
       name: "hotline",
       agentPlatform: null,
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
@@ -733,7 +733,7 @@ describe("restoring a connection", () => {
     const endpoint = await aConnection(ada, agent.id, {
       name: "endpoint",
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {

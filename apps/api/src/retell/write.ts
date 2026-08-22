@@ -3,8 +3,8 @@ import {
   claimProductionTrace,
   finishProductionTrace,
   recordProductionTraces,
-  recordRetellCallReceived,
-  recordRetellMonitoringReceived,
+  recordPulledCallReceived,
+  recordPulledCallReceivedForPlatformAgent,
   type AuthContext,
   type ProductionTraceClaim,
 } from "@egma/db";
@@ -40,8 +40,7 @@ export type WriteOutcome =
     };
 
 export type RetellProductionWriteTarget = {
-  readonly setupId: string;
-  readonly monitoredAgentId: string;
+  readonly agentId: string;
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly auth: AuthContext;
@@ -53,8 +52,8 @@ export type RetellProductionWriteStore = {
   readonly appendSpans: typeof appendSpans;
   readonly recordProductionTraces: typeof recordProductionTraces;
   readonly finishProductionTrace: typeof finishProductionTrace;
-  readonly recordRetellCallReceived: typeof recordRetellCallReceived;
-  readonly recordRetellMonitoringReceived: typeof recordRetellMonitoringReceived;
+  readonly recordPulledCallReceived: typeof recordPulledCallReceived;
+  readonly recordPulledCallReceivedForPlatformAgent: typeof recordPulledCallReceivedForPlatformAgent;
 };
 
 const STORES: RetellProductionWriteStore = {
@@ -62,8 +61,8 @@ const STORES: RetellProductionWriteStore = {
   appendSpans,
   recordProductionTraces,
   finishProductionTrace,
-  recordRetellCallReceived,
-  recordRetellMonitoringReceived,
+  recordPulledCallReceived,
+  recordPulledCallReceivedForPlatformAgent,
 };
 
 function projectIdOf(target: Pick<RetellProductionWriteTarget, "auth">): string {
@@ -177,7 +176,7 @@ export async function writeRetellCall(
   // provider conversation is durable. If this health update fails, the claim
   // remains stale and replay can finish it instead of leaving Monitoring in
   // "waiting" after the trace already arrived.
-  await stores.recordRetellCallReceived(target.auth, target, receivedAt);
+  await stores.recordPulledCallReceived(target.auth, target, receivedAt);
   await stores.finishProductionTrace(target.auth, {
     traceId: normalised.traceId,
     degraded: normalised.degraded,
@@ -228,7 +227,7 @@ export async function replayProductionClaim(
   ) {
     await stores.recordProductionTraces(claim.auth, normalised.spans);
   }
-  await stores.recordRetellMonitoringReceived(claim.auth, {
+  await stores.recordPulledCallReceivedForPlatformAgent(claim.auth, {
     platformAgentId: claim.platformAgentId,
   });
   await stores.finishProductionTrace(claim.auth, {

@@ -179,7 +179,7 @@ const WORK_DISPATCHING = [
   // cannot name a project or agent; the returned target carries the narrowed
   // `AuthContext` that every provider read and store write after the claim must
   // use. Stale production claims follow the same rule.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringPull",
   "sweepStaleProductionClaims",
 ];
 

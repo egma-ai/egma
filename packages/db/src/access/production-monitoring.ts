@@ -1074,6 +1074,8 @@ export type MonitoringFailureReplayTarget = {
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly apiKey: string;
+  /** The agent's own retry clock, so a replay backs off exactly as a poll does. */
+  readonly consecutiveFailures: number;
   readonly leaseOwner: string;
   readonly leaseExpiresAt: Date;
   readonly auth: AuthContext;
@@ -1126,6 +1128,7 @@ export async function claimMonitoringFailureReplay(
         platformAgentId: agent.platformAgentId,
         platformAgentName: agent.name,
         credentials: agent.monitoringApiKey,
+        consecutiveFailures: monitoringState.consecutiveFailures,
       })
       .from(monitoringFailure)
       .innerJoin(
@@ -1135,6 +1138,7 @@ export async function claimMonitoringFailureReplay(
           eq(agent.projectId, monitoringFailure.projectId),
         ),
       )
+      .leftJoin(monitoringState, eq(monitoringState.agentId, agent.id))
       .where(
         and(
           withinMonitoringProject(auth, monitoringFailure),
@@ -1196,6 +1200,7 @@ export async function claimMonitoringFailureReplay(
       platformAgentId: claimed.candidate.platformAgentId,
       platformAgentName: claimed.candidate.platformAgentName,
       apiKey: claimed.apiKey,
+      consecutiveFailures: claimed.candidate.consecutiveFailures ?? 0,
       leaseOwner,
       leaseExpiresAt,
       auth: monitoringContext(

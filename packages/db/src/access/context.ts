@@ -60,9 +60,9 @@ export type AuthContext = {
  * would make either boundary wider than its work.
  *
  * `monitoring` is the third of them, for background production ingestion.
- * `claimDueRetellMonitoringAgent` builds one from the project-owned Monitoring
- * setup and selected Retell agent, never from a simulation connection and
- * never from a caller-supplied customer identifier.
+ * `claimDueMonitoringPull` builds one from the pulled agent's own row and its
+ * monitoring notebook, never from a simulation connection and never from a
+ * caller-supplied customer identifier.
  *
  * It is its own word so that a context which came from claimed Monitoring work
  * says so wherever it is read, and so that it opens neither of the other two

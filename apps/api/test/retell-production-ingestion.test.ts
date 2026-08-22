@@ -1,7 +1,7 @@
 import type {
   ProductionTraceClaim,
-  RetellIngestionFailureReplayTarget,
-  RetellMonitoringTarget,
+  MonitoringFailureReplayTarget,
+  MonitoringPullTarget,
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -32,9 +32,9 @@ const AUTH = {
   via: "monitoring",
 } as const;
 
-const TARGET: RetellMonitoringTarget = {
+const TARGET: MonitoringPullTarget = {
   setupId: "mns_ingestion_test",
-  monitoredAgentId: "rma_ingestion_test",
+  agentId: "rma_ingestion_test",
   platformAgentId: "agent-secret-id-must-not-be-logged",
   platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
@@ -43,21 +43,21 @@ const TARGET: RetellMonitoringTarget = {
   scanThrough: BASE,
   paginationKey: null,
   seenPaginationKeys: [],
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
 };
 
-const REPLAY_TARGET: RetellIngestionFailureReplayTarget = {
+const REPLAY_TARGET: MonitoringFailureReplayTarget = {
   setupId: TARGET.setupId,
-  monitoredAgentId: TARGET.monitoredAgentId,
+  agentId: TARGET.agentId,
   failureId: "rif_explicit_replay_test",
   providerCallId: "call_older_than_import_window",
   platformAgentId: TARGET.platformAgentId,
   platformAgentName: TARGET.platformAgentName,
   apiKey: TARGET.apiKey,
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "replay-lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
@@ -97,7 +97,7 @@ type StoreChanges = Partial<RetellProductionIngestionStore>;
 
 function store(
   recorded: StoreRecord,
-  target: RetellMonitoringTarget | undefined = TARGET,
+  target: MonitoringPullTarget | undefined = TARGET,
   changes: StoreChanges = {},
 ): RetellProductionIngestionStore {
   let offered = false;
@@ -105,43 +105,43 @@ function store(
     async sweepStaleProductionClaims() {
       return [];
     },
-    async claimDueRetellMonitoringAgent() {
+    async claimDueMonitoringPull() {
       recorded.claims += 1;
       if (offered) return undefined;
       offered = true;
       return target;
     },
-    async renewRetellMonitoringLease() {
+    async renewMonitoringLease() {
       recorded.renewals += 1;
       return true;
     },
-    async checkpointRetellMonitoringPage(_auth, _target, checkpoint) {
+    async checkpointMonitoringPage(_auth, _target, checkpoint) {
       recorded.checkpoints.push(checkpoint);
       return true;
     },
-    async yieldRetellMonitoringLease(_auth, _target, input) {
+    async yieldMonitoringLease(_auth, _target, input) {
       recorded.yields.push(input.retryAt);
       return true;
     },
-    async finishRetellMonitoringScan(_auth, _target, options) {
+    async finishMonitoringScan(_auth, _target, options) {
       recorded.finishes.push(options?.pollMilliseconds ?? -1);
       return true;
     },
-    async failRetellMonitoringTarget(_auth, _target, input) {
+    async failMonitoringPull(_auth, _target, input) {
       recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
       return { changed: true, failures: 1, startedAt: input.now ?? BASE };
     },
     async recoverRetellMonitoringSetup() {
       return { recovered: false };
     },
-    async releaseRetellMonitoringLease(_auth, _target, input) {
+    async releaseMonitoringLease(_auth, _target, input) {
       recorded.releases.push(input.errorKind);
     },
-    async retellCallIsAccountedFor(_auth, providerCallId) {
+    async productionCallIsAccountedFor(_auth, providerCallId) {
       recorded.accounted.push(providerCallId);
       return false;
     },
-    async recordRetellIngestionFailure(_auth, _target, input) {
+    async recordMonitoringFailure(_auth, _target, input) {
       recorded.permanentFailures.push(input.providerCallId);
       return { changed: true };
     },
@@ -165,15 +165,15 @@ function replayStore(
   changes: Partial<RetellIngestionFailureReplayStore> = {},
 ): RetellIngestionFailureReplayStore {
   return {
-    async claimRetellIngestionFailureReplay(_auth, failureId) {
+    async claimMonitoringFailureReplay(_auth, failureId) {
       recorded.claimed.push(failureId);
       return { kind: "claimed", target: REPLAY_TARGET };
     },
-    async releaseRetellIngestionFailureReplay(_auth, _target, input) {
+    async releaseMonitoringFailureReplay(_auth, _target, input) {
       recorded.released.push(input.errorKind);
       return true;
     },
-    async failRetellIngestionFailureReplay(_auth, _target, input) {
+    async failMonitoringFailureReplay(_auth, _target, input) {
       recorded.providerFailures.push(input.kind);
       return {
         recorded: true,
@@ -182,7 +182,7 @@ function replayStore(
         startedAt: input.now ?? BASE,
       };
     },
-    async resolveRetellIngestionFailureReplay() {
+    async resolveMonitoringFailureReplay() {
       recorded.resolved += 1;
       return { resolved: true, agentRecovered: true };
     },
@@ -277,7 +277,7 @@ function logger(): {
 }
 
 type MetricRecord = {
-  attempts: RetellMonitoringTarget["scanKind"][];
+  attempts: MonitoringPullTarget["scanKind"][];
   turns: RetellProductionIngestionMetricTurn[];
   lags: number[];
   providerFailures: string[];
@@ -323,7 +323,7 @@ describe("Retell production ingestion", () => {
     const third = summary("call_new_second_page");
     let page = 0;
     const storage = store(recorded, TARGET, {
-      async retellCallIsAccountedFor(_auth, callId) {
+      async productionCallIsAccountedFor(_auth, callId) {
         recorded.accounted.push(callId);
         return callId === "call_already_accounted";
       },
@@ -457,7 +457,7 @@ describe("Retell production ingestion", () => {
     const recorded = record();
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         recorded.renewals += 1;
         return false;
       },
@@ -486,7 +486,7 @@ describe("Retell production ingestion", () => {
     let renewals = 0;
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -522,7 +522,7 @@ describe("Retell production ingestion", () => {
     let listRequests = 0;
     let hydrationRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -735,7 +735,7 @@ describe("Retell production ingestion", () => {
   it("uses one setup-wide Retry-After gate without a repeated log", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
-      async failRetellMonitoringTarget(_auth, _target, input) {
+      async failMonitoringPull(_auth, _target, input) {
         recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
         return { changed: false, failures: 4, startedAt: BASE };
       },
@@ -774,9 +774,9 @@ describe("Retell production ingestion", () => {
   it("caps unavailable-provider backoff and logs only the health transition", async () => {
     const recorded = record();
     const { log, events } = logger();
-    const failedManyTimes: RetellMonitoringTarget = {
+    const failedManyTimes: MonitoringPullTarget = {
       ...TARGET,
-      setupConsecutiveFailures: 20,
+      consecutiveFailures: 20,
     };
 
     await runRetellProductionIngestion({
@@ -911,7 +911,7 @@ describe("Retell production ingestion", () => {
     const result = await runRetellProductionIngestion({
       log,
       store: store(recorded, TARGET, {
-        async recordRetellIngestionFailure() {
+        async recordMonitoringFailure() {
           return { recorded: false, changed: false };
         },
       }),

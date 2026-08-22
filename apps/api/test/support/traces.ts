@@ -323,7 +323,7 @@ export type ListedTrace = {
   readonly source: string;
   readonly emitter: string;
   readonly environment: string;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly providerCallId: string;
   readonly agentPlatform: string;
   readonly platformAgentId: string;

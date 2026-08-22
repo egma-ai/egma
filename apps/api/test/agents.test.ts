@@ -61,7 +61,7 @@ function registration(
         ? {}
         : { name: overrides.connectionName }),
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
@@ -124,7 +124,7 @@ function connectionPayload(
 ): Record<string, unknown> {
   return {
     agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
@@ -217,7 +217,7 @@ describe("discovering simulation agents", () => {
           connectionCandidates: [
             {
               agentPlatform: "retell",
-              connectionKind: "phone_number",
+              connectionType: "phone_number",
               accessVariant: "phone_number.public_e164",
               modality: "voice",
               productLabel: "Retell phone",
@@ -231,7 +231,7 @@ describe("discovering simulation agents", () => {
           connectionCandidates: [
             {
               agentPlatform: "retell",
-              connectionKind: "retell_chat_api",
+              connectionType: "retell_chat_api",
               accessVariant: "retell_chat_api.api_key",
               modality: "chat",
               productLabel: "Retell chat",
@@ -306,7 +306,7 @@ describe("discovering simulation agents", () => {
           connectionCandidates: [
             {
               agentPlatform: "retell",
-              connectionKind: "retell_chat_api",
+              connectionType: "retell_chat_api",
               accessVariant: "retell_chat_api.api_key",
               modality: "chat",
               productLabel: "Retell chat",
@@ -365,7 +365,7 @@ describe("discovering simulation agents", () => {
       {
         name: "Retell main number",
         agentPlatform: "retell",
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+14155550100" },
@@ -390,7 +390,7 @@ describe("discovering simulation agents", () => {
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+14155550100" },
@@ -450,7 +450,7 @@ describe("discovering simulation agents", () => {
       withKey(ada.secret),
       {
         agentPlatform: "retell",
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+14155550100" },
@@ -464,7 +464,7 @@ describe("discovering simulation agents", () => {
     expect(connected.status).toBe(201);
     expect(connectionOf(connected)).toMatchObject({
       agentPlatform: "retell",
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+14155550100" },
@@ -517,7 +517,7 @@ describe("discovering simulation agents", () => {
       withKey(ada.secret),
       {
         agentPlatform: "retell",
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+14155550100" },
@@ -561,7 +561,7 @@ describe("registering an agent", () => {
       agentId: agentOf(registered).id,
       name: "retell_chat_api-1",
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       productLabel: "Retell chat",
       modality: "chat",
@@ -590,7 +590,7 @@ describe("registering an agent", () => {
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         // One letter wrong, which is the whole point: a typo dies at the door.
@@ -648,20 +648,20 @@ describe("a connection payload its kind will not take", () => {
    * rather than only at the seam below because the sentence a developer's
    * terminal prints is the one that came over the wire.
    */
-  it("names an unknown connection kind, and what egma does know", async () => {
+  it("names an unknown connection type, and what egma does know", async () => {
     api = await createApi("agents_unknown_type");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
-      connection: connectionPayload({ connectionKind: "vapi" }),
+      connection: connectionPayload({ connectionType: "vapi" }),
     });
 
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection kind Egma knows; expected one of retell_chat_api, phone_number, livekit_room',
+        '"vapi" is not a connection type Egma knows; expected one of retell_chat_api, phone_number, livekit_room',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -674,7 +674,7 @@ describe("a connection payload its kind will not take", () => {
       name: "Reception line",
       connection: {
         agentPlatform: "vapi",
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
@@ -685,12 +685,12 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+        "agent platform, connection type, access variant, and modality do not form a supported simulation connection",
     });
     expect(await agentRowCount()).toBe(0);
   });
 
-  it("names a modality the connection kind does not speak", async () => {
+  it("names a modality the connection type does not speak", async () => {
     api = await createApi("agents_wrong_modality");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -698,7 +698,7 @@ describe("a connection payload its kind will not take", () => {
       name: "Reception line",
       connection: {
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
@@ -721,7 +721,7 @@ describe("a connection payload its kind will not take", () => {
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_1" },
@@ -789,7 +789,7 @@ describe("a livekit connection", () => {
   ): Record<string, unknown> {
     return {
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
@@ -811,7 +811,7 @@ describe("a livekit connection", () => {
     expect(connectionOf(registered)).toMatchObject({
       name: "livekit_room-1",
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",
       modality: "voice",
@@ -875,7 +875,7 @@ describe("a livekit connection", () => {
       name: "Production agent",
       connection: {
         agentPlatform: "livekit_agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
@@ -889,7 +889,7 @@ describe("a livekit connection", () => {
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       productLabel: "LiveKit token endpoint",
       modality: "voice",
@@ -911,7 +911,7 @@ describe("a livekit connection", () => {
       name: "Private-network agent",
       connection: {
         agentPlatform: "livekit_agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
         config: {
@@ -1132,7 +1132,7 @@ describe("a livekit connection", () => {
       payload: { topology: "agent-dials-out" },
       message:
         'a connection has no key "topology"; it holds name, agentPlatform, ' +
-        "connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection",
+        "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection",
     },
     {
       named: "a credential key that does not belong",
@@ -1254,7 +1254,7 @@ describe("a livekit connection", () => {
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> => ({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
@@ -1510,7 +1510,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
+        "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
     });
@@ -1533,7 +1533,7 @@ describe("the vendor payload egma no longer keeps", () => {
     });
   });
 
-  it("refuses a supplied topology, which the connection kind decides", async () => {
+  it("refuses a supplied topology, which the connection type decides", async () => {
     api = await createApi("agents_topology_derived");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -1546,13 +1546,13 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionKind, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
+        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
     });
   });
 });
 
 describe("a connection's name", () => {
-  it("defaults to the smallest free numbered name for its connection kind", async () => {
+  it("defaults to the smallest free numbered name for its connection type", async () => {
     api = await createApi("agents_default_names");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -1794,12 +1794,12 @@ describe("reading agents", () => {
       `/v1/agents/${deskId}/connections`,
       withKey(ada.secret),
       {
-        // A second way into the same agent, with another connection kind and
+        // A second way into the same agent, with another connection type and
         // modality, so a row that showed one shape well and another badly
         // would be caught here rather than on screen.
         name: "production",
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         environment: "production",
@@ -1857,7 +1857,7 @@ describe("reading agents", () => {
     );
     expect(wired).toMatchObject({
       agentPlatform: null,
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       // The registry's customer-facing label travels with the technical facts
       // so list and detail surfaces cannot spell the same setup differently.

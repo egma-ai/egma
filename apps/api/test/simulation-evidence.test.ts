@@ -227,7 +227,7 @@ describe("one conversation's evidence, in one read", () => {
     expect((read.body.connection as { name: string }).name).not.toBe(null);
     const snapshot = read.body.connectionSnapshot as Record<string, unknown>;
     expect(snapshot.agentPlatform).toBe("livekit_agents");
-    expect(snapshot.connectionKind).toBe("livekit_room");
+    expect(snapshot.connectionType).toBe("livekit_room");
     expect(snapshot.accessVariant).toBe("livekit_room.project_credentials");
     expect(snapshot.modality).toBe("voice");
     // Nothing a credential could ride in. The secret lives in its own sealed
