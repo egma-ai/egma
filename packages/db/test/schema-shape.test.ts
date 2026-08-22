@@ -77,12 +77,10 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   monitoring_setup: "mns",
   // One platform agent selected under a Retell monitoring setup.
   retell_monitored_agent: "rma",
-  // The exactly-once ledger for a conversation egma watched on somebody else's
-  // platform. Its identity is its own because the row outlives the write it
-  // guards: a sweep reads it back to replay an append that never landed.
-  production_trace_claim: "ptc",
-  // A provider call that could not be normalized or written, held for replay.
-  retell_ingestion_failure: "rif",
+  // A provider call egma could not fetch or normalize: its bounded retry
+  // budget, and then the identity-only marker that stops the overlap starting
+  // a second one. It holds no provider document and expires by itself.
+  retell_call_retry: "rcr",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])

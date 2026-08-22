@@ -2237,15 +2237,6 @@ export type ListMonitoringSourcesResponses = {
                 lastErrorKind: string | null;
                 lastErrorAt: string | null;
                 consecutiveFailures: number;
-                failures: Array<{
-                    id: string;
-                    providerCallId: string;
-                    errorKind: string;
-                    attempts: number;
-                    status: string;
-                    lastAttemptAt: string;
-                    createdAt: string;
-                }>;
             }>;
         }>;
     };
@@ -2373,15 +2364,6 @@ export type ConfigureRetellMonitoringResponses = {
                 lastErrorKind: string | null;
                 lastErrorAt: string | null;
                 consecutiveFailures: number;
-                failures: Array<{
-                    id: string;
-                    providerCallId: string;
-                    errorKind: string;
-                    attempts: number;
-                    status: string;
-                    lastAttemptAt: string;
-                    createdAt: string;
-                }>;
             }>;
         };
     };
@@ -2449,83 +2431,12 @@ export type ConfigureLiveKitMonitoringResponses = {
                 lastErrorKind: string | null;
                 lastErrorAt: string | null;
                 consecutiveFailures: number;
-                failures: Array<{
-                    id: string;
-                    providerCallId: string;
-                    errorKind: string;
-                    attempts: number;
-                    status: string;
-                    lastAttemptAt: string;
-                    createdAt: string;
-                }>;
             }>;
         };
     };
 };
 
 export type ConfigureLiveKitMonitoringResponse = ConfigureLiveKitMonitoringResponses[keyof ConfigureLiveKitMonitoringResponses];
-
-export type ReplayMonitoringImportFailureData = {
-    body?: never;
-    path: {
-        failureId: string;
-    };
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/monitoring/retell/failures/{failureId}/replay';
-};
-
-export type ReplayMonitoringImportFailureErrors = {
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-    /**
-     * The request was refused.
-     */
-    503: Refusal;
-};
-
-export type ReplayMonitoringImportFailureError = ReplayMonitoringImportFailureErrors[keyof ReplayMonitoringImportFailureErrors];
-
-export type ReplayMonitoringImportFailureResponses = {
-    /**
-     * The resolved failure and imported trace.
-     */
-    200: {
-        monitoringImportFailure: {
-            id: string;
-            status: 'resolved';
-        };
-        trace: {
-            id: string;
-            write: unknown;
-        };
-    };
-};
-
-export type ReplayMonitoringImportFailureResponse = ReplayMonitoringImportFailureResponses[keyof ReplayMonitoringImportFailureResponses];
 
 export type DeleteMonitoringSourceData = {
     body?: never;

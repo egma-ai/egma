@@ -9,7 +9,6 @@ import {
   deleteMonitoringSource,
   discoverRetellVoiceAgents,
   listMonitoringSources,
-  replayMonitoringImportFailure,
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
@@ -346,9 +345,6 @@ function agentProgress(agent: RetellMonitoredAgent): StatusPresentation {
   if (agent.state === "importing") {
     return { text: "Importing 30 days", mark: "active", moving: true };
   }
-  if (agent.scanKind === "reconciliation") {
-    return { text: "Checking recent history", mark: "active", moving: true };
-  }
   return { text: "Active", mark: "complete" };
 }
 
@@ -365,7 +361,6 @@ function SetupStatus({
 }) {
   const [removing, setRemoving] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const [retrying, setRetrying] = useState<string | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const label = setup.agentPlatform === "retell" ? "Retell" : "LiveKit Agents";
   const status = statusPresentation(setup);
@@ -391,28 +386,6 @@ function SetupStatus({
     } else {
       setRefused(answer.refusal);
     }
-  }
-
-  async function retry(failureId: string): Promise<void> {
-    setRetrying(failureId);
-    setRefused(null);
-    const answer = await platformAnswer(
-      replayMonitoringImportFailure(
-        { failureId, projectId },
-        { client: platformClient },
-      ),
-    );
-    setRetrying(null);
-    if (answer.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    if (answer.status === "ready") {
-      onChanged();
-      return;
-    }
-    if (answer.refusal.error === "conflict") onChanged();
-    setRefused(answer.refusal);
   }
 
   return (
@@ -463,39 +436,6 @@ function SetupStatus({
                   );
                 })}
               </ul>
-              {setup.agents.flatMap((agent) =>
-                agent.failures.map((failure) => (
-                  <div
-                    className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground"
-                    key={failure.id}
-                  >
-                    <span className="inline-flex min-w-0 items-center gap-2">
-                      <StateMark kind="error" />
-                      <span>
-                        Retell conversation{" "}
-                        <code className="font-mono wrap-anywhere">
-                          {failure.providerCallId}
-                        </code>{" "}
-                        could not be imported.
-                      </span>
-                    </span>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={!mayConfigure}
-                      busy={retrying === failure.id}
-                      why={
-                        mayConfigure
-                          ? undefined
-                          : "Your role can read Monitoring and cannot retry an import."
-                      }
-                      onClick={() => void retry(failure.id)}
-                    >
-                      {retrying === failure.id ? "Retrying…" : "Retry import"}
-                    </Button>
-                  </div>
-                )),
-              )}
             </>
           ) : null}
         </div>

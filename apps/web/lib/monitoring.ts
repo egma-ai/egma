@@ -10,7 +10,6 @@ export type MonitoringPlatform = "retell" | "livekit_agents";
 export type MonitoringSetups = ListMonitoringSourcesResponse;
 export type MonitoringSetup = MonitoringSetups["monitoringSources"][number];
 export type RetellMonitoredAgent = MonitoringSetup["agents"][number];
-export type RetellIngestionFailure = RetellMonitoredAgent["failures"][number];
 export type RetellAgentChoices = DiscoverRetellVoiceAgentsResponse;
 export type RetellAgentChoice = RetellAgentChoices["agents"][number];
 

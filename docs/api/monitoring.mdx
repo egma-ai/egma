@@ -43,8 +43,8 @@ Each monitoring source has these fields:
 waiting for its first production conversation.
 
 Each Retell agent has its platform id and name, an import state, scan progress,
-last-success and last-conversation times, and any open exact-call import
-failures. Its `state` is `importing`, `active`, or `degraded`.
+and last-success and last-conversation times. Its `state` is `importing`,
+`active`, or `degraded`.
 
 ```bash
 curl "https://your-egma-host/v1/monitoring?projectId=prj_abc123" \
@@ -130,31 +130,6 @@ curl -X PUT \
 ```
 
 See [Egma Python SDK](/integrations/python-sdk) for the worker setup.
-
-## Retry one Retell import
-
-**`POST /v1/monitoring/retell/failures/:failureId/replay`**
-
-Retries the exact Retell call named by one open import failure. It reads the
-call directly, so it still works after that call is outside the normal 30-day
-list window. The production claim prevents a successful retry from creating a
-second production conversation.
-
-<ParamField path="failureId" type="string" required>
-  Failure id from a selected agent's `failures` array.
-</ParamField>
-
-<ResponseField name="monitoringImportFailure" type="object">
-  `{ id, status: "resolved" }` after a successful retry.
-</ResponseField>
-
-<ResponseField name="trace" type="object">
-  `{ id, write }`, where `write` is `written` or `already`.
-</ResponseField>
-
-A retry can return `409 conflict` when another retry owns the failure or Retell
-still cannot supply a complete conversation. A rate limit returns `429`; a
-temporary provider failure returns `503`.
 
 ## Remove a monitoring source
 
