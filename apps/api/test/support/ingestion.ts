@@ -1,7 +1,6 @@
 import { gunzipSync } from "node:zlib";
 
-import { appendSpans, type AuthContext } from "@egma/db";
-
+import { startDrainer } from "../../src/ingestion/drainer.ts";
 import {
   pendingObjectStore,
   type IngestionStore,
@@ -9,13 +8,9 @@ import {
 import {
   RECORD_FORMAT_VERSION,
   recordFrom,
-  spanFor,
   type IngestionRecord,
 } from "../../src/ingestion/record.ts";
-import {
-  segmentIdIn,
-  type SegmentHeader,
-} from "../../src/ingestion/segment.ts";
+import type { SegmentHeader } from "../../src/ingestion/segment.ts";
 
 /**
  * One normalized record, with evidence in it that a careless implementation
@@ -95,34 +90,30 @@ export async function pendingSegments(
 }
 
 /**
- * Every pending object turned into rows, and then removed — what the drainer
- * does, stood in for until the drainer itself exists.
+ * Every pending object drained, the way the deployment drains one.
  *
- * It is here rather than inside a test file because the door stops at
- * durability by design: a suite whose claim is about what a reader sees has to
- * carry evidence the rest of the way itself, and every one of them must do it
- * the same way or they would be proving different things. The scope comes from
- * the sealed object's own header, never from a key or from anything a caller
- * remembered, and the segment identity goes to the insert as its deduplication
- * token, which is the shape the real drainer keeps.
+ * The real drainer, driven for exactly one pass and then stopped — not a
+ * stand-in that repeats its steps. A suite whose claim is about what a reader
+ * sees has to carry evidence past the acceptance boundary somehow, and every
+ * one of them must do it the same way or they would be proving different
+ * things; doing it through the module the deployment runs is what stops this
+ * helper from quietly becoming a second implementation of the order that
+ * matters.
+ *
+ * A scan interval far beyond any suite's life, because the one pass is asked
+ * for here rather than waited for.
  */
 export async function drainPendingEvidence(
   store: IngestionStore,
 ): Promise<number> {
-  const bucket = pendingObjectStore(store);
-  const drained = await pendingSegments(store);
-  for (const segment of drained) {
-    const auth: AuthContext = {
-      userId: "",
-      organizationId: segment.header.organization_id,
-      projectId: segment.header.project_id,
-      role: "admin",
-      via: "engine",
-    };
-    await appendSpans(auth, segment.records.map(spanFor), {
-      segmentId: segmentIdIn(segment.key) ?? "",
-    });
-    await bucket.delete(segment.key);
+  const drainer = startDrainer({
+    store: pendingObjectStore(store),
+    log: { warn: () => undefined, error: () => undefined },
+    scanIntervalMilliseconds: 60 * 60_000,
+  });
+  try {
+    return await drainer.drainNow();
+  } finally {
+    await drainer.stop();
   }
-  return drained.length;
 }

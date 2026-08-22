@@ -24,6 +24,7 @@ import {
   EXPORT_TRACE_SERVICE_RESPONSE,
 } from "../src/otlp/schema.ts";
 import { createApi, type TestApi } from "./support/api.ts";
+import { pendingObjectStore } from "../src/ingestion/object-store.ts";
 import { pendingSegments } from "./support/ingestion.ts";
 import {
   startObjectStorage,
@@ -596,21 +597,36 @@ function protobufBodyOf(fixtureJson: string): Buffer {
 
 describe.skipIf(!storage.available)("the same path in the other encoding", () => {
   /**
-   * **One immutable identity holds one account of one span.**
+   * The object the conflict case leaves behind. Retention is the point, so it
+   * is removed the way an operator removes one — deliberately, and only once
+   * what it proves has been proved.
+   */
+  let conflicting = "";
+
+  afterAll(async () => {
+    if (storage.available && conflicting !== "") {
+      await pendingObjectStore(ingestStore()).delete(conflicting);
+    }
+  });
+
+  /**
+   * **One immutable identity holds one account of one span, and the first
+   * account is the one that stands.**
    *
    * This case used to assert the opposite — that a second, different account of
    * a span already stored was kept beside the first, so a reader met two rows
-   * saying different things about one moment and had no rule for choosing. The
-   * identity rebuild settles it: a span's permanent identity is its customer,
-   * its project, its trace and its span id, and a replay under that identity
-   * never becomes a second visible span.
+   * saying different things about one moment and had no rule for choosing.
    *
-   * What the door does with the changed bytes is unchanged and deliberate: it
-   * accepts them, because a sender resending is ordinary and refusing at the
-   * door would be answering a storage question at a wire boundary. Everything
-   * this suite can see afterwards is one span and one turn.
+   * What happens now is three things at once, and all three matter. The door
+   * **accepts** the changed bytes, because a sender resending is ordinary and
+   * refusing at a wire boundary would be answering a storage question there.
+   * The drainer **refuses to write them**, because the stored evidence is
+   * already somebody's record of that moment. And the object is **retained**
+   * rather than deleted, because Egma promised those bytes were safe before it
+   * ever read them back — so a defect in Egma is not a reason to throw a
+   * customer's evidence away.
    */
-  it("leaves one visible span when changed protobuf evidence reuses span ids", async () => {
+  it("keeps the stored account and retains the object when protobuf evidence reuses span ids", async () => {
     const before = await countOf(
       `select count() as n from spans final where trace_id = '${VOICE_TRACE}'`,
     );
@@ -636,7 +652,7 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
       value: { stringValue: "retained" },
     });
 
-    const resent = await post(
+    const resent = await stage(
       protobufBodyOf(JSON.stringify(changed)),
       SERVICE_TOKEN,
       "application/x-protobuf",
@@ -649,6 +665,13 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
         { defaults: false },
       ),
     ).toEqual({});
+
+    // The drain writes nothing for this object and leaves it where it is.
+    expect(await api.drainEvidence()).toBe(0);
+    const retained = await pendingSegments(ingestStore());
+    expect(retained).toHaveLength(1);
+    conflicting = retained[0]?.key ?? "";
+    expect(conflicting).not.toBe("");
 
     expect(
       await countOf(
@@ -669,6 +692,14 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
           `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002'`,
       ),
     ).toBe(1);
+
+    // The stored account is untouched: the attribute the resend added is
+    // nowhere in it.
+    const [stored] = await store().rows<{ payload: string }>(
+      "select payload from spans final " +
+        `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002'`,
+    );
+    expect(stored?.payload).not.toContain("pipecat.changed");
   });
 
   it("lands a genuinely new protobuf flush, attributed exactly as the JSON ones", async () => {

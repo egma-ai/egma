@@ -403,6 +403,9 @@ describe.skipIf(!storage.available)("an object store that has gone quiet", () =>
         ingestion: { ...api.config.ingestion, store: running.ingestStore },
       },
       retellProductionIngestionIntervalMilliseconds: 60 * 60_000,
+      // The recovered segment is left in the bucket to be looked at, which is
+      // this file's claim; that it is then drained is the drain suite's.
+      drainsPendingEvidence: false,
     });
     await restarted.app.ready();
 

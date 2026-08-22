@@ -11,10 +11,8 @@ import {
   finishProductionTrace,
   listMonitoringSetups,
   NotPermittedError,
-  recordLiveKitMonitoringReceived,
-  recordRetellCallReceived,
+  recordProductionEvidenceReceived,
   recordRetellIngestionFailure,
-  recordRetellMonitoringReceived,
   recoverRetellMonitoringSetup,
   releaseRetellIngestionFailureReplay,
   releaseRetellMonitoringLease,
@@ -214,11 +212,15 @@ describe("Retell Monitoring setup", () => {
 
     const retellReceivedAt = new Date("2026-08-20T08:01:00.000Z");
     const liveKitReceivedAt = new Date("2026-08-20T08:02:00.000Z");
-    await recordRetellMonitoringReceived(acmeAuth, {
+    await recordProductionEvidenceReceived(acmeAuth, {
+      agentPlatform: "retell",
       platformAgentId: selected()[0].platformAgentId,
       receivedAt: retellReceivedAt,
     });
-    await recordLiveKitMonitoringReceived(acmeAuth, liveKitReceivedAt);
+    await recordProductionEvidenceReceived(acmeAuth, {
+      agentPlatform: "livekit_agents",
+      receivedAt: liveKitReceivedAt,
+    });
 
     const acmeSetups = await listMonitoringSetups(acmeAuth);
     expect(
@@ -554,31 +556,80 @@ describe("Retell Monitoring setup", () => {
     ).toBe(true);
   });
 
-  it("does not receive a Retell call through another setup id", async () => {
+  /**
+   * **A replay is not news.**
+   *
+   * Evidence becomes durable in one order and is drained in another, so an
+   * older segment can perfectly well be written after a newer one — a
+   * ClickHouse outage, a retained object repaired a day later, a restart that
+   * found a backlog. Each of those carries the instant its evidence was
+   * received rather than the instant it is being replayed at, and a plain
+   * assignment would answer a customer's "last production conversation" by
+   * winding it back to a call from an hour ago. The merge is `greatest`, so the
+   * later fact stands whichever order the two arrive in.
+   */
+  it("never winds a customer's last-received state backwards", async () => {
     const auth = at(acme, ada);
     await configureRetellMonitoring(auth, {
       apiKey: RETELL_KEY,
       agents: selected(),
       now: SETUP_TIME,
     });
-    const liveKit = await configureLiveKitMonitoring(auth);
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(target).toBeDefined();
-    if (target === undefined) return;
 
-    await recordRetellCallReceived(
-      target.auth,
-      {
-        setupId: liveKit.id,
-        monitoredAgentId: target.monitoredAgentId,
-      },
-      new Date(SETUP_TIME.getTime() + 1_000),
-    );
+    const newer = new Date("2026-08-20T09:00:00.000Z");
+    const older = new Date("2026-08-20T08:00:00.000Z");
+    for (const receivedAt of [newer, older]) {
+      await recordProductionEvidenceReceived(auth, {
+        agentPlatform: "retell",
+        platformAgentId: selected()[0].platformAgentId,
+        receivedAt,
+      });
+    }
 
-    const retell = (await listMonitoringSetups(auth)).find(
-      (setup) => setup.agentPlatform === "retell",
-    );
-    expect(retell?.agents[0]?.lastCallReceivedAt).toBeNull();
+    const [setup] = await listMonitoringSetups(auth);
+    expect(setup).toMatchObject({
+      lastReceivedAt: newer,
+      agents: [{ lastCallReceivedAt: newer }],
+    });
+
+    // And the same instant twice is a no-op rather than a step of any kind,
+    // which is what a rediscovered object does.
+    await recordProductionEvidenceReceived(auth, {
+      agentPlatform: "retell",
+      platformAgentId: selected()[0].platformAgentId,
+      receivedAt: newer,
+    });
+    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
+      lastReceivedAt: newer,
+      agents: [{ lastCallReceivedAt: newer }],
+    });
+  });
+
+  it("moves only the named platform's setup, never the one beside it", async () => {
+    const auth = at(acme, ada);
+    await configureRetellMonitoring(auth, {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: SETUP_TIME,
+    });
+    await configureLiveKitMonitoring(auth);
+
+    const receivedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await recordProductionEvidenceReceived(auth, {
+      agentPlatform: "retell",
+      platformAgentId: selected()[0].platformAgentId,
+      receivedAt,
+    });
+
+    const setups = await listMonitoringSetups(auth);
+    expect(
+      setups.find((setup) => setup.agentPlatform === "retell"),
+    ).toMatchObject({ lastReceivedAt: receivedAt });
+    // A customer with both platforms configured has two independent facts, and
+    // one platform's evidence is not the other platform's news.
+    expect(
+      setups.find((setup) => setup.agentPlatform === "livekit_agents"),
+    ).toMatchObject({ lastReceivedAt: null });
   });
 
   it("stops an already leased agent when another agent sets the key-wide gate", async () => {
@@ -1411,7 +1462,8 @@ describe("Retell Monitoring setup", () => {
     });
     const replayedAt = new Date("2026-08-20T08:03:00.000Z");
 
-    await recordRetellMonitoringReceived(auth, {
+    await recordProductionEvidenceReceived(auth, {
+      agentPlatform: "retell",
       platformAgentId: selected()[0].platformAgentId,
       receivedAt: replayedAt,
     });

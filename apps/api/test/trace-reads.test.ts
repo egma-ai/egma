@@ -1,12 +1,20 @@
 import {
   appendSpans,
+  connectClickHouse,
+  disconnectClickHouse,
   REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   reportedMeasurementsPayload,
   type NewSpan,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
+import { pendingSegments } from "./support/ingestion.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import { FIXTURE_PROVIDER_CALL_ID, FIXTURE_TRACE } from "./support/fixture.ts";
 import {
   contextFor,
@@ -16,6 +24,7 @@ import {
   readTraceOverHttp,
   replayFixture,
   signUp,
+  syntheticExport,
   type Customer,
   type DetailMeasure,
   type DetailSpan,
@@ -39,6 +48,18 @@ import {
  * and recovering — rather than the shape of the code that returns it.
  */
 
+const storage: ObjectStorage = await startObjectStorage("trace-reads");
+
+if (!storage.available) {
+  process.stderr.write(`\nskipping the trace-reads suite — ${storage.why}\n\n`);
+}
+
+/** The ingestion bucket this instance accepts into, for reading it back. */
+function ingestStore() {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage.ingestStore;
+}
+
 let api: TestApi;
 let acme: Customer;
 
@@ -57,7 +78,11 @@ const WINDOW = {
 } as const;
 
 beforeAll(async () => {
-  api = await createApi("trace_reads", { traceStore: true });
+  if (!storage.available) return;
+  api = await createApi("trace_reads", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   const telemetrySecret = await mintKey(
     api.app,
@@ -65,11 +90,12 @@ beforeAll(async () => {
     "Acme production telemetry",
     acme.projectId,
   );
-  await replayFixture(api.app, telemetrySecret);
+  await replayFixture(api, telemetrySecret);
 });
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
 async function listed(): Promise<ListedPage> {
@@ -88,7 +114,86 @@ async function transcript(): Promise<TraceDetailBody> {
   return response.json() as TraceDetailBody;
 }
 
-describe("the captured trace, found in a list", () => {
+/**
+ * **A ClickHouse outage costs query visibility and nothing else.**
+ *
+ * This is the release's whole point, read from the far end: evidence is
+ * accepted while the trace store is down, the request is answered as accepted
+ * because the object store took it, and when the store comes back the same
+ * evidence appears in every read a person makes — the list, the detail, the
+ * transcript, the measures — with the durable handoff written before the object
+ * is deleted. Nothing was retried by the sender and nothing was lost.
+ */
+describe.skipIf(!storage.available)(
+  "a conversation accepted while the trace store was down",
+  () => {
+    const traceId = "7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c";
+    const WHILE_DOWN = {
+      from: "2026-08-09T09:00:00Z",
+      to: "2026-08-09T10:00:00Z",
+    } as const;
+
+    it("appears whole in every read once the store is back, and only then is the object gone", async () => {
+      const store = api.traceStore;
+      if (store === undefined) throw new Error("this API has no trace store");
+      const secret = await mintKey(
+        api.app,
+        acme.cookie,
+        "an agent talking through an outage",
+        acme.projectId,
+      );
+
+      await disconnectClickHouse();
+      let accepted;
+      try {
+        accepted = await api.app.inject({
+          method: "POST",
+          url: OTLP_TRACES_PATH,
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${secret}`,
+          },
+          payload: syntheticExport({
+            traceId,
+            startedAt: new Date("2026-08-09T09:30:00Z"),
+            humanSaid: "Can you still hear me?",
+          }),
+        });
+      } finally {
+        connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 4 });
+      }
+      // Accepted, because the object store took it. The sender owes nothing.
+      expect(accepted.statusCode, accepted.body).toBe(200);
+      expect(await pendingSegments(ingestStore())).toHaveLength(1);
+
+      await api.drainEvidence();
+
+      const page = (
+        await listTracesOverHttp(api.app, secret, WHILE_DOWN)
+      ).json() as ListedPage;
+      expect(page.traces.map((trace) => trace.traceId)).toEqual([traceId]);
+      expect(page.traces[0]?.turnCounts).toEqual({ human: 1, agent: 1 });
+
+      const detail = (
+        await readTraceOverHttp(api.app, secret, traceId, WHILE_DOWN)
+      ).json() as TraceDetailBody;
+      expect(
+        everySpan(detail.turns).map((span) => span.text).filter((text) => text !== ""),
+      ).toContain("Can you still hear me?");
+      expect(detail.measures.length).toBeGreaterThan(0);
+
+      // The evidence-ready handoff landed before the object did.
+      const { rows } = await api.database.sql<{ count: string }>(
+        "select count(*) as count from grading_job where trace_id = $1",
+        [traceId],
+      );
+      expect(rows[0]?.count).toBe("1");
+      expect(await pendingSegments(ingestStore())).toHaveLength(0);
+    });
+  },
+);
+
+describe.skipIf(!storage.available)("the captured trace, found in a list", () => {
   it("is one trace inside a window containing it, and the last page of one", async () => {
     const page = await listed();
     expect(page.traces).toHaveLength(1);
@@ -190,7 +295,7 @@ describe("the captured trace, found in a list", () => {
   });
 });
 
-describe("the captured trace, read as a transcript", () => {
+describe.skipIf(!storage.available)("the captured trace, read as a transcript", () => {
   it("is thirteen turns in the order they were taken", async () => {
     const detail = await transcript();
 
@@ -516,7 +621,7 @@ describe("the captured trace, read as a transcript", () => {
  * store, and putting them in the capture's own window would make every other
  * case in this file depend on the order the describes happen to run in.
  */
-describe("what one measure looks like on the wire", () => {
+describe.skipIf(!storage.available)("what one measure looks like on the wire", () => {
   const SIMULATED = "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a";
   const REPORTED = "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b";
 

@@ -792,6 +792,10 @@ export async function conductProductionTrace(
         parentSpanId: "",
         name: "agent_session",
         kind: "root",
+        // LiveKit's own session span, and the statement that carries the end
+        // fact: completion is the platform's word, never the absence of a
+        // parent.
+        endsTrace: true,
         durationNanoseconds: 20_000_000_000n,
         // The block rides here, under the egma-owned corner of a payload that
         // is otherwise the vendor's own document — written through the
@@ -826,8 +830,9 @@ async function exportFlush(world: World, spans: readonly NewSpan[]): Promise<voi
 }
 
 /**
- * One more flush of a conversation egma has already dealt with — a root span at
- * that, so it says as loudly as telemetry can that the conversation is over.
+ * One more flush of a conversation egma has already dealt with — carrying the
+ * platform's own end statement, so it says as loudly as telemetry can that the
+ * conversation is over.
  */
 export async function exportALateFlush(
   world: World,
@@ -839,6 +844,7 @@ export async function exportALateFlush(
       parentSpanId: "",
       name: "agent_session",
       kind: "root",
+      endsTrace: true,
       startedAtMicroseconds: BigInt(Date.now()) * 1_000n,
     }),
   ]);

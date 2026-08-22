@@ -1,9 +1,13 @@
 import { newId } from "@egma/ids";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { recordingPathFor } from "../src/routes/recordings.ts";
 import { RECORDING_LINK_SECONDS } from "../src/recordings/signed-link.ts";
 import { createApi, type TestApi } from "./support/api.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import {
   aConductedRun,
   fileTranscriptOf,
@@ -44,6 +48,10 @@ afterEach(async () => {
   await api?.close();
 });
 
+afterAll(() => {
+  if (storage.available) storage.stop();
+});
+
 function request(
   method: "GET",
   url: string,
@@ -69,6 +77,25 @@ const A_BROWSERS_STORE = {
 } as const;
 
 const A_REFERENCE = "sim_01JQ0A2B3C4D5E6F7G8H9J0K/dual-channel.wav";
+
+/**
+ * The one case here that files evidence at the door needs somewhere for that
+ * evidence to become durable — a transcript is read from rows, and rows come
+ * from a drained segment. Everything else in this file signs links against the
+ * fictional store above and needs no container at all.
+ */
+const storage: ObjectStorage = await startObjectStorage("recordings-routes");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the transcript-audio case — ${storage.why}\n\n`,
+  );
+}
+
+function running(): Extract<ObjectStorage, { available: true }> {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage;
+}
 
 /** Somebody with a run of two voice conversations, one of which was recorded. */
 async function aCustomerWhoHasRecorded(
@@ -380,11 +407,12 @@ describe("what the run's own results say about audio", () => {
  * Both halves are asserted here, because a route that answered only the happy
  * one would put a player on a transcript that has nothing to play.
  */
-describe("what a transcript says about audio", () => {
+describe.skipIf(!storage.available)("what a transcript says about audio", () => {
   it("names the simulation it is, so one route serves both surfaces", async () => {
     api = await createApi("recording_transcript", {
       blob: A_BROWSERS_STORE,
       traceStore: true,
+      ingestStore: running().ingestStore,
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const who = await standingOf(api.app, ada.cookie, "a terminal");
@@ -392,13 +420,13 @@ describe("what a transcript says about audio", () => {
 
     const at = new Date("2026-08-11T09:00:00Z");
     const heard = await fileTranscriptOf(
-      api.app,
+      api,
       run.heard,
       { human: "I need to move my cleaning.", agent: "Of course — when to?" },
       at,
     );
     const silent = await fileTranscriptOf(
-      api.app,
+      api,
       run.silent,
       { human: "Hello?", agent: "" },
       at,

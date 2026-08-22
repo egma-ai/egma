@@ -2,9 +2,8 @@ import {
   appendSpans,
   claimProductionTrace,
   finishProductionTrace,
+  recordProductionEvidenceReceived,
   recordProductionTraces,
-  recordRetellCallReceived,
-  recordRetellMonitoringReceived,
   type AuthContext,
   type ProductionTraceClaim,
 } from "@egma/db";
@@ -53,8 +52,7 @@ export type RetellProductionWriteStore = {
   readonly appendSpans: typeof appendSpans;
   readonly recordProductionTraces: typeof recordProductionTraces;
   readonly finishProductionTrace: typeof finishProductionTrace;
-  readonly recordRetellCallReceived: typeof recordRetellCallReceived;
-  readonly recordRetellMonitoringReceived: typeof recordRetellMonitoringReceived;
+  readonly recordProductionEvidenceReceived: typeof recordProductionEvidenceReceived;
 };
 
 const STORES: RetellProductionWriteStore = {
@@ -62,8 +60,7 @@ const STORES: RetellProductionWriteStore = {
   appendSpans,
   recordProductionTraces,
   finishProductionTrace,
-  recordRetellCallReceived,
-  recordRetellMonitoringReceived,
+  recordProductionEvidenceReceived,
 };
 
 function projectIdOf(target: Pick<RetellProductionWriteTarget, "auth">): string {
@@ -177,7 +174,11 @@ export async function writeRetellCall(
   // provider conversation is durable. If this health update fails, the claim
   // remains stale and replay can finish it instead of leaving Monitoring in
   // "waiting" after the trace already arrived.
-  await stores.recordRetellCallReceived(target.auth, target, receivedAt);
+  await stores.recordProductionEvidenceReceived(target.auth, {
+    agentPlatform: "retell",
+    platformAgentId: target.platformAgentId,
+    receivedAt,
+  });
   await stores.finishProductionTrace(target.auth, {
     traceId: normalised.traceId,
     degraded: normalised.degraded,
@@ -228,8 +229,10 @@ export async function replayProductionClaim(
   ) {
     await stores.recordProductionTraces(claim.auth, normalised.spans);
   }
-  await stores.recordRetellMonitoringReceived(claim.auth, {
+  await stores.recordProductionEvidenceReceived(claim.auth, {
+    agentPlatform: "retell",
     platformAgentId: claim.platformAgentId,
+    receivedAt: new Date(),
   });
   await stores.finishProductionTrace(claim.auth, {
     traceId: claim.traceId,

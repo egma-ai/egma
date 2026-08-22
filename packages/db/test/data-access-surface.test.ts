@@ -276,10 +276,11 @@ const CONTEXT_REQUIRING = [
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
-  "recordLiveKitMonitoringReceived",
-  "recordRetellCallReceived",
+  // One monotone writer for "evidence for this platform reached the store",
+  // where three plain assignments used to say the same thing — and could each
+  // wind a customer's Monitoring state backwards on a replay.
+  "recordProductionEvidenceReceived",
   "recordRetellIngestionFailure",
-  "recordRetellMonitoringReceived",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",

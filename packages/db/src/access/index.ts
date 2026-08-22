@@ -70,11 +70,12 @@
  * unfiltered scan this boundary exists to make unreachable.
  *
  * `recordProductionTraces` sits beside `appendSpans` on that same path and is
- * the other half of what the ingest door does with an export. It is handed the
- * very same spans: the trace store gets the rows, and the grading queue gets one
- * row per conversation saying when egma last heard about it and whether its root
- * span closed. Taking the spans rather than a summary of them is what keeps
- * "when is a conversation over" written down once. It is a queue write and a
+ * the other half of what the drainer does with a segment. It is handed the very
+ * same spans, and only after they are query-visible: the trace store gets the
+ * rows, and the grader-owned boundary gets one row per conversation saying when
+ * egma last heard about it and whether a span the platform said ends it has
+ * arrived. Taking the spans rather than a summary of them is what keeps "when is
+ * a conversation over" written down once. It is a bookkeeping row and a
  * notification and never a judgment — grading happens in a service that holds no
  * request open.
  *
@@ -375,10 +376,8 @@ export {
   finishProductionTrace,
   finishRetellMonitoringScan,
   listMonitoringSetups,
-  recordLiveKitMonitoringReceived,
-  recordRetellCallReceived,
+  recordProductionEvidenceReceived,
   recordRetellIngestionFailure,
-  recordRetellMonitoringReceived,
   recoverRetellMonitoringSetup,
   releaseRetellMonitoringLease,
   releaseRetellIngestionFailureReplay,

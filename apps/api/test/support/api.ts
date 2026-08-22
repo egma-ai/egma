@@ -57,12 +57,13 @@ export type TestApi = {
   /** Everything the email transport was handed, in order. */
   readonly mail: readonly Email[];
   /**
-   * Turn every pending object into rows, the way the drainer will.
+   * Turn every pending object into rows, the way the deployment does.
    *
    * The door answers on object-store durability and stops there, so a suite
    * whose claim is about what a reader sees calls this between posting and
-   * reading. It answers how many segments it drained, which is also how a test
-   * says "one project, one segment". Nothing to drain answers zero.
+   * reading. It answers how many objects the pass drained. On an instance that
+   * drains on its own, that count is whatever this pass happened to find — the
+   * evidence is what to assert on, not the number.
    */
   drainEvidence(): Promise<number>;
   close(): Promise<void>;
@@ -147,12 +148,28 @@ export type TestApiOptions = {
    */
   readonly ingestionRequestTimeoutMilliseconds?: number;
   /**
+   * What the local log will hold before it refuses. Tiny here for the one suite
+   * whose claim is the refusal, so that reaching a bound costs one request
+   * rather than half a gigabyte.
+   */
+  readonly ingestionLogMaxBytes?: number;
+  /**
    * Where the local log lives, for the one case that needs two instances to
    * share one: a stop and a start over staged evidence that outlived the
    * process. A directory named here belongs to the caller and is left where it
    * is on close.
    */
   readonly ingestionLogDirectory?: string;
+  /**
+   * Whether this instance runs the standing drainer. Off by default, so that a
+   * suite can look at a sealed segment before anything drains it — the state a
+   * deployment passes through in about the time one upload takes.
+   *
+   * On, the instance behaves as a deployment does: a durable segment is drained
+   * without anybody asking. `drainEvidence` then waits for a pass that started
+   * after the call, which is what a suite needs instead of a sleep.
+   */
+  readonly drainsPendingEvidence?: boolean;
   /**
    * Somewhere to keep the log lines, for a test whose claim is about what is
    * not in them. Off by default: the suite runs silent, and a file that does
@@ -246,6 +263,9 @@ export async function createApi(
                   requestTimeoutMilliseconds:
                     options.ingestionRequestTimeoutMilliseconds,
                 }),
+            ...(options.ingestionLogMaxBytes === undefined
+              ? {}
+              : { logMaxBytes: options.ingestionLogMaxBytes }),
           },
         };
 
@@ -264,8 +284,9 @@ export async function createApi(
   await seedPersonaLibrary();
   await seedGraderLibrary();
 
-  const { app, identity } = buildApi({
+  const { app, identity, drainer } = buildApi({
     config,
+    drainsPendingEvidence: options.drainsPendingEvidence ?? false,
     ...(options.defaultEmailSender === true ? {} : { emailSender }),
     ...(options.rateLimit === undefined ? {} : { rateLimit: options.rateLimit }),
     ...(options.logTo === undefined ? {} : { logTo: options.logTo }),
@@ -296,6 +317,10 @@ export async function createApi(
     mail,
     async drainEvidence() {
       if (options.ingestStore === undefined) return 0;
+      // The instance's own drainer where it has one, so a suite that proves the
+      // standing behaviour is waiting on the same object it is asserting about.
+      const standing = drainer();
+      if (standing !== undefined) return standing.drainNow();
       return drainPendingEvidence(options.ingestStore);
     },
     async close() {

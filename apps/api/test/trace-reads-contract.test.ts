@@ -15,6 +15,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
+import {
   contextFor,
   ingest,
   listTracesAsSignedIn,
@@ -44,6 +48,12 @@ import {
  * right for the spine test and useless for asking whether page two follows page
  * one.
  */
+
+const storage: ObjectStorage = await startObjectStorage("trace-reads-contract");
+
+if (!storage.available) {
+  process.stderr.write(`\nskipping the trace-reads contract suite — ${storage.why}\n\n`);
+}
 
 let api: TestApi;
 let acme: Customer;
@@ -78,7 +88,11 @@ const PAGING_TRACES = [
 ] as const;
 
 beforeAll(async () => {
-  api = await createApi("trace_reads_contract", { traceStore: true });
+  if (!storage.available) return;
+  api = await createApi("trace_reads_contract", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   globex = await signUp(api.app, "grace@globex.example", "Globex");
   acmeProjectSecret = await mintKey(
@@ -96,7 +110,7 @@ beforeAll(async () => {
 
   for (const trace of PAGING_TRACES) {
     await ingest(
-      api.app,
+      api,
       acmeProjectSecret,
       syntheticExport({
         traceId: trace.traceId,
@@ -109,6 +123,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
 async function page(
@@ -120,7 +135,7 @@ async function page(
   return response.json() as ListedPage;
 }
 
-describe("a list request that does not say when", () => {
+describe.skipIf(!storage.available)("a list request that does not say when", () => {
   it("is refused, and told what to send", async () => {
     const response = await listTracesOverHttp(api.app, acme.secret, {});
     expect(response.statusCode).toBe(400);
@@ -221,7 +236,7 @@ describe("a list request that does not say when", () => {
  * window too wide to serve is the caller's decision to make, and only a refusal
  * lets them make it.
  */
-describe("a window wider than one request may ask for", () => {
+describe.skipIf(!storage.available)("a window wider than one request may ask for", () => {
   it("is refused rather than quietly narrowed", async () => {
     const response = await listTracesOverHttp(api.app, acme.secret, {
       from: "2026-01-01T00:00:00Z",
@@ -265,7 +280,7 @@ describe("a window wider than one request may ask for", () => {
   });
 });
 
-describe("walking every page of a list", () => {
+describe.skipIf(!storage.available)("walking every page of a list", () => {
   /**
    * The whole promise, in one walk: every trace once, in order, across
    * boundaries that fall in the middle of a shared minute.
@@ -382,7 +397,7 @@ describe("walking every page of a list", () => {
  * became `Number("")`, which is zero, which is refused. Neither is what the
  * caller asked, and neither said so.
  */
-describe("a parameter that arrived empty", () => {
+describe.skipIf(!storage.available)("a parameter that arrived empty", () => {
   it("is the whole organization, when it is the project", async () => {
     const answered = await page(acme.secret, {
       ...DAY,
@@ -418,7 +433,7 @@ describe("a parameter that arrived empty", () => {
  * organization leads the filing order, so the query never reached the rows and
  * there is nothing to leak the difference.
  */
-describe("another organization asking for a trace that is not theirs", () => {
+describe.skipIf(!storage.available)("another organization asking for a trace that is not theirs", () => {
   it("finds nothing in a list of the same window", async () => {
     const answered = await page(globex.secret, { ...DAY, pageSize: 200 });
     expect(answered.traces).toEqual([]);
@@ -447,7 +462,7 @@ describe("another organization asking for a trace that is not theirs", () => {
 
   it("still reads its own, so the refusal is about tenancy and not about the store", async () => {
     await ingest(
-      api.app,
+      api,
       globexProjectSecret,
       syntheticExport({
         traceId: "bb000000000000000000000000000001",
@@ -472,7 +487,7 @@ describe("another organization asking for a trace that is not theirs", () => {
  * reads that project and cannot be argued into another — and is told so out
  * loud rather than having its filter silently dropped.
  */
-describe("filtering a list to one project", () => {
+describe.skipIf(!storage.available)("filtering a list to one project", () => {
   const OUTBOUND_WINDOW = {
     from: "2026-07-01T00:00:00Z",
     to: "2026-07-02T00:00:00Z",
@@ -503,7 +518,7 @@ describe("filtering a list to one project", () => {
 
     // One trace in Outbound, and one in the project signup created.
     await ingest(
-      api.app,
+      api,
       outboundSecret,
       syntheticExport({
         traceId: "cc000000000000000000000000000001",
@@ -512,7 +527,7 @@ describe("filtering a list to one project", () => {
       }),
     );
     await ingest(
-      api.app,
+      api,
       acmeProjectSecret,
       syntheticExport({
         traceId: "cc000000000000000000000000000002",
@@ -731,7 +746,7 @@ describe("filtering a list to one project", () => {
  * a key scoped to that project rather than reusing the organization-wide one:
  * the question is whether the cookie reads, not which project it reads.
  */
-describe("a browser session rather than a key", () => {
+describe.skipIf(!storage.available)("a browser session rather than a key", () => {
   const SESSION_WINDOW = {
     from: "2026-09-01T00:00:00Z",
     to: "2026-09-02T00:00:00Z",
@@ -746,7 +761,7 @@ describe("a browser session rather than a key", () => {
       acme.projectId,
     );
     await ingest(
-      api.app,
+      api,
       homeSecret,
       syntheticExport({
         traceId: SESSION_TRACE,
@@ -820,7 +835,7 @@ describe("a browser session rather than a key", () => {
  * which is what separates a predicate inside the scan from a filter over a page
  * that has already been counted.
  */
-describe("narrowing a list to one kind of traffic", () => {
+describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", () => {
   const MIXED = {
     from: "2026-10-01T00:00:00Z",
     to: "2026-10-02T00:00:00Z",
@@ -852,7 +867,7 @@ describe("narrowing a list to one kind of traffic", () => {
   beforeAll(async () => {
     for (const trace of PRODUCTION_TRACES) {
       await ingest(
-        api.app,
+        api,
         acmeProjectSecret,
         syntheticExport({
           traceId: trace.traceId,
@@ -912,7 +927,7 @@ describe("narrowing a list to one kind of traffic", () => {
       }
 
       await ingest(
-        api.app,
+        api,
         SERVICE_TOKEN,
         syntheticExport({
           traceId,
@@ -1069,7 +1084,7 @@ describe("narrowing a list to one kind of traffic", () => {
    */
   it("shows each organization only its own, whichever kind is asked for", async () => {
     await ingest(
-      api.app,
+      api,
       globexProjectSecret,
       syntheticExport({
         traceId: GLOBEX_TRACE,
@@ -1105,7 +1120,7 @@ describe("narrowing a list to one kind of traffic", () => {
   });
 });
 
-describe("a read with no usable credential", () => {
+describe.skipIf(!storage.available)("a read with no usable credential", () => {
   it("is refused before anything is looked up", async () => {
     for (const url of [
       `/v1/traces?from=${DAY.from}&to=${DAY.to}`,
@@ -1141,7 +1156,7 @@ describe("a read with no usable credential", () => {
  * A judgment egma wrote and then could not find is the exact false trust this
  * product exists to kill, so it is pinned here, at the read, through the routes.
  */
-describe("a production conversation egma judged", () => {
+describe.skipIf(!storage.available)("a production conversation egma judged", () => {
   const JUDGED_TRACE = "cc000000000000000000000000000001";
   const JUDGED_AT = "2026-06-01T11:00:00Z";
   const GRADER = newId("grd");
@@ -1149,7 +1164,7 @@ describe("a production conversation egma judged", () => {
 
   beforeAll(async () => {
     await ingest(
-      api.app,
+      api,
       acmeProjectSecret,
       syntheticExport({
         traceId: JUDGED_TRACE,

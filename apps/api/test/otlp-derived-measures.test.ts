@@ -166,7 +166,7 @@ beforeAll(async () => {
     "Acme production telemetry",
     acme.projectId,
   );
-  await replayFixture(api.app, telemetrySecret);
+  await replayFixture(api, telemetrySecret);
   // The door stops at object-store durability, so the evidence is carried the
   // rest of the way here — the measures are read out of rows.
   await api.drainEvidence();

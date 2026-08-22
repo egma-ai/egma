@@ -233,13 +233,30 @@ function aSpan(over: Partial<NewSpan> & { readonly traceId: string }): NewSpan {
   };
 }
 
-/** A root span: the one that names no parent, and so closes the conversation. */
+/**
+ * The span the platform stated ends the conversation — LiveKit's own session
+ * span, carrying `endsTrace` from the normalizer that recognised it.
+ *
+ * Having no parent is beside the point and is here only because that is what a
+ * session span looks like. `aParentlessSpan` below is the same shape without
+ * the statement, and it is what proves the two are different facts.
+ */
 function aRootSpan(traceId: string, startedAt = Date.now()): NewSpan {
   return aSpan({
     traceId,
     parentSpanId: "",
     name: "agent_session",
     kind: "root",
+    startedAtMicroseconds: BigInt(startedAt) * 1_000n,
+    endsTrace: true,
+  });
+}
+
+/** A span whose parent never arrived. It says nothing about the conversation. */
+function aParentlessSpan(traceId: string, startedAt = Date.now()): NewSpan {
+  return aSpan({
+    traceId,
+    parentSpanId: "",
     startedAtMicroseconds: BigInt(startedAt) * 1_000n,
   });
 }
@@ -333,9 +350,9 @@ describe("a terminal transition", () => {
 });
 
 /**
- * A production trace has no transaction to ride, so its job is written at the
- * door on the first export that mentions it and completed later — by the root
- * span arriving, or by nothing arriving at all for long enough.
+ * A production trace has no transaction to ride, so its bookkeeping row is
+ * written on the first segment that mentions it and completed later — by a span
+ * the platform said ends it, or by nothing arriving at all for long enough.
  */
 describe("a production trace at the door", () => {
   it("becomes known on the first export, and is not claimable while it is still happening", async () => {
@@ -394,6 +411,40 @@ describe("a production trace at the door", () => {
         [newId("gjb"), acme.organization, acme.project, traceId],
       ),
     ).rejects.toMatchObject({ code: POSTGRES_ERROR.uniqueViolation });
+  });
+
+  /**
+   * **The platform's word, and only the platform's word.**
+   *
+   * Completion used to be inferred from any span arriving with no parent, which
+   * reads like the same fact and is not one: a parentless span is a span whose
+   * parent did not arrive. An exporter flush that lost its parent produces one,
+   * and so does a span whose parent id came in malformed and was normalised to
+   * nothing at all — and either would have marked this conversation complete
+   * while the caller was still talking. A trace nobody states an end for stays
+   * open, and the idle sweep is what eventually picks it up.
+   */
+  it("is not completed by a span that merely arrived without a parent", async () => {
+    const traceId = wireId(16);
+    await recordProductionTraces(auth, [
+      aSpan({ traceId }),
+      aParentlessSpan(traceId),
+    ]);
+
+    expect((await theJobForTrace(traceId)).rootClosedAt).toBeNull();
+    expect(
+      (
+        await claimGradingJobs({
+          claimant: "grader-on-a-parentless-span",
+          capacity: 50,
+        })
+      ).some((claim) => claim.traceId === traceId),
+    ).toBe(false);
+
+    // And the platform saying so, on a span of exactly the same shape, does
+    // complete it.
+    await recordProductionTraces(auth, [aRootSpan(traceId)]);
+    expect((await theJobForTrace(traceId)).rootClosedAt).toBeInstanceOf(Date);
   });
 
   it("is claimable the moment its root span closes it", async () => {

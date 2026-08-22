@@ -80,12 +80,9 @@ function writeStore(
     async finishProductionTrace(_auth, finished) {
       recorded.finished.push(finished.traceId);
     },
-    async recordRetellCallReceived() {
+    async recordProductionEvidenceReceived(_auth, input) {
       recorded.received += 1;
-    },
-    async recordRetellMonitoringReceived(_auth, input) {
-      recorded.received += 1;
-      recorded.replayedPlatformAgentIds.push(input.platformAgentId);
+      recorded.replayedPlatformAgentIds.push(input.platformAgentId ?? "");
     },
   };
 }
