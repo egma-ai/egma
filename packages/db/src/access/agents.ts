@@ -655,7 +655,16 @@ async function insertConnection(
  * transaction. It owns the friendly refusal for the moment a living agent in
  * the project already holds the name.
  */
-async function insertAgent(
+/**
+ * Write one agent row, on whatever connection or transaction is handed in.
+ *
+ * **Exported to the module, not from the package.** Production monitoring
+ * needs the very same insert inside its own transaction — registering an
+ * unregistered platform agent and flipping its switch have to be one atomic
+ * act — and a second copy of this insert there would be a second place the
+ * agent's identity, its tenancy stamp and its held-name refusal are decided.
+ */
+export async function insertAgentWithin(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
@@ -724,13 +733,13 @@ export async function createAgent(
   const identity = { name };
 
   if (inline === undefined) {
-    return insertAgent(db(), auth, projectId, identity);
+    return insertAgentWithin(db(), auth, projectId, identity);
   }
 
   // Both rows or neither: the transaction is what makes the happy onboarding
   // path unable to produce an agent its own connection failed to reach.
   return db().transaction(async (tx) => {
-    const written = await insertAgent(tx, auth, projectId, identity);
+    const written = await insertAgentWithin(tx, auth, projectId, identity);
     const wired = await insertConnection(
       tx,
       auth,
@@ -797,7 +806,7 @@ export async function registerAgent(
   if (inline === undefined) {
     return {
       result: "created",
-      agent: await insertAgent(db(), auth, projectId, identity),
+      agent: await insertAgentWithin(db(), auth, projectId, identity),
     };
   }
 
@@ -806,7 +815,7 @@ export async function registerAgent(
     reuseKey === undefined ? undefined : inline.config[reuseKey];
 
   const bothRows = async (tx: Queryable): Promise<Registration> => {
-    const written = await insertAgent(tx, auth, projectId, identity);
+    const written = await insertAgentWithin(tx, auth, projectId, identity);
     return {
       result: "created",
       agent: written,

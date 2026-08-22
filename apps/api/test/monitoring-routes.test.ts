@@ -383,6 +383,103 @@ describe("starting monitoring", () => {
     expect(registered.rows[0]).toEqual({ watched: "2" });
   });
 
+  /**
+   * **A refused start leaves nothing behind.**
+   *
+   * Registering an unregistered platform agent and flipping its switch are one
+   * transaction, so a refused switch takes the agent row with it. Split in
+   * two — create, then enable — the loser of the race writes its agent row,
+   * loses the uniqueness-enforced switch, and leaves that row in the roster
+   * bound to nothing, belonging to a request that was told it had failed.
+   *
+   * Two requests ticking the same unregistered platform agent at once is how
+   * that happens. Whichever way the two interleave, the invariant is the same
+   * and it is what this asserts: one agent row for one Retell agent, and no
+   * live agent left unbound.
+   */
+  it("writes no orphan agent when two starts race for one platform agent", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_no_orphan", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-orphan@acme.example", "Acme");
+
+    const start = (name: string) =>
+      api.app.inject({
+        method: "POST",
+        url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+        headers: { cookie: ada.cookie },
+        payload: {
+          agentPlatform: "retell",
+          apiKey: RETELL_KEY,
+          // No agent id, so each request registers what it does not find.
+          watch: [{ platformAgentId: "agent_voice_1", name }],
+        },
+      });
+
+    const [first, second] = await Promise.all([
+      start("Front desk"),
+      start("Front desk copy"),
+    ]);
+
+    expect(first.statusCode, first.body).toBe(200);
+    expect(second.statusCode, second.body).toBe(200);
+
+    // Exactly one agent watches the Retell agent, and nothing is left unbound.
+    const rows = await api.database.sql<{
+      agents: string;
+      unbound: string;
+      watching: string;
+    }>(
+      "select " +
+        "(select count(*) from agent) as agents, " +
+        "(select count(*) from agent where platform_agent_id is null) as unbound, " +
+        "(select count(*) from agent where pull_production_calls) as watching",
+    );
+    expect(rows.rows[0]).toEqual({ agents: "1", unbound: "0", watching: "1" });
+  });
+
+  /**
+   * The same invariant with the race's timing removed: an agent is already
+   * switched on for this Retell agent, and the tick names no Egma agent — so
+   * the commit resolves it to the agent that already holds it rather than
+   * writing a second one.
+   */
+  it("recognizes a platform agent this project already watches", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_recognized", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-recognized@acme.example", "Acme");
+    const agentId = await pulling(ada);
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", name: "A second desk" }],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: { agentId: string; agentName: string; created: boolean }[];
+      refused: unknown[];
+    };
+    expect(outcome.refused).toEqual([]);
+    expect(outcome.watching).toHaveLength(1);
+    expect(outcome.watching[0]?.agentId).toBe(agentId);
+    expect(outcome.watching[0]?.created).toBe(false);
+
+    const named = await api.database.sql<{ name: string }>(
+      "select name from agent",
+    );
+    expect(named.rows.map((row) => row.name)).toEqual(["Front desk"]);
+  });
+
   it("refuses a viewer before starting anything", async () => {
     const retell = provider();
     api = await createApi("monitoring_routes_start_viewer", {

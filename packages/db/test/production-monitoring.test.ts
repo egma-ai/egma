@@ -5,6 +5,7 @@ import {
   createAgent,
   disablePullProductionCalls,
   enablePullProductionCalls,
+  registerAgentPullingProductionCalls,
   failMonitoringPull,
   finishMonitoringScan,
   finishProductionTrace,
@@ -127,6 +128,59 @@ afterAll(async () => {
 });
 
 describe("the pull switch", () => {
+  /**
+   * **Registering and switching on are one write.**
+   *
+   * Watching an unregistered platform agent means registering it, and the two
+   * halves cannot be separate commits: the switch's uniqueness index is what
+   * refuses a second agent on one platform agent, and a create that had
+   * already committed would leave that agent in the roster bound to nothing.
+   */
+  it("registers an unknown platform agent and starts it in one write", async () => {
+    const state = await registerAgentPullingProductionCalls(at(acme, ada), {
+      name: "Registered by monitoring",
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_registered_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    });
+
+    expect(state).toMatchObject({
+      pullProductionCalls: true,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_registered_1",
+      monitoringApiKeyHint: RETELL_KEY.slice(-4),
+      scanKind: "historical_import",
+    });
+  });
+
+  it("keeps no agent when the switch it was written for is refused", async () => {
+    await pulling("Holds the platform agent", "agent_retell_contested_1");
+
+    const before = await database.sql<{ agents: string }>(
+      "select count(*) as agents from agent",
+    );
+
+    await expect(
+      registerAgentPullingProductionCalls(at(acme, ada), {
+        name: "Would be an orphan",
+        agentPlatform: "retell",
+        platformAgentId: "agent_retell_contested_1",
+        apiKey: RETELL_KEY,
+        now: SETUP_TIME,
+      }),
+    ).rejects.toThrow();
+
+    const after = await database.sql<{ agents: string }>(
+      "select count(*) as agents from agent",
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+    const orphan = await database.sql<{ found: string }>(
+      "select count(*) as found from agent where name = 'Would be an orphan'",
+    );
+    expect(orphan.rows[0]).toEqual({ found: "0" });
+  });
+
   it("seals the key on the agent and opens the notebook on a 30-day import", async () => {
     const agentId = await agentNamed("Front desk");
 

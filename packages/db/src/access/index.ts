@@ -361,6 +361,7 @@ export {
   recordMonitoringFailure,
   recordPulledCallReceived,
   recordPulledCallReceivedForPlatformAgent,
+  registerAgentPullingProductionCalls,
   releaseMonitoringLease,
   releaseMonitoringFailureReplay,
   renewMonitoringLease,

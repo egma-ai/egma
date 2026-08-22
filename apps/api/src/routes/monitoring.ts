@@ -1,13 +1,13 @@
 import {
   AgentWriteRefusedError,
   authorize,
-  createAgent,
   disablePullProductionCalls,
   enablePullProductionCalls,
   getAgent,
   listAgents as listProjectAgents,
   NotPermittedError,
   readAgentPullState,
+  registerAgentPullingProductionCalls,
   UnprocessableInputError,
   type AgentPullState,
   type AuthContext,
@@ -369,28 +369,7 @@ export async function monitoringRoutes(
         // bound to it, or a new roster entry for it.
         const held = known.get(one.platformAgentId);
         if (held === undefined) {
-          try {
-            const made = await createAgent(resolved.auth, { name: agentName });
-            agentId = made.id;
-            agentName = made.name;
-            created = true;
-          } catch (error) {
-            if (
-              error instanceof AgentWriteRefusedError &&
-              error.reason === "name_taken"
-            ) {
-              refused.push({
-                platformAgentId: one.platformAgentId,
-                reason: "name_taken",
-                message:
-                  `This project already has an agent called \u201C${agentName}\u201D. ` +
-                  "Open that agent and start monitoring from there, or rename " +
-                  "the Retell agent.",
-              });
-              continue;
-            }
-            throw error;
-          }
+          created = true;
         } else {
           agentId = held.agentId;
           agentName = held.agentName;
@@ -398,20 +377,51 @@ export async function monitoringRoutes(
       }
 
       try {
-        const state = await enablePullProductionCalls(resolved.auth, {
-          agentId,
-          agentPlatform: RETELL,
-          platformAgentId: one.platformAgentId,
-          apiKey,
-        });
+        /*
+         * **Registering and switching on are one write, never two.** Two
+         * requests that both tick the same unregistered platform agent can
+         * both write an agent row before either reaches the uniqueness-
+         * enforced switch. Split across two commits, the loser's row survives
+         * as an agent bound to nothing, belonging to a request that was told
+         * it had failed. One transaction makes the refusal take the row with
+         * it.
+         */
+        const state =
+          agentId === undefined
+            ? await registerAgentPullingProductionCalls(resolved.auth, {
+                name: agentName,
+                agentPlatform: RETELL,
+                platformAgentId: one.platformAgentId,
+                apiKey,
+              })
+            : await enablePullProductionCalls(resolved.auth, {
+                agentId,
+                agentPlatform: RETELL,
+                platformAgentId: one.platformAgentId,
+                apiKey,
+              });
         started.push({
-          agentId,
+          agentId: state.agentId,
           agentName,
           platformAgentId: one.platformAgentId,
           created,
           pullProductionCalls: state.pullProductionCalls,
         });
       } catch (error) {
+        if (
+          error instanceof AgentWriteRefusedError &&
+          error.reason === "name_taken"
+        ) {
+          refused.push({
+            platformAgentId: one.platformAgentId,
+            reason: "name_taken",
+            message:
+              `This project already has an agent called \u201C${agentName}\u201D. ` +
+              "Open that agent and start monitoring from there, or rename " +
+              "the Retell agent.",
+          });
+          continue;
+        }
         if (!lostToPullUniqueness(error)) throw error;
         // The database refused this one tick. The ticks beside it are
         // untouched, and the sentence names the agent already watching.
