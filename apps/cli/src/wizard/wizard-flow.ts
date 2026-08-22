@@ -2,11 +2,19 @@
  * The wizard flow, from the first consent screen to the final status.
  *
  * The flow never draws anything and never reads a keystroke: it pushes state at
- * the UI and parks on a gate. Five steps — sign this machine in, find the voice
- * agent, reach it, write the tests that put it under pressure, and run them —
- * and the shape of the middle three is deliberately one shape: skills plus a
+ * the UI and parks on a gate. Sign this machine in, find the voice agent, ask
+ * what Egma is here to do, reach the agent, write the tests that put it under
+ * pressure, write the mocked world those tests run in, and run them — and the
+ * shape of every intelligent step is deliberately one shape: skills plus a
  * task, dispatched to the developer's own coding agent, with every action it
  * takes shown as it happens.
+ *
+ * Two things end the walk before any of that. A repository that already has an
+ * egma folder is refused where it stands, because the wizard onboards new
+ * repositories and a second setup would half-run into somebody's committed
+ * files. And an answer to the goal question that asks for production traffic to
+ * be watched creates nothing at all for now: that lane is not built into the
+ * terminal yet, and the flow that can do it today is named instead.
  *
  * The last step is the only one that does not end when it is finished. It ends
  * when the developer has seen a verdict, which is the whole point of the ten

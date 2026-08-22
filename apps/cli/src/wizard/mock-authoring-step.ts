@@ -32,10 +32,13 @@
  * an honest sentence about it beats ending a walk that has tests to run.
  */
 
-import path from "node:path";
-
 import type { DrivenAgent } from "../acp/driven-agent.ts";
-import { readMockToolsFile, type FolderPaths } from "../folder/egma-folder.ts";
+import {
+  FOLDER_NAME,
+  MOCK_TOOLS_FILE_NAME,
+  readMockToolsFile,
+  type FolderPaths,
+} from "../folder/egma-folder.ts";
 import type { MockToolEntry } from "../folder/mock-tools.ts";
 import { instructionsWith, publicSkill } from "../skills/index.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
@@ -353,7 +356,7 @@ export async function mockAuthoringStep(
       );
     } else {
       ui.pushStatus(
-        `${ACTION_MARK} ${mockTools.length} mock ${mockTools.length === 1 ? "tool" : "tools"} in ${path.posix.join("egma", "mock-tools.md")}`,
+        `${ACTION_MARK} ${mockTools.length} mock ${mockTools.length === 1 ? "tool" : "tools"} in ${FOLDER_NAME}/${MOCK_TOOLS_FILE_NAME}`,
       );
     }
   }

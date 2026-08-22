@@ -13,7 +13,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { folderPathsIn } from "../src/folder/egma-folder.ts";
+import { folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
@@ -189,6 +189,29 @@ describe("the goal question", () => {
     expect(ui.record.gate?.mocks).toEqual([]);
     expect(ui.record.gate?.changed).toEqual([]);
     expect(ui.record.gate?.rows.map((row) => row.overrides)).toEqual([[]]);
+  });
+
+  /**
+   * The platform is the single place the truth about monitoring lives, so the
+   * committed folder records nothing about it — and the closed key list the
+   * folder parses is the enforcement, not a habit.
+   */
+  it("writes a committed config that gained no new keys", async () => {
+    await walk("testing");
+
+    const written = await readFile(folderPathsIn(workspace.dir).config, "utf8");
+    const keys = written
+      .split("\n")
+      .flatMap((line) => /^(?<key>[a-z_]+):/u.exec(line)?.groups?.key ?? []);
+
+    expect(keys).toEqual(["platform", "project", "agent", "connection"]);
+    expect(written.toLowerCase()).not.toContain("monitor");
+    expect(written.toLowerCase()).not.toContain("goal");
+    // And it still parses, which is what makes the key list closed rather than
+    // merely short.
+    await expect(readConfig(folderPathsIn(workspace.dir).config)).resolves.toMatchObject({
+      platform: { origin: platform.url },
+    });
   });
 
   /** A run with nobody watching takes the lane every `npx egma` has taken. */

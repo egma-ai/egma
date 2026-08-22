@@ -324,7 +324,3 @@ export function skippedLine(drivenAgentName: string): string {
   return `Nothing was installed. ${drivenAgentName} can still drive Egma — tell it to run egma --help.`;
 }
 
-/** What the developer is told when the installer could not do it. */
-export function installFailedLine(reason: string): string {
-  return reason;
-}
