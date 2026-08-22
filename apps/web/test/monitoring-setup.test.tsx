@@ -1,12 +1,5 @@
 // @vitest-environment jsdom
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringSetupPage from "../app/projects/[projectId]/monitoring/setup/page.tsx";
@@ -39,11 +32,20 @@ const ME = {
   projects: [{ id: "prj_2", name: "Outbound", slug: "outbound" }],
 };
 
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+/** Answer the shell's own read, and record every address the page asks for. */
+function watchedFetch(asked: string[]): void {
+  vi.stubGlobal("scrollTo", vi.fn());
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: FetchInput) => {
+      const { path } = await observeRequest(input);
+      asked.push(path);
+      return new Response(JSON.stringify(path === "/api/me" ? ME : {}), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
 }
 
 afterEach(() => {
@@ -51,264 +53,49 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Monitoring setup", () => {
-  it("shows an unexpected Retell response instead of calling the agent active", async () => {
-    vi.stubGlobal("scrollTo", vi.fn());
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: FetchInput) => {
-        const { address: at } = await observeRequest(input);
-        if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/v1/monitoring") {
-          return json(200, {
-            monitoringSources: [
-              {
-                id: "mns_1",
-                projectId: "prj_2",
-                agentPlatform: "retell",
-                strategy: "retell_api_polling",
-                credentialsHint: "cdef",
-                health: {
-                  state: "healthy",
-                  blockedUntil: null,
-                  consecutiveFailures: 0,
-                  lastErrorAt: null,
-                  lastRecoveredAt: null,
-                  lastReceivedAt: null,
-                },
-                agents: [
-                  {
-                    id: "rma_1",
-                    platformAgentId: "agent_1",
-                    platformAgentName: "Front desk",
-                    state: "active",
-                    scanKind: null,
-                    lastSuccessAt: null,
-                    lastConversationAt: null,
-                    lastErrorKind: "provider_contract",
-                    lastErrorAt: "2026-08-20T00:00:00.000Z",
-                    consecutiveFailures: 1,
-                    failures: [],
-                  },
-                ],
-              },
-            ],
-          });
-        }
-        throw new Error(`nothing stubbed for GET ${at.pathname}`);
-      }),
-    );
+/**
+ * There is no monitoring setup object to configure any more (ADR-0015).
+ * Configuration collapsed into the agent: one per-agent switch turns pull on,
+ * and push is never configured at all. This address is kept as the signpost
+ * that says so, and the start-monitoring flow is built on it separately.
+ *
+ * So what is worth holding here is the *absence*: the page must consult no
+ * server state, because a page that read one would be this screen quietly
+ * becoming a second place monitoring is configured.
+ */
+describe("the start-monitoring address", () => {
+  it("says where the choice lives and sends the reader to the agents", async () => {
+    const asked: string[] = [];
+    watchedFetch(asked);
 
     render(<MonitoringSetupPage />);
+
     expect(
-      await screen.findByText(
-        "1 agent received an unexpected Retell response. Egma will retry.",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("Unexpected Retell response")).toBeTruthy();
-    expect(screen.queryByText("Active")).toBeNull();
+      await screen.findByText("Monitoring is set up on the agent."),
+    ).toBeDefined();
+    expect(
+      screen.getByText(/turn on Pull production calls/),
+    ).toBeDefined();
+    // Push needs nothing at all, and the page says so rather than offering a
+    // switch there is no server-side off for.
+    expect(screen.getByText(/needs no setup at all/)).toBeDefined();
+
+    const toAgents = screen.getByRole("link", { name: "Open agents" });
+    expect(toAgents.getAttribute("href")).toBe("/projects/prj_2/agents");
   });
 
-  it("retries one durable Retell import failure and refreshes its status", async () => {
-    const asked: { method: string; path: string }[] = [];
-    let reads = 0;
-    vi.stubGlobal("scrollTo", vi.fn());
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: FetchInput, init?: RequestInit) => {
-        const request = await observeRequest(input, init);
-        const { address: at, method } = request;
-        asked.push({ method, path: at.pathname });
-        if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/v1/monitoring" && method === "GET") {
-          reads += 1;
-          return json(200, {
-            monitoringSources: [
-              {
-                id: "mns_1",
-                projectId: "prj_2",
-                agentPlatform: "retell",
-                strategy: "retell_api_polling",
-                credentialsHint: "cdef",
-                health: {
-                  state: "healthy",
-                  blockedUntil: null,
-                  consecutiveFailures: 0,
-                  lastErrorAt: null,
-                  lastRecoveredAt: null,
-                  lastReceivedAt: null,
-                },
-                agents: [
-                  {
-                    id: "rma_1",
-                    platformAgentId: "agent_1",
-                    platformAgentName: "Front desk",
-                    state: reads === 1 ? "degraded" : "active",
-                    scanKind: null,
-                    lastSuccessAt: null,
-                    lastConversationAt: null,
-                    lastErrorKind: reads === 1 ? "provider_call_not_found" : null,
-                    lastErrorAt: null,
-                    consecutiveFailures: 0,
-                    failures:
-                      reads === 1
-                        ? [
-                            {
-                              id: "rif_1",
-                              providerCallId: "call_1",
-                              errorKind: "provider_call_not_found",
-                              attempts: 1,
-                              status: "open",
-                              lastAttemptAt: "2026-08-20T00:00:00.000Z",
-                              createdAt: "2026-08-20T00:00:00.000Z",
-                            },
-                          ]
-                        : [],
-                  },
-                ],
-              },
-            ],
-          });
-        }
-        if (
-          at.pathname === "/v1/monitoring/retell/failures/rif_1/replay" &&
-          method === "POST"
-        ) {
-          return json(200, {
-            failure: { id: "rif_1", status: "resolved" },
-            trace: { id: "trace_1", write: "written" },
-          });
-        }
-        throw new Error(`nothing stubbed for ${method} ${at.pathname}`);
-      }),
-    );
+  it("reads no server state and offers nothing to save", async () => {
+    const asked: string[] = [];
+    watchedFetch(asked);
 
     render(<MonitoringSetupPage />);
-    expect(await screen.findByText("1 agent needs attention.")).toBeTruthy();
-    expect(screen.getByText("Front desk")).toBeTruthy();
-    expect(screen.getByText("Needs attention")).toBeTruthy();
-    expect(document.querySelector('[data-state-mark="error"]')).toBeTruthy();
-    const retry = await screen.findByRole("button", { name: "Retry import" });
-    fireEvent.click(retry);
+    await screen.findByText("Monitoring is set up on the agent.");
 
-    await waitFor(() => expect(reads).toBe(2));
-    expect(screen.queryByRole("button", { name: "Retry import" })).toBeNull();
-    expect(await screen.findByText("Active")).toBeTruthy();
-    expect(document.querySelector('[data-state-mark="complete"]')).toBeTruthy();
-    expect(asked).toContainEqual({
-      method: "POST",
-      path: "/v1/monitoring/retell/failures/rif_1/replay",
-    });
-  });
-
-  it("asks before it removes a setup", async () => {
-    let deletes = 0;
-    vi.stubGlobal("scrollTo", vi.fn());
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: FetchInput, init?: RequestInit) => {
-        const request = await observeRequest(input, init);
-        const { address: at, method } = request;
-        if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/v1/monitoring" && method === "GET") {
-          return json(200, {
-            monitoringSources:
-              deletes === 0
-                ? [
-                    {
-                      id: "mns_1",
-                      projectId: "prj_2",
-                      agentPlatform: "retell",
-                      strategy: "retell_api_polling",
-                      credentialsHint: "cdef",
-                      health: {
-                        state: "healthy",
-                        blockedUntil: null,
-                        consecutiveFailures: 0,
-                        lastErrorAt: null,
-                        lastRecoveredAt: null,
-                        lastReceivedAt: null,
-                      },
-                      agents: [],
-                    },
-                  ]
-                : [],
-          });
-        }
-        if (at.pathname === "/v1/monitoring/retell" && method === "DELETE") {
-          deletes += 1;
-          return new Response(null, { status: 204 });
-        }
-        throw new Error(`nothing stubbed for ${method} ${at.pathname}`);
-      }),
+    expect(asked.filter((path) => path.startsWith("/v1/monitoring"))).toEqual(
+      [],
     );
-
-    render(<MonitoringSetupPage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Remove setup" }),
-    );
-
-    expect(deletes).toBe(0);
-    const dialog = screen.getByRole("dialog", {
-      name: "Remove Retell Monitoring setup?",
-    });
-    expect(
-      within(dialog).getByText(/stop polling every selected Retell agent/u),
-    ).toBeTruthy();
-    expect(
-      within(dialog).getByText(/production conversations stay/u),
-    ).toBeTruthy();
-    expect(within(dialog).queryByText(/traces stay/u)).toBeNull();
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Remove setup" }),
-    );
-
-    await waitFor(() => expect(deletes).toBe(1));
-  });
-
-  it("protects an unfinished Retell form before switching platforms", async () => {
-    vi.stubGlobal("scrollTo", vi.fn());
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: FetchInput) => {
-        const { address: at } = await observeRequest(input);
-        if (at.pathname === "/api/me") return json(200, ME);
-        if (at.pathname === "/v1/monitoring") {
-          return json(200, { monitoringSources: [] });
-        }
-        throw new Error(`nothing stubbed for GET ${at.pathname}`);
-      }),
-    );
-
-    render(<MonitoringSetupPage />);
-    const platform = await screen.findByLabelText("Agent platform");
-    fireEvent.change(platform, { target: { value: "retell" } });
-    fireEvent.change(screen.getByLabelText("Retell API key"), {
-      target: { value: "secret-key" },
-    });
-    fireEvent.change(platform, { target: { value: "livekit_agents" } });
-
-    const dialog = screen.getByRole("dialog", {
-      name: "Discard Retell setup changes?",
-    });
-    expect(
-      (screen.getByLabelText("Retell API key") as HTMLInputElement).value,
-    ).toBe("secret-key");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Keep editing" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-
-    fireEvent.change(platform, { target: { value: "livekit_agents" } });
-    fireEvent.click(
-      within(
-        screen.getByRole("dialog", {
-          name: "Discard Retell setup changes?",
-        }),
-      ).getByRole("button", { name: "Discard changes" }),
-    );
-
-    expect(
-      await screen.findByRole("heading", { name: "LiveKit Agents" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByLabelText("Retell API key")).toBeNull();
+    expect(screen.queryByLabelText("Agent platform")).toBeNull();
   });
 });

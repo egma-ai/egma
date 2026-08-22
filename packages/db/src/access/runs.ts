@@ -681,7 +681,11 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         triggeredVia: "manual",
         triggeredBy: auth.userId,
         connectionSnapshot: {
-          agentPlatform: reached.agentPlatform,
+          // Derived exactly as a read derives it: the type answers where it
+          // pins one platform, else the agent's own binding does.
+          agentPlatform:
+            platformOfConnectionType(reached.connectionType) ??
+            reached.agentPlatform,
           connectionType: reached.connectionType,
           accessVariant: reached.accessVariant,
           modality: reached.modality,

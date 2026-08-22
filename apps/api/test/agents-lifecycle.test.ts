@@ -186,81 +186,77 @@ describe("the agent list a browser reads", () => {
 });
 
 describe("the Egma-owned half of an agent", () => {
-  it("is a name and a description, and never the provider's configuration", async () => {
+  it("is a name and a platform binding, never the provider's configuration", async () => {
     api = await createApi("agents_browser_identity");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
     const edited = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      name: "Front desk",
-      description: "Answers the main line",
-      expectedRevision: agent.revision,
+      name: "Front desk, renamed",
     });
     expect(edited.status).toBe(200);
-    expect(held<AgentBody>(edited, "agent").description).toBe(
-      "Answers the main line",
-    );
+    expect(held<AgentBody>(edited, "agent").name).toBe("Front desk, renamed");
 
     // No prompt, no model, no tools: those live at the provider, and a read
-    // carrying a copy would be a copy going stale.
+    // carrying a copy would be a copy going stale. No description either — it
+    // was dropped pre-launch (ADR-0015).
     const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
     const shape = held<Record<string, unknown>>(read, "agent");
     for (const provider of ["prompt", "model", "tools", "voice", "pulled"]) {
       expect(Object.keys(shape)).not.toContain(provider);
     }
+    expect(Object.keys(shape)).not.toContain("description");
+    expect(Object.keys(shape)).not.toContain("revision");
 
-    // And an edit that tried to set one is refused by name rather than having
-    // the key quietly dropped.
+    // What it does carry: where the agent lives, and whether egma pulls its
+    // production calls. Unbound and off until somebody says otherwise.
+    expect(shape).toMatchObject({
+      agentPlatform: null,
+      platformAgentId: null,
+      monitoringKeyPresent: false,
+      pullProductionCalls: false,
+    });
+
+    // And an edit that tried to set the provider's own configuration is
+    // refused by name rather than having the key quietly dropped.
     const tried = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       prompt: "You are a helpful agent",
-      expectedRevision: held<AgentBody>(edited, "agent").revision,
     });
     expect(tried.status).toBe(400);
     expect(String(tried.body.message)).toContain("prompt");
   });
 
-  it("refuses an edit written against a revision the agent has moved past", async () => {
-    api = await createApi("agents_browser_stale_edit");
+  it("takes the last write, because there is no revision to be stale against", async () => {
+    // The column was dropped pre-launch (ADR-0015). Two editors on one agent
+    // is a silent overwrite now — the exact failure the revision existed to
+    // stop, accepted with eyes open — and a browser that still sent one is
+    // refused by name rather than having it quietly ignored.
+    api = await createApi("agents_browser_last_writer_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
     const agent = await anAgent(ada, "Front desk");
 
-    // Two editors open the same agent. The first saves.
     const first = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      description: "Edited first",
-      expectedRevision: agent.revision,
+      name: "Edited first",
     });
     expect(first.status).toBe(200);
 
-    // The second saves against what it read, and is told rather than winning.
     const second = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      description: "Edited second",
-      expectedRevision: agent.revision,
+      name: "Edited second",
     });
-    expect(second.status).toBe(409);
-    expect(second.body.error).toBe("identity_conflict");
-    expect(second.body.message).toBe(
-      `agent ${agent.id} changed after you opened it. Read it again, keep or ` +
-        `reapply your edits, and send the update with expectedRevision set ` +
-        `to its new revision.`,
-    );
+    expect(second.status).toBe(200);
 
-    // And the first editor's work is exactly where they left it.
     const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(read, "agent").description).toBe("Edited first");
-  });
+    expect(held<AgentBody>(read, "agent").name).toBe("Edited second");
 
-  it("makes a browser say which revision it was written against", async () => {
-    api = await createApi("agents_browser_revision_required");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const agent = await anAgent(ada, "Front desk");
-
-    const blind = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      description: "No revision named",
+    const stale = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
+      name: "Edited third",
+      expectedRevision: "rev_00000000000000000000000001",
     });
-    expect(blind.status).toBe(422);
-    expect(blind.body.error).toBe("unprocessable");
+    expect(stale.status).toBe(400);
+    expect(String(stale.body.message)).toContain("expectedRevision");
   });
+
+
 });
 
 describe("archiving an agent", () => {
@@ -359,80 +355,53 @@ function movedOn(resource: "agent" | "connection", id: string): string {
 }
 
 /**
- * Archive and Restore are identity writes, and they are guarded exactly as an
- * edit is.
+ * Archive and Restore are identity writes, and nothing guards them any more.
  *
- * **Every other Archive and Restore in this file sends the revision it read a
- * line earlier**, so a handler that took `expectedRevision` and dropped it
- * would leave all of them green. What that would let through is the race the
- * guard exists for: one tab archives an agent while another, holding a page
- * from before a rename, restores it — and neither person is ever told that
- * they were looking at different things.
- *
- * These are the twins of "refuses an edit written against a revision the agent
- * has moved past", and they are written so Agents read the way Personas
- * already do.
+ * The revision column was dropped from `agent` and `connection` pre-launch
+ * (ADR-0015), so the race this block used to prove — one tab archiving while
+ * another, holding a page from before a rename, restores — now resolves
+ * silently in favour of whoever wrote last. That is the accepted consequence,
+ * written down here so that a reader meets it rather than assuming a guard
+ * that is gone.
  */
-describe("the revision an Archive or a Restore is written against", () => {
-  it("guards Archive and Restore on the same terms, for an agent", async () => {
-    api = await createApi("agents_browser_archive_stale_revision");
+describe("what an Archive or a Restore is written against", () => {
+  it("is nothing: a stale tab's Archive simply lands", async () => {
+    api = await createApi("agents_browser_archive_last_writer_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
 
-    // Two tabs on the same agent. The first renames it, which moves the
-    // revision the second is still holding.
+    // Two tabs on the same agent. The first renames it; the second is still
+    // holding the page from before, and is told nothing about that.
     const renamed = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       name: "Front desk, renamed",
-      expectedRevision: agent.revision,
     });
     expect(renamed.status).toBe(200);
-    const current = held<AgentBody>(renamed, "agent").revision;
-
-    const stale = await browser("POST", `/v1/agents/${agent.id}/archive`, ada, {
-      expectedRevision: agent.revision,
-    });
-    expect(stale.status).toBe(409);
-    expect(stale.body.error).toBe("identity_conflict");
-    expect(stale.body.message).toBe(movedOn("agent", agent.id));
-
-    // Refused means nothing written: the agent is still in new work.
-    const standing = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(standing, "agent").archived).toBe(false);
 
     const archived = await browser(
       "POST",
       `/v1/agents/${agent.id}/archive`,
       ada,
-      { expectedRevision: current },
+      {},
     );
     expect(archived.status).toBe(200);
-    const afterArchive = held<AgentBody>(archived, "agent").revision;
+    expect(held<AgentBody>(archived, "agent").archived).toBe(true);
+    // The rename survives the Archive: last-writer-wins is per write, not a
+    // rollback of what somebody else already landed.
+    expect(held<AgentBody>(archived, "agent").name).toBe("Front desk, renamed");
 
-    // The revision the Archive replaced is exactly what a page opened before it
-    // is holding, and Restore refuses it for the same reason.
-    const staleRestore = await browser(
+    const back = await browser(
       "POST",
       `/v1/agents/${agent.id}/restore`,
       ada,
-      { expectedRevision: current },
+      {},
     );
-    expect(staleRestore.status).toBe(409);
-    expect(staleRestore.body.error).toBe("identity_conflict");
-    expect(staleRestore.body.message).toBe(movedOn("agent", agent.id));
-
-    const filed = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(filed, "agent").archived).toBe(true);
-
-    const back = await browser("POST", `/v1/agents/${agent.id}/restore`, ada, {
-      expectedRevision: afterArchive,
-    });
     expect(back.status).toBe(200);
     expect(held<AgentBody>(back, "agent").archived).toBe(false);
   });
 
-  it("guards Archive and Restore on the same terms, for a connection", async () => {
-    api = await createApi("agents_browser_connection_stale_revision");
+  it("is nothing for a connection either", async () => {
+    api = await createApi("agents_browser_connection_last_writer_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
@@ -441,50 +410,21 @@ describe("the revision an Archive or a Restore is written against", () => {
 
     const renamed = await browser("PATCH", at, ada, {
       name: "staging, renamed",
-      expectedRevision: wiring.revision,
     });
     expect(renamed.status).toBe(200);
-    const current = held<ConnectionBody>(renamed, "connection").revision;
 
-    const stale = await browser("POST", `${at}/archive`, ada, {
-      expectedRevision: wiring.revision,
-    });
-    expect(stale.status).toBe(409);
-    expect(stale.body.error).toBe("identity_conflict");
-    expect(stale.body.message).toBe(movedOn("connection", wiring.id));
-
-    // Nothing written, so the target is still reachable — which matters more
-    // here than on the agent: an Archive that landed would have settled the
-    // work going over it.
-    const standing = await browser("GET", at, ada);
-    expect(held<ConnectionBody>(standing, "connection").archived).toBe(false);
-
-    const archived = await browser("POST", `${at}/archive`, ada, {
-      expectedRevision: current,
-    });
+    const archived = await browser("POST", `${at}/archive`, ada, {});
     expect(archived.status).toBe(200);
-    const afterArchive = held<ConnectionBody>(archived, "connection").revision;
+    expect(held<ConnectionBody>(archived, "connection").archived).toBe(true);
 
-    // The Restore carries the credential `retell` requires, so the revision is
-    // the only thing left that can refuse it.
-    const credential = {
-      choice: "replace",
-      credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
-    };
-    const staleRestore = await browser("POST", `${at}/restore`, ada, {
-      expectedRevision: current,
-      credential,
-    });
-    expect(staleRestore.status).toBe(409);
-    expect(staleRestore.body.error).toBe("identity_conflict");
-    expect(staleRestore.body.message).toBe(movedOn("connection", wiring.id));
-
-    const filed = await browser("GET", at, ada);
-    expect(held<ConnectionBody>(filed, "connection").archived).toBe(true);
-
+    // A Retell chat connection's credential does not come back with it, so a
+    // Restore still has to bring one. That rule is the access variant's, not
+    // the revision's, and it is untouched by this pass.
     const back = await browser("POST", `${at}/restore`, ada, {
-      expectedRevision: afterArchive,
-      credential,
+      credential: {
+        choice: "replace",
+        credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
+      },
     });
     expect(back.status).toBe(200);
     expect(held<ConnectionBody>(back, "connection").archived).toBe(false);

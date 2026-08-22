@@ -555,7 +555,11 @@ describe("registering an agent", () => {
     expect(agentOf(registered)).toMatchObject({
       name: "Front desk",
       projectId: ada.projectId,
-      description: null,
+      // A registration binds no platform and turns no switch on. Monitoring is
+      // its own decision, taken later on the agent (ADR-0015).
+      agentPlatform: null,
+      platformAgentId: null,
+      pullProductionCalls: false,
     });
     expect(connectionOf(registered)).toMatchObject({
       agentId: agentOf(registered).id,
@@ -614,15 +618,12 @@ describe("registering an agent", () => {
 
     const claimed = await post("/v1/agents", withKey(ada.secret), {
       name: "Not wired yet",
-      description: "credentials are still with the platform team",
     });
 
     expect(claimed.status).toBe(201);
     expect(claimed.body.result).toBe("created");
     expect(claimed.body).not.toHaveProperty("connection");
-    expect(agentOf(claimed).description).toBe(
-      "credentials are still with the platform team",
-    );
+    expect(agentOf(claimed).name).toBe("Not wired yet");
   });
 
   it("refuses a registration with no name, in the factory's own words", async () => {
@@ -1480,7 +1481,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "description, projectId, connection; the agent's content stays at the " +
+        "projectId, connection; the agent's content stays at the " +
         "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
@@ -1529,7 +1530,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a registration has no key "organization"; it holds name, description, projectId, connection',
+        'a registration has no key "organization"; it holds name, projectId, connection',
     });
   });
 

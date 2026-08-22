@@ -782,6 +782,7 @@ export async function failMonitoringPull(
       .select({
         credentials: agent.monitoringApiKey,
         consecutiveFailures: monitoringState.consecutiveFailures,
+        nextPollAt: monitoringState.nextPollAt,
       })
       .from(monitoringState)
       .innerJoin(agent, eq(agent.id, monitoringState.agentId))
@@ -1088,7 +1089,16 @@ export type MonitoringFailureReplayClaim =
     }
   | {
       readonly kind: "busy";
-      readonly reason: MonitoringFailureKind | "replay_in_progress";
+      /**
+       * `backing_off` is the agent's own retry clock, and it is deliberately
+       * mute about what the provider said. The account-wide health state that
+       * used to name the cause is gone (ADR-0015), so all the server truthfully
+       * knows here is *this agent is waiting until `retryAt`*.
+       */
+      readonly reason:
+        | MonitoringFailureKind
+        | "replay_in_progress"
+        | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "not_found" };
@@ -1129,6 +1139,7 @@ export async function claimMonitoringFailureReplay(
         platformAgentName: agent.name,
         credentials: agent.monitoringApiKey,
         consecutiveFailures: monitoringState.consecutiveFailures,
+        nextPollAt: monitoringState.nextPollAt,
       })
       .from(monitoringFailure)
       .innerJoin(
@@ -1162,6 +1173,24 @@ export async function claimMonitoringFailureReplay(
         kind: "busy",
         reason: "replay_in_progress",
         retryAt: candidate.replayLeaseExpiresAt,
+      } as const;
+    }
+    // The agent's retry clock gates the explicit replay too, and it has to:
+    // without this, a customer pressing Retry would spend the provider request
+    // the backoff was taken to stop, and a rate limit would be answered by
+    // asking again. The gate is the failure streak *and* the clock together —
+    // `next_poll_at` also carries the ordinary 30-second cadence, and an
+    // explicit replay must never wait for that.
+    if (
+      candidate.consecutiveFailures !== null &&
+      candidate.consecutiveFailures > 0 &&
+      candidate.nextPollAt !== null &&
+      candidate.nextPollAt > now
+    ) {
+      return {
+        kind: "busy",
+        reason: "backing_off",
+        retryAt: candidate.nextPollAt,
       } as const;
     }
     const apiKey = openedMonitoringKey(candidate.credentials);

@@ -503,7 +503,7 @@ export const CONDUCTABLE_KINDS: readonly string[] = CONNECTION_TYPES.filter(
 );
 
 /** What a registration holds, and what a connection holds. Nothing else. */
-const AGENT_KEYS = ["name", "description", "projectId", "connection"] as const;
+const AGENT_KEYS = ["name", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -762,7 +762,6 @@ type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
-  description: string | null;
   readonly createdAt: string;
   updatedAt: string;
 };
@@ -773,7 +772,11 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
     id: agent.id,
     projectId: agent.projectId,
     name: agent.name,
-    description: agent.description,
+    agentPlatform: null,
+    platformAgentId: null,
+    monitoringKeyPresent: false,
+    monitoringApiKeyHint: null,
+    pullProductionCalls: false,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   };
@@ -1193,7 +1196,6 @@ export function agentRoutes(options: {
               id: newId("agt"),
               projectId,
               name,
-              description: typeof body["description"] === "string" ? body["description"] : null,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             };

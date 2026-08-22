@@ -471,7 +471,10 @@ export type RetellIngestionFailureReplayResult =
   | { readonly kind: "not_found" }
   | {
       readonly kind: "busy";
-      readonly reason: MonitoringFailureKind | "replay_in_progress";
+      readonly reason:
+        | MonitoringFailureKind
+        | "replay_in_progress"
+        | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "lease_lost" }

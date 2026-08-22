@@ -592,7 +592,10 @@ describe("every enumerated value", () => {
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
-      { table: "connection", column: "agent_platform" },
+      // The platform is the agent's, not the connection's (ADR-0015). A
+      // connection answers "which platform" from its type or through its
+      // agent, and holds no column of its own to enumerate.
+      { table: "agent", column: "agent_platform" },
       { table: "connection", column: "connection_type" },
       { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
@@ -606,6 +609,9 @@ describe("every enumerated value", () => {
       { table: "simulation", column: "modality" },
       { table: "run_event", column: "kind" },
       { table: "run_event", column: "verdict" },
+      { table: "monitoring_state", column: "scan_kind" },
+      { table: "monitoring_failure", column: "status" },
+      { table: "production_trace_claim", column: "status" },
     ];
 
     const { rows } = await database.sql<{

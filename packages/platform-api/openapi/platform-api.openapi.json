@@ -504,9 +504,6 @@
                   "name": {
                     "type": "string"
                   },
-                  "description": {
-                    "type": "string"
-                  },
                   "connection": {
                     "type": "object",
                     "properties": {
@@ -634,7 +631,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -644,9 +655,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -675,8 +698,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -780,10 +806,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -822,7 +844,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -869,7 +890,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -879,9 +914,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -910,8 +957,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1015,10 +1065,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -1057,7 +1103,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1250,7 +1295,21 @@
                           "name": {
                             "type": "string"
                           },
-                          "description": {
+                          "agentPlatform": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "retell",
+                                  "livekit_agents"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "platformAgentId": {
                             "anyOf": [
                               {
                                 "type": "string"
@@ -1260,9 +1319,21 @@
                               }
                             ]
                           },
-                          "revision": {
-                            "type": "string",
-                            "minLength": 1
+                          "monitoringKeyPresent": {
+                            "type": "boolean"
+                          },
+                          "monitoringApiKeyHint": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "pullProductionCalls": {
+                            "type": "boolean"
                           },
                           "archived": {
                             "type": "boolean"
@@ -1384,10 +1455,6 @@
                                     }
                                   ]
                                 },
-                                "revision": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
                                 "archived": {
                                   "type": "boolean"
                                 },
@@ -1426,7 +1493,6 @@
                                 "config",
                                 "credentialPresent",
                                 "credentialsHint",
-                                "revision",
                                 "archived",
                                 "archivedAt",
                                 "createdAt",
@@ -1440,8 +1506,11 @@
                           "id",
                           "projectId",
                           "name",
-                          "description",
-                          "revision",
+                          "agentPlatform",
+                          "platformAgentId",
+                          "monitoringKeyPresent",
+                          "monitoringApiKeyHint",
+                          "pullProductionCalls",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -1599,7 +1668,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -1609,9 +1692,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -1640,8 +1735,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1747,10 +1845,6 @@
                               }
                             ]
                           },
-                          "revision": {
-                            "type": "string",
-                            "minLength": 1
-                          },
                           "archived": {
                             "type": "boolean"
                           },
@@ -1789,7 +1883,6 @@
                           "config",
                           "credentialPresent",
                           "credentialsHint",
-                          "revision",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -1912,20 +2005,6 @@
                 "properties": {
                   "name": {
                     "type": "string"
-                  },
-                  "description": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -1955,7 +2034,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -1965,9 +2058,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -1996,8 +2101,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2342,10 +2450,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2384,7 +2488,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2534,12 +2637,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false
               }
             }
@@ -2567,7 +2665,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -2577,9 +2689,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -2608,8 +2732,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2773,10 +2900,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "name": {
                     "type": "string"
                   }
@@ -2808,7 +2931,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -2818,9 +2955,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -2849,8 +2998,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3107,10 +3259,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3149,7 +3297,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3297,10 +3444,6 @@
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -3412,10 +3555,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3454,7 +3593,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3613,12 +3751,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false
               }
             }
@@ -3728,10 +3861,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3770,7 +3899,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3935,10 +4063,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "name": {
                     "type": "string"
                   },
@@ -4085,10 +4209,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4127,7 +4247,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",

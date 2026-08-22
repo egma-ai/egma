@@ -477,6 +477,76 @@ describe("the poison-call record", () => {
     expect(await listMonitoringFailures(at(acme, ada), agentId)).toHaveLength(0);
   });
 
+  it("will not spend a provider request while the agent is backing off", async () => {
+    const { agentId } = await failed();
+    const [failure] = await listMonitoringFailures(at(acme, ada), agentId);
+
+    // What a refused provider turn leaves behind: a failure streak and a clock.
+    const backedOffUntil = new Date(SETUP_TIME.getTime() + 60_000);
+    await database.sql(
+      `update monitoring_state set consecutive_failures = 1, ` +
+        `next_poll_at = '${backedOffUntil.toISOString()}' ` +
+        `where agent_id = '${agentId}'`,
+    );
+
+    const gated = await claimMonitoringFailureReplay(
+      at(acme, ada),
+      failure?.id ?? "",
+      { now: SETUP_TIME },
+    );
+    expect(gated).toEqual({
+      kind: "busy",
+      reason: "backing_off",
+      retryAt: backedOffUntil,
+    });
+  });
+
+  it("lets an explicit replay through the ordinary poll cadence", async () => {
+    // `next_poll_at` also carries the every-30-seconds cadence, and a customer
+    // pressing Retry must never be made to wait for that. Only a failure streak
+    // turns the clock into a gate.
+    const { agentId } = await failed();
+    const [failure] = await listMonitoringFailures(at(acme, ada), agentId);
+    await database.sql(
+      `update monitoring_state set consecutive_failures = 0, ` +
+        `next_poll_at = '${new Date(SETUP_TIME.getTime() + 30_000).toISOString()}' ` +
+        `where agent_id = '${agentId}'`,
+    );
+
+    const claim = await claimMonitoringFailureReplay(
+      at(acme, ada),
+      failure?.id ?? "",
+      { now: SETUP_TIME },
+    );
+    expect(claim.kind).toBe("claimed");
+  });
+
+  it("clears the gate when the key is replaced", async () => {
+    const { agentId } = await failed();
+    const [failure] = await listMonitoringFailures(at(acme, ada), agentId);
+    await database.sql(
+      `update monitoring_state set consecutive_failures = 3, ` +
+        `next_poll_at = '9999-12-31T23:59:59.999Z' where agent_id = '${agentId}'`,
+    );
+
+    // Rotating the key is what a customer does about a refused one, and it is
+    // what puts the agent back in the queue.
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    });
+
+    const claim = await claimMonitoringFailureReplay(
+      at(acme, ada),
+      failure?.id ?? "",
+      { now: SETUP_TIME },
+    );
+    expect(claim.kind).toBe("claimed");
+  });
+
   it("answers an unknown failure the same way it answers another tenant's", async () => {
     await failed();
     expect(

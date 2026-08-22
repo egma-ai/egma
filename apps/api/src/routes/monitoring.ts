@@ -178,6 +178,18 @@ export async function monitoringRoutes(
             "Retell did not answer this retry. Try again.",
           );
         }
+        // The agent is already waiting out its own retry clock, which this
+        // retry would otherwise spend a provider request against. There is no
+        // stored health state to say why any more, so the honest answer is the
+        // wait itself and when it ends.
+        if (replayed.reason === "backing_off") {
+          return sendRefusal(
+            reply,
+            "too_many_requests",
+            "This agent is waiting before it asks Retell again, until " +
+              `${replayed.retryAt.toISOString()}. Try the retry after that.`,
+          );
+        }
         return sendRefusal(
           reply,
           "conflict",

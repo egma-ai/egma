@@ -98,7 +98,6 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
-    description?: string;
     connection?: {
         name?: string;
         agentPlatform: 'retell' | 'livekit_agents' | null;
@@ -126,7 +125,6 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'name' },
-                { in: 'body', key: 'description' },
                 { in: 'body', key: 'connection' }
             ] }]);
     return (options?.client ?? client).post<RegisterAgentResponses, RegisterAgentErrors, ThrowOnError>({
@@ -178,15 +176,11 @@ export const updateAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
     name?: string;
-    description?: string | null;
-    expectedRevision?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'name' },
-                { in: 'body', key: 'description' },
-                { in: 'body', key: 'expectedRevision' }
+                { in: 'body', key: 'name' }
             ] }]);
     return (options?.client ?? client).patch<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -266,12 +260,14 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
 export const archiveAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
-    expectedRevision?: string;
+    body?: {
+        [key: string]: never;
+    };
 }, options?: Options<never, ThrowOnError>): RequestResult<ArchiveAgentResponses, ArchiveAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' }
+                { key: 'body', map: 'body' }
             ] }]);
     return (options?.client ?? client).post<ArchiveAgentResponses, ArchiveAgentErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -296,13 +292,11 @@ export const archiveAgent = <ThrowOnError extends boolean = false>(parameters: {
 export const restoreAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
-    expectedRevision?: string;
     name?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<RestoreAgentResponses, RestoreAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' },
                 { in: 'body', key: 'name' }
             ] }]);
     return (options?.client ?? client).post<RestoreAgentResponses, RestoreAgentErrors, ThrowOnError>({
@@ -362,7 +356,6 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
     credentials?: {
         [key: string]: unknown;
     };
-    expectedRevision?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
@@ -371,8 +364,7 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'environment' },
                 { in: 'body', key: 'config' },
-                { in: 'body', key: 'credentials' },
-                { in: 'body', key: 'expectedRevision' }
+                { in: 'body', key: 'credentials' }
             ] }]);
     return (options?.client ?? client).patch<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -398,13 +390,15 @@ export const archiveConnection = <ThrowOnError extends boolean = false>(paramete
     agentId: string;
     connectionId: string;
     projectId?: string;
-    expectedRevision?: string;
+    body?: {
+        [key: string]: never;
+    };
 }, options?: Options<never, ThrowOnError>): RequestResult<ArchiveConnectionResponses, ArchiveConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'path', key: 'connectionId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' }
+                { key: 'body', map: 'body' }
             ] }]);
     return (options?.client ?? client).post<ArchiveConnectionResponses, ArchiveConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -430,7 +424,6 @@ export const restoreConnection = <ThrowOnError extends boolean = false>(paramete
     agentId: string;
     connectionId: string;
     projectId?: string;
-    expectedRevision?: string;
     name?: string;
     credential?: {
         choice: 'replace';
@@ -445,7 +438,6 @@ export const restoreConnection = <ThrowOnError extends boolean = false>(paramete
                 { in: 'path', key: 'agentId' },
                 { in: 'path', key: 'connectionId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'credential' }
             ] }]);

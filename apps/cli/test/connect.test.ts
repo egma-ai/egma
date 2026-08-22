@@ -391,7 +391,6 @@ describe("what lands on the platform", () => {
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
       "createdAt",
-      "description",
       "id",
       "name",
       "projectId",
@@ -432,7 +431,7 @@ describe("what lands on the platform", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "description, projectId, connection; the agent's content stays at the " +
+        "projectId, connection; the agent's content stays at the " +
         "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });

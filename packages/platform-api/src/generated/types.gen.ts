@@ -200,8 +200,11 @@ export type ListAgentsResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -223,7 +226,6 @@ export type ListAgentsResponses = {
                 };
                 credentialPresent: boolean;
                 credentialsHint: string | null;
-                revision: string;
                 archived: boolean;
                 archivedAt: string | null;
                 createdAt: string;
@@ -239,7 +241,6 @@ export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses];
 export type RegisterAgentData = {
     body: {
         name: string;
-        description?: string;
         connection?: {
             name?: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
@@ -318,8 +319,11 @@ export type RegisterAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -342,7 +346,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -358,8 +361,11 @@ export type RegisterAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -382,7 +388,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -439,8 +444,11 @@ export type GetAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -463,7 +471,6 @@ export type GetAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -477,8 +484,6 @@ export type GetAgentResponse = GetAgentResponses[keyof GetAgentResponses];
 export type UpdateAgentData = {
     body?: {
         name?: string;
-        description?: string | null;
-        expectedRevision?: string;
     };
     path: {
         agentId: string;
@@ -535,8 +540,11 @@ export type UpdateAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -639,7 +647,6 @@ export type AddConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -652,7 +659,7 @@ export type AddConnectionResponse = AddConnectionResponses[keyof AddConnectionRe
 
 export type ArchiveAgentData = {
     body?: {
-        expectedRevision?: string;
+        [key: string]: never;
     };
     path: {
         agentId: string;
@@ -709,8 +716,11 @@ export type ArchiveAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -725,7 +735,6 @@ export type ArchiveAgentResponse = ArchiveAgentResponses[keyof ArchiveAgentRespo
 
 export type RestoreAgentData = {
     body?: {
-        expectedRevision?: string;
         name?: string;
     };
     path: {
@@ -783,8 +792,11 @@ export type RestoreAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -854,7 +866,6 @@ export type GetConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -875,7 +886,6 @@ export type UpdateConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
-        expectedRevision?: string;
     };
     path: {
         agentId: string;
@@ -946,7 +956,6 @@ export type UpdateConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -959,7 +968,7 @@ export type UpdateConnectionResponse = UpdateConnectionResponses[keyof UpdateCon
 
 export type ArchiveConnectionData = {
     body?: {
-        expectedRevision?: string;
+        [key: string]: never;
     };
     path: {
         agentId: string;
@@ -1030,7 +1039,6 @@ export type ArchiveConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1044,7 +1052,6 @@ export type ArchiveConnectionResponse = ArchiveConnectionResponses[keyof Archive
 
 export type RestoreConnectionData = {
     body?: {
-        expectedRevision?: string;
         name?: string;
         credential?: {
             choice: 'replace';
@@ -1124,7 +1131,6 @@ export type RestoreConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;

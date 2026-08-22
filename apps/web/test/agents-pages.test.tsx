@@ -127,8 +127,11 @@ const AGENT = {
   id: "agt_1",
   projectId: "prj_1",
   name: "Front desk",
-  description: "Answers the main line.",
-  revision: "rev_one",
+  agentPlatform: null,
+  platformAgentId: null,
+  monitoringKeyPresent: false,
+  monitoringApiKeyHint: null,
+  pullProductionCalls: false,
   archived: false,
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
@@ -150,7 +153,6 @@ const CONNECTION = {
   config: { retellAgentId: "agent_abc" },
   credentialPresent: true,
   credentialsHint: "WXYZ",
-  revision: "rev_con_one",
   archived: false,
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
@@ -842,26 +844,26 @@ describe("one agent's page", () => {
     ).toBe(false);
   });
 
-  it("sends the revision it was opened on, and keeps the edit when it is stale", async () => {
+  it("saves the name with no revision, because edits are last-writer-wins", async () => {
+    // The revision column was dropped pre-launch (ADR-0015), so there is
+    // nothing for the save to be written against and no conflict to show. Two
+    // browsers editing one agent is a silent overwrite now — accepted with
+    // eyes open, and the exact failure the column existed to stop.
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents/agt_1": [
         { status: 200, body: { agent: AGENT, connections: [] } },
-        {
-          status: 409,
-          body: {
-            error: "identity_conflict",
-            message:
-              "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
-          },
-        },
+        { status: 200, body: { agent: AGENT, connections: [] } },
       ],
     });
     render(<AgentDetailPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Rewritten while somebody else was editing" },
+    // There is no description to edit either; the name is the whole of what
+    // egma owns about an agent's identity.
+    expect(screen.queryByLabelText("Description")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Renamed front desk" },
     });
     const save = screen.getByRole("button", { name: "Save" });
     expectSharedFormLayout(save);
@@ -869,18 +871,8 @@ describe("one agent's page", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("PATCH");
-    expect(sent[0]?.body.expectedRevision).toBe("rev_one");
-
-    // The conflict is shown in egma's own words and the work stays on screen:
-    // reading again is one click, retyping is not.
-    expect(
-      await screen.findByText(
-        "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
-      ),
-    ).toBeDefined();
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("Rewritten while somebody else was editing");
+    expect(sent[0]?.body).toEqual({ name: "Renamed front desk" });
+    expect(sent[0]?.body).not.toHaveProperty("expectedRevision");
   });
 
 });
@@ -1348,7 +1340,6 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "Primary Retell connection",
       config: { retellAgentId: "agent_moved" },
-      expectedRevision: "rev_con_one",
     });
   });
 
@@ -1383,7 +1374,6 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "staging",
       config: { url: "wss://example.livekit.cloud" },
-      expectedRevision: "rev_con_one",
     });
 
     cleanup();
@@ -1429,7 +1419,6 @@ describe("one connection's page", () => {
         url: "wss://example.livekit.cloud",
         agentName: "customer-support",
       },
-      expectedRevision: "rev_con_one",
     });
   });
 
