@@ -50,7 +50,7 @@ function catalog(): Record<string, unknown> {
       {
         agentPlatform: "livekit_agents",
         agentPlatformLabel: "LiveKit Agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
         accessVariantLabel: "LiveKit project credentials — Recommended",
         modality: "voice",
@@ -72,7 +72,7 @@ function catalog(): Record<string, unknown> {
       {
         agentPlatform: "livekit_agents",
         agentPlatformLabel: "LiveKit Agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
         accessVariantLabel: "Customer token endpoint — Advanced",
         modality: "voice",
@@ -248,7 +248,7 @@ describe("LiveKit in the wizard", () => {
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]).toMatchObject({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: shape.variant,
       modality: "voice",
       config: shape.config,

@@ -98,7 +98,7 @@ const TRACE: TraceFacts = {
   // Nothing egma dialled: production telemetry arrives by export, so a
   // monitored exchange names the platform that ran the agent and no egma
   // connection. `transcripts.test.ts` reads the same shape off the API.
-  connectionKind: "",
+  connectionType: "",
   providerCallId: "egma-fixture-capture-1",
   agentPlatform: "livekit_agents",
   platformAgentId: "agent_7f3c",

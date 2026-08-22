@@ -417,7 +417,7 @@ describe("what lands on the platform", () => {
         pulled: { vendor: "retell", documents: [], prompt: null, voice: null, tools: [] },
         connection: {
           agentPlatform: "retell",
-          connectionKind: "retell_chat_api",
+          connectionType: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001" },
@@ -452,7 +452,7 @@ describe("what lands on the platform", () => {
     expect(connection?.id).toMatch(/^con_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(connection?.name).toBe("retell_chat_api-1");
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionKind).toBe("retell_chat_api");
+    expect(connection?.connectionType).toBe("retell_chat_api");
     expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
     expect(connection?.modality).toBe("chat");
     expect(connection?.productLabel).toBe("Retell chat");
@@ -657,7 +657,7 @@ describe("the platform's own rules, held by the fixture", () => {
         name: "front-desk",
         connection: {
           agentPlatform: null,
-          connectionKind: "phone_number",
+          connectionType: "phone_number",
           accessVariant: "phone_number.public_e164",
           modality: "chat",
           config: { phoneNumber: "+15551234567" },
@@ -681,7 +681,7 @@ describe("the platform's own rules, held by the fixture", () => {
         name: "front-desk",
         connection: {
           agentPlatform: "retell",
-          connectionKind: "retell_chat_api",
+          connectionType: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_0001", retellLlmId: "llm_0001" },
@@ -705,7 +705,7 @@ describe("the platform's own rules, held by the fixture", () => {
         name: "front-desk",
         connection: {
           agentPlatform: null,
-          connectionKind: "phone_number",
+          connectionType: "phone_number",
           accessVariant: "phone_number.public_e164",
           modality: "voice",
           config: { phoneNumber: "+15551234567" },
@@ -732,7 +732,7 @@ describe("the platform's own rules, held by the fixture", () => {
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0002" },
@@ -751,7 +751,7 @@ describe("the platform's own rules, held by the fixture", () => {
       body: JSON.stringify({
         name: "retell_chat_api-1",
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_0003" },
