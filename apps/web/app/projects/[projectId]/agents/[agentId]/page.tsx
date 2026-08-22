@@ -380,7 +380,7 @@ function ProductionCalls({
     return (
       <Section
         title="Production calls"
-        lead="This agent's own process sends its spans to Egma. There is no switch to turn on."
+        lead="This agent's own process reports its production calls to Egma. There is no switch to turn on."
         action={
           <Button asChild variant="secondary">
             <Link href={startMonitoringPath(projectId)}>
@@ -394,7 +394,7 @@ function ProductionCalls({
             { label: "Platform", value: "LiveKit Agents" },
             {
               label: "How evidence arrives",
-              value: "Pushed by the agent, using this project's API key.",
+              value: "Reported by the agent, using this project's API key.",
             },
           ]}
         />

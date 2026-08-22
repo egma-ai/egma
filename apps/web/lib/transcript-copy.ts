@@ -119,10 +119,15 @@ export const QUIET = {
   },
   setUp: {
     title: "Nothing has been recorded here yet",
+    /*
+     * **No storage word, and none of the banned ones.** These two pages read
+     * the product's own vocabulary, so what a Retell agent did in production
+     * is what Egma pulls, and a LiveKit Agents agent reports its own work.
+     */
     lead:
-      "Start monitoring an agent. Egma pulls a Retell agent's calls with its " +
-      "own key; a LiveKit Agents agent pushes its own spans and needs no " +
-      "switch at all.",
+      "Start monitoring an agent. Egma pulls what a Retell agent did in " +
+      "production, using that agent's own key; a LiveKit Agents agent " +
+      "reports its own work and needs no switch at all.",
   },
   organizationKey: {
     title: "A key here names the whole organization",

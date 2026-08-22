@@ -509,6 +509,77 @@ describe("the Retell path", () => {
  * second account, because the commit that follows would send one account's
  * platform agent ids with the other account's key.
  */
+/**
+ * **A binding belongs to the account that holds it.**
+ *
+ * The stored binding and a chat connection's prefill were both decided against
+ * some earlier Retell account. Pointed at a key for a different account, that
+ * id means nothing there — committing it would seal the new account's key onto
+ * an identity the new account does not have, and Egma would poll forever for
+ * an agent that is not there.
+ */
+describe("a prefilled binding the account does not hold", () => {
+  it("binds while the listing holds it, and stops binding when it does not", async () => {
+    const { seen } = stub({
+      agents: [agent({ connections: [connection()] })],
+      account: [
+        // The first account holds the prefilled id.
+        [accountAgent()],
+        // The second does not, and offers a different agent entirely.
+        [accountAgent({ id: "agent_elsewhere_1", name: "Elsewhere" })],
+      ],
+    });
+    render(<StartMonitoringPage />);
+
+    fireEvent.change(await screen.findByLabelText("Agent"), {
+      target: { value: "agt_1" },
+    });
+    await listTheAccount();
+
+    // The connection's retellAgentId is on this account, so it is bound.
+    const bound = await screen.findByRole("radio", {
+      name: "“Front desk” is Front desk from Retell",
+    });
+    expect(bound.getAttribute("aria-checked")).toBe("true");
+
+    // A key for another account. The prefilled id is not on it.
+    fireEvent.change(screen.getByLabelText("Retell API key"), {
+      target: { value: "key_live_another_account" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "List Retell agents" }));
+    await screen.findByText("Elsewhere");
+
+    expect(
+      screen.getByText(/this Retell account does not have it/),
+    ).toBeDefined();
+    expect(
+      screen
+        .getByRole("radio", { name: "“Front desk” is Elsewhere" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+
+    // Nothing is committed until somebody chooses.
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+    expect(
+      await screen.findByText(/Choose which Retell agent “Front desk” is/),
+    ).toBeDefined();
+    expect(sent(seen, "/v1/monitoring/start")).toBeUndefined();
+
+    // Choosing sends this account's own id, never the one it did not hold.
+    fireEvent.click(
+      screen.getByRole("radio", { name: "“Front desk” is Elsewhere" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+
+    await screen.findByText("Egma is pulling production calls");
+    expect(sent(seen, "/v1/monitoring/start")).toEqual({
+      agentPlatform: "retell",
+      apiKey: "key_live_another_account",
+      watch: [{ platformAgentId: "agent_elsewhere_1", agentId: "agt_1" }],
+    });
+  });
+});
+
 describe("a key edited while discovery is in flight", () => {
   it("ignores the answer the old key asked for", async () => {
     const seen: Seen[] = [];

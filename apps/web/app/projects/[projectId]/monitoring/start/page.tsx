@@ -129,6 +129,10 @@ const COPY = {
   isThis: (name: string) => `This is “${name}”`,
   pairing: (agentName: string, retellName: string) =>
     `“${agentName}” is ${retellName}`,
+  notInThisAccount: (platformAgentId: string) =>
+    `Egma had ${platformAgentId} written down for this agent, and this Retell ` +
+    "account does not have it. Choose which agent on this account it is, or " +
+    "list the account that holds it.",
   bindFirst: (name: string) =>
     `Choose which Retell agent “${name}” is, then start monitoring. Without ` +
     "that, Egma would register a second agent for the same Retell agent.",
@@ -402,13 +406,40 @@ function RetellPath({
   const asking = useRef(0);
 
   /** What the radio settles on before anybody touches it. */
+  /**
+   * The Retell agent this flow would bind to, before the account has its say:
+   * an explicit choice, else the agent's stored binding, else whatever the
+   * chosen connection already knows.
+   */
+  const wantedBinding =
+    bound ??
+    (agent?.platformAgentId === null ? undefined : agent?.platformAgentId) ??
+    prefilled ??
+    null;
+
+  /**
+   * **A binding is only real when the account on screen contains it.**
+   *
+   * The stored binding and the connection's prefill were both decided against
+   * some earlier Retell account. Point this form at a key for a different
+   * account and that id means nothing there — committing it would seal the new
+   * account's key onto an identity the new account does not have, and egma
+   * would poll forever for an agent that is not there. So the listing decides,
+   * and where it does not contain the id there is no binding at all until
+   * somebody chooses one.
+   */
   const binding = useMemo(() => {
-    if (bound !== null) return bound;
-    if (agent?.platformAgentId !== null && agent?.platformAgentId !== undefined) {
-      return agent.platformAgentId;
-    }
-    return prefilled ?? null;
-  }, [bound, agent, prefilled]);
+    if (wantedBinding === null || listed === null) return null;
+    return listed.agents.some((one) => one.id === wantedBinding)
+      ? wantedBinding
+      : null;
+  }, [wantedBinding, listed]);
+
+  /** A wanted binding this account does not hold, which is worth saying. */
+  const strangerBinding =
+    listed !== null && wantedBinding !== null && binding === null
+      ? wantedBinding
+      : null;
 
   /**
    * Read the account, and settle the ticks from what came back.
@@ -596,6 +627,15 @@ function RetellPath({
         <Empty title={COPY.noAgents} lead={COPY.noAgentsLead} />
       ) : (
         <Section title={COPY.listed} lead={COPY.listedLead}>
+          {/*
+            * The prefill said one thing and the account says another. Saying
+            * so is the whole of the fix on screen: nothing is bound, the
+            * commit is blocked below until somebody chooses, and the id that
+            * did not match is named rather than quietly dropped.
+            */}
+          {strangerBinding === null ? null : (
+            <Problem>{COPY.notInThisAccount(strangerBinding)}</Problem>
+          )}
           <RadioGroup
             value={binding ?? ""}
             aria-label={agent === undefined ? COPY.listed : COPY.which(agent.name)}
@@ -830,7 +870,7 @@ function LiveKitInstructions({ projectId }: { readonly projectId: string }) {
   return (
     <Section
       title={COPY.livekit}
-      lead="Your agent's own process sends its spans to Egma. There is nothing to switch on here."
+      lead="Your agent's own process reports its production calls to Egma. There is nothing to switch on here."
     >
       <ol className="m-0 flex list-none flex-col gap-5 p-0">
         <Step
