@@ -727,7 +727,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           capacity: 4,
           heartbeatSeconds: 1,
           leaseSeconds: 3_600,
-          sweepSeconds: 3_600,
+          // Short, because a claim declined for a conversation whose evidence
+          // is still being drained goes back to the queue and is taken up
+          // again by a sweep. A deployment's own default is thirty seconds.
+          sweepSeconds: 1,
           traceIdleSeconds: 3_600,
           logLevel: "ERROR",
         },

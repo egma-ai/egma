@@ -1,4 +1,10 @@
-import { getSimulation, readTrace, readVerdicts } from "@egma/db";
+import {
+  getSimulation,
+  listGradingJobsForSimulation,
+  MOST_GRADING_ATTEMPTS,
+  readTrace,
+  readVerdicts,
+} from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -6,7 +12,9 @@ import { conversationOfSimulation } from "../src/conversation.ts";
 import {
   aLatencyCopy,
   conductSimulation,
+  eventually,
   jobFor,
+  streamConversationLate,
   makeWorld,
   oneServiceAtATime,
   seedGrader,
@@ -421,6 +429,76 @@ describe("a simulation whose trace never closed", () => {
 
     expect(conversation.nothingToJudgeBecause).toContain("span limit");
     expect(conversation.transcript).toEqual([]);
+  });
+});
+
+/**
+ * **Evidence accepted and not yet readable is a reason to ask again, never a
+ * reason to answer.**
+ *
+ * A simulation's span batches are answered at the door when they are durable in
+ * the object store, and the transaction that lands the simulation terminal is
+ * what mints the work to judge it — so the work can be taken up before the
+ * evidence behind it has been drained into the trace store. A verdict written
+ * then would be permanent, and it would say egma could not read a conversation
+ * it was in the middle of storing.
+ */
+describe("a simulation whose evidence is still on its way", () => {
+  it("is asked again rather than judged, and judges the conversation once it lands", async () => {
+    const judge = await judgingWith([3]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
+
+    // Landed terminal with nothing under it yet.
+    const conducted = await conductSimulation(world, { spans: null, testId });
+
+    // The claim is declined and the job goes back with an attempt spent and a
+    // sentence saying why. Nothing is written about the conversation.
+    const released = await eventually(
+      `the job for ${conducted.simulationId} to be handed back`,
+      async () => {
+        const [job] = await listGradingJobsForSimulation(
+          world.auth,
+          conducted.simulationId,
+        );
+        return job?.status === "pending" && job.attempts > 0 ? job : undefined;
+      },
+    );
+    expect(released.lastError).toContain(
+      "does not hold all of its conversation yet",
+    );
+    expect(
+      (await readVerdicts(world.auth, conducted.simulationId)).verdicts,
+    ).toEqual([]);
+    expect(judge.asked).toEqual([]);
+
+    // The drain finishes, and the next attempt judges what is now there.
+    await streamConversationLate(world, conducted.simulationId);
+    await jobFor(world, conducted, "graded");
+
+    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
+    expect(verdicts.length).toBeGreaterThan(0);
+    expect(verdicts.every((verdict) => verdict.verdict === "passed")).toBe(true);
+    expect(judge.asked.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * And the budget is what ends the waiting. A conversation whose evidence
+   * never arrives is answered on the last attempt out of what did — the same
+   * list of checks a reader would have seen either way — rather than left
+   * waiting or abandoned with nothing under it.
+   */
+  it("answers out of what arrived once the budget is spent", async () => {
+    await judgingWith();
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
+    const conducted = await conductSimulation(world, { spans: null, testId });
+
+    const judged = await jobFor(world, conducted, "graded");
+    expect(judged.attempts).toBe(MOST_GRADING_ATTEMPTS);
+
+    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
+    expect(verdicts.length).toBeGreaterThan(0);
+    expect(verdicts.every((verdict) => verdict.verdict === "errored")).toBe(true);
+    expect(verdicts[0]?.rationale).toContain("no record of this conversation");
   });
 });
 

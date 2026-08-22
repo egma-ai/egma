@@ -691,6 +691,7 @@ export {
   getGradingJobForTrace,
   listGradingJobsForSimulation,
   recordGradingHeartbeat,
+  MOST_GRADING_ATTEMPTS,
   recordProductionTraces,
   regrade,
   releaseGradingJob,

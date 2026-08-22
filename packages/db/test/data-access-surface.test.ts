@@ -595,6 +595,16 @@ const READ_LIMITS = [
 const THE_MONITORED_PLATFORMS = ["MONITORING_PLATFORMS"];
 
 /**
+ * How many times one conversation is handed out before egma stops trying.
+ *
+ * Exported for the same reason the read limits are: the service that judges
+ * decides on its own last attempt to answer with what it can see rather than
+ * decline again, and a bound named in two places is a bound that will one day
+ * disagree with itself.
+ */
+const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
+
+/**
  * What a mock tool's answer may cost the exchange that carries it, and the two
  * pure functions that read one.
  *
@@ -723,6 +733,7 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_MONITORED_PLATFORMS,
+        ...THE_GRADING_BUDGET,
         ...THE_FOLD,
         ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
