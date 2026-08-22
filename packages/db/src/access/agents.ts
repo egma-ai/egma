@@ -380,18 +380,30 @@ async function visibleAgent(
   auth: AuthContext,
   agentId: string,
 ): Promise<
-  { id: string; projectId: string; archivedAt: Date | null } | undefined
+  | {
+      id: string;
+      projectId: string;
+      agentPlatform: AgentPlatform | null;
+      archivedAt: Date | null;
+    }
+  | undefined
 > {
   const [row] = await db()
     .select({
       id: agent.id,
       projectId: agent.projectId,
+      // Every connection read under this agent derives its platform through
+      // here when its own type does not pin one, so the read that proves the
+      // agent is visible is the read that answers it.
+      agentPlatform: agent.agentPlatform,
       archivedAt: agent.archivedAt,
     })
     .from(agent)
     .where(theAgentEvenArchived(auth, agentId))
     .limit(1);
-  return row;
+  return row === undefined
+    ? undefined
+    : { ...row, agentPlatform: row.agentPlatform as AgentPlatform | null };
 }
 
 /**
@@ -460,9 +472,17 @@ type ConnectionRow = {
  */
 function connectionFromRow(
   row: ConnectionRow,
-  agentPlatformOfAgent: AgentPlatform | null = null,
+  /**
+   * The platform its agent is bound to, or null. **Required, with no default**:
+   * a default would silently drop the second half of the rule and let a
+   * `phone_number` connection on a Retell agent read back as belonging to no
+   * platform — and read back differently from the way it was written.
+   */
+  agentPlatformOfAgent: AgentPlatform | null,
 ): Connection {
   const connectionType = row.connectionType as ConnectionType;
+  // The type answers where it pins one platform; otherwise the agent answers,
+  // and where the agent is unbound nobody does. See ADR-0015.
   const agentPlatform =
     platformOfConnectionType(connectionType) ?? agentPlatformOfAgent;
   const accessVariant = row.accessVariant as AccessVariant;
@@ -516,8 +536,15 @@ type AdmittedConnection = {
 function admitConnection(input: NewConnection): AdmittedConnection {
   const descriptor = descriptorOf(input.connectionType);
   const modality = validModality(input.connectionType, input.modality);
-  // This validates the complete supported tuple. The label is deliberately
-  // discarded here because it is derived again on reads.
+  // The payload's own tuple has to be one egma supports — this is what turns
+  // away a combination nobody can reach, before any database work.
+  //
+  // **It is not the last word on the platform.** Where the connection type
+  // does not pin one, the agent answers, so `insertConnection` checks the
+  // tuple again against the platform this connection will actually be
+  // represented under. Validating only here would let the door admit one
+  // tuple and the row read back as another. The label is discarded both
+  // times, because it is derived on every read.
   productLabelOf(
     input.agentPlatform,
     input.connectionType,
@@ -615,12 +642,71 @@ function refusingHeldConnectionName(name: string): (error: unknown) => never {
  * name default and the friendly refusal when a living connection holds the
  * name already.
  */
+/**
+ * The platform this connection will be represented under, checked against the
+ * platform the payload named.
+ *
+ * Where the connection type pins a platform, it decides and the agent is not
+ * consulted. Where it does not — `phone_number` spans platforms — the agent
+ * decides, and a payload naming a different one is refused rather than quietly
+ * relabelled: accepting `livekit_agents` and then representing the connection
+ * as Retell's is wrong attribution, and the product label a person reads would
+ * not be the one they chose.
+ *
+ * A payload that names no platform contradicts nothing. It is the ordinary way
+ * to say "whatever this agent is on".
+ */
+function representedPlatform(
+  admitted: AdmittedConnection,
+  agentPlatformOfAgent: AgentPlatform | null,
+): AgentPlatform | null {
+  const pinned = platformOfConnectionType(admitted.connectionType);
+  if (pinned !== null) return pinned;
+
+  if (
+    agentPlatformOfAgent !== null &&
+    admitted.agentPlatform !== null &&
+    admitted.agentPlatform !== agentPlatformOfAgent
+  ) {
+    throw new AgentWriteRefusedError(
+      "platform_contradicts_agent",
+      `This connection names ${admitted.agentPlatform} and its agent is on ` +
+        `${agentPlatformOfAgent}. A ${admitted.connectionType} connection ` +
+        `reaches whichever platform its agent is on, so it cannot name ` +
+        `another one. Send ${agentPlatformOfAgent}, or leave the platform ` +
+        `out and the agent will answer.`,
+    );
+  }
+
+  // What the row will be represented as has to be a supported tuple in its own
+  // right, not only the tuple the payload happened to name.
+  productLabelOf(
+    agentPlatformOfAgent,
+    admitted.connectionType,
+    admitted.accessVariant,
+    admitted.modality,
+  );
+  return agentPlatformOfAgent;
+}
+
 async function insertConnection(
   on: Queryable,
   auth: AuthContext,
-  home: { readonly id: string; readonly projectId: string },
+  home: {
+    readonly id: string;
+    readonly projectId: string;
+    /**
+     * The agent's own binding. What comes back is derived from this and never
+     * from the payload's `agentPlatform`, so the product label a create
+     * answers is the one the next read answers.
+     */
+    readonly agentPlatform: AgentPlatform | null;
+  },
   admitted: AdmittedConnection,
 ): Promise<Connection> {
+  // Before the write, and here rather than at the door, because this is the
+  // first point that knows which agent the connection lands under.
+  const agentPlatform = representedPlatform(admitted, home.agentPlatform);
   const name =
     admitted.name ??
     (await freeDefaultName(on, home.id, admitted.connectionType));
@@ -647,7 +733,7 @@ async function insertConnection(
     .catch(refusingHeldConnectionName(name));
 
   if (inserted === undefined) throw new Error("the connection was not written");
-  return connectionFromRow(inserted, admitted.agentPlatform);
+  return connectionFromRow(inserted, agentPlatform);
 }
 
 /**
@@ -734,7 +820,7 @@ export async function createAgent(
     const wired = await insertConnection(
       tx,
       auth,
-      { id: written.id, projectId },
+      { id: written.id, projectId, agentPlatform: written.agentPlatform },
       inline,
     );
     return { ...written, connection: wired };
@@ -813,7 +899,7 @@ export async function registerAgent(
       connection: await insertConnection(
         tx,
         auth,
-        { id: written.id, projectId },
+        { id: written.id, projectId, agentPlatform: written.agentPlatform },
         inline,
       ),
     };
@@ -893,13 +979,14 @@ export async function registerAgent(
     // agent gains the connection is the same answer every time.
     const known = living[0];
     if (known !== undefined) {
+      const home = agentFromRow(known.identity);
       return {
         result: "connection_added",
-        agent: agentFromRow(known.identity),
+        agent: home,
         connection: await insertConnection(
           tx,
           auth,
-          { id: known.identity.id, projectId },
+          { id: home.id, projectId, agentPlatform: home.agentPlatform },
           inline,
         ),
       };
@@ -974,9 +1061,12 @@ async function connectionsOf(
     )
     .orderBy(asc(connection.id));
 
+  const platformOf = new Map(
+    agents.map((one) => [one.id, one.agentPlatform] as const),
+  );
   const held = new Map<string, Connection[]>();
   for (const row of rows) {
-    const one = connectionFromRow(row);
+    const one = connectionFromRow(row, platformOf.get(row.agentId) ?? null);
     const already = held.get(one.agentId);
     if (already === undefined) held.set(one.agentId, [one]);
     else already.push(one);
@@ -1436,7 +1526,8 @@ export async function getConnection(
 ): Promise<Connection | undefined> {
   authorize(auth, "read", here(auth));
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const [row] = await db()
     .select(CONNECTION_COLUMNS)
@@ -1444,7 +1535,9 @@ export async function getConnection(
     .where(theConnection(auth, agentId, connectionId))
     .limit(1);
 
-  return row === undefined ? undefined : connectionFromRow(row);
+  return row === undefined
+    ? undefined
+    : connectionFromRow(row, home.agentPlatform);
 }
 
 /**
@@ -1465,7 +1558,8 @@ export async function listConnections(
 ): Promise<readonly Connection[] | undefined> {
   authorize(auth, "read", here(auth));
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const half =
     options.archived === true
@@ -1480,7 +1574,7 @@ export async function listConnections(
     )
     .orderBy(asc(connection.id));
 
-  return rows.map((row) => connectionFromRow(row));
+  return rows.map((row) => connectionFromRow(row, home.agentPlatform));
 }
 
 /**
@@ -1525,7 +1619,8 @@ export async function updateConnection(
       ? undefined
       : validName(changes.name, "a connection");
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const [current] = await db()
     .select({
@@ -1592,7 +1687,9 @@ export async function updateConnection(
         : refusingHeldConnectionName(name),
     );
 
-  return updated === undefined ? undefined : connectionFromRow(updated);
+  return updated === undefined
+    ? undefined
+    : connectionFromRow(updated, home.agentPlatform);
 }
 
 /**
@@ -1618,7 +1715,8 @@ export async function archiveConnection(
 ): Promise<ArchivedConnection | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const now = new Date();
 
@@ -1642,7 +1740,10 @@ export async function archiveConnection(
         .limit(1);
       if (standing === undefined) return undefined;
       if (standing.archivedAt !== null) {
-        return { connection: connectionFromRow(standing), canceledRunCount: 0 };
+        return {
+          connection: connectionFromRow(standing, home.agentPlatform),
+          canceledRunCount: 0,
+        };
       }
       return undefined;
     }
@@ -1654,7 +1755,10 @@ export async function archiveConnection(
       now,
     );
 
-    return { connection: connectionFromRow(archived), canceledRunCount };
+    return {
+      connection: connectionFromRow(archived, home.agentPlatform),
+      canceledRunCount,
+    };
   });
 }
 
@@ -1796,5 +1900,7 @@ export async function restoreConnection(
       throw error;
     });
 
-  return restored === undefined ? undefined : connectionFromRow(restored);
+  return restored === undefined
+    ? undefined
+    : connectionFromRow(restored, home.agentPlatform);
 }
