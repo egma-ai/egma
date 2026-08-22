@@ -21,6 +21,10 @@ import { startService, type Service } from "../../grader/src/service.ts";
 import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
 import { REPORTS_PATH } from "../src/routes/reports.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import { NEUTRAL_TRAITS } from "./support/traces.ts";
 
 /**
@@ -323,6 +327,22 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  */
 const THE_PHRASE = "Wednesday afternoon";
 
+/**
+ * The walk needs somewhere for evidence to become durable, because the whole of
+ * what it watches runs through the real door: the simulator's span batches are
+ * answered on object-store durability, and its terminal report is sent behind
+ * them in order. An instance with no ingestion bucket answers those batches the
+ * way an unconfigured deployment does — retryably — and the simulation never
+ * reaches the report that ends it.
+ */
+const storage: ObjectStorage = await startObjectStorage("simulator-walk");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the shipped-simulator walk — ${storage.why}\n\n`,
+  );
+}
+
 let instance: Instance;
 let counterpart: RetellCounterpart;
 let simulator: ChildProcess | undefined;
@@ -508,6 +528,24 @@ async function gradingJobsFor(simulationId: string): Promise<number> {
   return Number(rows[0]?.count);
 }
 
+/** Wait until a durable grade has been followed by temporary queue cleanup. */
+async function waitForGradingCleanup(
+  simulationId: string,
+  within: number,
+): Promise<void> {
+  const deadline = Date.now() + within;
+  for (;;) {
+    const jobs = await gradingJobsFor(simulationId);
+    if (jobs === 0) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${simulationId} still has ${jobs} grading job(s) after ${within}ms`,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 25));
+  }
+}
+
 /**
  * Read evidence while the counterpart holds the conversation open. This is
  * an eventual-delivery wait, not a race to catch a short-lived state: the
@@ -595,6 +633,7 @@ beforeAll(async () => {
     web: false,
     traces: true,
     retellFetch: RETELL_CHAT_PREFLIGHT,
+    ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
     beforeApiListen(api) {
       api.addHook("preHandler", async (request) => {
         if (
@@ -632,9 +671,10 @@ afterAll(async () => {
   await instance?.close();
   await counterpart?.stop();
   await rm(scratch, { recursive: true, force: true });
+  if (storage.available) storage.stop();
 });
 
-describe("the shipped simulator against the real API", () => {
+describe.skipIf(!storage.available)("the shipped simulator against the real API", () => {
   it(
     "walks queued → claimed → running → completed, and a refused key to an honest failed",
     // Every controlled wait below has its own smaller deadline and diagnostic.
@@ -854,7 +894,22 @@ describe("the shipped simulator against the real API", () => {
       let spans: StoredSpan[] = [];
       try {
         expect((await rowOf(conducted.simulationId)).status).toBe("running");
+        // The root span closes the trace and rides the last segment, so its
+        // arrival is what says the whole conversation is readable. Bounded,
+        // and answered with whatever the last look saw, so a conversation
+        // that never lands fails on what is missing rather than on a timer.
+        const readableBy = Date.now() + 30_000;
         spans = await storedSpans(traceId);
+        while (
+          !spans.some((span) => span.name === "simulation") &&
+          Date.now() <= readableBy
+        ) {
+          await new Promise((resume) => setTimeout(resume, 25));
+          spans = await storedSpans(traceId);
+        }
+        // Still running after the wait: the held report is the only terminal
+        // producer for this Simulation, and it has not landed.
+        expect((await rowOf(conducted.simulationId)).status).toBe("running");
         const beforeTerminal = spans.map((span) => span.name);
         expect(
           beforeTerminal.filter((name) => name.endsWith("_turn")),
@@ -893,9 +948,6 @@ describe("the shipped simulator against the real API", () => {
       const startedAt = new Date(String(row.started_at));
       const endedAt = new Date(String(row.ended_at));
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
-      // Successful work is temporary: the worker deletes the Postgres queue
-      // row only after the durable ClickHouse grade has landed.
-      expect(await gradingJobsFor(conducted.simulationId)).toBe(0);
 
       // The complete conversation read while the terminal report was held,
       // before PostgreSQL left running — one span per timed thing, nothing
@@ -986,6 +1038,10 @@ describe("the shipped simulator against the real API", () => {
         30_000,
       );
       const [grade] = grades;
+      // Successful work is temporary. The grade can become query-visible just
+      // before the worker deletes its Postgres queue row, so wait for that
+      // ordered cleanup instead of depending on which read wins the instant.
+      await waitForGradingCleanup(conducted.simulationId, 30_000);
 
       // The row names both the project policy and the shared definition version.
       const seeded = await theProjectsGrader(auth);

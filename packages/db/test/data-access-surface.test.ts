@@ -266,7 +266,11 @@ const CONTEXT_REQUIRING = [
   "recordGradingHeartbeat",
   "recordProductionEvidenceReceived",
   "recordProductionGradingPlan",
+  // The durable drainer's grading handoffs after evidence is query-visible.
+  // A completed simulation row authorizes one; a supported explicit production
+  // end authorizes the other. Neither infers completion from an ordinary span.
   "recordProductionTraces",
+  "recordSimulationTraces",
   // Poll progress belongs to the selected Monitoring agent, never to a
   // simulation connection.
   "checkpointRetellMonitoringPage",

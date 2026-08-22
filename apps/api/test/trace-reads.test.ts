@@ -2,6 +2,7 @@ import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
+  readProductionGradingPlan,
   REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   reportedMeasurementsPayload,
   type NewSpan,
@@ -182,12 +183,17 @@ describe.skipIf(!storage.available)(
       ).toContain("Can you still hear me?");
       expect(detail.measures.length).toBeGreaterThan(0);
 
-      // The evidence-ready handoff landed before the object did.
+      // The supported end froze the empty production selection before the
+      // object was deleted. Expected behaviors grades simulations only, so no
+      // temporary worker job is invented for this production trace.
+      await expect(
+        readProductionGradingPlan(contextFor(acme, "admin"), traceId),
+      ).resolves.toMatchObject({ traceId, entries: [] });
       const { rows } = await api.database.sql<{ count: string }>(
         "select count(*) as count from grading_job where trace_id = $1",
         [traceId],
       );
-      expect(rows[0]?.count).toBe("1");
+      expect(rows[0]?.count).toBe("0");
       expect(await pendingSegments(ingestStore())).toHaveLength(0);
     });
   },
