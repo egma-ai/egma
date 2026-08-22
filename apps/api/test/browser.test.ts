@@ -2592,11 +2592,10 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
       await reactHasTakenOver(walk, "form");
 
+      // One field, and the shortness is the product's decision: an agent's
+      // prompt, model and tools live where the customer configures them, and
+      // the description column went with them (ADR-0015).
       await walk.fill("#agent-name", "The Support line");
-      await walk.fill(
-        "#agent-description",
-        "The one that answers the phone at the front desk.",
-      );
       await walk.getByRole("button", { name: "Register agent" }).click();
 
       await walk.waitForURL(/\/agents\/agt_[^/]+\/connections\/new\?onboarding=connection$/);
@@ -2670,17 +2669,20 @@ describe("the complete product, walked in order in a second project", () => {
       // Retell key and agent id do not enter it.
       const stored = await instance.database.sql<{
         id: string;
-        type: string;
+        connection_type: string;
+        access_variant: string;
         modality: string;
         config: Record<string, unknown>;
         credentials: string | null;
       }>(
-        `select id, agent_platform, connection_type, access_variant, modality, config, credentials
+        // No `agent_platform` column: which platform a connection reaches is
+        // answered by its type where the type pins one, and by the agent
+        // otherwise. `phone_number` spans platforms and pins nothing.
+        `select id, connection_type, access_variant, modality, config, credentials
            from connection where name = 'Retell staging'`,
       );
       expect(stored.rows).toHaveLength(1);
       expect(stored.rows[0]).toMatchObject({
-        agent_platform: "retell",
         connection_type: "phone_number",
         access_variant: "phone_number.public_e164",
         modality: "voice",
@@ -2694,7 +2696,8 @@ describe("the complete product, walked in order in a second project", () => {
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
       /*
-       * The agent's page is its identity and its connections, and nothing else.
+       * The agent's page is its identity, whether Egma pulls its production
+       * calls, and its connections. Nothing else.
        *
        * The absences are asserted only after the connection's own name has
        * landed. A page still loading says none of these words either, so
@@ -2704,6 +2707,11 @@ describe("the complete product, walked in order in a second project", () => {
       await saysWithin(walk, "Retell staging");
       const agentPage = await walk.innerText("main");
       expect(agentPage).toContain("Connections");
+      // The pull switch, which is the only stored monitoring choice in the
+      // product and lives on the agent that owns it (ADR-0015). Nothing binds
+      // this agent to a platform yet, so it reads off and says so.
+      expect(agentPage).toContain("Production calls");
+      expect(agentPage).toContain("Not bound");
       expect(agentPage).not.toContain("Recent runs");
       expect(agentPage).not.toContain("Attached tests");
 
@@ -3117,7 +3125,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("agents", "new"),
         // The refused shape of this page carries the other lead, so this
         // sentence is the form itself rather than the address of it.
-        says: "Its name and description in Egma",
+        says: "Its name in Egma",
       },
       { what: "one agent", address: agentAddress, says: "The Support line" },
       {
@@ -3196,6 +3204,20 @@ describe("the complete product, walked in order in a second project", () => {
         what: "one conversation",
         address: `${origin}${conversation}`,
         says: "Reschedules a booked appointment",
+      },
+      {
+        what: "Start monitoring",
+        address: at("monitoring", "start"),
+        /*
+         * The start-monitoring flow, which replaced the monitoring-setup page
+         * when the setup object was dropped (ADR-0015). The header's lead is
+         * drawn while the roster read is still in flight, so the phrase is the
+         * picker's own section heading, which only the settled page draws.
+         *
+         * The Monitoring list itself is not here: this walk opens it many
+         * times already, under `monitoringAt`, and against its own states.
+         */
+        says: "What Egma should watch",
       },
       {
         what: "Settings",

@@ -104,7 +104,7 @@ Each `watch` entry resolves to one Egma agent:
 <ResponseField name="refused" type="array">
   One entry per `watch` entry that did not start, shaped as
   `{ platformAgentId, reason, message }`. `reason` is `contested`,
-  `name_taken`, or `not_found`. `message` is the whole sentence to show.
+  `name_taken`, `not_found`, or `archived`. `message` is the whole sentence to show.
 </ResponseField>
 
 **Every entry is attempted and every entry is answered.** Egma starts each
