@@ -258,6 +258,19 @@ describe("the Egma-owned half of an agent", () => {
     });
     expect(stale.status).toBe(400);
     expect(String(stale.body.message)).toContain("expectedRevision");
+
+    // A connection lost the same column and answers the same way. It used to
+    // list the key as one it accepts and then drop it, so a browser holding on
+    // to optimistic locking was told its edit was safe when nothing checked.
+    const wiring = await aConnection(ada, agent.id, { name: "staging" });
+    const staleWiring = await browser(
+      "PATCH",
+      `/v1/agents/${agent.id}/connections/${wiring.id}`,
+      ada,
+      { name: "renamed", expectedRevision: "rev_00000000000000000000000001" },
+    );
+    expect(staleWiring.status).toBe(400);
+    expect(String(staleWiring.body.message)).toContain("expectedRevision");
   });
 
 

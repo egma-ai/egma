@@ -332,11 +332,6 @@ async function actingProject(
   return verb === "reads" ? readingIn(auth, named) : writingIn(auth, named);
 }
 
-/** Whether the caller is a browser, which is what makes a revision compulsory. */
-function fromBrowser(auth: AuthContext): boolean {
-  return auth.via === "session";
-}
-
 const AGENT_EDIT_KEYS = ["name"] as const;
 const ARCHIVE_KEYS = [] as const;
 const AGENT_RESTORE_KEYS = ["name"] as const;
@@ -345,13 +340,8 @@ const CONNECTION_EDIT_KEYS = [
   "environment",
   "config",
   "credentials",
-  "expectedRevision",
 ] as const;
-const CONNECTION_RESTORE_KEYS = [
-  "expectedRevision",
-  "name",
-  "credential",
-] as const;
+const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 
 const AGENT_KEYS = ["name", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
@@ -1156,13 +1146,14 @@ export async function agentRoutes(
   });
 
   /**
-   * The Egma-owned half of an agent, edited last-writer-wins (the revision
-   * was opened on.
+   * The Egma-owned half of an agent, edited last-writer-wins: the revision
+   * column was dropped pre-launch (ADR-0015), so two people editing one agent
+   * from two browsers is a silent overwrite.
    *
-   * The name and nothing else. The provider's prompt, model and
-   * tools are not here, are not in the read, and are not coming: they live
-   * where the customer configures them, and egma being a second place to edit
-   * them would make two answers to one question with no rule to choose between.
+   * The name and nothing else. The provider's prompt, model and tools are not
+   * here, are not in the read, and are not coming: they live where the customer
+   * configures them, and egma being a second place to edit them would make two
+   * answers to one question with no rule to choose between.
    */
   registerPlatformOperation(app, agentOperations.updateAgent, async (request, reply) => {
     const { auth } = requesterOf(request);
@@ -1175,14 +1166,11 @@ export async function agentRoutes(
     const name = textWhenGiven(body.name, "an agent's name");
     if (isRefusal(name)) return refused(reply, name);
 
-
     const acting = await actingProject(auth, request, "writes into");
     if (isRefusal(acting)) return refused(reply, acting);
 
     const updated = await updateAgent(acting, agentId, {
       ...(name === undefined ? {} : { name }),
-      // Absent keeps it; an explicit null clears it. The two are different
-      // requests and are read as different requests.
     });
 
     if (updated === undefined) return refused(reply, NO_SUCH_AGENT);
