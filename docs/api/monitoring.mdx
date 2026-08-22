@@ -19,7 +19,9 @@ switch and no configuration on this page: set `EGMA_URL` and a project-scoped
 
 There is no monitoring configuration object. The switch on the agent is the
 only stored monitoring choice, and an agent's fields are documented with
-[Agents](/api/agents).
+[Agents](/api/agents). Production conversations are read under **Monitoring**
+in the app, whichever way they arrived. See [Traces](/api/traces) for the OTLP
+door itself.
 
 All routes on this page use the normal Egma authentication rules. Pass the
 project identifier in the `projectId` query parameter. A project-scoped API key
@@ -37,7 +39,7 @@ this project already knows about each one. This request does not save the key.
 </ParamField>
 
 <ResponseField name="agents" type="array">
-  Voice-agent choices, sorted by name.
+  Voice-agent choices, sorted by name. Chat agents are not returned.
 </ResponseField>
 
 Each choice has these fields:
@@ -49,6 +51,11 @@ Each choice has these fields:
 | `registeredAgentId` | The Egma agent already bound to it, or `null`. |
 | `registeredAgentName` | That agent's name, or `null`. |
 | `pullProductionCalls` | Whether that Egma agent already pulls its calls. |
+
+A key Retell rejects returns `422`. A key with Agent Read permission but no
+access to conversation history will pass this check and fail later when Egma
+tries to pull conversations, so give the key Retell **Monitor** or **History
+Read** permission as well.
 
 ```bash
 curl -X POST \
@@ -157,10 +164,14 @@ curl -X POST \
 
 **`POST /v1/monitoring/retell/failures/:failureId/replay`**
 
-Retries the exact Retell call named by one open import failure. It reads the
-call directly, so it still works after that call is outside the normal 30-day
-list window. The production claim prevents a successful retry from creating a
-second production conversation.
+When Egma cannot import one production conversation after its allowed attempts,
+it records an import failure and moves on rather than stopping on that
+conversation. This retries the exact call the failure names.
+
+It reads that call directly, so it still works after the call has fallen
+outside the platform's normal 30-day list window. Egma claims each production
+conversation once, so a successful retry cannot create a second copy of a
+conversation that was already imported.
 
 <ParamField path="failureId" type="string" required>
   Import failure id.
@@ -171,11 +182,19 @@ second production conversation.
 </ResponseField>
 
 <ResponseField name="trace" type="object">
-  `{ id, write }`, where `write` is `written` or `already`.
+  `{ id, write }`, where `write` is `written` for a conversation this retry stored, or `already` for one Egma had already stored.
 </ResponseField>
 
-A retry returns `409 conflict` when another retry owns the failure or Retell
-still cannot supply a complete conversation. It returns `429` when Retell rate
-limits it, and also when the agent is waiting out its own retry delay after
-recent failures — the message says when that delay ends. A temporary provider
-failure returns `503`.
+| Status | Meaning |
+|---|---|
+| `404` | No open import failure with this id in this project. |
+| `409` | Another retry already owns this failure, or the platform still cannot supply a complete conversation. The failure stays open. |
+| `422` | The platform rejected the agent's stored key. Start monitoring again with a current key, then retry this import. |
+| `429` | The platform rate-limited the request, or this agent is already waiting before it asks again. The message says when to retry. |
+| `503` | The platform did not answer. Try again. |
+
+```bash
+curl -X POST \
+  "https://your-egma-host/v1/monitoring/retell/failures/mnf_abc123/replay?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..."
+```

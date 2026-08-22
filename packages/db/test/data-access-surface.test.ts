@@ -263,7 +263,6 @@ const CONTEXT_REQUIRING = [
   "readVerdicts",
   "recordPulledCallReceived",
   "recordMonitoringFailure",
-  "recordPulledCallReceivedForPlatformAgent",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",

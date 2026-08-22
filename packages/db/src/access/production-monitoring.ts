@@ -404,6 +404,7 @@ export async function listMonitoringFailures(
   auth: AuthContext,
   agentId: string,
 ): Promise<readonly MonitoringFailureSummary[]> {
+  authorize(auth, "read", here(auth));
   const rows = await db()
     .select({
       id: monitoringFailure.id,
@@ -937,7 +938,19 @@ export async function failMonitoringPull(
   });
 }
 
-/** Release a lease after a call-only failure without moving its fixed scan. */
+/**
+ * Release a lease after a call-only failure without moving its fixed scan.
+ *
+ * **The retry clock does not climb here.** `consecutive_failures` means "the
+ * provider refused this agent", and it does two jobs on that meaning: it is the
+ * exponent of the backoff ladder, and it is half the gate that refuses an
+ * explicit replay (the other half being a clock still in the future). What
+ * reaches this function is neither refusal nor rate limit — a broken page
+ * contract, an unreadable call id, an internal fault — so counting it would
+ * spend a customer's Retry on a provider that never said no, and a repeating
+ * breach would hold that gate shut for ever, because only a finished scan
+ * clears the streak. The plain retry the caller passes is the whole answer.
+ */
 export async function releaseMonitoringLease(
   auth: AuthContext,
   target: Pick<MonitoringPullTarget, "agentId" | "leaseOwner" | "apiKey">,
@@ -972,7 +985,6 @@ export async function releaseMonitoringLease(
               nextPollAt: input.retryAt,
               leaseOwner: null,
               leaseExpiresAt: null,
-              consecutiveFailures: sql`${monitoringState.consecutiveFailures} + 1`,
               updatedAt: now,
             }
           : {
@@ -1005,39 +1017,6 @@ export async function recordPulledCallReceived(
       and(
         withinMonitoringProject(auth, monitoringState),
         eq(monitoringState.agentId, target.agentId),
-      ),
-    );
-}
-
-/** Keep the notebook truthful when a stale claim finishes after a restart. */
-export async function recordPulledCallReceivedForPlatformAgent(
-  auth: AuthContext,
-  input: {
-    readonly platformAgentId: string;
-    readonly receivedAt?: Date | undefined;
-  },
-): Promise<void> {
-  const receivedAt = input.receivedAt ?? new Date();
-  const pulled = await db()
-    .select({ id: agent.id })
-    .from(agent)
-    .where(
-      and(
-        within(auth, agent, eq(agent.projectId, projectOf(auth))),
-        eq(agent.platformAgentId, input.platformAgentId),
-      ),
-    );
-  if (pulled.length === 0) return;
-  await db()
-    .update(monitoringState)
-    .set({ lastReceivedAt: receivedAt, updatedAt: receivedAt })
-    .where(
-      and(
-        withinMonitoringProject(auth, monitoringState),
-        inArray(
-          monitoringState.agentId,
-          pulled.map((row) => row.id),
-        ),
       ),
     );
 }
@@ -1188,15 +1167,13 @@ export type MonitoringFailureReplayClaim =
   | {
       readonly kind: "busy";
       /**
-       * `backing_off` is the agent's own retry clock, and it is deliberately
-       * mute about what the provider said. The account-wide health state that
-       * used to name the cause is gone (ADR-0015), so all the server truthfully
-       * knows here is *this agent is waiting until `retryAt`*.
+       * Exactly the two reasons this function can give. `backing_off` is the
+       * agent's own retry clock, and it is deliberately mute about what the
+       * provider said: the account-wide health state that used to name the
+       * cause is gone (ADR-0015), so all the server truthfully knows here is
+       * *this agent is waiting until `retryAt`*.
        */
-      readonly reason:
-        | MonitoringFailureKind
-        | "replay_in_progress"
-        | "backing_off";
+      readonly reason: "replay_in_progress" | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "not_found" };

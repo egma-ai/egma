@@ -1399,7 +1399,12 @@ export async function agentRoutes(
           message: error.message,
         });
       }
-      if (error.reason === "needs_a_name") {
+      if (
+        error.reason === "needs_a_name" ||
+        // The payload is well formed and every value in it is a real one; what
+        // is wrong is the pair, which is what `unprocessable` is for.
+        error.reason === "platform_contradicts_agent"
+      ) {
         return refused(reply, {
           refused: true,
           error: "unprocessable",

@@ -463,13 +463,20 @@ describe("discovering simulation agents", () => {
 
     expect(connected.status).toBe(201);
     expect(connectionOf(connected)).toMatchObject({
-      agentPlatform: "retell",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+14155550100" },
       credentialPresent: false,
     });
+
+    // The number was confirmed against Retell, and the connection still
+    // belongs to no platform: `phone_number` spans platforms, so a connection
+    // of that type is Retell's only when its **agent** is bound to Retell
+    // (ADR-0015). Confirming a number is not binding an agent — the simulation
+    // credential used for the check and the monitoring key an agent holds are
+    // two custodies on purpose — so this reads null until somebody binds it.
+    expect(connectionOf(connected).agentPlatform).toBeNull();
   });
 
   it("writes nothing when Retell rerouted a discovered phone candidate", async () => {

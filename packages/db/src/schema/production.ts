@@ -132,8 +132,10 @@ export const monitoringState = pgTable(
     ),
     // One notebook per agent, and the switch is what creates it.
     unique("monitoring_state_agent_unique").on(table.agentId),
-    // Failure rows repeat the tenant facts, so they can prove that their agent
-    // belongs to the same project and organization.
+    // Nothing points here. The poison-call record keys on the agent, as this
+    // table does, so it proves its tenancy against `agent` directly and never
+    // needs this notebook as a composite-foreign-key target. Kept because it
+    // is free and because a later per-agent child would want exactly it.
     unique("monitoring_state_id_tenant_unique").on(
       table.id,
       table.projectId,
@@ -178,7 +180,13 @@ export const productionTraceClaim = pgTable(
     platformAgentId: text("platform_agent_id").notNull(),
     platformAgentName: text("platform_agent_name"),
     platformAgentVersion: text("platform_agent_version"),
-    /** Safe Retell document with bearer-like fields removed. */
+    /**
+     * The pulling agent's id beside the safe Retell document, with
+     * bearer-like fields removed. The id is in here rather than in a
+     * column of its own because this table references nothing — which is
+     * what makes it survive a redesign — and crash recovery still has to
+     * stamp the notebook of the agent that actually pulled the call.
+     */
     payload: text("payload").notNull(),
     endedAt: moment("ended_at").notNull(),
     degraded: boolean("degraded").notNull().default(false),

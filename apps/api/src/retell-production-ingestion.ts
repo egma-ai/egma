@@ -38,7 +38,7 @@ import {
   type WriteOutcome,
 } from "./retell/write.ts";
 
-/** Retell selected agents are due about every 30 seconds. */
+/** An agent with its pull switch on is due about every 30 seconds. */
 export const RETELL_PRODUCTION_POLL_INTERVAL_MILLISECONDS = 30_000;
 /** A cheap DB wake catches a jittered due target without waiting another 30s. */
 export const RETELL_PRODUCTION_INGESTION_WAKE_INTERVAL_MILLISECONDS = 5_000;
@@ -47,9 +47,34 @@ const DEFAULT_REQUEST_TIMEOUT_MILLISECONDS = 10_000;
 const DEFAULT_MAXIMUM_PAGES_PER_TURN = 10;
 const DEFAULT_MAXIMUM_TURN_MILLISECONDS = 20_000;
 const MAXIMUM_HYDRATION_ATTEMPTS = 3;
-const INVALID_CREDENTIAL_RETRY_AT = new Date("9999-12-31T23:59:59.999Z");
 const BACKOFF_BASE_MILLISECONDS = 5_000;
 const BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
+/**
+ * The longest an agent may ever be made to wait — the ceiling on every wait
+ * this file can produce, whoever proposed it.
+ *
+ * The old model parked a refused key for ever and let the account-wide health
+ * row explain the stop. ADR-0015 drops `blocked_until` and the health surface
+ * together, so a permanent park would now be a silent one: nothing on any
+ * screen could say why calls stopped, and a key made good again on the
+ * provider's side would never be tried. A refusal therefore rides the same
+ * per-agent ladder with a higher ceiling — an hour, because a revoked key
+ * clears when a person acts and not in seconds. Re-arming the switch still
+ * wakes the agent at once.
+ *
+ * The provider's own `Retry-After` is held to the same hour: it is a
+ * suggestion from outside, and a header of a hundred years must not be able to
+ * retire an agent or hold its explicit-replay gate shut for the same span.
+ */
+const LONGEST_WAIT_MILLISECONDS = 60 * 60_000;
+/**
+ * How many doublings the ladder takes before the cap decides.
+ *
+ * Five seconds doubled twelve times is about six hours, past every ceiling
+ * here, so the bound exists only to keep the arithmetic small — the cap is
+ * what any wait beyond a few minutes actually lands on.
+ */
+const LONGEST_DOUBLING = 12;
 
 type PlatformLogEvent = Record<string, unknown>;
 
@@ -277,7 +302,7 @@ function stableUnit(value: string): number {
   return (hash >>> 0) / 4_294_967_296;
 }
 
-/** A stable 27-33 second spread stops all selected agents polling together. */
+/** A stable 27-33 second spread stops every pulled agent polling together. */
 function regularPollMilliseconds(target: MonitoringPullTarget): number {
   const spread = 0.9 + stableUnit(target.agentId) * 0.2;
   return Math.round(
@@ -285,16 +310,25 @@ function regularPollMilliseconds(target: MonitoringPullTarget): number {
   );
 }
 
+/**
+ * How long this agent alone waits after a refused provider turn.
+ *
+ * Capped exponential on the agent's own retry clock, spread by the same stable
+ * per-agent jitter as the cadence. Five agents holding sealed copies of one
+ * dead key each discover the refusal separately and each wait their own
+ * interval, so it costs one request per agent per interval and never a storm.
+ */
 function backoffMilliseconds(
   target: Pick<MonitoringPullTarget, "agentId" | "consecutiveFailures">,
+  capMilliseconds: number,
 ): number {
-  const exponent = Math.min(target.consecutiveFailures, 6);
+  const exponent = Math.min(target.consecutiveFailures, LONGEST_DOUBLING);
   const base = Math.min(
-    BACKOFF_CAP_MILLISECONDS,
+    capMilliseconds,
     BACKOFF_BASE_MILLISECONDS * 2 ** exponent,
   );
   const jitter = 0.8 + stableUnit(target.agentId) * 0.4;
-  return Math.min(BACKOFF_CAP_MILLISECONDS, Math.round(base * jitter));
+  return Math.min(capMilliseconds, Math.round(base * jitter));
 }
 
 function callIdOf(call: RetellCall): string {
@@ -405,7 +439,7 @@ type ProviderFailure = Exclude<
   { kind: "calls" } | { kind: "call" }
 >;
 
-function providerHealth(failure: ProviderFailure): MonitoringFailureKind {
+function providerFailureKind(failure: ProviderFailure): MonitoringFailureKind {
   if (failure.kind === "invalid-key") return "invalid_credential";
   if (failure.kind === "refused" && failure.reason === "rate-limited") {
     return "rate_limited";
@@ -418,16 +452,33 @@ function retryAtFor(
   failure: ProviderFailure,
   now: Date,
 ): Date {
-  const kind = providerHealth(failure);
-  if (kind === "invalid_credential") return INVALID_CREDENTIAL_RETRY_AT;
+  const kind = providerFailureKind(failure);
   if (
     kind === "rate_limited" &&
     failure.kind === "refused" &&
     failure.retryAfterMilliseconds !== undefined
   ) {
-    return new Date(now.getTime() + failure.retryAfterMilliseconds);
+    // Retell's own answer is honoured, up to the same ceiling every other wait
+    // has. A header of a hundred years — hostile, or a units mistake — would
+    // otherwise park the agent past the heat death of the account and hold the
+    // explicit-replay gate shut for the same span.
+    return new Date(
+      now.getTime() +
+        Math.min(
+          failure.retryAfterMilliseconds,
+          LONGEST_WAIT_MILLISECONDS,
+        ),
+    );
   }
-  return new Date(now.getTime() + backoffMilliseconds(target));
+  return new Date(
+    now.getTime() +
+      backoffMilliseconds(
+        target,
+        kind === "invalid_credential"
+          ? LONGEST_WAIT_MILLISECONDS
+          : BACKOFF_CAP_MILLISECONDS,
+      ),
+  );
 }
 
 async function failForProvider(
@@ -438,7 +489,7 @@ async function failForProvider(
   metrics: RetellProductionIngestionMetrics,
   now: Date,
 ): Promise<void> {
-  const kind = providerHealth(failure);
+  const kind = providerFailureKind(failure);
   const result = await store.failMonitoringPull(
     target.auth,
     target,
@@ -471,10 +522,7 @@ export type RetellIngestionFailureReplayResult =
   | { readonly kind: "not_found" }
   | {
       readonly kind: "busy";
-      readonly reason:
-        | MonitoringFailureKind
-        | "replay_in_progress"
-        | "backing_off";
+      readonly reason: "replay_in_progress" | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "lease_lost" }
@@ -572,9 +620,8 @@ export async function replayRetellIngestionFailure(
       if (resolved.agentRecovered) {
         input.log.info(
           platformEvent(
-            "egma.monitoring.retell.agent.recovered",
-            "A Retell Monitoring target recovered",
-            { health_state: "active" },
+            "egma.monitoring.pull.failures.cleared",
+            "An agent's last failed production call was imported",
           ),
         );
       }
@@ -604,7 +651,7 @@ export async function replayRetellIngestionFailure(
     }
 
     const now = clock();
-    const kind = providerHealth(retrieved);
+    const kind = providerFailureKind(retrieved);
     const retryAt = retryAtFor(target, retrieved, now);
     const failed = await store.failMonitoringFailureReplay(
       target.auth,
@@ -866,9 +913,9 @@ async function runTarget(
             if (recorded.changed) {
               options.log.warn(
                 platformEvent(
-                  "egma.monitoring.retell.health.changed",
-                  "A Retell Monitoring target became degraded",
-                  { health_state: "degraded" },
+                  "egma.monitoring.pull.call.failed",
+                  "A production call could not be imported",
+                  { error_kind: permanentKind },
                 ),
               );
             }
@@ -907,9 +954,9 @@ async function runTarget(
           if (recorded.changed) {
             options.log.warn(
               platformEvent(
-                "egma.monitoring.retell.health.changed",
-                "A Retell Monitoring target became degraded",
-                { health_state: "degraded" },
+                "egma.monitoring.pull.call.failed",
+                "A production call could not be imported",
+                { error_kind: "platform_agent_mismatch" },
               ),
             );
           }

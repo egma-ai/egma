@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { getSimulation } from "@egma/db";
+import { enablePullProductionCalls, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -524,6 +524,62 @@ describe("a connection's stored credential", () => {
     expect(written).not.toContain("not_admitted");
     expect(written).not.toContain(RETELL_KEY);
   });
+});
+
+describe("which platform a connection is stored under", () => {
+  it("refuses a phone payload that contradicts its bound agent, and says both", async () => {
+    api = await createApi("agents_browser_platform_contradiction");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agent = await anAgent(ada, "Front desk");
+
+    // Bind the agent to Retell the way the product does: turn its pull switch
+    // on with a Retell key.
+    await enablePullProductionCalls(
+      {
+        userId: ada.userId,
+        organizationId: ada.organizationId,
+        projectId: ada.projectId,
+        role: "admin",
+        via: "session",
+      },
+      {
+        agentId: agent.id,
+        agentPlatform: "retell",
+        platformAgentId: "agent_voice_1",
+        apiKey: "key_live_retell_monitoring_secret_QRST",
+      },
+    );
+
+    // `phone_number` reaches any platform, so this connection would be stored
+    // as Retell's whatever the payload claims.
+    const refused = await browser(
+      "POST",
+      `/v1/agents/${agent.id}/connections`,
+      ada,
+      {
+        name: "hotline",
+        agentPlatform: "livekit_agents",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551234567" },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toBe("unprocessable");
+    expect(String(refused.body.message)).toContain("livekit_agents");
+    expect(String(refused.body.message)).toContain("retell");
+
+    // Nothing was written, so the agent is exactly as it was.
+    const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
+    expect(read.body.connections).toEqual([]);
+  });
+
+  // The two admitted paths — a payload that agrees with its agent, and one on
+  // an unbound agent — are proven where they belong: at the access layer in
+  // `connections.test.ts`, and through the door in `agents.test.ts`, which
+  // already carries the Retell confirmation a phone connection needs.
 });
 
 describe("a connection's shape", () => {
