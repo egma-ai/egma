@@ -230,6 +230,14 @@ async function bindAndOpen(
         completedThrough: input.now,
         regularFloorAt: input.now,
         importGeneration: sql`${monitoringState.importGeneration} + 1`,
+        // A new observation is being opened, so any lease over the old one is
+        // void: whoever holds it is paging a scan that no longer exists, and
+        // every write it makes is refused by its own owner check. Were it
+        // allowed to finish, its own completion would drag `completed_through`
+        // back behind the switch and delete the floor just written — and the
+        // next regular window would reach into the hours pull was off.
+        leaseOwner: null,
+        leaseExpiresAt: null,
         nextPollAt: input.now,
         // The customer acted, which is the one thing that ends a park: a key
         // Retell refused is being offered again, and the ladder starts over.

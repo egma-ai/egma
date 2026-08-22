@@ -288,9 +288,77 @@ describe("the pull switch", () => {
     expect(target.scanKind).toBe("regular");
     expect(target.scanFrom).toEqual(resumedAt);
   });
+
+  /**
+   * **A turn already in flight may not outlive the switch-on.**
+   *
+   * Turning the switch on opens a new observation, so a lease taken over the
+   * window before it names a scan that no longer exists. Were that turn
+   * allowed to finish, its own completion would drag `completed_through` back
+   * to its older bound and delete the floor the switch just wrote — and the
+   * next regular window would reach into the hours pull was off, which is the
+   * backfill this branch exists to refuse.
+   */
+  it("voids an in-flight lease when the switch is turned on again", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const inFlight = await claimed();
+
+    const resumedAt = new Date(SETUP_TIME.getTime() + 20_000);
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: resumedAt,
+    });
+
+    // Every write the old turn still tries is refused by its own owner check.
+    expect(
+      await renewMonitoringLease(inFlight.auth, inFlight, { now: resumedAt }),
+    ).toBe(false);
+    expect(
+      await finishMonitoringScan(inFlight.auth, inFlight, { now: resumedAt }),
+    ).toBe(false);
+
+    // And the row is free at once, rather than waiting out a lease nobody owns.
+    const resumed = await claimed(resumedAt);
+    expect(resumed.importGeneration).toBe(2);
+    expect(resumed.scanKind).toBe("regular");
+    expect(resumed.scanFrom).toEqual(resumedAt);
+  });
 });
 
 describe("the poller's notebook", () => {
+  /**
+   * Two API replicas poll on the same cadence, so the claim is raced rather
+   * than taken in turn. `for update skip locked` is what makes the loser see
+   * nothing instead of queueing behind the winner.
+   */
+  it("lets only one replica claim one due agent", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+
+    const [first, second] = await Promise.all([
+      claimDueMonitoringPull({ now: SETUP_TIME }),
+      claimDueMonitoringPull({ now: SETUP_TIME }),
+    ]);
+    const held = [first, second].filter(
+      (target): target is NonNullable<typeof target> => target !== undefined,
+    );
+
+    expect(held).toHaveLength(1);
+    expect(held[0]).toMatchObject({
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      scanKind: "historical_import",
+      seenPaginationKeys: [],
+      auth: {
+        organizationId: acme.organization,
+        projectId: acme.project,
+        via: "monitoring",
+      },
+    });
+  });
+
   it("claims one due agent, holds its window, and finishes it", async () => {
     const agentId = await pulling("Front desk", "agent_retell_voice_1");
     const target = await claimed();
@@ -666,5 +734,73 @@ describe("a call that would not come", () => {
         where agent_id = '${agentId}'`,
     );
     expect(rows[0]?.n).toBe("0");
+  });
+
+  /** The batched page lookup is project-scoped, like every other read here. */
+  it("keeps one project's transient call state out of another's page", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
+    await recordRetellCallAttempt(target.auth, target, {
+      providerCallId: "call_retrying",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
+      now: SETUP_TIME,
+    });
+
+    const elsewhere = await transientRetellCallState(at(acmeOther, ada), {
+      agentId: target.agentId,
+      providerCallIds: ["call_retrying"],
+      importGeneration: target.importGeneration,
+      now: SETUP_TIME,
+    });
+    expect(elsewhere.size).toBe(0);
+  });
+
+  /**
+   * **One call is one budget, whichever agent meets it.**
+   *
+   * The row is unique per project and provider call, so two pulled agents in
+   * one project that both list the same call count against one budget rather
+   * than starting two — and the delete scopes by the same pair the finder
+   * used, so ownership moving to the later attempt cannot strand the row.
+   */
+  it("clears the one budget two pulled agents share for a call they both meet", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    await pulling("Back office", "agent_retell_voice_2");
+    const first = await claimed();
+    const second = await claimed();
+    expect(second.agentId).not.toBe(first.agentId);
+
+    const a = await recordRetellCallAttempt(first.auth, first, {
+      providerCallId: "call_both_meet",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
+      now: SETUP_TIME,
+    });
+    const b = await recordRetellCallAttempt(second.auth, second, {
+      providerCallId: "call_both_meet",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
+      now: SETUP_TIME,
+    });
+    expect(a).toMatchObject({ attempts: 1 });
+    expect(b).toMatchObject({ attempts: 2 });
+
+    const { rows } = await database.sql<{ agent_id: string; attempts: number }>(
+      "select agent_id, attempts from retell_call_retry",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.attempts).toBe(2);
+    expect(rows[0]?.agent_id).toBe(second.agentId);
+
+    // The first agent makes the call durable and clears it, although the row
+    // now names the second.
+    await deleteRetellCallRetry(first.auth, {
+      providerCallId: "call_both_meet",
+    });
+    const after = await database.sql<{ n: string }>(
+      "select count(*)::text as n from retell_call_retry",
+    );
+    expect(after.rows[0]?.n).toBe("0");
   });
 });
