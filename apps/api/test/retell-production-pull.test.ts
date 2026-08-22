@@ -1,12 +1,18 @@
 import {
   claimDueMonitoringPull,
   claimProductionTrace,
+  connectClickHouse,
   createAgent,
+  disablePullProductionCalls,
+  disconnectClickHouse,
   enablePullProductionCalls,
   finishProductionTrace,
   listMonitoringFailures,
+  listTraces,
+  readTrace,
   recordPulledCallReceived,
   recordPulledCallReceivedForPlatformAgent,
+  type AgentPlatform,
   type AuthContext,
 } from "@egma/db";
 import { newId } from "@egma/ids";
@@ -29,6 +35,7 @@ import {
   createConnectedDatabase,
   type MigratedDatabase,
 } from "../../../packages/db/test/support/database.ts";
+import { createMigratedTraceStore } from "../../../packages/db/test/support/clickhouse.ts";
 import {
   seedOrganization,
   seedUser,
@@ -78,19 +85,22 @@ function later(milliseconds: number): Date {
   return new Date(NOW.getTime() + milliseconds);
 }
 
-/** One agent bound to Retell, with its own sealed key and its switch on. */
+/** One agent bound to its platform, with its own sealed key and its switch on. */
 async function pulling(
   name: string,
   platformAgentId: string,
-  now: Date = NOW,
+  options: {
+    readonly now?: Date | undefined;
+    readonly agentPlatform?: AgentPlatform | undefined;
+  } = {},
 ): Promise<string> {
   const created = await createAgent(at(), { name });
   await enablePullProductionCalls(at(), {
     agentId: created.id,
-    agentPlatform: "retell",
+    agentPlatform: options.agentPlatform ?? "retell",
     platformAgentId,
     apiKey: RETELL_KEY,
-    now,
+    now: options.now ?? NOW,
   });
   return created.id;
 }
@@ -153,18 +163,19 @@ function retellDouble() {
     account: new Map<string, RetellCall[]>(),
     /** A forced HTTP status for one agent's list page. */
     listRefuses: new Map<string, number>(),
+    /** The `Retry-After` header that refusal carries, verbatim. */
+    listRetryAfter: new Map<string, string>(),
+    /** Claims another page and names no cursor: a broken paging contract. */
+    breaksPaging: false,
     /** A forced HTTP status for one call's full document. */
     getRefuses: new Map<string, number>(),
     pageSize: 100,
-    /** Answers nothing at all, for the turn that dies mid-flight. */
-    dead: false,
   };
 
   const fetchImpl = (async (
     input: string | URL | Request,
     init?: RequestInit,
   ): Promise<Response> => {
-    if (state.dead) throw new Error("the poller's process died mid-turn");
     const path = new URL(String(input)).pathname;
 
     if (path === "/v3/list-calls") {
@@ -182,7 +193,18 @@ function retellDouble() {
       });
       const refused = state.listRefuses.get(platformAgentId);
       if (refused !== undefined) {
-        return new Response("refused", { status: refused });
+        const retryAfter = state.listRetryAfter.get(platformAgentId);
+        return new Response("refused", {
+          status: refused,
+          ...(retryAfter === undefined
+            ? {}
+            : { headers: { "retry-after": retryAfter } }),
+        });
+      }
+      if (state.breaksPaging) {
+        return new Response(JSON.stringify({ items: [], has_more: true }), {
+          status: 200,
+        });
       }
       const inWindow = (state.account.get(platformAgentId) ?? [])
         .filter((call) => {
@@ -786,5 +808,159 @@ describe("a poison call", () => {
 
     expect(refused).toMatchObject({ kind: "busy", reason: "backing_off" });
     expect(await listMonitoringFailures(at(), agentId)).toHaveLength(1);
+  });
+});
+
+describe("a stale claim's stamp", () => {
+  it("lands only on the notebook that pulled the call", async () => {
+    // The claim references no agent — that is what makes it survive a
+    // redesign — so a restart has to find the agent again from the platform
+    // identity alone. Three agents answer to `agent_voice_1` here, and only
+    // one of them pulled anything.
+    const retired = await pulling("Retired front desk", "agent_voice_1");
+    await disablePullProductionCalls(at(), retired);
+    const pulls = await pulling("Front desk", "agent_voice_1");
+    const elsewhere = await pulling("Voice bot", "agent_voice_1", {
+      agentPlatform: "livekit_agents",
+    });
+
+    await recordPulledCallReceivedForPlatformAgent(at(), {
+      agentPlatform: "retell",
+      platformAgentId: "agent_voice_1",
+      receivedAt: later(MINUTE),
+    });
+
+    const stamped = new Map(
+      (await notebooks()).map((row) => [row.agent_id, row.last_received_at]),
+    );
+    expect(stamped.get(pulls)?.toISOString()).toBe(later(MINUTE).toISOString());
+    expect(stamped.get(retired)).toBeNull();
+    expect(stamped.get(elsewhere)).toBeNull();
+  });
+});
+
+describe("a broken page contract", () => {
+  it("does not close the explicit-replay gate, however often it repeats", async () => {
+    const double = retellDouble();
+    const agentId = await pulling("Front desk", "agent_voice_1");
+    holds(
+      double,
+      retellCall("call_broken", "agent_voice_1", later(-2 * MINUTE)),
+    );
+    double.getRefuses.set("call_broken", 404);
+    await poll(double);
+    const [failure] = await listMonitoringFailures(at(), agentId);
+    expect(failure).toBeDefined();
+
+    // Retell claims another page and names no cursor. That is a broken
+    // contract, not a refusal: it says nothing about whether this agent's key
+    // still works, so it must not climb the retry clock.
+    double.breaksPaging = true;
+    await poll(double, { now: later(60_000) });
+    expect((await notebook()).consecutive_failures).toBe(0);
+
+    const asked = await replayRetellIngestionFailure({
+      auth: at(),
+      failureId: failure?.id ?? "",
+      log: collectingLog().log,
+      reach: { url: RETELL_URL, fetchImpl: double.fetchImpl },
+      writer: realLedgerWriter([]),
+      clock: () => later(61_000),
+    });
+    expect(asked.kind).toBe("still_failed");
+
+    // It keeps breaking. Only a finished scan clears the streak, so a streak
+    // taken here would hold the gate shut for as long as the breach lasts.
+    await poll(double, { now: later(120_000) });
+    await poll(double, { now: later(180_000) });
+    expect((await notebook()).consecutive_failures).toBe(0);
+
+    double.getRefuses.delete("call_broken");
+    const resolved = await replayRetellIngestionFailure({
+      auth: at(),
+      failureId: failure?.id ?? "",
+      log: collectingLog().log,
+      reach: { url: RETELL_URL, fetchImpl: double.fetchImpl },
+      writer: realLedgerWriter([]),
+      clock: () => later(181_000),
+    });
+    expect(resolved).toMatchObject({ kind: "resolved", write: "written" });
+    expect(await listMonitoringFailures(at(), agentId)).toHaveLength(0);
+  });
+});
+
+describe("a rate limit", () => {
+  it("is honoured as asked, and held to the same ceiling when absurd", async () => {
+    const double = retellDouble();
+    const agentId = await pulling("Front desk", "agent_voice_1");
+    double.listRefuses.set("agent_voice_1", 429);
+    double.listRetryAfter.set("agent_voice_1", "12");
+
+    await poll(double);
+    expect((await notebook()).next_poll_at.toISOString()).toBe(
+      later(12_000).toISOString(),
+    );
+
+    // A hundred years, in seconds. Hostile or a units mistake, it must not be
+    // able to retire the agent or hold its replay gate shut for the same span.
+    double.listRetryAfter.set("agent_voice_1", "3153600000");
+    await database.sql(
+      "update monitoring_state set next_poll_at = $1 where agent_id = $2",
+      [later(MINUTE).toISOString(), agentId],
+    );
+    const absurdTurn = later(MINUTE);
+    await poll(double, { now: absurdTurn });
+
+    const waited =
+      (await notebook()).next_poll_at.getTime() - absurdTurn.getTime();
+    expect(waited).toBeGreaterThan(0);
+    expect(waited).toBeLessThanOrEqual(60 * MINUTE);
+  });
+});
+
+describe("a pulled call", () => {
+  it("is readable through the trace reads", async () => {
+    // The one case that runs the whole way into ClickHouse. Everything else in
+    // this file is a claim about a Postgres row, and stubs the span block; this
+    // is the claim that a Retell call that ended after the switch went on can
+    // actually be read back as a trace.
+    const traces = await createMigratedTraceStore("retell_production_pull");
+    connectClickHouse({ clickhouseUrl: traces.url, maxOpenConnections: 4 });
+    try {
+      const double = retellDouble();
+      await pulling("Front desk", "agent_voice_1");
+      holds(double, retellCall("call_live", "agent_voice_1", later(-MINUTE)));
+
+      // No writer seam at all: the real one, all the way through.
+      const turn = await runRetellProductionIngestion({
+        log: collectingLog().log,
+        reach: { url: RETELL_URL, fetchImpl: double.fetchImpl },
+        clock: () => NOW,
+      });
+      expect(turn).toMatchObject({ written: 1 });
+
+      const window = {
+        from: BigInt(NOW.getTime() - DAY) * 1_000n,
+        to: BigInt(NOW.getTime() + DAY) * 1_000n,
+      };
+      const listed = await listTraces(at(), { window });
+      const [summary] = listed.traces;
+      expect(summary).toMatchObject({
+        providerCallId: "call_live",
+        platformAgentId: "agent_voice_1",
+        platformAgentName: "Front desk",
+        agentPlatform: "retell",
+        environment: "production",
+      });
+
+      const detail = await readTrace(at(), summary?.traceId ?? "", { window });
+      expect(detail?.turns.map((turnRow) => turnRow.text)).toEqual([
+        "Hello",
+        "I need help",
+      ]);
+    } finally {
+      await disconnectClickHouse();
+      await traces.drop();
+    }
   });
 });

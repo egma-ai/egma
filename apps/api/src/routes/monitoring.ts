@@ -158,26 +158,6 @@ export async function monitoringRoutes(
         );
       }
       if (replayed.kind === "busy") {
-        if (replayed.reason === "rate_limited") {
-          return sendRefusal(
-            reply,
-            "too_many_requests",
-            "Retell rate-limited this retry. Wait and try again.",
-          );
-        }
-        if (replayed.reason === "invalid_credential") {
-          return unprocessable(
-            reply,
-            "Retell rejected the current API key. Update the Retell Monitoring setup and try again.",
-          );
-        }
-        if (replayed.reason === "provider_unavailable") {
-          return sendRefusal(
-            reply,
-            "provider_unavailable",
-            "Retell did not answer this retry. Try again.",
-          );
-        }
         // The agent is already waiting out its own retry clock, which this
         // retry would otherwise spend a provider request against. There is no
         // stored health state to say why any more, so the honest answer is the

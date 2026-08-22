@@ -228,6 +228,7 @@ export async function replayProductionClaim(
     await stores.recordProductionTraces(claim.auth, normalised.spans);
   }
   await stores.recordPulledCallReceivedForPlatformAgent(claim.auth, {
+    agentPlatform: "retell",
     platformAgentId: claim.platformAgentId,
   });
   await stores.finishProductionTrace(claim.auth, {

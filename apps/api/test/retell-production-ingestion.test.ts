@@ -807,13 +807,7 @@ describe("Retell production ingestion", () => {
       clock: () => BASE,
     });
 
-    expect(events.warn).toEqual([]);
-    expect(events.error).toEqual([]);
-    expect(
-      events.info.filter((one) =>
-        String(one["otel.event.name"]).includes("health"),
-      ),
-    ).toEqual([]);
+    expect(events).toEqual({ info: [], warn: [], error: [] });
   });
 
   it("makes a refused key wait, bounded, without a health state to park it in", async () => {

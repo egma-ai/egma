@@ -50,7 +50,8 @@ const MAXIMUM_HYDRATION_ATTEMPTS = 3;
 const BACKOFF_BASE_MILLISECONDS = 5_000;
 const BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
 /**
- * A key the provider refuses waits longer, and still only waits.
+ * The longest an agent may ever be made to wait — the ceiling on every wait
+ * this file can produce, whoever proposed it.
  *
  * The old model parked a refused key for ever and let the account-wide health
  * row explain the stop. ADR-0015 drops `blocked_until` and the health surface
@@ -60,8 +61,20 @@ const BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
  * per-agent ladder with a higher ceiling — an hour, because a revoked key
  * clears when a person acts and not in seconds. Re-arming the switch still
  * wakes the agent at once.
+ *
+ * The provider's own `Retry-After` is held to the same hour: it is a
+ * suggestion from outside, and a header of a hundred years must not be able to
+ * retire an agent or hold its explicit-replay gate shut for the same span.
  */
-const INVALID_CREDENTIAL_CAP_MILLISECONDS = 60 * 60_000;
+const LONGEST_WAIT_MILLISECONDS = 60 * 60_000;
+/**
+ * How many doublings the ladder takes before the cap decides.
+ *
+ * Five seconds doubled twelve times is about six hours, past every ceiling
+ * here, so the bound exists only to keep the arithmetic small — the cap is
+ * what any wait beyond a few minutes actually lands on.
+ */
+const LONGEST_DOUBLING = 12;
 
 type PlatformLogEvent = Record<string, unknown>;
 
@@ -307,9 +320,9 @@ function regularPollMilliseconds(target: MonitoringPullTarget): number {
  */
 function backoffMilliseconds(
   target: Pick<MonitoringPullTarget, "agentId" | "consecutiveFailures">,
-  capMilliseconds: number = BACKOFF_CAP_MILLISECONDS,
+  capMilliseconds: number,
 ): number {
-  const exponent = Math.min(target.consecutiveFailures, 12);
+  const exponent = Math.min(target.consecutiveFailures, LONGEST_DOUBLING);
   const base = Math.min(
     capMilliseconds,
     BACKOFF_BASE_MILLISECONDS * 2 ** exponent,
@@ -445,14 +458,24 @@ function retryAtFor(
     failure.kind === "refused" &&
     failure.retryAfterMilliseconds !== undefined
   ) {
-    return new Date(now.getTime() + failure.retryAfterMilliseconds);
+    // Retell's own answer is honoured, up to the same ceiling every other wait
+    // has. A header of a hundred years — hostile, or a units mistake — would
+    // otherwise park the agent past the heat death of the account and hold the
+    // explicit-replay gate shut for the same span.
+    return new Date(
+      now.getTime() +
+        Math.min(
+          failure.retryAfterMilliseconds,
+          LONGEST_WAIT_MILLISECONDS,
+        ),
+    );
   }
   return new Date(
     now.getTime() +
       backoffMilliseconds(
         target,
         kind === "invalid_credential"
-          ? INVALID_CREDENTIAL_CAP_MILLISECONDS
+          ? LONGEST_WAIT_MILLISECONDS
           : BACKOFF_CAP_MILLISECONDS,
       ),
   );
@@ -499,10 +522,7 @@ export type RetellIngestionFailureReplayResult =
   | { readonly kind: "not_found" }
   | {
       readonly kind: "busy";
-      readonly reason:
-        | MonitoringFailureKind
-        | "replay_in_progress"
-        | "backing_off";
+      readonly reason: "replay_in_progress" | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "lease_lost" }
