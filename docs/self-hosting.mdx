@@ -26,11 +26,11 @@ Clone the Egma repository, then copy the example environment file:
 cp .env.example .env
 ```
 
-Open `.env` in an editor. Most values have working defaults and you can leave them alone. **Ten variables have no default and the platform refuses to start without them.** They are marked `REQUIRED` in `.env.example`. The sections below explain each one and how to generate it.
+Open `.env` in an editor. Most values have working defaults and you can leave them alone. **Twelve variables have no default and the platform refuses to start without them.** They are marked `REQUIRED` in `.env.example`. The sections below explain each one and how to generate it.
 
 ## Step 2 — Set the required secrets
 
-Seven of the ten required values are secrets you generate yourself. The remaining three — the LiveKit API key and secret, and `EGMA_BASE_URL` — are set automatically when you run `self-host up`.
+Nine of the twelve required values are secrets you generate yourself. The remaining three — the LiveKit API key and secret, and `EGMA_BASE_URL` — are set automatically when you run `self-host up`.
 
 ### `EGMA_ENCRYPTION_KEY`
 
@@ -286,7 +286,7 @@ Run `egma self-host up` again from your platform workspace after pulling the lat
 ## Troubleshooting
 
 <Accordion title="Platform refuses to start and names a missing variable">
-  Every required variable is named in `.env.example`. Make sure you have filled in all seven secrets listed in the table above. `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`, and `EGMA_BASE_URL` are set automatically by `egma self-host up` — if they are missing, run `egma self-host up` instead of `docker compose up`.
+  Every required variable is named in `.env.example`. Make sure you have filled in all nine secrets listed in the table above. `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`, and `EGMA_BASE_URL` are set automatically by `egma self-host up` — if they are missing, run `egma self-host up` instead of `docker compose up`.
 </Accordion>
 
 <Accordion title="Recordings play nothing or return SignatureDoesNotMatch">
