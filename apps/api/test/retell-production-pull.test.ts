@@ -268,6 +268,7 @@ function realLedgerWriter(spans: unknown[]): RetellProductionWriter {
     recordPulledCallReceivedForPlatformAgent,
     async appendSpans(_auth, written) {
       spans.push(...written);
+      return { appended: written.length, batches: 1 };
     },
     async recordProductionTraces() {
       // ClickHouse's grading queue. Nothing here is a claim about it.
