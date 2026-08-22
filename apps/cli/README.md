@@ -48,7 +48,8 @@ contains the agent or configure it in the Egma UI.
 
 Then it connects that agent so Egma can reach it, writes a first suite of tests
 for it, puts them on Egma when you say so, and runs them — closing as soon as
-the first verdict has landed, with the rest of the suite still going on Egma.
+the first completed trace has terminal grading, with the rest of the suite still
+going on Egma.
 See below.
 
 ## Signing in
@@ -396,39 +397,36 @@ one **simulation** per persona, and each one arrives on its own line and moves:
 ```
 run run_01K7QXV2M8  ·  12 simulations
 
-◼ quoted-a-price            passed
+◼ quoted-a-price            grading complete
 ▶ lost-the-order-number     in progress
 ▶ open-on-sunday            dialing…
 ◻ after-hours-emergency     queued
 
-✓ First verdict: quoted-a-price passed
+✓ First result: quoted-a-price grading complete
 
-passed 1  ·  failed 0  ·  skipped 0  ·  errored 0  ·  waiting 11
+execution 1/12 finished  ·  grading 1/1 terminal  ·  errors 0
 ```
 
-**The wizard does not wait for the suite.** It waits for the first verdict —
-that is the point where you stop taking Egma's word for it — and then closes.
-The run carries on on Egma; shutting your terminal has never stopped one.
+**The wizard does not wait for the suite.** It waits for the first completed
+trace whose whole grading work is terminal. It never advances on the first
+individual grade. The run carries on on Egma; shutting your terminal has never
+stopped one.
 
-**Verdicts arrive after the conversation ends.** The simulator claims each
-simulation and conducts it; the grader judges what it did and writes one
-verdict per expected behaviour, each with its own rationale, the turns it
-cites, and the judge that wrote it. The screen keeps following until every
-simulation has finished **and** every one has been judged — those are two
-different moments. Close the window whenever you like; the run is yours on Egma
-either way, at the address the screen shows.
+**Grading starts after a completed conversation.** A grader reads trace
+evidence, test values, outcomes, and metrics and returns one normalized score
+from `0` to `1`. Expected behaviors is one grader. Its detailed assertion
+results stay inside its one grade. The results page shows each grade, its pass
+threshold, its individual result, and its evidence.
 
-A **verdict** is one of four, and Egma never turns four into three:
+Several grades can have a display-only combined score. Egma does not turn that
+score into a simulation, test, suite, or run pass/fail result. A low grade does
+not make `egma run` fail. An execution error or grading-system error does.
 
-- `passed` — the agent did what the test expected.
-- `failed` — it did not. Something in your agent is wrong.
-- `skipped` — a grader recorded no verdict, such as when its supported modality
-  did not match this simulation.
-- `errored` — the simulation never happened. The agent was not reached, or Egma
-  broke.
-
-A test that could not run is not a test that failed, and reporting one as the
-other would send you hunting a bug that is not there.
+The run screen reports grading as `not_requested`, `pending`, `running`,
+`complete`, or `error`. A simulation that failed or was canceled before it
+produced a completed trace has no grading state and adds no grading wait. A
+grader outside scope or incompatible with the trace writes no grade; it is not
+called skipped.
 
 If your connection kind has no simulator adapter, Egma refuses
 the run **at creation**, in its own words, and the wizard prints those words as
@@ -453,28 +451,35 @@ tests: 2
 simulations: 2
 results: http://localhost:3101/runs/run_01K…
 simulation: quoted-a-price default-persona running
-verdict: quoted-a-price default-persona passed
-first-verdict: quoted-a-price default-persona passed
+simulation: quoted-a-price default-persona completed
+grading: quoted-a-price default-persona pending
+grading: quoted-a-price default-persona running
+grading: quoted-a-price default-persona complete
+first-result: quoted-a-price default-persona complete
 simulation: lost-the-order-number default-persona completed
-verdict: lost-the-order-number default-persona skipped
-reason: no active grader supported this simulation's modality
-passed: 1
-failed: 0
-skipped: 1
-errored: 0
-pending: 0
+grading: lost-the-order-number default-persona not_requested
+execution-finished: 2
+execution-failed: 0
+execution-canceled: 0
+grading-terminal: 2
+grading-complete: 1
+grading-not-requested: 1
+grading-errors: 0
+grading-pending: 0
+grading-running: 0
 simulations: 2
 status: completed
 
-0 the run finished and nothing failed or errored
-1 nothing here to run   2 not signed in   3 a test failed
+0 execution and grading finished without an operational error
+1 nothing here to run   2 not signed in
 4 Egma did not answer, or refused
 5 Egma would not start the run, and said why
-6 a simulation errored, so nothing concluded   130 stopped part way
+6 execution or grading had an operational error   130 stopped part way
 ```
 
-`--no-follow` starts the run and returns at once, without waiting for a verdict
-— for when you want the suite going and will read the results page later.
+`--no-follow` starts the run and returns at once, without waiting for execution
+or grading — for when you want the suite going and will read the results page
+later.
 
 It runs the complete suite named by the local directory. The manifest supplies
 the stable suite ID, and each simulation records the exact test version it ran.
@@ -512,7 +517,7 @@ away. So everything you need is printed after that screen is released, in plain
 text, each item alone on its line so a triple-click takes it whole:
 
 ```
-✓ Your first run is live — 3 of 12 graded so far.
+✓ Your first run is live — 3 of 12 simulation results ready.
 
 http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
 
@@ -656,7 +661,7 @@ egma run <suite-directory> [options]
   --force              With login: sign in again even when this machine
                        already holds a key.
   --no-follow          With run: start the run and return at once, without
-                       waiting for a verdict. The run carries on on Egma.
+                       waiting for execution or grading. The run carries on on Egma.
   --retell-agent <id>  With connect: which agent, when the Retell account
                        holds more than one.
   --reach <text|phone> With connect and a headless wizard: how Egma should
@@ -794,11 +799,11 @@ The wizard signs this machine in against that instance, registers your agent
 and a way to reach it, writes a first suite of tests with your coding agent,
 puts them on Egma when you say so, and starts a run over them.
 
-**Then it waits for the answer.** The simulator claims the work and holds the
-conversation; the grader judges it afterwards. The first verdict opens the run
-page, and the screen keeps following until execution and grading are both
-finished — a run whose calls have all ended is not yet a run whose judgment is
-in, and the two are reported apart so neither can be mistaken for the other.
+**Then it waits for the first result.** The simulator claims the work and holds
+the conversation; graders run after a completed trace. The wizard moves on only
+after that trace's whole grading work is terminal. The headless `egma run`
+command follows all simulations until execution is terminal and every completed
+trace has terminal grading.
 
 The whole wizard flow is checked against a real instance the same way. On a checkout
 that has had `pnpm install`, and on a machine with a Chrome — or with

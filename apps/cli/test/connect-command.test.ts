@@ -589,7 +589,7 @@ describe("the whole walk, headless", () => {
       ],
     });
 
-    // The walk ends in a run, and a run ends when verdicts arrive. Nothing
+    // The walk ends in a run, and a trace result ends when grading is terminal. Nothing
     // here conducts a simulation, so the fixture is given the one thing a
     // platform with a simulator attached has.
     const grading = gradeEveryRun(platform);

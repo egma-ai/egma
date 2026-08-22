@@ -44,7 +44,8 @@ OpenTelemetry resource does. It decides nothing.
 ## Trace identity
 
 The simulator deterministically derives the trace id from the simulation id,
-so the conversation's spans and its verdicts can always find each other:
+so the simulation row, its spans, and its trace-level grades can find each
+other:
 
 - **trace id** — the simulation id's own 128 bits: the 26 Crockford base32
   characters after `sim_` decoded to a 128-bit integer, written as 32 lowercase

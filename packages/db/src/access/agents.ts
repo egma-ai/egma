@@ -1683,7 +1683,7 @@ export async function updateConnection(
  *
  * What it does is block new claims, settle the queue, and ask whatever is
  * already talking to stop at its next heartbeat. What it deliberately does not
- * do is erase anything: transcripts, verdicts and run headers stay exactly as
+ * do is erase anything: transcripts, grades and run headers stay exactly as
  * they are, because evidence that was true stays true after the target is
  * retired.
  */

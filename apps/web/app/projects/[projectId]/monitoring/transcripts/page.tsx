@@ -10,7 +10,7 @@ import {
 } from "@egma/platform-api/client";
 
 import type { Answer } from "../../../../../lib/api.ts";
-import type { RunningPage } from "../../../../../lib/graders.ts";
+import type { ProjectGradersPage } from "../../../../../lib/graders.ts";
 import {
   platformAnswer,
   platformClient,
@@ -159,7 +159,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
    * Neither is asked about a window: what each says is true of the project
    * rather than of the last day.
    */
-  const { answer: graders } = useProjectRead<RunningPage>(
+  const { answer: graders } = useProjectRead<ProjectGradersPage>(
     (projectId) =>
       platformAnswer(listGraders({ projectId }, { client: platformClient })),
     projectId,
@@ -495,7 +495,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         {quiet === "nothing-watches-production" ? (
           <Notice>
             {QUIET.unwatched.lead}{" "}
-            <Link href={projectPath(projectId, "graders", "running")}>
+            <Link href={projectPath(projectId, "graders")}>
               {QUIET.unwatched.graders}
             </Link>
           </Notice>

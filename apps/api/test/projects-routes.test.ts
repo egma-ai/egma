@@ -1,3 +1,4 @@
+import { PREDEFINED_GRADERS } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -160,10 +161,10 @@ describe("creating a project", () => {
 
   /**
    * The whole factory, proven from outside: the project the route made is
-   * usable, which means it has a default persona and a mandatory running
-   * grader for its first test.
+   * usable, which means it has a default persona and its protected Expected
+   * behaviors project grader for the first simulation.
    */
-  it("makes a project with its default persona and mandatory grader", async () => {
+  it("makes a project with its default persona and protected grader", async () => {
     api = await createApi("projects_create_whole");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -179,11 +180,15 @@ describe("creating a project", () => {
     );
     expect((personas.body.personas as unknown[]).length).toBe(1);
 
-    const { rows } = await api.database.sql<{ count: string }>(
-      "select count(*) as count from grader where project_id = $1 and deleted_at is null",
+    const { rows } = await api.database.sql<{ grader_definition_id: string }>(
+      `select grader_definition_id
+         from project_grader
+        where project_id = $1 and archived_at is null`,
       [String(made.body.id)],
     );
-    expect(rows[0]?.count).toBe("1");
+    expect(rows).toEqual([
+      { grader_definition_id: PREDEFINED_GRADERS.expectedBehaviors },
+    ]);
   });
 
   it("refuses a project with no name", async () => {

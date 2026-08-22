@@ -1,31 +1,25 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 import { cn } from "@/lib/utils";
 
-import { asSecond } from "../lib/instants.ts";
 import {
-  citedTurnPositions,
   type EvidenceCoverage,
   type EvidenceMockTool,
   type EvidencePlanItem,
   type EvidenceStep,
   type EvidenceTranscript,
-  type JudgedAssertion,
 } from "../lib/simulations.ts";
 import { graderDisplayName } from "../lib/presentation.ts";
 import { howFarIn, howLong } from "../lib/transcripts.ts";
 import { Help } from "./form.tsx";
 import { Empty } from "./page-state.tsx";
-import { VerdictBadge } from "./run-status.tsx";
 
 /**
  * The parts one conversation's evidence page is built from.
  *
  * **Each one takes finished data and decides nothing.** A transcript is handed
- * turns; the timed view is handed steps; the verdict block is handed a judged
- * dimension that has already been folded. That is what makes them reusable and
+ * turns; the timed view is handed steps; the grade block is handed a completed
+ * grade. That is what makes them reusable and
  * what makes them tunable: their appearance is the class list on each element
  * and their contract is `lib/simulations.ts`, and neither can be changed by
  * touching the other. A component that fetched, folded or filtered would put a
@@ -35,18 +29,18 @@ import { VerdictBadge } from "./run-status.tsx";
  * They live in their own file, beside `run-status.tsx` and for the same
  * reason: the shared component set is deliberately held closed.
  *
- * **Speech, timing and judgement stay three things.** The transcript is what was
+ * **Speech, timing and grading stay three things.** The transcript is what was
  * said and nothing else — tool calls and system work are not interleaved into
  * it, because a transcript with machinery in the middle of it stops being
  * readable as a conversation. The timed view is where those meet, on one clock.
- * And a verdict is never drawn inside a turn: judging is a separate act from
+ * And a grade is never drawn inside a turn: grading is a separate act from
  * speaking, and a page that mixed them would let a reader take a grader's
  * sentence for something the agent said.
  *
  * **The appearance is Tailwind on the shadcn base**, and `evidence.module.css`
  * is gone with it. What it said about these surfaces still holds and is worth
  * keeping: a transcript stays prose, a timeline stays a clock, a measure stays
- * a number, and a verdict stays a judgement. They share the palette and the
+ * a number, and a grade stays a grade. They share the palette and the
  * hairlines without those four different facts becoming one card pattern.
  *
  * What each surface *is* moved from a module class name onto `data-slot`, and
@@ -72,9 +66,6 @@ const ROW_HOVER =
 
 /** Identifiers, scores and clock times, in the shared monospace face. */
 const MONO = "font-mono text-sm text-muted-foreground";
-
-/** The same face for a paragraph, which has a margin to drop. */
-const CITED = ["m-0", MONO];
 
 /**
  * The marker on a disclosure, drawn rather than typed.
@@ -111,7 +102,7 @@ function everyStep(steps: readonly EvidenceStep[]): EvidenceStep[] {
 export type TranscriptProps = {
   readonly transcript: EvidenceTranscript;
   /**
-   * Turn positions to mark, one-based — the turns a judgement somebody is
+   * Turn positions to mark, one-based — the turns a grade somebody is
    * reading cites. Empty marks nothing, which is the ordinary state.
    */
   readonly highlighted?: readonly number[];
@@ -170,7 +161,7 @@ export function Transcript({
                  cited turn colours it rather than moving the text along. */
               "border-s-[3px] border-s-transparent",
               "not-first:border-t not-first:border-t-border",
-              /* A verdict points here. */
+              /* A grade points here. */
               cited && "border-s-brand bg-selected",
               /* Somebody followed a `Cites turn 3` link to this turn. The
                  scroll margin keeps it clear of whatever is pinned above. */
@@ -225,7 +216,7 @@ export function Transcript({
                     </span>
                   ) : null}
                   {cited ? (
-                    <span className="text-foreground">cited by a verdict</span>
+                    <span className="text-foreground">cited by a grade</span>
                   ) : null}
                 </p>
               )}
@@ -464,10 +455,10 @@ const MEASURES: Readonly<
 };
 
 /**
- * What was **measured**, and never what was judged.
+ * What was **measured**, and never what was graded.
  *
- * A metric measures and a grader judges, and that line is the reason this is its
- * own block instead of sitting among the verdicts. Nobody wrote down that the
+ * A metric measures and a grader grades, and that line is the reason this is its
+ * own block instead of sitting among the grades. Nobody wrote down that the
  * conversation took four minutes; somebody had to decide that confirming a
  * booking matters. Only what is actually known appears — a conversation that
  * never connected has no duration.
@@ -524,7 +515,7 @@ export function Measures({
  * The mocked world.
  * ------------------------------------------------------------------------ */
 
-/** One tool name, as a chip. Not a `Badge`: that one is an uppercase verdict. */
+/** One tool name, as a chip. */
 const TOOL_CHIP =
   "rounded-chip border border-border px-3 py-1 font-mono text-sm text-foreground";
 
@@ -628,121 +619,7 @@ export function MockToolEvidence({
   );
 }
 
-/* ------------------------------------------------------------------------ *
- * What egma made of it.
- * ------------------------------------------------------------------------ */
-
-/**
- * One judged assertion: what counts now, why, and the judgments underneath it.
- *
- * **Different grader-version judgments are preserved and shown.** A re-grade
- * replaces the row for this simulation's same pinned version. Any row already
- * stored under another version remains visible as superseded evidence.
- *
- * The page groups rows under their grader and marks that whole grader as
- * required or reports-only once. Repeating a storage id and lane on every
- * assertion makes the judgement harder to scan without adding information.
- *
- * `action` is where a page puts whatever it offers about this judgement, or
- * nothing at all for somebody who may not. This component never decides that:
- * what a role may do is the server's answer and the page's to relay.
- */
-export function VerdictEvidence({
-  judged,
-  turns,
-  action,
-  children,
-}: {
-  readonly judged: JudgedAssertion;
-  /** The transcript's turns, so cited spans can be named by position. */
-  readonly turns: readonly EvidenceStep[];
-  readonly action?: ReactNode;
-  /** Whatever the page opens under this row. */
-  readonly children?: ReactNode;
-}) {
-  const { speaking } = judged;
-  const cited = citedTurnPositions(speaking.citedTurns, turns);
-
-  return (
-    <article
-      className="flex flex-col gap-4 border-t border-t-border py-4"
-      data-assertion={judged.assertion}
-      data-slot="verdict"
-      data-verdict={speaking.verdict ?? "pending"}
-    >
-      <header className="flex flex-wrap items-center gap-3">
-        <span className="flex min-w-0 flex-[1_1_260px] flex-col gap-1">
-          {/*
-            The words where they could be resolved, and the bare key where they
-            could not. A guessed sentence would be unfalsifiable; a key is
-            merely terse.
-          */}
-          <strong className="text-sm font-medium text-foreground">
-            {judged.assertionText ?? judged.assertion}
-          </strong>
-        </span>
-        <VerdictBadge verdict={speaking.verdict} />
-        <span className={MONO}>
-          {speaking.score.toFixed(2)}
-        </span>
-        {action}
-      </header>
-
-      <p className="m-0 max-w-[88ch] text-sm text-foreground">
-        {speaking.rationale}
-      </p>
-      {cited.length === 0 ? null : (
-        <p className={cn(CITED)}>
-          Cites {cited.map((turn, at) => (
-            <span key={turn}>
-              {at === 0 ? "" : ", "}
-              <a
-                className="text-foreground underline-offset-3"
-                href={`#transcript-turn-${String(turn)}`}
-              >
-                turn {turn}
-              </a>
-            </span>
-          ))}
-        </p>
-      )}
-
-      {judged.superseded.length === 0 ? null : (
-        <details
-          className={cn(
-            /* `group`, so the marker on the summary can read `[open]`. */
-            "group flex flex-col gap-2 ps-4 text-muted-foreground",
-            /* An older judgement is filed under this one, not beside it. */
-            "border-s-2 border-s-border",
-          )}
-        >
-          <summary
-            className={cn(
-              DISCLOSURE,
-              "inline-flex w-fit cursor-pointer items-center gap-2",
-              "text-sm text-foreground before:size-3",
-              /* A keyboard opening is immediate: no motion delays input. */
-              "focus-visible:before:transition-none",
-            )}
-          >
-            {judged.superseded.length} earlier judgement
-            {judged.superseded.length === 1 ? "" : "s"} of this assertion
-          </summary>
-          {judged.superseded.map((row) => (
-            <p className={cn(CITED)} key={row.judgedAt}>
-              <span className={MONO}>{asSecond(row.judgedAt)}</span>{" "}
-              {row.verdict} — {row.rationale}
-            </p>
-          ))}
-        </details>
-      )}
-
-      {children}
-    </article>
-  );
-}
-
-/** The pinned grader versions this conversation was judged under. */
+/** The pinned grader versions this simulation was graded under. */
 export function PlanItems({
   items,
 }: {
@@ -751,8 +628,8 @@ export function PlanItems({
   if (items.length === 0) {
     return (
       <Empty
-        title="No grading plan was recorded for this simulation"
-        lead="Egma will not reconstruct one from today's graders, because that would be a claim about an old run that nobody can check."
+        title="No graders were frozen for this simulation"
+        lead="No project grader matched this simulation when the run started."
       />
     );
   }
@@ -773,13 +650,13 @@ export function PlanItems({
             /* Narrow, the note sits under the grader it describes. */
             "max-[40rem]:grid-cols-[1fr] max-[40rem]:gap-1",
           )}
-          key={`${item.graderId}:${item.graderVersionId}`}
+          key={item.projectGraderId}
         >
           <strong className="font-medium text-foreground">
-            {graderDisplayName(item.name)}
+            {graderDisplayName(item.graderName)}
           </strong>
           <span className="min-w-0 font-mono wrap-anywhere text-muted-foreground">
-            {`${item.required ? "blocks" : "reports only"} · ${item.graderVersionId}`}
+            {`Definition v${String(item.graderDefinitionVersion)} · pass threshold ${item.passThreshold.toFixed(2)}`}
           </span>
         </li>
       ))}
@@ -793,7 +670,7 @@ export function GradingPending({ what }: { readonly what: string }) {
     <p
       className={cn(
         "m-0 px-4 py-3 text-sm text-foreground",
-        /* Attention, not a verdict: Ember Wash behind an Ember edge. */
+        /* Attention, not a grade result: Ember Wash behind an Ember edge. */
         "border-s-[3px] border-s-brand bg-selected",
       )}
       data-slot="grading-pending"
@@ -802,10 +679,3 @@ export function GradingPending({ what }: { readonly what: string }) {
     </p>
   );
 }
-
-/*
- * **There was a `CorrectionForm` here.** It was where a page put the form it
- * opened under one judgement, and it goes with the endpoint behind it:
- * ADR-0009 takes corrections out of v0, and they return as the reserved
- * `human` grader type writing rows of its own.
- */

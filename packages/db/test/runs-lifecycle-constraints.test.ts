@@ -702,11 +702,9 @@ describe("the run header", () => {
 });
 
 /**
- * The events record's own door. A verdict is what the graders make of a
- * conversation, and they write it to their own tables; the day the feed starts
- * carrying one, these are the checks it will meet. Held here by raw SQL for the
- * same reason as everything else in this file: the paths that never pass
- * through the application are exactly the ones a constraint has to defend.
+ * The events record's own door. Held here by raw SQL for the same reason as
+ * everything else in this file: the paths that never pass through the
+ * application are exactly the ones a constraint has to defend.
  */
 describe("a run event", () => {
   /** One simulation, and the run it belongs to. */
@@ -725,14 +723,13 @@ describe("a run event", () => {
       seq: number;
       kind: string;
       status: string;
-      verdict?: string;
       reason?: string;
     },
   ): Promise<void> {
     await db.sql(
       `insert into run_event
-         (run_id, seq, organization_id, project_id, kind, simulation_id, status, verdict, reason)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+         (run_id, seq, organization_id, project_id, kind, simulation_id, status, reason)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         where.run,
         event.seq,
@@ -741,7 +738,6 @@ describe("a run event", () => {
         event.kind,
         where.simulation ?? null,
         event.status,
-        event.verdict ?? null,
         event.reason ?? null,
       ],
     );
@@ -771,37 +767,10 @@ describe("a run event", () => {
     );
   });
 
-  it("pairs a verdict with the ending it belongs to, and never folds skipped or errored into failed", async () => {
-    const { run, simulation } = await aConversation();
-
-    // The three honest pairings, each written without complaint.
-    await record({ run, simulation }, { seq: 1, kind: "simulation", status: "completed", verdict: "passed", reason: "agent_ended" });
-    await record({ run, simulation }, { seq: 2, kind: "simulation", status: "completed", verdict: "skipped", reason: "agent_ended" });
-    await record({ run, simulation }, { seq: 3, kind: "simulation", status: "failed", verdict: "errored", reason: "simulator_error" });
-    await record({ run, simulation }, { seq: 4, kind: "simulation", status: "canceled", verdict: "skipped" });
-
-    // A simulation that never ran is not a simulation that failed, and this is
-    // where saying otherwise becomes unwritable.
-    for (const [status, verdict] of [
-      ["failed", "failed"],
-      ["failed", "skipped"],
-      ["canceled", "failed"],
-      ["canceled", "errored"],
-      ["running", "passed"],
-      ["queued", "skipped"],
-    ] as const) {
-      await expect(
-        record({ run, simulation }, { seq: 9, kind: "simulation", status, verdict }),
-      ).rejects.toSatisfy(
-        (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-      );
-    }
-  });
-
   it("keeps each kind to its own vocabulary", async () => {
     const { run, simulation } = await aConversation();
 
-    // A run event is about the header: no simulation, no judgement of one.
+    // A run event is about the header, so it does not name one simulation.
     await expect(
       record({ run, simulation }, { seq: 1, kind: "run", status: "running" }),
     ).rejects.toSatisfy(

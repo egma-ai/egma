@@ -8,24 +8,24 @@
  * could not.
  */
 
-import type { RunTally, SimulationRow } from "./follow.ts";
+import type { RunProgress, SimulationRow } from "./follow.ts";
 
 export type RunView = {
   readonly runId: string;
   /** One line per simulation, in the order the run laid them out. */
   readonly rows: readonly SimulationRow[];
-  readonly tally: RunTally;
+  readonly progress: RunProgress;
   /**
-   * The simulation whose verdict landed first, or `null` while none has.
+   * The first completed trace whose whole grading work became terminal.
    *
    * The moment this stops being `null` is the moment the walk is timed
    * against, so the screen marks it rather than letting it scroll past like
    * every other change.
    */
-  readonly firstVerdict: SimulationRow | null;
+  readonly firstResult: SimulationRow | null;
   /** Where a person opens what happened. */
   readonly resultsUrl: string;
 };
 
 /** Everything one simulation's line says, in the words the glossary uses. */
-export type { SimulationRow, RunTally } from "./follow.ts";
+export type { RunProgress, SimulationRow } from "./follow.ts";

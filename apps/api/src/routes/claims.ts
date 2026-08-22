@@ -624,9 +624,9 @@ export async function claimRoutes(
           // platform's own `dispatch_failed` — because a spec that was never
           // handed over is never the simulator's error, must not wait to be
           // misnamed orphaned, and must never loop back through the queue to
-          // fail the same way again. The landing is terminal like any other:
-          // the judgement is minted beside it, and a run waiting only on
-          // this row settles with truthful counts.
+          // fail the same way again. The landing is terminal like any other,
+          // and a run waiting only on this row settles with truthful counts.
+          // No grading job is created because no completed trace exists.
           request.log.error(
             platformEvent(
               "egma.simulation.dispatch.failed",

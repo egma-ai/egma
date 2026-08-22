@@ -4,8 +4,7 @@
  *
  * It is here rather than on the data-access surface because it reaches nothing:
  * it is handed a snapshot a caller already holds and returns arithmetic over
- * it, so there is no tenancy to stamp and no `AuthContext` to take — the fold
- * over verdicts sits beside it for the same reason. Exported all the same,
+ * it, so there is no tenancy to stamp and no `AuthContext` to take. Exported,
  * because it is the **one** place a project default and a test override are
  * merged. A second implementation — in the claim path, in a route, in the
  * simulator — is a second answer that can disagree with this one, and a

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createProject,
   IdentityConflictError,
-  listGraders,
+  listProjectGraders,
   listPersonas,
   listProjects,
   NotPermittedError,
@@ -29,11 +29,11 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  * **The whole of this file is about one claim: a project is created whole or
  * not at all.** A project is not a row — it is a row, the shared persona a first
  * test gets when it names none, the pointer that makes that persona the default,
- * and its mandatory running grader. Signup writes all of them together. An
+ * and its Expected behaviors project grader. Signup writes all of them together. An
  * admin creating a second project used to write one of them, and
  * everything downstream of that gap failed later and somewhere else: the first
  * test in the new project refused because the project pointed at nobody, and
- * the first run could come back green having judged nothing.
+ * completed simulations could receive no expected-behavior grade.
  *
  * So the create is proven by what it leaves behind rather than by what it
  * returns, and the failure case is proven by the absence of every one of those
@@ -91,9 +91,9 @@ describe("creating a project", () => {
     // persona is the project's default, so the first test written here has a
     // persona when it names none.
     expect(personas.items[0]?.isDefault).toBe(true);
-    const graders = await listGraders(inside, {});
-    expect(graders.items).toHaveLength(1);
-    expect(graders.items[0]?.libraryId).toBe(
+    const graders = await listProjectGraders(inside);
+    expect(graders).toHaveLength(1);
+    expect(graders[0]?.graderDefinitionId).toBe(
       PREDEFINED_GRADERS.expectedBehaviors,
     );
   });

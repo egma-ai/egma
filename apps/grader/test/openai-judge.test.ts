@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GRADER_LIBRARY_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
+import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
 
 import { openaiJudge } from "../src/judge/openai.ts";
 import type { JudgeInput, JudgeQuestion } from "../src/judge/index.ts";
@@ -36,7 +36,7 @@ const EVIDENCE: JudgeInput = {
  * second owner, and a catalog update would no longer have one place to version.
  */
 const THE_PROMPT =
-  GRADER_LIBRARY_CATALOG.find(
+  GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
   )?.prompt ?? "";
 
@@ -105,7 +105,7 @@ describe("one judge call", () => {
 
     const body = JSON.parse(String(calls[0]?.init.body)) as Record<string, unknown>;
     expect(body["model"]).toBe("gpt-4.1-mini");
-    // The same conversation and the same criterion should get the same verdict
+    // The same conversation and the same criterion should get the same decision
     // twice, as far as a model can promise that at all.
     expect(body["temperature"]).toBe(0);
     expect(body["response_format"]).toEqual({ type: "json_object" });

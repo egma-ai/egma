@@ -800,7 +800,7 @@ function plainly(action: string): string {
     configure_agents: "create or change agents and connections",
     author_definitions: "create or change tests, personas and graders",
     start_and_cancel_runs: "start or cancel runs",
-    revisit_verdicts: "regrade or correct verdicts",
+    regrade: "regrade traces",
   };
   return said[action] ?? action.split("_").join(" ");
 }

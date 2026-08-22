@@ -6,8 +6,6 @@ import {
   type GradingWord,
   type RunStatusWord,
   type SimulationStatusWord,
-  type VerdictCounts,
-  type VerdictWord,
 } from "../lib/runs.ts";
 import type { VariantProps } from "class-variance-authority";
 
@@ -19,16 +17,13 @@ import { cn } from "@/lib/utils";
  * The parts every surface that shows a run is built from — and the reason they
  * are shared rather than written per page.
  *
- * **A run holds four different facts and every page has to show each of them as
- * itself.** The run's machinery, each simulation's machinery, where the
- * grading work stands, and the verdict. Folding any into any other is the defect
- * this whole area exists to prevent: an execution failure drawn as a failed
- * verdict tells a team their agent is broken when egma is, and pending grading
- * drawn as a failure tells them something failed when nobody has looked.
+ * Run state, simulation state, and grading state answer different questions.
+ * An execution failure must never look like a low grade, and unfinished grading
+ * must never look like a failure.
  *
  * A page that decided its own colours for those words would be free to decide
  * differently from its neighbour, and the first one to paint `completed` green
- * would have turned a machinery word into a judgement. So the mapping from word
+ * would have turned a machinery word into a quality result. So the mapping from word
  * to appearance is here, once, and the pages ask for it.
  *
  * These live in their own file with their own stylesheet rather than in
@@ -44,8 +39,7 @@ import { cn } from "@/lib/utils";
  * A run's machinery. **Nothing here is ever `good`.**
  *
  * `completed` means the work finished, which is not the same as the work going
- * well — a completed run may hold nothing but failed verdicts. Painting it green
- * would answer a question this word does not ask.
+ * well. Painting it green would answer a question this word does not ask.
  */
 /**
  * The tones a state word can be said in, read off the chip that says them.
@@ -68,7 +62,7 @@ const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
   pending: "Nothing has been claimed yet.",
   running: "Egma is conducting this run.",
   completed:
-    "The machinery finished. What the graders made of it is the verdict, which is a separate fact.",
+    "The run finished. Trace-level grade scores are separate facts.",
   canceled:
     "Somebody stopped this run, or the agent or connection it used was archived. Work already reported stays on the record.",
 };
@@ -79,7 +73,7 @@ export type StateMarkKind =
   | "complete"
   | "stopped"
   | "failed"
-  | "skipped"
+  | "not-requested"
   | "error";
 
 /**
@@ -117,7 +111,7 @@ export function StateMark({
       {kind === "stopped" || kind === "failed" ? (
         <path d="m3 3 6 6M9 3 3 9" />
       ) : null}
-      {kind === "skipped" ? <path d="M3 6h6" /> : null}
+      {kind === "not-requested" ? <path d="M3 6h6" /> : null}
       {kind === "error" ? (
         <>
           <circle cx="6" cy="6" r="4" />
@@ -192,9 +186,9 @@ const SIMULATION_STATUS_MEANING: Readonly<
   claimed: "A simulator has taken it and is about to start.",
   running: "The simulation is happening now.",
   completed:
-    "The simulation finished. Whether it went well is the verdict, which is a separate fact.",
+    "The simulation finished. Its trace-level grade scores are separate facts.",
   failed:
-    "Egma could not conduct this simulation. This is an execution problem, not a failed grader verdict, and it says nothing about the agent.",
+    "Egma could not conduct this simulation. This is an execution problem, not a grade, and it says nothing about the agent.",
   canceled: "This simulation was stopped before it finished.",
 };
 
@@ -246,28 +240,30 @@ export function SimulationStatus({
 
 /**
  * Where the grading work stands. **Never good and never bad**: how far along the
- * judging is says nothing about what it will decide.
+ * grading is says nothing about the scores it will produce.
  */
 const GRADING_WORD: Readonly<Record<GradingWord, string>> = {
-  not_required: "No grading",
-  waiting: "Not yet",
-  pending: "Grading",
-  graded: "Graded",
+  not_requested: "No grading",
+  pending: "Queued",
+  running: "Grading",
+  complete: "Graded",
+  error: "Grading error",
 };
 
 const GRADING_MEANING: Readonly<Record<GradingWord, string>> = {
-  not_required:
-    "There is nothing to judge and there never will be. Egma either never conducted this simulation or it was stopped, so no grading work was filed for it.",
-  waiting: "The simulation has not finished, so grading has not begun.",
-  pending: "The simulation finished and no verdict has arrived yet.",
-  graded: "Verdicts have arrived.",
+  not_requested: "No grader was asked to grade this trace.",
+  pending: "The grading work is waiting to start.",
+  running: "The graders are grading this trace.",
+  complete: "All requested grades are available.",
+  error: "Egma could not complete every requested grade.",
 };
 
 const GRADING_MARK: Readonly<Record<GradingWord, StateMarkKind>> = {
-  not_required: "skipped",
-  waiting: "waiting",
-  pending: "active",
-  graded: "complete",
+  not_requested: "not-requested",
+  pending: "waiting",
+  running: "active",
+  complete: "complete",
+  error: "error",
 };
 
 export function GradingState({
@@ -289,81 +285,6 @@ export function GradingState({
     <Badge title={GRADING_MEANING[grading]}>
       <StateMark kind={GRADING_MARK[grading]} />
       {GRADING_WORD[grading]}
-    </Badge>
-  );
-}
-
-/**
- * What was decided — and `null`, which is **nobody has decided yet** and is not
- * a verdict.
- *
- * Four words and never three. `skipped` and `errored` are answers in their own
- * right: a check that could not run is not a check that failed, and a broken
- * judge is not a failing agent. Both are amber rather than red for exactly that
- * reason.
- */
-const VERDICT_TONE: Readonly<Record<VerdictWord, StateTone>> = {
-  passed: "success",
-  failed: "failure",
-  skipped: "warning",
-  errored: "warning",
-};
-
-const VERDICT_MEANING: Readonly<Record<VerdictWord, string>> = {
-  passed: "Every check that could be scored passed.",
-  failed: "At least one check failed. This is a judgement about the agent.",
-  skipped:
-    "Nothing was scored. Egma judged nothing here, so no result has been earned either way.",
-  errored:
-    "Egma could not produce a judgement. This is a platform problem, not a failing agent.",
-};
-
-const VERDICT_MARK: Readonly<Record<VerdictWord, StateMarkKind>> = {
-  passed: "complete",
-  failed: "failed",
-  skipped: "skipped",
-  errored: "error",
-};
-
-export const NOT_JUDGED_YET = "Not judged yet";
-
-export function VerdictBadge({
-  verdict,
-  compact = false,
-}: {
-  readonly verdict: VerdictWord | null;
-  readonly compact?: boolean;
-}) {
-  if (verdict === null) {
-    const title =
-      "Nobody has finished judging this yet. That is not a result, and it is certainly not a failure.";
-    if (compact) {
-      return (
-        <InlineState title={title}>
-          <StateMark kind="waiting" />
-          Not judged
-        </InlineState>
-      );
-    }
-    return (
-      <Badge title={title}>
-        <StateMark kind="waiting" />
-        {NOT_JUDGED_YET}
-      </Badge>
-    );
-  }
-  if (compact) {
-    return (
-      <InlineState tone={VERDICT_TONE[verdict]} title={VERDICT_MEANING[verdict]}>
-        <StateMark kind={VERDICT_MARK[verdict]} />
-        {verdict}
-      </InlineState>
-    );
-  }
-  return (
-    <Badge variant={VERDICT_TONE[verdict]} title={VERDICT_MEANING[verdict]}>
-      <StateMark kind={VERDICT_MARK[verdict]} />
-      {verdict}
     </Badge>
   );
 }
@@ -394,96 +315,13 @@ function InlineState({
   );
 }
 
-/* ------------------------------------------------------------------------ *
- * The four facts together.
- * ------------------------------------------------------------------------ */
-
-/**
- * Machinery beside judgment, labelled, in one strip.
- *
- * The labels are not decoration. "Run", "Simulations", "Grading" and "Verdict"
- * are what stops somebody reading one number as an answer to another's question,
- * and they are the same four words on the list, on the detail page and on a
- * mobile screen.
- */
-export function RunFacts({
-  status,
-  finished,
-  expected,
-  graded,
-  gradable,
-  verdict,
-}: {
-  readonly status: RunStatusWord;
-  readonly finished: number;
-  readonly expected: number;
-  readonly graded: number;
-  readonly gradable: number;
-  readonly verdict: VerdictWord | null;
-}) {
-  return (
-    <div
-      className={cn(
-        "grid grid-cols-4 overflow-hidden rounded-card border border-border bg-surface",
-        /*
-         * The dividing lines live on the strip rather than on each fact,
-         * because which edge a fact carries depends on where the strip wrapped
-         * it. Four across draws one line between neighbours; two across moves
-         * the third fact to a new line, so it loses its leading edge and the
-         * bottom row gains a top one; one across turns every line horizontal.
-         */
-        "[&>*+*]:border-s [&>*+*]:border-border",
-        "max-[52rem]:grid-cols-2",
-        "max-[52rem]:[&>*:nth-child(3)]:border-s-0",
-        "max-[52rem]:[&>*:nth-child(n+3)]:border-t max-[52rem]:[&>*:nth-child(n+3)]:border-border",
-        "max-[32rem]:grid-cols-1",
-        "max-[32rem]:[&>*+*]:border-s-0 max-[32rem]:[&>*+*]:border-t",
-      )}
-    >
-      <Fact label="Run">
-        <RunStatus status={status} />
-      </Fact>
-      <Fact label="Simulations">
-        <span className="tabular-nums">
-          {finished} of {expected} finished
-        </span>
-      </Fact>
-      <Fact label="Grading">
-        <span className="tabular-nums">
-          {graded} of {gradable} judged
-        </span>
-      </Fact>
-      <Fact label="Verdict">
-        <VerdictBadge verdict={verdict} />
-      </Fact>
-    </div>
-  );
-}
-
-function Fact({
-  label,
-  children,
-}: {
-  readonly label: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-2 px-5 py-4">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
-        {children}
-      </span>
-    </div>
-  );
-}
-
 /**
  * How far the machinery has got, drawn as a bar.
  *
- * **The bar measures simulations, not judgment**, and it says so beside
+ * **The bar measures simulations, not grading**, and it says so beside
  * itself. A single bar over both would have to decide which of the two a
  * half-full bar meant, and the two settle at different moments — a run whose
- * simulations have all finished is not a run whose judgment is in.
+ * simulations have all finished is not a run whose grades are all available.
  */
 export function RunProgress({
   finished,
@@ -528,9 +366,7 @@ export function RunProgress({
 /**
  * How many simulations stand in each machinery state, in words.
  *
- * Only the states that have somebody in them, and `skipped` never merged into
- * anything: a summary that hid it would be hiding the one number that says egma
- * declined to conduct part of this run.
+ * Only states that have at least one simulation are shown.
  */
 export function SimulationTally({
   counts,
@@ -543,32 +379,6 @@ export function SimulationTally({
   return (
     <span className="text-sm tabular-nums text-muted-foreground">
       {said.length === 0 ? "No simulations yet" : said.join(" · ")}
-    </span>
-  );
-}
-
-/**
- * What the graders decided, counted — and `null`, which is not zero.
- *
- * A simulation nobody has judged has no counts at all, and a page that
- * rendered that as "0 of 0 passed" would be putting a finished-looking figure
- * against work nobody has done.
- */
-export function VerdictTally({ counts }: { readonly counts: VerdictCounts | null }) {
-  if (counts === null || counts.total === 0) {
-    return (
-      <span className="text-sm tabular-nums text-muted-foreground">
-        {NOT_JUDGED_YET}
-      </span>
-    );
-  }
-  const parts = [`${String(counts.passed)}/${String(counts.total)} passed`];
-  if (counts.failed > 0) parts.push(`${String(counts.failed)} failed`);
-  if (counts.skipped > 0) parts.push(`${String(counts.skipped)} skipped`);
-  if (counts.errored > 0) parts.push(`${String(counts.errored)} errored`);
-  return (
-    <span className="text-sm tabular-nums text-muted-foreground">
-      {parts.join(" · ")}
     </span>
   );
 }

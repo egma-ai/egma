@@ -1,6 +1,5 @@
 import {
   claimSimulations,
-  PREDEFINED_GRADERS,
   completeSimulation,
   createProject,
   startSimulation,
@@ -214,18 +213,24 @@ describe("a browser naming a project", () => {
  */
 describe("a browser working in a project that is not the first", () => {
   /** The two projects, and a key for building things in the second one. */
-  async function twoProjects(label: string): Promise<{
+  async function twoProjects(
+    label: string,
+    options: { readonly traceStore?: boolean } = {},
+  ): Promise<{
     readonly ada: Customer;
     readonly outbound: string;
     readonly keyForOutbound: string;
   }> {
-    api = await createApi(label);
+    api = await createApi(label, {
+      traceStore: options.traceStore ?? false,
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Made the way the New project page makes one, rather than by calling the
     // factory: what that page creates is the whole thing — the project, the
-    // default persona a first test gets when it names none, and the seeded
-    // grader copy. A project made through this door is ready for its first run.
+    // default persona a first test gets when it names none, and the protected
+    // Expected behaviors project grader. A project made through this door is
+    // ready for its first run.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",
@@ -424,7 +429,7 @@ describe("a browser working in a project that is not the first", () => {
    *
    * **The evidence page reads its project and the recording beside it did
    * not**, which is the hardest shape of this fault to notice: the page loads,
-   * the transcript is there, the verdicts are there, and the player is simply
+   * the transcript is there, the grades are there, and the player is simply
    * absent — which is exactly what an honest *this conversation recorded
    * nothing* looks like.
    *
@@ -436,6 +441,7 @@ describe("a browser working in a project that is not the first", () => {
   it("resolves a recording for a conversation in the project it named", async () => {
     const { ada, outbound, keyForOutbound } = await twoProjects(
       "browser_recording_elsewhere",
+      { traceStore: true },
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
@@ -596,7 +602,7 @@ describe("a browser working in a project that is not the first", () => {
    * *and* the first project is still empty — because a door that ignored the
    * address would answer exactly the same status code.
    */
-  it("authors a suite, a test, a grader and a run in the project its address names", async () => {
+  it("authors a suite and test, updates a project grader, and starts a run in the project its address names", async () => {
     const { ada, outbound } = await twoProjects("browser_writes_by_address");
     const inOutbound = { cookie: ada.cookie };
 
@@ -666,20 +672,24 @@ describe("a browser working in a project that is not the first", () => {
     );
     expect(edited.statusCode, edited.body).toBe(200);
 
-    /* POST /v1/graders */
-    const used = await asBrowser("POST", `/v1/graders?projectId=${outbound}`, {
-      libraryId: PREDEFINED_GRADERS.latency,
-      params: { metric: "turn_response_latency", bound: 2000 },
-      name: "Answers inside two seconds",
-    });
-    expect(used.statusCode, used.body).toBe(201);
-    const graderId = (used.json() as { id: string }).id;
+    /* GET /v1/graders */
+    const projectGraders = await asBrowser(
+      "GET",
+      `/v1/graders?projectId=${outbound}`,
+    );
+    expect(projectGraders.statusCode, projectGraders.body).toBe(200);
+    const [expectedBehaviors] = (
+      projectGraders.json() as { graders: { id: string }[] }
+    ).graders;
+    if (expectedBehaviors === undefined) {
+      throw new Error("the project has no Expected behaviors grader");
+    }
 
     /* PATCH /v1/graders/{id} */
     const retuned = await asBrowser(
       "PATCH",
-      `/v1/graders/${graderId}?projectId=${outbound}`,
-      { name: "Answers inside a second and a half" },
+      `/v1/graders/${expectedBehaviors.id}?projectId=${outbound}`,
+      { passThreshold: 0.8 },
     );
     expect(retuned.statusCode, retuned.body).toBe(200);
 
@@ -710,10 +720,12 @@ describe("a browser working in a project that is not the first", () => {
       `/v1/graders?projectId=${outbound}`,
     );
     expect(
-      (outboundGraders.json() as { graders: { name: string }[] }).graders.map(
-        (one) => one.name,
-      ),
-    ).toContain("Answers inside a second and a half");
+      (
+        outboundGraders.json() as {
+          graders: { name: string; passThreshold: number }[];
+        }
+      ).graders.map(({ name, passThreshold }) => ({ name, passThreshold })),
+    ).toEqual([{ name: "expected_behaviors", passThreshold: 0.8 }]);
 
     const outboundRuns = await asBrowser("GET", `/v1/runs?projectId=${outbound}`);
     expect(
@@ -730,17 +742,19 @@ describe("a browser working in a project that is not the first", () => {
     const firstRuns = await asBrowser("GET", `/v1/runs?projectId=${ada.projectId}`);
     expect((firstRuns.json() as { runs: unknown[] }).runs).toEqual([]);
 
-    // The seeded expected-behaviors copy and nothing else: the latency copy was
-    // made in Outbound and the first project never heard about it.
+    // The first project's protected grader kept its own threshold. The edit in
+    // Outbound did not cross the project boundary.
     const firstGraders = await asBrowser(
       "GET",
       `/v1/graders?projectId=${ada.projectId}`,
     );
     expect(
-      (firstGraders.json() as { graders: { name: string }[] }).graders.map(
-        (one) => one.name,
-      ),
-    ).toEqual(["expected_behaviors"]);
+      (
+        firstGraders.json() as {
+          graders: { name: string; passThreshold: number }[];
+        }
+      ).graders.map(({ name, passThreshold }) => ({ name, passThreshold })),
+    ).toEqual([{ name: "expected_behaviors", passThreshold: 1 }]);
   });
 
 });
@@ -780,11 +794,12 @@ describe("a key for the whole organization, where the organization holds two pro
     readonly outbound: string;
     readonly runId: string;
   }> {
-    api = await createApi(label);
+    api = await createApi(label, { traceStore: modality === "voice" });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     // Through the product's own door, so the second project is the whole thing
-    // — default persona and seeded grader included — rather than a bare row.
+    // — default persona and protected project grader included — rather than a
+    // bare row.
     const made = await api.app.inject({
       method: "POST",
       url: "/v1/projects",

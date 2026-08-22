@@ -1,1569 +1,334 @@
-import { newId } from "@egma/ids";
-import {
-  isCatalogedMeasure,
-  isSpanDerivedMeasure,
-  MEASURE_CATALOG_DOCUMENT,
-  MEASURE_CATALOG_VERSION,
-  SPAN_DERIVED_MEASURES,
-} from "@egma/simulation-contract";
-import { and, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { PREDEFINED_GRADERS } from "../grader-library/catalog.ts";
 import {
-  snapshotLibraryDefinition,
+  snapshotGraderDefinition,
   type GraderDefinitionSnapshot,
 } from "../grader-library/snapshot.ts";
-import type { LibraryParameter } from "../grader-library/catalog.ts";
 import {
-  RECOMMENDED_GRADER_MODEL,
-  graderModelFromRow,
-  sameGraderModel,
-  validGraderModel,
-  type GraderModel,
-} from "../models/selections.ts";
+  validatePassThreshold,
+  validateProjectGraderScope,
+} from "../grader-library/policy.ts";
 import {
-  grader,
-  graderLibrary,
-  graderLibraryVersion,
-  graderVersion,
-  GRADER_SCOPES,
-  type GraderScope,
-  type LibraryType,
+  graderDefinition,
+  graderDefinitionVersion,
+  projectGrader,
+  type GraderDefinitionType,
+  type ProjectGraderScope,
+  type SimulationScopeSelector,
 } from "../schema/graders.ts";
+import { test, testSuite } from "../schema/tests.ts";
 import type { AuthContext } from "./context.ts";
-import {
-  ProjectOutsideOrganizationError,
-  UnknownGraderLibraryEntryError,
-  UnprocessableInputError,
-} from "./errors.ts";
-import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
+import { UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
-import { isProjectOfOrganization } from "./projects.ts";
 import { inActingProject, within } from "./within.ts";
 
 export type { GraderDefinitionSnapshot } from "../grader-library/snapshot.ts";
 
-/**
- * Reading and writing the **running copies** — what they are is the schema
- * file's story (`schema/graders.ts`); this file is how they are reached.
- *
- * Project scoping works as the persona and test factories' does, verb for verb.
- * A context acting in a project writes and reads there; a context acting in none
- * — an organization-scoped credential — reads the whole customer and creates
- * nothing, because a grader belongs to a project and a credential for the whole
- * customer is acting in none.
- *
- * **There is one door that makes a grader, and it is Use.** A copy is only ever
- * made from a library entry: the entry decides the type and what the form asks
- * for, the copy holds the answers. That is why nothing here takes a type, and
- * why nothing here takes criteria — a grader nobody could point at a definition
- * would be a check with no words behind it. Each grader version stores one
- * exact reference to the shared immutable Library definition it executes.
- *
- * The line this factory holds that the two before it do not is **between what a
- * verdict was decided by and where the decision applies.** The filled-in values
- * and the judge model are what a judgment is made of, so they live in immutable
- * versions and an edit mints the next one, leaving last week's run meaning
- * exactly what it meant. The `required` flag, the scope and the sampling rate
- * rewrite no verdict already written, so they are written in place and take
- * effect everywhere at once. A developer tightening a bound and a developer
- * turning a blocker into a diagnostic are doing two different things, and only
- * one of them is rewriting history if it is versioned wrongly.
- *
- * **`required` is the one that reaches an old page anyway, and on purpose.** It
- * changes no row; it changes which lane a row is folded in, and the fold runs
- * at read time — so a run that failed on this grader alone reads as passed from
- * the moment the flag turns. That is the flag's whole job: nothing about the
- * judgment changed, only what the project lets a failure do, and the answer has
- * to be the one in force when somebody looks. Verdicts unchanged; what they add
- * up to changed. The two are not the same sentence and this file does not
- * pretend they are.
- */
-
-/**
- * The exact model this grader version executes. The provider/model pair comes
- * from the shared executable catalog. Its key is operational deployment data
- * and never part of this authored version.
- */
-export type JudgeModel = GraderModel;
-
-/**
- * One **assertion's** filled-in values: the answers to what the library entry's
- * form asked, keyed by the parameter names the entry declared.
- *
- * A latency copy's is `{ metric, bound }`. There is no shape here for anything
- * else, and deliberately: what may be asked is the entry's decision, checked at
- * the write door against the entry's own declaration, so a value nobody could
- * have been asked for cannot be stored.
- */
-export type GraderAssertion = Readonly<Record<string, string | number>>;
-
-/**
- * What a copy judges by: one filled-in set per assertion, in the order they
- * were written.
- *
- * **Empty is a complete answer, not an unfinished one.** The expected-behaviors
- * copy holds no assertions of its own because its assertions are the test's own
- * sentences, supplied per test at judging time — so an empty list is what a
- * correctly configured copy of it looks like, forever.
- */
-export type GraderConfig = {
-  readonly assertions: readonly GraderAssertion[];
-};
-
-/**
- * The library entry's form filled in, before anything has checked it: the
- * answers to whatever that entry declared, under the names it declared them.
- *
- * It is a name rather than a bare map because it is the shape both write doors
- * take — **Use** creates a copy from one and an edit replaces a copy's values
- * with one — and a primitive spelled out at each of them would be four places
- * agreeing by coincidence. What may be in it is the entry's decision and
- * nothing here can narrow it, which is why the values are `unknown` until
- * `validValue` has held each against its declared parameter.
- */
-export type FilledInForm = Readonly<Record<string, unknown>>;
-
-/** The config as a caller writes one; the same shape, before it is checked. */
-export type GraderConfigInput = {
-  readonly assertions: readonly FilledInForm[];
-};
-
-/**
- * The live settings: where the copy applies, how loudly, and what to call it.
- * Every one of them is optional at Use time, and every one of them takes effect
- * everywhere the moment it is written.
- */
-type LiveSettings = {
-  /** Defaults to the entry's own name — what the shelf calls this grader. */
-  readonly name?: string | undefined;
-  readonly description?: string | undefined;
-  readonly required?: boolean | undefined;
-  readonly scope?: GraderScope | undefined;
-  readonly productionSampleRate?: number | undefined;
-};
-
-/**
- * Pressing **Use** on a library entry: the pointer, and the answers to whatever
- * that entry's form asked.
- *
- * `params` is **one filled-in set**, because that is what the form is — one
- * measure and one bound, typed once. It becomes the copy's first and only
- * assertion. An entry that asks nothing takes nothing here, and the copy is born
- * with an empty list.
- */
-export type UseLibraryEntry = LiveSettings & {
-  readonly libraryId: string;
-  readonly params?: FilledInForm | undefined;
-  readonly judgeModel?: JudgeModel | undefined;
-};
-
-export type Grader = {
+export type ProjectGrader = {
   readonly id: string;
   readonly projectId: string;
-  /** The entry this is a copy of. Never null, and never orphaned. */
-  readonly libraryId: string;
+  readonly graderDefinitionId: string;
   readonly name: string;
   readonly description: string | null;
-  /** Derived from the Library identity's DB-guarded stable type. */
-  readonly type: LibraryType;
-  /** `false` makes this a diagnostic: judged, shown, never able to fail a test. */
-  readonly required: boolean;
-  readonly scope: GraderScope;
-  readonly productionSampleRate: number;
-  readonly version: number;
-  /** The current version's own `grv_` id — what a verdict row names. */
-  readonly versionId: string;
-  readonly config: GraderConfig;
-  readonly judgeModel: JudgeModel | null;
-  /** The current version's immutable executable Library definition. */
-  readonly definition: GraderDefinitionSnapshot;
+  readonly graderType: GraderDefinitionType;
+  readonly scopeEditable: boolean;
+  readonly scope: ProjectGraderScope;
+  readonly passThreshold: number;
+  readonly currentDefinitionVersion: number;
+  readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
 
-/**
- * The immutable part of a grader needed to execute one grading job.
- *
- * Current production grading can supply a full `Grader`. An initial simulation
- * supplies the version frozen in its run plan. Keeping the engine on this
- * smaller shape prevents it from reading today's pointer by accident.
- */
-export type ExecutableGrader = Pick<
-  Grader,
-  "id" | "versionId" | "config" | "judgeModel" | "definition"
->;
-
-/**
- * What an edit may touch. The live settings write in place and version nothing;
- * the filled-in values and the judge model are what a verdict was decided by,
- * and version on any change. Absent means keep.
- *
- * **Neither the stable Library identity nor its type is here.** Every version
- * behind a copy holds values shaped by that identity's type, so changing either
- * would leave history holding answers to questions this grader no longer asks.
- * Pressing Use again makes the different grader that actually happened.
- *
- * **The values arrive by either of two names, and they mean one thing.**
- * `params` is the entry's form filled in once — the shape **Use** takes, so a
- * screen that drew the form to create a copy draws the same form to change it
- * and sends the same body. `config` is the whole list, which is what a copy
- * holding more than one assertion needs. Both go through the same check against
- * the same entry; sending both at once is refused rather than ranked, because a
- * precedence rule here would decide which of two things somebody meant.
- */
-export type GraderChanges = {
-  readonly name?: string;
-  readonly description?: string | null;
-  readonly required?: boolean;
-  readonly scope?: GraderScope;
-  readonly productionSampleRate?: number;
-  /** The entry's form filled in once, exactly as **Use** takes it. */
-  readonly params?: FilledInForm;
-  readonly config?: GraderConfigInput;
-  readonly judgeModel?: JudgeModel | null;
+export type ProjectGraderChanges = {
+  readonly scope?: unknown;
+  readonly passThreshold?: number;
 };
 
-/** One version, frozen: the copy exactly as some verdict was decided by it. */
-export type GraderVersion = {
-  readonly id: string;
-  readonly graderId: string;
-  readonly libraryId: string;
-  readonly version: number;
-  readonly type: LibraryType;
-  readonly config: GraderConfig;
-  readonly judgeModel: JudgeModel | null;
-  readonly definition: GraderDefinitionSnapshot;
-  readonly createdAt: Date;
-};
-
-const notDeleted: SQL = isNull(grader.deletedAt);
-
-/** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
-  id: grader.id,
-  projectId: grader.projectId,
-  libraryId: grader.libraryId,
-  name: grader.name,
-  description: grader.description,
-  required: grader.required,
-  scope: grader.scope,
-  productionSampleRate: grader.productionSampleRate,
-  createdAt: grader.createdAt,
-  updatedAt: grader.updatedAt,
+  id: projectGrader.id,
+  projectId: projectGrader.projectId,
+  graderDefinitionId: projectGrader.graderDefinitionId,
+  name: graderDefinition.name,
+  description: graderDefinition.description,
+  graderType: graderDefinition.type,
+  scopeEditable: graderDefinition.scopeEditable,
+  scope: projectGrader.scope,
+  passThreshold: projectGrader.passThreshold,
+  currentDefinitionVersion: graderDefinition.currentDefinitionVersion,
+  archivedAt: projectGrader.archivedAt,
+  createdAt: projectGrader.createdAt,
+  updatedAt: projectGrader.updatedAt,
 } as const;
 
-/** The immutable Library-version columns every executable read joins. */
-const DEFINITION_COLUMNS = {
-  definitionLibraryId: graderLibraryVersion.libraryId,
-  definitionLibraryVersion: graderLibraryVersion.version,
-  definitionType: graderLibrary.type,
-  definitionPrompt: graderLibraryVersion.prompt,
-  definitionParams: graderLibraryVersion.params,
-  definitionOutput: graderLibraryVersion.outputDefinition,
-  definitionSourceCode: graderLibraryVersion.sourceCode,
-  definitionSourceCodeLanguage: graderLibraryVersion.sourceCodeLanguage,
-} as const;
-
-type SelectedDefinition = {
-  readonly definitionLibraryId: string;
-  readonly definitionLibraryVersion: number;
-  readonly definitionType: string;
-  readonly definitionPrompt: string | null;
-  readonly definitionParams: unknown;
-  readonly definitionOutput: unknown;
-  readonly definitionSourceCode: string | null;
-  readonly definitionSourceCodeLanguage: string | null;
-};
-
-function definitionFromSelection(
-  row: SelectedDefinition,
-): GraderDefinitionSnapshot {
-  return snapshotLibraryDefinition({
-    id: row.definitionLibraryId,
-    version: row.definitionLibraryVersion,
-    type: row.definitionType,
-    prompt: row.definitionPrompt,
-    params: row.definitionParams,
-    outputDefinition: row.definitionOutput,
-    sourceCode: row.definitionSourceCode,
-    sourceCodeLanguage: row.definitionSourceCodeLanguage,
-  });
-}
-
-function selectionFromDefinition(
-  definition: GraderDefinitionSnapshot,
-): SelectedDefinition {
+function fromRow(row: {
+  readonly id: string;
+  readonly projectId: string;
+  readonly graderDefinitionId: string;
+  readonly name: string;
+  readonly description: string | null;
+  readonly graderType: string;
+  readonly scopeEditable: boolean;
+  readonly scope: unknown;
+  readonly passThreshold: number;
+  readonly currentDefinitionVersion: number;
+  readonly archivedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}): ProjectGrader {
   return {
-    definitionLibraryId: definition.libraryId,
-    definitionLibraryVersion: definition.libraryVersion,
-    definitionType: definition.type,
-    definitionPrompt: definition.prompt,
-    definitionParams: definition.params,
-    definitionOutput: definition.outputDefinition,
-    definitionSourceCode: definition.sourceCode,
-    definitionSourceCodeLanguage: definition.sourceCodeLanguage,
+    ...row,
+    graderType: row.graderType as GraderDefinitionType,
+    scope: validateProjectGraderScope(row.scope),
   };
 }
 
-/**
- * What a copy is worth when whoever pressed Use said nothing about it.
- *
- * Blocking, because a grader somebody bothered to switch on is a grader they
- * expect to be believed, and one that quietly only reports is one whose failure
- * a release walks past. Making it a diagnostic is one word; noticing that it
- * never blocked anything is a postmortem.
- */
-const DEFAULT_REQUIRED = true;
-
-/** All of production, if production is ever in scope at all. */
-const DEFAULT_PRODUCTION_SAMPLE_RATE = 100;
-
-function validName(name: string): string {
-  const trimmed = name.trim();
-  if (trimmed === "") throw new UnprocessableInputError("a grader needs a name");
-  return trimmed;
-}
-
-/** One of a fixed list, or a refusal naming both the word and the list. */
-function knownWord<Value extends string>(
-  allowed: readonly Value[],
-  value: string,
-  what: string,
-): Value {
-  if (!(allowed as readonly string[]).includes(value)) {
-    throw new UnprocessableInputError(
-      `"${value}" is not a ${what} Egma knows; expected one of ${allowed.join(", ")}`,
-    );
-  }
-  return value as Value;
-}
-
-function validScope(scope: string): GraderScope {
-  return knownWord(GRADER_SCOPES, scope, "scope");
-}
-
-/**
- * A percentage of the production traffic that arrives — whole numbers only,
- * because "judge 12.5% of the calls" is a promise about traffic egma cannot
- * keep any more precisely than it can count conversations.
- */
-function validProductionSampleRate(rate: number): number {
-  if (!Number.isInteger(rate) || rate < 0 || rate > 100) {
-    throw new UnprocessableInputError(
-      "a production sample rate is a whole percentage between 0 and 100",
-    );
-  }
-  return rate;
-}
-
-function validJudgeModel(judgeModel: JudgeModel): JudgeModel {
-  return validGraderModel(judgeModel);
-}
-
-/**
- * The object something has to be before any field of it can be read, named by
- * what it is so a refusal points at the thing that is wrong rather than at the
- * grader as a whole.
- */
-function fields(value: unknown, what: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new UnprocessableInputError(`${what} has to be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-/**
- * What the write door needs off a library entry: its stable type, current
- * immutable definition revision and display name for useful refusals.
- */
-type Definition = GraderDefinitionSnapshot & { readonly name: string };
-
-/**
- * The entry this copy is being made from, or a refusal naming it.
- *
- * It joins the Library identity to the immutable revision its current pointer
- * names. Egma's entries belong to nobody and are on everybody's shelf; custom
- * entries belong to the caller's organization. Another customer's entry is not
- * refused differently from one that does not exist.
- */
-async function definitionOf(
+async function validateScopeReferences(
   on: Queryable,
   auth: AuthContext,
-  libraryId: string,
-): Promise<Definition> {
-  const [row] = await on
-    .select({
-      organizationId: graderLibrary.organizationId,
-      id: graderLibraryVersion.libraryId,
-      version: graderLibraryVersion.version,
-      name: graderLibrary.name,
-      type: graderLibrary.type,
-      prompt: graderLibraryVersion.prompt,
-      params: graderLibraryVersion.params,
-      outputDefinition: graderLibraryVersion.outputDefinition,
-      sourceCode: graderLibraryVersion.sourceCode,
-      sourceCodeLanguage: graderLibraryVersion.sourceCodeLanguage,
-    })
-    .from(graderLibrary)
+  projectId: string,
+  scope: ProjectGraderScope,
+): Promise<void> {
+  const suiteIds = scope.simulations
+    .filter((one): one is Extract<SimulationScopeSelector, { kind: "test_suite" }> => one.kind === "test_suite")
+    .map((one) => one.id);
+  const testIds = scope.simulations
+    .filter((one): one is Extract<SimulationScopeSelector, { kind: "test" }> => one.kind === "test")
+    .map((one) => one.id);
+
+  if (suiteIds.length > 0) {
+    const found = await on
+      .select({ id: testSuite.id })
+      .from(testSuite)
+      .where(
+        within(
+          auth,
+          testSuite,
+          and(
+            eq(testSuite.projectId, projectId),
+            inArray(testSuite.id, suiteIds),
+            isNull(testSuite.deletedAt),
+          ),
+        ),
+      );
+    if (found.length !== suiteIds.length) {
+      throw new UnprocessableInputError(
+        "grader scope names a test suite that is not active in this project",
+      );
+    }
+  }
+
+  if (testIds.length > 0) {
+    const found = await on
+      .select({ id: test.id })
+      .from(test)
+      .innerJoin(
+        testSuite,
+        and(eq(testSuite.id, test.suiteId), isNull(testSuite.deletedAt)),
+      )
+      .where(
+        within(
+          auth,
+          test,
+          and(
+            eq(test.projectId, projectId),
+            inArray(test.id, testIds),
+            isNull(test.deletedAt),
+          ),
+        ),
+      );
+    if (found.length !== testIds.length) {
+      throw new UnprocessableInputError(
+        "grader scope names a test that is not active in this project",
+      );
+    }
+  }
+}
+
+export async function listProjectGraders(
+  auth: AuthContext,
+): Promise<readonly ProjectGrader[]> {
+  authorize(auth, "read", here(auth));
+  const rows = await db()
+    .select(COLUMNS)
+    .from(projectGrader)
     .innerJoin(
-      graderLibraryVersion,
-      and(
-        eq(graderLibraryVersion.libraryId, graderLibrary.id),
-        eq(
-          graderLibraryVersion.version,
-          graderLibrary.currentDefinitionVersion,
+      graderDefinition,
+      eq(graderDefinition.id, projectGrader.graderDefinitionId),
+    )
+    .where(
+      within(
+        auth,
+        projectGrader,
+        and(isNull(projectGrader.archivedAt), inActingProject(auth, projectGrader)),
+      ),
+    )
+    .orderBy(asc(graderDefinition.name), asc(projectGrader.id));
+  return rows.map(fromRow);
+}
+
+export async function getProjectGrader(
+  auth: AuthContext,
+  id: string,
+): Promise<ProjectGrader | undefined> {
+  authorize(auth, "read", here(auth));
+  const [row] = await db()
+    .select(COLUMNS)
+    .from(projectGrader)
+    .innerJoin(
+      graderDefinition,
+      eq(graderDefinition.id, projectGrader.graderDefinitionId),
+    )
+    .where(
+      within(
+        auth,
+        projectGrader,
+        and(
+          eq(projectGrader.id, id),
+          isNull(projectGrader.archivedAt),
+          inActingProject(auth, projectGrader),
         ),
       ),
     )
-    .where(
-      and(
-        eq(graderLibrary.id, libraryId),
-        sql`(${graderLibrary.organizationId} is null or ${graderLibrary.organizationId} = ${auth.organizationId})`,
-      ),
-    )
-    .limit(1)
-    .for("share", { of: graderLibrary });
-
-  if (row === undefined) throw new UnknownGraderLibraryEntryError(libraryId);
-
-  return { ...snapshotLibraryDefinition(row), name: row.name };
-}
-
-/**
- * A measure egma computes from a conversation's spans, checked against the
- * catalog.
- *
- * **The one write-door rule that is about the world rather than about the
- * shape.** A copy names what it reads as a string, and a string naming nothing
- * produces a grader that reads nothing, judges nothing and is `skipped` forever
- * — a check somebody wrote, believes in, and that can never fire. Nothing
- * downstream can catch it: a missing measure is a legitimate `skipped` on a
- * conversation whose spans do not carry it, so the engine has no way to tell a
- * typo from a modality. Only the moment of writing can.
- *
- * **The list is the span-derived one, which is narrower than the catalog.** A
- * measure the catalog names but no span carries — the turn count, reported on
- * the terminal transition and kept on the simulation row — is a real number in
- * the wrong place for a grader: reading the trace
- * would never find it, so a copy naming one is exactly the forever-`skipped`
- * check this rule exists to refuse. It is the same list the **Use** form offers
- * and the same list the shared measure module implements, so a developer cannot
- * be shown an option a write would refuse.
- *
- * The refusal names the catalog rather than only the list, because the next
- * question after "that is not a measure" is always "then what is", and the
- * catalog is the document that answers it — and says what each measure means and
- * how each is computed, which a list of names cannot.
- */
-function validMeasure(measure: string, parameter: string): string {
-  if (!isSpanDerivedMeasure(measure)) {
-    const named = isCatalogedMeasure(measure)
-      ? `"${measure}" is a measure Egma records, and no span carries it — it arrives on the transition that ends a simulation — so a grader reading a conversation could never find it`
-      : `"${measure}" is not a measure Egma computes, so a grader reading it could never fire`;
-    throw new UnprocessableInputError(
-      `${named}; ${parameter} takes one of ${SPAN_DERIVED_MEASURES.join(", ")}, and the measure catalog (${MEASURE_CATALOG_DOCUMENT}, version ${MEASURE_CATALOG_VERSION}) says what each of them means and how each is computed from the spans`,
-    );
-  }
-  return measure;
-}
-
-/**
- * One value, checked against the parameter the entry declared it under.
- *
- * The `kind` decides the check exactly as it decides the control the form
- * draws, so what a person could type and what a write will take are one
- * decision. A kind this release has never heard of is refused rather than
- * waved through: a value nothing can check is a value nothing can be judged by.
- */
-function validValue(
-  parameter: LibraryParameter,
-  value: unknown,
-): string | number {
-  if (value === undefined || value === null) {
-    throw new UnprocessableInputError(
-      `this grader needs "${parameter.name}": ${parameter.means}`,
-    );
-  }
-
-  switch (parameter.kind) {
-    case "measure": {
-      if (typeof value !== "string" || value.trim() === "") {
-        throw new UnprocessableInputError(
-          `"${parameter.name}" is the name of a measure, so it has to be text`,
-        );
-      }
-      return validMeasure(value.trim(), `"${parameter.name}"`);
-    }
-    case "number": {
-      if (typeof value !== "number" || !Number.isFinite(value)) {
-        throw new UnprocessableInputError(
-          `"${parameter.name}" has to be a number: ${parameter.means}`,
-        );
-      }
-      return value;
-    }
-    default: {
-      throw new Error(
-        `library entry parameter "${parameter.name}" is a kind of value this release cannot check, so nothing may be written under it`,
-      );
-    }
-  }
-}
-
-/**
- * What an entry that asks nothing says when something arrives for it anyway.
- *
- * One sentence with two callers, because there are two ways to send a value to
- * a grader that has no questions: a set carrying a key it never declared, and a
- * set carrying no keys at all. The second reads as harmless and is not — an
- * empty assertion is a row the Running graders screen counts, so a copy whose
- * assertions are the test's own sentences would report holding one of its own.
- */
-function asksNothing(definition: Definition, because: string): string {
-  return (
-    `the ${definition.name} grader asks for nothing, so ${because} — its ` +
-    `assertions are the test's own expected behaviors`
-  );
-}
-
-/**
- * One assertion's filled-in values, checked against what the entry asks for —
- * every parameter answered, and nothing answered that was never asked.
- *
- * The second half matters as much as the first. A key the entry never declared
- * is either a typo for one it did or a leftover from a definition that has moved
- * on, and both become a grader quietly judging by less than somebody wrote
- * down. Refusing names the keys the entry actually asks for, because the next
- * question is always "then what should I have sent".
- */
-function validAssertion(
-  definition: Definition,
-  values: unknown,
-  what: string,
-): GraderAssertion {
-  const given = fields(values, what);
-  const asked = definition.params.map((parameter) => parameter.name);
-
-  const unexpected = Object.keys(given).filter((key) => !asked.includes(key));
-  if (unexpected.length > 0) {
-    throw new UnprocessableInputError(
-      asked.length === 0
-        ? asksNothing(definition, `"${unexpected.join('", "')}" has nowhere to go`)
-        : `the ${definition.name} grader does not ask for "${unexpected.join('", "')}"; it asks for "${asked.join('", "')}"`,
-    );
-  }
-
-  const filled: Record<string, string | number> = {};
-  for (const parameter of definition.params) {
-    filled[parameter.name] = validValue(parameter, given[parameter.name]);
-  }
-  return filled;
-}
-
-/**
- * Every assertion a copy is being written with, checked together.
- *
- * **An entry that asks for something needs at least one.** A latency copy with
- * no assertions reads nothing, judges nothing, and is a row on the Running
- * graders screen that says a project is checking something it is not. An entry
- * that asks nothing must have none, for the mirror-image reason: an empty set
- * of answers passes every rule above it — there is no key that was never asked
- * for and no parameter left unanswered — and stores an assertion holding
- * nothing, which the screen counts and nothing ever judges. Both halves are
- * enforced below; only the first one used to be.
- *
- * **And no measure twice, which is the rule that makes an assertion knowable.**
- * A verdict row is filed under the measure its check bounds. Simulation runs
- * pin their grader version, while a production re-grade can use a newer one;
- * the measure stays the stable assertion identity in both cases. It must also
- * be unique inside one version: two entries bounding one measure would write
- * two judgments under one name, and the verdict store's sorting key ends at the
- * assertion, so one check would vanish inside a single grading.
- *
- * It is a small product restriction and an honest one. What a second bound on
- * one measure usually means is a second *copy* — a strict one that blocks and a
- * looser one that only reports — and `required` lives on the copy rather than on
- * an assertion, so that is where the difference has to be expressed anyway. The
- * refusal says so.
- */
-function validConfig(
-  definition: Definition,
-  config: GraderConfigInput,
-): GraderConfig {
-  const assertions = config.assertions.map((values, at) =>
-    validAssertion(definition, values, `assertion ${at + 1} of this grader`),
-  );
-
-  if (definition.params.length > 0 && assertions.length === 0) {
-    throw new UnprocessableInputError(
-      `the ${definition.name} grader needs at least one assertion — "${definition.params
-        .map((parameter) => parameter.name)
-        .join('", "')}" — because a copy that checks nothing can never fail`,
-    );
-  }
-
-  if (definition.params.length === 0 && assertions.length > 0) {
-    throw new UnprocessableInputError(
-      asksNothing(
-        definition,
-        "there is nothing to fill in and an empty set of answers would be stored as though there were",
-      ),
-    );
-  }
-
-  const twice = measureNamedTwice(definition, assertions);
-  if (twice !== undefined) {
-    throw new UnprocessableInputError(
-      `this grader already bounds "${twice}", and a copy checks each measure once — its verdicts are filed under the measure they are about, so a second check on the same one could not be told from the first. Press Use again for a second copy, which is also where a different "required" belongs.`,
-    );
-  }
-
-  return { assertions };
-}
-
-/**
- * The first measure a copy names more than once, or nothing where each is named
- * once.
- *
- * It reads the entry's own declaration to find *which* value is a measure rather
- * than looking for a parameter called `metric`: what the parameters are is the
- * library entry's business, and an entry that one day asks for a measure under
- * another name is still an entry whose copies file verdicts under it.
- */
-function measureNamedTwice(
-  definition: Definition,
-  assertions: readonly GraderAssertion[],
-): string | undefined {
-  const measures = definition.params
-    .filter((parameter) => parameter.kind === "measure")
-    .map((parameter) => parameter.name);
-
-  const named = new Set<string>();
-  for (const assertion of assertions) {
-    for (const parameter of measures) {
-      const measure = assertion[parameter];
-      if (typeof measure !== "string") continue;
-      if (named.has(measure)) return measure;
-      named.add(measure);
-    }
-  }
-  return undefined;
-}
-
-/**
- * A form filled in once, as the config it becomes.
- *
- * **One set of answers is one assertion**, because that is what the form is:
- * the entry's questions, asked once. It is written here rather than at each
- * door so that **Use** and an edit cannot come to disagree about what somebody
- * filling that form in has said — which is the same reason both of them check
- * what they were given against the entry through `validConfig` and neither
- * holds an opinion of its own about a bound.
- */
-function oneFilledInSet(params: FilledInForm): GraderConfigInput {
-  return { assertions: [params] };
-}
-
-/**
- * A form that asked nothing, filled in.
- *
- * **Empty is a complete answer, not an unfinished one**, and this is the shape
- * a correct expected-behaviors copy keeps forever: its assertions are the
- * test's own sentences, supplied per test at judging time, so there has never
- * been anything here for anybody to type.
- */
-const NOTHING_TO_FILL_IN: GraderConfigInput = { assertions: [] };
-
-/**
- * The filled-in values an edit is asking for, and which of the two names it
- * asked under — or nothing at all, which means keep what is stored.
- *
- * The two names are one thing said at two grains, so exactly one may be used.
- * Refusing rather than ranking them: a precedence rule would quietly decide
- * which of two lists somebody meant, and the only honest answer is to ask.
- *
- * Which name was used travels on, because it decides one more thing that cannot
- * be settled until the stored config has been read — see `wouldLoseAssertions`.
- */
-type AskedValues = {
-  /** `params` is one filled-in set; `config` is the whole list. */
-  readonly under: "params" | "config";
-  readonly values: GraderConfigInput;
-};
-
-function valuesIn(changes: GraderChanges): AskedValues | undefined {
-  if (changes.params !== undefined && changes.config !== undefined) {
-    throw new UnprocessableInputError(
-      `an edit says a grader's filled-in values once: "params" is the entry's ` +
-        `form filled in, and "config" is the whole list of assertions. Send ` +
-        `whichever fits and not both.`,
-    );
-  }
-  if (changes.params !== undefined) {
-    return { under: "params", values: oneFilledInSet(changes.params) };
-  }
-  if (changes.config !== undefined) {
-    return { under: "config", values: changes.config };
-  }
-  return undefined;
-}
-
-/**
- * Whether replacing a copy's values with **one filled-in set** would quietly
- * drop assertions it is holding.
- *
- * `params` is the form asked once, so it can only ever say one assertion. On a
- * copy that holds one — every copy the product can make today, because Use
- * writes exactly one set or none — that is a complete replacement and nothing
- * is lost. On a copy holding two it is a truncation, and a silent one twice
- * over: the second bound stops being judged, *and* the edit mints a version
- * recording the loss as though somebody had asked for it.
- *
- * Nothing in the product can build such a copy yet — only `config` can, and no
- * door outside this module offers it. The refusal is here because that changes
- * the moment either re-grade or custom authoring lands, and a screen filling
- * one set into a two-assertion copy is exactly the shape that would then arrive.
- * It names `config`, which is the way to say the whole list on purpose.
- */
-function wouldLoseAssertions(
-  asked: AskedValues,
-  stored: GraderConfig,
-): string | undefined {
-  if (asked.under !== "params" || stored.assertions.length <= 1) {
-    return undefined;
-  }
-  return (
-    `this grader holds ${stored.assertions.length} assertions, and "params" ` +
-    `is the entry's form filled in once — sending it would replace all of ` +
-    `them with that one and mint a version saying the rest were never there. ` +
-    `Send "config" with every assertion this grader should keep.`
-  );
-}
-
-/**
- * The shape guard on every read. Stored jsonb comes back `unknown`, and a row
- * somebody hand-edited must fail here, loudly and naming itself, rather than
- * leak into a caller as a config that isn't one.
- *
- * Shape only, deliberately: what an entry asks for may grow or tighten later,
- * and an old version must stay readable exactly as it was written — so a key
- * nothing asks for any more is taken on trust once it is one of the two kinds
- * of value a form can produce.
- */
-function configFromRow(value: unknown, versionId: string): GraderConfig {
-  const malformed = (): Error =>
-    new Error(
-      `version ${versionId} holds a config in a shape Egma never writes; the row needs repairing before anybody can read it`,
-    );
-
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw malformed();
-  }
-  const { assertions } = value as Record<string, unknown>;
-  if (!Array.isArray(assertions)) throw malformed();
-
-  return {
-    assertions: assertions.map((entry) => {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-        throw malformed();
-      }
-      const filled: Record<string, string | number> = {};
-      for (const [key, held] of Object.entries(entry)) {
-        if (typeof held !== "string" && typeof held !== "number") {
-          throw malformed();
-        }
-        filled[key] = held;
-      }
-      return filled;
-    }),
-  };
-}
-
-/**
- * Refuse a catalog definition that cannot execute an active copy unchanged.
- *
- * Catalog reconciliation calls this before it writes a new shared definition
- * revision. There is no guessed config migration: if the new form or stable
- * type cannot accept a copy's exact stored config and model, the release must
- * supply an explicit migration or use a new Library identity.
- */
-export function assertGraderVersionCompatibleWithDefinition(
-  definition: GraderDefinitionSnapshot,
-  libraryName: string,
-  value: {
-    readonly versionId: string;
-    readonly config: unknown;
-    readonly judgeModel: unknown;
-  },
-): void {
-  const stored = configFromRow(value.config, value.versionId);
-  validConfig({ ...definition, name: libraryName }, stored);
-  judgeModelFromRow(value.judgeModel, value.versionId, definition.type);
-}
-
-function judgeModelFromRow(
-  value: unknown,
-  versionId: string,
-  type: LibraryType,
-): JudgeModel | null {
-  if (type === "code") {
-    if (value === null || value === undefined) return null;
-    throw new Error(
-      `version ${versionId} is a code grader and holds a judge model it can never use; the row needs repairing before anybody can read it`,
-    );
-  }
-  return graderModelFromRow(value, versionId);
-}
-
-/**
- * Byte-identical or not, decided value by value — the same answer canonical
- * serialization would give, without trusting any serializer to order keys the
- * way jsonb re-ordered them.
- *
- * Assertions compare **in order and by position**, because position is what a
- * verdict row keys an assertion by: reordering two bounds is a different grader
- * from the reader's point of view even though the same two checks are made.
- */
-function sameConfig(stored: GraderConfig, next: GraderConfig): boolean {
-  return (
-    stored.assertions.length === next.assertions.length &&
-    stored.assertions.every((assertion, at) => {
-      const other = next.assertions[at];
-      if (other === undefined) return false;
-      const keys = Object.keys(assertion).sort();
-      const otherKeys = Object.keys(other).sort();
-      return (
-        keys.length === otherKeys.length &&
-        keys.every((key, index) => key === otherKeys[index]) &&
-        keys.every((key) => assertion[key] === other[key])
-      );
-    })
-  );
-}
-
-function sameJudgeModel(a: JudgeModel | null, b: JudgeModel | null): boolean {
-  if (a === null || b === null) return a === b;
-  return sameGraderModel(a, b);
-}
-
-/** The named grader, alive, within the caller's tenancy and scope. */
-function theGrader(auth: AuthContext, id: string): SQL {
-  return within(
-    auth,
-    grader,
-    and(eq(grader.id, id), notDeleted, inActingProject(auth, grader)),
-  );
-}
-
-/** What a read hands back, from the row the identity and version join made. */
-function answer(row: SelectedDefinition & {
-  readonly id: string;
-  readonly projectId: string;
-  readonly libraryId: string;
-  readonly name: string;
-  readonly description: string | null;
-  readonly required: boolean;
-  readonly scope: string;
-  readonly productionSampleRate: number;
-  readonly version: number;
-  readonly versionId: string;
-  readonly config: unknown;
-  readonly judgeModel: unknown;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-}): Grader {
-  const definition = definitionFromSelection(row);
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    libraryId: row.libraryId,
-    name: row.name,
-    description: row.description,
-    type: definition.type,
-    required: row.required,
-    scope: row.scope as GraderScope,
-    productionSampleRate: row.productionSampleRate,
-    version: row.version,
-    versionId: row.versionId,
-    config: configFromRow(row.config, row.versionId),
-    judgeModel: judgeModelFromRow(
-      row.judgeModel,
-      row.versionId,
-      definition.type,
-    ),
-    definition,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-/**
- * **Use**: a running copy of a library entry, and its first version, or neither.
- *
- * The entry decides the type and what the form asked; the copy holds the
- * answers and where they apply. The whole write is one transaction — the
- * identity row goes in first naming a version that does not exist yet, its
- * pointer's constraint being deferred so Postgres checks it at commit — and
- * anything that fails on the way out takes both rows with it. A copy with no
- * version is a grader nothing can read a config off, and a version with no copy
- * is a config nothing judges by; neither is a state this door can leave behind.
- *
- * The entry is read **inside** the transaction under a share lock. The first
- * grader version therefore stores the exact immutable definition revision that
- * was current when the copy was written.
- */
-export async function useLibraryEntry(
-  auth: AuthContext,
-  input: UseLibraryEntry,
-): Promise<Grader> {
-  authorize(auth, "author_definitions", here(auth));
-
-  const { projectId } = auth;
-  if (projectId === undefined) {
-    throw new Error(
-      "a grader belongs to a project, and this credential is for the whole organization and acting in none",
-    );
-  }
-
-  // Everything answerable without the database is answered first; only an input
-  // worth writing costs the reads below.
-  const name = input.name === undefined ? undefined : validName(input.name);
-  const askedJudgeModel =
-    input.judgeModel === undefined ? undefined : validJudgeModel(input.judgeModel);
-  const required = input.required ?? DEFAULT_REQUIRED;
-  const scope = input.scope === undefined ? "simulations" : validScope(input.scope);
-  const productionSampleRate =
-    input.productionSampleRate === undefined
-      ? DEFAULT_PRODUCTION_SAMPLE_RATE
-      : validProductionSampleRate(input.productionSampleRate);
-
-  if (!(await isProjectOfOrganization(auth, projectId))) {
-    throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
-  }
-
-  const id = newId("grd");
-  const versionId = newId("grv");
-
-  const written = await db().transaction(async (tx) => {
-    const definition = await definitionOf(tx, auth, input.libraryId);
-    const judgeModel =
-      definition.type === "llm_as_judge"
-        ? (askedJudgeModel ?? RECOMMENDED_GRADER_MODEL)
-        : null;
-    if (definition.type === "code" && askedJudgeModel !== undefined) {
-      throw new UnprocessableInputError(
-        "a code grader makes no model call, so it cannot carry a judge model",
-      );
-    }
-    const config = validConfig(
-      definition,
-      input.params === undefined
-        ? NOTHING_TO_FILL_IN
-        : oneFilledInSet(input.params),
-    );
-
-    const [identity] = await tx
-      .insert(grader)
-      .values({
-        id,
-        organizationId: auth.organizationId,
-        projectId,
-        libraryId: definition.libraryId,
-        // Defaulted from the entry, so a copy nobody renamed says on screen
-        // which grader it is a copy of.
-        name: name ?? definition.name,
-        description: input.description ?? null,
-        required,
-        scope,
-        productionSampleRate,
-        currentVersionId: versionId,
-        createdBy: auth.userId,
-      })
-      .returning(COLUMNS);
-
-    if (identity === undefined) throw new Error("the grader was not written");
-
-    await tx.insert(graderVersion).values({
-      id: versionId,
-      graderId: id,
-      version: 1,
-      libraryId: definition.libraryId,
-      libraryVersion: definition.libraryVersion,
-      config,
-      judgeModel,
-      createdBy: auth.userId,
-    });
-
-    return { identity, config, judgeModel, definition };
-  });
-
-  // Through the same shaper every other read goes through, so what Use hands
-  // back and what a fetch hands back can never come to differ in a field one of
-  // them forgot.
-  return answer({
-    ...written.identity,
-    version: 1,
-    versionId,
-    config: written.config,
-    judgeModel: written.judgeModel,
-    ...selectionFromDefinition(written.definition),
-  });
-}
-
-/**
- * The identity row joined to its current version — the shape `get` and `list`
- * both answer with, written once so the two can never drift.
- */
-function selectWithCurrentVersion() {
-  return db()
-    .select({
-      ...COLUMNS,
-      version: graderVersion.version,
-      versionId: graderVersion.id,
-      config: graderVersion.config,
-      judgeModel: graderVersion.judgeModel,
-      ...DEFINITION_COLUMNS,
-    })
-    .from(grader)
-    .innerJoin(graderLibrary, eq(grader.libraryId, graderLibrary.id))
-    .innerJoin(graderVersion, eq(grader.currentVersionId, graderVersion.id))
-    .innerJoin(
-      graderLibraryVersion,
-      and(
-        eq(graderLibraryVersion.libraryId, graderVersion.libraryId),
-        eq(graderLibraryVersion.version, graderVersion.libraryVersion),
-      ),
-    );
-}
-
-/**
- * One running copy with what it currently judges by: the entry it points at,
- * its type and filled-in values, the judge it insists on if any, and the live
- * settings saying where it applies and whether it can fail anything.
- */
-export async function getGrader(
-  auth: AuthContext,
-  id: string,
-): Promise<Grader | undefined> {
-  authorize(auth, "read", here(auth));
-
-  const [row] = await selectWithCurrentVersion()
-    .where(theGrader(auth, id))
     .limit(1);
-
-  if (row === undefined) return undefined;
-  return answer(row);
+  return row === undefined ? undefined : fromRow(row);
 }
 
-/**
- * One door for every change, so no caller needs the version rules to pick a
- * function — the rules live here. The live settings write in place and version
- * nothing, and read back immediately, because none of them changes what any
- * verdict already written meant. The filled-in values and the judge model are
- * what a verdict was decided by: either of them differing from the current
- * version inserts the next version and moves the pointer, in one transaction
- * with the identity row locked, so two concurrent edits number one after the
- * other rather than fighting over the same version number. The version being
- * left behind is never touched, because a verdict that named it must still say
- * what decided it. Content byte-identical to the current version is not an edit
- * at all: nothing is written, not even `updated_at`, and the current version
- * comes back.
- *
- * What an edit leaves out, it keeps — and values it does give are checked
- * against the **current immutable definition of the entry this copy points
- * at**, which is the same check Use makes. If the catalog moved forward, the
- * edit mints a version that references that new definition too.
- *
- * Editing what the caller cannot see returns what reading it would have:
- * `undefined`, with nothing disturbed.
- */
-export async function editGrader(
+export async function editProjectGrader(
   auth: AuthContext,
   id: string,
-  changes: GraderChanges,
-): Promise<Grader | undefined> {
+  changes: ProjectGraderChanges,
+): Promise<ProjectGrader | undefined> {
   authorize(auth, "author_definitions", here(auth));
-
-  // Everything answerable without the database is answered first, exactly as
-  // Use answers it, so an edit is refused on the same grounds a Use is. The
-  // config is the one thing that cannot be judged yet: what it may hold depends
-  // on the entry the row this edit has not read points at.
-  const name = changes.name === undefined ? undefined : validName(changes.name);
-  const scope =
-    changes.scope === undefined ? undefined : validScope(changes.scope);
-  const productionSampleRate =
-    changes.productionSampleRate === undefined
-      ? undefined
-      : validProductionSampleRate(changes.productionSampleRate);
-  const judgeModel =
-    changes.judgeModel === undefined || changes.judgeModel === null
-      ? changes.judgeModel
-      : validJudgeModel(changes.judgeModel);
-  // Which of the two names carried the values is settled before anything is
-  // read; what those values may hold is the entry's business and is checked
-  // below, inside the transaction, by the code Use goes through.
-  const asked = valuesIn(changes);
-
   return db().transaction(async (tx) => {
-    // Lock order is Library identity, then running copy. Catalog reconciliation
-    // uses the same order, so a prompt release and a user edit cannot deadlock
-    // or leave a copy behind on the old current definition.
-    const [found] = await tx
-      .select({ libraryId: grader.libraryId })
-      .from(grader)
-      .where(theGrader(auth, id))
-      .limit(1);
-    if (found === undefined) return undefined;
-    const currentDefinition = await definitionOf(tx, auth, found.libraryId);
-
-    const [locked] = await tx
-      .select({ ...COLUMNS, currentVersionId: grader.currentVersionId })
-      .from(grader)
-      .where(theGrader(auth, id))
-      .limit(1)
-      .for("update");
-
-    if (locked === undefined) return undefined;
-    const { currentVersionId, ...current } = locked;
-    if (current.libraryId !== found.libraryId) {
-      throw new Error("a grader cannot move between Library identities");
-    }
-
-    // This select and the update below are the two `where`s in this file that
-    // start from a bare `eq` rather than `within`: each names an id that just
-    // came off the tenancy-checked row locked above, in this same transaction,
-    // so neither predicate can reach further than that check already did.
-    const [currentVersion] = await tx
-      .select({
-        id: graderVersion.id,
-        version: graderVersion.version,
-        config: graderVersion.config,
-        judgeModel: graderVersion.judgeModel,
-        ...DEFINITION_COLUMNS,
-      })
-      .from(graderVersion)
-      .innerJoin(graderLibrary, eq(graderVersion.libraryId, graderLibrary.id))
+    const [held] = await tx
+      .select(COLUMNS)
+      .from(projectGrader)
       .innerJoin(
-        graderLibraryVersion,
-        and(
-          eq(graderLibraryVersion.libraryId, graderVersion.libraryId),
-          eq(graderLibraryVersion.version, graderVersion.libraryVersion),
+        graderDefinition,
+        eq(graderDefinition.id, projectGrader.graderDefinitionId),
+      )
+      .where(
+        within(
+          auth,
+          projectGrader,
+          and(
+            eq(projectGrader.id, id),
+            isNull(projectGrader.archivedAt),
+            inActingProject(auth, projectGrader),
+          ),
         ),
       )
-      .where(eq(graderVersion.id, currentVersionId))
-      .limit(1);
-    if (currentVersion === undefined) {
-      throw new Error("the grader's current version is missing");
-    }
+      .limit(1)
+      .for("update", { of: projectGrader });
+    if (held === undefined) return undefined;
 
-    const storedDefinition = definitionFromSelection(currentVersion);
-    const stored = configFromRow(currentVersion.config, currentVersion.id);
-    const storedJudgeModel = judgeModelFromRow(
-      currentVersion.judgeModel,
-      currentVersion.id,
-      storedDefinition.type,
-    );
-
-    // The one refusal that needs the stored config in front of it: whether the
-    // grain this edit spoke in can say everything this copy is holding.
-    const losing =
-      asked === undefined ? undefined : wouldLoseAssertions(asked, stored);
-    if (losing !== undefined) throw new UnprocessableInputError(losing);
-
-    // Omitted means unchanged, and what given values are checked against is the
-    // entry this copy points at rather than anything the caller said.
-    const config =
-      asked === undefined
-        ? stored
-        : validConfig(currentDefinition, asked.values);
-    if (currentDefinition.type === "llm_as_judge" && judgeModel === null) {
+    const scope = changes.scope === undefined
+      ? validateProjectGraderScope(held.scope)
+      : validateProjectGraderScope(changes.scope);
+    if (changes.scope !== undefined && !held.scopeEditable) {
       throw new UnprocessableInputError(
-        "a model-judged grader needs one supported judge model; it cannot be cleared",
+        `the scope of ${held.name} is managed by Egma and cannot be changed`,
       );
     }
-    if (
-      currentDefinition.type === "code" &&
-      judgeModel !== undefined &&
-      judgeModel !== null
-    ) {
-      throw new UnprocessableInputError(
-        "a code grader makes no model call, so it cannot carry a judge model",
-      );
+    if (changes.scope !== undefined) {
+      await validateScopeReferences(tx, auth, held.projectId, scope);
     }
-    const nextJudgeModel =
-      currentDefinition.type === "code"
-        ? null
-        : judgeModel === undefined
-          ? storedJudgeModel
-          : judgeModel;
-
-    const mintsVersion =
-      !sameConfig(stored, config) ||
-      !sameJudgeModel(storedJudgeModel, nextJudgeModel) ||
-      storedDefinition.libraryId !== currentDefinition.libraryId ||
-      storedDefinition.libraryVersion !== currentDefinition.libraryVersion;
-    const settingsChanged =
-      changes.name !== undefined ||
-      changes.description !== undefined ||
-      changes.required !== undefined ||
-      scope !== undefined ||
-      productionSampleRate !== undefined;
-
-    const settled = {
-      ...current,
-      required: changes.required ?? current.required,
-      scope: scope ?? (current.scope as GraderScope),
-      productionSampleRate: productionSampleRate ?? current.productionSampleRate,
-    };
-
-    if (!mintsVersion && !settingsChanged) {
-      return answer({
-        ...settled,
-        version: currentVersion.version,
-        versionId: currentVersion.id,
-        config: stored,
-        judgeModel: storedJudgeModel,
-        ...selectionFromDefinition(storedDefinition),
-      });
-    }
-
-    let versionId = currentVersion.id;
-    let version = currentVersion.version;
-    if (mintsVersion) {
-      versionId = newId("grv");
-      version = currentVersion.version + 1;
-      await tx.insert(graderVersion).values({
-        id: versionId,
-        graderId: current.id,
-        version,
-        libraryId: currentDefinition.libraryId,
-        libraryVersion: currentDefinition.libraryVersion,
-        config,
-        judgeModel: nextJudgeModel,
-        createdBy: auth.userId,
-      });
-    }
+    const passThreshold = changes.passThreshold === undefined
+      ? held.passThreshold
+      : validatePassThreshold(changes.passThreshold);
 
     const [updated] = await tx
-      .update(grader)
-      .set({
-        ...(name === undefined ? {} : { name }),
-        ...(changes.description === undefined
-          ? {}
-          : { description: changes.description }),
-        ...(changes.required === undefined ? {} : { required: changes.required }),
-        ...(scope === undefined ? {} : { scope }),
-        ...(productionSampleRate === undefined ? {} : { productionSampleRate }),
-        ...(mintsVersion ? { currentVersionId: versionId } : {}),
-        updatedAt: new Date(),
-      })
-      .where(eq(grader.id, current.id))
-      .returning(COLUMNS);
-
-    if (updated === undefined) throw new Error("the grader was not written");
-    return answer({
-      ...updated,
-      version,
-      versionId,
-      config,
-      judgeModel: nextJudgeModel,
-      ...selectionFromDefinition(
-        mintsVersion ? currentDefinition : storedDefinition,
-      ),
-    });
+      .update(projectGrader)
+      .set({ scope, passThreshold, updatedAt: new Date() })
+      .where(eq(projectGrader.id, id))
+      .returning({ updatedAt: projectGrader.updatedAt });
+    if (updated === undefined) return undefined;
+    return fromRow({ ...held, scope, passThreshold, updatedAt: updated.updatedAt });
   });
 }
 
-/**
- * One frozen version, by its own `grv_` id — the read that keeps a verdict
- * interpretable after the copy moves on: exactly what decided it, in the values
- * it was decided by.
- *
- * Deliberately no deleted filter: versions outlive their grader's deletion, so a
- * verdict that named one can always say what judged it.
- */
-export async function getGraderVersion(
+/** Archive an optional project grader. Expected behaviors cannot be removed. */
+export async function archiveProjectGrader(
   auth: AuthContext,
-  versionId: string,
-): Promise<GraderVersion | undefined> {
-  authorize(auth, "read", here(auth));
+  id: string,
+): Promise<boolean> {
+  authorize(auth, "author_definitions", here(auth));
+  return db().transaction(async (tx) => {
+    const [held] = await tx
+      .select({ definitionId: projectGrader.graderDefinitionId })
+      .from(projectGrader)
+      .where(
+        within(
+          auth,
+          projectGrader,
+          and(
+            eq(projectGrader.id, id),
+            isNull(projectGrader.archivedAt),
+            inActingProject(auth, projectGrader),
+          ),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    if (held === undefined) return false;
+    if (held.definitionId === PREDEFINED_GRADERS.expectedBehaviors) {
+      throw new UnprocessableInputError("Expected behaviors cannot be removed from a project");
+    }
+    await tx
+      .update(projectGrader)
+      .set({ archivedAt: new Date(), updatedAt: new Date() })
+      .where(eq(projectGrader.id, id));
+    return true;
+  });
+}
 
-  const [row] = await db()
-    .select({
-      id: graderVersion.id,
-      graderId: graderVersion.graderId,
-      version: graderVersion.version,
-      config: graderVersion.config,
-      judgeModel: graderVersion.judgeModel,
-      createdAt: graderVersion.createdAt,
-      ...DEFINITION_COLUMNS,
-    })
-    .from(graderVersion)
-    .innerJoin(grader, eq(graderVersion.graderId, grader.id))
-    .innerJoin(graderLibrary, eq(graderVersion.libraryId, graderLibrary.id))
+const EXECUTABLE_COLUMNS = {
+  definitionId: graderDefinitionVersion.definitionId,
+  version: graderDefinitionVersion.version,
+  type: graderDefinition.type,
+  prompt: graderDefinitionVersion.prompt,
+  parameterContract: graderDefinitionVersion.parameterContract,
+  outputContract: graderDefinitionVersion.outputContract,
+  sourceCode: graderDefinitionVersion.sourceCode,
+  sourceCodeLanguage: graderDefinitionVersion.sourceCodeLanguage,
+  modalities: graderDefinitionVersion.modalities,
+  judgeModel: graderDefinitionVersion.judgeModel,
+} as const;
+
+/** Read one exact immutable definition version for execution. */
+export async function getExecutableGraderDefinition(
+  auth: AuthContext,
+  on: Queryable,
+  definitionId: string,
+  version: number,
+): Promise<GraderDefinitionSnapshot | undefined> {
+  authorize(auth, "read", here(auth));
+  const [row] = await on
+    .select(EXECUTABLE_COLUMNS)
+    .from(graderDefinitionVersion)
     .innerJoin(
-      graderLibraryVersion,
-      and(
-        eq(graderLibraryVersion.libraryId, graderVersion.libraryId),
-        eq(graderLibraryVersion.version, graderVersion.libraryVersion),
-      ),
+      graderDefinition,
+      eq(graderDefinition.id, graderDefinitionVersion.definitionId),
     )
     .where(
-      within(
-        auth,
-        grader,
-        and(eq(graderVersion.id, versionId), inActingProject(auth, grader)),
+      and(
+        eq(graderDefinitionVersion.definitionId, definitionId),
+        eq(graderDefinitionVersion.version, version),
+        or(
+          isNull(graderDefinition.organizationId),
+          eq(graderDefinition.organizationId, auth.organizationId),
+        ),
+        auth.projectId === undefined
+          ? undefined
+          : or(
+              isNull(graderDefinition.projectId),
+              eq(graderDefinition.projectId, auth.projectId),
+            ),
       ),
     )
     .limit(1);
-
-  if (row === undefined) return undefined;
-
-  const definition = definitionFromSelection(row);
-  return {
-    id: row.id,
-    graderId: row.graderId,
-    libraryId: definition.libraryId,
-    version: row.version,
-    type: definition.type,
-    config: configFromRow(row.config, row.id),
-    judgeModel: judgeModelFromRow(
-      row.judgeModel,
-      row.id,
-      definition.type,
-    ),
-    definition,
-    createdAt: row.createdAt,
-  };
-}
-
-/**
- * One page of the running copies the caller can reach — the acting project's,
- * or the whole customer's for a credential acting in none — and where the next
- * page starts.
- *
- * Newest first, on the id, which is the mint order; the page rules are the
- * three lists before this one's, written once in `pages.ts`.
- */
-export type GraderPage = {
-  readonly items: readonly Grader[];
-  /** Hand back as `cursor` to continue; absent on the last page. */
-  readonly nextCursor: string | undefined;
-};
-
-export async function listGraders(
-  auth: AuthContext,
-  page?: PageRequest,
-): Promise<GraderPage> {
-  authorize(auth, "read", here(auth));
-
-  const { limit, cursor } = pageWindow(page, {
-    singular: "grader",
-    plural: "graders",
-    prefix: "grd",
-  });
-  const olderThanCursor =
-    cursor === undefined ? undefined : lt(grader.id, cursor);
-
-  const rows = await selectWithCurrentVersion()
-    .where(
-      within(
-        auth,
-        grader,
-        and(notDeleted, inActingProject(auth, grader), olderThanCursor),
-      ),
-    )
-    .orderBy(desc(grader.id))
-    .limit(limit + 1);
-
-  const { items, nextCursor } = pageOf(rows, limit);
-  return { items: items.map(answer), nextCursor };
-}
-
-/**
- * What somebody reading a verdict row needs to know about the copy that wrote
- * it, and nothing else about that copy.
- */
-export type GraderFacts = {
-  /** The library entry it is a copy of — which says what its keys mean. */
-  readonly libraryId: string;
-  /** `false` makes it a diagnostic: judged, reported, never able to fail. */
-  readonly required: boolean;
-};
-
-/**
- * These copies, by id, as a reader of their verdicts needs them.
- *
- * **Read live, and never off the verdict row.** `required` is a live setting on
- * the copy rather than judged content on its versions, so a project that turns a
- * blocker into a diagnostic this morning reads its whole history that way from
- * this morning on. That is the decision the flag's placement already made:
- * nothing about the judgment changed, only what the project lets a failure do.
- * The Library identity is read from the copy for the opposite reason — it can
- * never be edited, so there is no other value it could have.
- *
- * **Deliberately no deleted filter.** A deleted copy's verdicts are still shown
- * — its versions outlive it so that they stay interpretable — and a diagnostic
- * that somebody switched off must not start failing a run's headline the moment
- * it goes. Whether the copy is still running is not what this question asks.
- *
- * That clause became load-bearing the day switching a copy off became something
- * a person can do from a screen. The two rules it sits between pull opposite
- * ways: an unresolvable grader is read as **required**, which is the safe
- * direction for a row nobody can place, and a switched-off copy is perfectly
- * placeable. Filtering it out here would hand every failing row a diagnostic
- * ever wrote to the lane that decides — a run that passed last month turning
- * red because somebody tidied up this morning. Deleting a copy says what judges
- * from now on and nothing about what a past run meant, and
- * `apps/grader/test/edited-and-switched-off.test.ts` is where that is pinned.
- *
- * **A copy this cannot see is simply absent**, and every caller reads that
- * absence the safe way: a copy it cannot see is required, and an unresolvable
- * key stays a key.
- * Another customer's id, or one the credential's project narrowing hides, comes
- * back with nothing rather than with a guess.
- *
- * Exported to the module, not from the package: this answers questions the
- * verdict read and the assertion read have to ask, and the grader table has one
- * owner, which is this file.
- */
-export async function graderFacts(
-  auth: AuthContext,
-  graderIds: readonly string[],
-): Promise<ReadonlyMap<string, GraderFacts>> {
-  const asked = [...new Set(graderIds)];
-  if (asked.length === 0) return new Map();
-
-  const rows = await db()
-    .select({
-      id: grader.id,
-      libraryId: grader.libraryId,
-      required: grader.required,
-    })
-    .from(grader)
-    .where(
-      within(
-        auth,
-        grader,
-        and(inArray(grader.id, asked), inActingProject(auth, grader)),
-      ),
-    );
-
-  return new Map(
-    rows.map(({ id, ...facts }) => [id, facts] as const),
-  );
-}
-
-/**
- * Whether this grader judges the production trace in front of it — and the
- * accumulator moved on by one trace, whatever the answer.
- *
- * **Deterministic, and that is the entire point.** The rate is added to the
- * accumulator; crossing a hundred is this grader's turn and takes a hundred back
- * off. A quarter is every fourth trace, exactly; a hundred per cent is all of
- * them and nought per cent is none; a rate that divides a hundred less neatly
- * spends what it accumulates and carries the remainder rather than rounding it
- * away. A customer who chose 25% and watched four calls go past can be shown
- * which one was judged and why the other three were not, which is an answer
- * randomness cannot give at any price.
- *
- * The crossing is read back off the accumulator rather than remembered: after
- * adding a rate under a hundred, the remainder is *below* the rate exactly when
- * a hundred came off it, because what is left is `before + rate - 100` and
- * `before` was under a hundred to begin with. At a hundred per cent the
- * accumulator never moves and is always under the rate — every trace, as
- * promised — and at nought it never moves and is never under it. So the whole
- * rule is one statement with no read before the write, which is also what makes
- * two copies of the grader service judging two traces at once share one sequence
- * instead of racing to the same tick.
- *
- * **Forward only.** The accumulator says where sampling has got to and nothing
- * about which traces were judged, so raising a rate speeds the next decision up
- * and lowering it slows the next one down; neither reaches back. Nothing is
- * re-judged and nothing is deleted, on exactly the same terms as an edit to a
- * scope.
- *
- * A retried job takes another tick. A copy of the service that died mid-judgment
- * and a second copy that picks the conversation up are two decisions about one
- * trace, and the phase shifts by one — never the rate. The alternative is
- * remembering every trace every grader ever declined, which is a table that
- * grows with traffic to answer a question nobody asks.
- *
- * No permission is asked for, on the same terms as `appendVerdicts`: what may
- * judge is decided by holding the claim, and this is egma's own count of how
- * often it did rather than anything the customer wrote. A grader nobody can
- * reach from this context judges nothing — the safe direction, and the only one.
- */
-export async function advanceProductionSampling(
-  auth: AuthContext,
-  graderId: string,
-): Promise<boolean> {
-  const [row] = await db()
-    .update(grader)
-    .set({
-      productionSampleAccumulator: sql`(${grader.productionSampleAccumulator} + ${grader.productionSampleRate}) % 100`,
-    })
-    // Deliberately not `updated_at`: this is traffic passing, not somebody
-    // editing a grader, and a definition whose modified time moved every time a
-    // call came in would make "what changed on Tuesday" unanswerable.
-    .where(theGrader(auth, graderId))
-    .returning({
-      accumulator: grader.productionSampleAccumulator,
-      rate: grader.productionSampleRate,
-    });
-
-  return row !== undefined && row.accumulator < row.rate;
-}
-
-export type DeletedGrader = {
-  readonly id: string;
-  readonly projectId: string;
-  readonly name: string;
-  readonly deletedAt: Date;
-};
-
-/**
- * The soft-delete marker, and only the marker. The copy vanishes from lists and
- * fetches at once; the version rows stay exactly where they are, because a
- * verdict that named one must stay interpretable for as long as it is kept.
- *
- * **Nothing refuses this, and that is the junction's departure showing.** It
- * used to be refused while the current version of a live test named the copy,
- * because letting it through would leave that test quietly checking one thing
- * fewer than it says it checks. A test names no graders now — where a copy
- * applies is its own scope — so switching one off is one decision about the
- * project, taken in one place, with nothing to hunt through first. Deleting the
- * copy is exactly how a project stops being judged by it, including the seeded
- * expected-behaviors one.
- *
- * Like Use, this refuses a credential acting in no project. An edit lands on a
- * row that already names its own project; a delete decides the grader should
- * stop appearing in one, and emptying a project is an act taken from inside it.
- */
-export async function deleteGrader(
-  auth: AuthContext,
-  id: string,
-): Promise<DeletedGrader | undefined> {
-  authorize(auth, "author_definitions", here(auth));
-
-  if (auth.projectId === undefined) {
-    throw new Error(
-      "deleting a grader happens inside its project, and this credential is for the whole organization and acting in none",
-    );
-  }
-
-  const deletedAt = new Date();
-  const [row] = await db()
-    .update(grader)
-    .set({ deletedAt, updatedAt: deletedAt })
-    .where(theGrader(auth, id))
-    .returning({
-      id: grader.id,
-      projectId: grader.projectId,
-      name: grader.name,
-    });
-
-  if (row === undefined) return undefined;
-  return { ...row, deletedAt };
+  return row === undefined ? undefined : snapshotGraderDefinition(row);
 }

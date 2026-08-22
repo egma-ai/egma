@@ -23,7 +23,7 @@
  * but Docker and Node. Which of the two ran is printed, every time.
  *
  * **What waits is named rather than faked.** Nothing on this machine claims a
- * simulation yet, so no verdict lands: left alone, the run would sit pending
+ * simulation yet, so no trace result is ready: left alone, the run would sit pending
  * with every simulation queued for as long as anybody watched it. This check
  * proves both halves of that honestly — it reads the feed twice while the run
  * is queued and finds it empty, and then **cancels the run itself**, because a
@@ -31,7 +31,7 @@
  * that never carries a change proves nothing about following one. The cancel
  * is the check's own doing, it is said out loud in what this prints, and a
  * canceled run passes nothing and fails nothing. The day the grader and the
- * test-to-simulation bridge land, the first verdict arrives through this same
+ * test-to-simulation bridge land, the first terminal grading state arrives through this same
  * feed with nothing here to change.
  *
  * Run it with two commands, from the repository root, on a checkout that has
@@ -581,7 +581,7 @@ async function runAndFollow(
   check(created.body.status === "pending", `the run is pending (${String(created.body.status)})`);
 
   // The follower's own view of the same thing: nothing to report, not done,
-  // and a cursor that has not moved. This is what waiting for a verdict that
+  // and a cursor that has not moved. This is what waiting for a trace result that
   // nothing writes actually looks like.
   const empty = await ask(instance.origin, key, `/v1/runs/${runId}/events?after=0`);
   check(
@@ -596,8 +596,8 @@ async function runAndFollow(
     "and three seconds later it is still empty — nothing claims a simulation on this machine",
   );
   check(
-    /^simulation: \S+ \S+ queued$/mu.test(running.out()) && !running.out().includes("verdict: "),
-    "the terminal is showing queued simulations and no verdict at all",
+    /^simulation: \S+ \S+ queued$/mu.test(running.out()) && !running.out().includes("first-result: "),
+    "the terminal is showing queued simulations and no trace result at all",
   );
 
   // The one change this machine can make to a live run, made while a follower
@@ -625,8 +625,9 @@ async function runAndFollow(
     `it drew every simulation moving to canceled, live, off the feed (${moved} of ${TESTS.length})`,
   );
   check(
-    first(ran.said, "passed") === "0" && first(ran.said, "failed") === "0",
-    "nothing passed and nothing failed: a canceled run counts as neither",
+    first(ran.said, "execution-canceled") === String(TESTS.length) &&
+      first(ran.said, "grading-terminal") === "0",
+    "every execution was canceled, and canceled simulations did not wait for grading",
   );
 
   const after = await ask(instance.origin, key, `/v1/runs/${runId}/events?after=0`);
@@ -681,18 +682,18 @@ function proven(): void {
   say("");
   say("  Waiting, and deliberately not faked here:");
   say("");
-  say("    · no verdict, and nothing that could produce one. Nothing claims");
+  say("    · no trace result, and nothing that could produce one. Nothing claims");
   say("      a simulation on this machine yet, so left alone this run would");
   say("      have stayed pending with every simulation queued for as long as");
   say("      anybody watched it. The grader and the test-to-simulation");
-  say("      bridge are what land that. When they do, the first verdict");
+  say("      bridge are what land that. When they do, the first trace result");
   say("      arrives through this same feed and nothing in this check");
   say("      changes — it already follows the way any follower follows.");
   say("    · the page the results address opens is still being built. The");
   say("      address itself is real, token-free, and on this instance.");
   say("");
   say("  So a green run of this is NOT the whole ten-minute walk. It is");
-  say("  everything up to the moment a verdict would land — and the one");
+  say("  everything up to the moment terminal grading would arrive — and the one");
   say("  change that moved this run was a cancel this check made, never a");
   say("  result egma reached.");
   say(RULE);

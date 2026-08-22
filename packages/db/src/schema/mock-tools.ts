@@ -149,7 +149,7 @@ export const mockTool = pgTable(
  *
  * **No rows means every agent**, which is the ordinary case: one project, one
  * mocked world, so two prompt variants are always tested against the same data
- * and a difference between their verdicts is the prompt's doing. Rows narrow
+ * and a difference between their answers is the prompt's doing. Rows narrow
  * it — affinity, never ownership, so the mock tool still belongs to the project
  * and never to an agent.
  *

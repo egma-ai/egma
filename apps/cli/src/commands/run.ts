@@ -11,7 +11,12 @@ import { PlatformRefusedError } from "../platform/refused.ts";
 import { hydrateRun, startRun } from "../platform/runs.ts";
 import { notSignedInRefusal, signedInAt } from "../platform/signed-in.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
-import { changeLines, tallyLines } from "../run/lines.ts";
+import {
+  changeLines,
+  gradingLine,
+  progressLines,
+  simulationLine,
+} from "../run/lines.ts";
 import {
   RunSelectionError,
   selectSuiteForRun,
@@ -23,10 +28,9 @@ export const RUN_EXIT = {
   done: 0,
   nothing: 1,
   notSignedIn: 2,
-  failed: 3,
   unreachable: 4,
   refused: 5,
-  errored: 6,
+  operational: 6,
   interrupted: 130,
 } as const;
 
@@ -148,7 +152,9 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   }
   const follower = new RunFollower(run);
   for (const row of follower.rows) {
-    options.out(`simulation: ${row.name} ${row.persona} ${row.status}`);
+    options.out(simulationLine(row));
+    const grading = gradingLine(row);
+    if (grading !== null) options.out(grading);
   }
 
   let ending;
@@ -166,15 +172,16 @@ export async function runRunCommand(options: RunCommandOptions): Promise<number>
   } catch (cause) {
     return unreachable(options, cause);
   }
-  const tally = follower.tally;
-  for (const line of tallyLines(tally)) options.out(line);
+  const progress = follower.progress;
+  for (const line of progressLines(progress)) options.out(line);
   if (ending === "interrupted") {
     options.out("status: left-running");
     return RUN_EXIT.interrupted;
   }
   options.out(`status: ${follower.runStatus}`);
-  if (tally.failed > 0) return RUN_EXIT.failed;
-  if (tally.errored > 0) return RUN_EXIT.errored;
+  if (progress.executionFailed > 0 || progress.gradingErrors > 0) {
+    return RUN_EXIT.operational;
+  }
   return RUN_EXIT.done;
 }
 

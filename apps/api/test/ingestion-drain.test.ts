@@ -5,13 +5,20 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   DRAIN_ADVISORY_LOCK,
+  getSimulation,
+  getGradingJobForTrace,
   listMonitoringSetups,
   openDrainOwnership,
+  readProductionGradingPlan,
   type AuthContext,
 } from "@egma/db";
+import { newId } from "@egma/ids";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { gzipSync } from "node:zlib";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { openSingleConnection } from "../../../packages/db/test/support/database.ts";
 
 import {
   forgetRetainedDefects,
@@ -36,11 +43,17 @@ import {
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import { aRecord } from "./support/ingestion.ts";
+import { aConductedRun } from "./support/recordings.ts";
 import {
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
-import { mintKey, signUp, type Customer } from "./support/traces.ts";
+import {
+  mintKey,
+  projectKeyFor,
+  signUp,
+  type Customer,
+} from "./support/traces.ts";
 
 /**
  * The segment lifecycle, with the faults that decide whether it is correct.
@@ -122,8 +135,8 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
 
   let api: TestApi;
   let acme: Customer;
-  let scope: SegmentScope;
   let auth: AuthContext;
+  let scope: SegmentScope;
   let bucket: PendingObjectStore;
 
   const faults: Faults = {};
@@ -148,6 +161,7 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         kind: "root",
         source: "production",
         agent_platform: "livekit_agents",
+        connection_kind: "",
         platform_agent_id: "agent-under-test",
         started_at_microseconds: String(at),
         ends_trace: true,
@@ -161,6 +175,7 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         kind: "turn:agent",
         source: "production",
         agent_platform: "livekit_agents",
+        connection_kind: "",
         platform_agent_id: "agent-under-test",
         started_at_microseconds: String(at + 1_000_000n),
         text: "Of course — Tuesday at four works.",
@@ -218,16 +233,20 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     return Number(row?.n ?? -1);
   }
 
-  async function gradingJobsFor(traceId: string): Promise<
-    readonly { root_closed_at: Date | null; last_seen_at: Date }[]
-  > {
-    const { rows } = await api.database.sql<{
-      root_closed_at: Date | null;
-      last_seen_at: Date;
-    }>("select root_closed_at, last_seen_at from grading_job where trace_id = $1", [
-      traceId,
-    ]);
-    return rows;
+  async function gradingJobCount(traceId: string): Promise<number> {
+    const { rows } = await api.database.sql<{ n: string }>(
+      "select count(*) as n from grading_job where trace_id = $1",
+      [traceId],
+    );
+    return Number(rows[0]?.n ?? -1);
+  }
+
+  async function physicalReceiptCount(traceId: string): Promise<number> {
+    return countOf(
+      "select count() as n from production_grading_plans " +
+        `where organization_id = '${scope.organizationId}' ` +
+        `and project_id = '${scope.projectId}' and trace_id = '${traceId}'`,
+    );
   }
 
   beforeAll(async () => {
@@ -282,10 +301,15 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         `select count() as n from turns final where trace_id = '${traceId}'`,
       ),
     ).toBe(1);
-    // The platform said the conversation ended, so the handoff says so too.
-    expect(await gradingJobsFor(traceId)).toEqual([
-      { root_closed_at: expect.any(Date), last_seen_at: expect.any(Date) },
-    ]);
+    // The platform said the conversation ended, so the handoff freezes the
+    // production selection. Expected behaviors grades simulations only, so an
+    // empty receipt is the complete answer and no worker job is invented.
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
     expect(
       (await listMonitoringSetups(auth)).find(
         (setup) => setup.agentPlatform === "livekit_agents",
@@ -325,7 +349,12 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         `select count() as n from turns final where trace_id = '${traceId}'`,
       ),
     ).toBe(1);
-    expect(await gradingJobsFor(traceId)).toHaveLength(1);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
   });
 
   it("leaves the object pending when the trace store is unavailable, and finishes on the next pass", async () => {
@@ -344,7 +373,9 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     // Nothing was written and nothing was deleted: the complete segment is
     // still there to be replayed.
     expect((await pending()).map((object) => object.key)).toContain(key);
-    expect(await gradingJobsFor(traceId)).toHaveLength(0);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toBeUndefined();
+    expect(await physicalReceiptCount(traceId)).toBe(0);
+    expect(await gradingJobCount(traceId)).toBe(0);
 
     expect(await drainer.drainNow()).toBe(1);
     expect(
@@ -352,20 +383,26 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         `select count() as n from spans final where trace_id = '${traceId}'`,
       ),
     ).toBe(2);
-    expect(await gradingJobsFor(traceId)).toHaveLength(1);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
   });
 
   it("keeps the object when the handoff fails, and replays only the missing effect", async () => {
     const traceId = "dd00000000000000000000000000dd00";
     const key = await accepted(aConversation(traceId));
 
-    // The one way to make Postgres refuse this write and no other. The rows
-    // reach ClickHouse; the handoff behind them does not.
-    // A literal rather than a bind parameter, because Postgres takes no
-    // parameters in DDL. The value is this file's own hex id.
-    await api.database.sql(
-      "alter table grading_job add constraint refuses_this_trace " +
-        `check (trace_id is null or trace_id <> '${traceId}')`,
+    // Refuse only this trace's immutable receipt. The evidence rows reach
+    // ClickHouse first; the handoff behind them then fails and must leave the
+    // accepted object available for replay.
+    const traceStore = api.traceStore;
+    if (traceStore === undefined) throw new Error("this API has no trace store");
+    await traceStore.command(
+      "alter table production_grading_plans add constraint refuses_this_trace " +
+        `check trace_id != '${traceId}'`,
     );
     try {
       expect(await drainer.drainNow()).toBe(0);
@@ -378,10 +415,12 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
           `select count() as n from spans final where trace_id = '${traceId}'`,
         ),
       ).toBe(2);
-      expect(await gradingJobsFor(traceId)).toHaveLength(0);
+      await expect(readProductionGradingPlan(auth, traceId)).resolves.toBeUndefined();
+      expect(await physicalReceiptCount(traceId)).toBe(0);
+      expect(await gradingJobCount(traceId)).toBe(0);
     } finally {
-      await api.database.sql(
-        "alter table grading_job drop constraint refuses_this_trace",
+      await traceStore.command(
+        "alter table production_grading_plans drop constraint refuses_this_trace",
       );
     }
 
@@ -393,9 +432,12 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         `select count() as n from spans final where trace_id = '${traceId}'`,
       ),
     ).toBe(2);
-    expect(await gradingJobsFor(traceId)).toEqual([
-      { root_closed_at: expect.any(Date), last_seen_at: expect.any(Date) },
-    ]);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
   });
 
   it("leaves one visible span and turn when the same evidence is drained under a new identity", async () => {
@@ -421,7 +463,12 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
         `select count() as n from turns final where trace_id = '${traceId}'`,
       ),
     ).toBe(1);
-    expect(await gradingJobsFor(traceId)).toHaveLength(1);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
   });
 
   it("retains a segment whose evidence disagrees with what is already stored, and changes nothing", async () => {
@@ -867,6 +914,87 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       await waiting.stop();
     }
   });
+
+  it("wakes one simulation grading job when completion precedes its drain", async () => {
+    const run = await aConductedRun(
+      api.app,
+      { auth, key: await projectKeyFor(api.app, acme) },
+      {
+        label: "the late simulation evidence run",
+        modality: "chat",
+        reference: "recordings/late-simulation-evidence.wav",
+      },
+    );
+    const simulation = await getSimulation(auth, run.heard);
+    if (simulation?.startedAt === null || simulation?.startedAt === undefined) {
+      throw new Error(`simulation ${run.heard} has no start time`);
+    }
+    const traceId = traceIdOfSimulation(run.heard);
+    if (traceId === undefined) throw new Error(`${run.heard} has no trace id`);
+
+    // The simulation row is already completed, but no evidence is readable and
+    // its frozen run plan has not produced temporary worker work.
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+    expect(await gradingJobCount(traceId)).toBe(0);
+
+    const root = aRecord({
+      trace_id: traceId,
+      span_id: `${traceId.slice(0, 14)}01`,
+      parent_span_id: "",
+      source: "simulation",
+      emitter: "egma-runtime",
+      started_at_microseconds: String(BigInt(simulation.startedAt.getTime()) * 1_000n),
+      duration_nanoseconds: "1000000",
+      name: "simulation",
+      kind: "root",
+      status: "ok",
+      text: "",
+      audio_url: "",
+      tool_name: "",
+      tool_arguments: "",
+      tool_result: "",
+      provider_call_id: "",
+      agent_platform: "",
+      platform_agent_id: "",
+      platform_agent_name: "",
+      platform_agent_version: "",
+      connection_kind: "",
+      run_id: run.runId,
+      agent_id: simulation.agentId,
+      agent_version_id: "",
+      test_version_id: simulation.testVersionId,
+      persona_version_id: simulation.personaVersionId,
+      payload: "{}",
+      // The simulation row above, not this span, says the simulation completed.
+      ends_trace: false,
+    });
+    await accepted([root]);
+    expect(await drainer.drainNow()).toBe(1);
+
+    const first = await getGradingJobForTrace(auth, traceId);
+    expect(first).toMatchObject({
+      source: "simulation",
+      simulationId: run.heard,
+      traceId,
+      runId: run.runId,
+      status: "pending",
+      entries: [expect.objectContaining({
+        graderDefinitionVersion: 1,
+        graderPassThreshold: 1,
+      })],
+    });
+    expect(await gradingJobCount(traceId)).toBe(1);
+
+    // A second physical segment can replay the same evidence. It reaches the
+    // same frozen plan and job rather than creating another row.
+    await accepted([root]);
+    expect(await drainer.drainNow()).toBe(1);
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toMatchObject({
+      id: first?.id,
+      entries: first?.entries,
+    });
+    expect(await gradingJobCount(traceId)).toBe(1);
+  });
 });
 
 /**
@@ -884,13 +1012,19 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
 
   let api: TestApi;
   let acme: Customer;
+  let auth: AuthContext;
   let scope: SegmentScope;
   let bucket: PendingObjectStore;
   let drainer: Drainer;
 
   const at = BigInt(Date.parse("2026-08-20T10:00:00.000Z")) * 1_000n;
+  const productionDefinitionId = newId("grl");
+  const productionProjectGraderId = newId("grd");
 
-  function turn(traceId: string): IngestionRecord {
+  function turn(
+    traceId: string,
+    overrides: Partial<IngestionRecord> = {},
+  ): IngestionRecord {
     return aRecord({
       trace_id: traceId,
       span_id: `${traceId.slice(0, 14)}02`,
@@ -899,8 +1033,10 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
       kind: "turn:agent",
       source: "production",
       agent_platform: "livekit_agents",
+      connection_kind: "",
       started_at_microseconds: String(at + 1_000_000n),
       text: "Tuesday at four, then.",
+      ...overrides,
     });
   }
 
@@ -913,6 +1049,7 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
       kind: "root",
       source: "production",
       agent_platform: "livekit_agents",
+      connection_kind: "",
       started_at_microseconds: String(at),
       ends_trace: true,
     });
@@ -923,15 +1060,23 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     expect(await drainer.drainNow()).toBe(1);
   }
 
-  async function jobFor(
-    traceId: string,
-  ): Promise<{ root_closed_at: Date | null } | undefined> {
-    const { rows } = await api.database.sql<{ root_closed_at: Date | null }>(
-      "select root_closed_at from grading_job where trace_id = $1",
+  async function gradingJobCount(traceId: string): Promise<number> {
+    const { rows } = await api.database.sql<{ n: string }>(
+      "select count(*) as n from grading_job where trace_id = $1",
       [traceId],
     );
-    expect(rows.length).toBeLessThanOrEqual(1);
-    return rows[0];
+    return Number(rows[0]?.n ?? -1);
+  }
+
+  async function physicalReceiptCount(traceId: string): Promise<number> {
+    const traceStore = api.traceStore;
+    if (traceStore === undefined) throw new Error("this API has no trace store");
+    const [row] = await traceStore.rows<{ n: string }>(
+      "select count() as n from production_grading_plans " +
+        `where organization_id = '${scope.organizationId}' ` +
+        `and project_id = '${scope.projectId}' and trace_id = '${traceId}'`,
+    );
+    return Number(row?.n ?? -1);
   }
 
   beforeAll(async () => {
@@ -939,6 +1084,13 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     api = await createApi("ingestion_drain_order", { traceStore: true });
     acme = await signUp(api.app, "ada@acme.example", "Acme");
     scope = { organizationId: acme.organizationId, projectId: acme.projectId };
+    auth = {
+      userId: acme.userId,
+      organizationId: acme.organizationId,
+      projectId: acme.projectId,
+      role: "admin",
+      via: "session",
+    };
     bucket = pendingObjectStore(running.ingestStore);
     drainer = startDrainer({
       store: bucket,
@@ -956,24 +1108,127 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     const traceId = "4400000000000000000000000000e401";
 
     await drain([turn(traceId)]);
-    // Known and readable, and deliberately not finished: nothing has said the
-    // conversation is over.
-    expect(await jobFor(traceId)).toEqual({ root_closed_at: null });
+    // Known and readable, but not complete: nothing has said the conversation
+    // is over, so neither a frozen receipt nor temporary work exists.
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toBeUndefined();
+    expect(await physicalReceiptCount(traceId)).toBe(0);
+    expect(await gradingJobCount(traceId)).toBe(0);
 
     await drain([ending(traceId)]);
-    expect(await jobFor(traceId)).toEqual({ root_closed_at: expect.any(Date) });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
   });
 
   it("takes the ending first and still reports the evidence that follows it", async () => {
     const traceId = "4400000000000000000000000000e402";
 
     await drain([ending(traceId)]);
-    expect(await jobFor(traceId)).toEqual({ root_closed_at: expect.any(Date) });
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
 
     await drain([turn(traceId)]);
-    // One piece of work either way, and a completion that a later flush cannot
-    // undo.
-    expect(await jobFor(traceId)).toEqual({ root_closed_at: expect.any(Date) });
+    // The later evidence does not rewrite the already frozen selection.
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+      traceId,
+      entries: [],
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(0);
+  });
+
+  it("freezes one production voice grader only after the explicit ending", async () => {
+    const setup = await openSingleConnection(api.database.url);
+    await setup.sql("begin");
+    await setup.sql(
+      `insert into grader_definition
+         (id, name, description, type, scope_editable, current_definition_version)
+       values ($1, 'Production voice fixture', 'Grades completed voice traces',
+               'code', true, 1)`,
+      [productionDefinitionId],
+    );
+    await setup.sql(
+      `insert into grader_definition_version
+         (definition_id, version, prompt, parameter_contract, output_contract,
+          source_code, source_code_language, modalities, judge_model)
+       values ($1, 1, null, '[]'::jsonb, '{}'::jsonb,
+               'return 1', 'javascript', '["voice"]'::jsonb, null)`,
+      [productionDefinitionId],
+    );
+    await setup.sql("commit");
+    await setup.close();
+    await api.database.sql(
+      `insert into project_grader
+         (id, organization_id, project_id, grader_definition_id, scope,
+          pass_threshold)
+       values ($1, $2, $3, $4,
+               '{"simulations":[],"production":{"sample_percent":100}}'::jsonb,
+               0.7)`,
+      [
+        productionProjectGraderId,
+        acme.organizationId,
+        acme.projectId,
+        productionDefinitionId,
+      ],
+    );
+
+    const traceId = "4400000000000000000000000000e403";
+    await drain([turn(traceId)]);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toBeUndefined();
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toBeUndefined();
+    expect(await physicalReceiptCount(traceId)).toBe(0);
+    expect(await gradingJobCount(traceId)).toBe(0);
+
+    await drain([ending(traceId)]);
+    const receipt = await readProductionGradingPlan(auth, traceId);
+    expect(receipt).toMatchObject({
+      traceId,
+      entries: [{
+        projectGraderId: productionProjectGraderId,
+        graderDefinitionId: productionDefinitionId,
+        graderDefinitionVersion: 1,
+        graderPassThreshold: 0.7,
+      }],
+    });
+    if (receipt === undefined) throw new Error("the completed trace has no receipt");
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+
+    const job = await getGradingJobForTrace(auth, traceId);
+    expect(job).toMatchObject({
+      source: "production",
+      traceId,
+      status: "pending",
+      entries: [{
+        projectGraderId: productionProjectGraderId,
+        graderDefinitionId: productionDefinitionId,
+        graderDefinitionVersion: 1,
+        graderPassThreshold: 0.7,
+        definition: { type: "code", modalities: ["voice"] },
+      }],
+    });
+    if (job === undefined) throw new Error("the completed trace has no job");
+    expect(job.entries).toHaveLength(1);
+    expect(await gradingJobCount(traceId)).toBe(1);
+
+    await drain([turn(traceId, {
+      span_id: `${traceId.slice(0, 14)}03`,
+      started_at_microseconds: String(at + 2_000_000n),
+      text: "I have added the final detail.",
+    })]);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toEqual(receipt);
+    await expect(getGradingJobForTrace(auth, traceId)).resolves.toMatchObject({
+      id: job.id,
+      entries: job.entries,
+    });
+    expect(await physicalReceiptCount(traceId)).toBe(1);
+    expect(await gradingJobCount(traceId)).toBe(1);
   });
 });
 

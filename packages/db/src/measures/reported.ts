@@ -9,8 +9,8 @@
  * numbers in its own shape, and exactly one place in egma knows that shape:
  * the platform's normalizer. The normalizer translates into this block, so the
  * shared measure module reads one shape forever and a new platform is one
- * mapping table in its own module, never a second parser in the arithmetic
- * every verdict rests on.
+ * mapping table in its own module, never a second parser in the shared metric
+ * arithmetic.
  *
  * **Raw samples, never the platform's percentiles.** A measurement here is the
  * platform's own raw series (`values`), so "every measurement holds the bound,
@@ -21,8 +21,8 @@
  * real turn failed.
  *
  * **Same meaning, same name.** A measurement whose meaning matches the measure
- * catalog carries the catalog's own name, so the graders a developer already
- * configured judge platform traffic unchanged. A platform stage with no
+ * catalog carries the catalog's own name, so every metric reader uses the same
+ * value for platform traffic. A platform stage with no
  * catalog counterpart keeps a platform-prefixed name (`retell/llm_latency`)
  * rather than a forced fit — captured now, surfaced when a display asks.
  *

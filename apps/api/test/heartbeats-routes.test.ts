@@ -85,7 +85,10 @@ async function aCustomerReadyToRun(label: string): Promise<{
   connectionId: string;
   versionId: string;
 }> {
-  api = await createApi(label);
+  // A terminal completed simulation has the protected Expected behaviors
+  // grader in its frozen plan, so completion probes the real trace store before
+  // it can create work. This steering suite needs an empty store, not evidence.
+  api = await createApi(label, { traceStore: true });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 

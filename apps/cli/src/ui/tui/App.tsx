@@ -145,6 +145,7 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
     return (
       <SkillsOfferScreen
         places={state.skillPlaces}
+        result={state.run?.firstResult ?? null}
         onAnswer={(choice) => store.answer("skills-offer", choice)}
       />
     );

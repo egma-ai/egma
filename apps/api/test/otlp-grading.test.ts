@@ -47,15 +47,11 @@ type Customer = {
 
 type JobRow = {
   readonly source: string;
-  readonly trace_id: string | null;
+  readonly trace_id: string;
   readonly simulation_id: string | null;
   readonly status: string;
   readonly organization_id: string;
   readonly project_id: string;
-  readonly first_span_at: Date;
-  readonly last_span_at: Date;
-  readonly last_seen_at: Date;
-  readonly root_closed_at: Date | null;
 };
 
 async function signUp(email: string, organizationName: string): Promise<Customer> {
@@ -151,36 +147,25 @@ afterAll(async () => {
 });
 
 describe.skipIf(!storage.available)("a captured conversation arriving on a project's key", () => {
-  it("becomes exactly one piece of grading work, however many flushes carried it", async () => {
-    const jobs = await jobsFor(acme.organizationId);
+  it("freezes one empty plan because no production grader is selected", async () => {
+    const traceStore = api.traceStore;
+    if (traceStore === undefined) throw new Error("this API has no trace store");
+    const plans = await traceStore.rows<{
+      trace_id: string;
+      entries: readonly unknown[];
+    }>(
+      "select trace_id, entries from production_grading_plans " +
+        `where organization_id = '${acme.organizationId}' and project_id = '${acme.projectId}'`,
+    );
 
-    // Fourteen exports, one conversation, one job. The unique on the trace is
-    // what makes the second one unrepresentable rather than merely unwritten,
-    // and it is the reason no conversation is ever judged twice.
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({
-      source: "production",
-      status: "pending",
-      project_id: acme.projectId,
-    });
-  });
-
-  it("adopts the trace id off the wire and names no simulation", async () => {
-    const [job] = await jobsFor(acme.organizationId);
-
-    expect(job?.trace_id).toMatch(/^[0-9a-f]{32}$/);
-    expect(job?.simulation_id).toBeNull();
-  });
-
-  it("is complete, because LiveKit's own session span said so in the fourteenth flush", async () => {
-    const [job] = await jobsFor(acme.organizationId);
-
-    // `agent_session` is LiveKit's own word for the span the whole conversation
-    // happened inside, and the normalizer carries that statement through as the
-    // completion fact. This capture's session span arrives alone, last, which is
-    // exactly the case a reader that guessed from the first flush would get
-    // wrong.
-    expect(job?.root_closed_at).toBeInstanceOf(Date);
+    // Fourteen exporter flushes describe one conversation. LiveKit's session
+    // span arrives in the final flush and creates one permanent selection
+    // receipt. Expected behaviors grades simulations only, so the frozen
+    // production selection is empty and there is no temporary queue row.
+    expect(plans).toHaveLength(1);
+    expect(plans[0]?.trace_id).toMatch(/^[0-9a-f]{32}$/u);
+    expect(plans[0]?.entries).toEqual([]);
+    expect(await jobsFor(acme.organizationId)).toEqual([]);
   });
 
   /**
@@ -191,8 +176,7 @@ describe.skipIf(!storage.available)("a captured conversation arriving on a proje
    * recognise could complete a conversation by flushing a span whose parent had
    * not arrived — and a mangled parent id, which normalises to no parent at all,
    * did the same. Neither says anything about whether the caller hung up. A
-   * platform this release has no explicit end fact for gets no completion here,
-   * and the idle sweep is what eventually picks such a trace up.
+   * platform this release has no explicit end fact for gets no completion here.
    */
   it("is not completed by a parentless span from a platform Egma does not recognise", async () => {
     const traceId = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
@@ -232,35 +216,14 @@ describe.skipIf(!storage.available)("a captured conversation arriving on a proje
     expect(posted.statusCode, posted.body).toBe(200);
     await api.drainEvidence();
 
-    const job = (await jobsFor(acme.organizationId)).find(
-      (each) => each.trace_id === traceId,
+    const traceStore = api.traceStore;
+    if (traceStore === undefined) throw new Error("this API has no trace store");
+    const [receipt] = await traceStore.rows<{ n: string }>(
+      "select count() as n from production_grading_plans " +
+        `where organization_id = '${acme.organizationId}' and trace_id = '${traceId}'`,
     );
-    // Known, and deliberately not finished.
-    expect(job).toMatchObject({ source: "production", status: "pending" });
-    expect(job?.root_closed_at).toBeNull();
-  });
-
-  it("records the window the whole conversation happened inside", async () => {
-    const [job] = await jobsFor(acme.organizationId);
-
-    // The capture's own timestamps. The window is what a reader prunes the
-    // trace store with, so a job that recorded one flush's extent would read
-    // back a fragment of the transcript — and the flush holding the earliest
-    // span is not the flush holding the latest.
-    //
-    // Both are the instants spans *began* at, because the store files a span
-    // under the minute it started in and the window is compared against exactly
-    // that. Milliseconds, because that is what a timestamp column reads back:
-    // the microseconds under them are dropped rather than rounded, and the read
-    // widens the window at both ends before it uses it.
-    expect(job?.first_span_at.toISOString()).toBe("2026-08-02T18:04:40.281Z");
-    expect(job?.last_span_at.toISOString()).toBe("2026-08-02T18:05:53.771Z");
-    // When egma last *heard* about the trace, which is a different fact: a trace
-    // backfilled an hour late would look silent the moment it landed if the two
-    // were confused.
-    expect(job?.last_seen_at.getTime()).toBeGreaterThan(
-      job?.last_span_at.getTime() ?? 0,
-    );
+    expect(Number(receipt?.n ?? -1)).toBe(0);
+    expect(await jobsFor(acme.organizationId)).toEqual([]);
   });
 });
 

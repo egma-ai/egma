@@ -15,7 +15,6 @@ import {
   getRun,
   getSimulation,
   getSimulationTestVersion,
-  listGradingJobsForSimulation,
   listRunEvents,
   listSimulations,
   recordSimulationHeartbeat,
@@ -178,10 +177,8 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
-  // No running graders: a claim carries identifiers and no content, and nothing
-  // about who may claim what changes with a project's judging. The one grading
-  // job this file reads is the one a terminal conversation always leaves
-  // behind, whatever will judge it.
+  // No project grader is needed here: a claim carries identifiers and no
+  // content, and project grading policy does not change who may claim work.
 
   acmeSeed = await seedCustomer(actingAsAcme(), "retell-secret-A1B2C3D4WXYZ");
   globexSeed = await seedCustomer(actingAsGlobex(), "retell-secret-E5F6G7H8UVWX");
@@ -474,7 +471,7 @@ describe("the connection door", () => {
 });
 
 describe("the dispatch-failure landing", () => {
-  it("lands the claim the platform could not hand over: failed, dispatch_failed, judged, counted", async () => {
+  it("lands the claim the platform could not hand over: failed, dispatch_failed, not graded, counted", async () => {
     const { runId, simulationId } = await oneQueuedSimulation(
       actingAsAcme(),
       acmeSeed,
@@ -490,11 +487,8 @@ describe("the dispatch-failure landing", () => {
     expect(landed?.endingReason).toBe("dispatch_failed");
     expect(landed?.endedAt).toBeInstanceOf(Date);
 
-    // Terminal like any other landing. The judgement is minted beside it —
-    // a simulation that never ran is judged errored, never left unjudged…
-    const jobs = await listGradingJobsForSimulation(actingAsAcme(), simulationId);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0]?.status).toBe("pending");
+    // Terminal like any other landing, but never graded: the platform did not
+    // produce a completed trace for a grader to score.
 
     // …the run it was the last conversation of settles with counts that say
     // what happened — nothing completed, nothing pretending to have…
@@ -769,7 +763,7 @@ describe("archiving a target out from under work", () => {
     const held = await getSimulation(actingAsAcme(), simulationId);
     expect(held?.status).toBe(status);
     expect(held?.cancelRequestedAt).toBeInstanceOf(Date);
-    // Not ended, and not judged: the conversation is still somebody's, and
+    // Not ended and not graded: the conversation is still somebody's, and
     // what it produced before it stops stays on the record.
     expect(held?.endedAt).toBeNull();
 

@@ -1,4 +1,4 @@
-import { GRADER_LIBRARY_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
+import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import { openaiJudge } from "../src/judge/openai.ts";
@@ -35,7 +35,7 @@ const MODEL = process.env["TEST_OPENAI_MODEL"]?.trim() ?? "gpt-4.1-mini";
  * prompt no deployment sends.
  */
 const THE_PROMPT =
-  GRADER_LIBRARY_CATALOG.find(
+  GRADER_DEFINITION_CATALOG.find(
     (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
   )?.prompt ?? "";
 

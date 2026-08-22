@@ -205,7 +205,7 @@ const GATE_HINTS = ["[enter] run", "[e] edit first", "[q] quit"] as const;
  * Enter at the gate, and out the other side of the run it starts.
  *
  * The gate is not the end of the walk any more: enter pushes the list and
- * starts a run over it, and the wizard leaves once a first verdict has landed.
+ * starts a run over it, and the wizard leaves once the first trace result is ready.
  * Nothing here conducts a simulation, so the fixture is given something that
  * judges what the run queues.
  *

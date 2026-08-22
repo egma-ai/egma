@@ -80,7 +80,7 @@ import { Menu, MenuDivider, MenuItem, MenuLabel } from "../../ui/menu.tsx";
 import { NumberField } from "../../ui/number-field.tsx";
 import { Empty, Failure, Loading } from "../../ui/page-state.tsx";
 import { ProjectSelector } from "../../ui/project-selector.tsx";
-import { RunProgress, VerdictBadge } from "../../ui/run-status.tsx";
+import { GradingState, RunProgress } from "../../ui/run-status.tsx";
 import { Actions, Section, Toolbar } from "../../ui/section.tsx";
 import { SettingsNav } from "../../ui/settings-nav.tsx";
 import { AppShell, ProductPage } from "../../ui/shell.tsx";
@@ -431,7 +431,7 @@ export function DesignSystemProof() {
               <div className="grid gap-6 md:grid-cols-3">
                 <NumberField
                   id="proof-sample-rate"
-                  label="Share of live traffic judged"
+                  label="Share of production traces graded"
                   value={sampleRate}
                   onChange={setSampleRate}
                   unit="%"
@@ -468,7 +468,7 @@ export function DesignSystemProof() {
                 <CardHeader>
                   <CardTitle>Refund policy grader</CardTitle>
                   <CardDescription>
-                    Judges whether the agent stated the refund window before it
+                    Grades whether the agent stated the refund window before it
                     offered one.
                   </CardDescription>
                 </CardHeader>
@@ -479,7 +479,7 @@ export function DesignSystemProof() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <BaseButton size="sm">Use this grader</BaseButton>
+                  <BaseButton size="sm">View grades</BaseButton>
                   <BaseButton size="sm" variant="ghost">
                     Read the definition
                   </BaseButton>
@@ -532,26 +532,26 @@ export function DesignSystemProof() {
                   <BaseDialog>
                     <DialogTrigger asChild>
                       <BaseButton variant="destructive">
-                        Delete grader
+                        Delete test suite
                       </BaseButton>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
                         <DialogTitle>
-                          Delete the Refund policy grader?
+                          Delete the Refund checks test suite?
                         </DialogTitle>
                         <DialogDescription>
-                          Runs that already used it keep their verdicts. No new
-                          run can be judged by it.
+                          Existing runs keep their frozen test versions. No
+                          future run can use this suite.
                         </DialogDescription>
                       </DialogHeader>
                       <DialogFooter>
                         <DialogClose asChild>
-                          <BaseButton variant="secondary">Keep it</BaseButton>
+                          <BaseButton variant="secondary">Keep suite</BaseButton>
                         </DialogClose>
                         <DialogClose asChild>
                           <BaseButton variant="destructive">
-                            Delete grader
+                            Delete test suite
                           </BaseButton>
                         </DialogClose>
                       </DialogFooter>
@@ -628,8 +628,9 @@ export function DesignSystemProof() {
                     </TabsContent>
                     <TabsContent value="graders">
                       <p className="m-0 text-sm text-muted-foreground">
-                        Two graders judged this run. Both were frozen when it
-                        started, so a later edit cannot change these verdicts.
+                        Two graders graded each completed simulation in this
+                        run. Both were frozen when it started, so a later edit
+                        cannot change those grades.
                       </p>
                     </TabsContent>
                     <TabsContent value="persona">
@@ -767,7 +768,7 @@ export function DesignSystemProof() {
               <div className={PREVIEW}>
                 <div className="grid gap-5">
                   {/*
-                    * "Judged" rather than "finished", and that is not a word
+                    * "Graded" rather than "finished", and that is not a word
                     * chosen for variety. `RunProgress` is drawn further down
                     * this page and is already labelled "Simulations finished";
                     * a second bar wearing the same name would leave a reader
@@ -778,14 +779,14 @@ export function DesignSystemProof() {
                     <Progress
                       value={finished}
                       max={10}
-                      aria-label="Simulations judged"
+                      aria-label="Simulations graded"
                       getValueLabel={(value, max) =>
-                        `${String(value)} of ${String(max)} simulations judged`
+                        `${String(value)} of ${String(max)} simulations graded`
                       }
                     />
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <span className="text-sm tabular-nums text-muted-foreground">
-                        {finished} of 10 simulations judged
+                        {finished} of 10 simulations graded
                       </span>
                       <BaseButton
                         type="button"
@@ -794,7 +795,7 @@ export function DesignSystemProof() {
                         disabled={finished >= 10}
                         onClick={() => setFinished((count) => Math.min(10, count + 1))}
                       >
-                        Judge one more simulation
+                        Grade one more simulation
                       </BaseButton>
                     </div>
                   </div>
@@ -843,7 +844,7 @@ export function DesignSystemProof() {
                       </TooltipTrigger>
                       <TooltipContent sideOffset={8}>
                         A run keeps the grader it started with, so editing the
-                        grader never changes a verdict already given.
+                        grader never changes a grade already recorded.
                       </TooltipContent>
                     </BaseTooltip>
                   </TooltipProvider>
@@ -864,7 +865,7 @@ export function DesignSystemProof() {
                     onClick={() =>
                       baseToast.success("Grader saved", {
                         description:
-                          "The next run will be judged by this version.",
+                          "The next run will use this version.",
                       })
                     }
                   >
@@ -982,9 +983,9 @@ export function DesignSystemProof() {
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <BaseBadge>Viewer</BaseBadge>
             <BaseBadge variant="success">Passed</BaseBadge>
-            <BaseBadge variant="warning">Skipped</BaseBadge>
+            <BaseBadge variant="warning">Needs review</BaseBadge>
             <BaseBadge variant="failure">Failed</BaseBadge>
-            <VerdictBadge verdict="errored" />
+            <GradingState grading="error" />
           </div>
         </article>
 

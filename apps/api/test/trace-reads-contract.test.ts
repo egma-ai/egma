@@ -1,17 +1,24 @@
 import {
-  appendVerdicts,
+  appendGrades,
+  claimGradingJobs,
   createAgent,
   createPersona,
   createProject,
   createTest,
   createTestSuite,
+  finishGradingJob,
+  listProjectGraders,
   listSimulations,
+  requestGrading,
   startRun,
   type AuthContext,
+  type GradingClaim,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { openSingleConnection } from "../../../packages/db/test/support/database.ts";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import {
@@ -1139,66 +1146,28 @@ describe.skipIf(!storage.available)("a read with no usable credential", () => {
   });
 });
 
-/**
- * **What egma judged a production conversation, found where egma filed it.**
- *
- * A simulation's verdicts are filed under its simulation id and its spans under
- * the same 128 bits written as hex, so the read derives one from the other. The
- * derivation is a pure bit conversion and therefore succeeds for *every* trace
- * id — including a customer's own production trace, which converts to a
- * perfectly well-formed simulation id nothing ever minted.
- *
- * That is the bug this describes. The read looked under the phantom id, found
- * nothing, and answered "nothing was judged" while the real verdict rows sat in
- * the store under the trace id it had been handed. A live call caught it: a
- * passed latency verdict, written by the grader, invisible on the transcript.
- *
- * A judgment egma wrote and then could not find is the exact false trust this
- * product exists to kill, so it is pinned here, at the read, through the routes.
- */
-describe.skipIf(!storage.available)("a production conversation egma judged", () => {
-  const JUDGED_TRACE = "cc000000000000000000000000000001";
-  const JUDGED_AT = "2026-06-01T11:00:00Z";
-  const GRADER = newId("grd");
-  const GRADER_VERSION = newId("grv");
+/** A visible production trace can have no grader selected for it. */
+describe.skipIf(!storage.available)("a production conversation outside every grader scope", () => {
+  const PENDING_TRACE = "cc000000000000000000000000000001";
+  const STARTED_AT = "2026-06-01T11:00:00Z";
 
   beforeAll(async () => {
     await ingest(
       api,
       acmeProjectSecret,
       syntheticExport({
-        traceId: JUDGED_TRACE,
-        startedAt: new Date(JUDGED_AT),
+        traceId: PENDING_TRACE,
+        startedAt: new Date(STARTED_AT),
         humanSaid: "How long will the wait be?",
       }),
     );
-
-    // Written the way the grader writes one: under the **trace id**, because a
-    // production conversation is not a simulation and has no simulation id.
-    await appendVerdicts(contextFor(acme, "admin"), [
-      {
-        traceId: JUDGED_TRACE,
-        graderId: GRADER,
-        graderVersionId: GRADER_VERSION,
-        assertion: "turn_response_latency",
-        source: "production",
-        verdict: "passed",
-        score: 1,
-        rationale: "every turn was answered inside the bound.",
-        citedSpanIds: [],
-        runId: "",
-        agentId: "",
-        agentVersionId: "",
-        judgedAtMicroseconds: BigInt(Date.parse(JUDGED_AT)) * 1000n,
-      },
-    ]);
   });
 
-  it("shows the judgment on its transcript, rather than nothing at all", async () => {
+  it("reports not requested and exposes the shared empty grade shape", async () => {
     const read = await readTraceOverHttp(
       api.app,
       acme.secret,
-      JUDGED_TRACE,
+      PENDING_TRACE,
       DAY,
     );
     expect(read.statusCode, read.body).toBe(200);
@@ -1206,40 +1175,156 @@ describe.skipIf(!storage.available)("a production conversation egma judged", () 
     const detail = read.json() as {
       trace: { source: string };
       simulationId: string | null;
-      verdicts: readonly { assertion: string; verdict: string }[];
-      outcome: { verdict: string; counts: Record<string, number> } | null;
+      gradingState: string;
+      grades: readonly unknown[];
+      gradeHistory: readonly unknown[];
+      combinedScore: number | null;
     };
 
-    // A production conversation, and it names no simulation — which is exactly
-    // the case the lookup used to get wrong.
     expect(detail.trace.source).toBe("production");
     expect(detail.simulationId).toBeNull();
-
-    expect(detail.verdicts).toHaveLength(1);
-    expect(detail.verdicts[0]?.assertion).toBe("turn_response_latency");
-    expect(detail.verdicts[0]?.verdict).toBe("passed");
+    expect(detail.gradingState).toBe("not_requested");
+    expect(detail.grades).toEqual([]);
+    expect(detail.gradeHistory).toEqual([]);
+    expect(detail.combinedScore).toBeNull();
+    expect(detail).not.toHaveProperty("verdicts");
+    expect(detail).not.toHaveProperty("outcome");
   });
+});
 
-  it("folds a real outcome, and never a skipped nothing", async () => {
+/** The production detail uses the same non-empty grade object as simulation. */
+describe.skipIf(!storage.available)("a production conversation selected by a fixture grader", () => {
+  const TRACE_ID = "dd000000000000000000000000000099";
+  const STARTED_AT = new Date("2026-06-01T12:00:00Z");
+  const definitionId = newId("grl");
+  const projectGraderId = newId("grd");
+
+  it("returns its current grade, evidence, and display-only mean", async () => {
+    const setup = await openSingleConnection(api.database.url);
+    await setup.sql("begin");
+    await setup.sql(
+      `insert into grader_definition
+         (id, name, description, type, scope_editable, current_definition_version)
+       values ($1, 'Production fixture', 'A contract-only production grader',
+               'code', true, 1)`,
+      [definitionId],
+    );
+    await setup.sql(
+      `insert into grader_definition_version
+         (definition_id, version, prompt, parameter_contract, output_contract,
+          source_code, source_code_language, modalities, judge_model)
+       values ($1, 1, null, '[]'::jsonb, '{}'::jsonb,
+               'return 1', 'javascript', '["voice"]'::jsonb, null)`,
+      [definitionId],
+    );
+    await setup.sql("commit");
+    await setup.close();
+    await api.database.sql(
+      `insert into project_grader
+         (id, organization_id, project_id, grader_definition_id, scope,
+          pass_threshold)
+       values ($1, $2, $3, $4,
+               '{"simulations":[],"production":{"sample_percent":100}}'::jsonb,
+               0.7)`,
+      [projectGraderId, acme.organizationId, acme.projectId, definitionId],
+    );
+    await expect(
+      listProjectGraders(contextFor(acme, "member")),
+    ).resolves.toContainEqual(expect.objectContaining({
+      id: projectGraderId,
+      scope: {
+        simulations: [],
+        production: { sample_percent: 100 },
+      },
+      currentDefinitionVersion: 1,
+    }));
+
+    await ingest(
+      api,
+      acmeProjectSecret,
+      syntheticExport({
+        traceId: TRACE_ID,
+        startedAt: STARTED_AT,
+        humanSaid: "Please check this production result.",
+      }),
+    );
+    await expect(requestGrading(contextFor(acme, "member"), {
+      source: "production",
+      traceId: TRACE_ID,
+      traceStartedAt: STARTED_AT,
+      endsTrace: true,
+      evidenceReady: true,
+      modality: "voice",
+    })).resolves.toMatchObject({ kind: "queued" });
+
+    let claim: GradingClaim | undefined;
+    await expect.poll(async () => {
+      const claims = await claimGradingJobs({
+        claimant: "production-contract-grader",
+        capacity: 10,
+      });
+      claim = claims.find((one) => one.traceId === TRACE_ID);
+      return claim?.traceId ?? null;
+    }).toBe(TRACE_ID);
+    if (claim === undefined) throw new Error("the fixture production job was not claimed");
+    const [entry] = claim.entries;
+    if (entry === undefined) throw new Error("the fixture production job has no grader");
+
+    await appendGrades(claim.auth, [{
+      source: "production",
+      traceId: TRACE_ID,
+      traceStartedAtMicroseconds: BigInt(claim.traceStartedAt.getTime()) * 1_000n,
+      runId: "",
+      projectGraderId: entry.projectGraderId,
+      graderDefinitionId: entry.graderDefinitionId,
+      graderDefinitionVersion: entry.graderDefinitionVersion,
+      score: 0.25,
+      details: {
+        rationale: "The production response missed the policy.",
+        assertions: [{
+          key: "policy-followed",
+          score: 0,
+          rationale: "The promised action did not happen.",
+          citedSpanIds: [`${TRACE_ID.slice(0, 14)}02`],
+        }],
+      },
+      graderPassThreshold: entry.graderPassThreshold,
+      gradingSequence: claim.sequenceBase + claim.attempts,
+      gradedAtMicroseconds: BigInt(STARTED_AT.getTime() + 10_000) * 1_000n,
+    }]);
+    await expect(
+      finishGradingJob(claim.auth, claim.id, claim.claimedBy),
+    ).resolves.toEqual({ id: claim.id });
+
     const read = await readTraceOverHttp(
       api.app,
       acme.secret,
-      JUDGED_TRACE,
+      TRACE_ID,
       DAY,
     );
     expect(read.statusCode, read.body).toBe(200);
-
-    const outcome = (
-      read.json() as {
-        outcome: { verdict: string; counts: Record<string, number> } | null;
-      }
-    ).outcome;
-
-    // Present, decided, and counting the row — the three things the phantom
-    // lookup destroyed, in the order somebody reading the page notices them.
-    expect(outcome).not.toBeNull();
-    expect(outcome?.verdict).toBe("passed");
-    expect(outcome?.counts.passed).toBe(1);
+    expect(read.json()).toMatchObject({
+      trace: { source: "production" },
+      simulationId: null,
+      gradingState: "complete",
+      combinedScore: 0.25,
+      grades: [{
+        projectGraderId,
+        graderDefinitionId: definitionId,
+        graderDefinitionVersion: 1,
+        graderName: "Production fixture",
+        score: 0.25,
+        passThreshold: 0.7,
+        result: "failed",
+        details: {
+          rationale: "The production response missed the policy.",
+          assertions: [{
+            key: "policy-followed",
+            score: 0,
+            rationale: "The promised action did not happen.",
+          }],
+        },
+      }],
+    });
   });
-
 });

@@ -187,7 +187,7 @@ export function Toast({
        * ticked circle against a crossed octagon reads as two different things
        * with no colour at all. Neutral for "this happened" and the failure
        * colour for "this went wrong" — never the brand colour, which
-       * `DESIGN.md` keeps away from every verdict.
+       * `DESIGN.md` keeps away from every semantic result.
        *
        * They are the icons `components/ui/sonner.tsx` draws for the same two
        * states, so a queued notification and this one would not arrive looking

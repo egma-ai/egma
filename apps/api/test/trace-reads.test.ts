@@ -2,6 +2,7 @@ import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
+  readProductionGradingPlan,
   REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   reportedMeasurementsPayload,
   type NewSpan,
@@ -182,12 +183,17 @@ describe.skipIf(!storage.available)(
       ).toContain("Can you still hear me?");
       expect(detail.measures.length).toBeGreaterThan(0);
 
-      // The evidence-ready handoff landed before the object did.
+      // The supported end froze the empty production selection before the
+      // object was deleted. Expected behaviors grades simulations only, so no
+      // temporary worker job is invented for this production trace.
+      await expect(
+        readProductionGradingPlan(contextFor(acme, "admin"), traceId),
+      ).resolves.toMatchObject({ traceId, entries: [] });
       const { rows } = await api.database.sql<{ count: string }>(
         "select count(*) as count from grading_job where trace_id = $1",
         [traceId],
       );
-      expect(rows[0]?.count).toBe("1");
+      expect(rows[0]?.count).toBe("0");
       expect(await pendingSegments(ingestStore())).toHaveLength(0);
     });
   },
@@ -577,16 +583,15 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
    * **What this exchange measured — the metrics display's read path.**
    *
    * The numbers are not on any row and are not stored: they are computed from
-   * the spans this answer already carries, by the same shared measure module the
-   * latency grader is judged through. So the figure a page shows and the figure a
-   * verdict rests on are one arithmetic, and no page can be the reason somebody
-   * distrusts a judgment.
+   * the spans this answer already carries, by the shared measure module. So
+   * every page and every future grader that uses the metric receives the same
+   * value from one arithmetic.
    *
    * The captured exchange emits no timing span of egma's own, and it is
    * measured anyway: the three latencies are **derived** from the shapes the
    * framework itself timed, and each says so. That is the answer to what this
-   * read used to return — an empty list, and a latency grader `skipped` on every
-   * production conversation a stock agent ever had.
+   * read used to return — an empty list on every production conversation a
+   * stock agent ever had.
    *
    * The numbers themselves are asserted in
    * `apps/api/test/otlp-derived-measures.test.ts`, against figures hand-computed

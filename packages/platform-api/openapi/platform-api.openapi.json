@@ -4843,13 +4843,17 @@
                             ]
                           },
                           "type": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "llm_as_judge",
+                              "code"
+                            ]
                           },
                           "owner": {
                             "type": "string",
                             "enum": [
                               "egma",
-                              "organization"
+                              "customer"
                             ]
                           },
                           "projectId": {
@@ -4863,25 +4867,13 @@
                               }
                             ]
                           },
-                          "version": {
+                          "scopeEditable": {
+                            "type": "boolean"
+                          },
+                          "currentDefinitionVersion": {
                             "type": "integer",
                             "minimum": 1
                           },
-                          "prompt": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "params": {
-                            "type": "array",
-                            "items": {}
-                          },
-                          "outputDefinition": {},
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -4898,10 +4890,8 @@
                           "type",
                           "owner",
                           "projectId",
-                          "version",
-                          "prompt",
-                          "params",
-                          "outputDefinition",
+                          "scopeEditable",
+                          "currentDefinitionVersion",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -4984,7 +4974,7 @@
     "/v1/graders": {
       "get": {
         "operationId": "listGraders",
-        "summary": "List running graders",
+        "summary": "List project graders",
         "tags": [
           "Graders"
         ],
@@ -5018,7 +5008,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Running graders, newest first.",
+            "description": "Project graders, newest first.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5033,11 +5023,11 @@
                             "type": "string",
                             "minLength": 1
                           },
-                          "libraryId": {
+                          "projectId": {
                             "type": "string",
                             "minLength": 1
                           },
-                          "projectId": {
+                          "graderDefinitionId": {
                             "type": "string",
                             "minLength": 1
                           },
@@ -5054,49 +5044,106 @@
                               }
                             ]
                           },
-                          "type": {
-                            "type": "string"
-                          },
-                          "required": {
+                          "scopeEditable": {
                             "type": "boolean"
                           },
                           "scope": {
-                            "type": "string"
-                          },
-                          "productionSampleRate": {
-                            "type": "number"
-                          },
-                          "version": {
-                            "type": "integer",
-                            "minimum": 1
-                          },
-                          "versionId": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "config": {},
-                          "judgeModel": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "provider": {
-                                    "type": "string"
-                                  },
-                                  "model": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "provider",
-                                  "model"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "simulations": {
+                                "type": "array",
+                                "items": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "all"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "kind"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "test_suite"
+                                          ]
+                                        },
+                                        "id": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "id"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "test"
+                                          ]
+                                        },
+                                        "id": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "id"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                }
                               },
-                              {
-                                "type": "null"
+                              "production": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "samplePercent": {
+                                        "type": "number",
+                                        "minimum": 1,
+                                        "maximum": 100
+                                      }
+                                    },
+                                    "required": [
+                                      "samplePercent"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
-                            ]
+                            },
+                            "required": [
+                              "simulations",
+                              "production"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "passThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
                           },
                           "createdAt": {
                             "type": "string",
@@ -5109,18 +5156,13 @@
                         },
                         "required": [
                           "id",
-                          "libraryId",
                           "projectId",
+                          "graderDefinitionId",
                           "name",
                           "description",
-                          "type",
-                          "required",
+                          "scopeEditable",
                           "scope",
-                          "productionSampleRate",
-                          "version",
-                          "versionId",
-                          "config",
-                          "judgeModel",
+                          "passThreshold",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -5198,10 +5240,12 @@
             }
           }
         }
-      },
-      "post": {
-        "operationId": "createGrader",
-        "summary": "Use a grader library entry",
+      }
+    },
+    "/v1/graders/{graderId}": {
+      "patch": {
+        "operationId": "updateGrader",
+        "summary": "Update a project grader's pass threshold",
         "tags": [
           "Graders"
         ],
@@ -5214,6 +5258,15 @@
           }
         ],
         "parameters": [
+          {
+            "name": "graderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
           {
             "name": "projectId",
             "in": "query",
@@ -5231,62 +5284,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "libraryId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "params": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "required": {
-                    "type": "boolean"
-                  },
-                  "scope": {
-                    "type": "string"
-                  },
-                  "productionSampleRate": {
-                    "type": "number"
-                  },
-                  "judgeModel": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
+                  "passThreshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
                   }
                 },
                 "required": [
-                  "libraryId"
+                  "passThreshold"
                 ],
                 "additionalProperties": false
               }
@@ -5294,8 +5299,8 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "The new running grader.",
+          "200": {
+            "description": "The updated project grader.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5305,11 +5310,11 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "libraryId": {
+                    "projectId": {
                       "type": "string",
                       "minLength": 1
                     },
-                    "projectId": {
+                    "graderDefinitionId": {
                       "type": "string",
                       "minLength": 1
                     },
@@ -5326,316 +5331,106 @@
                         }
                       ]
                     },
-                    "type": {
-                      "type": "string"
-                    },
-                    "required": {
+                    "scopeEditable": {
                       "type": "boolean"
                     },
                     "scope": {
-                      "type": "string"
-                    },
-                    "productionSampleRate": {
-                      "type": "number"
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "versionId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "config": {},
-                    "judgeModel": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "libraryId",
-                    "projectId",
-                    "name",
-                    "description",
-                    "type",
-                    "required",
-                    "scope",
-                    "productionSampleRate",
-                    "version",
-                    "versionId",
-                    "config",
-                    "judgeModel",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/graders/{graderId}": {
-      "patch": {
-        "operationId": "updateGrader",
-        "summary": "Update a running grader",
-        "tags": [
-          "Graders"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "graderId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "params": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "required": {
-                    "type": "boolean"
-                  },
-                  "scope": {
-                    "type": "string"
-                  },
-                  "productionSampleRate": {
-                    "type": "number"
-                  },
-                  "judgeModel": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "simulations": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "all"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "test_suite"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "test"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
                           }
                         },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The updated grader.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "libraryId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "projectId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "required": {
-                      "type": "boolean"
-                    },
-                    "scope": {
-                      "type": "string"
-                    },
-                    "productionSampleRate": {
-                      "type": "number"
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "versionId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "config": {},
-                    "judgeModel": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
+                        "production": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "samplePercent": {
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 100
+                                }
+                              },
+                              "required": [
+                                "samplePercent"
+                              ],
+                              "additionalProperties": false
                             },
-                            "model": {
-                              "type": "string"
+                            {
+                              "type": "null"
                             }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
+                          ]
                         }
-                      ]
+                      },
+                      "required": [
+                        "simulations",
+                        "production"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "passThreshold": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
                     },
                     "createdAt": {
                       "type": "string",
@@ -5648,18 +5443,13 @@
                   },
                   "required": [
                     "id",
-                    "libraryId",
                     "projectId",
+                    "graderDefinitionId",
                     "name",
                     "description",
-                    "type",
-                    "required",
+                    "scopeEditable",
                     "scope",
-                    "productionSampleRate",
-                    "version",
-                    "versionId",
-                    "config",
-                    "judgeModel",
+                    "passThreshold",
                     "createdAt",
                     "updatedAt"
                   ],
@@ -5709,121 +5499,6 @@
             }
           },
           "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteGrader",
-        "summary": "Switch off a grader",
-        "tags": [
-          "Graders"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "graderId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The grader that was switched off.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "deletedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name",
-                    "deletedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -14329,60 +14004,6 @@
                     "gradedCount": {
                       "type": "integer"
                     },
-                    "verdict": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "passed",
-                            "failed",
-                            "skipped",
-                            "errored"
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "score": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "verdictCounts": {
-                      "type": "object",
-                      "properties": {
-                        "passed": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "errored": {
-                          "type": "integer"
-                        },
-                        "total": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "passed",
-                        "failed",
-                        "skipped",
-                        "errored",
-                        "total"
-                      ],
-                      "additionalProperties": false
-                    },
                     "resultsUrl": {
                       "type": "string"
                     },
@@ -14437,9 +14058,6 @@
                     "finishedCount",
                     "gradableCount",
                     "gradedCount",
-                    "verdict",
-                    "score",
-                    "verdictCounts",
                     "resultsUrl",
                     "createdAt",
                     "startedAt",
@@ -14602,20 +14220,6 @@
                 "running",
                 "completed",
                 "canceled"
-              ]
-            }
-          },
-          {
-            "name": "verdict",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "passed",
-                "failed",
-                "skipped",
-                "errored"
               ]
             }
           },
@@ -14825,60 +14429,6 @@
                           "gradedCount": {
                             "type": "integer"
                           },
-                          "verdict": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "passed",
-                                  "failed",
-                                  "skipped",
-                                  "errored"
-                                ]
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "score": {
-                            "anyOf": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "verdictCounts": {
-                            "type": "object",
-                            "properties": {
-                              "passed": {
-                                "type": "integer"
-                              },
-                              "failed": {
-                                "type": "integer"
-                              },
-                              "skipped": {
-                                "type": "integer"
-                              },
-                              "errored": {
-                                "type": "integer"
-                              },
-                              "total": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "passed",
-                              "failed",
-                              "skipped",
-                              "errored",
-                              "total"
-                            ],
-                            "additionalProperties": false
-                          },
                           "resultsUrl": {
                             "type": "string"
                           },
@@ -14933,9 +14483,6 @@
                           "finishedCount",
                           "gradableCount",
                           "gradedCount",
-                          "verdict",
-                          "score",
-                          "verdictCounts",
                           "resultsUrl",
                           "createdAt",
                           "startedAt",
@@ -15235,60 +14782,6 @@
                     "gradedCount": {
                       "type": "integer"
                     },
-                    "verdict": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "passed",
-                            "failed",
-                            "skipped",
-                            "errored"
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "score": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "verdictCounts": {
-                      "type": "object",
-                      "properties": {
-                        "passed": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "errored": {
-                          "type": "integer"
-                        },
-                        "total": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "passed",
-                        "failed",
-                        "skipped",
-                        "errored",
-                        "total"
-                      ],
-                      "additionalProperties": false
-                    },
                     "resultsUrl": {
                       "type": "string"
                     },
@@ -15317,34 +14810,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "counts": {
-                      "type": "object",
-                      "properties": {
-                        "passed": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "errored": {
-                          "type": "integer"
-                        },
-                        "total": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "passed",
-                        "failed",
-                        "skipped",
-                        "errored",
-                        "total"
-                      ],
-                      "additionalProperties": false
                     },
                     "connectionSnapshot": {
                       "type": "object",
@@ -15483,14 +14948,10 @@
                     "finishedCount",
                     "gradableCount",
                     "gradedCount",
-                    "verdict",
-                    "score",
-                    "verdictCounts",
                     "resultsUrl",
                     "createdAt",
                     "startedAt",
                     "finishedAt",
-                    "counts",
                     "connectionSnapshot",
                     "agent",
                     "connection"
@@ -15679,70 +15140,17 @@
                               "canceled"
                             ]
                           },
-                          "grading": {
-                            "type": "string",
-                            "enum": [
-                              "not_required",
-                              "waiting",
-                              "pending",
-                              "graded"
-                            ]
-                          },
-                          "verdict": {
+                          "gradingState": {
                             "anyOf": [
                               {
                                 "type": "string",
                                 "enum": [
-                                  "passed",
-                                  "failed",
-                                  "skipped",
-                                  "errored"
+                                  "not_requested",
+                                  "pending",
+                                  "running",
+                                  "complete",
+                                  "error"
                                 ]
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "score": {
-                            "anyOf": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "counts": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "passed": {
-                                    "type": "integer"
-                                  },
-                                  "failed": {
-                                    "type": "integer"
-                                  },
-                                  "skipped": {
-                                    "type": "integer"
-                                  },
-                                  "errored": {
-                                    "type": "integer"
-                                  },
-                                  "total": {
-                                    "type": "integer"
-                                  }
-                                },
-                                "required": [
-                                  "passed",
-                                  "failed",
-                                  "skipped",
-                                  "errored",
-                                  "total"
-                                ],
-                                "additionalProperties": false
                               },
                               {
                                 "type": "null"
@@ -15827,10 +15235,7 @@
                           "personaName",
                           "personaVersionId",
                           "status",
-                          "grading",
-                          "verdict",
-                          "score",
-                          "counts",
+                          "gradingState",
                           "reason",
                           "modality",
                           "hasRecording",
@@ -16072,22 +15477,6 @@
                                   "canceled"
                                 ]
                               },
-                              "verdict": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "enum": [
-                                      "passed",
-                                      "failed",
-                                      "skipped",
-                                      "errored"
-                                    ]
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
                               "reason": {
                                 "anyOf": [
                                   {
@@ -16118,7 +15507,6 @@
                               "testName",
                               "personaName",
                               "status",
-                              "verdict",
                               "reason"
                             ],
                             "additionalProperties": false
@@ -16413,60 +15801,6 @@
                     "gradedCount": {
                       "type": "integer"
                     },
-                    "verdict": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "passed",
-                            "failed",
-                            "skipped",
-                            "errored"
-                          ]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "score": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "verdictCounts": {
-                      "type": "object",
-                      "properties": {
-                        "passed": {
-                          "type": "integer"
-                        },
-                        "failed": {
-                          "type": "integer"
-                        },
-                        "skipped": {
-                          "type": "integer"
-                        },
-                        "errored": {
-                          "type": "integer"
-                        },
-                        "total": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "passed",
-                        "failed",
-                        "skipped",
-                        "errored",
-                        "total"
-                      ],
-                      "additionalProperties": false
-                    },
                     "resultsUrl": {
                       "type": "string"
                     },
@@ -16521,9 +15855,6 @@
                     "finishedCount",
                     "gradableCount",
                     "gradedCount",
-                    "verdict",
-                    "score",
-                    "verdictCounts",
                     "resultsUrl",
                     "createdAt",
                     "startedAt",
@@ -16695,24 +16026,16 @@
                         "canceled"
                       ]
                     },
-                    "grading": {
-                      "type": "string",
-                      "enum": [
-                        "not_required",
-                        "waiting",
-                        "pending",
-                        "graded"
-                      ]
-                    },
-                    "verdict": {
+                    "gradingState": {
                       "anyOf": [
                         {
                           "type": "string",
                           "enum": [
-                            "passed",
-                            "failed",
-                            "skipped",
-                            "errored"
+                            "not_requested",
+                            "pending",
+                            "running",
+                            "complete",
+                            "error"
                           ]
                         },
                         {
@@ -16720,45 +16043,228 @@
                         }
                       ]
                     },
-                    "score": {
-                      "anyOf": [
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "counts": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "passed": {
-                              "type": "integer"
-                            },
-                            "failed": {
-                              "type": "integer"
-                            },
-                            "skipped": {
-                              "type": "integer"
-                            },
-                            "errored": {
-                              "type": "integer"
-                            },
-                            "total": {
-                              "type": "integer"
-                            }
+                    "grades": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "projectGraderId": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          "required": [
-                            "passed",
-                            "failed",
-                            "skipped",
-                            "errored",
-                            "total"
-                          ],
-                          "additionalProperties": false
+                          "graderDefinitionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "graderName": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "rationale": {
+                                "type": "string"
+                              },
+                              "assertions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "score": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "rationale": {
+                                      "type": "string"
+                                    },
+                                    "citedSpanIds": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "error": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "key"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": true
+                          },
+                          "passThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "errored"
+                            ]
+                          },
+                          "gradedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "projectGraderId",
+                          "graderDefinitionId",
+                          "graderDefinitionVersion",
+                          "graderName",
+                          "score",
+                          "details",
+                          "passThreshold",
+                          "result",
+                          "gradedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "gradeHistory": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "projectGraderId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "graderName": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "rationale": {
+                                "type": "string"
+                              },
+                              "assertions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "score": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "rationale": {
+                                      "type": "string"
+                                    },
+                                    "citedSpanIds": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "error": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "key"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": true
+                          },
+                          "passThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "errored"
+                            ]
+                          },
+                          "gradedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "projectGraderId",
+                          "graderDefinitionId",
+                          "graderDefinitionVersion",
+                          "graderName",
+                          "score",
+                          "details",
+                          "passThreshold",
+                          "result",
+                          "gradedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "combinedScore": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
                         },
                         {
                           "type": "null"
@@ -17234,47 +16740,33 @@
                               "items": {
                                 "type": "object",
                                 "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "authored"
-                                    ]
-                                  },
-                                  "graderId": {
+                                  "projectGraderId": {
                                     "type": "string",
                                     "minLength": 1
                                   },
-                                  "graderVersionId": {
+                                  "graderDefinitionId": {
                                     "type": "string",
                                     "minLength": 1
                                   },
-                                  "name": {
+                                  "graderDefinitionVersion": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "graderName": {
                                     "type": "string"
                                   },
-                                  "libraryId": {
-                                    "type": "string",
-                                    "minLength": 1
-                                  },
-                                  "required": {
-                                    "type": "boolean"
-                                  },
-                                  "scope": {
-                                    "type": "string",
-                                    "enum": [
-                                      "simulations",
-                                      "production",
-                                      "both"
-                                    ]
+                                  "passThreshold": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
                                   }
                                 },
                                 "required": [
-                                  "kind",
-                                  "graderId",
-                                  "graderVersionId",
-                                  "name",
-                                  "libraryId",
-                                  "required",
-                                  "scope"
+                                  "projectGraderId",
+                                  "graderDefinitionId",
+                                  "graderDefinitionVersion",
+                                  "graderName",
+                                  "passThreshold"
                                 ],
                                 "additionalProperties": false
                               }
@@ -17291,331 +16783,6 @@
                           "type": "null"
                         }
                       ]
-                    },
-                    "gradingJobs": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "pending",
-                              "claimed",
-                              "graded",
-                              "abandoned"
-                            ]
-                          },
-                          "regradeGraderId": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "attempts": {
-                            "type": "integer"
-                          },
-                          "lastError": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "finishedAt": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": [
-                          "status",
-                          "regradeGraderId",
-                          "attempts",
-                          "lastError",
-                          "finishedAt"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "verdicts": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "graderId": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "assertion": {
-                            "type": "string"
-                          },
-                          "assertionText": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "required": {
-                            "type": "boolean"
-                          },
-                          "verdict": {
-                            "type": "string",
-                            "enum": [
-                              "passed",
-                              "failed",
-                              "skipped",
-                              "errored"
-                            ]
-                          },
-                          "score": {
-                            "type": "number"
-                          },
-                          "rationale": {
-                            "type": "string"
-                          },
-                          "citedTurns": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "judgedAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
-                        },
-                        "required": [
-                          "graderId",
-                          "assertion",
-                          "assertionText",
-                          "required",
-                          "verdict",
-                          "score",
-                          "rationale",
-                          "citedTurns",
-                          "judgedAt"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "outcome": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "verdict": {
-                              "type": "string",
-                              "enum": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored"
-                              ]
-                            },
-                            "score": {
-                              "anyOf": [
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "counts": {
-                              "type": "object",
-                              "properties": {
-                                "passed": {
-                                  "type": "integer"
-                                },
-                                "failed": {
-                                  "type": "integer"
-                                },
-                                "skipped": {
-                                  "type": "integer"
-                                },
-                                "errored": {
-                                  "type": "integer"
-                                },
-                                "total": {
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored",
-                                "total"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "required": [
-                            "verdict",
-                            "score",
-                            "counts"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "diagnostics": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "verdict": {
-                              "type": "string",
-                              "enum": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored"
-                              ]
-                            },
-                            "score": {
-                              "anyOf": [
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "counts": {
-                              "type": "object",
-                              "properties": {
-                                "passed": {
-                                  "type": "integer"
-                                },
-                                "failed": {
-                                  "type": "integer"
-                                },
-                                "skipped": {
-                                  "type": "integer"
-                                },
-                                "errored": {
-                                  "type": "integer"
-                                },
-                                "total": {
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored",
-                                "total"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "required": [
-                            "verdict",
-                            "score",
-                            "counts"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "byGrader": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "graderId": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "required": {
-                            "type": "boolean"
-                          },
-                          "verdict": {
-                            "type": "string",
-                            "enum": [
-                              "passed",
-                              "failed",
-                              "skipped",
-                              "errored"
-                            ]
-                          },
-                          "score": {
-                            "anyOf": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "counts": {
-                            "type": "object",
-                            "properties": {
-                              "passed": {
-                                "type": "integer"
-                              },
-                              "failed": {
-                                "type": "integer"
-                              },
-                              "skipped": {
-                                "type": "integer"
-                              },
-                              "errored": {
-                                "type": "integer"
-                              },
-                              "total": {
-                                "type": "integer"
-                              }
-                            },
-                            "required": [
-                              "passed",
-                              "failed",
-                              "skipped",
-                              "errored",
-                              "total"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "required": [
-                          "graderId",
-                          "required",
-                          "verdict",
-                          "score",
-                          "counts"
-                        ],
-                        "additionalProperties": false
-                      }
                     },
                     "transcript": {
                       "anyOf": [
@@ -17705,10 +16872,10 @@
                     "runName",
                     "position",
                     "status",
-                    "grading",
-                    "verdict",
-                    "score",
-                    "counts",
+                    "gradingState",
+                    "grades",
+                    "gradeHistory",
+                    "combinedScore",
                     "reason",
                     "modality",
                     "createdAt",
@@ -17725,11 +16892,6 @@
                     "mockToolCoverage",
                     "mockTools",
                     "gradingPlan",
-                    "gradingJobs",
-                    "verdicts",
-                    "outcome",
-                    "diagnostics",
-                    "byGrader",
                     "transcript"
                   ],
                   "additionalProperties": false
@@ -17834,23 +16996,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "graderId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "The grading work that was requested.",
@@ -17863,17 +17008,6 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "graderId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
                     "reopened": {
                       "type": "integer"
                     },
@@ -17883,7 +17017,6 @@
                   },
                   "required": [
                     "simulationId",
-                    "graderId",
                     "reopened",
                     "alreadyWaiting"
                   ],
@@ -21201,7 +20334,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The trace and its judgments.",
+            "description": "The trace and its grades.",
             "content": {
               "application/json": {
                 "schema": {
@@ -21404,195 +20537,238 @@
                         }
                       ]
                     },
-                    "verdicts": {
+                    "gradingState": {
+                      "type": "string",
+                      "enum": [
+                        "not_requested",
+                        "pending",
+                        "running",
+                        "complete",
+                        "error"
+                      ]
+                    },
+                    "grades": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "graderId": {
+                          "projectGraderId": {
                             "type": "string",
                             "minLength": 1
                           },
-                          "assertion": {
+                          "graderDefinitionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "graderName": {
                             "type": "string"
                           },
-                          "assertionText": {
+                          "score": {
                             "anyOf": [
                               {
-                                "type": "string"
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
                               },
                               {
                                 "type": "null"
                               }
                             ]
                           },
-                          "required": {
-                            "type": "boolean"
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "rationale": {
+                                "type": "string"
+                              },
+                              "assertions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "score": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "rationale": {
+                                      "type": "string"
+                                    },
+                                    "citedSpanIds": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "error": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "key"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": true
                           },
-                          "verdict": {
+                          "passThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "result": {
                             "type": "string",
                             "enum": [
                               "passed",
                               "failed",
-                              "skipped",
                               "errored"
                             ]
                           },
-                          "score": {
-                            "type": "number"
-                          },
-                          "rationale": {
-                            "type": "string"
-                          },
-                          "citedTurns": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "judgedAt": {
+                          "gradedAt": {
                             "type": "string",
                             "format": "date-time"
                           }
                         },
                         "required": [
-                          "graderId",
-                          "assertion",
-                          "assertionText",
-                          "required",
-                          "verdict",
+                          "projectGraderId",
+                          "graderDefinitionId",
+                          "graderDefinitionVersion",
+                          "graderName",
                           "score",
-                          "rationale",
-                          "citedTurns",
-                          "judgedAt"
+                          "details",
+                          "passThreshold",
+                          "result",
+                          "gradedAt"
                         ],
                         "additionalProperties": false
                       }
                     },
-                    "outcome": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "verdict": {
-                              "type": "string",
-                              "enum": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored"
-                              ]
-                            },
-                            "score": {
-                              "anyOf": [
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "counts": {
-                              "type": "object",
-                              "properties": {
-                                "passed": {
-                                  "type": "integer"
-                                },
-                                "failed": {
-                                  "type": "integer"
-                                },
-                                "skipped": {
-                                  "type": "integer"
-                                },
-                                "errored": {
-                                  "type": "integer"
-                                },
-                                "total": {
-                                  "type": "integer"
+                    "gradeHistory": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "projectGraderId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "graderName": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {
+                              "rationale": {
+                                "type": "string"
+                              },
+                              "assertions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "score": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "rationale": {
+                                      "type": "string"
+                                    },
+                                    "citedSpanIds": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "error": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "key"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
-                              "required": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored",
-                                "total"
-                              ],
-                              "additionalProperties": false
-                            }
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": true
                           },
-                          "required": [
-                            "verdict",
-                            "score",
-                            "counts"
-                          ],
-                          "additionalProperties": false
+                          "passThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "passed",
+                              "failed",
+                              "errored"
+                            ]
+                          },
+                          "gradedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                        "required": [
+                          "projectGraderId",
+                          "graderDefinitionId",
+                          "graderDefinitionVersion",
+                          "graderName",
+                          "score",
+                          "details",
+                          "passThreshold",
+                          "result",
+                          "gradedAt"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
-                    "diagnostics": {
+                    "combinedScore": {
                       "anyOf": [
                         {
-                          "type": "object",
-                          "properties": {
-                            "verdict": {
-                              "type": "string",
-                              "enum": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored"
-                              ]
-                            },
-                            "score": {
-                              "anyOf": [
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "counts": {
-                              "type": "object",
-                              "properties": {
-                                "passed": {
-                                  "type": "integer"
-                                },
-                                "failed": {
-                                  "type": "integer"
-                                },
-                                "skipped": {
-                                  "type": "integer"
-                                },
-                                "errored": {
-                                  "type": "integer"
-                                },
-                                "total": {
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "passed",
-                                "failed",
-                                "skipped",
-                                "errored",
-                                "total"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "required": [
-                            "verdict",
-                            "score",
-                            "counts"
-                          ],
-                          "additionalProperties": false
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
                         },
                         {
                           "type": "null"
@@ -21607,9 +20783,10 @@
                     "spansTruncated",
                     "measures",
                     "simulationId",
-                    "verdicts",
-                    "outcome",
-                    "diagnostics"
+                    "gradingState",
+                    "grades",
+                    "gradeHistory",
+                    "combinedScore"
                   ],
                   "additionalProperties": false
                 }

@@ -141,7 +141,7 @@ describe("the grader's place in the deployment", () => {
     // rather than migrating a second time.
     expect(block).toContain("api:");
     expect(block).toContain("condition: service_healthy");
-    // Both stores, because it reads conversations from one and writes verdicts
+    // Both stores, because it reads conversations from one and writes grades
     // to the other.
     expect(block).toContain("DATABASE_URL:");
     expect(block).toContain("CLICKHOUSE_URL:");

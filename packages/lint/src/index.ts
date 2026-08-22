@@ -204,24 +204,14 @@ const WORK_DISPATCHING = [
  * authority. The call can name settings, never an organization or project,
  * and replaces only that one deployment-owned route.
  *
- * `seedGraderLibrary` writes predefined grader definitions from the product
- * catalog. It names no customer because a predefined entry belongs to none,
- * and it contains no provider credential.
+ * `reconcileGraderCatalog` writes predefined grader definitions from the
+ * product catalog and adds the fixed Expected behaviors project policy where
+ * an older project is missing it. It takes no customer identifier. New project
+ * creation writes that policy inside its own transaction.
  *
  * `seedPersonaLibrary` does the same for the fixed Egma-provided persona
  * catalog. It can create only the catalog's null-tenancy identities and
  * immutable versions; it accepts no customer identifier or authored value.
- *
- * `seedRunningGraders` was added on 2026-08-14 with the running copies, and it
- * is the other half of `seedGraderLibrary` one table down. A shelf full of
- * definitions judges nothing: `expected_behaviors` has to be *running* in a
- * project before that project's tests are checked against what they say. New
- * projects are born with the copy, in the transaction that creates them; every
- * project made before that change has none, and this writes it. It names no
- * customer and takes no argument at all — a project missing its mandatory
- * grading is missing it whoever owns it — and it asks whether a project has
- * *ever* held a copy rather than whether it holds one now, so a team that
- * switched theirs off is not overruled at the next start.
  *
  * The rule enforces the second half of that the same way it does for work
  * dispatch: nothing here may be handed an `organizationId` or a `projectId`. A
@@ -232,10 +222,9 @@ const WORK_DISPATCHING = [
  */
 const DEPLOYMENT_CONFIGURING = [
   "reconcileDeploymentCarrierSettings",
-  "seedGraderLibrary",
+  "reconcileGraderCatalog",
   "seedPersonaLibrary",
   "seedPlatformSettings",
-  "seedRunningGraders",
 ];
 
 /**

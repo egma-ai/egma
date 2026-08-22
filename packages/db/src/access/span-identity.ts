@@ -77,6 +77,8 @@ export type CommittedSpan = SpanIdentity & {
    * assume a match.
    */
   readonly contentHash: string;
+  /** Earliest visible span for this trace inside the caller's bounded window. */
+  readonly traceStartedAtMicroseconds: bigint;
 };
 
 export type CommittedSpansOptions = {
@@ -118,15 +120,35 @@ export async function committedSpans(
       trace_id: string;
       span_id: string;
       content_hash: string;
+      trace_started_at_micros: string;
     }>(
-      `select trace_id, span_id, content_hash
-         from ${SPANS_TABLE} final
-        where ${tenancy.clause}
-          and started_at >= ${asDateTime64(window.from)}
-          and started_at < ${asDateTime64(window.to)}
-          and (trace_id, span_id) in {identities:Array(Tuple(String, String))}`,
+      `select
+         held.trace_id as trace_id,
+         held.span_id as span_id,
+         held.content_hash as content_hash,
+         toString(toUnixTimestamp64Micro(bounds.trace_started_at)) as trace_started_at_micros
+       from
+       (
+         select trace_id, span_id, content_hash
+           from ${SPANS_TABLE} final
+          where ${tenancy.clause}
+            and started_at >= ${asDateTime64(window.from)}
+            and started_at < ${asDateTime64(window.to)}
+            and (trace_id, span_id) in {identities:Array(Tuple(String, String))}
+       ) as held
+       inner join
+       (
+         select trace_id, min(started_at) as trace_started_at
+           from ${SPANS_TABLE} final
+          where ${tenancy.clause}
+            and started_at >= ${asDateTime64(window.from)}
+            and started_at < ${asDateTime64(window.to)}
+            and trace_id in {trace_ids:Array(String)}
+          group by trace_id
+       ) as bounds using (trace_id)`,
       {
         ...tenancy.parameters,
+        trace_ids: [...new Set(batch.map((identity) => identity.traceId))],
         identities: batch.map(
           (identity) => new TupleParam([identity.traceId, identity.spanId]),
         ),
@@ -138,6 +160,7 @@ export async function committedSpans(
         traceId: row.trace_id,
         spanId: row.span_id,
         contentHash: row.content_hash,
+        traceStartedAtMicroseconds: BigInt(row.trace_started_at_micros),
       });
     }
   }

@@ -2,13 +2,26 @@ import { newId } from "@egma/ids";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { grader, type GraderScope } from "../schema/graders.ts";
+import { snapshotGraderDefinition } from "../grader-library/snapshot.ts";
+import {
+  planGroupsFor,
+  productionSampleSelected,
+  type ExecutableProjectGrader,
+  type PlanGroup,
+  type ProjectGraderCandidate,
+} from "../grading/plan.ts";
+import type { GraderModality, ProjectGraderScope } from "../schema/graders.ts";
+import {
+  graderDefinition,
+  graderDefinitionVersion,
+  projectGrader,
+} from "../schema/graders.ts";
 import { persona } from "../schema/personas.ts";
 import { gradingPlan, type GradingPlanState } from "../schema/plans.ts";
 import { simulation } from "../schema/runs.ts";
 import type { AuthContext } from "./context.ts";
 import { RunWriteRefusedError, type RunWriteRefusal } from "./errors.ts";
-import { getGraderVersion, type ExecutableGrader } from "./graders.ts";
+import { getExecutableGraderDefinition } from "./graders.ts";
 import { personaAvailableToProject } from "./persona-availability.ts";
 import { within } from "./within.ts";
 
@@ -18,8 +31,8 @@ export function refuseRun(reason: RunWriteRefusal, message: string): never {
 
 /** Pin each named persona at its current immutable version. */
 export async function resolvePersonaVersions(
-  on: Queryable,
   auth: AuthContext,
+  on: Queryable,
   projectId: string,
   ids: readonly string[],
 ): Promise<readonly { personaId: string; personaVersionId: string }[]> {
@@ -34,16 +47,11 @@ export async function resolvePersonaVersions(
         })
         .from(persona)
         .where(
-          personaAvailableToProject(
-            auth,
-            projectId,
-            inArray(persona.id, unique),
-          ),
+          personaAvailableToProject(auth, projectId, inArray(persona.id, unique)),
         )
         .for("share")
     ).map((row) => [row.id, row] as const),
   );
-
   return ids.map((id) => {
     const row = found.get(id);
     if (row === undefined || row.archivedAt !== null) {
@@ -53,21 +61,6 @@ export async function resolvePersonaVersions(
   });
 }
 
-export type PlanItem = {
-  readonly kind: "authored";
-  readonly graderId: string;
-  readonly graderVersionId: string;
-  readonly graderName: string;
-  readonly libraryId: string;
-  readonly required: boolean;
-  readonly scope: GraderScope;
-};
-
-export type PlanGroup = {
-  readonly tag: "suite";
-  readonly items: readonly PlanItem[];
-};
-
 export type GradingPlan = {
   readonly runId: string;
   readonly state: GradingPlanState;
@@ -75,78 +68,111 @@ export type GradingPlan = {
   readonly groups: readonly PlanGroup[];
 };
 
-type ApplicableGrader = {
-  readonly id: string;
-  readonly name: string;
-  readonly currentVersionId: string;
-  readonly libraryId: string;
-  readonly required: boolean;
-  readonly scope: GraderScope;
-};
+const CANDIDATE_COLUMNS = {
+  projectGraderId: projectGrader.id,
+  graderName: graderDefinition.name,
+  passThreshold: projectGrader.passThreshold,
+  scope: projectGrader.scope,
+  definitionId: graderDefinitionVersion.definitionId,
+  version: graderDefinitionVersion.version,
+  type: graderDefinition.type,
+  prompt: graderDefinitionVersion.prompt,
+  parameterContract: graderDefinitionVersion.parameterContract,
+  outputContract: graderDefinitionVersion.outputContract,
+  sourceCode: graderDefinitionVersion.sourceCode,
+  sourceCodeLanguage: graderDefinitionVersion.sourceCodeLanguage,
+  modalities: graderDefinitionVersion.modalities,
+  judgeModel: graderDefinitionVersion.judgeModel,
+} as const;
 
+/** Read the active project policy and its one current immutable definition. */
 export async function applicableGraders(
-  on: Queryable,
   auth: AuthContext,
+  on: Queryable,
   projectId: string,
-): Promise<ReadonlyMap<string, ApplicableGrader>> {
+): Promise<readonly ProjectGraderCandidate[]> {
   const rows = await on
-    .select({
-      id: grader.id,
-      name: grader.name,
-      libraryId: grader.libraryId,
-      required: grader.required,
-      scope: grader.scope,
-      currentVersionId: grader.currentVersionId,
-    })
-    .from(grader)
+    .select(CANDIDATE_COLUMNS)
+    .from(projectGrader)
+    .innerJoin(
+      graderDefinition,
+      eq(graderDefinition.id, projectGrader.graderDefinitionId),
+    )
+    .innerJoin(
+      graderDefinitionVersion,
+      and(
+        eq(graderDefinitionVersion.definitionId, graderDefinition.id),
+        eq(
+          graderDefinitionVersion.version,
+          graderDefinition.currentDefinitionVersion,
+        ),
+      ),
+    )
     .where(
       within(
         auth,
-        grader,
-        and(eq(grader.projectId, projectId), isNull(grader.deletedAt)),
+        projectGrader,
+        and(eq(projectGrader.projectId, projectId), isNull(projectGrader.archivedAt)),
       ),
     )
-    .orderBy(asc(grader.id));
-  return new Map(
-    rows.map((row) => [row.id, { ...row, scope: row.scope as GraderScope }] as const),
-  );
+    .orderBy(asc(projectGrader.id))
+    .for("share", { of: projectGrader });
+
+  return rows.map((row) => ({
+    projectGraderId: row.projectGraderId,
+    graderName: row.graderName,
+    passThreshold: row.passThreshold,
+    scope: row.scope as ProjectGraderScope,
+    definition: snapshotGraderDefinition(row),
+  }));
 }
 
-export function planGroupsFor(
-  graders: ReadonlyMap<string, ApplicableGrader>,
-): readonly PlanGroup[] {
-  const applying = [...graders.values()].filter(
-    (one) => one.scope === "simulations" || one.scope === "both",
-  );
-  return [{
-    tag: "suite" as const,
-    items: applying.map((one) => ({
-      kind: "authored" as const,
-      graderId: one.id,
-      graderVersionId: one.currentVersionId,
-      graderName: one.name,
-      libraryId: one.libraryId,
-      required: one.required,
-      scope: one.scope,
-    })),
-  }];
+/** Resolve and freeze the graders for one completed production trace. */
+export async function resolveProductionGraders(
+  auth: AuthContext,
+  on: Queryable,
+  input: {
+    readonly projectId: string;
+    readonly modality: GraderModality;
+    readonly traceId: string;
+  },
+): Promise<readonly ExecutableProjectGrader[]> {
+  const candidates = await applicableGraders(auth, on, input.projectId);
+  return candidates
+    .filter((candidate) => {
+      const production = candidate.scope.production;
+      return candidate.definition.modalities.includes(input.modality) &&
+        production !== null &&
+        productionSampleSelected(
+          input.traceId,
+          candidate.projectGraderId,
+          production.sample_percent,
+        );
+    })
+    .map(({ projectGraderId, passThreshold, definition }) => ({
+      projectGraderId,
+      passThreshold,
+      definition,
+    }));
 }
 
 export async function writeGradingPlan(
+  auth: AuthContext,
   on: Queryable,
   input: {
     readonly runId: string;
-    readonly organizationId: string;
-    readonly projectId: string;
     readonly groups: readonly PlanGroup[];
     readonly capturedAt: Date;
   },
 ): Promise<void> {
+  if (auth.projectId === undefined) {
+    throw new TypeError("writing a grading plan requires a project-scoped context");
+  }
   await on.insert(gradingPlan).values({
     id: newId("gpl"),
     runId: input.runId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
+    organizationId: auth.organizationId,
+    projectId: auth.projectId,
     state: "run_start",
     capturedAt: input.capturedAt,
     groups: input.groups,
@@ -176,37 +202,79 @@ export async function getGradingPlan(
   };
 }
 
-/** Resolve the exact grader versions frozen for one simulation. */
-export async function pinnedSimulationGraders(
+async function selectedSimulationPlanGroupOn(
   auth: AuthContext,
+  on: Queryable,
   simulationId: string,
-): Promise<readonly ExecutableGrader[] | undefined> {
-  const [row] = await db()
-    .select({ groups: gradingPlan.groups })
+): Promise<PlanGroup | undefined> {
+  const [row] = await on
+    .select({
+      testId: simulation.testId,
+      testVersionId: simulation.testVersionId,
+      groups: gradingPlan.groups,
+    })
     .from(simulation)
     .innerJoin(gradingPlan, eq(gradingPlan.runId, simulation.runId))
     .where(within(auth, simulation, eq(simulation.id, simulationId)))
     .limit(1);
   if (row === undefined) return undefined;
 
-  const groups = row.groups as readonly PlanGroup[];
-  const group = groups.length === 1 && groups[0]?.tag === "suite" ? groups[0] : undefined;
-  if (group === undefined) throw new Error(`simulation ${simulationId} has a malformed Suite grading plan`);
+  const group = (row.groups as readonly PlanGroup[]).find(
+    (one) =>
+      one.tag === "test" &&
+      one.testId === row.testId &&
+      one.testVersionId === row.testVersionId,
+  );
+  if (group === undefined) {
+    throw new Error(`simulation ${simulationId} has no matching test grading plan`);
+  }
+  return group;
+}
+
+/** Whether this simulation's frozen run plan names any grading work. */
+export async function simulationHasPlannedGradersOn(
+  auth: AuthContext,
+  on: Queryable,
+  simulationId: string,
+): Promise<boolean | undefined> {
+  const group = await selectedSimulationPlanGroupOn(auth, on, simulationId);
+  return group === undefined ? undefined : group.items.length > 0;
+}
+
+/** Resolve the exact grader versions frozen for one simulation. */
+export async function pinnedSimulationGradersOn(
+  auth: AuthContext,
+  on: Queryable,
+  simulationId: string,
+): Promise<readonly ExecutableProjectGrader[] | undefined> {
+  const group = await selectedSimulationPlanGroupOn(auth, on, simulationId);
+  if (group === undefined) return undefined;
+
   return Promise.all(
     group.items.map(async (item) => {
-      const version = await getGraderVersion(auth, item.graderVersionId);
-      if (version === undefined || version.graderId !== item.graderId) {
+      const definition = await getExecutableGraderDefinition(
+        auth,
+        on,
+        item.graderDefinitionId,
+        item.graderDefinitionVersion,
+      );
+      if (definition === undefined || definition.type !== item.graderType) {
         throw new Error(
-          `grading plan for simulation ${simulationId} names unreadable grader version ${item.graderVersionId}`,
+          `grading plan for simulation ${simulationId} names an unreadable grader definition`,
         );
       }
       return {
-        id: version.graderId,
-        versionId: version.id,
-        config: version.config,
-        judgeModel: version.judgeModel,
-        definition: version.definition,
+        projectGraderId: item.projectGraderId,
+        passThreshold: item.passThreshold,
+        definition,
       };
     }),
   );
+}
+
+export function pinnedSimulationGraders(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<readonly ExecutableProjectGrader[] | undefined> {
+  return pinnedSimulationGradersOn(auth, db(), simulationId);
 }
