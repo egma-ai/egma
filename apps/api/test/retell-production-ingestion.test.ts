@@ -33,8 +33,7 @@ const AUTH = {
 } as const;
 
 const TARGET: MonitoringPullTarget = {
-  setupId: "mns_ingestion_test",
-  agentId: "rma_ingestion_test",
+  agentId: "agt_ingestion_test",
   platformAgentId: "agent-secret-id-must-not-be-logged",
   platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
@@ -50,9 +49,8 @@ const TARGET: MonitoringPullTarget = {
 };
 
 const REPLAY_TARGET: MonitoringFailureReplayTarget = {
-  setupId: TARGET.setupId,
   agentId: TARGET.agentId,
-  failureId: "rif_explicit_replay_test",
+  failureId: "mnf_explicit_replay_test",
   providerCallId: "call_older_than_import_window",
   platformAgentId: TARGET.platformAgentId,
   platformAgentName: TARGET.platformAgentName,
@@ -129,10 +127,7 @@ function store(
     },
     async failMonitoringPull(_auth, _target, input) {
       recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
-      return { changed: true, failures: 1, startedAt: input.now ?? BASE };
-    },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
+      return { changed: true, failures: 1 };
     },
     async releaseMonitoringLease(_auth, _target, input) {
       recorded.releases.push(input.errorKind);
@@ -175,19 +170,11 @@ function replayStore(
     },
     async failMonitoringFailureReplay(_auth, _target, input) {
       recorded.providerFailures.push(input.kind);
-      return {
-        recorded: true,
-        changed: true,
-        failures: 1,
-        startedAt: input.now ?? BASE,
-      };
+      return { recorded: true, changed: true, failures: 1 };
     },
     async resolveMonitoringFailureReplay() {
       recorded.resolved += 1;
       return { resolved: true, agentRecovered: true };
-    },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
     },
     ...changes,
   };
@@ -805,35 +792,28 @@ describe("Retell production ingestion", () => {
     expect(events.error).toHaveLength(0);
   });
 
-  it("logs one recovery after a successful provider turn", async () => {
+  it("logs nothing at all when a provider turn simply works", async () => {
+    // There is no account-wide health to recover: the counter is a retry clock
+    // on this agent's own notebook, cleared by the scan that finished. So a
+    // good turn is silent (ADR-0015).
     const recorded = record();
     const { log, events } = logger();
-    const storage = store(recorded, TARGET, {
-      async recoverRetellMonitoringSetup() {
-        return {
-          recovered: true,
-          failures: 3,
-          startedAt: new Date(BASE.getTime() - 60_000),
-        };
-      },
-    });
 
     await runRetellProductionIngestion({
       log,
-      store: storage,
+      store: store(recorded, TARGET),
       provider: provider(),
       writer: writer(),
       clock: () => BASE,
     });
 
-    expect(events.info).toHaveLength(1);
-    expect(events.info[0]).toMatchObject({
-      "otel.event.name": "egma.monitoring.retell.health.recovered",
-      outage_duration_ms: 60_000,
-      failure_count: 3,
-    });
     expect(events.warn).toEqual([]);
     expect(events.error).toEqual([]);
+    expect(
+      events.info.filter((one) =>
+        String(one["otel.event.name"]).includes("health"),
+      ),
+    ).toEqual([]);
   });
 
   it("blocks an invalid key until configuration changes and logs only its state change", async () => {

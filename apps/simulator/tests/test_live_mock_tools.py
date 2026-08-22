@@ -258,7 +258,7 @@ def mocked_spec() -> dict:
         modality="voice",
         connection={
             "agent_platform": "livekit_agents",
-            "connection_kind": "livekit_room",
+            "connection_type": "livekit_room",
             "access_variant": "livekit_room.project_credentials",
             "config": config,
             "credentials": {

@@ -273,7 +273,7 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
         "modality": "chat",
         "connection": {
             "agent_platform": "retell",
-            "connection_kind": "retell_chat_api",
+            "connection_type": "retell_chat_api",
             "access_variant": "retell_chat_api.api_key",
             "config": {"retellAgentId": "agent_fixture"},
             "credentials": None,

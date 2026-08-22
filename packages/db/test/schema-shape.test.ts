@@ -73,16 +73,14 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // column — the shape both junction tables have, for the same reason.
   idempotent_operation: "org",
   grading_job: "gjb",
-  // One project's setup for one production agent platform.
-  monitoring_setup: "mns",
-  // One platform agent selected under a Retell monitoring setup.
-  retell_monitored_agent: "rma",
+  // One pulled agent's machine notebook: cursor, windows, lease, retry clock.
+  monitoring_state: "mst",
   // The exactly-once ledger for a conversation egma watched on somebody else's
   // platform. Its identity is its own because the row outlives the write it
   // guards: a sweep reads it back to replay an append that never landed.
   production_trace_claim: "ptc",
   // A provider call that could not be normalized or written, held for replay.
-  retell_ingestion_failure: "rif",
+  monitoring_failure: "mnf",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -351,6 +349,14 @@ describe("test suite ownership", () => {
 
   it("removes the retired applicability, capability-skip, retry, and archive shapes", () => {
     for (const { table, column } of [
+      // Agents own platform monitoring now: the agent's description and both
+      // live revisions went with the same pre-launch pass, and the connection
+      // answers "which platform" from its type or through its agent.
+      { table: "agent", column: "description" },
+      { table: "agent", column: "revision" },
+      { table: "connection", column: "revision" },
+      { table: "connection", column: "agent_platform" },
+      { table: "connection", column: "connection_kind" },
       { table: "test", column: "applicability_revision" },
       { table: "test", column: "archived_at" },
       { table: "test", column: "archive_reason" },

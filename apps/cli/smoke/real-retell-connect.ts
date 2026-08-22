@@ -355,7 +355,7 @@ async function main(): Promise<void> {
     const connection = platform.registered.connections.at(-1);
     check(
       connection?.agentPlatform === "retell" &&
-        connection.connectionKind === "retell_chat_api" &&
+        connection.connectionType === "retell_chat_api" &&
         connection.accessVariant === "retell_chat_api.api_key",
       `the connection is Retell chat (${connection?.productLabel})`,
     );

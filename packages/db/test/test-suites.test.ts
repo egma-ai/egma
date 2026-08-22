@@ -706,7 +706,6 @@ describe("unlimited execution with bounded reads", () => {
       actingAsAcme(),
       world.frontDesk,
       dedicated.id,
-      { expectedRevision: dedicated.revision },
     );
     expect(archived?.canceledRunCount).toBe(1);
     expect((await getRun(actingAsAcme(), started.id))?.canceledCount).toBe(505);

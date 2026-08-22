@@ -272,7 +272,7 @@ class RunningSimulation:
             # have to be given back and only conducting gives them back.
             model = build_model_client(self._spec)
             # One pipeline per simulation, built from its own spec: the
-            # plug that knows the connection kind, and — for voice — the speech
+            # plug that knows the connection type, and — for voice — the speech
             # legs around it, selected by this work order's models block.
             # Assembling also decides which of the two conductors this
             # simulation gets. It is validation, so a connection config
@@ -791,7 +791,7 @@ class SimulatorService:
                 )
                 continue
 
-            if plug_for(spec.connection_kind) is None:
+            if plug_for(spec.connection_type) is None:
                 # Same shape as a contract refusal: conducting is not
                 # possible, so nothing is reported and the control plane's
                 # sweep accounts for the row it thinks is claimed.
@@ -799,10 +799,10 @@ class SimulatorService:
                     logger,
                     logging.ERROR,
                     "egma.simulation.claim_response_invalid",
-                    "claimed simulation has no adapter for its connection kind",
+                    "claimed simulation has no adapter for its connection type",
                     attributes={
                         "egma.simulation_id": spec.simulation_id,
-                        "error.type": "unsupported_connection_kind",
+                        "error.type": "unsupported_connection_type",
                     },
                 )
                 continue

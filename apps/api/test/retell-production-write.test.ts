@@ -20,7 +20,6 @@ const AUTH = {
 } as const;
 
 const TARGET: MonitoringPullTarget = {
-  setupId: "mns_write_test",
   agentId: "rma_write_test",
   platformAgentId: "agent_in_retell_1",
   platformAgentName: "Front desk",

@@ -1,8 +1,8 @@
 import { gzipSync } from "node:zlib";
 
 import {
-  configureLiveKitMonitoring,
-  listMonitoringSetups,
+  listAgents,
+  readAgentPullState,
   type AuthContext,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -121,7 +121,7 @@ afterAll(async () => {
   await api?.close();
 });
 
-describe("LiveKit Monitoring health", () => {
+describe("what the door writes down about pushing", () => {
   function auth(): AuthContext {
     return {
       userId,
@@ -132,9 +132,14 @@ describe("LiveKit Monitoring health", () => {
     };
   }
 
-  it("changes only after a valid LiveKit production span reaches storage", async () => {
-    const configured = await configureLiveKitMonitoring(auth());
-    expect(configured.lastReceivedAt).toBeNull();
+  /**
+   * Nothing. Push is observed, never declared (ADR-0015): the project key
+   * authenticates, the spans are stored and graded, and the stored evidence is
+   * the whole record. The door used to stamp an arrival onto a monitoring
+   * setup row; that row is gone and the stamp went with it.
+   */
+  it("stores and grades, and records no arrival anywhere", async () => {
+    const before = await pushBookkeeping(auth());
 
     const refused = await post(
       jsonExport([
@@ -145,11 +150,6 @@ describe("LiveKit Monitoring health", () => {
       ]),
     );
     expect(refused.statusCode).toBe(200);
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeNull();
 
     const anotherPlatform = await post(
       jsonExport(
@@ -164,11 +164,6 @@ describe("LiveKit Monitoring health", () => {
       ),
     );
     expect(anotherPlatform.statusCode).toBe(200);
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeNull();
 
     const accepted = await post(
       jsonExport([
@@ -179,12 +174,30 @@ describe("LiveKit Monitoring health", () => {
       ]),
     );
     expect(accepted.statusCode).toBe(200);
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeInstanceOf(Date);
+
+    // The accepted export is in the trace store; the bookkeeping tables it
+    // never touches are exactly as empty as they were.
+    expect(await pushBookkeeping(auth())).toEqual(before);
   });
+
+  /** No agent was created, no notebook opened, no failure recorded. */
+  async function pushBookkeeping(context: AuthContext): Promise<{
+    readonly agents: number;
+    readonly states: number;
+    readonly failures: number;
+  }> {
+    const listed = await listAgents(context, {});
+    const [state] = await Promise.all([
+      Promise.all(
+        listed.items.map((one) => readAgentPullState(context, one.id)),
+      ),
+    ]);
+    return {
+      agents: listed.items.length,
+      states: state.filter((one) => one?.scanKind !== undefined && one?.scanKind !== null).length,
+      failures: state.reduce((all, one) => all + (one?.failures.length ?? 0), 0),
+    };
+  }
 });
 
 describe("the JSON encoding", () => {

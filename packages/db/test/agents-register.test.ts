@@ -2,10 +2,8 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  IdentityConflictError,
   listConnections,
   registerAgent,
-  updateConnection,
   type AuthContext,
   type NewAgent,
 } from "@egma/db";
@@ -229,55 +227,4 @@ describe("a credential rotated by a reused registration", () => {
     expect(sealed).not.toContain("1111ZZZZ");
   });
 
-  it("moves the revision, so a browser holding the old one is refused", async () => {
-    // A deploy re-running `register` is the one writer that reaches a
-    // connection from outside the browser. Somebody with the connection open
-    // is showing the credential hint as it was; if the revision stayed put,
-    // their Rename or Archive would land against a credential they never saw.
-    const vendor = `agent_in_retell_${newId("con").slice(-6)}`;
-    const opened = await registerAgent(
-      actingIn(acme.project),
-      registration({
-        name: "Open in a tab",
-        retellAgentId: vendor,
-        apiKey: "retell-secret-first-0000AAAA",
-      }),
-    );
-    const agentId = opened.agent.id;
-    const connectionId = opened.connection?.id ?? "";
-    // What the open page is holding.
-    const staleRevision = opened.connection?.revision ?? "";
-
-    const rotated = await registerAgent(
-      actingIn(acme.project),
-      registration({
-        name: "Open in a tab",
-        retellAgentId: vendor,
-        apiKey: "retell-secret-second-1111ZZZZ",
-      }),
-    );
-
-    expect(rotated.result).toBe("reused");
-    expect(rotated.connection?.id).toBe(connectionId);
-    expect(rotated.connection?.revision).not.toBe(staleRevision);
-
-    await expect(
-      updateConnection(actingIn(acme.project), agentId, connectionId, {
-        name: "Renamed from the stale tab",
-        expectedRevision: staleRevision,
-      }),
-    ).rejects.toBeInstanceOf(IdentityConflictError);
-
-    // Naming the revision the rotation left behind is how the edit lands, and
-    // reading it again is what puts the new credential hint in front of them.
-    const current = rotated.connection?.revision ?? "";
-    const renamed = await updateConnection(
-      actingIn(acme.project),
-      agentId,
-      connectionId,
-      { name: "Renamed after reading again", expectedRevision: current },
-    );
-    expect(renamed?.name).toBe("Renamed after reading again");
-    expect(renamed?.credentialsHint).toBe("ZZZZ");
-  });
 });

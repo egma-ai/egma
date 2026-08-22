@@ -76,26 +76,27 @@ afterAll(async () => {
 });
 
 describe("creating an agent", () => {
-  it("returns an agt_ id and fetch round-trips name and description", async () => {
-    const created = await createAgent(actingAsAcme(), {
-      name: "Front Desk",
-      description: "Books appointments for the clinic",
-    });
+  it("returns an agt_ id and fetch round-trips the name", async () => {
+    const created = await createAgent(actingAsAcme(), { name: "Front Desk" });
 
     expect(isId("agt", created.id)).toBe(true);
 
     const fetched = await getAgent(actingAsAcme(), created.id);
     expect(fetched).toBeDefined();
     expect(fetched?.name).toBe("Front Desk");
-    expect(fetched?.description).toBe("Books appointments for the clinic");
     expect(fetched?.projectId).toBe(acme.project);
   });
 
-  it("takes no description as none: the fetch answers null", async () => {
+  it("starts unbound: no platform, no key, and the pull switch off", async () => {
     const created = await createAgent(actingAsAcme(), { name: "Terse" });
 
     const fetched = await getAgent(actingAsAcme(), created.id);
-    expect(fetched?.description).toBeNull();
+    expect(fetched).toMatchObject({
+      agentPlatform: null,
+      platformAgentId: null,
+      monitoringApiKeyHint: null,
+      pullProductionCalls: false,
+    });
   });
 
   it("needs a name that is more than whitespace", async () => {
