@@ -101,7 +101,7 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
-  // The poller names no customer. It claims the next due selected agent and
+  // The poller names no customer. It claims the next due pulled agent and
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
   "claimDueMonitoringPull",
@@ -150,8 +150,6 @@ const CONTEXT_REQUIRING = [
   "cancelRun",
   "changeRole",
   "completeSimulation",
-  "configureLiveKitMonitoring",
-  "configureRetellMonitoring",
   // The kind of one connection, by its id alone — the only connection read
   // that does not name an agent. It exists for the deployment gate in front of
   // run creation, which is handed a connection id and no agent id and has to
@@ -218,11 +216,11 @@ const CONTEXT_REQUIRING = [
   "listAgents",
   "listApiKeys",
   "listConnections",
+  "listMonitoringFailures",
   "listGraderLibrary",
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
-  "listMonitoringSetups",
   "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
@@ -258,27 +256,28 @@ const CONTEXT_REQUIRING = [
   // test.
   "readAssertionShelf",
   "readAssertionWords",
+  "readAgentPullState",
   "readProject",
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
-  "recordLiveKitMonitoringReceived",
   "recordPulledCallReceived",
   "recordMonitoringFailure",
   "recordPulledCallReceivedForPlatformAgent",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger chooses one writer for a Retell call. Poll progress belongs to
-  // the selected Monitoring agent, never to a simulation connection.
+  // The ledger chooses one writer for a production call. Poll progress belongs
+  // to the pulled agent's own notebook, never to a simulation connection.
   "checkpointMonitoringPage",
   "claimMonitoringFailureReplay",
+  "disablePullProductionCalls",
+  "enablePullProductionCalls",
   "claimProductionTrace",
   "finishProductionTrace",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
-  "recoverRetellMonitoringSetup",
   "releaseMonitoringFailureReplay",
   "releaseMonitoringLease",
   "releaseGradingJob",
@@ -291,7 +290,6 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
-  "removeMonitoringSetup",
   "renameTestSuite",
   "renewMonitoringLease",
   "productionCallIsAccountedFor",
