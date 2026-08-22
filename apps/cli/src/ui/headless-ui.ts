@@ -316,6 +316,7 @@ export class HeadlessUI implements WizardUI {
     // approving the tests is approving the answers, so both are on the record.
     for (const mock of gate.mocks) this.write(`mock-tool: ${mock.tool} ${mock.says}`);
     this.write(`mock-tools: ${gate.mocks.length}`);
+    for (const file of gate.changed) this.write(`changed: ${file}`);
     this.write(
       `connection: ${gate.connectionName} ${gate.productLabel} ${gate.modality}`,
     );

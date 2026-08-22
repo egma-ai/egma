@@ -446,7 +446,7 @@ async function runWizardWithAgent(
     // so the lane passes straight to the gate with no screen in between.
     betweenWritingAndReview: async ({ tests, suiteDirectory }) => {
       advance({ type: "tests-ready", count: tests.length });
-      if (agentPlatform !== "livekit") return null;
+      if (agentPlatform !== "livekit") return { halted: null };
       const authored = await mockAuthoringStep({
         ui,
         drivenAgent,
@@ -461,9 +461,12 @@ async function runWizardWithAgent(
           tests,
         },
       });
-      if (authored.halted !== null) return authored.halted;
+      if (authored.halted !== null) return { halted: authored.halted };
       advance({ type: "mocks-ready" });
-      return null;
+      return {
+        halted: null,
+        changed: authored.sdkEntry === null ? [] : [authored.sdkEntry],
+      };
     },
     onReviewApproved: (count) => advance({ type: "review-approved", count }),
     ...(options.howManyTests === undefined ? {} : { howMany: options.howManyTests }),

@@ -184,8 +184,10 @@ describe("the goal question", () => {
     expect(sent).toHaveLength(2);
     expect(sent.some((task) => task.includes(MOCK_AUTHORING_TASK))).toBe(false);
 
-    // No mocked world exists, so the gate says nothing about one.
+    // No mocked world exists and nothing outside egma/ was touched, so the
+    // gate says nothing about either.
     expect(ui.record.gate?.mocks).toEqual([]);
+    expect(ui.record.gate?.changed).toEqual([]);
     expect(ui.record.gate?.rows.map((row) => row.overrides)).toEqual([[]]);
   });
 

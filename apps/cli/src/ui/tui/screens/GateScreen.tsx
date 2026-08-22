@@ -144,6 +144,13 @@ export function GateScreen({
           ))}
         </Box>
       )}
+      {gate.changed.length === 0 ? null : (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>
+            {`Egma changed ${gate.changed.join(", ")} in your repository, so a simulation can be served those answers.`}
+          </Text>
+        </Box>
+      )}
       {problem === null ? null : (
         <Box marginTop={1}>
           <Text>{problem}</Text>

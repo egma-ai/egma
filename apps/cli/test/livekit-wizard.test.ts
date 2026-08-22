@@ -443,6 +443,9 @@ describe("LiveKit in the wizard", () => {
     expect(ui.record.gate?.mocks).toEqual([
       { tool: "check_availability", says: "answers" },
     ]);
+    // And the one edit the wizard made to the developer's own code is named on
+    // the same screen: pressing enter runs against a worker Egma just changed.
+    expect(ui.record.gate?.changed).toEqual(["agent.py"]);
   });
 });
 

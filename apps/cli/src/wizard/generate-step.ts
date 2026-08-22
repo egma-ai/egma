@@ -113,10 +113,18 @@ export type GenerateStepOptions = {
    * exist, because that is the same moment.
    */
   readonly betweenWritingAndReview?:
-    | ((written: WrittenTests) => Promise<ExitReport | null>)
+    | ((written: WrittenTests) => Promise<BetweenReview>)
     | undefined;
   /** State-machine seam for the approval. It performs no I/O itself. */
   readonly onReviewApproved?: ((count: number) => void) | undefined;
+};
+
+/** What the work between the files landing and the gate going up left behind. */
+export type BetweenReview = {
+  /** Set only when the walk cannot carry on from here. */
+  readonly halted: ExitReport | null;
+  /** Files outside `egma/` it changed, for the gate to name. */
+  readonly changed?: readonly string[] | undefined;
 };
 
 /** The tests that landed, and the suite directory they landed in. */
@@ -568,18 +576,20 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   // The lane's own work between the files landing and the list going up. On
   // LiveKit that is the mocked world; on Retell it is nothing, and nothing is
   // exactly what the developer sees.
+  let changed: readonly string[] = [];
   if (usable.length > 0) {
-    const halted = await options.betweenWritingAndReview?.({
+    const between = await options.betweenWritingAndReview?.({
       tests: usable.map((file) => file.test.name),
       suiteDirectory: suite.directory,
     });
-    if (halted != null) return ending(halted);
+    if (between?.halted != null) return ending(between.halted);
+    changed = between?.changed ?? [];
   }
 
   // Read again, because the step above may have written into these files and
   // into the mocked world beside them. What is on disk is what is agreed to.
   const contents = await contentsFor(paths, suite.id);
-  const gate = gateFrom(contents, about, contents.mockTools);
+  const gate = gateFrom(contents, about, contents.mockTools, changed);
   for (const held of gate.heldBack) {
     ui.pushStatus(`${FAILURE_MARK} ${held.shown} was not pushed: ${held.reason}`);
   }
@@ -604,7 +614,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   // Re-read the complete repository after the editor returns. Approval never
   // means permission to omit a held-back file.
   const reread = await contentsFor(paths, suite.id);
-  const approved = gateFrom(reread, about, reread.mockTools);
+  const approved = gateFrom(reread, about, reread.mockTools, changed);
   if (approved.heldBack.length > 0) {
     return ending({
       kind: "failed",
