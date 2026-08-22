@@ -398,6 +398,11 @@ describe("adding a colleague, with no mail configured", () => {
       // definition, so driving either would prove the same thing.
       const bob = page.locator("tr", { hasText: "bob@acme.example" });
       await bob.waitFor();
+      const dismissDialogThroughOverlay = async () => {
+        await page
+          .locator('[data-slot="dialog-overlay"]')
+          .click({ position: { x: 4, y: 4 } });
+      };
       // Three controls, and all one height. The height itself is the shared
       // system's token rather than this page's own now that Settings is built
       // from the same controls as every other product page, so what is held
@@ -430,7 +435,7 @@ describe("adding a colleague, with no mail configured", () => {
         expect(memberActions).toEqual([]);
 
         await bob.getByRole("button", { name: "Deactivate" }).click();
-        await page.mouse.click(4, 4);
+        await dismissDialogThroughOverlay();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toEqual([]);
 
@@ -462,7 +467,7 @@ describe("adding a colleague, with no mail configured", () => {
         expect(memberActions).toHaveLength(1);
 
         await bob.getByRole("button", { name: "Remove" }).click();
-        await page.mouse.click(4, 4);
+        await dismissDialogThroughOverlay();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toHaveLength(1);
 
