@@ -536,8 +536,15 @@ type AdmittedConnection = {
 function admitConnection(input: NewConnection): AdmittedConnection {
   const descriptor = descriptorOf(input.connectionType);
   const modality = validModality(input.connectionType, input.modality);
-  // This validates the complete supported tuple. The label is deliberately
-  // discarded here because it is derived again on reads.
+  // The payload's own tuple has to be one egma supports — this is what turns
+  // away a combination nobody can reach, before any database work.
+  //
+  // **It is not the last word on the platform.** Where the connection type
+  // does not pin one, the agent answers, so `insertConnection` checks the
+  // tuple again against the platform this connection will actually be
+  // represented under. Validating only here would let the door admit one
+  // tuple and the row read back as another. The label is discarded both
+  // times, because it is derived on every read.
   productLabelOf(
     input.agentPlatform,
     input.connectionType,
@@ -635,6 +642,53 @@ function refusingHeldConnectionName(name: string): (error: unknown) => never {
  * name default and the friendly refusal when a living connection holds the
  * name already.
  */
+/**
+ * The platform this connection will be represented under, checked against the
+ * platform the payload named.
+ *
+ * Where the connection type pins a platform, it decides and the agent is not
+ * consulted. Where it does not — `phone_number` spans platforms — the agent
+ * decides, and a payload naming a different one is refused rather than quietly
+ * relabelled: accepting `livekit_agents` and then representing the connection
+ * as Retell's is wrong attribution, and the product label a person reads would
+ * not be the one they chose.
+ *
+ * A payload that names no platform contradicts nothing. It is the ordinary way
+ * to say "whatever this agent is on".
+ */
+function representedPlatform(
+  admitted: AdmittedConnection,
+  agentPlatformOfAgent: AgentPlatform | null,
+): AgentPlatform | null {
+  const pinned = platformOfConnectionType(admitted.connectionType);
+  if (pinned !== null) return pinned;
+
+  if (
+    agentPlatformOfAgent !== null &&
+    admitted.agentPlatform !== null &&
+    admitted.agentPlatform !== agentPlatformOfAgent
+  ) {
+    throw new AgentWriteRefusedError(
+      "platform_contradicts_agent",
+      `This connection names ${admitted.agentPlatform} and its agent is on ` +
+        `${agentPlatformOfAgent}. A ${admitted.connectionType} connection ` +
+        `reaches whichever platform its agent is on, so it cannot name ` +
+        `another one. Send ${agentPlatformOfAgent}, or leave the platform ` +
+        `out and the agent will answer.`,
+    );
+  }
+
+  // What the row will be represented as has to be a supported tuple in its own
+  // right, not only the tuple the payload happened to name.
+  productLabelOf(
+    agentPlatformOfAgent,
+    admitted.connectionType,
+    admitted.accessVariant,
+    admitted.modality,
+  );
+  return agentPlatformOfAgent;
+}
+
 async function insertConnection(
   on: Queryable,
   auth: AuthContext,
@@ -650,6 +704,9 @@ async function insertConnection(
   },
   admitted: AdmittedConnection,
 ): Promise<Connection> {
+  // Before the write, and here rather than at the door, because this is the
+  // first point that knows which agent the connection lands under.
+  const agentPlatform = representedPlatform(admitted, home.agentPlatform);
   const name =
     admitted.name ??
     (await freeDefaultName(on, home.id, admitted.connectionType));
@@ -676,7 +733,7 @@ async function insertConnection(
     .catch(refusingHeldConnectionName(name));
 
   if (inserted === undefined) throw new Error("the connection was not written");
-  return connectionFromRow(inserted, home.agentPlatform);
+  return connectionFromRow(inserted, agentPlatform);
 }
 
 /**

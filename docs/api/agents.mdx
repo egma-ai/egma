@@ -79,8 +79,20 @@ The `result` field in the response tells you exactly what happened:
 
   <Expandable title="connection fields">
     <ParamField body="agentPlatform" type="string | null" required>
-      Where the agent runs. Current values are `retell`, `livekit_agents`, or
-      `null` when the platform is unknown or does not matter to this path.
+      Which platform this combination is for. Current values are `retell`,
+      `livekit_agents`, or `null`.
+
+      A connection stores no platform of its own. Some connection types reach
+      exactly one platform — `retell_chat_api` reaches Retell, `livekit_room`
+      reaches LiveKit Agents — and for those the type answers and this field
+      only selects the combination to check. `phone_number` reaches any
+      platform, so a phone connection belongs to whichever platform its **agent**
+      is bound to, and to none while the agent is unbound.
+
+      Send `null` to let the agent answer. Naming a platform that differs from
+      the one the agent is bound to is refused with `422`, because Egma would
+      otherwise have to store the connection under a platform you did not
+      choose.
     </ParamField>
 
     <ParamField body="connectionType" type="string" required>
@@ -152,11 +164,11 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="agentId" type="string">The agent this connection belongs to.</ResponseField>
     <ResponseField name="projectId" type="string">The project this connection belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
-    <ResponseField name="agentPlatform" type="string | null">The agent platform recorded for this connection.</ResponseField>
+    <ResponseField name="agentPlatform" type="string | null">The platform this connection reaches. Derived, never stored: the connection type answers where it reaches exactly one platform, otherwise the agent's own platform answers, and it is `null` where neither does.</ResponseField>
     <ResponseField name="connectionType" type="string">The path the simulator uses.</ResponseField>
     <ResponseField name="accessVariant" type="string">How Egma gets access to that path.</ResponseField>
     <ResponseField name="modality" type="string">`chat` or `voice`.</ResponseField>
-    <ResponseField name="productLabel" type="string">Display text derived from the supported combination.</ResponseField>
+    <ResponseField name="productLabel" type="string">Display text derived from the supported combination, using the same platform as `agentPlatform` above.</ResponseField>
     <ResponseField name="topology" type="string">Derived execution detail that indicates who initiates the connection.</ResponseField>
     <ResponseField name="environment" type="string | null">Environment label, or `null`.</ResponseField>
     <ResponseField name="config" type="object">Safe configuration for the access variant.</ResponseField>
