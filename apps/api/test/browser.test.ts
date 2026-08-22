@@ -2958,7 +2958,13 @@ describe("the complete product, walked in order in a second project", () => {
     "opens the run, which lists the simulation it wrote",
     async () => {
       await walk.goto(runAddress);
-      await saysWithin(walk, "Simulations");
+      // The section heading is present before its request finishes. Wait for
+      // the row that proves the simulations response has landed, so every
+      // assertion below reads the settled page rather than its loading shell.
+      const row = walk
+        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .first();
+      await row.waitFor();
 
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
@@ -2969,10 +2975,6 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("The Support line");
       expect(shown).toContain("Retell staging");
 
-      const row = walk
-        .getByRole("link", { name: "Reschedules a booked appointment" })
-        .first();
-      await row.waitFor();
       conversation = (await row.getAttribute("href")) ?? "";
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
     },
