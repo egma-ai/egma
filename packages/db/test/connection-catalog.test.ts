@@ -145,23 +145,38 @@ describe("what a browser is told about a simulation connection", () => {
     );
   });
 
-  it("keeps platform, connection, access, modality, and product label separate", () => {
-    expect(connectionOptionMetadata()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          connectionType: "phone_number",
-          accessVariant: "phone_number.public_e164",
-          modality: "voice",
-          productLabel: "Retell phone",
-        }),
-        expect.objectContaining({
-          connectionType: "phone_number",
-          accessVariant: "phone_number.public_e164",
-          modality: "voice",
-          productLabel: "Phone number",
-        }),
-      ]),
+  it("answers the platform from the type, and null where the type spans them", () => {
+    const byVariant = new Map(
+      connectionOptionMetadata().map((one) => [one.accessVariant, one]),
     );
+
+    // A chat connection is Retell's and a room connection is LiveKit's,
+    // because nothing else answers those APIs.
+    expect(byVariant.get("retell_chat_api.api_key")).toMatchObject({
+      agentPlatform: "retell",
+      agentPlatformLabel: "Retell",
+      connectionType: "retell_chat_api",
+      productLabel: "Retell chat",
+    });
+    expect(byVariant.get("livekit_room.project_credentials")).toMatchObject({
+      agentPlatform: "livekit_agents",
+      connectionType: "livekit_room",
+    });
+
+    // A number is where egma dials, not who answers, so it pins no platform
+    // and appears once rather than once per platform.
+    expect(byVariant.get("phone_number.public_e164")).toMatchObject({
+      agentPlatform: null,
+      agentPlatformLabel: "Any or unknown",
+      connectionType: "phone_number",
+      modality: "voice",
+      productLabel: "Phone number",
+    });
+    expect(
+      connectionOptionMetadata().filter(
+        (one) => one.connectionType === "phone_number",
+      ),
+    ).toHaveLength(1);
   });
 
   it("refuses a tuple that is not one of the explicit supported ones", () => {

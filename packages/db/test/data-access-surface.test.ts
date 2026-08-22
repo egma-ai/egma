@@ -160,8 +160,6 @@ const CONTEXT_REQUIRING = [
   "cancelRun",
   "changeRole",
   "completeSimulation",
-  "configureLiveKitMonitoring",
-  "configureRetellMonitoring",
   // The kind of one connection, by its id alone — the only connection read
   // that does not name an agent. It exists for the deployment gate in front of
   // run creation, which is handed a connection id and no agent id and has to
@@ -238,7 +236,6 @@ const CONTEXT_REQUIRING = [
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
-  "listMonitoringSetups",
   "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
@@ -293,9 +290,9 @@ const CONTEXT_REQUIRING = [
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // Poll progress belongs to the selected Monitoring agent, never to a
-  // simulation connection. A call that lands writes nothing here at all; only
-  // one that did not leaves a short-lived retry row behind it.
+  // Poll progress belongs to the agent being polled, never to a simulation
+  // connection. A call that lands writes nothing here at all; only one that did
+  // not leaves a short-lived retry row behind it.
   "checkpointMonitoringPage",
   "deleteProductionCallFailure",
   "dueProductionCallRetries",
@@ -305,8 +302,6 @@ const CONTEXT_REQUIRING = [
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
-  "recoverRetellMonitoringSetup",
-  "releaseRetellMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
   "reopenGradingJob",
@@ -317,7 +312,6 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
-  "removeMonitoringSetup",
   "renameTestSuite",
   "renewMonitoringLease",
   "runAlreadyStartedFor",
@@ -360,6 +354,11 @@ const CONTEXT_REQUIRING = [
   // every project that has never had the expected-behaviors copy is given it.
   // It names no customer and takes no argument at all.
   "seedRunningGraders",
+  // The one monitoring choice in the product: pull, declared on the agent.
+  // Turning it on seals the platform key and opens the historical import;
+  // turning it off leaves the cursor where the reading got to.
+  "startPullingProductionCalls",
+  "stopPullingProductionCalls",
   "startRun",
   "startSimulation",
   // What a run froze at start. Pre-cutover run history is reset, so every run
@@ -594,14 +593,13 @@ const READ_LIMITS = [
 ];
 
 /**
- * The shipped list of agent platforms Monitoring keeps a setup for, beside the
- * type spelled from it.
+ * The shipped list of agent platforms, beside the type spelled from it.
  *
  * Deciding whether a word names one is a question about that list, and a list
  * written out a second time somewhere else is a list that will one day disagree
  * with itself — quietly, as a platform whose bookkeeping stopped being written.
  */
-const THE_MONITORED_PLATFORMS = ["MONITORING_PLATFORMS"];
+const THE_MONITORED_PLATFORMS = ["AGENT_PLATFORMS"];
 
 /**
  * How many times one conversation is handed out before egma stops trying.
