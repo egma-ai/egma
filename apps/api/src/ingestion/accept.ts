@@ -12,7 +12,11 @@ import {
   SegmentIdentityConflictError,
   type PendingObjectStore,
 } from "./object-store.ts";
-import { recordFor, type IngestionRecord } from "./record.ts";
+import {
+  LARGEST_STAGEABLE_RECORD_BYTES,
+  recordFor,
+  type IngestionRecord,
+} from "./record.ts";
 import {
   groupedByProject,
   millisecondsUntilSeal,
@@ -827,6 +831,56 @@ async function durableWithin(
  * on disk. A process that has opened no acceptance loop is holding nothing and
  * answers so.
  */
+/** How much of the local log is spoken for, and whether it will take more. */
+export type StagedLoad = {
+  /** Bytes across every file the log owns, sealed ones included. */
+  readonly bytes: number;
+  /** Frames staged and not yet released. */
+  readonly records: number;
+  /**
+   * There is no longer room for the next record, so staging one is refused.
+   *
+   * **Room for one more, not merely under the bound.** A bound is on frames
+   * and a frame is a record plus the log's own header, so a log a few hundred
+   * bytes under its byte bound refuses every request that arrives — and a
+   * readiness check comparing usage against the bound would call that instance
+   * ready and keep it in front of traffic it cannot take.
+   *
+   * Both bounds bind, and they bind on different things: half a gigabyte of
+   * transcripts and two hundred thousand tiny records are the same answer,
+   * *not now*.
+   */
+  readonly full: boolean;
+};
+
+/**
+ * What the local log is holding, asked of the log itself.
+ *
+ * `undefined` on a process that opened no acceptance loop, which is a different
+ * fact from an empty log and has to stay distinguishable: one is a deployment
+ * with nowhere to stage evidence, the other is one with nothing staged.
+ *
+ * **The question is the log's to answer, and it is asked rather than
+ * reconstructed.** The refusal rule lives in one place — `append` and this
+ * share it — because two copies of it are two chances for readiness and the
+ * door to disagree about whether this instance can take a request.
+ */
+export function stagedLoad(): StagedLoad | undefined {
+  const held = standing;
+  if (held === undefined) return undefined;
+  const { bytes, records } = held.log;
+  return {
+    bytes,
+    records,
+    // Room for the largest record the path will stage, so readiness goes
+    // unavailable before the door starts refusing rather than after. On a
+    // boundary this fine that is one record early, which is the side to be
+    // wrong on: an instance called ready while refusing is one nothing can
+    // detect from outside.
+    full: !held.log.accepts(LARGEST_STAGEABLE_RECORD_BYTES),
+  };
+}
+
 export function stagedEvidence(): readonly {
   readonly scope: SegmentScope;
   readonly record: IngestionRecord;

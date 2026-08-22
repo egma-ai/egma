@@ -163,7 +163,21 @@ async function freePort(): Promise<number> {
   });
 }
 
-/** Wait until something answers, or give up loudly rather than hang forever. */
+/**
+ * Wait until the process is serving, or give up loudly rather than hang.
+ *
+ * **Serving rather than ready, deliberately.** `/health` reports write
+ * readiness, and an instance given no ingestion bucket answers `503` there for
+ * as long as it lives — truthfully, because it has nowhere to make evidence
+ * durable. Most instances here are not about ingestion and are started without
+ * one, so waiting for a `200` would be waiting for something that is never
+ * coming.
+ *
+ * So this accepts any reply the route itself produced, which is every status
+ * below `500` plus the `503` readiness refusal. A `500` is not one of them: a
+ * process faulting on every request is not up, and treating that as "serving"
+ * would turn a broken instance into a suite that fails somewhere else later.
+ */
 async function answers(
   url: string,
   within: number,
@@ -176,7 +190,7 @@ async function answers(
 
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.status < 500 || response.status === 503) return;
     } catch {
       // Not up yet.
     }

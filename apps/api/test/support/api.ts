@@ -154,6 +154,17 @@ export type TestApiOptions = {
    */
   readonly ingestionLogMaxBytes?: number;
   /**
+   * How many staged records the local log will hold before it refuses. Zero is
+   * a log that is full before anything is staged, which is how the readiness
+   * suite reaches the refusal without writing half a gigabyte.
+   */
+  readonly ingestionLogMaxRecords?: number;
+  /**
+   * Which halves of ingestion this instance serves. `all` by default, which is
+   * what every shipped deployment runs.
+   */
+  readonly role?: Config["ingestion"]["role"];
+  /**
    * Where the local log lives, for the one case that needs two instances to
    * share one: a stop and a start over staged evidence that outlived the
    * process. A directory named here belongs to the caller and is left where it
@@ -266,6 +277,10 @@ export async function createApi(
             ...(options.ingestionLogMaxBytes === undefined
               ? {}
               : { logMaxBytes: options.ingestionLogMaxBytes }),
+            ...(options.ingestionLogMaxRecords === undefined
+              ? {}
+              : { logMaxRecords: options.ingestionLogMaxRecords }),
+            ...(options.role === undefined ? {} : { role: options.role }),
           },
         };
 

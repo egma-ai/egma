@@ -88,7 +88,6 @@ describe("Monitoring setup", () => {
                     lastErrorKind: "provider_contract",
                     lastErrorAt: "2026-08-20T00:00:00.000Z",
                     consecutiveFailures: 1,
-                    failures: [],
                   },
                 ],
               },
@@ -109,8 +108,7 @@ describe("Monitoring setup", () => {
     expect(screen.queryByText("Active")).toBeNull();
   });
 
-  it("retries one durable Retell import failure and refreshes its status", async () => {
-    const asked: { method: string; path: string }[] = [];
+  it("shows a degraded agent, and offers no per-call retry to repair it", async () => {
     let reads = 0;
     vi.stubGlobal("scrollTo", vi.fn());
     vi.stubGlobal(
@@ -118,7 +116,6 @@ describe("Monitoring setup", () => {
       vi.fn(async (input: FetchInput, init?: RequestInit) => {
         const request = await observeRequest(input, init);
         const { address: at, method } = request;
-        asked.push({ method, path: at.pathname });
         if (at.pathname === "/api/me") return json(200, ME);
         if (at.pathname === "/v1/monitoring" && method === "GET") {
           reads += 1;
@@ -143,40 +140,17 @@ describe("Monitoring setup", () => {
                     id: "rma_1",
                     platformAgentId: "agent_1",
                     platformAgentName: "Front desk",
-                    state: reads === 1 ? "degraded" : "active",
+                    state: "degraded",
                     scanKind: null,
                     lastSuccessAt: null,
                     lastConversationAt: null,
-                    lastErrorKind: reads === 1 ? "provider_call_not_found" : null,
+                    lastErrorKind: "provider_call_not_found",
                     lastErrorAt: null,
                     consecutiveFailures: 0,
-                    failures:
-                      reads === 1
-                        ? [
-                            {
-                              id: "rif_1",
-                              providerCallId: "call_1",
-                              errorKind: "provider_call_not_found",
-                              attempts: 1,
-                              status: "open",
-                              lastAttemptAt: "2026-08-20T00:00:00.000Z",
-                              createdAt: "2026-08-20T00:00:00.000Z",
-                            },
-                          ]
-                        : [],
                   },
                 ],
               },
             ],
-          });
-        }
-        if (
-          at.pathname === "/v1/monitoring/retell/failures/rif_1/replay" &&
-          method === "POST"
-        ) {
-          return json(200, {
-            failure: { id: "rif_1", status: "resolved" },
-            trace: { id: "trace_1", write: "written" },
           });
         }
         throw new Error(`nothing stubbed for ${method} ${at.pathname}`);
@@ -188,17 +162,12 @@ describe("Monitoring setup", () => {
     expect(screen.getByText("Front desk")).toBeTruthy();
     expect(screen.getByText("Needs attention")).toBeTruthy();
     expect(document.querySelector('[data-state-mark="error"]')).toBeTruthy();
-    const retry = await screen.findByRole("button", { name: "Retry import" });
-    fireEvent.click(retry);
 
-    await waitFor(() => expect(reads).toBe(2));
-    expect(screen.queryByRole("button", { name: "Retry import" })).toBeNull();
-    expect(await screen.findByText("Active")).toBeTruthy();
-    expect(document.querySelector('[data-state-mark="complete"]')).toBeTruthy();
-    expect(asked).toContainEqual({
-      method: "POST",
-      path: "/v1/monitoring/retell/failures/rif_1/replay",
-    });
+    // A provider call Egma could not read is an operational error, not a work
+    // item: there is nothing here for a customer to press.
+    expect(screen.queryByRole("button", { name: /retry/iu })).toBeNull();
+    expect(document.body.textContent).not.toContain("call_1");
+    expect(reads).toBe(1);
   });
 
   it("asks before it removes a setup", async () => {

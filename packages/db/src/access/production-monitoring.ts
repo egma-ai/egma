@@ -21,14 +21,12 @@ import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 import { db } from "../client.ts";
 import {
   monitoringSetup,
-  productionTraceClaim,
-  retellIngestionFailure,
+  retellCallRetry,
   retellMonitoredAgent,
   type MonitoringHealthState,
   type MonitoringPlatform,
   type MonitoringStrategy,
   type RetellMonitoredAgentState,
-  type RetellFailureStatus,
   type RetellScanKind,
 } from "../schema/production.ts";
 import { openCredentials, sealCredentials } from "../sealing.ts";
@@ -38,16 +36,31 @@ import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
 const HISTORY_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
-const RECONCILIATION_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const REGULAR_OVERLAP_MILLISECONDS = 5 * 60 * 1_000;
 const DEFAULT_POLL_MILLISECONDS = 30_000;
 const DEFAULT_LEASE_MILLISECONDS = 90_000;
-const FAILURE_REPLAY_LEASE_MILLISECONDS = 90_000;
-const CLAIM_LEASE_MILLISECONDS = 120_000;
-const MOST_REPLAYED_AT_ONCE = 50;
 const HINT_CHARACTERS = 4;
 const SHORTEST_KEY = 8;
 const INTERNAL_USER = "production-monitoring";
+
+/**
+ * One initial attempt and three automatic retries, and nothing beyond it.
+ *
+ * The ceiling is stored rather than counted in a process, so a restart in the
+ * middle of a budget resumes it instead of starting it again. A repeated
+ * provider listing is the same observation, not a new one.
+ */
+export const MOST_RETELL_CALL_ATTEMPTS = 4;
+
+/**
+ * How long after the terminal drop the identity-only marker stays.
+ *
+ * Three regular overlap windows: long enough that every repeat listing of that
+ * call meets the marker, short enough that the row is gone well before anybody
+ * could mistake it for a record of the loss. The loss itself is reported in one
+ * structured event and one counter, which is where it belongs.
+ */
+const RECENT_DROP_MILLISECONDS = 3 * REGULAR_OVERLAP_MILLISECONDS;
 
 function monitoringContext(
   organizationId: string,
@@ -146,17 +159,6 @@ export type RetellMonitoredAgent = {
   readonly lastErrorKind: string | null;
   readonly lastErrorAt: Date | null;
   readonly consecutiveFailures: number;
-  readonly failures: readonly RetellIngestionFailureSummary[];
-};
-
-export type RetellIngestionFailureSummary = {
-  readonly id: string;
-  readonly providerCallId: string;
-  readonly errorKind: string;
-  readonly attempts: number;
-  readonly status: RetellFailureStatus;
-  readonly lastAttemptAt: Date;
-  readonly createdAt: Date;
 };
 
 export type MonitoringSetup = {
@@ -224,37 +226,6 @@ export async function listMonitoringSetups(
     )
     .orderBy(asc(retellMonitoredAgent.platformAgentName));
 
-  const failures =
-    agents.length === 0
-      ? []
-      : await db()
-        .select({
-          id: retellIngestionFailure.id,
-          retellMonitoredAgentId:
-            retellIngestionFailure.retellMonitoredAgentId,
-          providerCallId: retellIngestionFailure.providerCallId,
-          errorKind: retellIngestionFailure.errorKind,
-          attempts: retellIngestionFailure.attempts,
-          status: retellIngestionFailure.status,
-          lastAttemptAt: retellIngestionFailure.lastAttemptAt,
-          createdAt: retellIngestionFailure.createdAt,
-        })
-        .from(retellIngestionFailure)
-        .where(
-          and(
-            withinMonitoringProject(auth, retellIngestionFailure),
-            inArray(
-              retellIngestionFailure.retellMonitoredAgentId,
-              agents.map((agent) => agent.id),
-            ),
-            eq(retellIngestionFailure.status, "open"),
-          ),
-        )
-          .orderBy(
-            asc(retellIngestionFailure.createdAt),
-            asc(retellIngestionFailure.id),
-          );
-
   return setups.map((setup) => ({
     ...setup,
     agentPlatform: setup.agentPlatform as MonitoringPlatform,
@@ -266,17 +237,25 @@ export async function listMonitoringSetups(
         ...agent,
         state: agent.state as RetellMonitoredAgentState,
         scanKind: agent.scanKind as RetellScanKind | null,
-        failures: failures
-          .filter((failure) => failure.retellMonitoredAgentId === agent.id)
-          .map(({ retellMonitoredAgentId: _agentId, ...failure }) => ({
-            ...failure,
-            status: failure.status as RetellFailureStatus,
-          })),
       })),
   }));
 }
 
-/** Create or rotate Retell setup and synchronize its selected voice agents. */
+/**
+ * Create or rotate Retell setup and synchronize its selected voice agents.
+ *
+ * **Selecting an agent is always the request for one fixed 30-day import**, on
+ * the first save and on every later one. That is the whole deep-backfill story:
+ * there is no scheduled reconciliation and no automatic backfill deeper than
+ * the regular five-minute overlap, so a customer who wants Egma to look further
+ * back selects the agent again and gets exactly that, deliberately.
+ *
+ * A re-selection is therefore a new **import generation**: the window, cursor
+ * and trail are re-armed, and transient call state written under an earlier
+ * generation stops applying. A call an earlier regular scan gave up on is
+ * allowed one new bounded look, while an ordinary repeated poll — which is the
+ * same observation rather than a new one — still is not.
+ */
 export async function configureRetellMonitoring(
   auth: AuthContext,
   input: {
@@ -291,7 +270,6 @@ export async function configureRetellMonitoring(
   const agents = selectedAgents(input.agents);
   const now = input.now ?? new Date();
   const historyFrom = new Date(now.getTime() - HISTORY_MILLISECONDS);
-  const reconcileAt = new Date(now.getTime() + RECONCILIATION_MILLISECONDS);
 
   await db().transaction(async (tx) => {
     // There is no setup row to lock on the first save. Serialize this one
@@ -354,7 +332,7 @@ export async function configureRetellMonitoring(
       );
 
     for (const selected of agents) {
-      await tx
+      const rearmed = await tx
         .insert(retellMonitoredAgent)
         .values({
           id: newId("rma"),
@@ -367,9 +345,7 @@ export async function configureRetellMonitoring(
           scanKind: "historical_import",
           scanFrom: historyFrom,
           scanThrough: now,
-          nextRegularPollAt: now,
           nextPollAt: now,
-          nextReconciliationAt: reconcileAt,
         })
         .onConflictDoUpdate({
           target: [
@@ -378,13 +354,45 @@ export async function configureRetellMonitoring(
           ],
           set: {
             platformAgentName: selected.platformAgentName,
+            state: "importing",
+            scanKind: "historical_import",
+            scanFrom: historyFrom,
+            scanThrough: now,
+            paginationKey: null,
+            paginationTrail: "[]",
+            // A fixed window is being re-armed, so any lease over the old one
+            // is void: whoever holds it is paging a scan that no longer exists,
+            // and every write it makes is refused by its own owner check.
+            leaseOwner: null,
+            leaseExpiresAt: null,
+            // The import ends above the floor by construction — it runs to
+            // `now` — so a cutover floor left over from an earlier release has
+            // nothing left to hold back.
+            regularFloorAt: null,
+            importGeneration: sql`${retellMonitoredAgent.importGeneration} + 1`,
             nextPollAt: now,
             consecutiveFailures: 0,
             lastErrorKind: null,
             lastErrorAt: null,
             updatedAt: now,
           },
-        });
+        })
+        .returning({ id: retellMonitoredAgent.id });
+
+      // The new generation cannot see the old one's transient rows, so leaving
+      // them would leave rows nothing reads, nothing sweeps and nothing can
+      // ever delete — while the two existence checks below, which ask about
+      // the agent rather than about a generation, would keep reporting a
+      // selected agent as degraded for work no longer owed. They go with the
+      // window they belonged to, in the transaction that replaces it.
+      await tx
+        .delete(retellCallRetry)
+        .where(
+          and(
+            withinMonitoringProject(auth, retellCallRetry),
+            eq(retellCallRetry.retellMonitoredAgentId, rearmed[0]?.id ?? ""),
+          ),
+        );
     }
   });
 
@@ -466,13 +474,37 @@ export type RetellMonitoringTarget = {
   readonly scanThrough: Date;
   readonly paginationKey: string | null;
   readonly seenPaginationKeys: readonly string[];
+  readonly importGeneration: number;
+  /**
+   * This agent has at least one transient call row of either shape.
+   *
+   * Answered inside the claim's own statement, so a poller can skip the retry
+   * pass entirely without asking a second question. That matters because the
+   * common case by far is an agent that owes nothing and a page that is empty,
+   * and it has to cost one claim and one provider read — not a query per turn
+   * looking for work that is almost never there.
+   *
+   * It asks about the agent rather than about its current import generation,
+   * and it can: re-selecting an agent deletes the rows belonging to the window
+   * it replaces, so a row from a generation nothing reads cannot exist.
+   */
+  readonly hasTransientCallState: boolean;
   readonly setupConsecutiveFailures: number;
   readonly leaseOwner: string;
   readonly leaseExpiresAt: Date;
   readonly auth: AuthContext;
 };
 
-/** Claim one due Retell target before any provider request. */
+/**
+ * Claim one due Retell target before any provider request.
+ *
+ * The fixed window is decided here and then held: a scan already in flight is
+ * resumed exactly as it was, and a new regular scan reaches five minutes back
+ * from the last completed upper bound so that a call the provider exposed a
+ * little late is still found. That subtraction has one limit — a floor, while
+ * one is set, which a cutover uses to stop the first window after it reaching
+ * behind the release.
+ */
 export async function claimDueRetellMonitoringAgent(
   options: {
     readonly now?: Date | undefined;
@@ -500,17 +532,13 @@ export async function claimDueRetellMonitoringAgent(
         scanThrough: retellMonitoredAgent.scanThrough,
         paginationKey: retellMonitoredAgent.paginationKey,
         paginationTrail: retellMonitoredAgent.paginationTrail,
-        reconciliationFrom: retellMonitoredAgent.reconciliationFrom,
-        reconciliationThrough: retellMonitoredAgent.reconciliationThrough,
-        reconciliationPaginationKey:
-          retellMonitoredAgent.reconciliationPaginationKey,
-        reconciliationPaginationTrail:
-          retellMonitoredAgent.reconciliationPaginationTrail,
-        reconciliationNeedsRegular:
-          retellMonitoredAgent.reconciliationNeedsRegular,
         completedThrough: retellMonitoredAgent.completedThrough,
-        nextRegularPollAt: retellMonitoredAgent.nextRegularPollAt,
-        nextReconciliationAt: retellMonitoredAgent.nextReconciliationAt,
+        regularFloorAt: retellMonitoredAgent.regularFloorAt,
+        importGeneration: retellMonitoredAgent.importGeneration,
+        hasTransientCallState: sql<boolean>`exists (
+          select 1 from ${retellCallRetry}
+           where ${retellCallRetry.retellMonitoredAgentId} = ${retellMonitoredAgent.id}
+        )`,
         credentials: monitoringSetup.credentials,
         setupConsecutiveFailures: monitoringSetup.consecutiveFailures,
       })
@@ -548,39 +576,17 @@ export async function claimDueRetellMonitoringAgent(
     let paginationKey = candidate.paginationKey;
     let paginationTrail = candidate.paginationTrail;
     if (scanKind === null || scanFrom === null || scanThrough === null) {
-      if (
-        candidate.reconciliationNeedsRegular ||
-        candidate.nextRegularPollAt <= now
-      ) {
-        scanKind = "regular";
-        const completed = candidate.completedThrough ?? now;
-        scanFrom = new Date(completed.getTime() - REGULAR_OVERLAP_MILLISECONDS);
-        scanThrough = now;
-        paginationKey = null;
-        paginationTrail = "[]";
-      } else if (
-        candidate.reconciliationFrom !== null &&
-        candidate.reconciliationThrough !== null
-      ) {
-        scanKind = "reconciliation";
-        scanFrom = candidate.reconciliationFrom;
-        scanThrough = candidate.reconciliationThrough;
-        paginationKey = candidate.reconciliationPaginationKey;
-        paginationTrail = candidate.reconciliationPaginationTrail;
-      } else if (candidate.nextReconciliationAt <= now) {
-        scanKind = "reconciliation";
-        scanFrom = new Date(now.getTime() - HISTORY_MILLISECONDS);
-        scanThrough = now;
-        paginationKey = null;
-        paginationTrail = "[]";
-      } else {
-        scanKind = "regular";
-        const completed = candidate.completedThrough ?? now;
-        scanFrom = new Date(completed.getTime() - REGULAR_OVERLAP_MILLISECONDS);
-        scanThrough = now;
-        paginationKey = null;
-        paginationTrail = "[]";
-      }
+      scanKind = "regular";
+      const completed = candidate.completedThrough ?? now;
+      const overlapped = new Date(
+        completed.getTime() - REGULAR_OVERLAP_MILLISECONDS,
+      );
+      const floor = candidate.regularFloorAt;
+      scanFrom =
+        floor !== null && floor > overlapped ? floor : overlapped;
+      scanThrough = now;
+      paginationKey = null;
+      paginationTrail = "[]";
     }
 
     let seenPaginationKeys: readonly string[] = [];
@@ -634,6 +640,8 @@ export async function claimDueRetellMonitoringAgent(
     scanThrough: claimed.scanThrough,
     paginationKey: claimed.paginationKey,
     seenPaginationKeys: claimed.seenPaginationKeys,
+    importGeneration: claimed.importGeneration,
+    hasTransientCallState: claimed.hasTransientCallState,
     setupConsecutiveFailures: claimed.setupConsecutiveFailures,
     leaseOwner: claimed.leaseOwner,
     leaseExpiresAt: claimed.leaseExpiresAt,
@@ -732,69 +740,35 @@ export async function yieldRetellMonitoringLease(
   },
 ): Promise<boolean> {
   const now = input.now ?? new Date();
-  return db().transaction(async (tx) => {
-    const [held] = await tx
-      .select({
-        scanKind: retellMonitoredAgent.scanKind,
-        scanFrom: retellMonitoredAgent.scanFrom,
-        scanThrough: retellMonitoredAgent.scanThrough,
-        paginationKey: retellMonitoredAgent.paginationKey,
-        paginationTrail: retellMonitoredAgent.paginationTrail,
-        nextRegularPollAt: retellMonitoredAgent.nextRegularPollAt,
-      })
-      .from(retellMonitoredAgent)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-        ),
-      )
-      .for("update");
-    if (held === undefined) return false;
-
-    const pausesReconciliation =
-      target.scanKind === "reconciliation" &&
-      held.scanKind === "reconciliation" &&
-      held.scanFrom !== null &&
-      held.scanThrough !== null;
-    const updated = await tx
-      .update(retellMonitoredAgent)
-      .set({
-        ...(pausesReconciliation
-          ? {
-              reconciliationFrom: held.scanFrom,
-              reconciliationThrough: held.scanThrough,
-              reconciliationPaginationKey: held.paginationKey,
-              reconciliationPaginationTrail: held.paginationTrail,
-              reconciliationNeedsRegular: true,
-              scanKind: null,
-              scanFrom: null,
-              scanThrough: null,
-              paginationKey: null,
-              paginationTrail: "[]",
-            }
-          : {}),
-        nextPollAt: pausesReconciliation
-          ? held.nextRegularPollAt
-          : input.retryAt,
-        leaseOwner: null,
-        leaseExpiresAt: null,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-        ),
-      )
-      .returning({ id: retellMonitoredAgent.id });
-    return updated.length === 1;
-  });
+  const updated = await db()
+    .update(retellMonitoredAgent)
+    .set({
+      // The fixed window, the cursor and the trail all stay exactly where they
+      // are: this is a pause inside one scan, and the next claim resumes it.
+      nextPollAt: input.retryAt,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        withinMonitoringProject(auth, retellMonitoredAgent),
+        eq(retellMonitoredAgent.id, target.monitoredAgentId),
+        eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+      ),
+    )
+    .returning({ id: retellMonitoredAgent.id });
+  return updated.length === 1;
 }
 
-/** Finish the fixed scan and release its lease. */
+/**
+ * Finish the fixed scan and release its lease.
+ *
+ * The completed upper bound moves here and only here, which is what makes the
+ * next regular window start where this one stopped. The floor is cleared at the
+ * same moment: a window has now completed above it, so later polls regain the
+ * ordinary five-minute overlap.
+ */
 export async function finishRetellMonitoringScan(
   auth: AuthContext,
   target: RetellMonitoringTarget,
@@ -807,18 +781,9 @@ export async function finishRetellMonitoringScan(
   const scheduledNextPollAt = new Date(
     now.getTime() + (options.pollMilliseconds ?? DEFAULT_POLL_MILLISECONDS),
   );
-  const completedThrough =
-    target.scanKind === "reconciliation" ? undefined : target.scanThrough;
   return db().transaction(async (tx) => {
     const [held] = await tx
-      .select({
-        reconciliationFrom: retellMonitoredAgent.reconciliationFrom,
-        reconciliationThrough: retellMonitoredAgent.reconciliationThrough,
-        reconciliationNeedsRegular:
-          retellMonitoredAgent.reconciliationNeedsRegular,
-        nextRegularPollAt: retellMonitoredAgent.nextRegularPollAt,
-        nextReconciliationAt: retellMonitoredAgent.nextReconciliationAt,
-      })
+      .select({ id: retellMonitoredAgent.id })
       .from(retellMonitoredAgent)
       .where(
         and(
@@ -829,29 +794,11 @@ export async function finishRetellMonitoringScan(
       )
       .for("update");
     if (held === undefined) return false;
-    const [openFailure] = await tx
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(
-            retellIngestionFailure.retellMonitoredAgentId,
-            target.monitoredAgentId,
-          ),
-          eq(retellIngestionFailure.status, "open"),
-        ),
-      )
-      .limit(1);
-    const degraded = openFailure !== undefined;
-    const resumesReconciliation =
-      target.scanKind === "regular" &&
-      held.reconciliationNeedsRegular &&
-      held.reconciliationFrom !== null &&
-      held.reconciliationThrough !== null;
-    const reconciliationReady =
-      target.scanKind === "regular" &&
-      (resumesReconciliation || held.nextReconciliationAt <= now);
+    const degraded = await hasRetellCallInFlight(
+      tx,
+      auth,
+      target.monitoredAgentId,
+    );
     const updated = await tx
       .update(retellMonitoredAgent)
       .set({
@@ -861,30 +808,9 @@ export async function finishRetellMonitoringScan(
         scanThrough: null,
         paginationKey: null,
         paginationTrail: "[]",
-        ...(completedThrough === undefined ? {} : { completedThrough }),
-        ...(target.scanKind === "reconciliation"
-          ? {}
-          : { nextRegularPollAt: scheduledNextPollAt }),
-        ...(target.scanKind === "reconciliation"
-          ? {
-              reconciliationFrom: null,
-              reconciliationThrough: null,
-              reconciliationPaginationKey: null,
-              reconciliationPaginationTrail: "[]",
-              reconciliationNeedsRegular: false,
-              nextReconciliationAt: new Date(
-                now.getTime() + RECONCILIATION_MILLISECONDS,
-              ),
-            }
-          : resumesReconciliation
-            ? { reconciliationNeedsRegular: false }
-            : {}),
-        nextPollAt:
-          target.scanKind === "reconciliation"
-            ? held.nextRegularPollAt
-            : reconciliationReady
-              ? now
-              : scheduledNextPollAt,
+        completedThrough: target.scanThrough,
+        regularFloorAt: null,
+        nextPollAt: scheduledNextPollAt,
         leaseOwner: null,
         leaseExpiresAt: null,
         consecutiveFailures: 0,
@@ -1037,7 +963,6 @@ export async function recoverRetellMonitoringSetup(
   target: {
     readonly setupId: string;
     readonly monitoredAgentId: string;
-    readonly failureId?: string | undefined;
     readonly leaseOwner: string;
     readonly apiKey: string;
     readonly setupConsecutiveFailures: number;
@@ -1073,55 +998,18 @@ export async function recoverRetellMonitoringSetup(
     ) {
       return { recovered: false } as const;
     }
-    const [leased] =
-      target.failureId === undefined
-        ? await tx
-          .select({ id: retellMonitoredAgent.id })
-          .from(retellMonitoredAgent)
-          .where(
-            and(
-              withinMonitoringProject(auth, retellMonitoredAgent),
-              eq(retellMonitoredAgent.id, target.monitoredAgentId),
-              eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-              eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-            ),
-          )
-          .for("update")
-        : await tx
-          .select({ id: retellIngestionFailure.id })
-          .from(retellIngestionFailure)
-          .innerJoin(
-            retellMonitoredAgent,
-            and(
-              eq(
-                retellMonitoredAgent.id,
-                retellIngestionFailure.retellMonitoredAgentId,
-              ),
-              eq(
-                retellMonitoredAgent.projectId,
-                retellIngestionFailure.projectId,
-              ),
-              eq(
-                retellMonitoredAgent.organizationId,
-                retellIngestionFailure.organizationId,
-              ),
-            ),
-          )
-          .where(
-            and(
-              withinMonitoringProject(auth, retellIngestionFailure),
-              withinMonitoringProject(auth, retellMonitoredAgent),
-              eq(retellIngestionFailure.id, target.failureId),
-              eq(
-                retellIngestionFailure.retellMonitoredAgentId,
-                target.monitoredAgentId,
-              ),
-              eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-              eq(retellIngestionFailure.status, "open"),
-              eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-            ),
-          )
-          .for("update", { of: retellIngestionFailure });
+    const [leased] = await tx
+      .select({ id: retellMonitoredAgent.id })
+      .from(retellMonitoredAgent)
+      .where(
+        and(
+          withinMonitoringProject(auth, retellMonitoredAgent),
+          eq(retellMonitoredAgent.id, target.monitoredAgentId),
+          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
+          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+        ),
+      )
+      .for("update");
     if (leased === undefined || held.healthState === "healthy") {
       return { recovered: false } as const;
     }
@@ -1283,87 +1171,232 @@ export async function recordProductionEvidenceReceived(
   });
 }
 
-/** A summary is already owned by a completed claim or a durable failure. */
-export async function retellCallIsAccountedFor(
-  auth: AuthContext,
-  providerCallId: string,
-): Promise<boolean> {
-  const projectId = projectOf(auth);
-  const [claim, failure] = await Promise.all([
-    db()
-      .select({ id: productionTraceClaim.id })
-      .from(productionTraceClaim)
-      .where(
-        and(
-          withinMonitoringProject(auth, productionTraceClaim),
-          eq(productionTraceClaim.projectId, projectId),
-          eq(productionTraceClaim.providerCallId, providerCallId),
-        ),
-      )
-      .limit(1),
-    db()
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.projectId, projectId),
-          eq(retellIngestionFailure.providerCallId, providerCallId),
-          eq(retellIngestionFailure.status, "open"),
-        ),
-      )
-      .limit(1),
-  ]);
-  return claim.length > 0 || failure.length > 0;
+/* ------------------------------------------------------------------- *
+ * Transient Retell call state: a bounded budget, then an expiring mark.
+ *
+ * Everything below is about calls that did **not** work. A call that lands
+ * writes nothing here and nothing anywhere else in Postgres: its evidence is in
+ * the object store and then in the trace store, and a receipt row for every
+ * successful conversation is exactly the second permanent telemetry store this
+ * release removes.
+ * ------------------------------------------------------------------- */
+
+/** One listed call Egma is still trying, or has recently given up on. */
+export type TransientRetellCall = {
+  readonly providerCallId: string;
+  /** Attempts already made, counting the initial one. */
+  readonly attempts: number;
+  readonly errorKind: string;
+  /** When the next automatic retry is due. Null once the budget is spent. */
+  readonly nextAttemptAt: Date | null;
+  /** When a recent-drop marker stops applying. Null while retries remain. */
+  readonly expiresAt: Date | null;
+};
+
+type TransientRow = {
+  providerCallId: string;
+  attempts: number;
+  errorKind: string;
+  nextAttemptAt: Date | null;
+  expiresAt: Date | null;
+};
+
+const TRANSIENT_COLUMNS = {
+  providerCallId: retellCallRetry.providerCallId,
+  attempts: retellCallRetry.attempts,
+  errorKind: retellCallRetry.errorKind,
+  nextAttemptAt: retellCallRetry.nextAttemptAt,
+  expiresAt: retellCallRetry.expiresAt,
+};
+
+/**
+ * A row still says something about this scan.
+ *
+ * Two conditions, and both are about time rather than about shape: a retry row
+ * always applies, because a call with retries left is a call Egma still owes;
+ * a marker applies only until it expires, because its whole purpose is to
+ * outlive the overlap that would otherwise re-list the call, and no longer.
+ */
+function transientStillApplies(now: Date): SQL {
+  return or(
+    isNotNull(retellCallRetry.nextAttemptAt),
+    sql`${retellCallRetry.expiresAt} > ${now}`,
+  ) as SQL;
 }
 
-export async function recordRetellIngestionFailure(
+function transientOf(row: TransientRow): TransientRetellCall {
+  return {
+    providerCallId: row.providerCallId,
+    attempts: row.attempts,
+    errorKind: row.errorKind,
+    nextAttemptAt: row.nextAttemptAt,
+    expiresAt: row.expiresAt,
+  };
+}
+
+/**
+ * What this page already knows about the calls it listed, in **one** statement.
+ *
+ * The poller asks this once per non-empty page and never once per call. What
+ * comes back decides two different things: a call with a scheduled retry is
+ * accounted for and must not be hydrated again this turn, and a call with an
+ * active marker must not be hydrated at all — the five-minute overlap lists a
+ * dropped call again on purpose, and treating that repeat as new work is how a
+ * three-attempt budget quietly becomes an endless one.
+ *
+ * **Scoped to one import generation.** Selecting the agent again is a new,
+ * deliberate observation of the provider's history, so state written under an
+ * earlier generation is invisible here and the new import may take its own
+ * bounded look. An ordinary repeated poll carries the same generation and sees
+ * everything, which is the difference the whole rule turns on.
+ */
+export async function transientRetellCallState(
   auth: AuthContext,
-  target: RetellMonitoringTarget,
+  input: {
+    readonly monitoredAgentId: string;
+    readonly providerCallIds: readonly string[];
+    readonly importGeneration: number;
+    readonly now?: Date | undefined;
+  },
+): Promise<ReadonlyMap<string, TransientRetellCall>> {
+  if (input.providerCallIds.length === 0) return new Map();
+  const now = input.now ?? new Date();
+  const rows = await db()
+    .select(TRANSIENT_COLUMNS)
+    .from(retellCallRetry)
+    .where(
+      and(
+        withinMonitoringProject(auth, retellCallRetry),
+        eq(retellCallRetry.retellMonitoredAgentId, input.monitoredAgentId),
+        eq(retellCallRetry.importGeneration, input.importGeneration),
+        inArray(retellCallRetry.providerCallId, [...input.providerCallIds]),
+        transientStillApplies(now),
+      ),
+    );
+  return new Map(
+    rows.map((row) => [row.providerCallId, transientOf(row)] as const),
+  );
+}
+
+/**
+ * The calls whose next automatic retry is due for this leased agent.
+ *
+ * A retry does not wait to be listed again. An import's fixed window is paged
+ * once and never re-read, so a call that failed during one would have no second
+ * chance if the overlap were the only way back to it — and a budget that only
+ * applies to regular polling is not the budget the product promises.
+ */
+export async function dueRetellCallRetries(
+  auth: AuthContext,
+  input: {
+    readonly monitoredAgentId: string;
+    readonly importGeneration: number;
+    readonly now?: Date | undefined;
+    /**
+     * How many to take on. Required, and the poller's to choose: it is the one
+     * that knows how long a turn may hold a lease, and a second default here
+     * would be a bound that could quietly disagree with it.
+     */
+    readonly limit: number;
+  },
+): Promise<readonly TransientRetellCall[]> {
+  const now = input.now ?? new Date();
+  const rows = await db()
+    .select(TRANSIENT_COLUMNS)
+    .from(retellCallRetry)
+    .where(
+      and(
+        withinMonitoringProject(auth, retellCallRetry),
+        eq(retellCallRetry.retellMonitoredAgentId, input.monitoredAgentId),
+        eq(retellCallRetry.importGeneration, input.importGeneration),
+        isNotNull(retellCallRetry.nextAttemptAt),
+        lte(retellCallRetry.nextAttemptAt, now),
+      ),
+    )
+    .orderBy(asc(retellCallRetry.nextAttemptAt), asc(retellCallRetry.id))
+    .limit(input.limit);
+  return rows.map(transientOf);
+}
+
+/** What one counted attempt did. */
+export type RetellCallAttemptOutcome =
+  | { readonly recorded: false }
+  | {
+      readonly recorded: true;
+      /** Attempts now made, counting this one. */
+      readonly attempts: number;
+      /** The budget is spent: this row is now a recent-drop marker. */
+      readonly dropped: boolean;
+      /** The selected agent's customer-visible state changed. */
+      readonly changed: boolean;
+    };
+
+type PgTransaction = Parameters<
+  Parameters<ReturnType<typeof db>["transaction"]>[0]
+>[0];
+
+/**
+ * The agent still owes at least one call an automatic retry.
+ *
+ * Asked of the agent rather than of one import generation, on the same terms as
+ * the claim's own check: re-selecting an agent deletes the rows belonging to
+ * the window it replaces, so every row still here belongs to the generation
+ * running now.
+ */
+async function hasRetellCallInFlight(
+  tx: PgTransaction,
+  auth: AuthContext,
+  monitoredAgentId: string,
+): Promise<boolean> {
+  const [inFlight] = await tx
+    .select({ id: retellCallRetry.id })
+    .from(retellCallRetry)
+    .where(
+      and(
+        withinMonitoringProject(auth, retellCallRetry),
+        eq(retellCallRetry.retellMonitoredAgentId, monitoredAgentId),
+        isNotNull(retellCallRetry.nextAttemptAt),
+      ),
+    )
+    .limit(1);
+  return inFlight !== undefined;
+}
+
+/**
+ * Count one failed attempt at a listed call, and either schedule the next
+ * automatic retry or end the budget.
+ *
+ * **The count lives here rather than in a process**, which is the whole point:
+ * a restart in the middle of a budget resumes it, and a provider listing the
+ * same call again does not restart it. The ceiling is a stored check as well as
+ * an arithmetic one, so no timing inside any implementation can produce a
+ * fourth automatic retry.
+ *
+ * A row that no longer applies — an expired marker, or state from an earlier
+ * import generation — is replaced rather than incremented. That is the same
+ * rule the batched lookup uses, said once more where it decides a budget.
+ */
+export async function recordRetellCallAttempt(
+  auth: AuthContext,
+  target: Pick<
+    RetellMonitoringTarget,
+    "setupId" | "monitoredAgentId" | "leaseOwner" | "importGeneration"
+  >,
   input: {
     readonly providerCallId: string;
     readonly errorKind: string;
-    readonly safePayload?: string | undefined;
+    /**
+     * Milliseconds to wait before each automatic retry, in order. The caller
+     * owns the timing; the ceiling on how many of them can be used is this
+     * module's, and the table's.
+     */
+    readonly retryBackoffMilliseconds: readonly number[];
     readonly now?: Date | undefined;
   },
-): Promise<{ readonly changed: boolean; readonly recorded?: false }> {
+): Promise<RetellCallAttemptOutcome> {
   const now = input.now ?? new Date();
   const projectId = projectOf(auth);
   return db().transaction(async (tx) => {
-    const [setup] = await tx
-      .select({ credentials: monitoringSetup.credentials })
-      .from(monitoringSetup)
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      )
-      .for("update");
-    if (setup === undefined || setup.credentials === null) {
-      return { recorded: false, changed: false };
-    }
-    if (openedRetellKey(setup.credentials) !== target.apiKey) {
-      await tx
-        .update(retellMonitoredAgent)
-        .set({
-          nextPollAt: now,
-          leaseOwner: null,
-          leaseExpiresAt: null,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            withinMonitoringProject(auth, retellMonitoredAgent),
-            eq(retellMonitoredAgent.id, target.monitoredAgentId),
-            eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-            eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-          ),
-        );
-      return { recorded: false, changed: false };
-    }
-
     const [owned] = await tx
       .select({
         id: retellMonitoredAgent.id,
@@ -1379,40 +1412,86 @@ export async function recordRetellIngestionFailure(
         ),
       )
       .for("update");
-    if (owned === undefined) {
-      return { recorded: false, changed: false };
-    }
-    await tx
-      .insert(retellIngestionFailure)
-      .values({
-        id: newId("rif"),
+    if (owned === undefined) return { recorded: false } as const;
+
+    const [held] = await tx
+      .select({
+        id: retellCallRetry.id,
+        attempts: retellCallRetry.attempts,
+        nextAttemptAt: retellCallRetry.nextAttemptAt,
+        expiresAt: retellCallRetry.expiresAt,
+        importGeneration: retellCallRetry.importGeneration,
+      })
+      .from(retellCallRetry)
+      .where(
+        and(
+          withinMonitoringProject(auth, retellCallRetry),
+          eq(retellCallRetry.providerCallId, input.providerCallId),
+        ),
+      )
+      .for("update");
+
+    const carries =
+      held !== undefined &&
+      held.importGeneration === target.importGeneration &&
+      (held.nextAttemptAt !== null ||
+        (held.expiresAt !== null && held.expiresAt > now));
+    const attempts = carries ? held.attempts + 1 : 1;
+    const dropped = attempts >= MOST_RETELL_CALL_ATTEMPTS;
+    const backoff =
+      input.retryBackoffMilliseconds[
+        Math.min(attempts - 1, input.retryBackoffMilliseconds.length - 1)
+      ] ?? 0;
+    const schedule = dropped
+      ? {
+          nextAttemptAt: null,
+          expiresAt: new Date(now.getTime() + RECENT_DROP_MILLISECONDS),
+        }
+      : {
+          nextAttemptAt: new Date(now.getTime() + backoff),
+          expiresAt: null,
+        };
+
+    if (held === undefined) {
+      await tx.insert(retellCallRetry).values({
+        id: newId("rcr"),
         organizationId: auth.organizationId,
         projectId,
         retellMonitoredAgentId: target.monitoredAgentId,
         providerCallId: input.providerCallId,
         errorKind: input.errorKind,
-        payload: input.safePayload,
-        status: "open",
+        attempts,
         lastAttemptAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [
-          retellIngestionFailure.projectId,
-          retellIngestionFailure.providerCallId,
-        ],
-        set: {
-          errorKind: input.errorKind,
-          payload: input.safePayload,
-          attempts: sql`${retellIngestionFailure.attempts} + 1`,
-          status: "open",
-          resolvedAt: null,
-          lastAttemptAt: now,
-        },
+        importGeneration: target.importGeneration,
+        ...schedule,
       });
+    } else {
+      await tx
+        .update(retellCallRetry)
+        .set({
+          retellMonitoredAgentId: target.monitoredAgentId,
+          errorKind: input.errorKind,
+          attempts,
+          lastAttemptAt: now,
+          importGeneration: target.importGeneration,
+          ...schedule,
+        })
+        .where(eq(retellCallRetry.id, held.id));
+    }
+
+    // Degraded is the customer-visible word for "Egma is still trying", so it
+    // follows what is in flight rather than what has been lost. A terminal drop
+    // is not in flight: it is an evidence gap reported to an operator, and a
+    // selected agent that keeps working must not wear it.
+    const inFlight =
+      !dropped ||
+      (await hasRetellCallInFlight(tx, auth, target.monitoredAgentId));
+    const state = inFlight ? "degraded" : "active";
+    const changed = owned.state !== state && owned.state !== "importing";
     await tx
       .update(retellMonitoredAgent)
       .set({
-        state: "degraded",
+        ...(owned.state === "importing" ? {} : { state }),
         lastErrorKind: input.errorKind,
         lastErrorAt: now,
         updatedAt: now,
@@ -1421,645 +1500,80 @@ export async function recordRetellIngestionFailure(
         and(
           withinMonitoringProject(auth, retellMonitoredAgent),
           eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
           eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
         ),
       );
-    return { changed: owned.state !== "degraded" };
+
+    return { recorded: true, attempts, dropped, changed } as const;
   });
 }
-
-export type RetellIngestionFailureReplayTarget = {
-  readonly setupId: string;
-  readonly monitoredAgentId: string;
-  readonly failureId: string;
-  readonly providerCallId: string;
-  readonly platformAgentId: string;
-  readonly platformAgentName: string;
-  readonly apiKey: string;
-  readonly setupConsecutiveFailures: number;
-  readonly leaseOwner: string;
-  readonly leaseExpiresAt: Date;
-  readonly auth: AuthContext;
-};
-
-export type RetellIngestionFailureReplayClaim =
-  | {
-      readonly kind: "claimed";
-      readonly target: RetellIngestionFailureReplayTarget;
-    }
-  | {
-      readonly kind: "busy";
-      readonly reason: MonitoringFailureKind | "replay_in_progress";
-      readonly retryAt: Date;
-    }
-  | { readonly kind: "not_found" };
 
 /**
- * Lease one customer-requested failed call and open the current setup key.
+ * Forget one call's transient state, because its evidence is durable.
  *
- * The failure id is always resolved inside the caller's project. A failure in
- * another tenant therefore has the same result as an unknown failure id.
+ * Called after object-store acceptance and never before it. A row deleted on
+ * hydration success would be a row deleted while the evidence was still only in
+ * this process's memory, and a crash in that gap would leave a call nobody is
+ * still trying and nobody has stored.
  */
-export async function claimRetellIngestionFailureReplay(
+export async function deleteRetellCallRetry(
   auth: AuthContext,
-  failureId: string,
-  options: {
-    readonly now?: Date | undefined;
-    readonly leaseMilliseconds?: number | undefined;
-  } = {},
-): Promise<RetellIngestionFailureReplayClaim> {
-  authorize(auth, "configure_monitoring", here(auth));
-  projectOf(auth);
-  const now = options.now ?? new Date();
-  const leaseOwner = randomUUID();
-  const leaseExpiresAt = new Date(
-    now.getTime() +
-      (options.leaseMilliseconds ?? FAILURE_REPLAY_LEASE_MILLISECONDS),
-  );
-
-  const claimed = await db().transaction(async (tx) => {
-    const [candidate] = await tx
-      .select({
-        failureId: retellIngestionFailure.id,
-        providerCallId: retellIngestionFailure.providerCallId,
-        replayLeaseExpiresAt: retellIngestionFailure.replayLeaseExpiresAt,
-        monitoredAgentId: retellMonitoredAgent.id,
-        platformAgentId: retellMonitoredAgent.platformAgentId,
-        platformAgentName: retellMonitoredAgent.platformAgentName,
-        setupId: monitoringSetup.id,
-        organizationId: monitoringSetup.organizationId,
-        projectId: monitoringSetup.projectId,
-        credentials: monitoringSetup.credentials,
-        healthState: monitoringSetup.healthState,
-        blockedUntil: monitoringSetup.blockedUntil,
-        setupConsecutiveFailures: monitoringSetup.consecutiveFailures,
-      })
-      .from(retellIngestionFailure)
-      .innerJoin(
-        retellMonitoredAgent,
-        and(
-          eq(
-            retellMonitoredAgent.id,
-            retellIngestionFailure.retellMonitoredAgentId,
-          ),
-          eq(retellMonitoredAgent.projectId, retellIngestionFailure.projectId),
-          eq(
-            retellMonitoredAgent.organizationId,
-            retellIngestionFailure.organizationId,
-          ),
-        ),
-      )
-      .innerJoin(
-        monitoringSetup,
-        and(
-          eq(monitoringSetup.id, retellMonitoredAgent.monitoringSetupId),
-          eq(monitoringSetup.projectId, retellMonitoredAgent.projectId),
-          eq(
-            monitoringSetup.organizationId,
-            retellMonitoredAgent.organizationId,
-          ),
-        ),
-      )
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(retellIngestionFailure.id, failureId),
-          eq(retellIngestionFailure.status, "open"),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      )
-      .for("update", { of: retellIngestionFailure });
-    if (candidate === undefined || candidate.credentials === null) {
-      return { kind: "not_found" } as const;
-    }
-    if (candidate.blockedUntil !== null && candidate.blockedUntil > now) {
-      const reason = candidate.healthState as MonitoringHealthState;
-      return {
-        kind: "busy",
-        reason: reason === "healthy" ? "provider_unavailable" : reason,
-        retryAt: candidate.blockedUntil,
-      } as const;
-    }
-    if (
-      candidate.replayLeaseExpiresAt !== null &&
-      candidate.replayLeaseExpiresAt > now
-    ) {
-      return {
-        kind: "busy",
-        reason: "replay_in_progress",
-        retryAt: candidate.replayLeaseExpiresAt,
-      } as const;
-    }
-    const apiKey = openedRetellKey(candidate.credentials);
-
-    const updated = await tx
-      .update(retellIngestionFailure)
-      .set({
-        replayLeaseOwner: leaseOwner,
-        replayLeaseExpiresAt: leaseExpiresAt,
-        attempts: sql`${retellIngestionFailure.attempts} + 1`,
-        lastAttemptAt: now,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, candidate.failureId),
-          eq(retellIngestionFailure.status, "open"),
-        ),
-      )
-      .returning({ id: retellIngestionFailure.id });
-    if (updated.length !== 1) return { kind: "not_found" } as const;
-    return { kind: "claimed", candidate, apiKey } as const;
-  });
-
-  if (claimed.kind !== "claimed") return claimed;
-  return {
-    kind: "claimed",
-    target: {
-      setupId: claimed.candidate.setupId,
-      monitoredAgentId: claimed.candidate.monitoredAgentId,
-      failureId: claimed.candidate.failureId,
-      providerCallId: claimed.candidate.providerCallId,
-      platformAgentId: claimed.candidate.platformAgentId,
-      platformAgentName: claimed.candidate.platformAgentName,
-      apiKey: claimed.apiKey,
-      setupConsecutiveFailures:
-        claimed.candidate.setupConsecutiveFailures,
-      leaseOwner,
-      leaseExpiresAt,
-      auth: monitoringContext(
-        claimed.candidate.organizationId,
-        claimed.candidate.projectId,
-      ),
-    },
-  };
-}
-
-/** Keep a durable failure open after an exact-call replay still cannot import. */
-export async function releaseRetellIngestionFailureReplay(
-  auth: AuthContext,
-  target: Pick<
-    RetellIngestionFailureReplayTarget,
-    | "setupId"
-    | "monitoredAgentId"
-    | "failureId"
-    | "leaseOwner"
-    | "apiKey"
-  >,
-  input: {
-    readonly errorKind: string;
-    readonly now?: Date | undefined;
-  },
-): Promise<boolean> {
+  target: Pick<RetellMonitoringTarget, "monitoredAgentId">,
+  input: { readonly providerCallId: string; readonly now?: Date | undefined },
+): Promise<void> {
   const now = input.now ?? new Date();
-  return db().transaction(async (tx) => {
-    const [setup] = await tx
-      .select({ credentials: monitoringSetup.credentials })
-      .from(monitoringSetup)
+  await db().transaction(async (tx) => {
+    const deleted = await tx
+      .delete(retellCallRetry)
       .where(
         and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
+          withinMonitoringProject(auth, retellCallRetry),
+          eq(retellCallRetry.retellMonitoredAgentId, target.monitoredAgentId),
+          eq(retellCallRetry.providerCallId, input.providerCallId),
         ),
       )
-      .for("update");
-    if (setup === undefined || setup.credentials === null) return false;
-
-    const [failure] = await tx
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .innerJoin(
-        retellMonitoredAgent,
-        eq(
-          retellMonitoredAgent.id,
-          retellIngestionFailure.retellMonitoredAgentId,
-        ),
-      )
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.status, "open"),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-        ),
-      )
-      .for("update", { of: retellIngestionFailure });
-    if (failure === undefined) return false;
-
-    if (openedRetellKey(setup.credentials) !== target.apiKey) {
-      await tx
-        .update(retellIngestionFailure)
-        .set({ replayLeaseOwner: null, replayLeaseExpiresAt: null })
-        .where(
-          and(
-            withinMonitoringProject(auth, retellIngestionFailure),
-            eq(retellIngestionFailure.id, target.failureId),
-            eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-          ),
-        );
-      return false;
-    }
-
-    const released = await tx
-      .update(retellIngestionFailure)
-      .set({
-        errorKind: input.errorKind,
-        lastAttemptAt: now,
-        replayLeaseOwner: null,
-        replayLeaseExpiresAt: null,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-        ),
-      )
-      .returning({ id: retellIngestionFailure.id });
-    return released.length === 1;
-  });
-}
-
-export type RetellIngestionFailureReplayProviderResult = {
-  readonly recorded: boolean;
-  readonly changed: boolean;
-  readonly failures: number;
-  readonly startedAt: Date;
-};
-
-/** Record a setup-wide provider failure and release one manual replay lease. */
-export async function failRetellIngestionFailureReplay(
-  auth: AuthContext,
-  target: Pick<
-    RetellIngestionFailureReplayTarget,
-    "setupId" | "failureId" | "leaseOwner" | "apiKey"
-  >,
-  input: {
-    readonly kind: MonitoringFailureKind;
-    readonly retryAt: Date;
-    readonly now?: Date | undefined;
-  },
-): Promise<RetellIngestionFailureReplayProviderResult> {
-  const now = input.now ?? new Date();
-  return db().transaction(async (tx) => {
-    const [held] = await tx
-      .select({
-        credentials: monitoringSetup.credentials,
-        healthState: monitoringSetup.healthState,
-        blockedUntil: monitoringSetup.blockedUntil,
-        failureStartedAt: monitoringSetup.failureStartedAt,
-        consecutiveFailures: monitoringSetup.consecutiveFailures,
-      })
-      .from(monitoringSetup)
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      )
-      .for("update");
-    if (held === undefined) {
-      return {
-        recorded: false,
-        changed: false,
-        failures: 0,
-        startedAt: now,
-      };
-    }
-
-    const [failure] = await tx
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .innerJoin(
-        retellMonitoredAgent,
-        eq(
-          retellMonitoredAgent.id,
-          retellIngestionFailure.retellMonitoredAgentId,
-        ),
-      )
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.status, "open"),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-        ),
-      )
-      .for("update", { of: retellIngestionFailure });
-    if (failure === undefined) {
-      return {
-        recorded: false,
-        changed: false,
-        failures: held.consecutiveFailures,
-        startedAt: held.failureStartedAt ?? now,
-      };
-    }
-    if (
-      held.credentials === null ||
-      openedRetellKey(held.credentials) !== target.apiKey
-    ) {
-      await tx
-        .update(retellIngestionFailure)
-        .set({
-          replayLeaseOwner: null,
-          replayLeaseExpiresAt: null,
-          lastAttemptAt: now,
-        })
-        .where(
-          and(
-            withinMonitoringProject(auth, retellIngestionFailure),
-            eq(retellIngestionFailure.id, target.failureId),
-            eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-          ),
-        );
-      return {
-        recorded: false,
-        changed: false,
-        failures: held.consecutiveFailures,
-        startedAt: held.failureStartedAt ?? now,
-      };
-    }
-
-    const keepExistingGate =
-      input.kind !== "invalid_credential" &&
-      (held.healthState === "invalid_credential" ||
-        (held.blockedUntil !== null && held.blockedUntil > input.retryAt));
-    const healthState = keepExistingGate ? held.healthState : input.kind;
-    const blockedUntil = keepExistingGate
-      ? (held.blockedUntil ?? input.retryAt)
-      : input.retryAt;
-    const changed = held.healthState !== healthState;
-    const startedAt = held.failureStartedAt ?? now;
-    const failures = held.consecutiveFailures + 1;
-    await tx
-      .update(monitoringSetup)
-      .set({
-        healthState,
-        blockedUntil,
-        failureStartedAt: startedAt,
-        consecutiveFailures: failures,
-        lastErrorAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
-      );
-    await tx
-      .update(retellIngestionFailure)
-      .set({
-        replayLeaseOwner: null,
-        replayLeaseExpiresAt: null,
-        lastAttemptAt: now,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-        ),
-      );
-    return { recorded: true, changed, failures, startedAt };
-  });
-}
-
-/** Resolve one replayed failure and recover the agent only when none remain. */
-export async function resolveRetellIngestionFailureReplay(
-  auth: AuthContext,
-  target: Pick<
-    RetellIngestionFailureReplayTarget,
-    "monitoredAgentId" | "failureId" | "leaseOwner"
-  >,
-  options: { readonly now?: Date | undefined } = {},
-): Promise<{ readonly resolved: boolean; readonly agentRecovered: boolean }> {
-  const now = options.now ?? new Date();
-  return db().transaction(async (tx) => {
-    const [agent] = await tx
-      .select({
-        state: retellMonitoredAgent.state,
-        scanKind: retellMonitoredAgent.scanKind,
-      })
-      .from(retellMonitoredAgent)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-        ),
-      )
-      .for("update");
-    if (agent === undefined) {
-      return { resolved: false, agentRecovered: false };
-    }
-
-    const resolved = await tx
-      .update(retellIngestionFailure)
-      .set({
-        status: "resolved",
-        resolvedAt: now,
-        replayLeaseOwner: null,
-        replayLeaseExpiresAt: null,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(
-            retellIngestionFailure.retellMonitoredAgentId,
-            target.monitoredAgentId,
-          ),
-          eq(retellIngestionFailure.status, "open"),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-        ),
-      )
-      .returning({ id: retellIngestionFailure.id });
-    if (resolved.length !== 1) {
-      return { resolved: false, agentRecovered: false };
-    }
-
-    const [remaining] = await tx
-      .select({
-        errorKind: retellIngestionFailure.errorKind,
-        lastAttemptAt: retellIngestionFailure.lastAttemptAt,
-      })
-      .from(retellIngestionFailure)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(
-            retellIngestionFailure.retellMonitoredAgentId,
-            target.monitoredAgentId,
-          ),
-          eq(retellIngestionFailure.status, "open"),
-        ),
-      )
-      .orderBy(
-        desc(retellIngestionFailure.lastAttemptAt),
-        desc(retellIngestionFailure.id),
-      )
-      .limit(1);
-    const agentRecovered =
-      agent.state === "degraded" && remaining === undefined;
+      .returning({ id: retellCallRetry.id });
+    if (deleted.length === 0) return;
+    if (await hasRetellCallInFlight(tx, auth, target.monitoredAgentId)) return;
     await tx
       .update(retellMonitoredAgent)
-      .set(
-        remaining === undefined
-          ? {
-              state: agent.scanKind === null ? "active" : "importing",
-              consecutiveFailures: 0,
-              lastErrorKind: null,
-              lastErrorAt: null,
-              lastSuccessAt: now,
-              updatedAt: now,
-            }
-          : {
-              state: "degraded",
-              lastErrorKind: remaining.errorKind,
-              lastErrorAt: remaining.lastAttemptAt,
-              updatedAt: now,
-            },
-      )
+      .set({ state: "active", updatedAt: now })
       .where(
         and(
           withinMonitoringProject(auth, retellMonitoredAgent),
           eq(retellMonitoredAgent.id, target.monitoredAgentId),
+          eq(retellMonitoredAgent.state, "degraded"),
         ),
       );
-    return { resolved: true, agentRecovered };
   });
 }
 
-export type ProductionTraceOffer = {
-  readonly traceId: string;
-  readonly providerCallId: string;
-  readonly platformAgentId: string;
-  readonly platformAgentName?: string | undefined;
-  readonly platformAgentVersion?: string | undefined;
-  readonly payload: string;
-  readonly endedAt: Date;
-};
-
-export type ProductionTraceClaim = ProductionTraceOffer & {
-  readonly id: string;
-  readonly degraded: boolean;
-  readonly auth: AuthContext;
-};
-
-/** Atomically own one Retell call before writing it to ClickHouse. */
-export async function claimProductionTrace(
+/**
+ * Remove recent-drop markers this agent has outlived.
+ *
+ * The lookup already ignores an expired marker, so this is housekeeping rather
+ * than correctness — but a marker nobody deletes is a row that stays in a
+ * control database forever, and this table's whole promise is that it does not
+ * grow with a customer's traffic.
+ */
+export async function sweepExpiredRetellCallMarkers(
   auth: AuthContext,
-  offer: ProductionTraceOffer,
-): Promise<ProductionTraceClaim | undefined> {
-  const projectId = projectOf(auth);
-  const [row] = await db()
-    .insert(productionTraceClaim)
-    .values({
-      id: newId("ptc"),
-      organizationId: auth.organizationId,
-      projectId,
-      traceId: offer.traceId,
-      providerCallId: offer.providerCallId,
-      platformAgentId: offer.platformAgentId,
-      platformAgentName: offer.platformAgentName,
-      platformAgentVersion: offer.platformAgentVersion,
-      payload: offer.payload,
-      endedAt: offer.endedAt,
-      status: "claimed",
-      claimedAt: new Date(),
-    })
-    .onConflictDoNothing({
-      target: [productionTraceClaim.projectId, productionTraceClaim.providerCallId],
-    })
-    .returning({ id: productionTraceClaim.id });
-  if (row === undefined) return undefined;
-  return { ...offer, id: row.id, degraded: false, auth };
-}
-
-export async function finishProductionTrace(
-  auth: AuthContext,
-  finished: { readonly traceId: string; readonly degraded: boolean },
-): Promise<void> {
-  await db()
-    .update(productionTraceClaim)
-    .set({
-      status: "written",
-      writtenAt: new Date(),
-      degraded: finished.degraded,
-    })
+  input: {
+    readonly monitoredAgentId: string;
+    readonly now?: Date | undefined;
+  },
+): Promise<number> {
+  const now = input.now ?? new Date();
+  const swept = await db()
+    .delete(retellCallRetry)
     .where(
-      withinMonitoringProject(
-        auth,
-        productionTraceClaim,
-        eq(productionTraceClaim.traceId, finished.traceId),
+      and(
+        withinMonitoringProject(auth, retellCallRetry),
+        eq(retellCallRetry.retellMonitoredAgentId, input.monitoredAgentId),
+        isNotNull(retellCallRetry.expiresAt),
+        lte(retellCallRetry.expiresAt, now),
       ),
-    );
-}
-
-/** Re-take claims left between Postgres and ClickHouse by a crashed process. */
-export async function sweepStaleProductionClaims(
-  options: { readonly now?: Date | undefined } = {},
-): Promise<readonly ProductionTraceClaim[]> {
-  const now = options.now ?? new Date();
-  const staleSince = new Date(now.getTime() - CLAIM_LEASE_MILLISECONDS);
-  const rows = await db().transaction(async (tx) => {
-    const candidates = await tx
-      .select({ id: productionTraceClaim.id })
-      .from(productionTraceClaim)
-      .where(
-        and(
-          eq(productionTraceClaim.status, "claimed"),
-          lt(productionTraceClaim.claimedAt, staleSince),
-        ),
-      )
-      .orderBy(asc(productionTraceClaim.id))
-      .limit(MOST_REPLAYED_AT_ONCE)
-      .for("update", { of: productionTraceClaim, skipLocked: true });
-    if (candidates.length === 0) return [];
-    return tx
-      .update(productionTraceClaim)
-      .set({ claimedAt: now })
-      .where(
-        inArray(
-          productionTraceClaim.id,
-          candidates.map((candidate) => candidate.id),
-        ),
-      )
-      .returning({
-        id: productionTraceClaim.id,
-        organizationId: productionTraceClaim.organizationId,
-        projectId: productionTraceClaim.projectId,
-        traceId: productionTraceClaim.traceId,
-        providerCallId: productionTraceClaim.providerCallId,
-        platformAgentId: productionTraceClaim.platformAgentId,
-        platformAgentName: productionTraceClaim.platformAgentName,
-        platformAgentVersion: productionTraceClaim.platformAgentVersion,
-        payload: productionTraceClaim.payload,
-        endedAt: productionTraceClaim.endedAt,
-        degraded: productionTraceClaim.degraded,
-      });
-  });
-  return rows.map((row) => ({
-    id: row.id,
-    traceId: row.traceId,
-    providerCallId: row.providerCallId,
-    platformAgentId: row.platformAgentId,
-    ...(row.platformAgentName === null
-      ? {}
-      : { platformAgentName: row.platformAgentName }),
-    ...(row.platformAgentVersion === null
-      ? {}
-      : { platformAgentVersion: row.platformAgentVersion }),
-    payload: row.payload,
-    endedAt: row.endedAt,
-    degraded: row.degraded,
-    auth: monitoringContext(row.organizationId, row.projectId),
-  }));
+    )
+    .returning({ id: retellCallRetry.id });
+  return swept.length;
 }

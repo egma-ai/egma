@@ -210,6 +210,26 @@ const FIELD_BOUNDS = {
 const BOUNDED_FIELDS = Object.keys(FIELD_BOUNDS) as readonly (keyof typeof FIELD_BOUNDS)[];
 
 /**
+ * The most evidence one record may carry in its bounded fields, in bytes.
+ *
+ * Derived from the bounds above rather than written out again, so a bound that
+ * moves moves this with it. It is what a caller reserving room for one more
+ * record has to reserve, and it is deliberately the *sum* of every ceiling: a
+ * record is allowed to sit at all of them at once, and a reserve computed from
+ * the largest single field would be a reserve one long transcript overruns.
+ *
+ * **`payload` is not in it, because `payload` has no bound.** It is the
+ * provider's document exactly as it arrived; nothing here refuses one for its
+ * size, and the batch splitter is what keeps a large one writable. A caller
+ * using this to size a reserve is therefore reserving against the fields this
+ * module bounds, and no more.
+ */
+export const LARGEST_BOUNDED_RECORD_BYTES = BOUNDED_FIELDS.reduce(
+  (total, field) => total + FIELD_BOUNDS[field],
+  0,
+);
+
+/**
  * Refuse a record that violates a documented bound, and say nothing about one
  * that does not.
  *

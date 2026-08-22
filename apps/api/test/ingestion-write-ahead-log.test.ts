@@ -238,6 +238,79 @@ describe("a log that has been told what it may hold", () => {
     expect(log.records).toBe(2);
   });
 
+  /**
+   * The same question the append asks, asked without writing anything — and it
+   * has to be the same question. Anything deciding whether this instance can
+   * take more evidence asks here; a second copy of the rule somewhere else is
+   * two answers that can disagree, and the disagreement is an instance calling
+   * itself ready while its door refuses everything.
+   */
+  it("answers whether one more frame of a given size would still fit", () => {
+    const directory = aDirectory();
+    // Room for exactly two 20-byte payloads: each frame costs its payload plus
+    // an 8-byte header, so 64 bytes holds 56 of frames and 8 to spare.
+    const log = openWriteAheadLog(directory, { ...BOUNDS, maxBytes: 64 });
+
+    expect(log.accepts(20)).toBe(true);
+    log.append(bytes("a".repeat(20)));
+    expect(log.accepts(20)).toBe(true);
+    log.append(bytes("b".repeat(20)));
+
+    // 56 bytes used, 8 left — exactly one empty frame's worth of header and
+    // nothing to put in it. This is the state a caller comparing 56 against 64
+    // calls writable while the very next record is refused.
+    expect(log.bytes).toBe(56);
+    expect(log.bytes).toBeLessThan(64);
+    expect(log.accepts(20)).toBe(false);
+    expect(log.accepts(1)).toBe(false);
+    expect(log.accepts(0)).toBe(true);
+    expect(() => log.append(bytes("c".repeat(20)))).toThrow(
+      IngestionBackpressureError,
+    );
+  });
+
+  it("answers on the byte boundary the same way the append does", () => {
+    const directory = aDirectory();
+    // Exactly one 20-byte frame, and not one byte more.
+    const log = openWriteAheadLog(directory, { ...BOUNDS, maxBytes: 28 });
+
+    expect(log.accepts(20)).toBe(true);
+    expect(log.accepts(21)).toBe(false);
+    log.append(bytes("a".repeat(20)));
+
+    expect(log.bytes).toBe(28);
+    expect(log.accepts(0)).toBe(false);
+    expect(() => log.append(bytes(""))).toThrow(IngestionBackpressureError);
+  });
+
+  it("answers on the record boundary too, whatever room the bytes leave", () => {
+    const directory = aDirectory();
+    const log = openWriteAheadLog(directory, { ...BOUNDS, maxRecords: 2 });
+
+    expect(log.accepts(1)).toBe(true);
+    log.append(bytes("one"));
+    expect(log.accepts(1)).toBe(true);
+    log.append(bytes("two"));
+
+    // Bytes are barely touched; the record bound is the one that closed.
+    expect(log.bytes).toBeLessThan(BOUNDS.maxBytes);
+    expect(log.accepts(1)).toBe(false);
+    expect(() => log.append(bytes("three"))).toThrow(IngestionBackpressureError);
+  });
+
+  it("takes room back as staged records are released", () => {
+    const directory = aDirectory();
+    const log = openWriteAheadLog(directory, { ...BOUNDS, maxRecords: 2 });
+
+    const first = log.append(bytes("one"));
+    log.append(bytes("two"));
+    expect(log.accepts(1)).toBe(false);
+
+    // Durable somewhere else, so the log is no longer holding it.
+    log.release([first]);
+    expect(log.accepts(1)).toBe(true);
+  });
+
   it("says which bound it met, and that nothing was thrown away", () => {
     // The sentence a `503` is built out of. An operator reading it has to be
     // able to tell backpressure from a lost disk without reading this file.

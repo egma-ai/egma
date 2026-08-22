@@ -34,7 +34,6 @@ import {
   listTerminalCalls,
   type RetellReach as RetellCallReach,
 } from "../retell/api.ts";
-import { replayRetellIngestionFailure } from "../retell-production-ingestion.ts";
 
 export type MonitoringRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -95,15 +94,6 @@ function described(setup: MonitoringSetup): Record<string, unknown> {
       lastErrorKind: agent.lastErrorKind,
       lastErrorAt: agent.lastErrorAt?.toISOString() ?? null,
       consecutiveFailures: agent.consecutiveFailures,
-      failures: agent.failures.map((failure) => ({
-        id: failure.id,
-        providerCallId: failure.providerCallId,
-        errorKind: failure.errorKind,
-        attempts: failure.attempts,
-        status: failure.status,
-        lastAttemptAt: failure.lastAttemptAt.toISOString(),
-        createdAt: failure.createdAt.toISOString(),
-      })),
     })),
   };
 }
@@ -302,104 +292,6 @@ export async function monitoringRoutes(
     const configured = await configureLiveKitMonitoring(resolved.auth);
     return reply.send({ monitoringSource: described(configured) });
   });
-
-  registerPlatformOperation(
-    app,
-    monitoringOperations.replayMonitoringImportFailure,
-    async (request, reply) => {
-      const { auth } = requesterOf(request);
-      const query = request.query as Record<string, unknown>;
-      const { failureId } = request.params as { failureId: string };
-      const resolved = await acting(auth, projectNamed(query, {}));
-      if (!("auth" in resolved)) return refuseActing(reply, resolved);
-
-      const replayed = await replayRetellIngestionFailure({
-        auth: resolved.auth,
-        failureId,
-        reach: callReach(options),
-        log: {
-          info: (event) => request.log.info(event),
-          warn: (event) => request.log.warn(event),
-          error: (event) => request.log.error(event),
-        },
-      });
-      if (replayed.kind === "not_found") {
-        return sendRefusal(
-          reply,
-          "not_found",
-          "There is no open Retell import failure with this id in this project.",
-        );
-      }
-      if (replayed.kind === "busy") {
-        if (replayed.reason === "rate_limited") {
-          return sendRefusal(
-            reply,
-            "too_many_requests",
-            "Retell rate-limited this retry. Wait and try again.",
-          );
-        }
-        if (replayed.reason === "invalid_credential") {
-          return unprocessable(
-            reply,
-            "Retell rejected the current API key. Update the Retell Monitoring setup and try again.",
-          );
-        }
-        if (replayed.reason === "provider_unavailable") {
-          return sendRefusal(
-            reply,
-            "provider_unavailable",
-            "Retell did not answer this retry. Try again.",
-          );
-        }
-        return sendRefusal(
-          reply,
-          "conflict",
-          "This Retell import failure is already being retried. Refresh Monitoring in a moment.",
-        );
-      }
-      if (replayed.kind === "lease_lost") {
-        return sendRefusal(
-          reply,
-          "conflict",
-          "This Retell import retry changed while it was running. Refresh Monitoring and try again.",
-        );
-      }
-      if (replayed.kind === "still_failed") {
-        return sendRefusal(
-          reply,
-          "conflict",
-          "Retell still cannot provide a complete production transcript. The import failure remains open.",
-        );
-      }
-      if (replayed.kind === "invalid_credential") {
-        return unprocessable(
-          reply,
-          "Retell rejected the current API key. Update the Retell Monitoring setup and try again.",
-        );
-      }
-      if (replayed.kind === "rate_limited") {
-        return sendRefusal(
-          reply,
-          "too_many_requests",
-          "Retell rate-limited this retry. Wait and try again.",
-        );
-      }
-      if (replayed.kind === "provider_unavailable") {
-        return sendRefusal(
-          reply,
-          "provider_unavailable",
-          "Retell did not answer this retry. Try again.",
-        );
-      }
-      return reply.send({
-        monitoringImportFailure: {
-          id: replayed.failureId,
-          status: "resolved",
-        },
-        trace: { id: replayed.traceId, write: replayed.write },
-      });
-    },
-  );
 
   registerPlatformOperation(app, monitoringOperations.deleteMonitoringSource, async (request, reply) => {
     const { auth } = requesterOf(request);

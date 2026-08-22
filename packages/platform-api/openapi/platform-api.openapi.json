@@ -7916,49 +7916,6 @@
                                 "consecutiveFailures": {
                                   "type": "integer",
                                   "minimum": 0
-                                },
-                                "failures": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string",
-                                        "minLength": 1
-                                      },
-                                      "providerCallId": {
-                                        "type": "string"
-                                      },
-                                      "errorKind": {
-                                        "type": "string"
-                                      },
-                                      "attempts": {
-                                        "type": "integer",
-                                        "minimum": 0
-                                      },
-                                      "status": {
-                                        "type": "string"
-                                      },
-                                      "lastAttemptAt": {
-                                        "type": "string",
-                                        "format": "date-time"
-                                      },
-                                      "createdAt": {
-                                        "type": "string",
-                                        "format": "date-time"
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "providerCallId",
-                                      "errorKind",
-                                      "attempts",
-                                      "status",
-                                      "lastAttemptAt",
-                                      "createdAt"
-                                    ],
-                                    "additionalProperties": false
-                                  }
                                 }
                               },
                               "required": [
@@ -7971,8 +7928,7 @@
                                 "lastConversationAt",
                                 "lastErrorKind",
                                 "lastErrorAt",
-                                "consecutiveFailures",
-                                "failures"
+                                "consecutiveFailures"
                               ],
                               "additionalProperties": false
                             }
@@ -8423,49 +8379,6 @@
                               "consecutiveFailures": {
                                 "type": "integer",
                                 "minimum": 0
-                              },
-                              "failures": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "providerCallId": {
-                                      "type": "string"
-                                    },
-                                    "errorKind": {
-                                      "type": "string"
-                                    },
-                                    "attempts": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
-                                    "status": {
-                                      "type": "string"
-                                    },
-                                    "lastAttemptAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "providerCallId",
-                                    "errorKind",
-                                    "attempts",
-                                    "status",
-                                    "lastAttemptAt",
-                                    "createdAt"
-                                  ],
-                                  "additionalProperties": false
-                                }
                               }
                             },
                             "required": [
@@ -8478,8 +8391,7 @@
                               "lastConversationAt",
                               "lastErrorKind",
                               "lastErrorAt",
-                              "consecutiveFailures",
-                              "failures"
+                              "consecutiveFailures"
                             ],
                             "additionalProperties": false
                           }
@@ -8767,49 +8679,6 @@
                               "consecutiveFailures": {
                                 "type": "integer",
                                 "minimum": 0
-                              },
-                              "failures": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "providerCallId": {
-                                      "type": "string"
-                                    },
-                                    "errorKind": {
-                                      "type": "string"
-                                    },
-                                    "attempts": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
-                                    "status": {
-                                      "type": "string"
-                                    },
-                                    "lastAttemptAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "providerCallId",
-                                    "errorKind",
-                                    "attempts",
-                                    "status",
-                                    "lastAttemptAt",
-                                    "createdAt"
-                                  ],
-                                  "additionalProperties": false
-                                }
                               }
                             },
                             "required": [
@@ -8822,8 +8691,7 @@
                               "lastConversationAt",
                               "lastErrorKind",
                               "lastErrorAt",
-                              "consecutiveFailures",
-                              "failures"
+                              "consecutiveFailures"
                             ],
                             "additionalProperties": false
                           }
@@ -8890,173 +8758,6 @@
                 }
               }
             },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/monitoring/retell/failures/{failureId}/replay": {
-      "post": {
-        "operationId": "replayMonitoringImportFailure",
-        "summary": "Replay a monitoring import failure",
-        "tags": [
-          "Monitoring"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "failureId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The resolved failure and imported trace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "monitoringImportFailure": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "status": {
-                          "type": "string",
-                          "const": "resolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "status"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "trace": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "write": {}
-                      },
-                      "required": [
-                        "id",
-                        "write"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "monitoringImportFailure",
-                    "trace"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "The request was refused.",
             "content": {
               "application/json": {
                 "schema": {
