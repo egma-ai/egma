@@ -73,14 +73,14 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // column — the shape both junction tables have, for the same reason.
   idempotent_operation: "org",
   grading_job: "gjb",
-  // One project's setup for one production agent platform.
-  monitoring_setup: "mns",
-  // One platform agent selected under a Retell monitoring setup.
-  retell_monitored_agent: "rma",
-  // A provider call egma could not fetch or normalize: its bounded retry
+  // One agent's polling notebook. It is keyed by the agent it belongs to
+  // rather than by an identity of its own — one row per agent, and there is no
+  // second thing it could be.
+  monitoring_state: "agt",
+  // A production call egma could not fetch or normalize: its bounded retry
   // budget, and then the identity-only marker that stops the overlap starting
   // a second one. It holds no provider document and expires by itself.
-  retell_call_retry: "rcr",
+  monitoring_failure: "mnf",
 };
 
 const declaredTables = (Object.values(schema) as unknown[])
@@ -584,8 +584,9 @@ describe("every enumerated value", () => {
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
-      { table: "connection", column: "agent_platform" },
-      { table: "connection", column: "connection_kind" },
+      { table: "agent", column: "agent_platform" },
+      { table: "connection", column: "connection_type" },
+      { table: "monitoring_state", column: "scan_kind" },
       { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },

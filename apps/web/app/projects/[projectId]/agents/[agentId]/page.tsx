@@ -72,7 +72,7 @@ export default function AgentDetailPage() {
  * A connection, said the same way the agents list says it.
  *
  * The product label comes down on the connection, derived by the registry from
- * its platform, connection kind, access variant, and modality. A label table
+ * its platform, connection type, access variant, and modality. A label table
  * kept in this application would be a second vocabulary able to disagree with
  * the registry that gates the connection forms.
  */

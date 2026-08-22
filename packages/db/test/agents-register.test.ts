@@ -57,8 +57,7 @@ function registration(overrides: {
   return {
     name: overrides.name ?? "Front desk",
     connection: {
-      agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
@@ -152,7 +151,7 @@ describe("a registration naming no connection", () => {
   });
 });
 
-describe("a connection kind with no reuse key", () => {
+describe("a connection type with no reuse key", () => {
   /**
    * A phone number is where egma dials, not who answers, and two agents may
    * share one — so the type declares no reuse key and registering the same
@@ -163,8 +162,7 @@ describe("a connection kind with no reuse key", () => {
     const dialled = await registerAgent(actingIn(acme.project), {
       name: "Reception line",
       connection: {
-        agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
@@ -175,8 +173,7 @@ describe("a connection kind with no reuse key", () => {
     const again = await registerAgent(actingIn(acme.project), {
       name: "Reception line, second team",
       connection: {
-        agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
@@ -245,8 +242,6 @@ describe("a credential rotated by a reused registration", () => {
     );
     const agentId = opened.agent.id;
     const connectionId = opened.connection?.id ?? "";
-    // What the open page is holding.
-    const staleRevision = opened.connection?.revision ?? "";
 
     const rotated = await registerAgent(
       actingIn(acme.project),
@@ -259,25 +254,17 @@ describe("a credential rotated by a reused registration", () => {
 
     expect(rotated.result).toBe("reused");
     expect(rotated.connection?.id).toBe(connectionId);
-    expect(rotated.connection?.revision).not.toBe(staleRevision);
+    expect(rotated.connection?.credentialsHint).toBe("ZZZZ");
 
-    await expect(
-      updateConnection(actingIn(acme.project), agentId, connectionId, {
-        name: "Renamed from the stale tab",
-        expectedRevision: staleRevision,
-      }),
-    ).rejects.toBeInstanceOf(IdentityConflictError);
-
-    // Naming the revision the rotation left behind is how the edit lands, and
-    // reading it again is what puts the new credential hint in front of them.
-    const current = rotated.connection?.revision ?? "";
+    // The stale tab's rename lands: there is no revision left to refuse it,
+    // and last-writer-wins is the pre-launch choice.
     const renamed = await updateConnection(
       actingIn(acme.project),
       agentId,
       connectionId,
-      { name: "Renamed after reading again", expectedRevision: current },
+      { name: "Renamed from the stale tab" },
     );
-    expect(renamed?.name).toBe("Renamed after reading again");
+    expect(renamed?.name).toBe("Renamed from the stale tab");
     expect(renamed?.credentialsHint).toBe("ZZZZ");
   });
 });

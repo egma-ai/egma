@@ -31,10 +31,16 @@ type AnsweredConnection = AddConnectionResponse["connection"];
 export type NewConnection = {
   /** Omit and the platform chooses a numbered product-label name. */
   readonly name?: string | undefined;
-  /** Who runs the agent, or null when Egma does not know. */
-  readonly agentPlatform: ConnectionInput["agentPlatform"];
+  /**
+   * Who runs the agent, or null when Egma does not know.
+   *
+   * It is not sent any more: the platform answers it from the connection type
+   * where the type pins one, and from the agent's own binding where it does
+   * not. The wizard still carries it to choose what to build.
+   */
+  readonly agentPlatform: "retell" | "livekit_agents" | null;
   /** What Egma connects to for this simulation. */
-  readonly connectionKind: ConnectionInput["connectionKind"];
+  readonly connectionKind: ConnectionInput["connectionType"];
   /** How Egma gets access to that connection. */
   readonly accessVariant: ConnectionInput["accessVariant"];
   readonly modality: ConnectionInput["modality"];
@@ -139,7 +145,7 @@ function cleanConnection(connection: AnsweredConnection): RegisteredConnection {
     name: platformText(connection.name),
     agentPlatform:
       connection.agentPlatform === null ? null : platformText(connection.agentPlatform),
-    connectionKind: platformText(connection.connectionKind),
+    connectionKind: platformText(connection.connectionType),
     accessVariant: platformText(connection.accessVariant),
     modality: platformText(connection.modality),
     productLabel: platformText(connection.productLabel),
@@ -156,8 +162,7 @@ function connectionParameters(connection: NewConnection): ConnectionInput {
     connection.agentPlatformSelection?.credentials.reveal();
   return {
     ...(connection.name === undefined ? {} : { name: connection.name }),
-    agentPlatform: connection.agentPlatform,
-    connectionKind: connection.connectionKind,
+    connectionType: connection.connectionKind,
     accessVariant: connection.accessVariant,
     modality: connection.modality,
     ...(connection.environment === undefined

@@ -76,26 +76,25 @@ afterAll(async () => {
 });
 
 describe("creating an agent", () => {
-  it("returns an agt_ id and fetch round-trips name and description", async () => {
-    const created = await createAgent(actingAsAcme(), {
-      name: "Front Desk",
-      description: "Books appointments for the clinic",
-    });
+  it("returns an agt_ id and fetch round-trips the name", async () => {
+    const created = await createAgent(actingAsAcme(), { name: "Front Desk" });
 
     expect(isId("agt", created.id)).toBe(true);
 
     const fetched = await getAgent(actingAsAcme(), created.id);
     expect(fetched).toBeDefined();
     expect(fetched?.name).toBe("Front Desk");
-    expect(fetched?.description).toBe("Books appointments for the clinic");
     expect(fetched?.projectId).toBe(acme.project);
   });
 
-  it("takes no description as none: the fetch answers null", async () => {
+  it("opens unbound: no platform, no key, and the pull switch off", async () => {
     const created = await createAgent(actingAsAcme(), { name: "Terse" });
 
     const fetched = await getAgent(actingAsAcme(), created.id);
-    expect(fetched?.description).toBeNull();
+    expect(fetched?.agentPlatform).toBeNull();
+    expect(fetched?.platformAgentId).toBeNull();
+    expect(fetched?.monitoringApiKeyHint).toBeNull();
+    expect(fetched?.pullProductionCalls).toBe(false);
   });
 
   it("needs a name that is more than whitespace", async () => {
@@ -232,7 +231,7 @@ describe("the database itself", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_type, access_variant, modality, topology, config, revision)
          values ($1, $2, $3, $4, 'staging', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001')`,
         [newId("con"), acme.organization, globex.project, anchor.id],
       ),
@@ -250,7 +249,7 @@ describe("the database itself", () => {
     await expect(
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_type, access_variant, modality, topology, config, revision)
          values ($1, $2, $3, $4, 'astray', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001')`,
         [newId("con"), acme.organization, acme.secondProject, homed.id],
       ),
@@ -265,7 +264,7 @@ describe("the database itself", () => {
     const halfSealed = (credentials: string | null, hint: string | null) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision, credentials, credentials_hint)
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_type, access_variant, modality, topology, config, revision, credentials, credentials_hint)
          values ($1, $2, $3, $4, $5, 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001', $6, $7)`,
         [
           newId("con"),
@@ -292,7 +291,7 @@ describe("the database itself", () => {
     const staging = (id: string) =>
       database.sql(
         `insert into connection
-           (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
+           (id, organization_id, project_id, agent_id, name, agent_platform, connection_type, access_variant, modality, topology, config, revision)
          values ($1, $2, $3, $4, 'staging', 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}', 'rev_00000000000000000000000001')`,
         [id, acme.organization, acme.project, wired.id],
       );

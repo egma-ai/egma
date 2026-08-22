@@ -2065,22 +2065,22 @@ describe("the connection type leaving the simulation row (0019)", () => {
         where conname in (
           'connection_type_allowed',
           'connection_agent_platform_allowed',
-          'connection_kind_allowed',
+          'connection_type_allowed',
           'connection_access_variant_allowed'
         ) order by conname`,
     );
     expect(rows.map((row) => row.name)).toEqual([
       "connection_access_variant_allowed",
       "connection_agent_platform_allowed",
-      "connection_kind_allowed",
+      "connection_type_allowed",
     ]);
   });
 
-  it("keeps modality, which remains separate from the connection kind", async () => {
+  it("keeps modality, which remains separate from the connection type", async () => {
     // The row's own check names it, and a CHECK cannot join — which is why
     // this column stayed where the legacy type went. A recording on a conversation
     // that was not voice is still refused by the row itself, and the write
-    // that proves it names no connection kind at all.
+    // that proves it names no connection type at all.
     await expect(
       client.query(
         `insert into simulation
@@ -3886,7 +3886,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       config: { retellAgentId: "agent_retell_chat" },
       expected: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
       },
     },
@@ -3901,7 +3901,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       config: { phoneNumber: "+15551234567" },
       expected: {
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
       },
     },
@@ -3919,7 +3919,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       },
       expected: {
         agentPlatform: "livekit_agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: "livekit_room.project_credentials",
       },
     },
@@ -3937,7 +3937,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       },
       expected: {
         agentPlatform: "livekit_agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
       },
     },
@@ -4172,10 +4172,10 @@ describe("the direct Monitoring cutover (0038)", () => {
     const { rows: connections } = await client.query<{
       id: string;
       agent_platform: string | null;
-      connection_kind: string;
+      connection_type: string;
       access_variant: string;
     }>(
-      `select id, agent_platform, connection_kind, access_variant
+      `select id, agent_platform, connection_type, access_variant
          from connection order by id`,
     );
     const connectionById = new Map(connections.map((row) => [row.id, row]));
@@ -4192,12 +4192,12 @@ describe("the direct Monitoring cutover (0038)", () => {
       expect(connectionById.get(reach.connectionId)).toEqual({
         id: reach.connectionId,
         agent_platform: reach.expected.agentPlatform,
-        connection_kind: reach.expected.connectionKind,
+        connection_type: reach.expected.connectionType,
         access_variant: reach.expected.accessVariant,
       });
       expect(runById.get(reach.runId)).toEqual({
         agentPlatform: reach.expected.agentPlatform,
-        connectionKind: reach.expected.connectionKind,
+        connectionType: reach.expected.connectionType,
         accessVariant: reach.expected.accessVariant,
         modality: reach.modality,
         topology: reach.topology,
@@ -4214,7 +4214,7 @@ describe("the direct Monitoring cutover (0038)", () => {
 
     expect(rows[0]?.connection_snapshot).toEqual({
       agentPlatform: finishedRun.reach.expected.agentPlatform,
-      connectionKind: finishedRun.reach.expected.connectionKind,
+      connectionType: finishedRun.reach.expected.connectionType,
       accessVariant: finishedRun.reach.expected.accessVariant,
       modality: finishedRun.reach.modality,
       topology: finishedRun.reach.topology,
@@ -4429,7 +4429,7 @@ describe("the clean test-suite cutover (0040)", () => {
     await client.query(
       `insert into connection
          (id, organization_id, project_id, agent_id, name, agent_platform,
-          connection_kind, modality, topology, access_variant, config,
+          connection_type, modality, topology, access_variant, config,
           capability_state, capabilities_measured, capabilities_supported,
           capabilities_checked_at, capability_source, revision)
        values ($1, $2, $3, $4, 'Chat', 'retell', 'retell_chat_api', 'chat',
@@ -4534,7 +4534,7 @@ describe("the clean test-suite cutover (0040)", () => {
         JSON.stringify({ personaIds: [personaId] }),
         JSON.stringify({
           agentPlatform: "retell",
-          connectionKind: "retell_chat_api",
+          connectionType: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           topology: "hosted-broker",
@@ -4696,9 +4696,11 @@ describe("the Retell polling-control cutover (0041)", () => {
 
   const organizationId = newId("org");
   const projectId = newId("prj");
-  const setupId = newId("mns");
-  const importingAgent = newId("rma");
-  const pollingAgent = newId("rma");
+  // Prefixes this release no longer mints, written out because the schema
+  // these fixtures land in is the one 0041 was written against.
+  const setupId = `mns_${"A".repeat(26)}`;
+  const importingAgent = `rma_${"B".repeat(26)}`;
+  const pollingAgent = `rma_${"C".repeat(26)}`;
   const oldClaim = { id: `ptc_${"A".repeat(26)}`, callId: "call_before_it" };
   const oldFailure = { id: `rif_${"A".repeat(26)}`, callId: "call_lost" };
 
@@ -4911,7 +4913,7 @@ describe("the Retell polling-control cutover (0041)", () => {
           next_attempt_at)
        values ($1, $2, $3, $4, 'call_retrying', 'provider_call_refused', 1,
           now(), now() + interval '30 seconds')`,
-      [newId("rcr"), organizationId, projectId, pollingAgent],
+      [`rcr_${"D".repeat(26)}`, organizationId, projectId, pollingAgent],
     );
     await expect(
       client.query(
@@ -4921,7 +4923,7 @@ describe("the Retell polling-control cutover (0041)", () => {
             next_attempt_at, expires_at)
          values ($1, $2, $3, $4, 'call_both', 'provider_call_refused', 1,
             now(), now(), now())`,
-        [newId("rcr"), organizationId, projectId, pollingAgent],
+        [`rcr_${"E".repeat(26)}`, organizationId, projectId, pollingAgent],
       ),
     ).rejects.toMatchObject({ constraint: "retell_call_retry_one_schedule" });
     await expect(
@@ -4932,7 +4934,7 @@ describe("the Retell polling-control cutover (0041)", () => {
             next_attempt_at)
          values ($1, $2, $3, $4, 'call_over_budget', 'provider_call_refused',
             5, now(), now())`,
-        [newId("rcr"), organizationId, projectId, pollingAgent],
+        [`rcr_${"F".repeat(26)}`, organizationId, projectId, pollingAgent],
       ),
     ).rejects.toMatchObject({
       constraint: "retell_call_retry_attempts_bounded",

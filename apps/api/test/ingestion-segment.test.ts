@@ -181,7 +181,7 @@ describe("what a segment is allowed to contain", () => {
       "agent_platform",
       "agent_version_id",
       "audio_url",
-      "connection_kind",
+      "connection_type",
       "duration_nanoseconds",
       "emitter",
       "ends_trace",

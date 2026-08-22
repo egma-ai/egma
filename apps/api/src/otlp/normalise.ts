@@ -256,7 +256,7 @@ const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
 // is not settled, so it must not be relabelled as platform-agent identity.
 const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
 const PLATFORM_AGENT_VERSION_ATTRIBUTES = ["lk.agent_version"];
-const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_kind"];
+const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_type"];
 
 /**
  * How much of one export egma will turn into rows.

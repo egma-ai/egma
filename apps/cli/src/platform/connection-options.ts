@@ -39,7 +39,7 @@ export type CredentialField = {
 export type ConnectionOption = {
   readonly agentPlatform: GeneratedOption["agentPlatform"];
   readonly agentPlatformLabel: string;
-  readonly connectionKind: GeneratedOption["connectionKind"];
+  readonly connectionKind: GeneratedOption["connectionType"];
   readonly accessVariant: GeneratedOption["accessVariant"];
   readonly accessVariantLabel: string;
   readonly modality: GeneratedOption["modality"];
@@ -66,7 +66,7 @@ function cleanOption(option: GeneratedOption): ConnectionOption {
   return {
     agentPlatform: option.agentPlatform,
     agentPlatformLabel: platformText(option.agentPlatformLabel),
-    connectionKind: option.connectionKind,
+    connectionKind: option.connectionType,
     accessVariant: option.accessVariant,
     accessVariantLabel: platformText(option.accessVariantLabel),
     modality: option.modality,

@@ -436,7 +436,7 @@ async function assembledSpec(
     modality: claim.modality,
     connection: {
       agent_platform: connection.agentPlatform,
-      connection_kind: connection.connectionType,
+      connection_type: connection.connectionType,
       access_variant: connection.accessVariant,
       config: connection.config,
       credentials: connection.credentials,

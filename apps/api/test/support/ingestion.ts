@@ -49,7 +49,7 @@ export function aRecord(
     platform_agent_id: "agent_44b1",
     platform_agent_name: "Front desk",
     platform_agent_version: "7",
-    connection_kind: "phone",
+    connection_type: "phone",
     run_id: "",
     agent_id: "",
     agent_version_id: "",

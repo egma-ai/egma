@@ -87,8 +87,7 @@ async function oneQueuedSimulation(
   const created = await createAgent(auth, {
     name: `Front desk ${label}`,
     connection: {
-      agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_${label}` },

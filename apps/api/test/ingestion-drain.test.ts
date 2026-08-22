@@ -1,11 +1,9 @@
 import {
   appendSpans,
   committedSpans,
-  configureLiveKitMonitoring,
   connectClickHouse,
   disconnectClickHouse,
   DRAIN_ADVISORY_LOCK,
-  listMonitoringSetups,
   openDrainOwnership,
   type AuthContext,
 } from "@egma/db";
@@ -242,7 +240,6 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       role: "admin",
       via: "session",
     };
-    await configureLiveKitMonitoring(auth);
 
     bucket = pendingObjectStore(running.ingestStore);
     drainer = startDrainer({
@@ -286,11 +283,12 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     expect(await gradingJobsFor(traceId)).toEqual([
       { root_closed_at: expect.any(Date), last_seen_at: expect.any(Date) },
     ]);
-    expect(
-      (await listMonitoringSetups(auth)).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeInstanceOf(Date);
+    // A pushing agent has no polling notebook, so the drain moves none — the
+    // door's bookkeeping for push is that there is none.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*) as count from monitoring_state",
+    );
+    expect(rows[0]?.count).toBe("0");
 
     // And only then is the object gone.
     expect((await pending()).map((object) => object.key)).not.toContain(key);

@@ -103,7 +103,7 @@ export type IngestionRecord = {
   readonly platform_agent_id: string;
   readonly platform_agent_name: string;
   readonly platform_agent_version: string;
-  readonly connection_kind: string;
+  readonly connection_type: string;
   readonly run_id: string;
   readonly agent_id: string;
   readonly agent_version_id: string;
@@ -158,7 +158,7 @@ const RECORD_KEYS = [
   "agent_platform",
   "agent_version_id",
   "audio_url",
-  "connection_kind",
+  "connection_type",
   "duration_nanoseconds",
   "emitter",
   "ends_trace",
@@ -238,7 +238,7 @@ export function spanFor(record: IngestionRecord): NewSpan {
     platformAgentId: record.platform_agent_id,
     platformAgentName: record.platform_agent_name,
     platformAgentVersion: record.platform_agent_version,
-    connectionType: record.connection_kind,
+    connectionType: record.connection_type,
     runId: record.run_id,
     agentId: record.agent_id,
     agentVersionId: record.agent_version_id,
@@ -274,7 +274,7 @@ export function recordFor(span: NewSpan): IngestionRecord {
     platform_agent_id: span.platformAgentId,
     platform_agent_name: span.platformAgentName,
     platform_agent_version: span.platformAgentVersion,
-    connection_kind: span.connectionType,
+    connection_type: span.connectionType,
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,

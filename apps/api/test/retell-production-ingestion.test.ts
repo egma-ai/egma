@@ -1,7 +1,7 @@
 import type {
   NewSpan,
-  RetellMonitoringTarget,
-  TransientRetellCall,
+  MonitoringTarget,
+  TransientProductionCall,
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -32,11 +32,11 @@ const AUTH = {
   via: "monitoring",
 } as const;
 
-const TARGET: RetellMonitoringTarget = {
-  setupId: "mns_ingestion_test",
-  monitoredAgentId: "rma_ingestion_test",
+const TARGET: MonitoringTarget = {
+  agentId: "agt_0000000000000000000000TEST",
+  agentPlatform: "retell",
   platformAgentId: "agent-secret-id-must-not-be-logged",
-  platformAgentName: "Private agent name must not be logged",
+  agentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
   scanKind: "historical_import",
   scanFrom: new Date("2026-07-20T12:00:00.000Z"),
@@ -45,7 +45,7 @@ const TARGET: RetellMonitoringTarget = {
   seenPaginationKeys: [],
   importGeneration: 1,
   hasTransientCallState: false,
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
@@ -110,7 +110,7 @@ function record(rows: Map<string, RetryRow> = new Map()): StoreRecord {
 function transientOf(
   providerCallId: string,
   row: RetryRow,
-): TransientRetellCall {
+): TransientProductionCall {
   return {
     providerCallId,
     attempts: row.attempts,
@@ -124,7 +124,7 @@ type StoreChanges = Partial<RetellProductionIngestionStore>;
 
 function store(
   recorded: StoreRecord,
-  target: RetellMonitoringTarget | undefined = TARGET,
+  target: MonitoringTarget | undefined = TARGET,
   changes: StoreChanges = {},
 ): RetellProductionIngestionStore {
   let offered = false;
@@ -134,42 +134,40 @@ function store(
       (row.expiresAt !== null && row.expiresAt > now));
 
   return {
-    async claimDueRetellMonitoringAgent() {
+    async claimDueMonitoringAgent() {
       recorded.claims += 1;
       if (offered || target === undefined) return undefined;
       offered = true;
       return { ...target, hasTransientCallState: recorded.rows.size > 0 };
     },
-    async renewRetellMonitoringLease() {
+    async renewMonitoringLease() {
       recorded.renewals += 1;
       return true;
     },
-    async checkpointRetellMonitoringPage(_auth, _target, checkpoint) {
+    async checkpointMonitoringPage(_auth, _target, checkpoint) {
       recorded.checkpoints.push(checkpoint);
       return true;
     },
-    async yieldRetellMonitoringLease(_auth, _target, input) {
+    async yieldMonitoringLease(_auth, _target, input) {
       recorded.yields.push(input.retryAt);
       return true;
     },
-    async finishRetellMonitoringScan(_auth, _target, options) {
+    async finishMonitoringScan(_auth, _target, options) {
       recorded.finishes.push(options?.pollMilliseconds ?? -1);
       return true;
     },
-    async failRetellMonitoringTarget(_auth, _target, input) {
-      recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
-      return { changed: true, failures: 1, startedAt: input.now ?? BASE };
-    },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
-    },
-    async releaseRetellMonitoringLease(_auth, _target, input) {
+    async failMonitoringTarget(_auth, _target, input) {
+      recorded.failures.push({
+        kind: input.errorKind,
+        retryAt: input.retryAt,
+      });
       recorded.releases.push(input.errorKind);
+      return { recorded: true, failures: 1 };
     },
-    async transientRetellCallState(_auth, input) {
+    async transientProductionCallState(_auth, input) {
       recorded.transientLookups.push([...input.providerCallIds]);
       const now = input.now ?? BASE;
-      const found = new Map<string, TransientRetellCall>();
+      const found = new Map<string, TransientProductionCall>();
       for (const providerCallId of input.providerCallIds) {
         const row = recorded.rows.get(providerCallId);
         if (row === undefined) continue;
@@ -178,9 +176,9 @@ function store(
       }
       return found;
     },
-    async dueRetellCallRetries(_auth, input) {
+    async dueProductionCallRetries(_auth, input) {
       const now = input.now ?? BASE;
-      const due: TransientRetellCall[] = [];
+      const due: TransientProductionCall[] = [];
       for (const [providerCallId, row] of recorded.rows) {
         if (row.importGeneration !== input.importGeneration) continue;
         if (row.nextAttemptAt === null || row.nextAttemptAt > now) continue;
@@ -188,7 +186,7 @@ function store(
       }
       return due;
     },
-    async recordRetellCallAttempt(_auth, owner, input) {
+    async recordProductionCallAttempt(_auth, owner, input) {
       const now = input.now ?? BASE;
       const held = recorded.rows.get(input.providerCallId);
       const carries =
@@ -211,13 +209,13 @@ function store(
           : null,
         importGeneration: owner.importGeneration,
       });
-      return { recorded: true, attempts, dropped, changed: attempts === 1 };
+      return { recorded: true, attempts, dropped };
     },
-    async deleteRetellCallRetry(_auth, _target, input) {
+    async deleteProductionCallFailure(_auth, input) {
       recorded.deletes.push(input.providerCallId);
       recorded.rows.delete(input.providerCallId);
     },
-    async sweepExpiredRetellCallMarkers(_auth, input) {
+    async sweepExpiredProductionCallMarkers(_auth, input) {
       recorded.sweeps += 1;
       const now = input.now ?? BASE;
       let swept = 0;
@@ -410,7 +408,7 @@ function logger(): {
 }
 
 type MetricRecord = {
-  attempts: RetellMonitoringTarget["scanKind"][];
+  attempts: MonitoringTarget["scanKind"][];
   turns: RetellProductionIngestionMetricTurn[];
   lags: number[];
   providerFailures: string[];
@@ -707,7 +705,7 @@ describe("Retell production ingestion", () => {
     const recorded = record();
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         recorded.renewals += 1;
         return false;
       },
@@ -735,7 +733,7 @@ describe("Retell production ingestion", () => {
     let renewals = 0;
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -770,7 +768,7 @@ describe("Retell production ingestion", () => {
     let listRequests = 0;
     let hydrationRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -963,12 +961,15 @@ describe("Retell production ingestion", () => {
     });
   });
 
-  it("uses one setup-wide Retry-After gate without a repeated log", async () => {
+  it("honours the provider's own Retry-After for this agent alone", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
-      async failRetellMonitoringTarget(_auth, _target, input) {
-        recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
-        return { changed: false, failures: 4, startedAt: BASE };
+      async failMonitoringTarget(_auth, _target, input) {
+        recorded.failures.push({
+          kind: input.errorKind,
+          retryAt: input.retryAt,
+        });
+        return { recorded: false, failures: 4 };
       },
     });
     const { log, events } = logger();
@@ -1001,12 +1002,12 @@ describe("Retell production ingestion", () => {
     expect(observed.recorded.providerFailures).toEqual(["rate_limited"]);
   });
 
-  it("caps unavailable-provider backoff and logs only the health transition", async () => {
+  it("caps this agent's unavailable-provider backoff and reports it once", async () => {
     const recorded = record();
     const { log, events } = logger();
-    const failedManyTimes: RetellMonitoringTarget = {
+    const failedManyTimes: MonitoringTarget = {
       ...TARGET,
-      setupConsecutiveFailures: 20,
+      consecutiveFailures: 20,
     };
 
     await runRetellProductionIngestion({
@@ -1034,37 +1035,7 @@ describe("Retell production ingestion", () => {
     expect(events.error).toHaveLength(0);
   });
 
-  it("logs one recovery after a successful provider turn", async () => {
-    const recorded = record();
-    const { log, events } = logger();
-    const storage = store(recorded, TARGET, {
-      async recoverRetellMonitoringSetup() {
-        return {
-          recovered: true,
-          failures: 3,
-          startedAt: new Date(BASE.getTime() - 60_000),
-        };
-      },
-    });
-
-    await runRetellProductionIngestion({
-      log,
-      store: storage,
-      provider: provider(),
-      clock: () => BASE,
-    });
-
-    expect(events.info).toHaveLength(1);
-    expect(events.info[0]).toMatchObject({
-      "otel.event.name": "egma.monitoring.retell.health.recovered",
-      outage_duration_ms: 60_000,
-      failure_count: 3,
-    });
-    expect(events.warn).toEqual([]);
-    expect(events.error).toEqual([]);
-  });
-
-  it("blocks an invalid key until configuration changes and logs only its state change", async () => {
+  it("holds an invalid key until the key changes, and reports it once", async () => {
     const recorded = record();
     const { log, events } = logger();
 
@@ -1085,7 +1056,7 @@ describe("Retell production ingestion", () => {
     expect(events.error).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain(TARGET.apiKey);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentId);
-    expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentName);
+    expect(JSON.stringify(events)).not.toContain(TARGET.agentName);
   });
 
   it("applies a request deadline and classifies a timed-out read as unavailable", async () => {
@@ -1503,7 +1474,7 @@ describe("the bounded Retell retry budget", () => {
 
     const turn = async (
       at: Date,
-      target: RetellMonitoringTarget = TARGET,
+      target: MonitoringTarget = TARGET,
     ): Promise<RetellProductionIngestionResult> =>
       runRetellProductionIngestion({
         log: heard.log,
@@ -1616,7 +1587,7 @@ describe("the bounded Retell retry budget", () => {
     expect(dropped[0]).toMatchObject({
       organization_id: AUTH.organizationId,
       project_id: AUTH.projectId,
-      retell_monitored_agent_id: TARGET.monitoredAgentId,
+      retell_monitored_agent_id: TARGET.agentId,
       provider_call_id: "call_that_will_not_hydrate",
       error_kind: "provider_call_not_found",
       automatic_retries: 3,
@@ -1679,7 +1650,7 @@ describe("the bounded Retell retry budget", () => {
     // never the setup door.
     world.succeed();
     world.recorded.rows.clear();
-    const reimport: RetellMonitoringTarget = {
+    const reimport: MonitoringTarget = {
       ...TARGET,
       scanKind: "historical_import",
       importGeneration: 2,
@@ -1711,7 +1682,7 @@ describe("the bounded Retell retry budget", () => {
     expect(world.recorded.rows.size).toBe(1);
 
     world.succeed();
-    const reimport: RetellMonitoringTarget = {
+    const reimport: MonitoringTarget = {
       ...TARGET,
       scanKind: "historical_import",
       importGeneration: 2,

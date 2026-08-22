@@ -2676,13 +2676,13 @@ describe("the complete product, walked in order in a second project", () => {
         config: Record<string, unknown>;
         credentials: string | null;
       }>(
-        `select id, agent_platform, connection_kind, access_variant, modality, config, credentials
+        `select id, agent_platform, connection_type, access_variant, modality, config, credentials
            from connection where name = 'Retell staging'`,
       );
       expect(stored.rows).toHaveLength(1);
       expect(stored.rows[0]).toMatchObject({
         agent_platform: "retell",
-        connection_kind: "phone_number",
+        connection_type: "phone_number",
         access_variant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: BROWSER_RETELL_NUMBER },

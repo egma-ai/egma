@@ -1,8 +1,6 @@
 import { gzipSync } from "node:zlib";
 
 import {
-  configureLiveKitMonitoring,
-  listMonitoringSetups,
   type AuthContext,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -157,28 +155,14 @@ afterAll(async () => {
 });
 
 describe.skipIf(!storage.available)("what the door stages for Monitoring", () => {
-  function auth(): AuthContext {
-    return {
-      userId,
-      organizationId,
-      projectId,
-      role: "admin",
-      via: "session",
-    };
-  }
-
   /**
-   * Monitoring's "last heard from" is a fact about evidence being
-   * *query-visible*, so the door does not assert it: it accepts, and what the
-   * drainer finds in the object is what moves that state. What the door decides
-   * is which of these exports produces evidence at all, and that is what is read
-   * out of the pending object here — the setup's own bookkeeping is proved where
-   * the drainer writes it.
+   * The door consults no monitoring state and writes none, which is the whole
+   * of what push is owed: the project key authenticates, tenancy comes from the
+   * key, and the stored evidence is the record. What the door decides is which
+   * of these exports produces evidence at all, and that is what is read out of
+   * the pending object here.
    */
   it("stages nothing for evidence it refuses, and platform identity for what it takes", async () => {
-    const configured = await configureLiveKitMonitoring(auth());
-    expect(configured.lastReceivedAt).toBeNull();
-
     const refused = await stage(
       jsonExport([
         jsonSpan({
@@ -227,13 +211,13 @@ describe.skipIf(!storage.available)("what the door stages for Monitoring", () =>
       // conversation is over. Nothing infers it from the span having no parent.
       ends_trace: true,
     });
+    // Drains clean with no monitoring row anywhere: a pushing agent is not
+    // registered, is not stamped, and is not gated.
     await api.drainEvidence();
-
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      ),
-    ).toBeDefined();
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*) as count from monitoring_state",
+    );
+    expect(rows[0]?.count).toBe("0");
   });
 });
 

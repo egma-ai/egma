@@ -327,7 +327,7 @@ function canonicalEvidence(span: NewSpan): string {
     agent_platform: span.agentPlatform,
     agent_version_id: span.agentVersionId,
     audio_url: span.audioUrl,
-    connection_kind: span.connectionType,
+    connection_type: span.connectionType,
     duration_nanoseconds: span.durationNanoseconds.toString(),
     emitter: span.emitter,
     ends_trace: span.endsTrace,

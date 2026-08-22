@@ -104,7 +104,7 @@ const WORK_DISPATCHING = [
   // The poller names no customer. It claims the next due selected agent and
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringAgent",
   // Which process, out of however many are running, drains the pending prefix.
   // One claim per deployment rather than one per customer: the prefix holds
   // every project's evidence, so there is no customer to name.
@@ -168,7 +168,7 @@ const CONTEXT_REQUIRING = [
   // know whether a phone call is what this run would place. It answers a kind
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
-  "connectionKindOf",
+  "connectionTypeOf",
   // What the trace store already holds, asked about a batch at a time and
   // answered without any evidence in it: which spans are committed and what
   // each of their fingerprints is, and which of a list of trace ids exist.
@@ -209,9 +209,9 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failRetellMonitoringTarget",
+  "failMonitoringTarget",
   "finishGradingJob",
-  "finishRetellMonitoringScan",
+  "finishMonitoringScan",
   "getAgent",
   "getConnection",
   "getGrader",
@@ -296,12 +296,12 @@ const CONTEXT_REQUIRING = [
   // Poll progress belongs to the selected Monitoring agent, never to a
   // simulation connection. A call that lands writes nothing here at all; only
   // one that did not leaves a short-lived retry row behind it.
-  "checkpointRetellMonitoringPage",
-  "deleteRetellCallRetry",
-  "dueRetellCallRetries",
-  "recordRetellCallAttempt",
-  "sweepExpiredRetellCallMarkers",
-  "transientRetellCallState",
+  "checkpointMonitoringPage",
+  "deleteProductionCallFailure",
+  "dueProductionCallRetries",
+  "recordProductionCallAttempt",
+  "sweepExpiredProductionCallMarkers",
+  "transientProductionCallState",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
@@ -319,7 +319,7 @@ const CONTEXT_REQUIRING = [
   "restoreConnection",
   "removeMonitoringSetup",
   "renameTestSuite",
-  "renewRetellMonitoringLease",
+  "renewMonitoringLease",
   "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
@@ -388,7 +388,7 @@ const CONTEXT_REQUIRING = [
   // and the answers to whatever that entry's form asked.
   "useLibraryEntry",
   "writePlatformSettings",
-  "yieldRetellMonitoringLease",
+  "yieldMonitoringLease",
 ];
 
 /**
@@ -561,7 +561,7 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
-  "connectionKindUsesPlatformCarrier",
+  "connectionTypeUsesPlatformCarrier",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
@@ -623,7 +623,7 @@ const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
  * The lock's key is exported so an operator reading `pg_locks` can tell egma's
  * two advisory locks apart without reading the source.
  */
-const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
+const THE_RETELL_BUDGET = ["MOST_PRODUCTION_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
 /**
  * What a mock tool's answer may cost the exchange that carries it, and the two

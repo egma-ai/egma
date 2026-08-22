@@ -149,15 +149,13 @@ describe("what a browser is told about a simulation connection", () => {
     expect(connectionOptionMetadata()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          agentPlatform: "retell",
-          connectionKind: "phone_number",
+          connectionType: "phone_number",
           accessVariant: "phone_number.public_e164",
           modality: "voice",
           productLabel: "Retell phone",
         }),
         expect.objectContaining({
-          agentPlatform: null,
-          connectionKind: "phone_number",
+          connectionType: "phone_number",
           accessVariant: "phone_number.public_e164",
           modality: "voice",
           productLabel: "Phone number",
@@ -166,16 +164,11 @@ describe("what a browser is told about a simulation connection", () => {
     );
   });
 
-  it("refuses a platform that is not part of an explicit supported tuple", () => {
+  it("refuses a tuple that is not one of the explicit supported ones", () => {
     expect(() =>
-      productLabelOf(
-        "vapi" as never,
-        "phone_number",
-        "phone_number.public_e164",
-        "voice",
-      ),
+      productLabelOf("phone_number", "retell_chat_api.api_key", "voice"),
     ).toThrow(
-      "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+      "connection type, access variant, and modality do not form a supported simulation connection",
     );
   });
 });

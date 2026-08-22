@@ -57,7 +57,7 @@ const RESCHEDULING = {
 
 const RETELL = {
   agentPlatform: "retell",
-  connectionKind: "retell_chat_api",
+  connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
@@ -66,7 +66,7 @@ const RETELL = {
 
 const LIVEKIT = {
   agentPlatform: "livekit_agents",
-  connectionKind: "livekit_room",
+  connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
@@ -78,7 +78,7 @@ const LIVEKIT = {
 
 const PHONE = {
   agentPlatform: null,
-  connectionKind: "phone_number",
+  connectionType: "phone_number",
   accessVariant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
@@ -366,7 +366,7 @@ describe("claiming work", () => {
     expect(spec.modality).toBe("chat");
     expect(spec.connection).toEqual({
       agent_platform: "retell",
-      connection_kind: "retell_chat_api",
+      connection_type: "retell_chat_api",
       access_variant: "retell_chat_api.api_key",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
