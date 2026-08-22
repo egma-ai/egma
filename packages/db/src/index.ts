@@ -209,5 +209,20 @@ export {
   type CredentialRuleName,
   type AccessVariantMetadata,
 } from "./access/connection-registry.ts";
+/**
+ * The two pure decisions about one span's evidence, taken before it is stored
+ * and again by whoever stores it.
+ *
+ * Here rather than on the data-access surface, and for that surface's own
+ * reason: neither reaches a store. A record goes in, a fingerprint or a refusal
+ * comes out, and there is no tenancy to stamp because there is nothing to stamp
+ * it on. Exported all the same, and from the same entry point as the folds,
+ * because each has to be worked out in exactly one place. The acceptance path
+ * refuses an oversize record before it is staged and fingerprints what it
+ * stages; this package fingerprints the row and compares it against what is
+ * already stored. Two implementations of either is one of them deciding that a
+ * conflict is a replay, or that a cut value is a whole one.
+ */
+export { refuseOversizeRecord, spanContentHash } from "./access/spans.ts";
 export * from "./access/index.ts";
 export * as schema from "./schema/index.ts";

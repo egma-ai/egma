@@ -649,6 +649,43 @@ export class TraceStoreRefusedError extends Error {
 }
 
 /**
+ * A record naming a field longer than the column it would be filed in.
+ *
+ * Its own class because it is the one refusal about the evidence rather than
+ * about the store: nothing failed, nothing was reached, and the answer is not
+ * "try again" but "this record cannot be stored as what it claims to be". The
+ * alternative — cutting the field to fit — is what this replaces, and it was
+ * worse than a refusal in the way that matters most: a shortened transcript is
+ * stored looking exactly like a whole one, so the customer whose evidence egma
+ * edited is the last person who could ever find out.
+ *
+ * It carries the field, the bound and the size rather than a sentence about
+ * them, because the caller has to report all three to whoever sent the record
+ * and the sentence is the part deliberately left free to improve.
+ */
+export class OversizeRecordError extends Error {
+  /** The `NewSpan` field, by the name the sender knows it as. */
+  readonly field: string;
+  /** What that field may hold, in bytes of UTF-8. */
+  readonly bound: number;
+  /** What arrived, in the same unit. */
+  readonly bytes: number;
+
+  constructor(field: string, bound: number, bytes: number) {
+    super(
+      `this record's ${field} is ${bytes} bytes of UTF-8, and the column holds ` +
+        `${bound}. It is refused rather than shortened: a value cut to fit is ` +
+        `stored looking exactly like a whole one, and nothing afterwards can ` +
+        `tell that it was cut. Send the record with a shorter ${field}.`,
+    );
+    this.name = "OversizeRecordError";
+    this.field = field;
+    this.bound = bound;
+    this.bytes = bytes;
+  }
+}
+
+/**
  * A trace query egma will not run, because of how it was asked rather than
  * because of who asked it.
  *

@@ -117,6 +117,7 @@ export {
   LastAdminError,
   MockToolTakenError,
   NotPermittedError,
+  OversizeRecordError,
   PersonaNameAmbiguousError,
   PersonaNamedByTestsError,
   EgmaProvidedPersonaError,
@@ -259,11 +260,29 @@ export {
 
 export {
   appendSpans,
+  type AppendSpansOptions,
   type AppendedSpans,
   type NewSpan,
   type SpanEmitter,
   type SpanSource,
 } from "./spans.ts";
+
+/**
+ * The two identity probes, beside the write they exist for.
+ *
+ * Neither reads evidence: one answers which spans the store already holds and
+ * what each of them says as a fingerprint, the other answers which of a list of
+ * traces exist. They take the context like every other call here and stamp the
+ * tenancy from it, and each takes a window it cannot be called without.
+ */
+export {
+  committedSpans,
+  committedTraces,
+  type CommittedSpan,
+  type CommittedSpansOptions,
+  type CommittedTracesOptions,
+  type SpanIdentity,
+} from "./span-identity.ts";
 
 export {
   listTraces,

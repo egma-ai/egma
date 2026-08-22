@@ -6,10 +6,55 @@ import {
 
 import { SERVICE_TOKEN_PREFIX } from "./auth/service-token.ts";
 import type { SmtpSettings } from "./auth/email.ts";
+import type { IngestionStore } from "./ingestion/object-store.ts";
 import type { BlobStore } from "./recordings/signed-link.ts";
 
 /** Which source owns the carrier route after the platform has started. */
 export type CarrierSettingsSource = "platform" | "environment";
+
+/**
+ * Which halves of ingestion this process serves.
+ *
+ * `all` is the deployment every self-host and the current hosted platform runs:
+ * one process accepts evidence and drains the pending prefix. The other two
+ * exist so that splitting those apart later is a setting rather than a second
+ * protocol and a second image — `ingest` accepts and never drains, `drain`
+ * drains and never accepts.
+ */
+export type DeploymentRole = "all" | "ingest" | "drain";
+
+/**
+ * Everything the durable ingestion path is told, in one place.
+ *
+ * **The numbers here are documented starting values, not proven capacity.**
+ * Each one is set where the code that reads it can survive it and where the
+ * bound it sits under is known — the segment byte bound sits under the trace
+ * store's own insert bound, the flush interval sits inside the product's
+ * two-second visibility target — and the release's capacity proof is what
+ * turns any of them into a claim.
+ */
+export type IngestionSettings = {
+  readonly role: DeploymentRole;
+  /**
+   * The ingestion bucket, or `undefined` on a deployment that has named no
+   * endpoint. Naming the endpoint is what selects it, the way naming the
+   * browser's address selects the recording store above.
+   */
+  readonly store: IngestionStore | undefined;
+  /** Where the local write-ahead log lives. A writable directory, on a volume. */
+  readonly logDirectory: string;
+  readonly logMaxBytes: number;
+  readonly logMaxRecords: number;
+  /** How long the oldest staged record waits for company before its segment seals. */
+  readonly flushMilliseconds: number;
+  /** Uncompressed NDJSON bytes, under the trace store's own insert bound. */
+  readonly segmentMaxBytes: number;
+  readonly segmentMaxRecords: number;
+  /** Past this, a request is answered retryably with its staged record retained. */
+  readonly requestTimeoutMilliseconds: number;
+  /** How often the whole pending prefix is listed, restart scan aside. */
+  readonly scanIntervalMilliseconds: number;
+};
 
 export type Config = {
   readonly databaseUrl: string;
@@ -135,6 +180,16 @@ export type Config = {
    */
   readonly blob: BlobStore | undefined;
   /**
+   * The durable ingestion path: which role this process serves, where staged
+   * evidence waits, and which bucket it becomes durable in.
+   *
+   * Separate from `blob` above and sharing nothing with it. One deployment can
+   * run both on one MinIO, and they still have two buckets and two credentials,
+   * because a workload that could read, delete or expire the other's objects
+   * would make either one's retention a promise neither can keep.
+   */
+  readonly ingestion: IngestionSettings;
+  /**
    * Where to post mail, if anywhere. **Absent is the ordinary case and is never
    * an error**: with no transport configured, signup asks for no verification
    * and an invitation hands its link back to the person who created it. Setting
@@ -167,6 +222,199 @@ function carrierSettingsSource(
   throw new Error(
     "EGMA_CARRIER_SETTINGS_SOURCE must be platform or environment, not " + raw,
   );
+}
+
+/** Which halves of ingestion this process serves. See `DeploymentRole`. */
+function deploymentRole(environment: NodeJS.ProcessEnv): DeploymentRole {
+  const raw = environment.EGMA_ROLE?.trim();
+  if (raw === undefined || raw === "") return "all";
+  if (raw === "all" || raw === "ingest" || raw === "drain") return raw;
+  throw new Error("EGMA_ROLE must be all, ingest or drain, not " + raw);
+}
+
+/**
+ * One ingestion bound, as a positive whole number.
+ *
+ * Refused by name rather than coerced, because every one of these is a bound
+ * that decides what happens under load: a zero or a stray unit suffix would
+ * turn a bound into a refusal of everything, at the moment there is most
+ * traffic to refuse.
+ */
+function bound(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+  fallback: number,
+): number {
+  const raw = environment[name]?.trim();
+  if (raw === undefined || raw === "") return fallback;
+  const held = Number(raw);
+  if (!Number.isInteger(held) || held <= 0) {
+    throw new Error(`${name} is not a positive whole number: ${raw}`);
+  }
+  return held;
+}
+
+/**
+ * The ingestion bucket and the credential confined to it, or `undefined` where
+ * nobody named an endpoint.
+ *
+ * **This address is Egma's own, and that is the difference from
+ * `EGMA_BLOB_PUBLIC_URL` next door.** The control plane has never opened a
+ * connection to an object store before this release — recordings are signed
+ * arithmetic and fetched by a browser — so this is the first setting in the
+ * file that names where *this container* reaches a store. On the bundled
+ * deployment that is `http://minio:9000`, which is exactly the value the
+ * recordings setting must never hold.
+ *
+ * All of it or none of it, refused at startup by name, on the recording store's
+ * discipline: half a credential accepts evidence it cannot make durable, and a
+ * request that answers `503` for a reason nobody can see is worse than a
+ * process that refuses to start naming the variable.
+ */
+function ingestionStore(
+  environment: NodeJS.ProcessEnv,
+): IngestionStore | undefined {
+  const endpoint = environment.EGMA_INGEST_ENDPOINT?.trim() || "";
+  if (endpoint === "") return undefined;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint);
+  } catch {
+    throw new Error(
+      `EGMA_INGEST_ENDPOINT is not a URL: ${endpoint}. It is the address this ` +
+        "container reaches the ingestion bucket at, and on the bundled " +
+        "deployment it looks like http://minio:9000.",
+    );
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(
+      `EGMA_INGEST_ENDPOINT speaks ${parsed.protocol} and Egma reaches an ` +
+        "object store over http: or https:",
+    );
+  }
+  // Scheme, host and port, and nothing after them — the narrowing the recording
+  // store's address makes, for a reason of its own. A credential in this URL
+  // would be a second place a credential lives, silently outranking the pair
+  // below; a path would be read as part of the bucket's address by one client
+  // and dropped by another, and a segment written under one reading would be
+  // invisible to a listing made under the other.
+  if (
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    (parsed.pathname !== "" && parsed.pathname !== "/") ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw new Error(
+      `EGMA_INGEST_ENDPOINT must be only the address Egma reaches the ` +
+        `ingestion store at — scheme, host and port, nothing else — and this ` +
+        `one carries more. Set it to ${parsed.origin}, and set the credential ` +
+        `in EGMA_INGEST_ACCESS_KEY_ID and EGMA_INGEST_SECRET_ACCESS_KEY rather ` +
+        `than in the address.`,
+    );
+  }
+
+  const accessKeyId = environment.EGMA_INGEST_ACCESS_KEY_ID?.trim() || "";
+  const secretAccessKey = environment.EGMA_INGEST_SECRET_ACCESS_KEY?.trim() || "";
+  const missing = [
+    accessKeyId === "" ? "EGMA_INGEST_ACCESS_KEY_ID" : "",
+    secretAccessKey === "" ? "EGMA_INGEST_SECRET_ACCESS_KEY" : "",
+  ].filter((name) => name !== "");
+  if (missing.length > 0) {
+    throw new Error(
+      `EGMA_INGEST_ENDPOINT names an ingestion store and this deployment is ` +
+        `missing ${missing.join(" and ")}. Both halves are one credential, and ` +
+        "it is its own — never the recording store's read pair and never the " +
+        "simulator's write pair. It is confined to this bucket's pending " +
+        "prefix, so one workload cannot read, delete or expire the other's " +
+        "objects.",
+    );
+  }
+
+  const bucket = environment.EGMA_INGEST_BUCKET?.trim() || DEFAULT_INGEST_BUCKET;
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(bucket)) {
+    throw new Error(
+      `EGMA_INGEST_BUCKET must be a bucket name — lower case, 3 to 63 ` +
+        `characters, letters, digits, dots and hyphens, and no separator; ` +
+        `got ${bucket}`,
+    );
+  }
+
+  return {
+    endpoint: parsed.origin,
+    bucket,
+    region: ingestRegion(environment, parsed),
+    accessKeyId,
+    secretAccessKey,
+  };
+}
+
+/**
+ * What the ingestion client signs for.
+ *
+ * The recording store's rule, one bucket over and for the same two reasons:
+ * MinIO ignores the region and every signature must still carry one, so a
+ * deployment that named none works; and on Amazon's own S3 the default is not a
+ * default but a wrong answer, refused by name rather than signed with. A bucket
+ * in `eu-west-1` signed for `us-east-1` refuses every upload with
+ * `SignatureDoesNotMatch`, which names neither the region nor the variable —
+ * and here that is not a recording that will not play, it is acceptance
+ * answering `503` for every request the deployment receives.
+ */
+function ingestRegion(environment: NodeJS.ProcessEnv, address: URL): string {
+  const named = environment.EGMA_INGEST_REGION?.trim() || "";
+  if (named !== "") return named;
+
+  if (address.hostname.endsWith(".amazonaws.com")) {
+    throw new Error(
+      `EGMA_INGEST_ENDPOINT points at ${address.hostname}, which is Amazon's ` +
+        "own S3, and no EGMA_INGEST_REGION was set. A signature carries the " +
+        "region and S3 refuses one signed for another, so Egma would sign " +
+        "every segment for us-east-1 and every acceptance would fail. Set " +
+        "EGMA_INGEST_REGION to the ingestion bucket's region.",
+    );
+  }
+  return DEFAULT_INGEST_REGION;
+}
+
+/** Everything the durable ingestion path is told. See `IngestionSettings`. */
+function ingestionSettings(
+  environment: NodeJS.ProcessEnv,
+): IngestionSettings {
+  return {
+    role: deploymentRole(environment),
+    store: ingestionStore(environment),
+    logDirectory:
+      environment.EGMA_INGESTION_LOG_DIR?.trim() || DEFAULT_INGESTION_LOG_DIR,
+    logMaxBytes: bound(environment, "EGMA_INGESTION_LOG_MAX_BYTES", 536_870_912),
+    logMaxRecords: bound(environment, "EGMA_INGESTION_LOG_MAX_RECORDS", 200_000),
+    flushMilliseconds: bound(
+      environment,
+      "EGMA_INGESTION_FLUSH_MILLISECONDS",
+      500,
+    ),
+    segmentMaxBytes: bound(
+      environment,
+      "EGMA_INGESTION_SEGMENT_MAX_BYTES",
+      8_388_608,
+    ),
+    segmentMaxRecords: bound(
+      environment,
+      "EGMA_INGESTION_SEGMENT_MAX_RECORDS",
+      5_000,
+    ),
+    requestTimeoutMilliseconds: bound(
+      environment,
+      "EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS",
+      10_000,
+    ),
+    scanIntervalMilliseconds: bound(
+      environment,
+      "EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS",
+      30_000,
+    ),
+  };
 }
 
 /**
@@ -357,6 +605,7 @@ export function loadConfig(
     providerCredentials: providerCredentialSource(environment),
     platformSettings: platformSettings(environment),
     blob: blobStore(environment, parsedBaseUrl),
+    ingestion: ingestionSettings(environment),
   };
 }
 
@@ -615,3 +864,17 @@ const DEFAULT_BLOB_BUCKET = "egma-recordings";
 
 /** What a store that ignores regions is signed for. See `blobRegion`. */
 const DEFAULT_BLOB_REGION = "us-east-1";
+
+/** The second bucket on the same store, created beside the recordings one. */
+const DEFAULT_INGEST_BUCKET = "egma-ingestion";
+
+/** What a store that ignores regions is signed for. See `ingestRegion`. */
+const DEFAULT_INGEST_REGION = "us-east-1";
+
+/**
+ * Where staged evidence waits, on the named volume the deployment gives the
+ * api service. It is the one path in this file that must be writable and must
+ * survive a container replacement: what is in it is evidence that has been
+ * accepted and is not durable yet.
+ */
+const DEFAULT_INGESTION_LOG_DIR = "/var/lib/egma/ingestion";

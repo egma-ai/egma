@@ -9,6 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1116.0",
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
     "@egma/platform-api": "workspace:*",

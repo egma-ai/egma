@@ -84,6 +84,16 @@ export const ID_PREFIXES = [
   "rma",
   /** One Retell call that bounded retries could not import. */
   "rif",
+  /**
+   * One sealed segment of production evidence: the unit that is written to the
+   * ingestion bucket once and read back by the drainer. It is minted when the
+   * segment is sealed, written into the local log before the upload starts, and
+   * reused verbatim on every retry — an ambiguous upload has to reach for the
+   * same immutable object rather than invent a second one holding the same
+   * evidence. Sortable, so the recovery listing walks the pending prefix
+   * oldest-first without a second sort key.
+   */
+  "sgm",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

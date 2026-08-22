@@ -85,6 +85,25 @@ export async function rowsIn<Row>(
   }
 }
 
+/**
+ * Rows into a store the migration tests are stepping through by hand, on
+ * `rowsIn`'s terms and for its reason: a store part-way through a chain has no
+ * settled shape to keep a connection against, and what these tests need is to
+ * populate one schema and then watch the next migration meet it.
+ */
+export async function appendIn(
+  store: EmptyTraceStore,
+  table: string,
+  values: readonly Record<string, unknown>[],
+): Promise<void> {
+  const client = createClient({ url: store.url });
+  try {
+    await client.insert({ table, values, format: "JSONEachRow" });
+  } finally {
+    await client.close();
+  }
+}
+
 /** Every table the database holds, ledger included, in name order. */
 export async function tablesIn(store: EmptyTraceStore): Promise<string[]> {
   const tables = await rowsIn<{ name: string }>(

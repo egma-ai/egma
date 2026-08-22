@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 
 import { ClickHouseError } from "@clickhouse/client";
 
 import { traceStore } from "../clickhouse/client.ts";
 import type { AuthContext } from "./context.ts";
-import { TraceStoreRefusedError } from "./errors.ts";
+import { OversizeRecordError, TraceStoreRefusedError } from "./errors.ts";
 
 /**
  * Writing spans, and the only way anything ever does.
@@ -15,14 +16,23 @@ import { TraceStoreRefusedError } from "./errors.ts";
  * caller passed: `NewSpan` has no organization and no project on it, so a
  * payload claiming one cannot be obeyed even by a handler that wanted to.
  *
- * **Append only, and it is the whole contract.** No read before the write, no
- * update, no delete, no merge of a later part into an earlier one. A span
- * arrives once, complete. Duplicates are not resolved at read time on this
- * table — the obligation not to send twice belongs to whoever wrote the span.
- * ClickHouse can suppress a byte-identical insert block while that block stays
- * in its recent deduplication window. Changing, regrouping, or reordering the
- * evidence creates a different block. There is no read-time or permanent
- * per-span deduplication.
+ * **A span is immutable, and its identity is the whole of it**: organization,
+ * project, trace and span. Nothing is read before the write and nothing is ever
+ * overwritten — a second arrival of one identity is either the same evidence,
+ * which is a replay and changes nothing visible, or different evidence, which is
+ * an integrity defect somebody has to look at. The table collapses the first on
+ * the identity above. It cannot recognise the second, and is never asked to: a
+ * caller with two arrivals to reconcile checks them against `committedSpans`
+ * before it appends, so a conflict is refused while both meanings still exist.
+ *
+ * Two shields sit in front of that, and neither is the guarantee. A byte-
+ * identical insert block is dropped while it is still in the store's recent
+ * window, and a caller that can name what it is replaying passes that name as
+ * `segmentId` so the same output twice is dropped even when the bytes were
+ * regrouped. Both windows are finite. The identity is not.
+ *
+ * **Nothing here shortens a value.** A record that violates a documented bound
+ * is refused whole, by name, before anything is staged.
  */
 
 /**
@@ -112,6 +122,19 @@ export type NewSpan = {
    * provider-specific subset.
    */
   readonly payload: string;
+  /**
+   * Whether the platform said in so many words that this span ends its trace.
+   *
+   * The fact is known at normalization time and belongs to the platform that
+   * supplied it: LiveKit's session span, Retell's reported end. A platform with
+   * no such fact says `false` rather than having one inferred for it, because a
+   * parentless span is not an ending — an exporter flush whose parent never
+   * arrived produces one too.
+   *
+   * Optional while the doors still construct spans without it; absent is
+   * `false`, decided once at the insert boundary rather than at each reader.
+   */
+  readonly endsTrace?: boolean;
 };
 
 export type AppendedSpans = {
@@ -146,15 +169,20 @@ const SPANS_TABLE = "spans";
 
 /**
  * Where a single field stops, in **bytes of UTF-8**, because that is what
- * ClickHouse stores and what a `String` column is measured in. The cut itself
- * still lands on a character boundary; see `truncated`.
+ * ClickHouse stores and what a `String` column is measured in.
  *
- * Only the normalised columns are capped, and never the safe provider payload.
- * A cap costs presentation rather than data because the untruncated safe copy
- * is on the same row. Transcripts and tool payloads are what actually reach
- * these, which is why they get the generous ones.
+ * These are **hard bounds and refusals**, not caps a value is quietly cut to
+ * fit. A shortened transcript is stored as if it were the whole one: nothing on
+ * the row says a cut happened, no reader can tell, and the evidence a team
+ * later disputes is evidence egma edited. So a record over a bound is refused
+ * by name and whoever sent it is told which field and by how much, which is a
+ * thing they can act on.
+ *
+ * The numbers are the ones this table has always documented. `payload` has no
+ * bound and never had one — it is the provider's document exactly as it
+ * arrived, and the batch splitter below is what keeps a large one writable.
  */
-const FIELD_LIMITS = {
+const FIELD_BOUNDS = {
   name: 1_024,
   kind: 128,
   status: 64,
@@ -172,40 +200,30 @@ const FIELD_LIMITS = {
   environment: 128,
 } as const satisfies Readonly<Record<string, number>>;
 
-/** How many bytes of UTF-8 one code point becomes. */
-function utf8Bytes(codePoint: number): number {
-  if (codePoint < 0x80) return 1;
-  if (codePoint < 0x800) return 2;
-  if (codePoint < 0x10000) return 3;
-  return 4;
-}
+/** Which fields carry a bound, in the order a refusal reports them. */
+const BOUNDED_FIELDS = Object.keys(FIELD_BOUNDS) as readonly (keyof typeof FIELD_BOUNDS)[];
 
 /**
- * Cut at a limit of **bytes** without splitting a character in half.
+ * Refuse a record that violates a documented bound, and say nothing about one
+ * that does not.
  *
- * The two units in play are not the same one: ClickHouse measures a `String`
- * column in bytes of UTF-8, and JavaScript measures a string in UTF-16 code
- * units, so a transcript of emoji is four bytes and two code units a character.
- * The budget is the store's, and the boundary is JavaScript's — iterating by
- * code point is what keeps a surrogate pair whole, because a lone surrogate is
- * not text in any encoding and ClickHouse stores what it is given.
+ * Pure, exported, and deliberately separate from the write: an acceptance path
+ * has to make this decision *before* anything is staged, so that a record egma
+ * will not store never enters the log, never rides a segment, and is reported
+ * to whoever sent it while the request is still open. Calling it again at the
+ * write is not a second opinion — it is the same function on the same record.
+ *
+ * The first field over its bound is the one named. A record with three
+ * enormous fields has one problem, and reporting the first is enough to act on.
  */
-function truncated(value: string, limit: number): string {
-  // The common case by far, and the only one that touches every row: a native
-  // byte count and nothing else.
-  if (Buffer.byteLength(value) <= limit) return value;
-
-  let bytes = 0;
-  let kept = 0;
-  for (const character of value) {
-    const size = utf8Bytes(character.codePointAt(0) ?? 0);
-    if (bytes + size > limit) break;
-    bytes += size;
-    // Two code units for anything above the basic plane, and the pair is kept
-    // or dropped together.
-    kept += character.length;
+export function refuseOversizeRecord(span: NewSpan): void {
+  for (const field of BOUNDED_FIELDS) {
+    const bound = FIELD_BOUNDS[field];
+    const bytes = Buffer.byteLength(span[field]);
+    if (bytes > bound) {
+      throw new OversizeRecordError(field, bound, bytes);
+    }
   }
-  return value.slice(0, kept);
 }
 
 /**
@@ -227,6 +245,75 @@ function asDateTime64(microseconds: bigint): string {
   return `${whole.replace("T", " ")}.${remainder.toString().padStart(6, "0")}`;
 }
 
+/**
+ * The one canonical form of a span's evidence, and the fingerprint taken from
+ * it.
+ *
+ * **Every field of `NewSpan`, and nothing else.** Not the tenancy, which is
+ * part of the identity this hash is filed under rather than part of the content
+ * it describes; not the moment anything was received, which says how the
+ * evidence travelled and not what it says; not a format version, because the
+ * shape being hashed is this type and a change to it is a change to the type.
+ * A rule with exceptions is a rule two implementations disagree about, and the
+ * two are in different packages.
+ *
+ * Keys are sorted so that object literal order cannot move a hash, and the two
+ * 64-bit counts are written as decimal rather than left to `JSON.stringify`,
+ * which refuses a `bigint` outright. Absent `endsTrace` is `false` here, so a
+ * writer that states it and one that has not learned to yet agree.
+ */
+function canonicalEvidence(span: NewSpan): string {
+  const evidence: Record<string, string | boolean> = {
+    agent_id: span.agentId,
+    agent_platform: span.agentPlatform,
+    agent_version_id: span.agentVersionId,
+    audio_url: span.audioUrl,
+    connection_kind: span.connectionKind,
+    duration_nanoseconds: span.durationNanoseconds.toString(),
+    emitter: span.emitter,
+    ends_trace: span.endsTrace ?? false,
+    environment: span.environment,
+    kind: span.kind,
+    name: span.name,
+    parent_span_id: span.parentSpanId,
+    payload: span.payload,
+    persona_version_id: span.personaVersionId,
+    platform_agent_id: span.platformAgentId,
+    platform_agent_name: span.platformAgentName,
+    platform_agent_version: span.platformAgentVersion,
+    provider_call_id: span.providerCallId,
+    run_id: span.runId,
+    source: span.source,
+    span_id: span.spanId,
+    started_at_microseconds: span.startedAtMicroseconds.toString(),
+    status: span.status,
+    test_version_id: span.testVersionId,
+    text: span.text,
+    tool_arguments: span.toolArguments,
+    tool_name: span.toolName,
+    tool_result: span.toolResult,
+    trace_id: span.traceId,
+  };
+  return JSON.stringify(evidence, Object.keys(evidence).sort());
+}
+
+/**
+ * What this span says, as one comparable value.
+ *
+ * Stored on the row and compared against on a replay. The comparison is the
+ * only thing that can tell an exact replay — which changes nothing and is
+ * always safe — from a second, different account of one immutable identity,
+ * which is a defect and must never overwrite the first. The engine cannot make
+ * that distinction and is not asked to.
+ *
+ * Exported because the acceptance path computes it over the record it is about
+ * to stage, long before this module sees a row, and two implementations of one
+ * fingerprint is one of them quietly deciding that a conflict is a replay.
+ */
+export function spanContentHash(span: NewSpan): string {
+  return createHash("sha256").update(canonicalEvidence(span), "utf8").digest("hex");
+}
+
 /** The project every stored span must belong to. */
 function projectForTrace(auth: AuthContext): string {
   if (auth.projectId === undefined) {
@@ -245,42 +332,31 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
     project_id: projectForTrace(auth),
     source: span.source,
     emitter: span.emitter,
-    environment: truncated(span.environment, FIELD_LIMITS.environment),
+    environment: span.environment,
     started_at: asDateTime64(span.startedAtMicroseconds),
     // A 64-bit count does not survive a JSON number, so it travels as a string.
     duration_ns: span.durationNanoseconds.toString(),
-    name: truncated(span.name, FIELD_LIMITS.name),
-    kind: truncated(span.kind, FIELD_LIMITS.kind),
-    status: truncated(span.status, FIELD_LIMITS.status),
-    text: truncated(span.text, FIELD_LIMITS.text),
-    audio_url: truncated(span.audioUrl, FIELD_LIMITS.audioUrl),
-    tool_name: truncated(span.toolName, FIELD_LIMITS.toolName),
-    tool_arguments: truncated(span.toolArguments, FIELD_LIMITS.toolArguments),
-    tool_result: truncated(span.toolResult, FIELD_LIMITS.toolResult),
-    provider_call_id: truncated(
-      span.providerCallId,
-      FIELD_LIMITS.providerCallId,
-    ),
-    agent_platform: truncated(span.agentPlatform, FIELD_LIMITS.agentPlatform),
-    platform_agent_id: truncated(
-      span.platformAgentId,
-      FIELD_LIMITS.platformAgentId,
-    ),
-    platform_agent_name: truncated(
-      span.platformAgentName,
-      FIELD_LIMITS.platformAgentName,
-    ),
-    platform_agent_version: truncated(
-      span.platformAgentVersion,
-      FIELD_LIMITS.platformAgentVersion,
-    ),
-    connection_type: truncated(span.connectionKind, FIELD_LIMITS.connectionKind),
+    name: span.name,
+    kind: span.kind,
+    status: span.status,
+    text: span.text,
+    audio_url: span.audioUrl,
+    tool_name: span.toolName,
+    tool_arguments: span.toolArguments,
+    tool_result: span.toolResult,
+    provider_call_id: span.providerCallId,
+    agent_platform: span.agentPlatform,
+    platform_agent_id: span.platformAgentId,
+    platform_agent_name: span.platformAgentName,
+    platform_agent_version: span.platformAgentVersion,
+    connection_type: span.connectionKind,
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,
     test_version_id: span.testVersionId,
     persona_version_id: span.personaVersionId,
     payload: span.payload,
+    content_hash: spanContentHash(span),
   };
 }
 
@@ -458,21 +534,48 @@ function* lines(block: readonly string[]): Generator<string> {
   for (const line of block) yield `${line}\n`;
 }
 
+export type AppendSpansOptions = {
+  /**
+   * What is being written, when the caller knows: the identity of the segment
+   * these spans were drained from.
+   *
+   * It becomes each block's `insert_deduplication_token`, which is the shield
+   * in front of the identity for the case block dedup cannot see — the same
+   * evidence re-serialised, regrouped or re-split by a retry, which is
+   * different bytes and the same output. Deterministic in the segment and the
+   * block, so a replay of one segment produces the same tokens in the same
+   * order and every one of them is recognised.
+   *
+   * Absent from the doors that write straight through, which have no segment to
+   * name; those rely on block dedup and, permanently, on the identity.
+   */
+  readonly segmentId?: string | undefined;
+};
+
 /**
  * File these spans under the caller's organization and project.
  *
- * Nothing is read first and nothing is overwritten. ClickHouse may suppress a
- * recent byte-identical block, but changed evidence appends even when it reuses
- * span ids. There is no read-time or permanent per-span collapse.
+ * Every record is checked against the documented bounds before anything is
+ * staged, and a record over one is refused whole — the batch does not go, and
+ * nothing partial is left behind, because the first block is not sent until the
+ * last record has passed.
+ *
+ * Nothing is read first and nothing is overwritten. An exact replay collapses
+ * on the span identity; evidence that disagrees with what is already stored is
+ * a defect this function cannot see and must not be asked to settle, so a
+ * caller replaying anything checks `committedSpans` before it calls.
  */
 export async function appendSpans(
   auth: AuthContext,
   spans: readonly NewSpan[],
+  options: AppendSpansOptions = {},
 ): Promise<AppendedSpans> {
   if (spans.length === 0) return { appended: 0, batches: 0 };
 
+  for (const span of spans) refuseOversizeRecord(span);
+
   const batches = preparedInserts(auth, spans);
-  for (const block of batches) {
+  for (const [index, block] of batches.entries()) {
     // The rows go out as the lines they were already serialised into. The
     // client's own `insert` would take the objects and stringify each one
     // again, which on a batch of fat payloads is the whole batch materialised
@@ -482,6 +585,7 @@ export async function appendSpans(
       const { stream } = await traceStore().exec({
         query: `INSERT INTO ${SPANS_TABLE} FORMAT JSONEachRow`,
         values: Readable.from(lines(block.lines), { objectMode: false }),
+        ...deduplicationToken(options.segmentId, index),
       });
       // An insert answers with an empty body, and the empty body still has to
       // be read: a response left undrained keeps its socket out of the pool
@@ -493,4 +597,25 @@ export async function appendSpans(
   }
 
   return { appended: spans.length, batches: batches.length };
+}
+
+/**
+ * The token one block goes out under, as a settings fragment to spread into the
+ * call — or nothing at all, which is a caller that named no segment.
+ *
+ * The table is in the name because a segment writes more than one table and a
+ * token is scoped to the table it is offered against; the block index is in it
+ * because a segment large enough to split writes several, and one token across
+ * them would suppress every block after the first.
+ */
+function deduplicationToken(
+  segmentId: string | undefined,
+  block: number,
+): { readonly clickhouse_settings?: { readonly insert_deduplication_token: string } } {
+  if (segmentId === undefined || segmentId === "") return {};
+  return {
+    clickhouse_settings: {
+      insert_deduplication_token: `${segmentId}:${SPANS_TABLE}:${block}`,
+    },
+  };
 }

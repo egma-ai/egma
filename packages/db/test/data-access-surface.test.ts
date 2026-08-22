@@ -111,12 +111,19 @@ const WORK_DISPATCHING = [
 /**
  * Everything that touches a customer's data. All of it needs the context.
  *
- * The trace store's three are `appendSpans`, which writes, and `listTraces` and
+ * The trace store's are `appendSpans`, which writes, and `listTraces` and
  * `readTrace`, which arrived with the two v1 endpoints that call them — an
  * exported read with no caller would be a hole in the boundary that nothing is
  * watching, which is the same objection as a permission row nothing enforces.
  * Both reads take a required time window on top of the context, so neither can
  * be called in a way that scans the whole table.
+ *
+ * `committedSpans` and `committedTraces` are the write path's own two questions
+ * about the same store, and they take the window for the reads' reason: the
+ * partition key is the month a span started in, so a probe with no window is a
+ * scan of every month the customer ever had. Neither returns evidence — one
+ * answers fingerprints, the other answers which ids exist — which is why they
+ * are a pair of their own rather than a third and fourth read.
  *
  * `appendVerdicts` and `readVerdicts` are the same two halves for the store's
  * other table. They need no window because a verdict is filed under the
@@ -159,6 +166,13 @@ const CONTEXT_REQUIRING = [
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
   "connectionKindOf",
+  // What the trace store already holds, asked about a batch at a time and
+  // answered without any evidence in it: which spans are committed and what
+  // each of their fingerprints is, and which of a list of trace ids exist.
+  // They take a window they cannot be called without, on the read surface's
+  // terms, and they answer nothing a caller did not already name.
+  "committedSpans",
+  "committedTraces",
   "createAgent",
   "createApiKey",
   "createInvitation",
@@ -462,6 +476,11 @@ const VALUES = [
   // which is a different answer in kind.
   "MockToolTakenError",
   "NotPermittedError",
+  // A record naming a field longer than the column it would be filed in. Its
+  // own class because it is about the evidence rather than about the store:
+  // nothing failed and trying again will not help, and it carries the field,
+  // the bound and the size so that whoever sent the record is told all three.
+  "OversizeRecordError",
   "EgmaProvidedPersonaError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
@@ -656,10 +675,28 @@ const THE_MEASURES = [
   "reportedMeasurementsPayload",
 ];
 
+/**
+ * The two decisions about one span's evidence, taken on the fold's terms and
+ * for the fold's reason: a record goes in, a fingerprint or a refusal comes
+ * out, and neither reaches a store. There is no tenancy to stamp because there
+ * is nothing to stamp it on.
+ *
+ * They cross the boundary because each has to be worked out in exactly one
+ * place, and each has two halves in two packages. An acceptance path refuses an
+ * oversize record before it is staged; this module refuses it again at the
+ * write, and a second implementation of the bound is one of them storing a cut
+ * value as if it were whole. An acceptance path fingerprints what it stages;
+ * this module fingerprints the row and compares it against what is stored, and
+ * a second implementation of the fingerprint is one of them calling a conflict
+ * a replay.
+ */
+const THE_EVIDENCE_RULES = ["refuseOversizeRecord", "spanContentHash"];
+
 describe("the data-access module's surface", () => {
   it("is exactly this, so widening it cannot happen by accident", () => {
     expect(Object.keys(dataAccess).sort()).toEqual(
       [
+        ...THE_EVIDENCE_RULES,
         ...CONNECTION,
         ...MIGRATIONS,
         ...IDENTITY,
