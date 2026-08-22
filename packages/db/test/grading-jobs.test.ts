@@ -270,6 +270,50 @@ describe("one frozen production job", () => {
       traceId,
     })).resolves.toEqual({ history: [], current: [] });
   });
+
+  it("keeps durable grades complete when final cleanup loses its worker", async () => {
+    const traceId = "2323232323232323232323232323bbbb";
+    await request(traceId);
+
+    for (let attempt = 1; attempt < 3; attempt += 1) {
+      const claim = await claimTrace(traceId, `grader-before-final-${attempt}`);
+      await releaseGradingJob(
+        claim.auth,
+        claim.id,
+        claim.claimedBy,
+        `store unavailable on attempt ${attempt}`,
+      );
+    }
+
+    const final = await claimTrace(traceId, "grader-lost-after-append");
+    await appendOne(final, 1, 1_777_000_001_500_000n);
+    await database.sql(
+      `update grading_job
+          set heartbeat_at = now() - interval '10 seconds'
+        where id = $1`,
+      [final.id],
+    );
+    await claimGradingJobs({
+      claimant: "grader-after-final-expiry",
+      capacity: 50,
+      leaseSeconds: 1,
+    });
+
+    await expect(getGradingJob(auth, final.id)).resolves.toMatchObject({
+      status: "abandoned",
+      attempts: 3,
+    });
+    await expect(readTraceGrading(auth, { source: "production", traceId }))
+      .resolves.toMatchObject({
+        state: "complete",
+        combinedScore: 1,
+        current: [{ score: 1, result: "passed" }],
+      });
+    await expect(request(traceId)).resolves.toEqual({
+      kind: "terminal",
+      outcome: "complete",
+    });
+  });
 });
 
 describe("the durable production handoff", () => {

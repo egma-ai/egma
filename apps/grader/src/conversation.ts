@@ -329,13 +329,15 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * at the door.
  *
  * The keys are the simulation contract's turn event, minus the two fields only a
- * report needs, because a grader reading a transcript must not have to know
- * which source it came from. An agent turn with nothing said is kept rather than
- * dropped: the captured trace has several, and a turn that produced no words is
- * a fact about the conversation.
+ * report needs, plus the real span id that lets a grade cite its evidence. A
+ * grader still does not have to know which source the transcript came from. An
+ * agent turn with nothing said is kept rather than dropped: the captured trace
+ * has several, and a turn that produced no words is a fact about the
+ * conversation.
  */
 function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
   return trace.turns.map((turn) => ({
+    span_id: turn.spanId,
     speaker: speakerOf(turn.kind),
     text: turn.text,
     started_at: turn.startedAt,
@@ -344,6 +346,8 @@ function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
 }
 
 type TranscriptTurn = {
+  /** The real evidence span this turn came from. */
+  readonly span_id: string;
   readonly speaker: string;
   readonly text: string;
   /** RFC 3339 to the microsecond, exactly as the store holds it. */

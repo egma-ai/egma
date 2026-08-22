@@ -345,10 +345,7 @@ async function settleOrdinaryRequest(
   if (input.entries.length === 0) return { kind: "not_requested" };
 
   const held = await jobForTrace(on, auth, input.traceId);
-  if (held !== undefined) {
-    if (held.status === "abandoned") {
-      return { kind: "terminal", outcome: "error" };
-    }
+  if (held?.status === "pending" || held?.status === "claimed") {
     return { kind: "queued", jobId: held.id, created: false };
   }
 
@@ -363,6 +360,9 @@ async function settleOrdinaryRequest(
       kind: "terminal",
       outcome: terminal.errored ? "error" : "complete",
     };
+  }
+  if (held?.status === "abandoned") {
+    return { kind: "terminal", outcome: "error" };
   }
 
   const queued = await enqueue(on, auth, input);
@@ -1031,13 +1031,14 @@ export async function readTraceGrading(
   if (job?.status === "pending") {
     return { state: "pending", history, current, combinedScore: null };
   }
-  if (job?.status === "abandoned") {
-    return { state: "error", history, current, combinedScore: null };
-  }
-
   const terminal = allEntriesHaveResults(entries, grades.current);
   if (!terminal.complete) {
-    return { state: "pending", history, current, combinedScore: null };
+    return {
+      state: job?.status === "abandoned" ? "error" : "pending",
+      history,
+      current,
+      combinedScore: null,
+    };
   }
   if (terminal.errored) {
     return { state: "error", history, current, combinedScore: null };
@@ -1153,7 +1154,7 @@ function selectedGroup(row: SimulationPlanRow): PlanGroup {
 function needsCurrentGradeFacts(row: SimulationPlanRow): boolean {
   if (row.status !== "completed") return false;
   if (selectedGroup(row).items.length === 0) return false;
-  return row.jobStatus === null;
+  return row.jobStatus === null || row.jobStatus === "abandoned";
 }
 
 function resolvedSimulationState(
@@ -1169,7 +1170,6 @@ function resolvedSimulationState(
 
   if (row.jobStatus === "claimed") return { gradable: true, state: "running" };
   if (row.jobStatus === "pending") return { gradable: true, state: "pending" };
-  if (row.jobStatus === "abandoned") return { gradable: true, state: "error" };
 
   const traceId = traceIdOfSimulation(row.simulationId);
   if (traceId === undefined) {
@@ -1179,7 +1179,12 @@ function resolvedSimulationState(
   let errored = false;
   for (const item of group.items) {
     const grade = current?.get(item.projectGraderId);
-    if (grade === undefined) return { gradable: true, state: "pending" };
+    if (grade === undefined) {
+      return {
+        gradable: true,
+        state: row.jobStatus === "abandoned" ? "error" : "pending",
+      };
+    }
     errored ||= grade.errored;
   }
   return { gradable: true, state: errored ? "error" : "complete" };

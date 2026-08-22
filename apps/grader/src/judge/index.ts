@@ -63,8 +63,6 @@ export {
   asJudgeReads,
   judgeInputOf,
   textOf,
-  turnReference,
-  TURN_REFERENCE_PREFIX,
   type JudgeInput,
   type Turn,
 } from "./input.ts";

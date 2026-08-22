@@ -53,7 +53,6 @@ export async function executeExpectedBehaviors(
   }
 
   const evidence = judgeInputOf(execution.conversation);
-  const turns = evidence.transcript.length;
   const assertions = await Promise.all(
     behaviors.map(async (behavior, at): Promise<GraderAssertionResult> => {
       const question: JudgeQuestion = { prompt, criterion: behavior, evidence };
@@ -61,7 +60,7 @@ export async function executeExpectedBehaviors(
         return assertionResultOf(
           behaviorAssertionKey(at),
           await judge.ask(question),
-          turns,
+          evidence.transcript,
         );
       } catch (error) {
         return assertionError(

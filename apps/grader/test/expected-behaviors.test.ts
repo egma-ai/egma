@@ -53,8 +53,16 @@ function conversation(
     nothingToJudgeBecause: null,
     endingReason: "persona_concluded",
     transcript: [
-      { speaker: "persona", text: "Please cancel my appointment." },
-      { speaker: "agent", text: "It is canceled. The policy permits it." },
+      {
+        span_id: "aaaaaaaaaaaaaaaa",
+        speaker: "persona",
+        text: "Please cancel my appointment.",
+      },
+      {
+        span_id: "bbbbbbbbbbbbbbbb",
+        speaker: "agent",
+        text: "It is canceled. The policy permits it.",
+      },
     ],
     events: [],
     measures: [],
@@ -107,7 +115,7 @@ describe("Expected behaviors produces one grade", () => {
       key: "behavior_1",
       score: 1,
       rationale: "behavior 1 passed",
-      citedSpanIds: ["turn:2"],
+      citedSpanIds: ["bbbbbbbbbbbbbbbb"],
     });
     expect(result.details.assertions?.[6]).toMatchObject({
       key: "behavior_7",
@@ -132,7 +140,7 @@ describe("Expected behaviors produces one grade", () => {
         key: "behavior_1",
         score: 1,
         rationale: "confirmed",
-        citedSpanIds: ["turn:2"],
+        citedSpanIds: ["bbbbbbbbbbbbbbbb"],
       },
       {
         key: "behavior_2",

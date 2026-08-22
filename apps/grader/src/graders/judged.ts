@@ -1,4 +1,4 @@
-import { turnReference, type JudgeAnswer } from "../judge/index.ts";
+import type { JudgeAnswer, Turn } from "../judge/index.ts";
 import type { GraderAssertionResult } from "./contract.ts";
 
 /**
@@ -11,11 +11,11 @@ import type { GraderAssertionResult } from "./contract.ts";
 export function assertionResultOf(
   key: string,
   answer: JudgeAnswer,
-  turns: number,
+  turns: readonly Turn[],
 ): GraderAssertionResult {
   const citedSpanIds = answer.citedTurns
-    .filter((cited) => cited >= 1 && cited <= turns)
-    .map(turnReference);
+    .map((cited) => turns[cited - 1]?.spanId)
+    .filter((spanId): spanId is string => spanId !== undefined);
 
   if (answer.decision === "cannot_determine") {
     return {
