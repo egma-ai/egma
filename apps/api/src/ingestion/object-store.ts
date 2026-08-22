@@ -142,6 +142,13 @@ export function pendingObjectStore(
           requestHandler: {
             requestTimeout: options.requestTimeoutMilliseconds,
             connectionTimeout: options.requestTimeoutMilliseconds,
+            // Required, and the bound is inert without it: the client's default
+            // is to log a warning and keep waiting, because `requestTimeout`
+            // was once a socket-idle setting and turning it into a refusal is
+            // opt-in. A bound that only warns is a request held open for as
+            // long as the store stays quiet — which is the exact failure the
+            // whole acceptance timeout exists to answer.
+            throwOnRequestTimeout: true,
           },
         }),
   });

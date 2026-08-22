@@ -14,6 +14,9 @@ import {
   type EmailSender,
 } from "./auth/email.ts";
 import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
+import { closeAcceptance, openAcceptance } from "./ingestion/accept.ts";
+import { startDrainer, type Drainer } from "./ingestion/drainer.ts";
+import { pendingObjectStore } from "./ingestion/object-store.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
@@ -88,6 +91,18 @@ export type ServerOptions = {
   readonly deviceAuthorizationInterval?: IdentityOptions["deviceAuthorizationInterval"];
   /** Test seam for Retell account reads. Production uses the global fetch. */
   readonly retellFetch?: RetellFetch | undefined;
+  /**
+   * Whether this process runs the standing drainer. Defaults to running it,
+   * which is what every deployment does today.
+   *
+   * It is here because acceptance and draining are already two halves that a
+   * later release separates by role — a process that only accepts is a shape
+   * this design promises, not one invented for a suite. Until the role setting
+   * decides it, this is what lets a proof hold a sealed segment still and look
+   * inside it: in a running deployment that state lasts about as long as one
+   * upload, and a proof that raced it would be a proof about timing.
+   */
+  readonly drainsPendingEvidence?: boolean;
 };
 
 export type Api = {
@@ -98,6 +113,15 @@ export type Api = {
    * nobody can reach is a thing nobody can test.
    */
   readonly identity: Identity;
+  /**
+   * This process's drainer once the server is ready, or nothing where it names
+   * no ingestion store or was built not to drain.
+   *
+   * Handed back on the same terms as the identity provider: whoever owns the
+   * server owns its standing work, and `drainNow` is how a caller waits for a
+   * pass to have *finished* rather than to have been scheduled.
+   */
+  drainer(): Drainer | undefined;
 };
 
 export function buildApi(options: ServerOptions): Api {
@@ -360,7 +384,38 @@ export function buildApi(options: ServerOptions): Api {
   // agent is DB-leased before a provider request, so every API replica can run
   // the same loop without overlapping one target.
   let retellProductionIngestion: RetellProductionIngestion | undefined;
+  // One active drainer per deployment: pending objects into ClickHouse, the
+  // replay-safe handoffs, and then the object. It runs on every process for
+  // now; which processes accept and which drain becomes the role setting's
+  // question, not this file's.
+  let drainer: Drainer | undefined;
   app.addHook("onReady", async () => {
+    // The drainer first, so the hand-off below has somewhere to hand to. Its
+    // own startup scan is what makes that hand-off optional: a segment whose
+    // hint is lost costs a scan interval and never an object.
+    const ingestion = config.ingestion.store;
+    drainer =
+      ingestion === undefined || options.drainsPendingEvidence === false
+        ? undefined
+        : startDrainer({
+            store: pendingObjectStore(ingestion, {
+              requestTimeoutMilliseconds:
+                config.ingestion.requestTimeoutMilliseconds,
+            }),
+            log: app.log,
+            scanIntervalMilliseconds: config.ingestion.scanIntervalMilliseconds,
+          });
+
+    // Opening acceptance recovers whatever the last stop left staged, so
+    // evidence that was in hand when a process died is on its way again within
+    // the first tick rather than after the first new request.
+    openAcceptance({
+      settings: config.ingestion,
+      log: app.log,
+      onSegmentDurable: (segment) => {
+        drainer?.wake(segment.key);
+      },
+    });
     orphanSweep = startOrphanSweep({
       log: app.log,
       ...(options.orphanSweepIntervalMilliseconds === undefined
@@ -383,7 +438,13 @@ export function buildApi(options: ServerOptions): Api {
     // and then the stores knows the sweep holds no connection to them.
     await orphanSweep?.stop();
     await retellProductionIngestion?.stop();
+    // Acceptance before the drainer, so nothing new is uploaded into a bucket
+    // nobody is reading; and neither uploads nor drains anything on the way
+    // out. What is staged is on the disk with its checksums and what is pending
+    // is in the bucket, and the next start is what moves both.
+    await closeAcceptance();
+    await drainer?.stop();
   });
 
-  return { app, identity };
+  return { app, identity, drainer: () => drainer };
 }

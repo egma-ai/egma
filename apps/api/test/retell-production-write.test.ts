@@ -80,12 +80,9 @@ function writeStore(
     async finishProductionTrace(_auth, finished) {
       recorded.finished.push(finished.traceId);
     },
-    async recordRetellCallReceived() {
+    async recordProductionEvidenceReceived(_auth, input) {
       recorded.received += 1;
-    },
-    async recordRetellMonitoringReceived(_auth, input) {
-      recorded.received += 1;
-      recorded.replayedPlatformAgentIds.push(input.platformAgentId);
+      recorded.replayedPlatformAgentIds.push(input.platformAgentId ?? "");
     },
   };
 }
@@ -135,10 +132,11 @@ describe("the shared Retell production writer", () => {
       platformAgentVersion: "7",
     });
     expect(recorded.claimed).not.toHaveProperty("connectionId");
-    expect(recorded.claimed?.payload).toContain('"access_token":"[REDACTED]"');
+    expect(recorded.claimed?.payload).not.toContain("access_token");
     expect(recorded.claimed?.payload).not.toContain(
       "provider-access-token-must-not-be-stored",
     );
+    expect(recorded.claimed?.payload).not.toContain("REDACTED");
     expect(recorded.appended).toBeGreaterThan(1);
     expect(recorded.grading).toBe(recorded.appended);
     expect(recorded.finished).toHaveLength(1);

@@ -976,8 +976,14 @@ Five things about the contract are worth knowing before you build on it:
   exactly as an id nobody ever minted does.
 - **The stored payload is not in either response.** It is by a wide margin the
   largest thing on a span, and a transcript carrying it would be megabytes of
-  JSON nobody asked to render. Safe Direct OTLP and Retell provider payloads
-  stay on their rows after credential-like values are redacted.
+  JSON nobody asked to render. Direct OTLP and Retell provider payloads stay on
+  their rows exactly as they arrived — nothing is scanned for credential-looking
+  names or values, so a transcript keeps every word of what was said. The only
+  fields Egma leaves out are Retell's own transport credentials: the top-level
+  `access_token`, and the values of `authorization`, `proxy-authorization`,
+  `cookie`, `set-cookie`, `api-key` and `x-api-key` inside Retell's
+  `custom_sip_headers` map. They are omitted, with no marker written where they
+  were.
 - **A transcript of more than 10,000 spans is a prefix, and says so.**
   `spansTruncated` is then `true`, and it means exactly one thing: `turns` and
   `spans` hold the first 10,000 spans in time order, while `spanCount` and every

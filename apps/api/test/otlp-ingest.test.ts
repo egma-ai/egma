@@ -10,6 +10,7 @@ import {
   FIXTURE_WINDOW,
   type CapturedRequest,
 } from "./support/fixture.ts";
+import { startObjectStorage, type ObjectStorage } from "./support/object-storage.ts";
 
 /**
  * A real LiveKit agent's telemetry, replayed at the door it will really arrive
@@ -17,15 +18,32 @@ import {
  *
  * This is the spine: fourteen captured OTLP bodies, byte for byte as an
  * exporter sent them, posted over HTTP to the running API with an ordinary egma
- * API key, landing in a real ClickHouse. It exercises the credential, the
- * protobuf decoding, the normalisation, the tenancy stamp and the append in one
- * pass — because every one of those is a place the path could be right in
- * isolation and wrong end to end.
+ * API key, staged into a real ingestion bucket and drained into a real
+ * ClickHouse. It exercises the credential, the protobuf decoding, the
+ * normalisation, the tenancy stamp, the segment and the insert in one pass —
+ * because every one of those is a place the path could be right in isolation
+ * and wrong end to end.
+ *
+ * The door answers on object-store durability and writes no row, so each post
+ * is followed by a drain. That is the one seam this file stands in for, and it
+ * stands in for it the way the drainer does the work: scope out of the sealed
+ * object's own header, the segment identity as the insert's deduplication
+ * token.
  *
  * What is asserted is the landed shape rather than the code's own opinion of
  * it. The read functions over `spans` belong to the next ticket, so the store
- * is queried directly here, the way the migration tests already do.
+ * is queried directly here, the way the migration tests already do — with
+ * `final`, because two physical copies of one replayed identity are not two
+ * spans.
  */
+
+const storage: ObjectStorage = await startObjectStorage("otlp-ingest");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the captured-trace ingest suite — ${storage.why}\n\n`,
+  );
+}
 
 let api: TestApi;
 let requests: CapturedRequest[];
@@ -76,7 +94,7 @@ async function post(
   body: Buffer | string,
   contentType = "application/x-protobuf",
 ) {
-  return api.app.inject({
+  const response = await api.app.inject({
     method: "POST",
     url: OTLP_TRACES_PATH,
     headers: {
@@ -85,6 +103,8 @@ async function post(
     },
     payload: body,
   });
+  await api.drainEvidence();
+  return response;
 }
 
 /** Replay the whole capture, in order, as one exporter's fourteen flushes. */
@@ -113,17 +133,22 @@ const inTheWindow =
 let acme: Customer;
 
 beforeAll(async () => {
+  if (!storage.available) return;
   requests = await capturedRequests();
-  api = await createApi("otlp_ingest", { traceStore: true });
+  api = await createApi("otlp_ingest", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
   acme = await signUpWithAKey("ada@acme.example", "Acme");
   await replay(acme.secret);
 });
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
-describe("the captured trace, posted at the door", () => {
+describe.skipIf(!storage.available)("the captured trace, posted at the door", () => {
   it("is fourteen requests the exporter really sent, and every one of them is protobuf", () => {
     expect(requests).toHaveLength(14);
     for (const request of requests) {
@@ -133,17 +158,17 @@ describe("the captured trace, posted at the door", () => {
   });
 
   it("lands as one trace of the spans that arrived, and not one more", async () => {
-    expect(await countOf("select count() as n from spans")).toBe(
+    expect(await countOf("select count() as n from spans final")).toBe(
       FIXTURE_TRACE.spans,
     );
     expect(
-      await countOf("select uniqExact(trace_id) as n from spans"),
+      await countOf("select uniqExact(trace_id) as n from spans final"),
     ).toBe(1);
   });
 
   it("adopts the ids off the wire rather than minting any", async () => {
     const rows = await store().rows<{ trace_id: string; span_id: string }>(
-      "select distinct trace_id, span_id from spans limit 200",
+      "select distinct trace_id, span_id from spans final limit 200",
     );
     expect(rows).toHaveLength(FIXTURE_TRACE.spans);
     for (const row of rows) {
@@ -157,7 +182,7 @@ describe("the captured trace, posted at the door", () => {
     const rows = await store().rows<{
       organization_id: string;
       project_id: string;
-    }>("select distinct organization_id, project_id from spans");
+    }>("select distinct organization_id, project_id from spans final");
 
     expect(rows).toEqual([
       { organization_id: acme.organizationId, project_id: acme.projectId },
@@ -169,7 +194,7 @@ describe("the captured trace, posted at the door", () => {
       source: string;
       emitter: string;
       environment: string;
-    }>("select distinct source, emitter, environment from spans");
+    }>("select distinct source, emitter, environment from spans final");
 
     expect(rows).toEqual([
       { source: "production", emitter: "agent", environment: "default" },
@@ -178,18 +203,18 @@ describe("the captured trace, posted at the door", () => {
 
   it("keeps the vendor's own identifier for this trace on every row", async () => {
     const rows = await store().rows<{ provider_call_id: string }>(
-      "select distinct provider_call_id from spans",
+      "select distinct provider_call_id from spans final",
     );
     expect(rows).toEqual([{ provider_call_id: FIXTURE_PROVIDER_CALL_ID }]);
   });
 
   it("records when the trace happened, to the microsecond it was stamped", async () => {
     expect(
-      await countOf(`select count() as n from spans where ${inTheWindow}`),
+      await countOf(`select count() as n from spans final where ${inTheWindow}`),
     ).toBe(FIXTURE_TRACE.spans);
 
     const [root] = await store().rows<{ started_at: string; duration_ns: number }>(
-      "select started_at, duration_ns from spans where parent_span_id = '' limit 1",
+      "select started_at, duration_ns from spans final where parent_span_id = '' limit 1",
     );
     // The wire said 1785693880281989804 nanoseconds. Microseconds is what the
     // column holds, and the sub-microsecond digits are dropped rather than
@@ -202,7 +227,7 @@ describe("the captured trace, posted at the door", () => {
 
   it("reads the transcript as turns, five from the human and eight from the agent", async () => {
     const rows = await store().rows<{ kind: string; n: number }>(
-      "select kind, count() as n from turns group by kind order by kind",
+      "select kind, count() as n from turns final group by kind order by kind",
     );
     expect(rows).toEqual([
       { kind: "turn:agent", n: FIXTURE_TRACE.agentTurns },
@@ -210,7 +235,7 @@ describe("the captured trace, posted at the door", () => {
     ]);
 
     const [first] = await store().rows<{ text_preview: string }>(
-      "select text_preview from turns where kind = 'turn:human' order by started_at limit 1",
+      "select text_preview from turns final where kind = 'turn:human' order by started_at limit 1",
     );
     expect(first?.text_preview).toBe("Hi Kelly, my name is Sam.");
   });
@@ -221,7 +246,7 @@ describe("the captured trace, posted at the door", () => {
       tool_arguments: string;
       tool_result: string;
     }>(
-      "select tool_name, tool_arguments, tool_result from spans " +
+      "select tool_name, tool_arguments, tool_result from spans final " +
         "where kind = 'tool' order by started_at",
     );
 
@@ -244,7 +269,7 @@ describe("the captured trace, posted at the door", () => {
    */
   it("keeps the spans that failed, and what they said about it", async () => {
     const rows = await store().rows<{ name: string; payload: string }>(
-      "select name, payload from spans where status = 'error' order by started_at",
+      "select name, payload from spans final where status = 'error' order by started_at",
     );
 
     expect(rows).toHaveLength(FIXTURE_TRACE.erroredSpans);
@@ -270,7 +295,7 @@ describe("the captured trace, posted at the door", () => {
    */
   it("stores one row per span that arrived, under the name it arrived with", async () => {
     const rows = await store().rows<{ name: string; n: string }>(
-      "select name, count() as n from spans group by name order by name",
+      "select name, count() as n from spans final group by name order by name",
     );
 
     expect(Object.fromEntries(rows.map((row) => [row.name, Number(row.n)]))).toEqual(
@@ -298,14 +323,14 @@ describe("the captured trace, posted at the door", () => {
       },
     );
 
-    expect(await countOf("select count() as n from spans where kind = 'stt'")).toBe(
+    expect(await countOf("select count() as n from spans final where kind = 'stt'")).toBe(
       0,
     );
   });
 
   it("keeps the whole of what the human said, and the framework's own attributes with it", async () => {
     const [row] = await store().rows<{ text: string; payload: string }>(
-      "select text, payload from spans where kind = 'turn:human' " +
+      "select text, payload from spans final where kind = 'turn:human' " +
         "order by started_at limit 1",
     );
 
@@ -324,7 +349,7 @@ describe("the captured trace, posted at the door", () => {
       agent_platform: string;
       connection_type: string;
     }>(
-      "select distinct agent_platform, connection_type from spans",
+      "select distinct agent_platform, connection_type from spans final",
     );
     expect(rows).toEqual([
       { agent_platform: "livekit_agents", connection_type: "" },
@@ -333,11 +358,11 @@ describe("the captured trace, posted at the door", () => {
 
   it("keeps an unproven LiveKit agent label in payload without calling it an agent name", async () => {
     const rows = await store().rows<{ platform_agent_name: string }>(
-      "select distinct platform_agent_name from spans",
+      "select distinct platform_agent_name from spans final",
     );
     expect(rows).toEqual([{ platform_agent_name: "" }]);
     const [root] = await store().rows<{ payload: string }>(
-      "select payload from spans where kind = 'root' limit 1",
+      "select payload from spans final where kind = 'root' limit 1",
     );
     expect(root?.payload).toContain("lk.agent_label");
     expect(root?.payload).toContain("kelly");
@@ -346,7 +371,7 @@ describe("the captured trace, posted at the door", () => {
   it("pins no run, no agent and no versions, because nothing here started one", async () => {
     expect(
       await countOf(
-        "select count() as n from spans where run_id != '' or agent_id != '' " +
+        "select count() as n from spans final where run_id != '' or agent_id != '' " +
           "or agent_version_id != '' or test_version_id != '' " +
           "or persona_version_id != ''",
       ),
@@ -373,13 +398,13 @@ describe("the captured trace, posted at the door", () => {
    * times over, and the row counts have to be exactly what they were.
    */
   it("is the same trace after being sent a second time, not two of it", async () => {
-    const before = await countOf("select count() as n from spans");
-    const turnsBefore = await countOf("select count() as n from turns");
+    const before = await countOf("select count() as n from spans final");
+    const turnsBefore = await countOf("select count() as n from turns final");
 
     await replay(acme.secret);
 
-    expect(await countOf("select count() as n from spans")).toBe(before);
-    expect(await countOf("select count() as n from turns")).toBe(turnsBefore);
+    expect(await countOf("select count() as n from spans final")).toBe(before);
+    expect(await countOf("select count() as n from turns final")).toBe(turnsBefore);
   });
 });
 
@@ -401,7 +426,7 @@ describe("two organizations sending the very same trace", () => {
 
   it("each hold the whole of it, and only their own copy", async () => {
     const rows = await store().rows<{ organization_id: string; n: number }>(
-      "select organization_id, count() as n from spans " +
+      "select organization_id, count() as n from spans final " +
         "group by organization_id order by organization_id",
     );
 
@@ -424,7 +449,7 @@ describe("two organizations sending the very same trace", () => {
    */
   it("keeps each organization's copy separable by the organization, not by the trace id", async () => {
     const [row] = await store().rows<{ trace_id: string }>(
-      "select distinct trace_id from spans limit 1",
+      "select distinct trace_id from spans final limit 1",
     );
     const traceId = row?.trace_id ?? "";
     expect(traceId).not.toBe("");
@@ -433,7 +458,7 @@ describe("two organizations sending the very same trace", () => {
     // is exactly what the organization leading the filing order is for.
     expect(
       await countOf(
-        `select count() as n from spans where trace_id = '${traceId}' ` +
+        `select count() as n from spans final where trace_id = '${traceId}' ` +
           `and organization_id = '${globex.organizationId}'`,
       ),
     ).toBe(FIXTURE_TRACE.spans);
@@ -445,7 +470,7 @@ describe("a request with no usable credential", () => {
     const request = requests[0];
     if (request === undefined) throw new Error("the capture is empty");
 
-    const before = await countOf("select count() as n from spans");
+    const before = await countOf("select count() as n from spans final");
 
     const anonymous = await post(null, request.body);
     expect(anonymous.statusCode).toBe(401);
@@ -464,6 +489,6 @@ describe("a request with no usable credential", () => {
     });
     expect(wrongScheme.statusCode).toBe(401);
 
-    expect(await countOf("select count() as n from spans")).toBe(before);
+    expect(await countOf("select count() as n from spans final")).toBe(before);
   });
 });

@@ -3,10 +3,20 @@ import {
   finishRetellMonitoringScan,
   recordRetellIngestionFailure,
 } from "@egma/db";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
+import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { createApi, type TestApi } from "./support/api.ts";
-import { colleagueOf, signUp } from "./support/traces.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
+import {
+  colleagueOf,
+  mintKey,
+  signUp,
+  syntheticExport,
+} from "./support/traces.ts";
 
 let api: TestApi;
 
@@ -76,6 +86,29 @@ function provider(
   }) as typeof fetch;
   return { asked, fetchImpl };
 }
+
+/**
+ * The one case here that files evidence at the door needs somewhere for that
+ * evidence to become durable — Monitoring's "last heard from" is written where
+ * a segment is drained. Every other case in this file talks to a Retell-shaped
+ * server on loopback and needs no container.
+ */
+const storage: ObjectStorage = await startObjectStorage("monitoring-routes");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the Monitoring last-received case — ${storage.why}\n\n`,
+  );
+}
+
+function running(): Extract<ObjectStorage, { available: true }> {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage;
+}
+
+afterAll(() => {
+  if (storage.available) storage.stop();
+});
 
 describe("platform-first Monitoring setup", () => {
   it("discovers voice agents, proves call-history access, and stores one sealed key", async () => {
@@ -379,6 +412,87 @@ describe("platform-first Monitoring setup", () => {
         new URL(request.url).pathname === `/v2/get-call/${providerCallId}`,
     );
     expect(getCalls).toHaveLength(1);
+  });
+
+  /**
+   * **Monitoring's "last heard from" is a fact about evidence being readable**,
+   * so it is written where the segment is drained rather than where the request
+   * is answered.
+   *
+   * A request is answered as accepted on object-store durability, and the
+   * conversation becomes readable afterwards. Setting this at the door would
+   * tell a customer their Monitoring was live while a trace store was still
+   * cold and their conversation could not be opened.
+   */
+  it.skipIf(!storage.available)("reports LiveKit as heard from once the accepted evidence is drained", async () => {
+    api = await createApi("monitoring_routes_livekit_received", {
+      traceStore: true,
+      ingestStore: running().ingestStore,
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const configured = await api.app.inject({
+      method: "PUT",
+      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(configured.statusCode, configured.body).toBe(200);
+    expect(
+      (
+        configured.json() as {
+          monitoringSource: { health: { lastReceivedAt: unknown } };
+        }
+      ).monitoringSource.health.lastReceivedAt,
+    ).toBeNull();
+
+    const secret = await mintKey(
+      api.app,
+      ada.cookie,
+      "the agent under test",
+      ada.projectId,
+    );
+    const posted = await api.app.inject({
+      method: "POST",
+      url: OTLP_TRACES_PATH,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${secret}`,
+      },
+      payload: syntheticExport({
+        traceId: "8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d8d",
+        startedAt: new Date("2026-08-09T11:00:00Z"),
+      }),
+    });
+    expect(posted.statusCode, posted.body).toBe(200);
+
+    // Accepted, and deliberately not yet heard from.
+    const staged = await api.app.inject({
+      method: "GET",
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(
+      (
+        staged.json() as {
+          monitoringSources: { health: { lastReceivedAt: unknown } }[];
+        }
+      ).monitoringSources[0]?.health.lastReceivedAt,
+    ).toBeNull();
+
+    await api.drainEvidence();
+
+    const heard = await api.app.inject({
+      method: "GET",
+      url: `/v1/monitoring?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+    });
+    expect(
+      (
+        heard.json() as {
+          monitoringSources: { health: { lastReceivedAt: string | null } }[];
+        }
+      ).monitoringSources[0]?.health.lastReceivedAt,
+    ).toEqual(expect.any(String));
   });
 
   it("creates and removes the separate LiveKit Agents setup", async () => {

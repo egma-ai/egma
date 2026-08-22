@@ -116,10 +116,13 @@ export type NewSpan = {
   readonly testVersionId: string;
   readonly personaVersionId: string;
   /**
-   * Safe provider data for this span. Every platform adapter removes
-   * credentials and bearer-like values before this boundary. This field is
-   * never truncated, while child spans may hold a normalized
-   * provider-specific subset.
+   * The provider's own document for this span, as it arrived.
+   *
+   * Never shortened and never rewritten. A platform adapter omits the transport
+   * fields that are credentials by naming them exactly — Retell's top-level
+   * `access_token` and the six authentication headers inside its own
+   * `custom_sip_headers` map — and looks at nothing else on the way past. What
+   * a value happens to contain is evidence.
    */
   readonly payload: string;
   /**
@@ -131,10 +134,13 @@ export type NewSpan = {
    * parentless span is not an ending — an exporter flush whose parent never
    * arrived produces one too.
    *
-   * Optional while the doors still construct spans without it; absent is
-   * `false`, decided once at the insert boundary rather than at each reader.
+   * Required like every other field, and required *because* the honest value is
+   * so often `false`: an optional one would let a normalizer that has a real end
+   * fact to state forget to state it, and the trace would then go quiet with
+   * nothing anywhere saying why. Stating `false` is a sentence about the
+   * platform; leaving it out is a sentence about the code.
    */
-  readonly endsTrace?: boolean;
+  readonly endsTrace: boolean;
 };
 
 export type AppendedSpans = {
@@ -259,8 +265,7 @@ function asDateTime64(microseconds: bigint): string {
  *
  * Keys are sorted so that object literal order cannot move a hash, and the two
  * 64-bit counts are written as decimal rather than left to `JSON.stringify`,
- * which refuses a `bigint` outright. Absent `endsTrace` is `false` here, so a
- * writer that states it and one that has not learned to yet agree.
+ * which refuses a `bigint` outright.
  */
 function canonicalEvidence(span: NewSpan): string {
   const evidence: Record<string, string | boolean> = {
@@ -271,7 +276,7 @@ function canonicalEvidence(span: NewSpan): string {
     connection_kind: span.connectionKind,
     duration_nanoseconds: span.durationNanoseconds.toString(),
     emitter: span.emitter,
-    ends_trace: span.endsTrace ?? false,
+    ends_trace: span.endsTrace,
     environment: span.environment,
     kind: span.kind,
     name: span.name,

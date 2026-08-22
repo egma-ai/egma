@@ -1206,53 +1206,74 @@ export async function releaseRetellMonitoringLease(
   });
 }
 
-export async function recordRetellCallReceived(
-  auth: AuthContext,
-  target: Pick<RetellMonitoringTarget, "setupId" | "monitoredAgentId">,
-  receivedAt: Date,
-): Promise<void> {
-  await db().transaction(async (tx) => {
-    await tx
-      .update(monitoringSetup)
-      .set({ lastReceivedAt: receivedAt, updatedAt: new Date() })
-      .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
-      );
-    await tx
-      .update(retellMonitoredAgent)
-      .set({ lastCallReceivedAt: receivedAt, updatedAt: new Date() })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-        ),
-      );
-  });
-}
-
-/** Keep setup health truthful when a stale claim finishes after a restart. */
-export async function recordRetellMonitoringReceived(
+/**
+ * Move "last heard from" forward for one agent platform, and never backward.
+ *
+ * **One writer, because there is one fact**: evidence for this platform reached
+ * the store at this instant. A Retell call landing, a Retell claim finishing
+ * after a restart and a LiveKit conversation arriving are the same sentence,
+ * and one sentence with three writers is three chances to say it differently.
+ *
+ * **The merge is monotone, and it has to be.** Evidence becomes durable in one
+ * order and is drained in another, and the instant a caller passes is the one
+ * the evidence was *received* rather than the one it is being written at — so a
+ * replay or a historical import carries an older instant than the row already
+ * holds. A plain assignment would answer a customer's "last production
+ * conversation" by winding it back to a call from an hour ago. `greatest` keeps
+ * whichever instant is later, and the `coalesce` is what makes the first write
+ * work at all: a column that has never been written is null, and
+ * `greatest(null, x)` is null in Postgres, so a setup that had never heard from
+ * anybody would stay that way forever.
+ *
+ * Batched by construction: the caller names a platform and, where the platform
+ * has selected agents, one of them — never a call. One drained segment carrying
+ * two hundred conversations of one agent is one statement here.
+ */
+export async function recordProductionEvidenceReceived(
   auth: AuthContext,
   input: {
-    readonly platformAgentId: string;
-    readonly receivedAt?: Date | undefined;
+    readonly agentPlatform: MonitoringPlatform;
+    /** The selected agent, where the platform has them. Retell does. */
+    readonly platformAgentId?: string | undefined;
+    readonly receivedAt: Date;
   },
 ): Promise<void> {
-  const receivedAt = input.receivedAt ?? new Date();
+  if (auth.projectId === undefined) return;
+  const { receivedAt } = input;
+  const monotone = (column: AnyPgColumn): SQL =>
+    sql`greatest(coalesce(${column}, ${receivedAt}), ${receivedAt})`;
+  // When the row was touched, which is a different fact from when the evidence
+  // was received: a replay or a historical import carries an old `receivedAt`
+  // and is happening now, and a row stamped with the older of the two would
+  // report that nothing has changed since.
+  const touchedAt = new Date();
+
   await db().transaction(async (tx) => {
     await tx
       .update(monitoringSetup)
-      .set({ lastReceivedAt: receivedAt, updatedAt: receivedAt })
+      .set({
+        lastReceivedAt: monotone(monitoringSetup.lastReceivedAt),
+        updatedAt: touchedAt,
+      })
       .where(
         and(
           withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.agentPlatform, "retell"),
+          eq(monitoringSetup.agentPlatform, input.agentPlatform),
         ),
       );
+
+    // Named agents only. A platform that has none — or a caller that did not
+    // name one — moves the setup's own state and nothing else, rather than
+    // every selected agent's.
+    if (input.platformAgentId === undefined || input.platformAgentId === "") {
+      return;
+    }
     await tx
       .update(retellMonitoredAgent)
-      .set({ lastCallReceivedAt: receivedAt, updatedAt: receivedAt })
+      .set({
+        lastCallReceivedAt: monotone(retellMonitoredAgent.lastCallReceivedAt),
+        updatedAt: touchedAt,
+      })
       .where(
         and(
           withinMonitoringProject(auth, retellMonitoredAgent),
@@ -1260,23 +1281,6 @@ export async function recordRetellMonitoringReceived(
         ),
       );
   });
-}
-
-/** Called after a valid LiveKit production export reaches the shared store. */
-export async function recordLiveKitMonitoringReceived(
-  auth: AuthContext,
-  receivedAt = new Date(),
-): Promise<void> {
-  if (auth.projectId === undefined) return;
-  await db()
-    .update(monitoringSetup)
-    .set({ lastReceivedAt: receivedAt, updatedAt: receivedAt })
-    .where(
-      and(
-        withinMonitoringProject(auth, monitoringSetup),
-        eq(monitoringSetup.agentPlatform, "livekit_agents"),
-      ),
-    );
 }
 
 /** A summary is already owned by a completed claim or a durable failure. */

@@ -24,10 +24,15 @@ import type {
  * per-turn spans — inventing structure that was never measured would corrupt
  * every comparison the numbers exist for.
  *
- * **Safe provider data is kept.** What the columns do not have a place for
- * stays in the payload, resource and scope attributes included. Credential
- * fields and bearer-like values are redacted before any field is read or any
- * payload is serialized.
+ * **Everything that arrives is kept, exactly.** What the columns do not have a
+ * place for stays in the payload, resource and scope attributes included, byte
+ * for byte. Nothing here reads an attribute's name or a value's shape and
+ * decides it looks like a credential: a transcript containing the word
+ * `password`, a tool argument called `secret`, an attribute whose value starts
+ * with `Bearer` are all evidence, and a scanner that rewrote them would have
+ * edited the one thing the product exists to show a team. Operational
+ * credentials are excluded by position instead — the HTTP `Authorization`
+ * header and the service token live outside the payload and never reach here.
  *
  * **Tenancy is not the payload's business.** A resource attribute naming an
  * organization or a project is read by nothing here, deliberately. The customer
@@ -253,56 +258,6 @@ const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
 const PLATFORM_AGENT_VERSION_ATTRIBUTES = ["lk.agent_version"];
 const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_kind"];
 
-/** The visible marker left where an OTLP producer supplied a credential. */
-const OTLP_REDACTED = "[REDACTED]";
-
-function normalizedKey(value: string): string {
-  return value.trim().toLowerCase().replaceAll(/[^a-z0-9]+/gu, "-");
-}
-
-function isCredentialKey(key: string): boolean {
-  const normalized = normalizedKey(key);
-  return /(?:^|-)(?:access-token|api-key|auth|authorization|credential|cookie|password|secret|signature|token)(?:-|$)/u.test(
-    normalized,
-  );
-}
-
-const AUTHORIZATION_VALUE = /\b(?:bearer|basic)\s+[^\s,;]+/giu;
-const CREDENTIAL_ASSIGNMENT =
-  /([?&;]\s*(?:access[_-]?token|api[_-]?key|auth|authorization|credential|password|secret|signature|token)=)[^&#;\s]+/giu;
-
-function safeString(value: string): string {
-  return value
-    .replace(AUTHORIZATION_VALUE, OTLP_REDACTED)
-    .replace(CREDENTIAL_ASSIGNMENT, `$1${OTLP_REDACTED}`);
-}
-
-/** Copy one decoded OTLP document after removing credential-bearing values. */
-function safeOtlpProviderData<T>(value: T): T {
-  const copied = (held: unknown): unknown => {
-    if (typeof held === "string") return safeString(held);
-    if (Array.isArray(held)) return held.map(copied);
-    if (typeof held !== "object" || held === null) return held;
-
-    const row = held as Readonly<Record<string, unknown>>;
-    const attributeKey = typeof row["key"] === "string" ? row["key"] : "";
-    const redactsAttribute =
-      attributeKey !== "" && isCredentialKey(attributeKey);
-    const safe: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(row)) {
-      if (redactsAttribute && key === "value") {
-        safe[key] = { stringValue: OTLP_REDACTED };
-      } else if (isCredentialKey(key)) {
-        safe[key] = OTLP_REDACTED;
-      } else {
-        safe[key] = copied(nested);
-      }
-    }
-    return safe;
-  };
-  return copied(value) as T;
-}
-
 /**
  * How much of one export egma will turn into rows.
  *
@@ -315,7 +270,7 @@ function safeOtlpProviderData<T>(value: T): T {
  * Both caps are needed because they answer different requests. A body inside
  * the wire limit can still carry a hundred thousand tiny spans, which is what
  * the count is for; and it can carry two thousand spans sharing one enormous
- * resource, where every row repeats the safe resource and a 1.3 MiB
+ * resource, where every row repeats that resource and a 1.3 MiB
  * request becomes gigabytes of rows. The byte budget is measured on what the
  * rows actually weigh, which is the only number that predicts the memory.
  */
@@ -351,9 +306,7 @@ function attribute(
   key: string,
 ): string {
   const found = (attributes ?? []).find((entry) => entry.key === key);
-  if (found === undefined) return "";
-  const value = textOf(found.value);
-  return value === OTLP_REDACTED ? "" : value;
+  return found === undefined ? "" : textOf(found.value);
 }
 
 function firstAttribute(
@@ -516,7 +469,7 @@ function environmentOf(
  * Everything on a row except the span itself, serialised once for the whole
  * scope rather than once per span.
  *
- * The safe resource and scope ride every row on purpose — a row has to say
+ * The resource and the scope ride every row on purpose — a row has to say
  * where it came from without a join — but they are the same two objects for
  * every span in the group. Built lazily, so a group whose spans are all
  * refused never pays for serialization.
@@ -543,7 +496,7 @@ const TOO_MANY_SPANS =
 
 const TOO_MANY_BYTES =
   `this export's spans came to more than the ${MAXIMUM_NORMALISED_BYTES / (1024 * 1024)} MiB of rows Egma ` +
-  "writes from one request — every span carries its safe resource and scope, " +
+  "writes from one request — every span carries its resource and scope, " +
   "so a large resource repeated across many spans reaches this long " +
   "before the body does. The spans that fitted were stored and the rest were " +
   "refused rather than retried; flush smaller batches.";
@@ -572,8 +525,7 @@ export function normaliseOtlpExport(
   let excess: RejectedSpan | undefined;
   let normalisedBytes = 0;
 
-  for (const receivedResourceSpans of request.resourceSpans ?? []) {
-    const resourceSpans = safeOtlpProviderData(receivedResourceSpans);
+  for (const resourceSpans of request.resourceSpans ?? []) {
     const environment = environmentOf(resourceSpans);
     const attribution =
       attributionFor?.(resourceSpans) ?? INGESTED_AT_THIS_DOOR;
@@ -639,6 +591,7 @@ export function normaliseOtlpExport(
         const attributes = span.attributes;
         const kind = kindOf(scope, span);
         const tool = TOOL_KEYS_BY_SCOPE[scope?.name ?? ""];
+        const agentPlatform = AGENT_PLATFORM_BY_SCOPE[scope?.name ?? ""] ?? "";
 
         payloadPrefix ??= payloadPrefixFor(resourceSpans, scopeSpans);
         const payload = `${payloadPrefix}${JSON.stringify(span)}}`;
@@ -681,7 +634,7 @@ export function normaliseOtlpExport(
             [attributes, resourceSpans.resource?.attributes],
             PROVIDER_CALL_ID_ATTRIBUTES,
           ),
-          agentPlatform: AGENT_PLATFORM_BY_SCOPE[scope?.name ?? ""] ?? "",
+          agentPlatform,
           platformAgentId: firstAttribute(
             [attributes, resourceSpans.resource?.attributes],
             PLATFORM_AGENT_ID_ATTRIBUTES,
@@ -715,6 +668,26 @@ export function normaliseOtlpExport(
           testVersionId: attribution.testVersionId,
           personaVersionId: attribution.personaVersionId,
           payload,
+          /*
+           * The platform's own statement that the conversation is over, and
+           * only where a platform this door recognises made it.
+           *
+           * Two conditions, both required. `root` says the framework's session
+           * span arrived — the one span the whole trace happened inside, named
+           * in that framework's own vocabulary rather than guessed from the
+           * shape of the trace. `agentPlatform` says the scope is a production
+           * platform this release supports. A scope nobody recognises reaches
+           * `other` and says nothing here, which is the point: a parentless
+           * span is not an ending, and an exporter flush whose parent never
+           * arrived produces one.
+           *
+           * A simulation's root is deliberately `false`. Its scope maps to no
+           * production platform, and the completion fact for a simulation
+           * belongs to the lifecycle that ends the run — asserting it here as
+           * well would be two producers of one fact, which is how one
+           * conversation comes to be graded twice.
+           */
+          endsTrace: kind === "root" && agentPlatform !== "",
         });
       }
     }

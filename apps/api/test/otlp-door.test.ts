@@ -7,6 +7,7 @@ import {
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import type { IngestionStore } from "../src/ingestion/object-store.ts";
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import {
   EXPORT_TRACE_SERVICE_REQUEST,
@@ -14,6 +15,11 @@ import {
   RPC_STATUS_MESSAGE as RPC_STATUS,
 } from "../src/otlp/schema.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
+import { pendingSegments } from "./support/ingestion.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 
 /**
  * What the door accepts, what it refuses, and what it says either way.
@@ -23,7 +29,18 @@ import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
  * behaving well: the other encoding, a body that is not what it claims, a
  * client that tries to name its own customer, and the shape of a refusal an
  * OpenTelemetry SDK is going to parse rather than read.
+ *
+ * The door answers on object-store durability and writes no row, so a post here
+ * is followed by a drain wherever the claim is about what a reader sees. What
+ * the door itself decided is read out of the pending object instead, which is
+ * the only place it has put anything by the time it answers.
  */
+
+const storage: ObjectStorage = await startObjectStorage("otlp-door");
+
+if (!storage.available) {
+  process.stderr.write(`\nskipping the OTLP door suite — ${storage.why}\n\n`);
+}
 
 let api: TestApi;
 let secret: string;
@@ -65,6 +82,13 @@ function jsonExport(
 }
 
 async function post(body: Buffer | string, headers: Record<string, string> = {}) {
+  const response = await stage(body, headers);
+  await api.drainEvidence();
+  return response;
+}
+
+/** The same post, stopping where the door does: durable and not yet drained. */
+async function stage(body: Buffer | string, headers: Record<string, string> = {}) {
   return api.app.inject({
     method: "POST",
     url: OTLP_TRACES_PATH,
@@ -83,8 +107,18 @@ function store(): NonNullable<TestApi["traceStore"]> {
   return traceStore;
 }
 
+/** The ingestion bucket this instance accepts into, for reading it back. */
+function ingestStore(): IngestionStore {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage.ingestStore;
+}
+
 beforeAll(async () => {
-  api = await createApi("otlp_door", { traceStore: true });
+  if (!storage.available) return;
+  api = await createApi("otlp_door", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
 
   const created = await api.app.inject({
     method: "POST",
@@ -119,9 +153,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
-describe("LiveKit Monitoring health", () => {
+describe.skipIf(!storage.available)("what the door stages for Monitoring", () => {
   function auth(): AuthContext {
     return {
       userId,
@@ -132,11 +167,19 @@ describe("LiveKit Monitoring health", () => {
     };
   }
 
-  it("changes only after a valid LiveKit production span reaches storage", async () => {
+  /**
+   * Monitoring's "last heard from" is a fact about evidence being
+   * *query-visible*, so the door does not assert it: it accepts, and what the
+   * drainer finds in the object is what moves that state. What the door decides
+   * is which of these exports produces evidence at all, and that is what is read
+   * out of the pending object here — the setup's own bookkeeping is proved where
+   * the drainer writes it.
+   */
+  it("stages nothing for evidence it refuses, and platform identity for what it takes", async () => {
     const configured = await configureLiveKitMonitoring(auth());
     expect(configured.lastReceivedAt).toBeNull();
 
-    const refused = await post(
+    const refused = await stage(
       jsonExport([
         jsonSpan({
           traceId: "not-an-otel-trace-id",
@@ -145,13 +188,9 @@ describe("LiveKit Monitoring health", () => {
       ]),
     );
     expect(refused.statusCode).toBe(200);
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeNull();
+    expect(await pendingSegments(ingestStore())).toHaveLength(0);
 
-    const anotherPlatform = await post(
+    const anotherPlatform = await stage(
       jsonExport(
         [
           jsonSpan({
@@ -164,30 +203,41 @@ describe("LiveKit Monitoring health", () => {
       ),
     );
     expect(anotherPlatform.statusCode).toBe(200);
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeNull();
+    const [foreign] = await pendingSegments(ingestStore());
+    expect(foreign?.records[0]).toMatchObject({
+      agent_platform: "",
+      ends_trace: false,
+    });
+    await api.drainEvidence();
 
-    const accepted = await post(
+    const accepted = await stage(
       jsonExport([
         jsonSpan({
           traceId: "45454545454545454545454545454545",
           spanId: "4545454545454545",
+          name: "agent_session",
         }),
       ]),
     );
     expect(accepted.statusCode).toBe(200);
+    const [livekit] = await pendingSegments(ingestStore());
+    expect(livekit?.records[0]).toMatchObject({
+      agent_platform: "livekit_agents",
+      // The framework's own session span, which is the platform saying the
+      // conversation is over. Nothing infers it from the span having no parent.
+      ends_trace: true,
+    });
+    await api.drainEvidence();
+
     expect(
       (await listMonitoringSetups(auth())).find(
         (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeInstanceOf(Date);
+      ),
+    ).toBeDefined();
   });
 });
 
-describe("the JSON encoding", () => {
+describe.skipIf(!storage.available)("the JSON encoding", () => {
   it("lands the same way protobuf does, ids and nanoseconds included", async () => {
     const response = await post(jsonExport([jsonSpan()]));
     expect(response.statusCode).toBe(200);
@@ -237,7 +287,20 @@ describe("the JSON encoding", () => {
     expect(row).toEqual({ organization_id: organizationId, project_id: projectId });
   });
 
-  it("redacts credential-like OTLP data before fields or payload are stored", async () => {
+  /**
+   * The rule this replaced a scrubber with: **egma does not read evidence to
+   * decide what evidence is.**
+   *
+   * Each sentinel below is a thing a real caller says or a real customer names:
+   * a transcript containing the word `Bearer`, a tool argument called
+   * `password`, an attribute named `api_key`, a metadata field called
+   * `access_token`. A scanner that rewrote any of them would have edited the
+   * one thing the product exists to show a team. Operational credentials are
+   * excluded by *position* instead — the `Authorization` header and the service
+   * token live outside the payload and never reach normalization at all — so
+   * nothing here has to guess.
+   */
+  it("keeps every value a sender wrote, credential-looking ones included", async () => {
     const traceId = "19191919191919191919191919191919";
     const response = await post(
       JSON.stringify({
@@ -325,29 +388,36 @@ describe("the JSON encoding", () => {
       text: string;
       platform_agent_name: string;
     }>(
-      `select payload, provider_call_id, text, platform_agent_name from spans ` +
+      `select payload, provider_call_id, text, platform_agent_name from spans final ` +
         `where trace_id = '${traceId}'`,
     );
     expect(row).toBeDefined();
+
+    // Every one of them, byte for byte, wherever it sat: on the resource, on
+    // the scope, on the span, nested in a kvlist, and on an event.
     const stored = JSON.stringify(row);
-    for (const secretValue of [
-      "resource-secret",
+    for (const sentinel of [
+      "Bearer resource-secret",
       "resource-api-secret",
-      "scope-secret",
-      "transcript-secret",
-      "agent-secret",
+      "Bearer scope-secret",
+      "Bearer transcript-secret",
+      "Basic agent-secret",
       "span-password-secret",
       "nested-token-secret",
       "event-client-secret",
     ]) {
-      expect(stored).not.toContain(secretValue);
+      expect(stored).toContain(sentinel);
     }
+
+    // And the lifted columns hold exactly what arrived.
     expect(row).toMatchObject({
-      provider_call_id: "",
-      text: "",
-      platform_agent_name: "",
+      provider_call_id: "Bearer resource-secret",
+      text: "Bearer transcript-secret",
+      platform_agent_name: "Basic agent-secret",
     });
-    expect(row?.payload).toContain("[REDACTED]");
+
+    // Nothing is written anywhere in place of anything.
+    expect(stored).not.toContain("REDACTED");
   });
 
   it("keeps a Pipecat service span whole without making a transcript turn", async () => {
@@ -451,7 +521,7 @@ describe("the JSON encoding", () => {
   });
 });
 
-describe("a payload that names a customer", () => {
+describe.skipIf(!storage.available)("a payload that names a customer", () => {
   /**
    * A client can send whatever attributes it likes. Which account its
    * telemetry lands in is not one of them — the request's own claim is not
@@ -515,7 +585,7 @@ describe("a payload that names a customer", () => {
   });
 });
 
-describe("the environment a span was recorded in", () => {
+describe.skipIf(!storage.available)("the environment a span was recorded in", () => {
   it("is discovered from the telemetry, with no declaration step anywhere", async () => {
     const traceId = "00001111222233334444555566667777";
     const response = await post(
@@ -572,7 +642,7 @@ describe("the environment a span was recorded in", () => {
   });
 });
 
-describe("a span that named itself nothing", () => {
+describe.skipIf(!storage.available)("a span that named itself nothing", () => {
   it("is rejected rather than given an id egma made up", async () => {
     const good = jsonSpan({
       traceId: "12121212121212121212121212121212",
@@ -613,7 +683,7 @@ describe("a span that named itself nothing", () => {
  * lost: the two timestamps it was measured from are in the payload as they
  * arrived.
  */
-describe("a span that says it ran for longer than Int64 holds", () => {
+describe.skipIf(!storage.available)("a span that says it ran for longer than Int64 holds", () => {
   it("is stored with its duration clamped rather than wrapped", async () => {
     const traceId = "13131313131313131313131313131313";
     const response = await post(
@@ -642,7 +712,7 @@ describe("a span that says it ran for longer than Int64 holds", () => {
   });
 });
 
-describe("a body the door cannot read", () => {
+describe.skipIf(!storage.available)("a body the door cannot read", () => {
   it("is refused with a reason, rather than accepted and lost", async () => {
     const notProtobuf = await post(Buffer.from([0xff, 0xff, 0xff, 0xff]), {
       "content-type": "application/x-protobuf",
@@ -697,7 +767,7 @@ describe("a body the door cannot read", () => {
   });
 });
 
-describe("a compressed export", () => {
+describe.skipIf(!storage.available)("a compressed export", () => {
   it("is read, because that is how most exporters are configured", async () => {
     const traceId = "55556666777788889999000011112222";
     const body = EXPORT_TRACE_SERVICE_REQUEST.encode(
@@ -751,7 +821,7 @@ describe("a compressed export", () => {
   });
 });
 
-describe("an export carrying nothing", () => {
+describe.skipIf(!storage.available)("an export carrying nothing", () => {
   it("is a perfectly good request and stores no rows", async () => {
     const before = (
       await store().rows<{ n: number }>("select count() as n from spans")
@@ -777,7 +847,7 @@ describe("an export carrying nothing", () => {
  * exporter is told how much was refused rather than left to believe all of it
  * landed.
  */
-describe("an export asking for more than egma turns into rows", () => {
+describe.skipIf(!storage.available)("an export asking for more than egma turns into rows", () => {
   it("stores what fits and reports the rest, when one fat resource rides every span", async () => {
     const traceId = "cafe0000cafe0000cafe0000cafe0000";
     const spans = 100;
@@ -849,7 +919,7 @@ describe("an export asking for more than egma turns into rows", () => {
  * the same base64 text here, so a span means the same thing whichever way its
  * exporter is configured.
  */
-describe("an attribute carrying bytes", () => {
+describe.skipIf(!storage.available)("an attribute carrying bytes", () => {
   const raw = Buffer.from([0x00, 0x01, 0xfe, 0xff]);
   const asBase64 = raw.toString("base64");
 
@@ -935,7 +1005,7 @@ describe("an attribute carrying bytes", () => {
   });
 });
 
-describe("an id shouted in uppercase hex", () => {
+describe.skipIf(!storage.available)("an id shouted in uppercase hex", () => {
   /**
    * The JSON mapping says lowercase and every exporter obeys, but a
    * hand-written client that writes its hex in capitals means the same trace —
@@ -960,7 +1030,7 @@ describe("an id shouted in uppercase hex", () => {
   });
 });
 
-describe("a span whose parent is not an id", () => {
+describe.skipIf(!storage.available)("a span whose parent is not an id", () => {
   /**
    * The parent is normalised to empty, which is how a root is recognised — so a
    * span with a malformed parent reads as a second root rather than as the
@@ -993,7 +1063,7 @@ describe("a span whose parent is not an id", () => {
   });
 });
 
-describe("a request carrying no credential at all", () => {
+describe.skipIf(!storage.available)("a request carrying no credential at all", () => {
   /**
    * The body is the expensive part of an export, and reading it for somebody
    * who named nobody is how an unauthenticated flood costs a server the memory
@@ -1020,7 +1090,7 @@ describe("a request carrying no credential at all", () => {
   });
 });
 
-describe("the role the key's holder acts at", () => {
+describe.skipIf(!storage.available)("the role the key's holder acts at", () => {
   let viewerSecret: string;
   let viewerOrganizationId: string;
 
@@ -1105,58 +1175,11 @@ describe("the role the key's holder acts at", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    await api.drainEvidence();
 
     const [row] = await store().rows<{ organization_id: string }>(
-      `select organization_id from spans where trace_id = '${traceId}'`,
+      `select organization_id from spans final where trace_id = '${traceId}'`,
     );
     expect(row?.organization_id).toBe(viewerOrganizationId);
-  });
-});
-
-describe("a batch the trace store will never take", () => {
-  /**
-   * The specification's rule is the whole of the design here: rejected data
-   * must not be retried, and a 5xx is read by every exporter as *try again
-   * later*. So a store that has looked at these rows and refused them — a
-   * constraint they violate, a column they no longer fit — is answered as a
-   * rejection, which stops the retry loop and says why. A store that is merely
-   * unreachable is the opposite case and stays an error, because those rows
-   * would land perfectly well a minute from now.
-   */
-  it("is answered as a rejection rather than as an error an exporter will retry", async () => {
-    const traceId = "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0";
-    await store().command(
-      "alter table spans add constraint takes_nothing check length(span_id) < 0",
-    );
-
-    try {
-      const response = await post(
-        jsonExport([jsonSpan({ traceId, spanId: "f0f0f0f0f0f0f0f0" })]),
-      );
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({
-        partialSuccess: {
-          rejectedSpans: "1",
-          errorMessage: expect.stringContaining("the trace store refused"),
-        },
-      });
-    } finally {
-      await store().command(
-        "alter table spans drop constraint takes_nothing",
-      );
-    }
-
-    const [row] = await store().rows<{ n: number }>(
-      `select count() as n from spans where trace_id = '${traceId}'`,
-    );
-    expect(row?.n).toBe(0);
-
-    // And the door still works: the refusal was about those rows.
-    const after = await post(
-      jsonExport([jsonSpan({ traceId, spanId: "f0f0f0f0f0f0f0f0" })]),
-    );
-    expect(after.statusCode).toBe(200);
-    expect(after.json()).toEqual({});
   });
 });

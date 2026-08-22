@@ -597,6 +597,7 @@ function simulationSpan(
     testVersionId: simulation.testVersionId ?? "",
     personaVersionId: simulation.personaVersionId,
     payload: "{}",
+    endsTrace: false,
     ...over,
   };
 }
@@ -791,6 +792,10 @@ export async function conductProductionTrace(
         parentSpanId: "",
         name: "agent_session",
         kind: "root",
+        // LiveKit's own session span, and the statement that carries the end
+        // fact: completion is the platform's word, never the absence of a
+        // parent.
+        endsTrace: true,
         durationNanoseconds: 20_000_000_000n,
         // The block rides here, under the egma-owned corner of a payload that
         // is otherwise the vendor's own document — written through the
@@ -825,8 +830,9 @@ async function exportFlush(world: World, spans: readonly NewSpan[]): Promise<voi
 }
 
 /**
- * One more flush of a conversation egma has already dealt with — a root span at
- * that, so it says as loudly as telemetry can that the conversation is over.
+ * One more flush of a conversation egma has already dealt with — carrying the
+ * platform's own end statement, so it says as loudly as telemetry can that the
+ * conversation is over.
  */
 export async function exportALateFlush(
   world: World,
@@ -838,6 +844,7 @@ export async function exportALateFlush(
       parentSpanId: "",
       name: "agent_session",
       kind: "root",
+      endsTrace: true,
       startedAtMicroseconds: BigInt(Date.now()) * 1_000n,
     }),
   ]);
@@ -876,6 +883,7 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...over,
   };
 }
@@ -945,7 +953,10 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     capacity: 4,
     heartbeatSeconds: 1,
     leaseSeconds: 3_600,
-    sweepSeconds: 3_600,
+    // Short, because a claim declined for a conversation egma does not hold all
+    // of yet goes back to the queue and is only taken up again by a sweep. A
+    // deployment's own default is thirty seconds; a suite's patience is not.
+    sweepSeconds: 1,
     // An hour, so a production trace judged inside a test's patience was judged
     // because its root span closed. The idle fallback's own test sets it low.
     traceIdleSeconds: 3_600,
@@ -1069,6 +1080,26 @@ export async function verdictsOn(
  * still claimable when the next case starts its own copy would be judged again,
  * by a judge scripted for something else.
  */
+/**
+ * The conversation's spans, arriving after the simulation already landed.
+ *
+ * The ordinary order is the other way round — a simulator streams while it
+ * conducts and lands terminal after — and this is the case that order does not
+ * cover: evidence accepted at the door, safe, and not yet readable when the
+ * work to judge it was minted.
+ */
+export async function streamConversationLate(
+  world: World,
+  simulationId: string,
+  streaming: StreamedConversation = aConversation(),
+): Promise<void> {
+  const simulation = await getSimulation(world.auth, simulationId);
+  if (simulation === undefined) {
+    throw new Error(`simulation ${simulationId} is not there`);
+  }
+  await streamConversation(world, simulation, streaming);
+}
+
 export async function jobFor(
   world: World,
   conversation:

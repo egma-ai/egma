@@ -272,14 +272,19 @@ const CONTEXT_REQUIRING = [
   // test.
   "readAssertionShelf",
   "readAssertionWords",
+  // Asks one question and answers it about the acting customer: does this
+  // project belong to them. The drainer holds a scope it read out of a sealed
+  // object and must not write under a pair Postgres has never agreed to.
+  "isProjectOfOrganization",
   "readProject",
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
-  "recordLiveKitMonitoringReceived",
-  "recordRetellCallReceived",
+  // The one writer for "evidence for this platform reached the store". Its
+  // merge is monotone, because the instant it is given comes from the evidence
+  // and a replay therefore carries an older one than the row already holds.
+  "recordProductionEvidenceReceived",
   "recordRetellIngestionFailure",
-  "recordRetellMonitoringReceived",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
@@ -580,6 +585,26 @@ const READ_LIMITS = [
 ];
 
 /**
+ * The shipped list of agent platforms Monitoring keeps a setup for, beside the
+ * type spelled from it.
+ *
+ * Deciding whether a word names one is a question about that list, and a list
+ * written out a second time somewhere else is a list that will one day disagree
+ * with itself — quietly, as a platform whose bookkeeping stopped being written.
+ */
+const THE_MONITORED_PLATFORMS = ["MONITORING_PLATFORMS"];
+
+/**
+ * How many times one conversation is handed out before egma stops trying.
+ *
+ * Exported for the same reason the read limits are: the service that judges
+ * decides on its own last attempt to answer with what it can see rather than
+ * decline again, and a bound named in two places is a bound that will one day
+ * disagree with itself.
+ */
+const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
+
+/**
  * What a mock tool's answer may cost the exchange that carries it, and the two
  * pure functions that read one.
  *
@@ -707,6 +732,8 @@ describe("the data-access module's surface", () => {
         ...PERMISSION,
         ...VALUES,
         ...READ_LIMITS,
+        ...THE_MONITORED_PLATFORMS,
+        ...THE_GRADING_BUDGET,
         ...THE_FOLD,
         ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
