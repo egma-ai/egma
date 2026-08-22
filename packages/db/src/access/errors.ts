@@ -720,7 +720,7 @@ export class ConnectionRestoreRefusedError extends Error {
   /** Whichever of the two the sentence named, for a layer that has to relay it. */
   readonly connectionId: string | undefined;
   readonly agentId: string | undefined;
-  readonly connectionKind: string | undefined;
+  readonly connectionType: string | undefined;
 
   constructor(
     reason: ConnectionRestoreRefusal,
@@ -728,7 +728,7 @@ export class ConnectionRestoreRefusedError extends Error {
     named: {
       readonly connectionId?: string;
       readonly agentId?: string;
-      readonly connectionKind?: string;
+      readonly connectionType?: string;
     } = {},
   ) {
     super(message);
@@ -736,7 +736,7 @@ export class ConnectionRestoreRefusedError extends Error {
     this.reason = reason;
     this.connectionId = named.connectionId;
     this.agentId = named.agentId;
-    this.connectionKind = named.connectionKind;
+    this.connectionType = named.connectionType;
   }
 }
 

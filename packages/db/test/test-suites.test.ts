@@ -98,7 +98,7 @@ beforeAll(async () => {
     {
       name: "Suite test chat",
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "suite_test_agent" },
@@ -688,7 +688,7 @@ describe("unlimited execution with bounded reads", () => {
     const dedicated = await addConnection(actingAsAcme(), world.frontDesk, {
       name: "Large archive target",
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "suite_archive_target" },

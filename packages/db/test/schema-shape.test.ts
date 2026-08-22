@@ -587,7 +587,7 @@ describe("every enumerated value", () => {
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
       { table: "connection", column: "agent_platform" },
-      { table: "connection", column: "connection_kind" },
+      { table: "connection", column: "connection_type" },
       { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },

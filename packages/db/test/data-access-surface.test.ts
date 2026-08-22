@@ -158,7 +158,7 @@ const CONTEXT_REQUIRING = [
   // know whether a phone call is what this run would place. It answers a kind
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
-  "connectionKindOf",
+  "connectionTypeOf",
   "createAgent",
   "createApiKey",
   "createInvitation",
@@ -528,7 +528,7 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
-  "connectionKindUsesPlatformCarrier",
+  "connectionTypeUsesPlatformCarrier",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
