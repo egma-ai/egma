@@ -180,7 +180,13 @@ export const productionTraceClaim = pgTable(
     platformAgentId: text("platform_agent_id").notNull(),
     platformAgentName: text("platform_agent_name"),
     platformAgentVersion: text("platform_agent_version"),
-    /** Safe Retell document with bearer-like fields removed. */
+    /**
+     * The pulling agent's id beside the safe Retell document, with
+     * bearer-like fields removed. The id is in here rather than in a
+     * column of its own because this table references nothing — which is
+     * what makes it survive a redesign — and crash recovery still has to
+     * stamp the notebook of the agent that actually pulled the call.
+     */
     payload: text("payload").notNull(),
     endedAt: moment("ended_at").notNull(),
     degraded: boolean("degraded").notNull().default(false),
