@@ -923,52 +923,6 @@ export async function recordPulledCallReceived(
     );
 }
 
-/**
- * Keep the notebook truthful when a stale claim finishes after a restart.
- *
- * The claim carries no agent id — it deliberately references nothing, which is
- * what makes it survive a redesign — so the agent has to be found again from
- * the platform identity the call was pulled under. That identity is only
- * unique among agents *pulling* on *that platform*: a switched-off twin keeps
- * its notebook (and may name the same platform agent, which the partial unique
- * index allows), and a LiveKit agent may hold the same id string by accident.
- * Neither pulled this call, so neither is stamped.
- */
-export async function recordPulledCallReceivedForPlatformAgent(
-  auth: AuthContext,
-  input: {
-    readonly agentPlatform: AgentPlatform;
-    readonly platformAgentId: string;
-    readonly receivedAt?: Date | undefined;
-  },
-): Promise<void> {
-  const receivedAt = input.receivedAt ?? new Date();
-  const pulled = await db()
-    .select({ id: agent.id })
-    .from(agent)
-    .where(
-      and(
-        within(auth, agent, eq(agent.projectId, projectOf(auth))),
-        eq(agent.agentPlatform, input.agentPlatform),
-        eq(agent.platformAgentId, input.platformAgentId),
-        eq(agent.pullProductionCalls, true),
-      ),
-    );
-  if (pulled.length === 0) return;
-  await db()
-    .update(monitoringState)
-    .set({ lastReceivedAt: receivedAt, updatedAt: receivedAt })
-    .where(
-      and(
-        withinMonitoringProject(auth, monitoringState),
-        inArray(
-          monitoringState.agentId,
-          pulled.map((row) => row.id),
-        ),
-      ),
-    );
-}
-
 /** A summary is already owned by a completed claim or a durable failure. */
 export async function productionCallIsAccountedFor(
   auth: AuthContext,

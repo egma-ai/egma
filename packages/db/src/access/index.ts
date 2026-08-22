@@ -360,7 +360,6 @@ export {
   readAgentPullState,
   recordMonitoringFailure,
   recordPulledCallReceived,
-  recordPulledCallReceivedForPlatformAgent,
   releaseMonitoringLease,
   releaseMonitoringFailureReplay,
   renewMonitoringLease,

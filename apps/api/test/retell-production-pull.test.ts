@@ -11,7 +11,7 @@ import {
   listTraces,
   readTrace,
   recordPulledCallReceived,
-  recordPulledCallReceivedForPlatformAgent,
+  sweepStaleProductionClaims,
   type AgentPlatform,
   type AuthContext,
 } from "@egma/db";
@@ -118,9 +118,21 @@ function retellCall(
     call_type: "phone_call",
     start_timestamp: endedAt.getTime() - 30_000,
     end_timestamp: endedAt.getTime(),
+    // With word timings, because a transcript's order has to be a reported
+    // fact here rather than a tie-break: two turns Retell timed identically are
+    // indistinguishable to a trace read, and the one case that reads spans back
+    // asks for them in order.
     transcript_with_tool_calls: [
-      { role: "agent", content: "Hello" },
-      { role: "user", content: "I need help" },
+      {
+        role: "agent",
+        content: "Hello",
+        words: [{ word: "Hello", start: 0.1, end: 0.6 }],
+      },
+      {
+        role: "user",
+        content: "I need help",
+        words: [{ word: "I need help", start: 1.2, end: 2.4 }],
+      },
     ],
   };
 }
@@ -287,7 +299,6 @@ function realLedgerWriter(spans: unknown[]): RetellProductionWriter {
     claimProductionTrace,
     finishProductionTrace,
     recordPulledCallReceived,
-    recordPulledCallReceivedForPlatformAgent,
     async appendSpans(_auth, written) {
       spans.push(...written);
       return { appended: written.length, batches: 1 };
@@ -812,30 +823,71 @@ describe("a poison call", () => {
 });
 
 describe("a stale claim's stamp", () => {
-  it("lands only on the notebook that pulled the call", async () => {
-    // The claim references no agent — that is what makes it survive a
-    // redesign — so a restart has to find the agent again from the platform
-    // identity alone. Three agents answer to `agent_voice_1` here, and only
-    // one of them pulled anything.
-    const retired = await pulling("Retired front desk", "agent_voice_1");
-    await disablePullProductionCalls(at(), retired);
-    const pulls = await pulling("Front desk", "agent_voice_1");
-    const elsewhere = await pulling("Voice bot", "agent_voice_1", {
-      agentPlatform: "livekit_agents",
-    });
+  it("lands on the agent that pulled the call, not on its replacement", async () => {
+    const double = retellDouble();
+    const pulled = await pulling("Front desk", "agent_voice_1");
+    holds(double, retellCall("call_live", "agent_voice_1", later(-MINUTE)));
 
-    await recordPulledCallReceivedForPlatformAgent(at(), {
-      agentPlatform: "retell",
-      platformAgentId: "agent_voice_1",
-      receivedAt: later(MINUTE),
+    // The turn dies between Postgres and ClickHouse. The claim is owned and
+    // never marked written, which is the whole reason the sweep exists.
+    const crashing: RetellProductionWriteStore = {
+      claimProductionTrace,
+      finishProductionTrace,
+      recordPulledCallReceived,
+      async appendSpans() {
+        throw new Error("the trace store went away mid-write");
+      },
+      async recordProductionTraces() {
+        // Never reached: the span block is what failed.
+      },
+    };
+    await expect(
+      runRetellProductionIngestion({
+        log: collectingLog().log,
+        reach: { url: RETELL_URL, fetchImpl: double.fetchImpl },
+        writer: {
+          writeRetellCall: (target, call, receivedAt) =>
+            writeRetellCall(target, call, receivedAt, crashing),
+          replayProductionClaim: (claim) =>
+            replayProductionClaim(claim, crashing),
+        },
+        clock: () => NOW,
+      }),
+    ).rejects.toThrow("the trace store went away mid-write");
+
+    // The customer moves the platform agent onto a fresh egma agent. The
+    // switched-off original keeps its notebook, and the partial unique index
+    // allows the replacement to name the same platform agent.
+    await disablePullProductionCalls(at(), pulled);
+    const replacement = await pulling("Front desk, again", "agent_voice_1");
+
+    // Crash recovery, on the real clock the claim was written against.
+    const stale = await sweepStaleProductionClaims({
+      now: new Date(Date.now() + 5 * MINUTE),
     });
+    expect(stale).toHaveLength(1);
+    for (const claim of stale) {
+      await replayProductionClaim(claim, {
+        claimProductionTrace,
+        finishProductionTrace,
+        recordPulledCallReceived,
+        async appendSpans(_auth, written) {
+          return { appended: written.length, batches: 1 };
+        },
+        async recordProductionTraces() {
+          // ClickHouse's grading queue. Not what this case is about.
+        },
+      });
+    }
 
     const stamped = new Map(
       (await notebooks()).map((row) => [row.agent_id, row.last_received_at]),
     );
-    expect(stamped.get(pulls)?.toISOString()).toBe(later(MINUTE).toISOString());
-    expect(stamped.get(retired)).toBeNull();
-    expect(stamped.get(elsewhere)).toBeNull();
+    expect(stamped.get(pulled)).not.toBeNull();
+    expect(stamped.get(replacement)).toBeNull();
+    expect(await ledger()).toEqual([
+      { provider_call_id: "call_live", status: "written" },
+    ]);
   });
 });
 
