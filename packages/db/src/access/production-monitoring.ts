@@ -1528,6 +1528,22 @@ export async function deleteRetellCallRetry(
 ): Promise<void> {
   const now = input.now ?? new Date();
   await db().transaction(async (tx) => {
+    // The agent row first, in the same order every writer of its state takes
+    // it. Two calls made durable at the same moment must not each see the
+    // other's row still standing and both leave the restore to the other;
+    // serialized here, whichever in-flight check runs last sees every
+    // sibling's committed delete, so an agent owing nothing cannot stay
+    // degraded.
+    await tx
+      .select({ id: retellMonitoredAgent.id })
+      .from(retellMonitoredAgent)
+      .where(
+        and(
+          withinMonitoringProject(auth, retellMonitoredAgent),
+          eq(retellMonitoredAgent.id, target.monitoredAgentId),
+        ),
+      )
+      .for("update");
     const deleted = await tx
       .delete(retellCallRetry)
       .where(
