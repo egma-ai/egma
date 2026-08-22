@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   discoverRetellVoiceAgents,
   listAgents,
@@ -88,6 +88,12 @@ export default function StartMonitoringPage() {
 }
 
 type Platform = "retell" | "livekit_agents";
+
+/** One account listing, and the key it was read with. */
+type Listing = {
+  readonly key: string;
+  readonly agents: readonly RetellAgentChoice[];
+};
 
 /** Which agent this flow is about, or the roster it is adding to. */
 const FROM_THE_ACCOUNT = "";
@@ -374,13 +380,26 @@ function RetellPath({
 }) {
   const [apiKey, setApiKey] = useState("");
   const [listing, setListing] = useState(false);
-  const [listed, setListed] = useState<readonly RetellAgentChoice[] | null>(null);
+  /**
+   * The account listing, **and the key that produced it**, together.
+   *
+   * They are one value because they are one fact. Held apart, a listing read
+   * with one key could still be on screen after the key was edited, and the
+   * commit would send yesterday's platform agent ids with today's key.
+   */
+  const [listed, setListed] = useState<Listing | null>(null);
   const [bound, setBound] = useState<string | null>(null);
   const [ticked, setTicked] = useState<readonly string[]>([]);
   const [starting, setStarting] = useState(false);
   const [outcome, setOutcome] = useState<StartOutcome | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  /**
+   * Which discovery is the current one. A reply from an earlier one is
+   * dropped: it was asked with a key that is no longer the key on screen, and
+   * installing its agents would be this form quietly mixing two accounts.
+   */
+  const asking = useRef(0);
 
   /** What the radio settles on before anybody touches it. */
   const binding = useMemo(() => {
@@ -402,13 +421,23 @@ function RetellPath({
     quiet: boolean,
     keep: readonly string[] = [],
   ): Promise<readonly RetellAgentChoice[] | null> {
+
+    const attempt = asking.current + 1;
+    asking.current = attempt;
+    const askedWith = apiKey.trim();
+
     if (!quiet) setListing(true);
     const answer = await platformAnswer(
       discoverRetellVoiceAgents(
-        { projectId, apiKey: apiKey.trim() },
+        { projectId, apiKey: askedWith },
         { client: platformClient },
       ),
     );
+
+    // Superseded while it was in flight, by a newer read or by the key being
+    // edited. Whatever it says is about an account this form is no longer
+    // asking about, so nothing here changes.
+    if (asking.current !== attempt) return null;
     if (!quiet) setListing(false);
 
     if (answer.status === "signed-out") {
@@ -420,7 +449,7 @@ function RetellPath({
       setListed(null);
       return null;
     }
-    setListed(answer.value.agents);
+    setListed({ key: askedWith, agents: answer.value.agents });
     // Everything already switched on stays on screen as ticked and fixed: it
     // is a fact rather than a choice, and the commit never sends it again.
     setTicked(
@@ -441,6 +470,9 @@ function RetellPath({
 
   async function commit(): Promise<void> {
     if (starting || listed === null) return;
+    // The key that produced this listing, not whatever is in the field now.
+    // The two can only differ for an instant, and this is the instant.
+    const apiKeyOfListing = listed.key;
 
     /*
      * **A picked agent has to be bound before anything is committed.** Left
@@ -455,20 +487,20 @@ function RetellPath({
     }
 
     const watch = [
-      ...(binding === null || alreadyWatching(listed, binding)
+      ...(binding === null || alreadyWatching(listed.agents, binding)
         ? []
         : [
             {
               platformAgentId: binding,
               ...(agent === undefined
-                ? { name: nameOf(listed, binding) }
+                ? { name: nameOf(listed.agents, binding) }
                 : { agentId: agent.id }),
             },
           ]),
       ...ticked
         .filter((id) => id !== binding)
-        .filter((id) => !alreadyWatching(listed, id))
-        .map((id) => ({ platformAgentId: id, name: nameOf(listed, id) })),
+        .filter((id) => !alreadyWatching(listed.agents, id))
+        .map((id) => ({ platformAgentId: id, name: nameOf(listed.agents, id) })),
     ];
 
     if (watch.length === 0) {
@@ -485,7 +517,7 @@ function RetellPath({
         {
           projectId,
           agentPlatform: "retell",
-          apiKey: apiKey.trim(),
+          apiKey: apiKeyOfListing,
           watch,
         },
         { client: platformClient },
@@ -529,8 +561,20 @@ function RetellPath({
             placeholder="key_…"
             onChange={(event) => {
               setApiKey(event.target.value);
+              /*
+               * A different key is a different account. Everything on screen
+               * below was decided about the old one — which agents exist,
+               * which are ticked, which one this agent is — so all of it goes,
+               * and a discovery still in flight is superseded here rather than
+               * allowed to install its agents when it lands.
+               */
+              asking.current += 1;
               setListed(null);
+              setTicked([]);
+              setBound(null);
               setOutcome(null);
+              setProblem(null);
+              setListing(false);
             }}
           />
         </Field>
@@ -548,7 +592,7 @@ function RetellPath({
         <Outcome projectId={projectId} outcome={outcome} />
       )}
 
-      {listed === null ? null : listed.length === 0 ? (
+      {listed === null ? null : listed.agents.length === 0 ? (
         <Empty title={COPY.noAgents} lead={COPY.noAgentsLead} />
       ) : (
         <Section title={COPY.listed} lead={COPY.listedLead}>
@@ -561,7 +605,7 @@ function RetellPath({
             }}
           >
             <ul className="m-0 flex list-none flex-col gap-3 p-0">
-              {listed.map((one) => (
+              {listed.agents.map((one) => (
                 <AccountAgent
                   key={one.id}
                   choice={one}
@@ -585,8 +629,8 @@ function RetellPath({
           <FormActions>
             <Button
               type="button"
-              disabled={starting || everyOneWatched(listed)}
-              why={everyOneWatched(listed) ? COPY.allWatched : undefined}
+              disabled={starting || everyOneWatched(listed.agents)}
+              why={everyOneWatched(listed.agents) ? COPY.allWatched : undefined}
               onClick={() => void commit()}
             >
               {starting ? COPY.starting : COPY.start}

@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import StartMonitoringPage from "../app/projects/[projectId]/monitoring/start/page.tsx";
@@ -490,6 +497,107 @@ describe("the Retell path", () => {
 
     expect(await screen.findByText(refusal)).toBeDefined();
     expect(screen.queryByText("Egma is pulling production calls")).toBeNull();
+  });
+});
+
+/**
+ * **A listing belongs to the key that produced it.**
+ *
+ * Editing the key while discovery is in flight is ordinary — a paste that
+ * missed a character, a second key from the password manager. What must not
+ * happen is the first account's agents landing in a form that is now about the
+ * second account, because the commit that follows would send one account's
+ * platform agent ids with the other account's key.
+ */
+describe("a key edited while discovery is in flight", () => {
+  it("ignores the answer the old key asked for", async () => {
+    const seen: Seen[] = [];
+    let release: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    vi.stubGlobal("scrollTo", vi.fn());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: FetchInput) => {
+        const asked = await observeRequest(input);
+        seen.push({ path: asked.path, method: asked.method, body: asked.body });
+
+        if (asked.path === "/api/me") {
+          return new Response(JSON.stringify(ME), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (asked.path === "/v1/agents") {
+          return new Response(
+            JSON.stringify({ agents: [agent()], nextPageToken: null }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (asked.path === "/v1/monitoring/retell/discover") {
+          const usedKey = (asked.body as { apiKey: string }).apiKey;
+          // The first read is held open until the key has been edited.
+          if (usedKey === RETELL_KEY) await held;
+          return new Response(
+            JSON.stringify({
+              agents: [
+                accountAgent({
+                  id: usedKey === RETELL_KEY ? "stale_agent" : "fresh_agent",
+                  name: usedKey === RETELL_KEY ? "Stale" : "Fresh",
+                }),
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ watching: [], refused: [] }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    render(<StartMonitoringPage />);
+    const key = await screen.findByLabelText("Retell API key");
+    fireEvent.change(key, { target: { value: RETELL_KEY } });
+    fireEvent.click(screen.getByRole("button", { name: "List Retell agents" }));
+
+    // The key changes before the first answer arrives.
+    fireEvent.change(key, { target: { value: "key_live_a_different_one" } });
+    // Let the stale answer land *and* let React render whatever it did, so
+    // the assertions below are about the settled screen rather than about a
+    // state update that has not been flushed yet.
+    await act(async () => {
+      release?.();
+      await held;
+    });
+
+    // The stale account never reaches the form, and nothing is left ticked.
+    expect(screen.queryByText("Stale")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start monitoring" })).toBeNull();
+
+    // The new key's own read is the one that fills it.
+    fireEvent.click(screen.getByRole("button", { name: "List Retell agents" }));
+    expect(await screen.findByText("Fresh")).toBeDefined();
+    expect(screen.queryByText("Stale")).toBeNull();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Also watch Fresh" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+
+    await vi.waitFor(() =>
+      expect(
+        seen.some((one) => one.path === "/v1/monitoring/start"),
+      ).toBe(true),
+    );
+    // One key, one account: the commit carries the key its listing was read
+    // with and the ids that listing named.
+    expect(sent(seen, "/v1/monitoring/start")).toEqual({
+      agentPlatform: "retell",
+      apiKey: "key_live_a_different_one",
+      watch: [{ platformAgentId: "fresh_agent", name: "Fresh" }],
+    });
   });
 });
 
