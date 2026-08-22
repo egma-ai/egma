@@ -689,13 +689,16 @@ describe("write readiness", () => {
     try {
       const response = await api.app.inject({ method: "GET", url: "/health" });
       expect(response.statusCode).toBe(503);
+      // The component word, and no raw gauge beside it: the live byte and record
+      // volume is a metric, not something an unauthenticated caller reads here.
       expect(response.json()).toMatchObject({
         status: "unavailable",
         postgres: "reachable",
         ingestion: "reachable",
         localLog: "full",
-        stagedRecords: 0,
       });
+      expect(response.json()).not.toHaveProperty("stagedBytes");
+      expect(response.json()).not.toHaveProperty("stagedRecords");
     } finally {
       await api.close();
     }
@@ -755,25 +758,19 @@ describe("write readiness", () => {
       });
 
       const response = await api.app.inject({ method: "GET", url: "/health" });
-      const body = response.json() as {
-        stagedBytes: number;
-        stagedRecords: number;
-      };
       expect(response.statusCode).toBe(503);
+      // An empty log answered `writable` and this near-empty one answers `full`:
+      // the door and the health check agree on the word, which is the claim.
+      // The raw byte and record accounting the gauges once carried is proved at
+      // the log's own seam; it is a metric here, not part of this body.
       expect(response.json()).toMatchObject({
         status: "unavailable",
         postgres: "reachable",
         ingestion: "reachable",
         localLog: "full",
       });
-      // Under the bound the whole time, and out of room all the same.
-      expect(body.stagedRecords).toBeGreaterThan(0);
-      // Comfortably over the 512 bytes of slack and nowhere near the bound:
-      // the log is barely used and has no room for a record all the same.
-      expect(body.stagedBytes).toBeGreaterThan(512);
-      expect(body.stagedBytes).toBeLessThan(
-        LARGEST_STAGEABLE_RECORD_BYTES + 512,
-      );
+      expect(response.json()).not.toHaveProperty("stagedBytes");
+      expect(response.json()).not.toHaveProperty("stagedRecords");
       void accepted;
     } finally {
       await api.close();
@@ -844,6 +841,89 @@ describe("the three roles one image serves", () => {
       } finally {
         await api.close();
       }
+    }
+  });
+});
+
+/**
+ * The drain component while the trace store is down.
+ *
+ * A stalled drain that read as healthy is a green health check in front of a
+ * conversation that never becomes query-visible — indistinguishable from a
+ * working one. So the drain component says `degraded` when it has work and keeps
+ * making no progress on it, and it says so **without turning the status code**:
+ * acceptance does not need ClickHouse, so the write path is still ready and the
+ * container stays in its own health check while the outage lasts.
+ */
+describe("the drain component under a trace store outage", () => {
+  let storage: ObjectStorage;
+
+  beforeAll(async () => {
+    storage = await startObjectStorage("api_drain_degraded");
+    if (!storage.available) {
+      process.stderr.write(`\nskipping drain degradation — ${storage.why}\n\n`);
+    }
+  });
+
+  afterAll(() => {
+    if (storage.available) storage.stop();
+  });
+
+  it("reports the drain degraded while ClickHouse is unreachable, and stays 200", async () => {
+    if (!storage.available) return;
+    const api = await createApi("health_drain_degraded", {
+      traceStore: true,
+      ingestStore: storage.ingestStore,
+      // The standing drainer has to be running for its component to be reported.
+      drainsPendingEvidence: true,
+    });
+    try {
+      const acme = await signUp(api.app, "ada@acme.example", "Acme");
+      const secret = await mintKey(
+        api.app,
+        acme.cookie,
+        "a terminal",
+        acme.projectId,
+      );
+
+      // The trace store goes away. Acceptance does not need it — the bucket is
+      // the boundary — so the door still answers success and the object is
+      // durable, waiting to drain.
+      await disconnectClickHouse();
+      const accepted = await api.app.inject({
+        method: "POST",
+        url: OTLP_TRACES_PATH,
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${secret}`,
+        },
+        payload: syntheticExport({
+          traceId: "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+          startedAt: new Date("2026-08-20T10:00:00.000Z"),
+        }),
+      });
+      expect(accepted.statusCode, accepted.body).toBe(200);
+
+      // A drain pass finds the object and cannot move it into a store it cannot
+      // reach, so the drain stalls on work it can see.
+      await api.drainEvidence();
+
+      const response = await api.app.inject({ method: "GET", url: "/health" });
+      // Still ready: a query outage is not the acceptance path being unable to
+      // receive a conversation.
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        status: "ok",
+        clickhouse: "unreachable",
+        drain: "degraded",
+      });
+    } finally {
+      // Put the store back for this instance's own close, which drops its schema.
+      connectClickHouse({
+        clickhouseUrl: api.config.clickhouseUrl,
+        maxOpenConnections: 4,
+      });
+      await api.close();
     }
   });
 });

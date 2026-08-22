@@ -239,8 +239,8 @@ function tenancyOf(auth: AuthContext, asked: string | undefined): Tenancy {
  * two ends for the same reason and refuses a third — a window wider than the
  * product serves — which does not apply here.
  */
-const EARLIEST_READABLE_MICROSECONDS = BigInt(Date.UTC(1900, 0, 1)) * 1000n;
-const LATEST_READABLE_MICROSECONDS = BigInt(Date.UTC(2262, 3, 11)) * 1000n;
+export const EARLIEST_READABLE_MICROSECONDS = BigInt(Date.UTC(1900, 0, 1)) * 1000n;
+export const LATEST_READABLE_MICROSECONDS = BigInt(Date.UTC(2262, 3, 11)) * 1000n;
 
 function checkedWindow(window: TimeWindow): TimeWindow {
   const { from, to } = window;

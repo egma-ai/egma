@@ -207,6 +207,32 @@ function framesIn(
   return { frames, damagedFrom: at === bytes.length ? undefined : at };
 }
 
+/**
+ * Move a damaged tail beside its file without ever writing over one already
+ * there.
+ *
+ * A first-frame tear leaves nothing whole, so recovery removes the empty `.log`
+ * and the next append re-creates the same ordinal — and a later tear at that
+ * ordinal would land on the same `.torn` name. Writing over it would destroy the
+ * bytes of the earlier tear, which is the one thing isolation exists to keep. So
+ * each tear takes a name of its own by exclusive create: `NNNNNNNN.log.torn`,
+ * then `.2.torn`, `.3.torn`, and the operator keeps every isolated tail.
+ */
+function isolateTornTail(where: string, bytes: Buffer): void {
+  let attempt = 1;
+  for (;;) {
+    const suffix =
+      attempt === 1 ? ISOLATED_SUFFIX : `.${attempt}${ISOLATED_SUFFIX}`;
+    try {
+      writeFileSync(`${where}${suffix}`, bytes, { flag: "wx" });
+      return;
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
+      attempt += 1;
+    }
+  }
+}
+
 /** Write a whole buffer, however many calls the operating system wants. */
 function writeWhole(handle: number, frame: Buffer): void {
   let written = 0;
@@ -240,7 +266,7 @@ export function openWriteAheadLog(
     const held = readFileSync(where);
     const { frames, damagedFrom } = framesIn(name, held);
     if (damagedFrom !== undefined) {
-      writeFileSync(`${where}${ISOLATED_SUFFIX}`, held.subarray(damagedFrom));
+      isolateTornTail(where, held.subarray(damagedFrom));
       const handle = openSync(where, "r+");
       ftruncateSync(handle, damagedFrom);
       fsyncSync(handle);

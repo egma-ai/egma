@@ -268,36 +268,42 @@ export function buildApi(options: ServerOptions): Api {
     }
   };
 
-  /** Whether the local log will take more, asked of the log rather than guessed. */
-  const stagedState = (): {
-    readonly state: "writable" | "full" | "unavailable";
-    readonly bytes: number;
-    readonly records: number;
-  } => {
+  /**
+   * Whether the local log will take more, in one word, asked of the log rather
+   * than guessed. The raw byte and record gauges are the log's live volume and
+   * stay in metrics; the health body carries only which of the three it is.
+   */
+  const localLogState = (): "writable" | "full" | "unavailable" => {
     try {
       const load = stagedLoad();
-      if (load === undefined) return { state: "unavailable", bytes: 0, records: 0 };
-      return {
-        state: load.full ? "full" : "writable",
-        bytes: load.bytes,
-        records: load.records,
-      };
+      if (load === undefined) return "unavailable";
+      return load.full ? "full" : "writable";
     } catch (cause) {
       app.log.error({ err: cause }, "health check could not read the local log");
-      return { state: "unavailable", bytes: 0, records: 0 };
+      return "unavailable";
     }
   };
 
-  /** What this process is doing about the pending prefix, in one word. */
+  /**
+   * What this process is doing about the pending prefix, in one word.
+   *
+   * `degraded` is a drainer that has work and keeps making no progress on it —
+   * a trace store it cannot reach — reported here as a component and never as a
+   * verdict: the status code does not turn on it, exactly as a query outage does
+   * not make the acceptance path unhealthy. The raw backlog numbers behind it
+   * stay in metrics rather than in the unauthenticated body.
+   */
   const drainState = ():
     | "draining"
+    | "degraded"
     | "standby"
     | "migrating"
     | "not_running" => {
     if (!drainsEvidence || drainer === undefined) return "not_running";
-    const standing = drainer.standingBy();
-    if (standing === "trace_store_migrating") return "migrating";
-    if (standing === "standby") return "standby";
+    const health = drainer.health();
+    if (health.standby === "trace_store_migrating") return "migrating";
+    if (health.standby === "standby") return "standby";
+    if (health.stalled) return "degraded";
     return "draining";
   };
 
@@ -311,7 +317,7 @@ export function buildApi(options: ServerOptions): Api {
             ingestionStore.reachable(),
           ),
     ]);
-    const staged = stagedState();
+    const localLog = localLogState();
 
     // A `drain` process serves no acceptance path, so its write readiness is
     // Postgres alone: holding it unhealthy for a bucket it never writes to
@@ -319,7 +325,7 @@ export function buildApi(options: ServerOptions): Api {
     const ready =
       postgres === "reachable" &&
       (!acceptsEvidence ||
-        (ingestion === "reachable" && staged.state === "writable"));
+        (ingestion === "reachable" && localLog === "writable"));
 
     return reply.code(ready ? 200 : 503).send({
       status: ready ? "ok" : "unavailable",
@@ -327,16 +333,17 @@ export function buildApi(options: ServerOptions): Api {
       postgres,
       clickhouse,
       ingestion,
-      localLog: staged.state,
-      // Reported so an operator can see a backlog forming before it refuses.
-      // Both, because both bounds bind and either one can be the near one.
-      stagedBytes: staged.bytes,
-      stagedRecords: staged.records,
+      // The component word, and not the raw byte and record gauges beside it: a
+      // per-second curve of evidence in flight is a live-volume signal an
+      // unauthenticated caller has no business reading, and it is in metrics
+      // instead. `full` is the word the door and this check must agree on.
+      localLog,
       drain: drainState(),
-      // Every reason class this process has retained an accepted segment
-      // under, and how many of each. Absent means nothing was retained, which
-      // is what a healthy deployment reports forever.
-      retainedDefects: Object.fromEntries(retainedDefects()),
+      // Whether any accepted segment is retained as an internal defect — a
+      // boolean, not the per-class breakdown. The counts are an operator signal
+      // that belongs in metrics; a caller with no credential learns only that
+      // something is owed a look.
+      retainedDefect: retainedDefects().size > 0,
     });
   });
 

@@ -278,6 +278,10 @@ const CONTEXT_REQUIRING = [
   // project belong to them. The drainer holds a scope it read out of a sealed
   // object and must not write under a pair Postgres has never agreed to.
   "isProjectOfOrganization",
+  // The same question with deletion in the answer: whether the pair is live,
+  // archived since the evidence was accepted, or was never real. The drainer
+  // tells a project removed after the fact from a binding that could not exist.
+  "projectOfOrganizationState",
   "readProject",
   "readRunVerdicts",
   "readTrace",
@@ -487,6 +491,10 @@ const VALUES = [
   // nothing failed and trying again will not help, and it carries the field,
   // the bound and the size so that whoever sent the record is told all three.
   "OversizeRecordError",
+  // The other refusal about the evidence rather than the store: a start instant
+  // the store cannot hold. Its own class beside the oversize one — nothing
+  // failed, and trying again will not help.
+  "UnstorableInstantError",
   "EgmaProvidedPersonaError",
   // The persona factory's other refusal: archiving the persona a project
   // points at, without saying who takes the pointer. A project always has a
@@ -736,6 +744,11 @@ const THE_MEASURES = [
 const THE_EVIDENCE_RULES = [
   "LARGEST_BOUNDED_RECORD_BYTES",
   "refuseOversizeRecord",
+  // The other refusal over the same door: a span whose start instant a
+  // DateTime64 row and the partitioned read that guards every replay cannot be
+  // built around. Refused before staging as an oversize field is, so a segment
+  // that could never be read back is never sealed.
+  "refuseUnstorableInstant",
   "spanContentHash",
 ];
 

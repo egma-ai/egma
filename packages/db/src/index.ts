@@ -226,6 +226,7 @@ export {
 export {
   LARGEST_BOUNDED_RECORD_BYTES,
   refuseOversizeRecord,
+  refuseUnstorableInstant,
   spanContentHash,
 } from "./access/spans.ts";
 export * from "./access/index.ts";

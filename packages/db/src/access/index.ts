@@ -131,6 +131,7 @@ export {
   UnknownGraderLibraryEntryError,
   UnprocessableInputError,
   UnreadableTraceQueryError,
+  UnstorableInstantError,
   VersionConflictError,
   WriteAbortedError,
   type AgentWriteRefusal,
@@ -233,6 +234,7 @@ export {
 export {
   isProjectOfOrganization,
   listProjects,
+  projectOfOrganizationState,
   projectsOf,
   readProject,
   createProject,
@@ -240,6 +242,7 @@ export {
   type NewProject,
   type Project,
   type ProjectChanges,
+  type ProjectTenancyState,
 } from "./projects.ts";
 
 export {

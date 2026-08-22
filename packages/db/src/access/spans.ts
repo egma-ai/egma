@@ -5,7 +5,15 @@ import { ClickHouseError } from "@clickhouse/client";
 
 import { traceStore } from "../clickhouse/client.ts";
 import type { AuthContext } from "./context.ts";
-import { OversizeRecordError, TraceStoreRefusedError } from "./errors.ts";
+import {
+  OversizeRecordError,
+  TraceStoreRefusedError,
+  UnstorableInstantError,
+} from "./errors.ts";
+import {
+  EARLIEST_READABLE_MICROSECONDS,
+  LATEST_READABLE_MICROSECONDS,
+} from "./span-identity.ts";
 
 /**
  * Writing spans, and the only way anything ever does.
@@ -249,6 +257,32 @@ export function refuseOversizeRecord(span: NewSpan): void {
     if (bytes > bound) {
       throw new OversizeRecordError(field, bound, bytes);
     }
+  }
+}
+
+/**
+ * Refuse a record whose span begins at an instant the trace store cannot hold,
+ * and say nothing about one inside the range.
+ *
+ * The other door beside `refuseOversizeRecord`, over the other thing a stored
+ * span needs: an instant a `DateTime64` row and the partitioned read that guards
+ * every replay can be built around. The bound is the store's own readable
+ * ceiling, so a record refused here is exactly one whose window the identity
+ * probe could not build — a span past it seals into a valid segment, is
+ * answered, and then stops the drain that guards it. The half-open read carries
+ * the latest instant one past its own end, so an instant at the ceiling is
+ * already one too far.
+ */
+export function refuseUnstorableInstant(span: NewSpan): void {
+  const instant = span.startedAtMicroseconds;
+  if (
+    instant < EARLIEST_READABLE_MICROSECONDS ||
+    instant >= LATEST_READABLE_MICROSECONDS
+  ) {
+    throw new UnstorableInstantError(instant, {
+      earliest: EARLIEST_READABLE_MICROSECONDS,
+      latest: LATEST_READABLE_MICROSECONDS,
+    });
   }
 }
 

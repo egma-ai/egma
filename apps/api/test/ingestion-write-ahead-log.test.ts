@@ -180,6 +180,48 @@ describe("staged evidence across a restart", () => {
     ]);
   });
 
+  it("never writes over an isolated tail when its ordinal comes round again", () => {
+    // A first-frame tear leaves nothing whole, so recovery isolates the tail,
+    // removes the empty file, and the next append takes the same ordinal — the
+    // one arrangement where a later tear at that ordinal would land on the same
+    // `.torn` name and, without care, destroy the earlier one's bytes.
+    const directory = aDirectory();
+
+    const breakFirstFrame = (): void => {
+      const where = path.join(directory, "00000001.log");
+      const held = readFileSync(where);
+      // The first byte of the first frame's payload, which fails its checksum.
+      held[8] = (held[8] as number) ^ 0xff;
+      writeFileSync(where, held);
+    };
+
+    const first = openWriteAheadLog(directory, BOUNDS);
+    first.append(bytes("the first tear"));
+    first.close();
+    breakFirstFrame();
+    // Recovery isolates the whole file and removes the empty `.log` behind it.
+    openWriteAheadLog(directory, BOUNDS).close();
+    expect(filesIn(directory)).toContain("00000001.log.torn");
+    expect(filesIn(directory)).not.toContain("00000001.log");
+
+    // The ordinal comes round again and tears again.
+    const second = openWriteAheadLog(directory, BOUNDS);
+    second.append(bytes("the second, different tear"));
+    second.close();
+    breakFirstFrame();
+    openWriteAheadLog(directory, BOUNDS).close();
+
+    // Both tails are kept: the second takes a name of its own rather than
+    // overwriting the first, so the operator has the bytes of each tear.
+    expect(filesIn(directory)).toContain("00000001.log.torn");
+    expect(filesIn(directory)).toContain("00000001.log.2.torn");
+    const firstTail = readFileSync(path.join(directory, "00000001.log.torn"));
+    const secondTail = readFileSync(path.join(directory, "00000001.log.2.torn"));
+    expect(firstTail.length).toBeGreaterThan(0);
+    expect(secondTail.length).toBeGreaterThan(0);
+    expect(firstTail.equals(secondTail)).toBe(false);
+  });
+
   it("keeps the complete records in a file written after a damaged one", () => {
     // Damage in an older file costs the records inside it and no more. Dropping
     // the newer files behind it would turn one lost region into every lost

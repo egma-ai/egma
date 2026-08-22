@@ -48,14 +48,21 @@ connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
  * writing a segment into a schema still being built is how a good object
  * becomes a retained defect for a reason that had nothing to do with it.
  *
+ * It never settles into a terminal failure. A slow or unreachable store is
+ * retried with a doubling, capped backoff: the migrations are idempotent and one
+ * instance holds their lock, so a later attempt finishes what an earlier one
+ * could not — and until one does, the acceptance path keeps taking evidence and
+ * the drainer stands by. A process stuck in a `failed` state would hold the
+ * deployment's one drain claim behind a green health check for good, while a
+ * healthy sibling stood by forever.
+ *
  * The `ingest` role skips it: that process never writes ClickHouse, and a role
  * that only accepts evidence has no business applying somebody else's schema.
  */
 type TraceStoreSchema =
   | { readonly state: "skipped" }
   | { readonly state: "migrating" }
-  | { readonly state: "ready"; readonly applied: readonly string[] }
-  | { readonly state: "failed" };
+  | { readonly state: "ready"; readonly applied: readonly string[] };
 
 let traceSchema: TraceStoreSchema =
   config.ingestion.role === "ingest"
@@ -115,26 +122,43 @@ const { app } = buildApi({
   traceStoreReady: () => traceSchema.state === "ready",
 });
 
+/** The longest this process waits between attempts on the trace-store schema. */
+const TRACE_SCHEMA_BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
+/** Set the moment a signal arrives, so the retry loop stops instead of racing shutdown. */
+let stopping = false;
+
 if (traceSchema.state === "migrating") {
   void (async () => {
-    try {
-      const applied = await runClickHouseMigrations(config.clickhouseUrl);
-      traceSchema = { state: "ready", applied: applied.applied };
-      app.log.info(
-        { traceStore: applied.applied },
-        applied.applied.length === 0
-          ? "trace-store schema already up to date"
-          : "trace-store schema migrations applied",
-      );
-    } catch (cause) {
-      // Reported and retried by the next start, never thrown: the acceptance
-      // path is already serving and taking it down would lose the evidence
-      // this arrangement exists to keep.
-      traceSchema = { state: "failed" };
-      app.log.error(
-        { err: cause },
-        "the trace-store schema could not be applied; draining is held until it is",
-      );
+    let backoffMilliseconds = 1_000;
+    for (;;) {
+      if (stopping) return;
+      try {
+        const applied = await runClickHouseMigrations(config.clickhouseUrl);
+        traceSchema = { state: "ready", applied: applied.applied };
+        app.log.info(
+          { traceStore: applied.applied },
+          applied.applied.length === 0
+            ? "trace-store schema already up to date"
+            : "trace-store schema migrations applied",
+        );
+        return;
+      } catch (cause) {
+        // Reported and waited out, never thrown and never terminal: the
+        // acceptance path is already serving, and a store slow to wake finishes
+        // on a later attempt while the drainer stands by.
+        app.log.error(
+          { err: cause, retryInMilliseconds: backoffMilliseconds },
+          "the trace-store schema could not be applied; draining is held until it is",
+        );
+        await new Promise<void>((wake) => {
+          // Unref'd, so a backoff in flight never keeps the process from exiting.
+          setTimeout(wake, backoffMilliseconds).unref();
+        });
+        backoffMilliseconds = Math.min(
+          backoffMilliseconds * 2,
+          TRACE_SCHEMA_BACKOFF_CAP_MILLISECONDS,
+        );
+      }
     }
   })();
 }
@@ -189,6 +213,7 @@ app.log.info(
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
+    stopping = true;
     void (async () => {
       await app.close();
       await disconnect();

@@ -143,6 +143,8 @@ const MAXIMUM_BODY_BYTES = 20 * 1024 * 1024;
 const RPC_INVALID_ARGUMENT = 3;
 const RPC_PERMISSION_DENIED = 7;
 const RPC_UNAVAILABLE = 14;
+/** What an unexpected failure on this side is, and the one an exporter retries. */
+const RPC_INTERNAL = 13;
 
 /**
  * The one compression OTLP/HTTP names, and what most exporters are configured
@@ -535,6 +537,44 @@ export async function traceRoutes(
   app: FastifyInstance,
   options: TraceRoutesOptions,
 ): Promise<void> {
+  // The one place an unexpected throw is answered, and it is answered as OTLP's
+  // — not egma's, and never with the cause. A failure with no status of its own
+  // can carry an absolute local-log path or an ordinal in its message, and the
+  // body is read by an exporter and logged where an exporter's operator sees it;
+  // so the cause goes to this side's log alone and the sender gets one generic
+  // sentence and a status it retries. Everything a handler means to say — a
+  // refusal, a partial success, `503` — it returns rather than throws, so this
+  // catches only what nobody meant to happen.
+  //
+  // A framework refusal the door itself did not raise — a body over the cap is
+  // the one that reaches here — arrives with its own status and a generic
+  // message that names no evidence and no path, so it keeps both.
+  app.setErrorHandler((error: unknown, request, reply) => {
+    const encoding = encodingOf(request.headers["content-type"]);
+    const framework = error as { statusCode?: unknown; message?: unknown };
+    if (typeof framework.statusCode === "number" && framework.statusCode < 500) {
+      return statusResponse(
+        reply,
+        encoding,
+        framework.statusCode,
+        RPC_INVALID_ARGUMENT,
+        typeof framework.message === "string"
+          ? framework.message
+          : "this export could not be read.",
+      );
+    }
+    request.log.error({ err: error }, "the trace door could not answer an export");
+    return statusResponse(
+      reply,
+      encoding,
+      500,
+      RPC_INTERNAL,
+      "Egma could not accept this export. Nothing about the failure is echoed " +
+        "here; if it continues, it is a fault on Egma's side rather than " +
+        "anything wrong with the request. Try again.",
+    );
+  });
+
   // Before the body parser, which is the whole point: `onRequest` is the one
   // hook Fastify runs with nothing read yet.
   app.addHook("onRequest", async (request, reply) => {

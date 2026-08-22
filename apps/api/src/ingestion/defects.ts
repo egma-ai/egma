@@ -1,3 +1,5 @@
+import { UnreadableTraceQueryError } from "@egma/db";
+import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
 import type { FastifyBaseLogger } from "fastify";
 
 import { UnreadableSegmentError, type SegmentDefect } from "./verify.ts";
@@ -62,14 +64,48 @@ export type IngestionDefect =
    * and it is a pair the control database has never agreed to.
    */
   | "impossible_tenant_binding"
+  /**
+   * The header names a project that was this organization's and has since been
+   * archived. The pair was real when the evidence arrived, so this is a project
+   * removed after acceptance rather than a binding that could never exist — a
+   * different fact for an operator, and one whose evidence is still retained.
+   */
+  | "project_deleted"
   /** The trace store refused these rows and would refuse the same bytes again. */
-  | "store_refused";
+  | "store_refused"
+  /**
+   * A span begins at an instant the trace store cannot hold, so the read probe
+   * that guards every replay cannot build a window around it. The door refuses
+   * such a record before staging; one that reached a segment another way is
+   * retained here.
+   */
+  | "unstorable_instant"
+  /**
+   * A defect this build did not recognise the shape of. Retained and counted
+   * rather than retried in silence, so an accepted segment that cannot be
+   * drained is always a number an operator can see rather than one more GET
+   * every scan.
+   */
+  | "internal_defect";
 
 /** The one event name a retained defect is reported under. */
 export const RETAINED_DEFECT_EVENT = "ingestion.segment.retained";
 
 /** And the one metric it is counted in, by reason class alone. */
 export const RETAINED_DEFECT_METRIC = "ingestion_segment_retained_total";
+
+const meter = openTelemetryMetrics.getMeter("@egma/api/ingestion");
+
+/**
+ * Retained objects as a series, by reason class and nothing else — the raw
+ * count the unauthenticated health body does not carry. The reason class is the
+ * one label, for the same reason the log line is the only place a key appears:
+ * a key, an organization or a segment id is an unbounded label, and the first
+ * bucket full of damaged objects would be the one that took the metrics down.
+ */
+const retainedDefectTotal = meter.createCounter("egma.ingestion.segment.retained", {
+  description: "Accepted segments retained as internal defects, by reason class",
+});
 
 /** How many retained objects this process has seen, by reason. */
 const counted = new Map<IngestionDefect, number>();
@@ -90,6 +126,7 @@ export function retainedDefect(
   cause: unknown,
 ): void {
   counted.set(defect, (counted.get(defect) ?? 0) + 1);
+  retainedDefectTotal.add(1, { reason: defect });
   log.error(
     {
       event: RETAINED_DEFECT_EVENT,
@@ -107,6 +144,71 @@ export function retainedDefect(
 /** The reason class one unreadable object is counted under. */
 export function defectOf(cause: unknown): IngestionDefect | undefined {
   return cause instanceof UnreadableSegmentError ? cause.reason : undefined;
+}
+
+/**
+ * Whether a drain step failed for a reason that will pass — the store did not
+ * answer, a query timed out, a connection went — rather than for something about
+ * the evidence.
+ *
+ * **This is the one that decides retry from retain.** A cause it recognises is
+ * left where it is and taken again next pass; everything else is an internal
+ * defect the object is retained under, so an accepted segment this build cannot
+ * drain is a number an operator sees rather than one more download every scan.
+ *
+ * A driver or infrastructure error carries a code — a Node errno, a Postgres
+ * SQLSTATE, a ClickHouse number — and this build's own not-connected wrappers
+ * name the store. The after-acceptance data defects it is asked to tell those
+ * apart from carry no code, so a code is the signal that the fault is the
+ * moment rather than the rows. The specific permanent classes that do carry a
+ * code — a refusal the store already made — are matched by their own class
+ * ahead of this, never reaching here.
+ *
+ * The cause chain is walked, because a query layer wraps a driver's error and
+ * the code lives one link down: a handoff that failed on a Postgres error the
+ * ORM re-threw is a transient failure to replay, not a segment to retain, and
+ * the signal that says so is on the error it wrapped.
+ */
+export function isTransientDrainFailure(cause: unknown): boolean {
+  for (
+    let error: unknown = cause, depth = 0;
+    error !== null && typeof error === "object" && depth < 8;
+    depth += 1
+  ) {
+    if (
+      error instanceof Error &&
+      /not connected to (?:ClickHouse|Postgres)/.test(error.message)
+    ) {
+      return true;
+    }
+    const held = error as { code?: unknown; name?: unknown; cause?: unknown };
+    if (typeof held.code === "string") return true;
+    if (
+      typeof held.name === "string" &&
+      /Timeout|Abort|Network|Connection/.test(held.name)
+    ) {
+      return true;
+    }
+    if (held.cause === error) break;
+    error = held.cause;
+  }
+  return false;
+}
+
+/**
+ * The reason class a retained drain failure is counted under, when its own
+ * block has not already named a more precise one.
+ *
+ * An instant the store cannot hold is named as such — it reaches the drainer as
+ * the read probe refusing to build a window, or the row encoder refusing the
+ * value — and everything else this build did not recognise is an internal
+ * defect. Both are retained; the reason is what an operator reads.
+ */
+export function retainedReasonFor(cause: unknown): IngestionDefect {
+  if (cause instanceof UnreadableTraceQueryError || cause instanceof RangeError) {
+    return "unstorable_instant";
+  }
+  return "internal_defect";
 }
 
 /** What this process has retained, by reason. For the operator surfaces. */

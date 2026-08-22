@@ -1,4 +1,5 @@
 import {
+  appendSpans,
   committedSpans,
   configureLiveKitMonitoring,
   connectClickHouse,
@@ -22,7 +23,11 @@ import {
   type PendingObject,
   type PendingObjectStore,
 } from "../src/ingestion/object-store.ts";
-import { contentHashOf, type IngestionRecord } from "../src/ingestion/record.ts";
+import {
+  contentHashOf,
+  spanFor,
+  type IngestionRecord,
+} from "../src/ingestion/record.ts";
 import {
   pendingKeyFor,
   sealSegment,
@@ -521,6 +526,111 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
 
     await bucket.delete(pendingKeyFor(damaged));
     await bucket.delete(pendingKeyFor(lying));
+  });
+
+  /**
+   * The door refuses a span whose instant the store cannot hold, so one only
+   * reaches the drainer if it got into the bucket another way. When it does, the
+   * identity probe cannot build a window around it and throws — a cause the
+   * drainer must retain and count rather than fall through to a warning and read
+   * the object again every scan for the life of the process.
+   */
+  it("retains a segment whose span begins past the store's readable ceiling, counting it once", async () => {
+    forgetRetainedDefects();
+    const traceId = "77000000000000000000000000007700";
+    const sealed = sealSegment({
+      scope,
+      records: aConversation(traceId, {
+        started_at_microseconds: String(BigInt(Date.UTC(9999, 0, 1)) * 1000n),
+      }),
+    });
+    await bucket.create(sealed);
+
+    expect(await drainer.drainNow()).toBe(0);
+    expect((await pending()).map((object) => object.key)).toContain(sealed.key);
+    expect(
+      await countOf(
+        `select count() as n from spans final where trace_id = '${traceId}'`,
+      ),
+    ).toBe(0);
+
+    const counted = retainedDefects();
+    expect([...counted.keys()]).toEqual(["unstorable_instant"]);
+    expect(counted.get("unstorable_instant")).toBe(1);
+
+    // Retained, not looped: the next pass skips it and one stuck object stays
+    // one rather than becoming a count that measures how long the process is up.
+    expect(await drainer.drainNow()).toBe(0);
+    expect(retainedDefects().get("unstorable_instant")).toBe(1);
+
+    await bucket.delete(sealed.key);
+  });
+
+  /**
+   * The Seam 2 fault this proves: an attempt that got one ClickHouse block in
+   * and stopped, replayed whole, leaves no second copy. Two records a month
+   * apart become two insert blocks, each under its own `<segmentId>:spans:<n>`
+   * token, so the block already committed is a no-op the token absorbs and the
+   * second completes.
+   */
+  it("replays a whole segment whose first block already landed, without a second copy", async () => {
+    const traceId = "88000000000000000000000000008800";
+    const root = `${traceId.slice(0, 14)}01`;
+    const later = `${traceId.slice(0, 14)}02`;
+    const records: readonly IngestionRecord[] = [
+      aRecord({
+        trace_id: traceId,
+        span_id: root,
+        parent_span_id: "",
+        name: "agent_session",
+        kind: "root",
+        source: "production",
+        agent_platform: "livekit_agents",
+        platform_agent_id: "agent-under-test",
+        started_at_microseconds: String(
+          BigInt(Date.parse("2026-01-15T09:00:00.000Z")) * 1000n,
+        ),
+        ends_trace: true,
+      }),
+      aRecord({
+        trace_id: traceId,
+        span_id: later,
+        parent_span_id: root,
+        name: "agent_turn",
+        kind: "turn:agent",
+        source: "production",
+        agent_platform: "livekit_agents",
+        platform_agent_id: "agent-under-test",
+        started_at_microseconds: String(
+          BigInt(Date.parse("2026-02-15T09:00:00.000Z")) * 1000n,
+        ),
+        text: "A month later.",
+      }),
+    ];
+    const sealed = sealSegment({ scope, records });
+
+    const oneOf = (spanId: string): Promise<number> =>
+      countOf(
+        `select count() as n from spans final where span_id = '${spanId}'`,
+      );
+
+    // The attempt that stopped after its first block: only the first record
+    // reached the store, under the segment's own first token.
+    await appendSpans(auth, [spanFor(records[0] as IngestionRecord)], {
+      segmentId: sealed.segmentId,
+    });
+    expect(await oneOf(root)).toBe(1);
+    expect(await oneOf(later)).toBe(0);
+
+    // The whole object drains under the same tokens: the first block dedups and
+    // the second is new, and neither leaves a second visible copy.
+    await bucket.create(sealed);
+    expect(await drainer.drainNow()).toBe(1);
+    expect(await oneOf(root)).toBe(1);
+    expect(await oneOf(later)).toBe(1);
+    expect((await pending()).map((object) => object.key)).not.toContain(
+      sealed.key,
+    );
   });
 
   /**

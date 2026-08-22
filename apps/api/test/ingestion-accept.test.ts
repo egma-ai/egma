@@ -428,6 +428,42 @@ describe.skipIf(!storage.available)("evidence at the acceptance boundary", () =>
     await drainPendingEvidence(running.ingestStore);
   });
 
+  it("refuses a span whose instant the store cannot hold, and stages nothing of it", async () => {
+    // A start time far past the trace store's readable ceiling — a broken clock,
+    // or an exporter sending the wrong unit — which would seal into a valid
+    // segment and then stop the read probe that guards every replay. Refused at
+    // the door, the way an oversize field is: a 200 with a count and a reason,
+    // never a 5xx and never a staged record.
+    const answered = await post(
+      jsonExport([
+        jsonSpan({
+          traceId: "eeff0000eeff0000eeff0000eeff0000",
+          spanId: "eeff000000000001",
+          startTimeUnixNano: "9".repeat(25),
+          endTimeUnixNano: "9".repeat(25),
+        }),
+        jsonSpan({
+          traceId: "eeff0000eeff0000eeff0000eeff0000",
+          spanId: "eeff000000000002",
+        }),
+      ]),
+    );
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const refusal = JSON.parse(answered.body) as {
+      partialSuccess: { rejectedSpans: string; errorMessage: string };
+    };
+    expect(refusal.partialSuccess.rejectedSpans).toBe("1");
+    expect(refusal.partialSuccess.errorMessage).toContain("trace store holds");
+
+    const [pending] = await pendingSegments(running.ingestStore);
+    expect(pending?.records).toHaveLength(1);
+    expect(pending?.records[0]?.span_id).toBe("eeff000000000002");
+    expect(JSON.stringify(pending)).not.toContain("9999999999999999999999999");
+
+    await drainPendingEvidence(running.ingestStore);
+  });
+
   it("refuses a record over a documented bound by name, and stages neither it nor a shortened one", async () => {
     const tooLong = "n".repeat(1_100);
     const answered = await post(

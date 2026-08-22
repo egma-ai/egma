@@ -1,8 +1,8 @@
 import {
   appendSpans,
   committedSpans,
-  isProjectOfOrganization,
   MONITORING_PLATFORMS,
+  projectOfOrganizationState,
   recordProductionEvidenceReceived,
   recordProductionTraces,
   TraceStoreRefusedError,
@@ -10,17 +10,56 @@ import {
   type MonitoringPlatform,
   type NewSpan,
 } from "@egma/db";
+import { mintedAt } from "@egma/ids";
+import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
 
 import {
   defectOf,
+  isTransientDrainFailure,
   retainedDefect,
+  retainedReasonFor,
   type IngestionDefect,
   type IngestionLog,
 } from "./defects.ts";
 import type { PendingObjectStore } from "./object-store.ts";
 import { contentHashOf, spanFor, type IngestionRecord } from "./record.ts";
-import type { SegmentScope } from "./segment.ts";
+import { segmentIdIn, type SegmentScope } from "./segment.ts";
 import { verifiedSegment, type VerifiedSegment } from "./verify.ts";
+
+const meter = openTelemetryMetrics.getMeter("@egma/api/ingestion-drainer");
+const objectsDrained = meter.createCounter("egma.ingestion.drain.objects.drained", {
+  description: "Pending objects drained and deleted",
+});
+const drainFailures = meter.createCounter("egma.ingestion.drain.failures", {
+  description: "Drain steps that left an object pending to be tried again",
+});
+
+/**
+ * The backlog as a level rather than an event: how many pending objects have
+ * work still owed on them, and how old the oldest is. One active drainer serves
+ * a deployment, so the module holds the latest snapshot each pass writes and the
+ * gauges read it — the raw numbers the unauthenticated health body does not
+ * carry.
+ */
+let latestBacklog: { pending: number; oldestAgeMilliseconds: number } = {
+  pending: 0,
+  oldestAgeMilliseconds: 0,
+};
+
+meter
+  .createObservableGauge("egma.ingestion.drain.pending.count", {
+    description: "Pending objects with drain work still owed on them",
+  })
+  .addCallback((result) => result.observe(latestBacklog.pending));
+
+meter
+  .createObservableGauge("egma.ingestion.drain.pending.oldest_age", {
+    description: "Age of the oldest pending object with work owed",
+    unit: "ms",
+  })
+  .addCallback((result) =>
+    result.observe(latestBacklog.oldestAgeMilliseconds),
+  );
 
 /**
  * The drainer: pending objects in, query-visible evidence out, and the object
@@ -101,7 +140,9 @@ export type DrainerOptions = {
    * the prefix unconditionally, which is what a suite driving one process
    * wants and what a deployment must never rely on.
    */
-  readonly ownership?: { take(): Promise<boolean> } | undefined;
+  readonly ownership?:
+    | { take(): Promise<boolean>; unlock(): Promise<void> }
+    | undefined;
   /**
    * Whether the trace store's own schema is ready, asked before every pass.
    *
@@ -116,6 +157,32 @@ export type DrainerOptions = {
 
 /** Why a drain pass did nothing, when it did nothing on purpose. */
 export type DrainStandby = "standby" | "trace_store_migrating";
+
+/**
+ * What the drain component looks like from outside, past whether it is running.
+ *
+ * The health surface reports it in words and never these raw numbers, and the
+ * status code never turns on any of it: a stalled drain is a downstream problem
+ * to see, not the acceptance path being unable to receive a conversation. The
+ * numbers are here for the metric series and for `stalled`, which is the one
+ * derived word — a drainer that has work and keeps making no progress on it,
+ * which is what a store it cannot reach looks like from here.
+ */
+export type DrainHealth = {
+  /** Why this pass did nothing on purpose, or `undefined` when it is draining. */
+  readonly standby: DrainStandby | undefined;
+  /** Pending objects this process has work to do on, retained defects aside. */
+  readonly pending: number;
+  /** Age of the oldest such object, in milliseconds, or `0` for none. */
+  readonly oldestPendingAgeMilliseconds: number;
+  /** Passes in a row that had work and drained nothing of it. */
+  readonly consecutiveFailures: number;
+  /** Whether the drain is making no progress on work it can see. */
+  readonly stalled: boolean;
+};
+
+/** A pass that had work and drained none of it this many times is stalled. */
+const STALL_AFTER_CONSECUTIVE_FAILURES = 1;
 
 export type Drainer = {
   /**
@@ -140,6 +207,12 @@ export type Drainer = {
    * failure of anything.
    */
   standingBy(): DrainStandby | undefined;
+  /**
+   * The drain component as the health surface reads it: the standby reason if
+   * any, the pending backlog, and whether the drain is stalled on work it
+   * cannot make progress on. The status code turns on none of it.
+   */
+  health(): DrainHealth;
   stop(): Promise<void>;
 };
 
@@ -165,6 +238,12 @@ type Running = {
   waiting: Promise<number> | undefined;
   /** Why the last pass did nothing on purpose, for the health surface. */
   standby: DrainStandby | undefined;
+  /** Objects the last pass had work to do on, retained defects aside. */
+  pending: number;
+  /** When the oldest such object was minted, or `undefined` for none. */
+  oldestPendingAtMilliseconds: number | undefined;
+  /** Passes in a row that had work and drained nothing of it. */
+  consecutiveFailures: number;
   stopped: boolean;
 };
 
@@ -233,15 +312,20 @@ function windowOf(records: readonly IngestionRecord[]): {
  *
  * A stored row whose content hash is empty is evidence written before the
  * fingerprint existed — the simulation evidence carried through the identity
- * rebuild. It is treated as an exact replay and never as a conflict: the row is
- * there, it is authoritative, and a comparison that cannot be made is not a
- * disagreement.
+ * rebuild. It cannot be compared, so it stays authoritative in fact and not
+ * only in name: its identity comes back in the returned set and is left out of
+ * the insert, rather than being written over the row already there.
+ *
+ * The answer is the set of identities to leave out for that reason. An exact
+ * replay stays in — writing it again is a no-op the identity collapses — and a
+ * disagreement stops the whole object before a row is written.
  */
 async function refuseConflictingEvidence(
   auth: AuthContext,
   segment: VerifiedSegment,
-): Promise<void> {
-  if (segment.records.length === 0) return;
+): Promise<ReadonlySet<string>> {
+  const authoritative = new Set<string>();
+  if (segment.records.length === 0) return authoritative;
 
   const held = await committedSpans(
     auth,
@@ -251,14 +335,19 @@ async function refuseConflictingEvidence(
     })),
     { window: windowOf(segment.records) },
   );
-  if (held.length === 0) return;
+  if (held.length === 0) return authoritative;
 
   const stored = new Map(
     held.map((one) => [`${one.traceId}/${one.spanId}`, one.contentHash]),
   );
   for (const record of segment.records) {
-    const fingerprint = stored.get(`${record.trace_id}/${record.span_id}`);
-    if (fingerprint === undefined || fingerprint === "") continue;
+    const identity = `${record.trace_id}/${record.span_id}`;
+    const fingerprint = stored.get(identity);
+    if (fingerprint === undefined) continue;
+    if (fingerprint === "") {
+      authoritative.add(identity);
+      continue;
+    }
     if (fingerprint === contentHashOf(record)) continue;
     throw new IdentityConflictInSegmentError(
       `span ${record.span_id} of trace ${record.trace_id} is already stored ` +
@@ -268,6 +357,7 @@ async function refuseConflictingEvidence(
         `somebody may already have read.`,
     );
   }
+  return authoritative;
 }
 
 /** Two accounts of one immutable span. The stored one wins; see the module doc. */
@@ -283,6 +373,14 @@ export class ImpossibleTenantBindingError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ImpossibleTenantBindingError";
+  }
+}
+
+/** A header naming a real project of its organization that has since been archived. */
+export class ProjectDeletedAfterAcceptanceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProjectDeletedAfterAcceptanceError";
   }
 }
 
@@ -361,6 +459,28 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     return false;
   };
 
+  /**
+   * A step failed for a reason that will pass — the store did not answer, a
+   * query timed out, a connection went. The object is left exactly where it is
+   * and the next pass runs the whole of it again. Counted, so a store that has
+   * gone quiet is a rising number rather than a silence.
+   */
+  const waitAndTryAgain = (cause: unknown, message: string): false => {
+    drainFailures.add(1);
+    log.warn({ err: cause, key }, message);
+    return false;
+  };
+
+  /**
+   * The one classification, in one place: a transient cause is waited out, a
+   * recognised defect is retained under its own reason, and anything else this
+   * build did not expect is retained too rather than looped in silence.
+   */
+  const classify = (cause: unknown, message: string): false =>
+    isTransientDrainFailure(cause)
+      ? waitAndTryAgain(cause, message)
+      : retain(retainedReasonFor(cause), cause);
+
   let segment: VerifiedSegment;
   try {
     segment = verifiedSegment(key, await store.read(key));
@@ -369,8 +489,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     if (defect === undefined) {
       // The bucket did not answer. Not a defect and not this object's fault:
       // the next pass reads it again.
-      log.warn({ err: cause, key }, "a pending object could not be read");
-      return false;
+      return waitAndTryAgain(cause, "a pending object could not be read");
     }
     return retain(defect, cause);
   }
@@ -379,48 +498,74 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
   const spans: readonly NewSpan[] = segment.records.map(spanFor);
 
   // The header binds a project to an organization and the checksum covers that
-  // binding, so nothing can have edited it — but a pair that was never real is
-  // a different failure, and it is one only Postgres can answer. Asked before a
-  // row is written, because a write under a pair the control database has never
-  // agreed to is one customer's evidence filed under another's name.
+  // binding, so nothing can have edited it — but a pair that was never real, and
+  // a pair archived since the evidence was accepted, are two different failures
+  // only Postgres can tell apart. Asked before a row is written, because a write
+  // under a pair the control database will not stand behind is one customer's
+  // evidence filed under another's name.
+  let tenancy: "live" | "deleted" | "absent";
   try {
-    if (!(await isProjectOfOrganization(auth, segment.scope.projectId))) {
-      return retain(
-        "impossible_tenant_binding",
-        new ImpossibleTenantBindingError(
-          `this segment names project ${segment.scope.projectId} under ` +
-            `organization ${segment.scope.organizationId}, and that project is ` +
-            `not one of theirs. It is retained: evidence whose customer cannot ` +
-            `be established is not evidence to write anywhere.`,
-        ),
-      );
-    }
+    tenancy = await projectOfOrganizationState(auth, segment.scope.projectId);
   } catch (cause) {
-    // The control database did not answer. Not a defect, and the object is
-    // untouched.
-    log.warn({ err: cause, key }, "a segment's tenancy could not be checked");
-    return false;
+    return waitAndTryAgain(cause, "a segment's tenancy could not be checked");
+  }
+  if (tenancy === "absent") {
+    return retain(
+      "impossible_tenant_binding",
+      new ImpossibleTenantBindingError(
+        `this segment names project ${segment.scope.projectId} under ` +
+          `organization ${segment.scope.organizationId}, and that project is ` +
+          `not one of theirs. It is retained: evidence whose customer cannot ` +
+          `be established is not evidence to write anywhere.`,
+      ),
+    );
+  }
+  if (tenancy === "deleted") {
+    return retain(
+      "project_deleted",
+      new ProjectDeletedAfterAcceptanceError(
+        `this segment names project ${segment.scope.projectId} of organization ` +
+          `${segment.scope.organizationId}, and that project has since been ` +
+          `archived. It is retained: the pair was real when this evidence was ` +
+          `accepted, so this is a project removed afterwards rather than a ` +
+          `binding that was never real.`,
+      ),
+    );
   }
 
+  let authoritative: ReadonlySet<string>;
   try {
-    await refuseConflictingEvidence(auth, segment);
+    authoritative = await refuseConflictingEvidence(auth, segment);
   } catch (cause) {
     if (cause instanceof IdentityConflictInSegmentError) {
       return retain("identity_conflict", cause);
     }
-    // The probe itself failed — an unreachable store, a query that timed out.
-    // Nothing has been written and the object is untouched.
-    log.warn({ err: cause, key }, "a segment's identities could not be checked");
-    return false;
+    // The probe failed — an unreachable store, a query that timed out — or the
+    // window it would build cannot be read: a transient cause is waited out and
+    // anything else is retained rather than looped.
+    return classify(cause, "a segment's identities could not be checked");
   }
 
+  // The complete segment, every time — save an identity already stored under an
+  // empty content hash. That is evidence written before the fingerprint existed,
+  // which cannot be compared and so stays authoritative in fact: writing over it
+  // is the one thing a plain replacement table would do and the one thing that
+  // must not happen.
+  const insertable =
+    authoritative.size === 0
+      ? spans
+      : segment.records
+          .filter(
+            (record) => !authoritative.has(`${record.trace_id}/${record.span_id}`),
+          )
+          .map(spanFor);
+
   try {
-    // The complete segment, every time. A replay that wrote only the records it
-    // found missing would form different blocks under the same deduplication
-    // token, and the token would then suppress the very rows the replay existed
-    // to write. Identity is what makes the repeat free; the token only makes it
-    // cheap.
-    await appendSpans(auth, spans, { segmentId: segment.segmentId });
+    // A replay that wrote only the records it found missing would form different
+    // blocks under the same deduplication token, and the token would then
+    // suppress the very rows the replay existed to write. Identity is what makes
+    // the repeat free; the token only makes it cheap.
+    await appendSpans(auth, insertable, { segmentId: segment.segmentId });
   } catch (cause) {
     if (cause instanceof TraceStoreRefusedError) {
       // Rows the store has looked at and will refuse forever. Retained rather
@@ -428,8 +573,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
       // request that carried them was accepted long ago.
       return retain("store_refused", cause);
     }
-    log.warn({ err: cause, key }, "a segment did not reach the trace store");
-    return false;
+    return classify(cause, "a segment did not reach the trace store");
   }
 
   try {
@@ -441,10 +585,11 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // and answering it twice is how two readers of span shape come to disagree.
     await recordProductionTraces(auth, spans);
   } catch (cause) {
-    // The rows are visible and the handoffs are not. The object stays, and the
-    // replay finishes the missing half: the write it repeats is a no-op.
-    log.warn({ err: cause, key }, "a drained segment's handoffs did not finish");
-    return false;
+    // The rows are visible and the handoffs are not. A transient cause leaves
+    // the object to finish the missing half on replay; a value the handoff
+    // cannot store — an instant with no readable date — is retained instead of
+    // repeated forever.
+    return classify(cause, "a drained segment's handoffs did not finish");
   }
 
   try {
@@ -453,16 +598,58 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // Everything that depends on this object has happened, so the object is
     // spent. Leaving it costs one more harmless drain when the next scan finds
     // it, which is also what retries the delete.
-    log.warn({ err: cause, key }, "a drained segment could not be deleted");
-    return false;
+    return waitAndTryAgain(cause, "a drained segment could not be deleted");
   }
 
+  objectsDrained.add(1);
   return true;
+}
+
+/** The minting instant of the oldest key here, or `undefined` for none. */
+function oldestMintOf(keys: readonly string[]): number | undefined {
+  let oldest: number | undefined;
+  for (const key of keys) {
+    const id = segmentIdIn(key);
+    if (id === undefined) continue;
+    let at: number;
+    try {
+      at = mintedAt(id).getTime();
+    } catch {
+      continue;
+    }
+    if (oldest === undefined || at < oldest) oldest = at;
+  }
+  return oldest;
+}
+
+/** Record the backlog this pass leaves behind, for the gauges and for `stalled`. */
+function recordBacklog(held: Running, stillPending: readonly string[]): void {
+  held.pending = stillPending.length;
+  const oldest = oldestMintOf(stillPending);
+  held.oldestPendingAtMilliseconds = oldest;
+  latestBacklog = {
+    pending: stillPending.length,
+    oldestAgeMilliseconds: oldest === undefined ? 0 : Math.max(0, Date.now() - oldest),
+  };
 }
 
 /** Everything discoverable right now, oldest first, one object at a time. */
 async function pass(held: Running): Promise<number> {
   const { log, store } = held.options;
+
+  // The trace store's readiness is asked before the claim, not after: a process
+  // whose store is not ready has no business holding the deployment's one drain
+  // claim, and if it is already holding it — a store that was ready and then was
+  // not — it lets go here so a healthy instance can take over rather than stand
+  // by forever behind a green health check. A hint is worthless without the
+  // claim, so it is dropped on either early return; the takeover pass lists the
+  // whole prefix anyway.
+  if (held.options.traceStoreReady?.() === false) {
+    held.standby = "trace_store_migrating";
+    held.hinted.clear();
+    await held.options.ownership?.unlock();
+    return 0;
+  }
 
   // Before the listing, because a process that is not the drainer should not
   // be reading the prefix either: standing by costs one Postgres round trip
@@ -470,12 +657,9 @@ async function pass(held: Running): Promise<number> {
   if (held.options.ownership !== undefined) {
     if (!(await held.options.ownership.take())) {
       held.standby = "standby";
+      held.hinted.clear();
       return 0;
     }
-  }
-  if (held.options.traceStoreReady?.() === false) {
-    held.standby = "trace_store_migrating";
-    return 0;
   }
   held.standby = undefined;
 
@@ -488,17 +672,50 @@ async function pass(held: Running): Promise<number> {
   }
 
   // Anything an upload handed over since the last pass, in case it is newer
-  // than the listing. A key that is in both is drained once.
+  // than the listing. A key that is in both is drained once. Membership is a
+  // set rather than a scan of `keys`, so merging a large standby backlog on a
+  // failover does not walk the whole listing once per hint.
+  const seen = new Set(keys);
   for (const hinted of held.hinted) {
-    if (!keys.includes(hinted)) keys.push(hinted);
+    if (!seen.has(hinted)) {
+      keys.push(hinted);
+      seen.add(hinted);
+    }
   }
   held.hinted.clear();
 
   let drained = 0;
+  const stillPending: string[] = [];
   for (const key of keys) {
     if (held.stopped) break;
+    // The claim is re-asked between objects, not only once a pass: a holder
+    // whose connection dies mid-pass must stop rather than walk the rest of the
+    // prefix beside whoever takes over. Asking a session that already holds it
+    // is one liveness round trip and stacks no second hold.
+    if (
+      held.options.ownership !== undefined &&
+      !(await held.options.ownership.take())
+    ) {
+      held.standby = "standby";
+      break;
+    }
     if (held.retained.has(key)) continue;
-    if (await drainOne(held, key)) drained += 1;
+    if (await drainOne(held, key)) {
+      drained += 1;
+    } else if (!held.retained.has(key)) {
+      // Left where it is for a reason that will pass, so it is still backlog.
+      stillPending.push(key);
+    }
+  }
+
+  recordBacklog(held, stillPending);
+  // A pass that had work and moved none of it is a stall: the store it drains
+  // into is unreachable, and the drain component says so without the status code
+  // turning on it. Any progress, or nothing left owed, clears it.
+  if (drained > 0 || stillPending.length === 0) {
+    held.consecutiveFailures = 0;
+  } else {
+    held.consecutiveFailures += 1;
   }
   return drained;
 }
@@ -545,6 +762,9 @@ export function startDrainer(options: DrainerOptions): Drainer {
     // Until the first pass has asked, this process has not been told it is the
     // drainer, and reporting that it is would be a guess.
     standby: options.ownership === undefined ? undefined : "standby",
+    pending: 0,
+    oldestPendingAtMilliseconds: undefined,
+    consecutiveFailures: 0,
     stopped: false,
   };
 
@@ -586,6 +806,23 @@ export function startDrainer(options: DrainerOptions): Drainer {
 
     standingBy() {
       return held.standby;
+    },
+
+    health() {
+      const oldest = held.oldestPendingAtMilliseconds;
+      return {
+        standby: held.standby,
+        pending: held.pending,
+        oldestPendingAgeMilliseconds:
+          oldest === undefined ? 0 : Math.max(0, Date.now() - oldest),
+        consecutiveFailures: held.consecutiveFailures,
+        // A stall is a drainer that has work and keeps making no progress on it.
+        // Standing by or waiting on the store's schema is not a stall — those are
+        // this process behaving exactly as intended.
+        stalled:
+          held.standby === undefined &&
+          held.consecutiveFailures >= STALL_AFTER_CONSECUTIVE_FAILURES,
+      };
     },
 
     async stop() {

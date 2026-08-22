@@ -1,9 +1,12 @@
 import {
   OversizeRecordError,
   refuseOversizeRecord,
+  refuseUnstorableInstant,
+  UnstorableInstantError,
   type AuthContext,
   type NewSpan,
 } from "@egma/db";
+import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
 import type { FastifyBaseLogger } from "fastify";
 
 import type { IngestionSettings } from "../config.ts";
@@ -35,6 +38,18 @@ import {
   type StagedEntry,
   type WriteAheadLog,
 } from "./write-ahead-log.ts";
+
+const meter = openTelemetryMetrics.getMeter("@egma/api/ingestion-accept");
+const uploadFailures = meter.createCounter("egma.ingestion.upload.failures", {
+  description: "Segment uploads that did not reach the ingestion object store",
+});
+const acknowledgementLatency = meter.createHistogram(
+  "egma.ingestion.acknowledgement.latency",
+  {
+    description: "Time from a record being staged to its segment being durable",
+    unit: "ms",
+  },
+);
 
 /**
  * Acceptance: the one place evidence becomes Egma's problem.
@@ -209,6 +224,22 @@ type Standing = {
  * can be given the wrong one.
  */
 let standing: Standing | undefined;
+
+// The local log's live volume as a level, for the scrape that used to read it
+// off the unauthenticated health body: bytes spoken for and frames staged, both
+// because both bounds bind and either can be the near one. Zero on a process
+// holding nothing or with no acceptance loop open.
+meter
+  .createObservableGauge("egma.ingestion.local_log.bytes", {
+    description: "Bytes across every local-log file, sealed ones included",
+    unit: "By",
+  })
+  .addCallback((result) => result.observe(standing?.log.bytes ?? 0));
+meter
+  .createObservableGauge("egma.ingestion.local_log.records", {
+    description: "Frames staged in the local log and not yet released",
+  })
+  .addCallback((result) => result.observe(standing?.log.records ?? 0));
 
 function keyFor(scope: SegmentScope): string {
   return `${scope.organizationId}/${scope.projectId}`;
@@ -413,6 +444,7 @@ async function upload(held: Standing, group: Group): Promise<void> {
     group.failedAttempts += 1;
     group.nextAttemptAtMilliseconds =
       Date.now() + nextAttemptAfter(held, group.failedAttempts);
+    uploadFailures.add(1);
 
     const refusal = new IngestionUnavailableError(
       "this evidence was staged and could not be made durable in the " +
@@ -430,7 +462,11 @@ async function upload(held: Standing, group: Group): Promise<void> {
     attempt.sealEntry,
     ...attempt.staged.map((staged) => staged.entry),
   ]);
-  for (const staged of attempt.staged) staged.settled();
+  const durableAt = Date.now();
+  for (const staged of attempt.staged) {
+    acknowledgementLatency.record(durableAt - staged.stagedAtMilliseconds);
+    staged.settled();
+  }
 
   try {
     held.onSegmentDurable(attempt.segment);
@@ -676,6 +712,26 @@ export async function closeAcceptance(): Promise<void> {
     held.timer = undefined;
   }
   await held.running;
+
+  // A caller still awaiting durability is settled with the retryable refusal
+  // now, rather than left to time out on its own request bound while the
+  // process shuts down. It says the same true thing the store-timeout refusal
+  // does — the records are framed on disk and recovered on the next start — so
+  // the wait ends at once instead of ten seconds later.
+  const refusal = new IngestionUnavailableError(
+    "this Egma is stopping, so this evidence could not be made durable before " +
+      "it did. Nothing has been discarded — it is on disk and recovered on the " +
+      "next start; send it again.",
+  );
+  for (const group of held.groups.values()) {
+    for (const staged of [
+      ...group.sealed.flatMap((sealed) => sealed.staged),
+      ...group.waiting,
+    ]) {
+      staged.settled(refusal);
+    }
+  }
+
   held.log.close();
 }
 
@@ -730,12 +786,20 @@ export async function acceptEvidenceForProjects(
       try {
         // Before anything is staged, so a record Egma will not store never
         // enters the log, never rides a segment, and is reported to whoever
-        // sent it while their request is still open.
+        // sent it while their request is still open. Two doors: a field over a
+        // documented bound, and a span whose instant the store cannot hold —
+        // one seals into a segment the drainer then cannot read back.
         refuseOversizeRecord(span);
+        refuseUnstorableInstant(span);
       } catch (cause) {
-        if (!(cause instanceof OversizeRecordError)) throw cause;
-        refused.push({ reason: cause.message });
-        continue;
+        if (
+          cause instanceof OversizeRecordError ||
+          cause instanceof UnstorableInstantError
+        ) {
+          refused.push({ reason: cause.message });
+          continue;
+        }
+        throw cause;
       }
       staging.push({ scope, record: recordFor(span) });
     }
@@ -822,15 +886,6 @@ async function durableWithin(
   }
 }
 
-/**
- * Every record this process has staged and not yet made durable, oldest first,
- * each with the trusted scope it was accepted under.
- *
- * It answers one question — *what is still in hand* — and answers it from the
- * groups the standing loop is holding, which are the frames the local log holds
- * on disk. A process that has opened no acceptance loop is holding nothing and
- * answers so.
- */
 /** How much of the local log is spoken for, and whether it will take more. */
 export type StagedLoad = {
   /** Bytes across every file the log owns, sealed ones included. */
@@ -881,6 +936,16 @@ export function stagedLoad(): StagedLoad | undefined {
   };
 }
 
+/**
+ * Every record this process has staged and not yet made durable, oldest first,
+ * each with the trusted scope it was accepted under.
+ *
+ * **A test seam, not a product read.** It answers one question — *what is still
+ * in hand* — across every tenant at once and behind no context, so nothing that
+ * serves a request reaches it: the suites that prove staging survives a refusal
+ * import this module directly, and no route, no barrel and no handler does. A
+ * process that opened no acceptance loop is holding nothing and answers so.
+ */
 export function stagedEvidence(): readonly {
   readonly scope: SegmentScope;
   readonly record: IngestionRecord;
