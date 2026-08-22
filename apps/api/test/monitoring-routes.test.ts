@@ -227,6 +227,7 @@ describe("starting monitoring", () => {
           pullProductionCalls: true,
         },
       ],
+      refused: [],
     });
     // The key never comes back out, in the answer or in a log.
     expect(started.body).not.toContain(RETELL_KEY);
@@ -291,7 +292,7 @@ describe("starting monitoring", () => {
     await pulling(ada);
     const second = await createAgent(at(ada), { name: "Second desk" });
 
-    const refused = await api.app.inject({
+    const answered = await api.app.inject({
       method: "POST",
       url: `/v1/monitoring/start?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
@@ -302,17 +303,115 @@ describe("starting monitoring", () => {
       },
     });
 
-    expect(refused.statusCode, refused.body).toBe(409);
-    const answered = refused.json() as { error: string; message: string };
-    expect(answered.error).toBe("conflict");
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: unknown[];
+      refused: { platformAgentId: string; reason: string; message: string }[];
+    };
+    expect(outcome.watching).toEqual([]);
+    expect(outcome.refused).toHaveLength(1);
+    expect(outcome.refused[0]?.reason).toBe("contested");
     // Plain words, naming the platform agent and the agent already watching it.
-    expect(answered.message).toContain("agent_voice_1");
-    expect(answered.message).toContain("Front desk");
-    expect(answered.message).not.toContain("agent_pulled_platform_agent_unique");
+    expect(outcome.refused[0]?.message).toContain("agent_voice_1");
+    expect(outcome.refused[0]?.message).toContain("Front desk");
+    expect(outcome.refused[0]?.message).not.toContain(
+      "agent_pulled_platform_agent_unique",
+    );
     // And the loser's switch stayed off.
     expect((await readAgentPullState(at(ada), second.id))?.pullProductionCalls).toBe(
       false,
     );
+  });
+
+  /**
+   * **A refusal never hides what started beside it.**
+   *
+   * Starting an agent is a whole act on its own, so the entries around a
+   * contested tick still start and the answer says so. A request answered with
+   * only the refusal would leave switches on that nothing on screen mentions,
+   * and the obvious next move — press it again — would start them twice.
+   */
+  it("starts the ticks beside a contested one and answers both", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_mixed", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-mixed@acme.example", "Acme");
+    await pulling(ada);
+    const second = await createAgent(at(ada), { name: "Second desk" });
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [
+          // Contested: "Front desk" already watches this one.
+          { platformAgentId: "agent_voice_1", agentId: second.id },
+          // Unregistered, and named only by the platform.
+          { platformAgentId: "agent_voice_9", name: "Billing" },
+          // A missing agent id, which is this tick's own answer.
+          { platformAgentId: "agent_voice_8", agentId: "agt_does_not_exist" },
+        ],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: { agentName: string; platformAgentId: string; created: boolean }[];
+      refused: { platformAgentId: string; reason: string }[];
+    };
+
+    expect(outcome.watching).toHaveLength(1);
+    expect(outcome.watching[0]?.platformAgentId).toBe("agent_voice_9");
+    expect(outcome.watching[0]?.agentName).toBe("Billing");
+    expect(outcome.watching[0]?.created).toBe(true);
+
+    expect(
+      outcome.refused.map((one) => [one.platformAgentId, one.reason]),
+    ).toEqual([
+      ["agent_voice_1", "contested"],
+      ["agent_voice_8", "not_found"],
+    ]);
+
+    // The agent registered mid-list really is watching, and the loser is not.
+    const registered = await api.database.sql<{ watched: string }>(
+      "select count(*) as watched from agent where pull_production_calls",
+    );
+    expect(registered.rows[0]).toEqual({ watched: "2" });
+  });
+
+  it("refuses a viewer before starting anything", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_viewer", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-start-viewer@acme.example", "Acme");
+    const viewer = await colleagueOf(
+      api.app,
+      ada,
+      "grace-start@acme.example",
+      "viewer",
+    );
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: viewer.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", name: "Front desk" }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(403);
+    const written = await api.database.sql<{ agents: string }>(
+      "select count(*) as agents from agent",
+    );
+    expect(written.rows[0]).toEqual({ agents: "0" });
   });
 
   it("refuses a LiveKit start, because push is not configured anywhere", async () => {
@@ -364,6 +463,32 @@ describe("starting monitoring", () => {
 });
 
 describe("stopping monitoring", () => {
+  it("refuses a viewer, leaving the switch on", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_stop_viewer", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-stop-viewer@acme.example", "Acme");
+    const agentId = await pulling(ada);
+    const viewer = await colleagueOf(
+      api.app,
+      ada,
+      "grace-stop@acme.example",
+      "viewer",
+    );
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/agents/${agentId}/stop?projectId=${ada.projectId}`,
+      headers: { cookie: viewer.cookie },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(403);
+    expect((await readAgentPullState(at(ada), agentId))?.pullProductionCalls).toBe(
+      true,
+    );
+  });
+
   it("turns the switch off and keeps everything stored", async () => {
     const retell = provider();
     api = await createApi("monitoring_routes_stop", {
