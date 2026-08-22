@@ -121,6 +121,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     testVersionId: "",
     personaVersionId: "",
     payload: "{}",
+    endsTrace: false,
     ...overrides,
   };
 }

@@ -1,11 +1,10 @@
-import {
-  claimDueRetellMonitoringAgent,
-  finishRetellMonitoringScan,
-  recordRetellIngestionFailure,
-} from "@egma/db";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import { colleagueOf, signUp } from "./support/traces.ts";
 
 let api: TestApi;
@@ -76,6 +75,29 @@ function provider(
   }) as typeof fetch;
   return { asked, fetchImpl };
 }
+
+/**
+ * The one case here that files evidence at the door needs somewhere for that
+ * evidence to become durable — Monitoring's "last heard from" is written where
+ * a segment is drained. Every other case in this file talks to a Retell-shaped
+ * server on loopback and needs no container.
+ */
+const storage: ObjectStorage = await startObjectStorage("monitoring-routes");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the Monitoring last-received case — ${storage.why}\n\n`,
+  );
+}
+
+function running(): Extract<ObjectStorage, { available: true }> {
+  if (!storage.available) throw new Error("this suite has no object store");
+  return storage;
+}
+
+afterAll(() => {
+  if (storage.available) storage.stop();
+});
 
 describe("platform-first Monitoring setup", () => {
   it("discovers voice agents, proves call-history access, and stores one sealed key", async () => {
@@ -217,168 +239,6 @@ describe("platform-first Monitoring setup", () => {
       expect(refused.statusCode, refused.body).toBe(403);
     }
     expect(retell.asked).toEqual([]);
-  });
-
-  it("replays one exact durable Retell failure outside the list window", async () => {
-    const providerCallId = "call_from_2020_exact_replay";
-    const retell = provider({
-      getCall: {
-        call_id: providerCallId,
-        agent_id: "agent_voice_1",
-        agent_name: "Historical front desk name",
-        agent_version: 2,
-        call_status: "ended",
-        call_type: "phone_call",
-        start_timestamp: Date.parse("2020-01-01T00:00:00.000Z"),
-        end_timestamp: Date.parse("2020-01-01T00:01:00.000Z"),
-        transcript_with_tool_calls: [
-          { role: "agent", content: "Hello" },
-          { role: "user", content: "I need help" },
-        ],
-      },
-    });
-    api = await createApi("monitoring_routes_exact_replay", {
-      retellFetch: retell.fetchImpl,
-      traceStore: true,
-    });
-    const ada = await signUp(api.app, "ada-replay@acme.example", "Acme");
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "Front desk" }],
-      },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
-
-    const target = await claimDueRetellMonitoringAgent({ now: new Date() });
-    expect(target).toBeDefined();
-    if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
-      providerCallId,
-      errorKind: "provider_call_not_found",
-      now: new Date(),
-    });
-    await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
-
-    const before = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    const failure = before.json().monitoringSources[0].agents[0].failures[0] as {
-      id: string;
-      providerCallId: string;
-    };
-    expect(failure.providerCallId).toBe(providerCallId);
-
-    const replayed = await api.app.inject({
-      method: "POST",
-      url:
-        `/v1/monitoring/retell/failures/${failure.id}/replay` +
-        `?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(replayed.statusCode, replayed.body).toBe(200);
-    expect(replayed.json()).toMatchObject({
-      monitoringImportFailure: { id: failure.id, status: "resolved" },
-      trace: { write: "written" },
-    });
-    const repeated = await api.app.inject({
-      method: "POST",
-      url:
-        `/v1/monitoring/retell/failures/${failure.id}/replay` +
-        `?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(repeated.statusCode).toBe(404);
-
-    const paths = retell.asked.map((request) => new URL(request.url).pathname);
-    expect(paths.filter((path) => path === "/v3/list-calls")).toHaveLength(1);
-    expect(
-      paths.filter((path) => path === `/v2/get-call/${providerCallId}`),
-    ).toHaveLength(1);
-    const stored = await api.database.sql<{
-      claims: string;
-      open_failures: string;
-    }>(
-      "select " +
-        "(select count(*) from production_trace_claim) as claims, " +
-        "(select count(*) from retell_ingestion_failure where status = 'open') as open_failures",
-    );
-    expect(stored.rows[0]).toEqual({ claims: "1", open_failures: "0" });
-
-    const after = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(after.json().monitoringSources[0].agents[0]).toMatchObject({
-      state: "active",
-      failures: [],
-    });
-  });
-
-  it("does not call Retell again while a replay Retry-After gate is active", async () => {
-    const providerCallId = "call_rate_limited_exact_replay";
-    const retell = provider({
-      getCallStatus: 429,
-      getCallHeaders: { "retry-after": "60" },
-    });
-    api = await createApi("monitoring_routes_replay_retry_after", {
-      retellFetch: retell.fetchImpl,
-    });
-    const ada = await signUp(api.app, "ada-retry-after@acme.example", "Acme");
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "Front desk" }],
-      },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
-
-    const target = await claimDueRetellMonitoringAgent({ now: new Date() });
-    expect(target).toBeDefined();
-    if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
-      providerCallId,
-      errorKind: "provider_call_not_found",
-      now: new Date(),
-    });
-    await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    const failureId = listed.json().monitoringSources[0].agents[0].failures[0].id as string;
-    const replayUrl =
-      `/v1/monitoring/retell/failures/${failureId}/replay` +
-      `?projectId=${ada.projectId}`;
-
-    const first = await api.app.inject({
-      method: "POST",
-      url: replayUrl,
-      headers: { cookie: ada.cookie },
-    });
-    expect(first.statusCode, first.body).toBe(429);
-    const second = await api.app.inject({
-      method: "POST",
-      url: replayUrl,
-      headers: { cookie: ada.cookie },
-    });
-    expect(second.statusCode, second.body).toBe(429);
-
-    const getCalls = retell.asked.filter(
-      (request) =>
-        new URL(request.url).pathname === `/v2/get-call/${providerCallId}`,
-    );
-    expect(getCalls).toHaveLength(1);
   });
 
   it("creates and removes the separate LiveKit Agents setup", async () => {

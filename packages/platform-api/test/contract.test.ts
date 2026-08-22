@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 79 current operations", () => {
+  it("contains one unique definition for each of the 78 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(79);
+    expect(operations).toHaveLength(78);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );

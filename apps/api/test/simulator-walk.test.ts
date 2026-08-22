@@ -21,6 +21,10 @@ import { startService, type Service } from "../../grader/src/service.ts";
 import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
 import { REPORTS_PATH } from "../src/routes/reports.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import { NEUTRAL_TRAITS } from "./support/traces.ts";
 
 /**
@@ -324,6 +328,22 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  */
 const THE_PHRASE = "Wednesday afternoon";
 
+/**
+ * The walk needs somewhere for evidence to become durable, because the whole of
+ * what it watches runs through the real door: the simulator's span batches are
+ * answered on object-store durability, and its terminal report is sent behind
+ * them in order. An instance with no ingestion bucket answers those batches the
+ * way an unconfigured deployment does — retryably — and the simulation never
+ * reaches the report that ends it.
+ */
+const storage: ObjectStorage = await startObjectStorage("simulator-walk");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the shipped-simulator walk — ${storage.why}\n\n`,
+  );
+}
+
 let instance: Instance;
 let counterpart: RetellCounterpart;
 let simulator: ChildProcess | undefined;
@@ -585,6 +605,7 @@ beforeAll(async () => {
     web: false,
     traces: true,
     retellFetch: RETELL_CHAT_PREFLIGHT,
+    ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
     beforeApiListen(api) {
       api.addHook("preHandler", async (request) => {
         if (
@@ -622,9 +643,10 @@ afterAll(async () => {
   await instance?.close();
   await counterpart?.stop();
   await rm(scratch, { recursive: true, force: true });
+  if (storage.available) storage.stop();
 });
 
-describe("the shipped simulator against the real API", () => {
+describe.skipIf(!storage.available)("the shipped simulator against the real API", () => {
   it(
     "walks queued → claimed → running → completed, and a refused key to an honest failed",
     // Every controlled wait below has its own smaller deadline and diagnostic.
@@ -800,7 +822,10 @@ describe("the shipped simulator against the real API", () => {
           capacity: 4,
           heartbeatSeconds: 1,
           leaseSeconds: 3_600,
-          sweepSeconds: 3_600,
+          // Short, because a claim declined for a conversation whose evidence
+          // is still being drained goes back to the queue and is taken up
+          // again by a sweep. A deployment's own default is thirty seconds.
+          sweepSeconds: 1,
           traceIdleSeconds: 3_600,
           logLevel: "ERROR",
         },
@@ -834,9 +859,12 @@ describe("the shipped simulator against the real API", () => {
       }
 
       // The terminal lifecycle document has reached the real report door, but
-      // the route has not applied it. The simulator drains every span first,
-      // so the complete trace must already be readable while PostgreSQL still
-      // says this Simulation is running.
+      // the route has not applied it. The simulator sends every span before
+      // the report, and a span batch is answered when it is durable in the
+      // object store — readable moments later, once the standing drainer has
+      // landed it. The held report keeps PostgreSQL at running through that
+      // wait, so the complete conversation must become readable while the row
+      // still says running.
       await waitForSignal(
         terminalReportArrived.opened,
         60_000,
@@ -845,7 +873,22 @@ describe("the shipped simulator against the real API", () => {
       let spans: StoredSpan[] = [];
       try {
         expect((await rowOf(conducted.simulationId)).status).toBe("running");
+        // The root span closes the trace and rides the last segment, so its
+        // arrival is what says the whole conversation is readable. Bounded,
+        // and answered with whatever the last look saw, so a conversation
+        // that never lands fails on what is missing rather than on a timer.
+        const readableBy = Date.now() + 30_000;
         spans = await storedSpans(traceId);
+        while (
+          !spans.some((span) => span.name === "simulation") &&
+          Date.now() <= readableBy
+        ) {
+          await new Promise((resume) => setTimeout(resume, 25));
+          spans = await storedSpans(traceId);
+        }
+        // Still running after the wait: the held report is the only terminal
+        // producer for this Simulation, and it has not landed.
+        expect((await rowOf(conducted.simulationId)).status).toBe("running");
         const beforeTerminal = spans.map((span) => span.name);
         expect(
           beforeTerminal.filter((name) => name.endsWith("_turn")),

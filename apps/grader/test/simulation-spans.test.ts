@@ -1,4 +1,10 @@
-import { getSimulation, readTrace, readVerdicts } from "@egma/db";
+import {
+  getSimulation,
+  listGradingJobsForSimulation,
+  MOST_GRADING_ATTEMPTS,
+  readTrace,
+  readVerdicts,
+} from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -6,7 +12,9 @@ import { conversationOfSimulation } from "../src/conversation.ts";
 import {
   aLatencyCopy,
   conductSimulation,
+  eventually,
   jobFor,
+  streamConversationLate,
   makeWorld,
   oneServiceAtATime,
   seedGrader,
@@ -421,6 +429,121 @@ describe("a simulation whose trace never closed", () => {
 
     expect(conversation.nothingToJudgeBecause).toContain("span limit");
     expect(conversation.transcript).toEqual([]);
+  });
+});
+
+/**
+ * **Evidence accepted and not yet readable is a reason to ask again, never a
+ * reason to answer.**
+ *
+ * A simulation's span batches are answered at the door when they are durable in
+ * the object store, and the transaction that lands the simulation terminal is
+ * what mints the work to judge it — so the work can be taken up before the
+ * evidence behind it has been drained into the trace store. A verdict written
+ * then would be permanent, and it would say egma could not read a conversation
+ * it was in the middle of storing.
+ */
+describe("a simulation whose evidence is still on its way", () => {
+  it("is asked again rather than judged, and judges the conversation once it lands", async () => {
+    const judge = await judgingWith([3]);
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
+
+    // Landed terminal with nothing under it yet.
+    const conducted = await conductSimulation(world, { spans: null, testId });
+
+    // The claim is declined and the job goes back with an attempt spent and a
+    // sentence saying why. Nothing is written about the conversation.
+    const released = await eventually(
+      `the job for ${conducted.simulationId} to be handed back`,
+      async () => {
+        const [job] = await listGradingJobsForSimulation(
+          world.auth,
+          conducted.simulationId,
+        );
+        return job?.status === "pending" && job.attempts > 0 ? job : undefined;
+      },
+    );
+    expect(released.lastError).toContain(
+      "does not hold all of its conversation yet",
+    );
+    expect(
+      (await readVerdicts(world.auth, conducted.simulationId)).verdicts,
+    ).toEqual([]);
+    expect(judge.asked).toEqual([]);
+
+    // The drain finishes, and the next attempt judges what is now there.
+    await streamConversationLate(world, conducted.simulationId);
+    await jobFor(world, conducted, "graded");
+
+    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
+    expect(verdicts.length).toBeGreaterThan(0);
+    expect(verdicts.every((verdict) => verdict.verdict === "passed")).toBe(true);
+    expect(judge.asked.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * And the budget is what ends the waiting. A conversation whose evidence
+   * never arrives is answered on the last attempt out of what did — the same
+   * list of checks a reader would have seen either way — rather than left
+   * waiting or abandoned with nothing under it.
+   */
+  it("answers out of what arrived once the budget is spent", async () => {
+    await judgingWith();
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
+    const conducted = await conductSimulation(world, { spans: null, testId });
+
+    const judged = await jobFor(world, conducted, "graded");
+    expect(judged.attempts).toBe(MOST_GRADING_ATTEMPTS);
+
+    const { verdicts } = await readVerdicts(world.auth, conducted.simulationId);
+    expect(verdicts.length).toBeGreaterThan(0);
+    expect(verdicts.every((verdict) => verdict.verdict === "errored")).toBe(true);
+    expect(verdicts[0]?.rationale).toContain("no record of this conversation");
+  });
+
+  /**
+   * A whole run's worth landing together is the case a single conversation
+   * cannot show: at a claim's capacity, a decline used to re-claim at once from
+   * the capacity shortcut, so the budget was gone in milliseconds and a
+   * permanent verdict was written while the store was still cold. Spacing the
+   * retries by the sweep is what leaves room for the drain to finish, so the
+   * batch is judged from what lands rather than abandoned before it can.
+   */
+  it("does not spend a full batch's budget before the store catches up", async () => {
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
+
+    // No copy is running, so the whole batch is pending before the first claim
+    // and is taken at once — a claim's capacity of conversations, each terminal
+    // with nothing under it yet.
+    await service.stop();
+    const landing = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        conductSimulation(world, { spans: null, testId }),
+      ),
+    );
+
+    // A copy starts and takes the whole batch, and the drain lands right behind
+    // it. On the hot loop the budget was gone before this streaming finished; a
+    // sweep between the retries is what leaves an attempt to read the
+    // conversation once it is there.
+    await judgingWith([3]);
+    for (const conducted of landing) {
+      await streamConversationLate(world, conducted.simulationId);
+    }
+
+    // So every conversation is judged from what landed rather than abandoned to
+    // an errored verdict written before its evidence was readable.
+    for (const conducted of landing) {
+      await jobFor(world, conducted, "graded");
+      const { verdicts } = await readVerdicts(
+        world.auth,
+        conducted.simulationId,
+      );
+      expect(verdicts.length).toBeGreaterThan(0);
+      expect(verdicts.every((verdict) => verdict.verdict === "passed")).toBe(
+        true,
+      );
+    }
   });
 });
 

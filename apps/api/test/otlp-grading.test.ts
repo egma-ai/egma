@@ -2,6 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import { capturedRequests, type CapturedRequest } from "./support/fixture.ts";
 
 /**
@@ -25,6 +29,12 @@ import { capturedRequests, type CapturedRequest } from "./support/fixture.ts";
  * it arrives on a key that names a project, and the ingest file's key names the
  * whole customer on purpose.
  */
+
+const storage: ObjectStorage = await startObjectStorage("otlp-grading");
+
+if (!storage.available) {
+  process.stderr.write(`\nskipping the OTLP grading suite — ${storage.why}\n\n`);
+}
 
 let api: TestApi;
 let requests: CapturedRequest[];
@@ -83,7 +93,15 @@ async function mintKey(
   return (minted.json() as { secret: string }).secret;
 }
 
-/** Replay the whole capture, in order, as the exporter's fourteen flushes. */
+/**
+ * Replay the whole capture, in order, as the exporter's fourteen flushes, and
+ * then drain.
+ *
+ * The evidence-ready handoff is an effect of the evidence becoming
+ * query-visible, so it happens where the segment is drained rather than where
+ * the request is answered. A suite about that handoff therefore has to carry
+ * the evidence all the way, not just to the acceptance boundary.
+ */
 async function replay(secret: string): Promise<void> {
   for (const request of requests) {
     const response = await api.app.inject({
@@ -97,6 +115,7 @@ async function replay(secret: string): Promise<void> {
     });
     expect(response.statusCode, request.file).toBe(200);
   }
+  await api.drainEvidence();
 }
 
 async function jobsFor(organizationId: string): Promise<JobRow[]> {
@@ -112,8 +131,12 @@ let globex: Customer;
 let globexOrganizationKey: string;
 
 beforeAll(async () => {
+  if (!storage.available) return;
   requests = await capturedRequests();
-  api = await createApi("otlp_grading", { traceStore: true });
+  api = await createApi("otlp_grading", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
 
   acme = await signUp("ada@acme.example", "Acme");
   await replay(await mintKey(acme, "Acme's agent", acme.projectId));
@@ -124,9 +147,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
-describe("a captured conversation arriving on a project's key", () => {
+describe.skipIf(!storage.available)("a captured conversation arriving on a project's key", () => {
   it("becomes exactly one piece of grading work, however many flushes carried it", async () => {
     const jobs = await jobsFor(acme.organizationId);
 
@@ -148,14 +172,72 @@ describe("a captured conversation arriving on a project's key", () => {
     expect(job?.simulation_id).toBeNull();
   });
 
-  it("is complete, because the root span closed it in the fourteenth flush", async () => {
+  it("is complete, because LiveKit's own session span said so in the fourteenth flush", async () => {
     const [job] = await jobsFor(acme.organizationId);
 
-    // An exporter sends a span when the span *ends*, so `agent_session` reaching
-    // the door is the conversation having ended. This capture's root arrives
-    // alone, last, which is exactly the case a door that guessed from the first
-    // flush would get wrong.
+    // `agent_session` is LiveKit's own word for the span the whole conversation
+    // happened inside, and the normalizer carries that statement through as the
+    // completion fact. This capture's session span arrives alone, last, which is
+    // exactly the case a reader that guessed from the first flush would get
+    // wrong.
     expect(job?.root_closed_at).toBeInstanceOf(Date);
+  });
+
+  /**
+   * **A span with no parent is not an ending**, and this is the case that used
+   * to say otherwise.
+   *
+   * Completion was inferred from any parentless span, so a scope Egma does not
+   * recognise could complete a conversation by flushing a span whose parent had
+   * not arrived — and a mangled parent id, which normalises to no parent at all,
+   * did the same. Neither says anything about whether the caller hung up. A
+   * platform this release has no explicit end fact for gets no completion here,
+   * and the idle sweep is what eventually picks such a trace up.
+   */
+  it("is not completed by a parentless span from a platform Egma does not recognise", async () => {
+    const traceId = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+    const secret = await mintKey(acme, "another framework", acme.projectId);
+    const posted = await api.app.inject({
+      method: "POST",
+      url: OTLP_TRACES_PATH,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${secret}`,
+      },
+      payload: JSON.stringify({
+        resourceSpans: [
+          {
+            resource: { attributes: [] },
+            scopeSpans: [
+              {
+                scope: { name: "another-agent-platform" },
+                spans: [
+                  {
+                    traceId,
+                    spanId: "5a5a5a5a5a5a5a5a",
+                    // No parent at all, which is what a lost flush leaves.
+                    parentSpanId: "",
+                    name: "agent_session",
+                    startTimeUnixNano: "1785693880281989804",
+                    endTimeUnixNano: "1785693881281989804",
+                    attributes: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(posted.statusCode, posted.body).toBe(200);
+    await api.drainEvidence();
+
+    const job = (await jobsFor(acme.organizationId)).find(
+      (each) => each.trace_id === traceId,
+    );
+    // Known, and deliberately not finished.
+    expect(job).toMatchObject({ source: "production", status: "pending" });
+    expect(job?.root_closed_at).toBeNull();
   });
 
   it("records the window the whole conversation happened inside", async () => {
@@ -182,7 +264,7 @@ describe("a captured conversation arriving on a project's key", () => {
   });
 });
 
-describe("telemetry sent with a key for the whole customer", () => {
+describe.skipIf(!storage.available)("telemetry sent with a key for the whole customer", () => {
   it("is refused before its body is decoded or any trace is stored", async () => {
     const response = await api.app.inject({
       method: "POST",

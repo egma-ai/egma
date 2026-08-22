@@ -69,21 +69,29 @@ export const ID_PREFIXES = [
    */
   "rev",
   /**
-   * One production trace's claim: the row a transport inserts before it writes
-   * anything, carrying the vendor payload it holds. Its own identity because
-   * the row outlives the write it guards — a sweep reads it back to replay a
-   * conversation whose append never landed.
-   */
-  "ptc",
-  /**
    * One project's setup for bringing production evidence in from an agent
    * platform. This is separate from the connections used by simulations.
    */
   "mns",
   /** One Retell voice agent selected inside a Retell Monitoring setup. */
   "rma",
-  /** One Retell call that bounded retries could not import. */
-  "rif",
+  /**
+   * One Retell call whose fetch or normalization failed: the short-lived row
+   * holding its bounded retry budget, and then the identity-only marker that
+   * stops the five-minute overlap starting a second budget. It carries no
+   * provider document and disappears on success or expiry.
+   */
+  "rcr",
+  /**
+   * One sealed segment of production evidence: the unit that is written to the
+   * ingestion bucket once and read back by the drainer. It is minted when the
+   * segment is sealed, written into the local log before the upload starts, and
+   * reused verbatim on every retry — an ambiguous upload has to reach for the
+   * same immutable object rather than invent a second one holding the same
+   * evidence. Sortable, so the recovery listing walks the pending prefix
+   * oldest-first without a second sort key.
+   */
+  "sgm",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

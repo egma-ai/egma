@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
+import { startObjectStorage, type ObjectStorage } from "./support/object-storage.ts";
 import {
   mintKey,
   readTraceOverHttp,
@@ -31,6 +32,14 @@ import {
  * What is proved here is that a real conversation, through the real path,
  * arrives measured.
  */
+
+const storage: ObjectStorage = await startObjectStorage("otlp-measures");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the derived-measures suite — ${storage.why}\n\n`,
+  );
+}
 
 let api: TestApi;
 let acme: Customer;
@@ -144,7 +153,11 @@ function measure(
 }
 
 beforeAll(async () => {
-  api = await createApi("otlp_derived_measures", { traceStore: true });
+  if (!storage.available) return;
+  api = await createApi("otlp_derived_measures", {
+    traceStore: true,
+    ingestStore: storage.ingestStore,
+  });
   acme = await signUp(api.app, "ada@acme.example", "Acme");
   // The fourteen flushes, byte for byte as the exporter sent them.
   const telemetrySecret = await mintKey(
@@ -153,14 +166,18 @@ beforeAll(async () => {
     "Acme production telemetry",
     acme.projectId,
   );
-  await replayFixture(api.app, telemetrySecret);
+  await replayFixture(api, telemetrySecret);
+  // The door stops at object-store durability, so the evidence is carried the
+  // rest of the way here — the measures are read out of rows.
+  await api.drainEvidence();
 });
 
 afterAll(async () => {
   await api?.close();
+  if (storage.available) storage.stop();
 });
 
-describe("the captured LiveKit conversation, read back through the door", () => {
+describe.skipIf(!storage.available)("the captured LiveKit conversation, read back through the door", () => {
   it("carries exactly the three derived measures, and says they were derived", async () => {
     const measures = await measuresOfTheCapture();
 

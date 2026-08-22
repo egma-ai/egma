@@ -10,9 +10,13 @@ import {
   type NewVerdict,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import {
   aConductedRun,
   fileTranscriptOf,
@@ -43,10 +47,22 @@ import { colleagueOf, request as ask, signUp, type Answer } from "./support/trac
  * carries who judged it any more.
  */
 
+const storage: ObjectStorage = await startObjectStorage("simulation-evidence");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the simulation-evidence suite — ${storage.why}\n\n`,
+  );
+}
+
 let api: TestApi;
 
 afterEach(async () => {
   await api?.close();
+});
+
+afterAll(() => {
+  if (storage.available) storage.stop();
 });
 
 function request(
@@ -108,7 +124,12 @@ async function aCustomerWhoHasRun(
   label: string,
   options: { readonly withTraceEvidence?: boolean } = {},
 ): Promise<Conducted> {
-  api = await createApi(label, { traceStore: options.withTraceEvidence === true });
+  api = await createApi(label, {
+    traceStore: options.withTraceEvidence === true,
+    ...(options.withTraceEvidence === true && storage.available
+      ? { ingestStore: storage.ingestStore }
+      : {}),
+  });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const who = await standingOf(api.app, ada.cookie, "a terminal");
   const run = await aConductedRun(api.app, who, {
@@ -117,7 +138,7 @@ async function aCustomerWhoHasRun(
 
   if (options.withTraceEvidence === true) {
     await fileTranscriptOf(
-      api.app,
+      api,
       run.heard,
       {
         human: "I need to move Thursday's clean to next week.",
@@ -189,7 +210,7 @@ async function theJobOn(
   return { status: only.status, narrowedTo: only.regradeGraderId };
 }
 
-describe("one conversation's evidence, in one read", () => {
+describe.skipIf(!storage.available)("one conversation's evidence, in one read", () => {
   it("carries the pins, the identities, the plan, the judgement and the transcript together", async () => {
     const { who, run } = await aCustomerWhoHasRun("evidence_one_read", {
       withTraceEvidence: true,
@@ -321,7 +342,7 @@ describe("one conversation's evidence, in one read", () => {
   });
 });
 
-describe("judging one conversation again", () => {
+describe.skipIf(!storage.available)("judging one conversation again", () => {
   it("reopens its grading job, and says what the ask was narrowed to", async () => {
     const { who, run } = await aCustomerWhoHasRun("evidence_regrade");
     await finishGrading(who.auth);
@@ -593,7 +614,7 @@ describe("judging one conversation again", () => {
  * this is where that stops being a claim: the transcript above came back under
  * the id derived from the conversation, with nothing having stored a mapping.
  */
-describe("the conversation and its spans", () => {
+describe.skipIf(!storage.available)("the conversation and its spans", () => {
   it("files the transcript under the id derived from the simulation", async () => {
     const { who, run } = await aCustomerWhoHasRun("evidence_trace_identity", {
       withTraceEvidence: true,
@@ -602,5 +623,47 @@ describe("the conversation and its spans", () => {
     const read = await request("GET", `/v1/simulations/${run.heard}`, who.key);
     const transcript = read.body.transcript as { traceId: string };
     expect(transcript.traceId).toBe(traceIdOfSimulation(run.heard));
+  });
+
+  /**
+   * **Simulation evidence goes through the same durable path, and is graded
+   * once.**
+   *
+   * One rule stands between a simulation's spans and a second piece of grading
+   * work: a span whose source is not `production` is not reported through the
+   * evidence-ready boundary. The door writes nothing at all, and the drainer
+   * reports every segment it drains without knowing whose conversation is
+   * whose — so that per-span rule is the only guard there is.
+   *
+   * A simulation's grading work is minted by the transaction that lands it
+   * terminal, so a second piece filed from telemetry would be one conversation
+   * judged twice. That is why the evidence going in **and** the evidence going
+   * through the drainer are both proved here rather than assumed.
+   */
+  it("grades exactly once, however many segments its spans arrive in", async () => {
+    const { who, run } = await aCustomerWhoHasRun("evidence_graded_once", {
+      withTraceEvidence: true,
+    });
+
+    // A second flush of the same conversation, drained on its own — which is
+    // the shape a simulator's ordered sender really produces.
+    await fileTranscriptOf(
+      api,
+      run.heard,
+      { human: "One more thing.", agent: "Of course." },
+      new Date(),
+    );
+
+    const jobs = await listGradingJobsForSimulation(who.auth, run.heard);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ source: "simulation" });
+
+    // And nothing was filed against the trace those spans are stored under,
+    // which is where a second piece of work would have appeared.
+    const { rows } = await api.database.sql<{ count: string }>(
+      "select count(*) as count from grading_job where source = $1",
+      ["production"],
+    );
+    expect(rows[0]?.count).toBe("0");
   });
 });

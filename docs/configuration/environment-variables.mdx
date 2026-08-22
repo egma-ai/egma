@@ -4,7 +4,7 @@ sidebarTitle: "Environment Variables"
 description: "Complete reference for every environment variable Egma reads on startup — required secrets, optional defaults, and the commands that generate safe values."
 ---
 
-Copy `.env.example` to `.env` before you start the platform. Most variables have working defaults that are safe to leave alone. Ten do not — the deployment refuses to start if any one of them is absent, printing the name of the missing variable rather than guessing at a value. Those ten are your deployment's own secrets and its own address: a default for any of them would be a value every reader of this repository already holds.
+Copy `.env.example` to `.env` before you start the platform. Most variables have working defaults that are safe to leave alone. Twelve do not — the deployment refuses to start if any one of them is absent, printing the name of the missing variable rather than guessing at a value. Those twelve are your deployment's own secrets and its own address: a default for any of them would be a value every reader of this repository already holds.
 
 The sections below separate what you must supply from what you can safely leave at its default.
 
@@ -12,7 +12,7 @@ The sections below separate what you must supply from what you can safely leave 
 
 ## Required variables
 
-Set all seven of the following before running `egma self-host up`. The remaining three (`EGMA_BASE_URL`, `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`) are set automatically by `egma self-host up` and do not need to be set by hand unless you are driving `docker compose` directly.
+Set all nine of the following before running `egma self-host up`. The remaining three (`EGMA_BASE_URL`, `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`) are set automatically by `egma self-host up` and do not need to be set by hand unless you are driving `docker compose` directly.
 
 <ParamField path="EGMA_ENCRYPTION_KEY" type="string" required>
   32 random bytes encoded as 64 hex characters. Seals connection credentials and the carrier SIP password stored in Postgres. Back this up alongside the database — the sealed values are unrecoverable without it.
@@ -44,6 +44,24 @@ Set all seven of the following before running `egma self-host up`. The remaining
 
 <ParamField path="EGMA_S3_SECRET_ACCESS_KEY" type="string" required>
   The MinIO root credential password. You choose this value — minimum 8 characters. Paired with `EGMA_S3_ACCESS_KEY_ID` above.
+</ParamField>
+
+<ParamField path="EGMA_S3_INGEST_ACCESS_KEY_ID" type="string" required>
+  The username of the credential Egma writes production evidence with. You choose this value — minimum 8 characters. The deployment creates a MinIO user from it on first start, confined to the `pending/` prefix of the ingestion bucket, so it can never read, delete, or expire a recording.
+
+  Required for every deployment that accepts evidence, which is every deployment that is not a read-only replica. There is no default for the same reason the root pair has none.
+
+  ```bash
+  echo "EGMA_S3_INGEST_ACCESS_KEY_ID=$(openssl rand -hex 8)"
+  ```
+</ParamField>
+
+<ParamField path="EGMA_S3_INGEST_SECRET_ACCESS_KEY" type="string" required>
+  The password paired with `EGMA_S3_INGEST_ACCESS_KEY_ID`. You choose this value — minimum 8 characters.
+
+  ```bash
+  echo "EGMA_S3_INGEST_SECRET_ACCESS_KEY=$(openssl rand -base64 24)"
+  ```
 </ParamField>
 
 <Note>
@@ -152,6 +170,93 @@ All variables in this section have working defaults. Override them only when the
   Set this to the same host as `EGMA_BASE_URL`, on port 9000 (or whatever `EGMA_S3_PORT` is). If `EGMA_BASE_URL` uses `https:`, this must also use `https:` — browsers block mixed-content audio before the request is sent.
 </ParamField>
 
+### Ingestion
+
+Production evidence is accepted into a second bucket on the same MinIO, and Egma answers a request successfully only once the evidence is durable there. Everything in this section has a working default; the credential that reaches the bucket is in the required section above.
+
+<Note>
+  **The bundled MinIO runs on one node, so its durability is your host's.** The volume survives a container being replaced. It does not survive the loss of that host or its disk. Point `EGMA_INGEST_ENDPOINT` at a store that is remote from this machine — Amazon S3, or any S3-compatible service with a durability promise of its own — if your production evidence must survive either.
+</Note>
+
+<ParamField path="EGMA_INGEST_BUCKET" type="string" default="egma-ingestion">
+  The bucket accepted evidence waits in. Created on first start beside the recordings bucket. It is a spool rather than an archive: Egma writes the evidence to ClickHouse soon afterwards and deletes the object.
+</ParamField>
+
+<ParamField path="EGMA_INGEST_ENDPOINT" type="string" default="http://minio:9000">
+  The address **Egma itself** reaches the ingestion bucket at, from inside the deployment's own network. This is the one place in this file where that address and a browser's are genuinely different settings pointing at one MinIO: a recording is fetched by a browser from `EGMA_BLOB_PUBLIC_URL`, and a segment is uploaded by Egma from here.
+
+  Scheme, host, and port only. A path, a query string, or a credential in this URL is refused rather than half-honoured.
+</ParamField>
+
+<ParamField path="EGMA_INGEST_REGION" type="string" default="">
+  The AWS region included in ingestion request signatures. Defaults from `EGMA_S3_REGION`. Leave empty for MinIO. Set to the real region when pointing this at Amazon S3 — the API refuses to start on an `amazonaws.com` endpoint without one.
+</ParamField>
+
+<ParamField path="EGMA_INGEST_ACCESS_KEY_ID" type="string">
+  The credential the API signs ingestion requests with. Defaults from `EGMA_S3_INGEST_ACCESS_KEY_ID`, so a deployment using the bundled MinIO sets only that one. Set this directly when the ingestion bucket lives somewhere other than the bundled store.
+</ParamField>
+
+<ParamField path="EGMA_INGEST_SECRET_ACCESS_KEY" type="string">
+  Paired with `EGMA_INGEST_ACCESS_KEY_ID`. Defaults from `EGMA_S3_INGEST_SECRET_ACCESS_KEY`.
+</ParamField>
+
+<ParamField path="EGMA_ROLE" type="string" default="all">
+  Which halves of ingestion this process serves: `all`, `ingest`, or `drain`.
+
+  `all` is what this deployment runs — one process accepts evidence and drains the spool. The other two exist so that splitting those apart on a larger deployment later is this one setting rather than a second image and a second protocol. Exactly one process drains per deployment, whichever roles are running.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_LOG_DIR" type="string" default="/var/lib/egma/ingestion">
+  Where accepted evidence waits between being staged and being durable. A directory on the `api-ingestion` named volume, holding evidence Egma has taken responsibility for and has not made durable yet. A restart reads it back.
+
+  `docker compose down -v` deletes this volume. Doing that with a backlog in it throws away evidence Egma has already answered success to.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_LOG_MAX_BYTES" type="number" default="536870912">
+  How many bytes that staging area holds before Egma starts refusing new evidence. Past it the door answers a retryable failure and nothing already staged is discarded to make room.
+
+  512 MiB is a documented starting value chosen to sit inside an ordinary root disk, not a proven capacity. On the bundled deployment this volume shares the disk with everything else.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_LOG_MAX_RECORDS" type="number" default="200000">
+  How many staged records it holds before the same refusal. Both bounds bind, because records are not all one size: a bound in bytes alone is reached after ten conversations on one deployment and ten million on another.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_FLUSH_MILLISECONDS" type="number" default="500">
+  How long the oldest staged record waits for company before its segment is sealed and uploaded. A low-volume deployment lives on this number: one conversation's spans must not wait for a batch that will never fill. Raising it trades visibility for fewer, larger objects.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_SEGMENT_MAX_BYTES" type="number" default="8388608">
+  How large one segment gets before it seals regardless of the clock. Counts uncompressed evidence, and sits under the trace store's own insert bound so one segment is at most one or two inserts.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_SEGMENT_MAX_RECORDS" type="number" default="5000">
+  The same bound in records.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS" type="number" default="10000">
+  How long a request waits for the object store before Egma answers it retryably. Past this the sender is told to try again and the staged evidence stays eligible for upload, so a slow store costs a retry rather than a false success. It is never unbounded.
+</ParamField>
+
+<ParamField path="EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS" type="number" default="30000">
+  How often the whole pending spool is listed. That listing is the recovery authority and runs once at startup as well — handing a freshly uploaded segment straight on is a speed hint, and a hint that is lost or delivered twice must not be able to lose evidence.
+</ParamField>
+
+### What the ingestion defaults measure as
+
+Numbers, not adjectives, from one bounded measurement of exactly these defaults on one machine: a 4-vCPU, 16 GiB VM running the API, PostgreSQL, ClickHouse, a loopback MinIO, and the load generator all at once, with records of about 2,750 evidence bytes. A dedicated host does better; an object store across a real network moves the acknowledgement tail. Nothing below is extrapolated.
+
+| Measured | Value |
+| --- | --- |
+| Sustained acceptance at 128 concurrent senders | ~170 conversations/s — 4,600 spans/s, 4.65 MB/s of evidence — held across three 60–75 s runs with every request answered 200 |
+| Acknowledgement latency at that rate | p50 0.85 s, p95 1.15–1.18 s |
+| Acknowledgement floor when nearly idle | ~0.5 s — a lone conversation's wait is the flush interval |
+| Readable after acknowledgement | p50 under 90 ms, p95 under 120 ms, through the standing drainer alone; none of 1,180 measured conversations failed to become readable |
+| Compression on the wire to the store | gzip ≈ 8.3:1 on full segments |
+| Refusal onset | exactly at the configured bounds — the byte bound refuses with less than one frame of headroom left, the record bound on the record after the last — always retryably, never discarding anything staged |
+
+Past 128 concurrent senders this machine buys almost no additional throughput and pays double the latency: one API process saturates one core. And the byte bound read as an outage buffer, by arithmetic on the measured peak: 512 MiB of staging holds roughly 110 seconds of peak-rate evidence, which is the window an object-store outage has before the door stops staging new evidence and starts refusing it.
+
 ### API and web ports
 
 <ParamField path="EGMA_API_PORT" type="number" default="3100">
@@ -250,12 +355,14 @@ neither:
 
 ## Quick-start checklist
 
-Run these commands to generate all seven required secrets at once, then paste the output into your `.env`:
+Run these commands to generate all nine required secrets at once, then paste the output into your `.env`:
 
 ```bash
 echo "EGMA_ENCRYPTION_KEY=$(openssl rand -hex 32)"
 echo "EGMA_AUTH_SECRET=$(openssl rand -base64 32)"
 echo "EGMA_SIMULATOR_SERVICE_TOKEN=egma_st_$(openssl rand -hex 32)"
+echo "EGMA_S3_INGEST_ACCESS_KEY_ID=$(openssl rand -hex 8)"
+echo "EGMA_S3_INGEST_SECRET_ACCESS_KEY=$(openssl rand -base64 24)"
 
 # Choose your own values for these — minimum 8 characters each:
 echo "EGMA_S3_ACCESS_KEY_ID=<your-minio-admin-user>"

@@ -79,22 +79,24 @@ import { within } from "./within.ts";
  * ## And the other source, which nobody can wake for
  *
  * A production trace has no transaction to ride and no moment anybody owns. It
- * arrives as spans, so `recordProductionTraces` is called by the ingest door,
- * once per export, and writes the two facts completion is decided from: when
- * egma last heard about this trace, and whether the export carried its root
- * span. **That is a queue write and a notification and nothing else** — no
- * grader is resolved, no conversation is read, and no judgment is made anywhere
- * near a request path. What the API process must stay free of is judge work,
- * which would make an exporter's timeout depend on somebody's judge model; it
- * was never free of bookkeeping.
+ * arrives as spans, so `recordProductionTraces` is called by the drainer, once
+ * per drained segment and only after its rows are query-visible, and writes the
+ * two facts completion is decided from: when egma last heard about this trace,
+ * and whether the segment carried a span the platform said ends it. **That is a
+ * bookkeeping row and a notification and nothing else** — no grader is
+ * resolved, no conversation is read, and no judgment is made anywhere near it.
+ * Reporting before the evidence was readable would be worse than reporting
+ * late: a grader woken for a trace it cannot read would judge an empty one.
  *
  * The two ways such a trace completes are answered in two different places, and
  * they have to be:
  *
- * - **Its root span closed.** An exporter sends a span when the span ends, so a
- *   root arriving at the door *is* the conversation ending. The door stamps
- *   `root_closed_at` and raises the same notification a terminal transition
- *   does, so the wake-up is immediate and no interval is on the path.
+ * - **Its platform said it ended.** Each supported platform states that fact on
+ *   the one span that carries it, and the normalizer carries the statement
+ *   through to here. The drainer stamps `root_closed_at` and raises the same
+ *   notification a terminal transition does, so the wake-up is immediate and no
+ *   interval is on the path. A platform that states nothing produces no
+ *   completion here, and nothing infers one from the shape of a trace.
  * - **It went quiet.** An exporter that never closes a root would otherwise
  *   leave a conversation unjudged forever, and there is nothing to be woken by:
  *   the completing event is the *absence* of one. So this half is inherently a
@@ -165,7 +167,15 @@ const DEFAULT_LEASE_SECONDS = 120;
  * mid-judgment — and a fourth attempt at a conversation that has broken three
  * copies is a queue of one job growing forever.
  */
-const MOST_ATTEMPTS = 3;
+/**
+ * How many times one conversation is handed out before egma stops trying.
+ *
+ * Exported because the service that does the judging decides, on its own last
+ * attempt, to answer with what it can see rather than to decline again — and a
+ * bound named in two places is a bound that will one day disagree with itself,
+ * quietly, as a job abandoned where an answer was owed.
+ */
+export const MOST_GRADING_ATTEMPTS = 3;
 
 /**
  * How long a production trace has to be quiet before egma judges it without a
@@ -418,11 +428,11 @@ type ProductionTraceActivity = {
 /**
  * A production trace becomes known, and — when its root closes — claimable work.
  *
- * Called by the ingest door with the very spans it just appended, after they are
- * stored and once per export. **It writes bookkeeping and raises a notification,
- * and does nothing else**: no grader is resolved, no conversation is read,
- * nothing is judged. Judging is the grader service's, and the request path stays
- * clear of it.
+ * Called by the drainer with the very spans it just wrote, after they are
+ * query-visible and once per segment. **It writes bookkeeping and raises a
+ * notification, and does nothing else**: no grader is resolved, no conversation
+ * is read, nothing is judged. Judging is the grader service's, and neither the
+ * request path nor the drainer holds anything open for it.
  *
  * It takes the spans rather than a summary of them so that **what completion
  * means is written down once**. A caller that computed "which trace, how wide,
@@ -431,11 +441,16 @@ type ProductionTraceActivity = {
  * would show up as conversations that were never judged, which is the failure
  * nobody notices.
  *
- * The row is written on the first export that carries any span of a trace and
- * updated by every export after it, which is why the whole thing is one upsert
+ * The row is written on the first segment that carries any span of a trace and
+ * updated by every segment after it, which is why the whole thing is one upsert
  * against the project-and-trace unique: an exporter flushes a conversation in
- * as many batches as it likes, in whatever order, and they all land on one row.
- * The project is part of that key because a trace id comes from the customer.
+ * as many batches as it likes, in whatever order, they are drained in whatever
+ * order they became durable, and they all land on one row. The project is part
+ * of that key because a trace id comes from the customer.
+ *
+ * **Replaying a segment repeats this harmlessly**, which is what makes the
+ * drainer's replay safe: the merge below is monotone in every column and the
+ * upsert touches nothing that has moved past `pending`.
  *
  * **A job already claimed or already graded is not touched**, which is the whole
  * of what late spans do. Telemetry that arrives after egma judged a trace does
@@ -450,7 +465,7 @@ type ProductionTraceActivity = {
  *
  * No permission is asked for, on the same terms as `appendSpans` beside it: what
  * may write telemetry is decided once, at the door, before a byte of the body is
- * read.
+ * read, and the scope this is called with is the one sealed into the segment.
  */
 export async function recordProductionTraces(
   auth: AuthContext,
@@ -515,28 +530,28 @@ export async function recordProductionTraces(
 }
 
 /**
- * The production conversations one export carried, gathered by trace.
+ * The production conversations one segment carried, gathered by trace.
  *
- * **A trace is over when its root span closes**, and an export can tell: an
- * OpenTelemetry exporter sends a span when the span *ends*, so the root — the
- * one span the whole conversation happened inside — arriving here is the
- * conversation having ended. The captured LiveKit trace does exactly that: a
- * hundred and thirty-three spans across fourteen flushes, and `agent_session`
- * comes alone in the last one.
+ * **A trace is over when the platform that ran it says so**, and each span
+ * carries that word: `endsTrace` is set by the normalizer that recognised the
+ * platform — LiveKit's own session span, Retell's reported end — and is `false`
+ * everywhere else, including on a platform this release does not support.
  *
- * A root is a span naming no parent, which is the recognition the whole store
- * already uses — `parent_span_id` is empty on a root, and the trace read files
- * such a span at the top. It has one consequence worth saying out loud: a span
- * whose parent id arrived malformed is normalised to no parent at all, so
- * telemetry a hand-written client mangled can complete a trace early. The
- * alternative is reading a framework's own word for its root out of the span
- * name, which would make completion mean something different for every provider
- * egma ever supports — and a trace completed early is judged on what arrived,
- * while a trace completed by nobody is judged by the idle window anyway.
+ * **A span having no parent is not an ending**, and is never read as one here.
+ * A parentless span is a span whose parent did not arrive: an exporter flush
+ * that lost its parent produces one, and so does a span whose parent id came in
+ * malformed and was normalised to nothing at all. Either would mark a
+ * conversation complete while the caller was still talking, which is a judgment
+ * written about half a call. The end is a fact only the platform holds, so it
+ * is carried from where the platform stated it. Where no supported platform
+ * states one, this reports no completion and invents nothing.
  *
  * Simulation traces are excluded rather than treated as production: their
- * grading job is created by the transaction that ends the simulation, so spans
- * arriving through this door must not create a second job.
+ * grading work is created by the transaction that ends the simulation, and this
+ * filter is what stops the same evidence creating a second piece of it. It is
+ * the **only** guard, because the drainer reports every segment it drains
+ * without knowing whose conversation is whose — so the question is asked of
+ * every span rather than of a segment.
  *
  * Nothing here decides whether a trace *should* be graded. It reports what
  * arrived; which graders apply, and whether this trace is their turn, are
@@ -553,13 +568,12 @@ function productionTracesIn(
   for (const span of spans) {
     if (span.source !== "production") continue;
 
-    const isRoot = span.parentSpanId === "";
     const found = seen.get(span.traceId);
     if (found === undefined) {
       seen.set(span.traceId, {
         first: span.startedAtMicroseconds,
         last: span.startedAtMicroseconds,
-        rootClosed: isRoot,
+        rootClosed: span.endsTrace,
       });
       continue;
     }
@@ -570,7 +584,7 @@ function productionTracesIn(
     if (span.startedAtMicroseconds > found.last) {
       found.last = span.startedAtMicroseconds;
     }
-    found.rootClosed ||= isRoot;
+    found.rootClosed ||= span.endsTrace;
   }
 
   return [...seen].map(([traceId, when]) => ({
@@ -636,8 +650,8 @@ export type GradingClaimRequest = {
  * transaction said so, and sampling and idleness are both about traffic egma did
  * not cause.
  *
- * A job that has been claimed `MOST_ATTEMPTS` times and still is not finished is
- * `abandoned` here instead of handed out again. egma stops trying; it does not
+ * A job that has been claimed `MOST_GRADING_ATTEMPTS` times and still is not
+ * finished is `abandoned` here instead of handed out again. egma stops trying; it does not
  * say anything about the agent, which is why the word is not `failed`.
  *
  * **It takes no `AuthContext` and cannot be given one.** See the note at the top
@@ -707,7 +721,7 @@ export async function claimGradingJobs(
     // locked just above, in this same transaction, so nothing below reaches
     // further than that select already did.
     const exhausted = candidates
-      .filter((candidate) => candidate.attempts >= MOST_ATTEMPTS)
+      .filter((candidate) => candidate.attempts >= MOST_GRADING_ATTEMPTS)
       .map((candidate) => candidate.id);
     if (exhausted.length > 0) {
       await tx
@@ -720,7 +734,7 @@ export async function claimGradingJobs(
     }
 
     const takeable = candidates
-      .filter((candidate) => candidate.attempts < MOST_ATTEMPTS)
+      .filter((candidate) => candidate.attempts < MOST_GRADING_ATTEMPTS)
       .map((candidate) => candidate.id);
     if (takeable.length === 0) return [];
 

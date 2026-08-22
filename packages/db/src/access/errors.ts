@@ -649,6 +649,80 @@ export class TraceStoreRefusedError extends Error {
 }
 
 /**
+ * A record naming a field longer than the column it would be filed in.
+ *
+ * Its own class because it is the one refusal about the evidence rather than
+ * about the store: nothing failed, nothing was reached, and the answer is not
+ * "try again" but "this record cannot be stored as what it claims to be". The
+ * alternative — cutting the field to fit — is what this replaces, and it was
+ * worse than a refusal in the way that matters most: a shortened transcript is
+ * stored looking exactly like a whole one, so the customer whose evidence egma
+ * edited is the last person who could ever find out.
+ *
+ * It carries the field, the bound and the size rather than a sentence about
+ * them, because the caller has to report all three to whoever sent the record
+ * and the sentence is the part deliberately left free to improve.
+ */
+export class OversizeRecordError extends Error {
+  /** The `NewSpan` field, by the name the sender knows it as. */
+  readonly field: string;
+  /** What that field may hold, in bytes of UTF-8. */
+  readonly bound: number;
+  /** What arrived, in the same unit. */
+  readonly bytes: number;
+
+  constructor(field: string, bound: number, bytes: number) {
+    super(
+      `this record's ${field} is ${bytes} bytes of UTF-8, and the column holds ` +
+        `${bound}. It is refused rather than shortened: a value cut to fit is ` +
+        `stored looking exactly like a whole one, and nothing afterwards can ` +
+        `tell that it was cut. Send the record with a shorter ${field}.`,
+    );
+    this.name = "OversizeRecordError";
+    this.field = field;
+    this.bound = bound;
+    this.bytes = bytes;
+  }
+}
+
+/**
+ * A record whose span begins at an instant the trace store cannot hold.
+ *
+ * Its own class beside `OversizeRecordError` because it is the other refusal
+ * about the evidence rather than about the store: the store is not reached and
+ * nothing failed, and the answer is not "try again" but "this instant is not one
+ * a `DateTime64` row and a partitioned read can be built around". A start time
+ * outside the store's range seals into a valid segment and then stops the read
+ * probe that guards every replay, so it is refused at the door instead, exactly
+ * as an oversize field is.
+ *
+ * It carries the instant and the bound it crossed rather than a sentence about
+ * them, because the caller reports both to whoever sent the record and the
+ * sentence is the part left free to improve.
+ */
+export class UnstorableInstantError extends Error {
+  /** The offending start instant, in microseconds since the epoch. */
+  readonly microseconds: bigint;
+  /** The store's earliest and latest holdable instant, same unit. */
+  readonly earliest: bigint;
+  readonly latest: bigint;
+
+  constructor(microseconds: bigint, bounds: { earliest: bigint; latest: bigint }) {
+    super(
+      `this record's start instant is ${microseconds} microseconds since the ` +
+        `epoch, and the trace store holds ${bounds.earliest} to ${bounds.latest}. ` +
+        `It is refused rather than stored: a span whose instant the store cannot ` +
+        `hold seals into a segment that then cannot be read back. Send the record ` +
+        `with a start time inside that range.`,
+    );
+    this.name = "UnstorableInstantError";
+    this.microseconds = microseconds;
+    this.earliest = bounds.earliest;
+    this.latest = bounds.latest;
+  }
+}
+
+/**
  * A trace query egma will not run, because of how it was asked rather than
  * because of who asked it.
  *

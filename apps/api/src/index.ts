@@ -18,19 +18,56 @@ import { buildApi } from "./server.ts";
 
 const config = loadConfig();
 
-// Migrations apply on boot, to both stores. There is no separate migration
-// container and no manual step, and two instances starting at once cannot both
-// apply to Postgres. A file that fails throws here, before anything is served:
+// Postgres migrations apply on boot and are a hard gate. There is no separate
+// migration container and no manual step, and two instances starting at once
+// cannot both apply. A file that fails throws here, before anything is served:
 // an instance running against a schema it could not finish applying would look
-// healthy until the first read of a column nobody created.
+// healthy until the first read of a column nobody created. Authentication and
+// acceptance both depend on this store, so nothing can usefully start without
+// it.
 const migrations = await runMigrations(config.databaseUrl);
-const traceMigrations = await runClickHouseMigrations(config.clickhouseUrl);
 
 connect({
   databaseUrl: config.databaseUrl,
   encryptionKey: config.encryptionKey,
 });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
+
+/**
+ * The trace store's own schema, applied in the background and never fatal.
+ *
+ * **This is the failure the durable boundary exists to remove.** A slow
+ * ClickHouse Cloud wake used to throw out of this module, so the process never
+ * reached `listen()` — and an egma that could have accepted evidence into
+ * object storage and drained it later instead accepted nothing, and took the
+ * hosted address down with it. Evidence is safe when it is durable in the
+ * bucket; ClickHouse is what happens next, and "next" is allowed to be late.
+ *
+ * So it runs beside the server rather than in front of it, its state is a
+ * reported component, and the drainer refuses to drain until it finishes —
+ * writing a segment into a schema still being built is how a good object
+ * becomes a retained defect for a reason that had nothing to do with it.
+ *
+ * It never settles into a terminal failure. A slow or unreachable store is
+ * retried with a doubling, capped backoff: the migrations are idempotent and one
+ * instance holds their lock, so a later attempt finishes what an earlier one
+ * could not — and until one does, the acceptance path keeps taking evidence and
+ * the drainer stands by. A process stuck in a `failed` state would hold the
+ * deployment's one drain claim behind a green health check for good, while a
+ * healthy sibling stood by forever.
+ *
+ * The `ingest` role skips it: that process never writes ClickHouse, and a role
+ * that only accepts evidence has no business applying somebody else's schema.
+ */
+type TraceStoreSchema =
+  | { readonly state: "skipped" }
+  | { readonly state: "migrating" }
+  | { readonly state: "ready"; readonly applied: readonly string[] };
+
+let traceSchema: TraceStoreSchema =
+  config.ingestion.role === "ingest"
+    ? { state: "skipped" }
+    : { state: "migrating" };
 
 // The carrier route this environment offers, written when the platform does
 // not already hold one. This is how an automated deployment configures phone
@@ -80,7 +117,52 @@ const shelved = await seedGraderLibrary();
 // keeps it off across every restart.
 const judging = await seedRunningGraders();
 
-const { app } = buildApi({ config });
+const { app } = buildApi({
+  config,
+  traceStoreReady: () => traceSchema.state === "ready",
+});
+
+/** The longest this process waits between attempts on the trace-store schema. */
+const TRACE_SCHEMA_BACKOFF_CAP_MILLISECONDS = 5 * 60_000;
+/** Set the moment a signal arrives, so the retry loop stops instead of racing shutdown. */
+let stopping = false;
+
+if (traceSchema.state === "migrating") {
+  void (async () => {
+    let backoffMilliseconds = 1_000;
+    for (;;) {
+      if (stopping) return;
+      try {
+        const applied = await runClickHouseMigrations(config.clickhouseUrl);
+        traceSchema = { state: "ready", applied: applied.applied };
+        app.log.info(
+          { traceStore: applied.applied },
+          applied.applied.length === 0
+            ? "trace-store schema already up to date"
+            : "trace-store schema migrations applied",
+        );
+        return;
+      } catch (cause) {
+        // Reported and waited out, never thrown and never terminal: the
+        // acceptance path is already serving, and a store slow to wake finishes
+        // on a later attempt while the drainer stands by.
+        app.log.error(
+          { err: cause, retryInMilliseconds: backoffMilliseconds },
+          "the trace-store schema could not be applied; draining is held until it is",
+        );
+        await new Promise<void>((wake) => {
+          // Unref'd, so a backoff in flight never keeps the process from exiting.
+          setTimeout(wake, backoffMilliseconds).unref();
+        });
+        backoffMilliseconds = Math.min(
+          backoffMilliseconds * 2,
+          TRACE_SCHEMA_BACKOFF_CAP_MILLISECONDS,
+        );
+      }
+    }
+  })();
+}
+
 if (seeded.length > 0) {
   // The names, never the values and never their hints: what is worth saying is
   // that this platform just gained settings it did not have, and which ones.
@@ -123,14 +205,15 @@ if (judging.length > 0) {
   );
 }
 app.log.info(
-  { applied: migrations.applied, traceStore: traceMigrations.applied },
-  migrations.applied.length === 0 && traceMigrations.applied.length === 0
+  { applied: migrations.applied, role: config.ingestion.role },
+  migrations.applied.length === 0
     ? "schema already up to date"
     : "schema migrations applied",
 );
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
+    stopping = true;
     void (async () => {
       await app.close();
       await disconnect();

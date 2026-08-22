@@ -1,6 +1,5 @@
 import { defineOperation } from "../definition.ts";
 import {
-  anySchema,
   arrayOf,
   dateTimeSchema,
   nullable,
@@ -11,29 +10,6 @@ import {
 } from "../schemas.ts";
 
 const optionalInstant = nullable(dateTimeSchema);
-
-const importFailure = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    providerCallId: { type: "string" },
-    errorKind: { type: "string" },
-    attempts: { type: "integer", minimum: 0 },
-    status: { type: "string" },
-    lastAttemptAt: dateTimeSchema,
-    createdAt: dateTimeSchema,
-  },
-  required: [
-    "id",
-    "providerCallId",
-    "errorKind",
-    "attempts",
-    "status",
-    "lastAttemptAt",
-    "createdAt",
-  ],
-  additionalProperties: false,
-} as const;
 
 const monitoredAgent = {
   type: "object",
@@ -48,7 +24,6 @@ const monitoredAgent = {
     lastErrorKind: nullable({ type: "string" }),
     lastErrorAt: optionalInstant,
     consecutiveFailures: { type: "integer", minimum: 0 },
-    failures: arrayOf(importFailure),
   },
   required: [
     "id",
@@ -61,7 +36,6 @@ const monitoredAgent = {
     "lastErrorKind",
     "lastErrorAt",
     "consecutiveFailures",
-    "failures",
   ],
   additionalProperties: false,
 } as const;
@@ -239,53 +213,6 @@ export const monitoringOperations = {
       403: refusalResponse,
       422: refusalResponse,
       429: rateLimitResponse,
-    },
-  }),
-
-  replayMonitoringImportFailure: defineOperation({
-    operationId: "replayMonitoringImportFailure",
-    method: "POST",
-    path: "/v1/monitoring/retell/failures/{failureId}/replay",
-    summary: "Replay a monitoring import failure",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: {
-      params: parameters({ failureId: stringIdSchema }, ["failureId"]),
-      query: projectQuery,
-    },
-    responses: {
-      200: {
-        description: "The resolved failure and imported trace.",
-        schema: {
-          type: "object",
-          properties: {
-            monitoringImportFailure: {
-              type: "object",
-              properties: {
-                id: stringIdSchema,
-                status: { type: "string", const: "resolved" },
-              },
-              required: ["id", "status"],
-              additionalProperties: false,
-            },
-            trace: {
-              type: "object",
-              properties: { id: { type: "string" }, write: anySchema },
-              required: ["id", "write"],
-              additionalProperties: false,
-            },
-          },
-          required: ["monitoringImportFailure", "trace"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      404: refusalResponse,
-      409: refusalResponse,
-      422: refusalResponse,
-      429: rateLimitResponse,
-      503: refusalResponse,
     },
   }),
 

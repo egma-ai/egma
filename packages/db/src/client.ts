@@ -90,6 +90,24 @@ export async function ping(): Promise<void> {
   await db().execute(sql`select 1`);
 }
 
+/**
+ * A connection of this process's own, outside the pool.
+ *
+ * For the two things a pooled connection cannot do: hold a subscription, and
+ * hold a session-scoped lock. Both belong to one session for as long as the
+ * process lives, and a pooled connection would carry either back into the pool
+ * and hand it to the next unrelated query.
+ *
+ * Not re-exported from the package entry point. Whoever needs one takes it
+ * inside `packages/db/src`, so the reason for a second connection is written
+ * down beside the code that opens it rather than anywhere a caller likes.
+ */
+export function dedicatedConnection(): pg.Client {
+  const url = databaseUrl;
+  if (url === undefined) throw new Error("not connected to Postgres");
+  return new pg.Client({ connectionString: url });
+}
+
 /** A connection held open on one channel; closing it is the only thing to do. */
 export type Listening = {
   close(): Promise<void>;

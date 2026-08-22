@@ -24,7 +24,12 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { BUCKET, READ_ONLY_POLICY } from "./support/object-storage.ts";
+import {
+  BUCKET,
+  INGEST_BUCKET,
+  INGEST_POLICY,
+  READ_ONLY_POLICY,
+} from "./support/object-storage.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const API = path.resolve(HERE, "..");
@@ -239,7 +244,7 @@ describe("the API's deployment story", () => {
     ).toBe(true);
   });
 
-  it("gives the API a store credential that can only read, and never the simulator's", () => {
+  it("gives the API a recording credential that can only read, and never the simulator's", () => {
     const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
     const api = serviceBlock("api");
 
@@ -248,6 +253,14 @@ describe("the API's deployment story", () => {
     // that would undo that is the API being handed the write pair — which is
     // exactly what an interpolation default would do if somebody "simplified"
     // it. Neither write variable may appear on this service at all.
+    //
+    // **The API does now hold a credential that can write**, and this test says
+    // so on purpose rather than quietly stopping being true: ingestion writes
+    // segments, so its pair is on this service by design. What keeps that from
+    // reaching a recording is the next test — a different bucket, and a policy
+    // confined to one prefix of it. The rule this one holds is unchanged and
+    // narrower than it used to read: *the recordings write pair* never appears
+    // here.
     for (const write of [
       "EGMA_S3_ACCESS_KEY_ID",
       "EGMA_S3_SECRET_ACCESS_KEY",
@@ -286,6 +299,111 @@ describe("the API's deployment story", () => {
       /printf '([^']+)'\s*\n?\s*"\$\$EGMA_S3_BUCKET"/u.exec(compose)?.[1] ?? "";
     expect(written, "the bucket job writes a policy document").not.toBe("");
     expect(JSON.parse(written.replace("%s", BUCKET))).toEqual(READ_ONLY_POLICY);
+  });
+
+  it("confines the ingestion credential to the pending prefix of its own bucket", () => {
+    // The credential the API holds that *can* write, and the two facts that
+    // keep it away from everything it must not touch.
+    //
+    // The first is that it is a different bucket. The second is this policy:
+    // one prefix of that bucket for the object operations a spool needs, and a
+    // listing statement carrying a prefix condition, so the credential cannot
+    // even enumerate the ingestion bucket outside `pending/`. Neither fact is
+    // enough alone — a policy is one document in a compose file that a
+    // deployment could widen, and a second bucket without a confining policy
+    // would still be a credential that could delete a whole bucket's worth of
+    // accepted evidence.
+    //
+    // Held against the copy `ingestion-object-store.test.ts` proves against a
+    // real MinIO, the way the recordings policy is, so the suite cannot end up
+    // proving a policy nobody deploys.
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    const written =
+      /printf '([^']+)'\s*\n?\s*"\$\$EGMA_INGEST_BUCKET"/u.exec(compose)?.[1] ?? "";
+    expect(written, "the bucket job writes an ingestion policy document").not.toBe(
+      "",
+    );
+
+    const policy = JSON.parse(written.replaceAll("%s", INGEST_BUCKET)) as {
+      Statement: readonly { Resource: readonly string[] }[];
+    };
+    expect(policy).toEqual(INGEST_POLICY);
+
+    // And what the two files agree on, checked for its shape rather than for
+    // its text — so that widening both copies in step still fails here.
+    for (const statement of policy.Statement) {
+      for (const resource of statement.Resource) {
+        expect(
+          resource.startsWith(`arn:aws:s3:::${INGEST_BUCKET}`),
+          `the ingestion policy names ${resource}, which is outside its bucket`,
+        ).toBe(true);
+        expect(
+          resource === `arn:aws:s3:::${INGEST_BUCKET}` ||
+            resource === `arn:aws:s3:::${INGEST_BUCKET}/pending/*`,
+          `the ingestion policy names ${resource}, which is wider than the ` +
+            "pending prefix",
+        ).toBe(true);
+      }
+    }
+
+    // The recordings bucket is not reachable from it by any spelling, and the
+    // ingestion pair is not the recordings pair under another name.
+    expect(written).not.toContain(BUCKET);
+    const api = serviceBlock("api");
+    for (const recordings of [
+      "EGMA_S3_ACCESS_KEY_ID",
+      "EGMA_S3_SECRET_ACCESS_KEY",
+      "EGMA_S3_READ_ACCESS_KEY_ID",
+      "EGMA_S3_READ_SECRET_ACCESS_KEY",
+    ]) {
+      expect(
+        new RegExp(`EGMA_INGEST_[A-Z_]+: \\$\\{[^}]*${recordings}[:}]`, "u").test(
+          api,
+        ),
+        `the ingestion credential defaults from ${recordings}, so one leak is both`,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * One image, three roles, and today exactly one of them is running.
+   *
+   * The point of the setting is that splitting acceptance from draining later
+   * is a value in an environment file rather than a second image and a second
+   * protocol. The point of the default is that this release does not split
+   * anything: the shipped stack runs `all`, adds no container, and adds no
+   * broker — which is the promise a reader of the compose file should be able
+   * to check without reading any code.
+   */
+  it("ships one image running the whole path, with no container or broker added", () => {
+    const api = serviceBlock("api");
+    expect(api).toContain("EGMA_ROLE: ${EGMA_ROLE:-all}");
+
+    // The exact list, so that adding a container fails here and has to be
+    // argued for rather than noticed later. `livekit-redis` is LiveKit's own
+    // dependency and predates this effort; nothing here is an ingestion broker
+    // or a second half of the API.
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    const services = compose
+      .slice(compose.indexOf("\nservices:"), compose.indexOf("\nvolumes:"))
+      .matchAll(/^ {2}([a-z][a-z0-9-]*):$/gmu);
+    expect([...services].map((match) => match[1])).toEqual([
+      "postgres",
+      "clickhouse",
+      "minio",
+      "minio-bucket",
+      "api",
+      "web",
+      "simulator",
+      "grader",
+      "livekit-redis",
+      "livekit",
+      "livekit-sip",
+    ]);
+
+    // And the api service builds one image rather than selecting a second one
+    // for a second role.
+    expect(api).toMatch(/build:|image:/u);
   });
 
   it("never passes the Twilio Auth Token to any container", () => {

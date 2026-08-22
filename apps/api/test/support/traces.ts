@@ -4,7 +4,7 @@ import { expect } from "vitest";
 
 import { SIMULATION_ID_ATTRIBUTE } from "../../src/otlp/normalise.ts";
 import { OTLP_TRACES_PATH } from "../../src/routes/traces.ts";
-import { cookiesFrom } from "./api.ts";
+import { cookiesFrom, type TestApi } from "./api.ts";
 import { capturedRequests, type CapturedRequest } from "./fixture.ts";
 
 /**
@@ -176,14 +176,21 @@ export async function request(
 
 let captured: CapturedRequest[] | undefined;
 
-/** The captured LiveKit trace, read once and replayed byte for byte. */
+/**
+ * The captured LiveKit trace, read once and replayed byte for byte, then
+ * drained.
+ *
+ * The door stops at object-store durability, so a suite reading rows back has
+ * to carry the evidence the rest of the way. It takes the instance rather than
+ * its app for exactly that reason.
+ */
 export async function replayFixture(
-  app: FastifyInstance,
+  api: Pick<TestApi, "app" | "drainEvidence">,
   secret: string,
 ): Promise<void> {
   captured ??= await capturedRequests();
   for (const request of captured) {
-    const response = await app.inject({
+    const response = await api.app.inject({
       method: "POST",
       url: OTLP_TRACES_PATH,
       headers: {
@@ -194,6 +201,7 @@ export async function replayFixture(
     });
     expect(response.statusCode, request.file).toBe(200);
   }
+  await api.drainEvidence();
 }
 
 export type SyntheticTrace = {
@@ -293,18 +301,27 @@ export function syntheticExport(trace: SyntheticTrace): string {
   });
 }
 
+/**
+ * One export through the door, and then drained.
+ *
+ * It takes the instance rather than its app because the door answers on
+ * object-store durability and writes no row: a suite asking what a reader sees
+ * has to carry the evidence past that boundary, and every one of them must do
+ * it the same way.
+ */
 export async function ingest(
-  app: FastifyInstance,
+  api: Pick<TestApi, "app" | "drainEvidence">,
   secret: string,
   body: string,
 ): Promise<void> {
-  const response = await app.inject({
+  const response = await api.app.inject({
     method: "POST",
     url: OTLP_TRACES_PATH,
     headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
     payload: body,
   });
   expect(response.statusCode, response.body).toBe(200);
+  await api.drainEvidence();
 }
 
 /* ------------------------------------------------------------------ *
