@@ -91,12 +91,6 @@ function columnsFor(projectId: string): readonly Column<ListedAgentWithConnectio
         <ConnectionsOnRow connections={agent.connections} />
       ),
     },
-    {
-      key: "description",
-      header: "Description",
-      hideOnMobile: true,
-      cell: (agent) => agent.description ?? "—",
-    },
   ];
 }
 

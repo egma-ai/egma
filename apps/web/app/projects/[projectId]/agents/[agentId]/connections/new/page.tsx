@@ -167,7 +167,7 @@ function NewConnection({
       ? undefined
       : optionNamed(catalog, chosenCandidate);
   const liveKitForm = liveKitDispatchForm({
-    connectionKind: option?.connectionKind,
+    connectionType: option?.connectionType,
     option,
     config: draft.config,
     mode: livekitDispatch,
@@ -305,7 +305,7 @@ function NewConnection({
         return {
           ...common,
           agentPlatform: chosenCandidate.agentPlatform,
-          connectionKind: chosenCandidate.connectionKind,
+          connectionType: chosenCandidate.connectionType,
           accessVariant: chosenCandidate.accessVariant,
           modality: chosenCandidate.modality,
           config: chosenCandidate.config,
@@ -332,7 +332,7 @@ function NewConnection({
       return {
         ...common,
         agentPlatform: option.agentPlatform,
-        connectionKind: option.connectionKind,
+        connectionType: option.connectionType,
         accessVariant: option.accessVariant,
         modality: option.modality,
         config,

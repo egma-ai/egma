@@ -7,7 +7,6 @@ import { getAgent, updateAgent } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import type { Refusal } from "../../../../../lib/api.ts";
 import {
   NO_ENVIRONMENT,
@@ -219,7 +218,6 @@ function AgentDetailView({
           { label: "Agents", href: agents },
           { label: agent.name },
         ]}
-        lead={agent.description ?? "No description yet."}
         action={
           role === null ? undefined : (
             <Actions>
@@ -312,13 +310,11 @@ function AgentDetailView({
 }
 
 /**
- * The Egma-owned identity, edited against the revision the form was opened on.
+ * The Egma-owned identity: the name, and nothing the provider owns.
  *
- * **The revision goes with the save and is not a formality.** Two people
- * editing one agent from two browsers is the ordinary case; without it the
- * second save silently erases the first and neither of them is told. When egma
- * refuses for that reason the typing stays exactly where it is and the sentence
- * says what to do — reading again is one click, retyping is not.
+ * **Two browsers editing one agent is last-writer-wins.** The opaque revision
+ * that used to make the second save refuse was dropped pre-launch with the
+ * column it lived in, so the second save now lands and the first is gone.
  */
 function EditAgent({
   projectId,
@@ -332,13 +328,11 @@ function EditAgent({
   readonly onSaved: () => void;
 }) {
   const [name, setName] = useState(agent.name);
-  const [description, setDescription] = useState(agent.description ?? "");
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
 
-  const changed =
-    name !== agent.name || description !== (agent.description ?? "");
+  const changed = name !== agent.name;
   useUnsavedChanges(changed && !saving, saving);
 
   async function save(): Promise<void> {
@@ -359,8 +353,6 @@ function EditAgent({
           agentId: agent.id,
           projectId,
           name: wanted,
-          description: description.trim() === "" ? null : description.trim(),
-          expectedRevision: agent.revision,
         },
         { client: platformClient },
       ),
@@ -401,15 +393,6 @@ function EditAgent({
             {nameProblem === null ? null : (
               <Problem id="edit-agent-name-problem">{nameProblem}</Problem>
             )}
-          </Field>
-
-          <Field label="Description" htmlFor="edit-agent-description">
-            <Textarea
-              id="edit-agent-description"
-              value={description}
-              rows={3}
-              onChange={(event) => setDescription(event.target.value)}
-            />
           </Field>
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}
