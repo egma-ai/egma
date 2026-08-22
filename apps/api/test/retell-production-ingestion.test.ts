@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { IngestionUnavailableError } from "../src/ingestion/accept.ts";
 import {
+  acceptedIdentities,
   runRetellProductionIngestion,
   startRetellProductionIngestion,
   type RetellCommittedLookup,
@@ -1213,10 +1214,14 @@ describe("the bounded Retell retry budget", () => {
     const hydrations: string[] = [];
     const directReads: string[] = [];
     const taken = acceptance();
-    // The trace store, as far as this world is concerned: whatever acceptance
-    // has taken is committed, so a later page recognises its own work instead
-    // of importing it twice.
+    // The trace store: a call is committed only once `drain()` moves it here,
+    // never the instant it is accepted. That gap — durable in the object store,
+    // not yet query-visible — is the one a standing poller crosses between
+    // turns, and the one the poller's own memory is there to cover.
     const committed = new Set<string>();
+    // One memory for the standing poller, carried across every turn, exactly as
+    // the real loop carries one for the life of the process.
+    const accepted = acceptedIdentities();
     const asked: LookupRecord = { windows: [], asked: [] };
     const observed = metricRecorder();
     const heard = logger();
@@ -1255,13 +1260,8 @@ describe("the bounded Retell retry budget", () => {
           },
         }),
         lookup: lookup(asked, committed),
-        acceptance: {
-          async acceptEvidence(spans, given) {
-            const answer = await taken.acceptance.acceptEvidence(spans, given);
-            for (const span of spans) committed.add(span.traceId);
-            return answer;
-          },
-        },
+        acceptance: taken.acceptance,
+        accepted,
         clock: () => at,
       });
 
@@ -1279,6 +1279,10 @@ describe("the bounded Retell retry budget", () => {
       },
       succeed() {
         hydrates = true;
+      },
+      /** The drainer catches up: everything accepted becomes query-visible. */
+      drain() {
+        for (const traceId of taken.recorded.traceIds) committed.add(traceId);
       },
     };
   }
@@ -1480,6 +1484,46 @@ describe("the bounded Retell retry budget", () => {
     expect(world.hydrations).toEqual(["call_that_will_not_hydrate"]);
     expect(world.recorded.rows.size).toBe(0);
     expect(world.recorded.finishes).toHaveLength(2);
+  });
+
+  /**
+   * The same rule across turns, which is where it actually bites: a call made
+   * durable on one turn leaves no transient row and is not query-visible until
+   * the drainer takes its segment, so the five-minute overlap re-lists it while
+   * both of the page's batched questions are still blind to it. Only the
+   * poller's own memory of what it accepted keeps that repeat from importing one
+   * conversation twice — and once the drain catches up the memory hands the
+   * recognition back to the committed probe.
+   */
+  it("does not import a durable-but-not-yet-drained call again across turns", async () => {
+    const world = failingWorld({ hydrates: true });
+    world.list([summary("call_landed")]);
+    const traceId = traceIdFor(AUTH.projectId, "call_landed");
+
+    // Turn N accepts the call and makes it durable. Nothing is written to
+    // Postgres, and the drain has not run.
+    const first = await world.turn(BASE);
+    expect(first).toMatchObject({ accepted: 1, settled: 0 });
+    expect(world.taken.recorded.traceIds).toEqual([traceId]);
+    expect(world.recorded.rows.size).toBe(0);
+
+    // Turn N+1, inside the overlap. The committed probe is still blind and there
+    // is no transient row, so the only thing that can recognise this call is the
+    // memory — and it does: settled, not accepted, and no second provider fetch.
+    const overlap = await world.turn(new Date(BASE.getTime() + 30_000));
+    expect(overlap).toMatchObject({ accepted: 0, settled: 1 });
+    expect(world.taken.recorded.calls).toHaveLength(1);
+    expect(world.hydrations).toEqual(["call_landed"]);
+
+    // The drainer catches up. Now the probe sees the call, the memory hands the
+    // recognition back to it, and a still-later overlap settles it on the
+    // store's own word — still one accept, still one fetch.
+    world.drain();
+    const reconciled = await world.turn(new Date(BASE.getTime() + 60_000));
+    expect(reconciled).toMatchObject({ accepted: 0, settled: 1 });
+    expect(world.asked.asked.at(-1)).toEqual([traceId]);
+    expect(world.taken.recorded.calls).toHaveLength(1);
+    expect(world.hydrations).toEqual(["call_landed"]);
   });
 
   it("writes nothing to Postgres for a listed call that simply worked", async () => {

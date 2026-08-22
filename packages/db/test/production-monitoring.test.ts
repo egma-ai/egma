@@ -983,6 +983,66 @@ describe("the bounded Retell call budget", () => {
     expect(await state()).toBe("active");
   });
 
+  it("clears the one budget two selected agents share for a call they both meet", async () => {
+    // Two selected agents in one project, so a provider call that turns out to
+    // belong to one of them is a `platform_agent_mismatch` the other can also
+    // meet — and the row is unique per project and call, so there is one of it.
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: [
+        {
+          platformAgentId: "agent_retell_voice_1",
+          platformAgentName: "Front desk",
+        },
+        {
+          platformAgentId: "agent_retell_voice_2",
+          platformAgentName: "Back office",
+        },
+      ],
+      now: SETUP_TIME,
+    });
+    const first = await leased(SETUP_TIME);
+    const second = await leased(SETUP_TIME);
+    expect(second.monitoredAgentId).not.toBe(first.monitoredAgentId);
+
+    // The second attempt lands on the first's row and counts against one budget
+    // rather than starting a second, taking ownership with it.
+    const a = await recordRetellCallAttempt(first.auth, first, {
+      providerCallId: "call_both_meet",
+      errorKind: "platform_agent_mismatch",
+      retryBackoffMilliseconds: BACKOFF,
+      now: SETUP_TIME,
+    });
+    const b = await recordRetellCallAttempt(second.auth, second, {
+      providerCallId: "call_both_meet",
+      errorKind: "platform_agent_mismatch",
+      retryBackoffMilliseconds: BACKOFF,
+      now: SETUP_TIME,
+    });
+    expect(a).toMatchObject({ attempts: 1 });
+    expect(b).toMatchObject({ attempts: 2 });
+
+    const rows = await database.sql<{
+      retell_monitored_agent_id: string;
+      attempts: number;
+    }>("select retell_monitored_agent_id, attempts from retell_call_retry");
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]?.attempts).toBe(2);
+    expect(rows.rows[0]?.retell_monitored_agent_id).toBe(second.monitoredAgentId);
+
+    // The first agent makes the call durable and clears it, even though the row
+    // is now the second's: the delete scopes by project and call, the same pair
+    // the finder used, so ownership cannot strand the one shared row.
+    await deleteRetellCallRetry(first.auth, first, {
+      providerCallId: "call_both_meet",
+      now: SETUP_TIME,
+    });
+    const after = await database.sql<{ count: string }>(
+      "select count(*)::text as count from retell_call_retry",
+    );
+    expect(after.rows[0]?.count).toBe("0");
+  });
+
   it("tells the claim whether an agent owes anything, so an empty poll asks nothing", async () => {
     const target = await configured();
     expect(target.hasTransientCallState).toBe(false);

@@ -500,6 +500,51 @@ describe("a simulation whose evidence is still on its way", () => {
     expect(verdicts.every((verdict) => verdict.verdict === "errored")).toBe(true);
     expect(verdicts[0]?.rationale).toContain("no record of this conversation");
   });
+
+  /**
+   * A whole run's worth landing together is the case a single conversation
+   * cannot show: at a claim's capacity, a decline used to re-claim at once from
+   * the capacity shortcut, so the budget was gone in milliseconds and a
+   * permanent verdict was written while the store was still cold. Spacing the
+   * retries by the sweep is what leaves room for the drain to finish, so the
+   * batch is judged from what lands rather than abandoned before it can.
+   */
+  it("does not spend a full batch's budget before the store catches up", async () => {
+    const testId = await seedTest(world, [THE_BEHAVIOR]);
+
+    // No copy is running, so the whole batch is pending before the first claim
+    // and is taken at once — a claim's capacity of conversations, each terminal
+    // with nothing under it yet.
+    await service.stop();
+    const landing = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        conductSimulation(world, { spans: null, testId }),
+      ),
+    );
+
+    // A copy starts and takes the whole batch, and the drain lands right behind
+    // it. On the hot loop the budget was gone before this streaming finished; a
+    // sweep between the retries is what leaves an attempt to read the
+    // conversation once it is there.
+    await judgingWith([3]);
+    for (const conducted of landing) {
+      await streamConversationLate(world, conducted.simulationId);
+    }
+
+    // So every conversation is judged from what landed rather than abandoned to
+    // an errored verdict written before its evidence was readable.
+    for (const conducted of landing) {
+      await jobFor(world, conducted, "graded");
+      const { verdicts } = await readVerdicts(
+        world.auth,
+        conducted.simulationId,
+      );
+      expect(verdicts.length).toBeGreaterThan(0);
+      expect(verdicts.every((verdict) => verdict.verdict === "passed")).toBe(
+        true,
+      );
+    }
+  });
 });
 
 describe("a simulation with no spans at all", () => {
