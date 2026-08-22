@@ -4,6 +4,7 @@ import {
   enablePullProductionCalls,
   finishMonitoringScan,
   listMonitoringFailures,
+  readAgentPullState,
   recordMonitoringFailure,
   type AuthContext,
 } from "@egma/db";
@@ -146,7 +147,16 @@ describe("discovering what a Retell key can see", () => {
 
     expect(discovered.statusCode, discovered.body).toBe(200);
     expect(discovered.json()).toEqual({
-      agents: [{ id: "agent_voice_1", name: "Front desk from Retell" }],
+      agents: [
+        {
+          id: "agent_voice_1",
+          name: "Front desk from Retell",
+          // Nothing in this project registers it yet, so a tick would.
+          registeredAgentId: null,
+          registeredAgentName: null,
+          pullProductionCalls: false,
+        },
+      ],
     });
     expect(discovered.body).not.toContain(RETELL_KEY);
     expect(logs.join("\n")).not.toContain(RETELL_KEY);
@@ -174,6 +184,219 @@ describe("discovering what a Retell key can see", () => {
 
     expect(refused.statusCode, refused.body).toBe(403);
     expect(retell.asked).toEqual([]);
+  });
+});
+
+/**
+ * **Starting monitoring, which is the whole of what the flow commits.**
+ *
+ * Three things happen in one request and each is asserted for itself: the key
+ * is sealed onto the agent, the switch is flipped, and the notebook opens on
+ * the 30-day historical window. A platform agent this project does not
+ * register yet is registered on the spot, because watching one *means*
+ * registering it.
+ */
+describe("starting monitoring", () => {
+  it("seals the key on the picked agent, flips the switch, and opens the window", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_existing", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-start@acme.example", "Acme");
+    const created = await createAgent(at(ada), { name: "Front desk" });
+
+    const started = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", agentId: created.id }],
+      },
+    });
+
+    expect(started.statusCode, started.body).toBe(200);
+    expect(started.json()).toEqual({
+      watching: [
+        {
+          agentId: created.id,
+          agentName: "Front desk",
+          platformAgentId: "agent_voice_1",
+          created: false,
+          pullProductionCalls: true,
+        },
+      ],
+    });
+    // The key never comes back out, in the answer or in a log.
+    expect(started.body).not.toContain(RETELL_KEY);
+
+    const state = await readAgentPullState(at(ada), created.id);
+    expect(state?.pullProductionCalls).toBe(true);
+    expect(state?.agentPlatform).toBe("retell");
+    expect(state?.platformAgentId).toBe("agent_voice_1");
+    expect(state?.monitoringApiKeyHint).toBe(RETELL_KEY.slice(-4));
+    // The notebook opened on the historical import rather than on regular work.
+    expect(state?.scanKind).toBe("historical_import");
+  });
+
+  it("registers an unregistered platform agent on the spot", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_new", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-register@acme.example", "Acme");
+
+    const started = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [
+          { platformAgentId: "agent_voice_1", name: "Front desk from Retell" },
+        ],
+      },
+    });
+
+    expect(started.statusCode, started.body).toBe(200);
+    const [watching] = started.json().watching as {
+      agentId: string;
+      agentName: string;
+      created: boolean;
+    }[];
+    expect(watching?.created).toBe(true);
+    expect(watching?.agentName).toBe("Front desk from Retell");
+
+    const state = await readAgentPullState(at(ada), watching?.agentId ?? "");
+    expect(state?.pullProductionCalls).toBe(true);
+    expect(state?.platformAgentId).toBe("agent_voice_1");
+  });
+
+  /**
+   * **One Egma agent watches one platform agent, and the database says so.**
+   *
+   * The refusal is the partial unique index's own answer, caught and dressed
+   * in a sentence. Nothing reads the roster first to decide: a check before
+   * the write would be a race with the very next request, and the index exists
+   * to make the fight unrepresentable rather than usually avoided.
+   */
+  it("refuses a second agent on one platform agent, in plain words", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_contested", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-contested@acme.example", "Acme");
+    await pulling(ada);
+    const second = await createAgent(at(ada), { name: "Second desk" });
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", agentId: second.id }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(409);
+    const answered = refused.json() as { error: string; message: string };
+    expect(answered.error).toBe("conflict");
+    // Plain words, naming the platform agent and the agent already watching it.
+    expect(answered.message).toContain("agent_voice_1");
+    expect(answered.message).toContain("Front desk");
+    expect(answered.message).not.toContain("agent_pulled_platform_agent_unique");
+    // And the loser's switch stayed off.
+    expect((await readAgentPullState(at(ada), second.id))?.pullProductionCalls).toBe(
+      false,
+    );
+  });
+
+  it("refuses a LiveKit start, because push is not configured anywhere", async () => {
+    api = await createApi("monitoring_routes_start_livekit");
+    const ada = await signUp(api.app, "ada-livekit@acme.example", "Acme");
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "livekit_agents",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "whatever" }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(422);
+  });
+
+  it("tells the picker which account agents this project already registers", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_discover_known", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-known@acme.example", "Acme");
+    const agentId = await pulling(ada);
+
+    const discovered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/retell/discover?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: { apiKey: RETELL_KEY },
+    });
+
+    expect(discovered.statusCode, discovered.body).toBe(200);
+    expect(discovered.json()).toEqual({
+      agents: [
+        {
+          id: "agent_voice_1",
+          name: "Front desk from Retell",
+          registeredAgentId: agentId,
+          registeredAgentName: "Front desk",
+          pullProductionCalls: true,
+        },
+      ],
+    });
+  });
+});
+
+describe("stopping monitoring", () => {
+  it("turns the switch off and keeps everything stored", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_stop", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-stop@acme.example", "Acme");
+    const agentId = await pulling(ada);
+
+    const stopped = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/agents/${agentId}/stop?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+    });
+
+    expect(stopped.statusCode, stopped.body).toBe(200);
+    expect(stopped.json()).toEqual({
+      monitoring: {
+        agentId,
+        pullProductionCalls: false,
+        agentPlatform: "retell",
+        platformAgentId: "agent_voice_1",
+        monitoringApiKeyHint: RETELL_KEY.slice(-4),
+        lastReceivedAt: null,
+      },
+    });
+
+    // The notebook survives: its cursor is what a later start resumes from.
+    const kept = await api.database.sql<{ states: string }>(
+      "select count(*) as states from monitoring_state",
+    );
+    expect(kept.rows[0]).toEqual({ states: "1" });
+    // And nothing is due any more, because the switch is what makes it due.
+    expect(await claimDueMonitoringPull({ now: new Date() })).toBeUndefined();
   });
 });
 

@@ -870,6 +870,103 @@ describe("one agent's page", () => {
 
 /* ------------------------------------------------------------------------ */
 
+/**
+ * **The pull switch, on the agent that owns it.**
+ *
+ * There is no monitoring setup object anywhere in the product any more, so
+ * what is worth holding here is which direction each half of the switch goes:
+ * turning it *off* is a door this page opens by itself, and turning it *on*
+ * needs the platform key — sealed randomly and never read back — so it is the
+ * start-monitoring flow's job and this page only points at it.
+ */
+describe("an agent's production calls", () => {
+  const PULLING = {
+    ...AGENT,
+    agentPlatform: "retell",
+    platformAgentId: "agent_voice_1",
+    monitoringKeyPresent: true,
+    monitoringApiKeyHint: "QRST",
+    pullProductionCalls: true,
+  };
+
+  it("points at the start-monitoring flow while the switch is off", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/agents/agt_1": { status: 200, body: { agent: AGENT, connections: [] } },
+    });
+    render(<AgentDetailPage />);
+
+    await screen.findByRole("heading", { name: "Production calls" });
+    expect(screen.getByText("Off")).toBeDefined();
+    // Nothing binds it yet, and the page says so rather than showing a blank.
+    expect(screen.getAllByText("Not bound")).toHaveLength(2);
+    expect(
+      screen.getByRole("link", { name: "Start monitoring" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/monitoring/start");
+    expect(screen.queryByRole("button", { name: "Stop pulling" })).toBeNull();
+  });
+
+  it("shows the binding and the key hint, and never the key", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/agents/agt_1": { status: 200, body: { agent: PULLING, connections: [] } },
+    });
+    render(<AgentDetailPage />);
+
+    await screen.findByRole("heading", { name: "Production calls" });
+    expect(screen.getByText("On")).toBeDefined();
+    expect(screen.getByText("Retell")).toBeDefined();
+    expect(screen.getByText("agent_voice_1")).toBeDefined();
+    expect(screen.getByText("…QRST")).toBeDefined();
+  });
+
+  it("stops pulling through the agent's own door, after naming the agent", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/agents/agt_1": { status: 200, body: { agent: PULLING, connections: [] } },
+      "/v1/monitoring/agents/agt_1/stop": {
+        status: 200,
+        body: {
+          monitoring: {
+            agentId: "agt_1",
+            pullProductionCalls: false,
+            agentPlatform: "retell",
+            platformAgentId: "agent_voice_1",
+            monitoringApiKeyHint: "QRST",
+            lastReceivedAt: null,
+          },
+        },
+      },
+    });
+    render(<AgentDetailPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Stop pulling" }),
+    );
+
+    // The dialog names the agent and says what survives, because nothing is
+    // lost: the transcripts, the binding, the key and the cursor all stay.
+    expect(
+      await screen.findByText(/Egma stops asking Retell for “Front desk”/),
+    ).toBeDefined();
+    expect(screen.getByText(/stays stored/)).toBeDefined();
+
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Stop pulling",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        sent.some(
+          (one) => one.url === "/v1/monitoring/agents/agt_1/stop?projectId=prj_1",
+        ),
+      ).toBe(true),
+    );
+  });
+});
+
 describe("adding a connection", () => {
   it("keeps the connection hierarchy present while the parent agent loads", async () => {
     apiAnswers({
