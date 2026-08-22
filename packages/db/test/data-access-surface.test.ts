@@ -276,6 +276,9 @@ const CONTEXT_REQUIRING = [
   "finishProductionTrace",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
+  // Register a platform agent egma does not know and start pulling it, as one
+  // write. Split in two, a refused switch leaves an unbound agent behind.
+  "registerAgentPullingProductionCalls",
   "regrade",
   "releaseMonitoringFailureReplay",
   "releaseMonitoringLease",

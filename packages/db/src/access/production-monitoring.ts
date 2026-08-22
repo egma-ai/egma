@@ -17,8 +17,9 @@ import {
 } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 
-import { db } from "../client.ts";
+import { db, type Queryable } from "../client.ts";
 import { agent, type AgentPlatform } from "../schema/agents.ts";
+import { insertAgentWithin } from "./agents.ts";
 import {
   monitoringFailure,
   monitoringState,
@@ -149,6 +150,66 @@ export type AgentPullState = {
 };
 
 /**
+ * Bind one agent to its platform, seal its key, flip the switch, and open the
+ * notebook — inside whatever transaction the caller is already in.
+ *
+ * **It takes the transaction rather than opening one**, because the two callers
+ * need different amounts of work to be one atomic act. Enabling an agent that
+ * already exists is this and nothing else. Registering an unregistered platform
+ * agent is *this plus the insert that made the row*, and splitting those two
+ * across separate commits is what leaves an unbound agent behind when the
+ * uniqueness index refuses the switch.
+ */
+async function bindAndOpen(
+  tx: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  input: {
+    readonly agentId: string;
+    readonly agentPlatform: AgentPlatform;
+    readonly platformAgentId: string;
+    readonly apiKey: string;
+    readonly now: Date;
+    readonly historyFrom: Date;
+    readonly reconcileAt: Date;
+  },
+): Promise<void> {
+  await tx
+    .update(agent)
+    .set({
+      agentPlatform: input.agentPlatform,
+      platformAgentId: input.platformAgentId,
+      monitoringApiKey: sealCredentials({ apiKey: input.apiKey }),
+      monitoringApiKeyHint: input.apiKey.slice(-HINT_CHARACTERS),
+      pullProductionCalls: true,
+      updatedAt: input.now,
+    })
+    .where(eq(agent.id, input.agentId));
+
+  // The notebook is created by the switch and, in v1, only by it. A second
+  // enable resumes the notebook it already has rather than losing its cursor,
+  // and only wakes it up.
+  await tx
+    .insert(monitoringState)
+    .values({
+      id: newId("mst"),
+      agentId: input.agentId,
+      organizationId: auth.organizationId,
+      projectId,
+      scanKind: "historical_import",
+      scanFrom: input.historyFrom,
+      scanThrough: input.now,
+      nextRegularPollAt: input.now,
+      nextPollAt: input.now,
+      nextReconciliationAt: input.reconcileAt,
+    })
+    .onConflictDoUpdate({
+      target: [monitoringState.agentId],
+      set: { nextPollAt: input.now, consecutiveFailures: 0, updatedAt: input.now },
+    });
+}
+
+/**
  * Turn pull on for one agent: bind it to its platform, seal its monitoring
  * key, and open the notebook with the historical-import window.
  *
@@ -196,42 +257,79 @@ export async function enablePullProductionCalls(
         "That agent is not in this project, or has been archived.",
       );
     }
-    await tx
-      .update(agent)
-      .set({
-        agentPlatform: input.agentPlatform,
-        platformAgentId,
-        monitoringApiKey: sealCredentials({ apiKey }),
-        monitoringApiKeyHint: apiKey.slice(-HINT_CHARACTERS),
-        pullProductionCalls: true,
-        updatedAt: now,
-      })
-      .where(eq(agent.id, input.agentId));
-
-    // The notebook is created by the switch and, in v1, only by it. A second
-    // enable resumes the notebook it already has rather than losing its
-    // cursor, and only wakes it up.
-    await tx
-      .insert(monitoringState)
-      .values({
-        id: newId("mst"),
-        agentId: input.agentId,
-        organizationId: auth.organizationId,
-        projectId,
-        scanKind: "historical_import",
-        scanFrom: historyFrom,
-        scanThrough: now,
-        nextRegularPollAt: now,
-        nextPollAt: now,
-        nextReconciliationAt: reconcileAt,
-      })
-      .onConflictDoUpdate({
-        target: [monitoringState.agentId],
-        set: { nextPollAt: now, consecutiveFailures: 0, updatedAt: now },
-      });
+    await bindAndOpen(tx, auth, projectId, {
+      agentId: input.agentId,
+      agentPlatform: input.agentPlatform,
+      platformAgentId,
+      apiKey,
+      now,
+      historyFrom,
+      reconcileAt,
+    });
   });
 
   const state = await readAgentPullState(auth, input.agentId);
+  if (state === undefined) throw new Error("The pull switch was not written");
+  return state;
+}
+
+/**
+ * Register one platform agent egma does not know yet, and start pulling it —
+ * as one act.
+ *
+ * **Why this exists rather than a create followed by an enable.** Two requests
+ * that both tick the same unregistered platform agent can both write an agent
+ * row before either reaches the uniqueness-enforced switch. Split across two
+ * commits, the loser's row survives: an agent in the roster bound to nothing,
+ * belonging to a request that was told it had failed. One transaction makes
+ * the refusal undo the row it was about to be attached to.
+ *
+ * The insert is `agents.ts`'s own, so the identity, the tenancy stamp and the
+ * held-name refusal are decided in one place for every agent egma writes.
+ */
+export async function registerAgentPullingProductionCalls(
+  auth: AuthContext,
+  input: {
+    readonly name: string;
+    readonly agentPlatform: AgentPlatform;
+    readonly platformAgentId: string;
+    readonly apiKey: unknown;
+    readonly now?: Date | undefined;
+  },
+): Promise<AgentPullState> {
+  // Both permissions, because this write is both things: it puts an agent in
+  // the roster and it turns monitoring on for it.
+  authorize(auth, "configure_agents", here(auth));
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const apiKey = monitoringKey(input.apiKey);
+  const platformAgentId = input.platformAgentId.trim();
+  if (platformAgentId === "") {
+    throw new UnprocessableInputError(
+      "The platform's own id for this agent is required to pull its calls.",
+    );
+  }
+  const now = input.now ?? new Date();
+  const historyFrom = new Date(now.getTime() - HISTORY_MILLISECONDS);
+  const reconcileAt = new Date(now.getTime() + RECONCILIATION_MILLISECONDS);
+
+  const agentId = await db().transaction(async (tx) => {
+    const written = await insertAgentWithin(tx, auth, projectId, {
+      name: input.name,
+    });
+    await bindAndOpen(tx, auth, projectId, {
+      agentId: written.id,
+      agentPlatform: input.agentPlatform,
+      platformAgentId,
+      apiKey,
+      now,
+      historyFrom,
+      reconcileAt,
+    });
+    return written.id;
+  });
+
+  const state = await readAgentPullState(auth, agentId);
   if (state === undefined) throw new Error("The pull switch was not written");
   return state;
 }

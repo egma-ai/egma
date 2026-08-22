@@ -150,7 +150,9 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="platformAgentId" type="string | null">That platform's own identifier for this agent, or `null`.</ResponseField>
     <ResponseField name="monitoringKeyPresent" type="boolean">Whether a platform key is stored for pulling this agent's production conversations.</ResponseField>
     <ResponseField name="monitoringApiKeyHint" type="string | null">Last four characters of that key, or `null`. Egma never returns the key itself.</ResponseField>
-    <ResponseField name="pullProductionCalls" type="boolean">Whether Egma pulls this agent's production conversations from its platform.</ResponseField>
+    <ResponseField name="pullProductionCalls" type="boolean">Whether Egma pulls this agent's production conversations from its platform. Turn it on with [Start pulling production calls](/api/monitoring).</ResponseField>
+    <ResponseField name="archived" type="boolean">Whether the agent is archived.</ResponseField>
+    <ResponseField name="archivedAt" type="string | null">ISO 8601 timestamp, or `null` while the agent is active.</ResponseField>
     <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
     <ResponseField name="updatedAt" type="string">ISO 8601 timestamp.</ResponseField>
   </Expandable>

@@ -4,6 +4,7 @@ import {
   enablePullProductionCalls,
   finishMonitoringScan,
   listMonitoringFailures,
+  readAgentPullState,
   recordMonitoringFailure,
   type AuthContext,
 } from "@egma/db";
@@ -146,7 +147,16 @@ describe("discovering what a Retell key can see", () => {
 
     expect(discovered.statusCode, discovered.body).toBe(200);
     expect(discovered.json()).toEqual({
-      agents: [{ id: "agent_voice_1", name: "Front desk from Retell" }],
+      agents: [
+        {
+          id: "agent_voice_1",
+          name: "Front desk from Retell",
+          // Nothing in this project registers it yet, so a tick would.
+          registeredAgentId: null,
+          registeredAgentName: null,
+          pullProductionCalls: false,
+        },
+      ],
     });
     expect(discovered.body).not.toContain(RETELL_KEY);
     expect(logs.join("\n")).not.toContain(RETELL_KEY);
@@ -174,6 +184,441 @@ describe("discovering what a Retell key can see", () => {
 
     expect(refused.statusCode, refused.body).toBe(403);
     expect(retell.asked).toEqual([]);
+  });
+});
+
+/**
+ * **Starting monitoring, which is the whole of what the flow commits.**
+ *
+ * Three things happen in one request and each is asserted for itself: the key
+ * is sealed onto the agent, the switch is flipped, and the notebook opens on
+ * the 30-day historical window. A platform agent this project does not
+ * register yet is registered on the spot, because watching one *means*
+ * registering it.
+ */
+describe("starting monitoring", () => {
+  it("seals the key on the picked agent, flips the switch, and opens the window", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_existing", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-start@acme.example", "Acme");
+    const created = await createAgent(at(ada), { name: "Front desk" });
+
+    const started = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", agentId: created.id }],
+      },
+    });
+
+    expect(started.statusCode, started.body).toBe(200);
+    expect(started.json()).toEqual({
+      watching: [
+        {
+          agentId: created.id,
+          agentName: "Front desk",
+          platformAgentId: "agent_voice_1",
+          created: false,
+          pullProductionCalls: true,
+        },
+      ],
+      refused: [],
+    });
+    // The key never comes back out, in the answer or in a log.
+    expect(started.body).not.toContain(RETELL_KEY);
+
+    const state = await readAgentPullState(at(ada), created.id);
+    expect(state?.pullProductionCalls).toBe(true);
+    expect(state?.agentPlatform).toBe("retell");
+    expect(state?.platformAgentId).toBe("agent_voice_1");
+    expect(state?.monitoringApiKeyHint).toBe(RETELL_KEY.slice(-4));
+    // The notebook opened on the historical import rather than on regular work.
+    expect(state?.scanKind).toBe("historical_import");
+  });
+
+  it("registers an unregistered platform agent on the spot", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_new", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-register@acme.example", "Acme");
+
+    const started = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [
+          { platformAgentId: "agent_voice_1", name: "Front desk from Retell" },
+        ],
+      },
+    });
+
+    expect(started.statusCode, started.body).toBe(200);
+    const [watching] = started.json().watching as {
+      agentId: string;
+      agentName: string;
+      created: boolean;
+    }[];
+    expect(watching?.created).toBe(true);
+    expect(watching?.agentName).toBe("Front desk from Retell");
+
+    const state = await readAgentPullState(at(ada), watching?.agentId ?? "");
+    expect(state?.pullProductionCalls).toBe(true);
+    expect(state?.platformAgentId).toBe("agent_voice_1");
+  });
+
+  /**
+   * **One Egma agent watches one platform agent, and the database says so.**
+   *
+   * The refusal is the partial unique index's own answer, caught and dressed
+   * in a sentence. Nothing reads the roster first to decide: a check before
+   * the write would be a race with the very next request, and the index exists
+   * to make the fight unrepresentable rather than usually avoided.
+   */
+  it("refuses a second agent on one platform agent, in plain words", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_contested", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-contested@acme.example", "Acme");
+    await pulling(ada);
+    const second = await createAgent(at(ada), { name: "Second desk" });
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", agentId: second.id }],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: unknown[];
+      refused: { platformAgentId: string; reason: string; message: string }[];
+    };
+    expect(outcome.watching).toEqual([]);
+    expect(outcome.refused).toHaveLength(1);
+    expect(outcome.refused[0]?.reason).toBe("contested");
+    // Plain words, naming the platform agent and the agent already watching it.
+    expect(outcome.refused[0]?.message).toContain("agent_voice_1");
+    expect(outcome.refused[0]?.message).toContain("Front desk");
+    expect(outcome.refused[0]?.message).not.toContain(
+      "agent_pulled_platform_agent_unique",
+    );
+    // And the loser's switch stayed off.
+    expect((await readAgentPullState(at(ada), second.id))?.pullProductionCalls).toBe(
+      false,
+    );
+  });
+
+  /**
+   * **A refusal never hides what started beside it.**
+   *
+   * Starting an agent is a whole act on its own, so the entries around a
+   * contested tick still start and the answer says so. A request answered with
+   * only the refusal would leave switches on that nothing on screen mentions,
+   * and the obvious next move — press it again — would start them twice.
+   */
+  it("starts the ticks beside a contested one and answers both", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_mixed", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-mixed@acme.example", "Acme");
+    await pulling(ada);
+    const second = await createAgent(at(ada), { name: "Second desk" });
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [
+          // Contested: "Front desk" already watches this one.
+          { platformAgentId: "agent_voice_1", agentId: second.id },
+          // Unregistered, and named only by the platform.
+          { platformAgentId: "agent_voice_9", name: "Billing" },
+          // A missing agent id, which is this tick's own answer.
+          { platformAgentId: "agent_voice_8", agentId: "agt_does_not_exist" },
+        ],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: { agentName: string; platformAgentId: string; created: boolean }[];
+      refused: { platformAgentId: string; reason: string }[];
+    };
+
+    expect(outcome.watching).toHaveLength(1);
+    expect(outcome.watching[0]?.platformAgentId).toBe("agent_voice_9");
+    expect(outcome.watching[0]?.agentName).toBe("Billing");
+    expect(outcome.watching[0]?.created).toBe(true);
+
+    expect(
+      outcome.refused.map((one) => [one.platformAgentId, one.reason]),
+    ).toEqual([
+      ["agent_voice_1", "contested"],
+      ["agent_voice_8", "not_found"],
+    ]);
+
+    // The agent registered mid-list really is watching, and the loser is not.
+    const registered = await api.database.sql<{ watched: string }>(
+      "select count(*) as watched from agent where pull_production_calls",
+    );
+    expect(registered.rows[0]).toEqual({ watched: "2" });
+  });
+
+  /**
+   * **A refused start leaves nothing behind.**
+   *
+   * Registering an unregistered platform agent and flipping its switch are one
+   * transaction, so a refused switch takes the agent row with it. Split in
+   * two — create, then enable — the loser of the race writes its agent row,
+   * loses the uniqueness-enforced switch, and leaves that row in the roster
+   * bound to nothing, belonging to a request that was told it had failed.
+   *
+   * Two requests ticking the same unregistered platform agent at once is how
+   * that happens. Whichever way the two interleave, the invariant is the same
+   * and it is what this asserts: one agent row for one Retell agent, and no
+   * live agent left unbound.
+   */
+  it("writes no orphan agent when two starts race for one platform agent", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_no_orphan", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-orphan@acme.example", "Acme");
+
+    const start = (name: string) =>
+      api.app.inject({
+        method: "POST",
+        url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+        headers: { cookie: ada.cookie },
+        payload: {
+          agentPlatform: "retell",
+          apiKey: RETELL_KEY,
+          // No agent id, so each request registers what it does not find.
+          watch: [{ platformAgentId: "agent_voice_1", name }],
+        },
+      });
+
+    const [first, second] = await Promise.all([
+      start("Front desk"),
+      start("Front desk copy"),
+    ]);
+
+    expect(first.statusCode, first.body).toBe(200);
+    expect(second.statusCode, second.body).toBe(200);
+
+    // Exactly one agent watches the Retell agent, and nothing is left unbound.
+    const rows = await api.database.sql<{
+      agents: string;
+      unbound: string;
+      watching: string;
+    }>(
+      "select " +
+        "(select count(*) from agent) as agents, " +
+        "(select count(*) from agent where platform_agent_id is null) as unbound, " +
+        "(select count(*) from agent where pull_production_calls) as watching",
+    );
+    expect(rows.rows[0]).toEqual({ agents: "1", unbound: "0", watching: "1" });
+  });
+
+  /**
+   * The same invariant with the race's timing removed: an agent is already
+   * switched on for this Retell agent, and the tick names no Egma agent — so
+   * the commit resolves it to the agent that already holds it rather than
+   * writing a second one.
+   */
+  it("recognizes a platform agent this project already watches", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_recognized", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-recognized@acme.example", "Acme");
+    const agentId = await pulling(ada);
+
+    const answered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", name: "A second desk" }],
+      },
+    });
+
+    expect(answered.statusCode, answered.body).toBe(200);
+    const outcome = answered.json() as {
+      watching: { agentId: string; agentName: string; created: boolean }[];
+      refused: unknown[];
+    };
+    expect(outcome.refused).toEqual([]);
+    expect(outcome.watching).toHaveLength(1);
+    expect(outcome.watching[0]?.agentId).toBe(agentId);
+    expect(outcome.watching[0]?.created).toBe(false);
+
+    const named = await api.database.sql<{ name: string }>(
+      "select name from agent",
+    );
+    expect(named.rows.map((row) => row.name)).toEqual(["Front desk"]);
+  });
+
+  it("refuses a viewer before starting anything", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_start_viewer", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-start-viewer@acme.example", "Acme");
+    const viewer = await colleagueOf(
+      api.app,
+      ada,
+      "grace-start@acme.example",
+      "viewer",
+    );
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: viewer.cookie },
+      payload: {
+        agentPlatform: "retell",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "agent_voice_1", name: "Front desk" }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(403);
+    const written = await api.database.sql<{ agents: string }>(
+      "select count(*) as agents from agent",
+    );
+    expect(written.rows[0]).toEqual({ agents: "0" });
+  });
+
+  it("refuses a LiveKit start, because push is not configured anywhere", async () => {
+    api = await createApi("monitoring_routes_start_livekit");
+    const ada = await signUp(api.app, "ada-livekit@acme.example", "Acme");
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "livekit_agents",
+        apiKey: RETELL_KEY,
+        watch: [{ platformAgentId: "whatever" }],
+      },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(422);
+  });
+
+  it("tells the picker which account agents this project already registers", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_discover_known", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-known@acme.example", "Acme");
+    const agentId = await pulling(ada);
+
+    const discovered = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/retell/discover?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: { apiKey: RETELL_KEY },
+    });
+
+    expect(discovered.statusCode, discovered.body).toBe(200);
+    expect(discovered.json()).toEqual({
+      agents: [
+        {
+          id: "agent_voice_1",
+          name: "Front desk from Retell",
+          registeredAgentId: agentId,
+          registeredAgentName: "Front desk",
+          pullProductionCalls: true,
+        },
+      ],
+    });
+  });
+});
+
+describe("stopping monitoring", () => {
+  it("refuses a viewer, leaving the switch on", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_stop_viewer", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-stop-viewer@acme.example", "Acme");
+    const agentId = await pulling(ada);
+    const viewer = await colleagueOf(
+      api.app,
+      ada,
+      "grace-stop@acme.example",
+      "viewer",
+    );
+
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/agents/${agentId}/stop?projectId=${ada.projectId}`,
+      headers: { cookie: viewer.cookie },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(403);
+    expect((await readAgentPullState(at(ada), agentId))?.pullProductionCalls).toBe(
+      true,
+    );
+  });
+
+  it("turns the switch off and keeps everything stored", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_stop", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada-stop@acme.example", "Acme");
+    const agentId = await pulling(ada);
+
+    const stopped = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/agents/${agentId}/stop?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+    });
+
+    expect(stopped.statusCode, stopped.body).toBe(200);
+    expect(stopped.json()).toEqual({
+      monitoring: {
+        agentId,
+        pullProductionCalls: false,
+        agentPlatform: "retell",
+        platformAgentId: "agent_voice_1",
+        monitoringApiKeyHint: RETELL_KEY.slice(-4),
+        lastReceivedAt: null,
+      },
+    });
+
+    // The notebook survives: its cursor is what a later start resumes from.
+    const kept = await api.database.sql<{ states: string }>(
+      "select count(*) as states from monitoring_state",
+    );
+    expect(kept.rows[0]).toEqual({ states: "1" });
+    // And nothing is due any more, because the switch is what makes it due.
+    expect(await claimDueMonitoringPull({ now: new Date() })).toBeUndefined();
   });
 });
 

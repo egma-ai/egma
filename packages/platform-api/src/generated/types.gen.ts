@@ -2231,11 +2231,138 @@ export type DiscoverRetellVoiceAgentsResponses = {
         agents: Array<{
             id: string;
             name: string;
+            registeredAgentId: string | null;
+            registeredAgentName: string | null;
+            pullProductionCalls: boolean;
         }>;
     };
 };
 
 export type DiscoverRetellVoiceAgentsResponse = DiscoverRetellVoiceAgentsResponses[keyof DiscoverRetellVoiceAgentsResponses];
+
+export type StartMonitoringData = {
+    body: {
+        agentPlatform: 'retell';
+        apiKey: string;
+        watch: Array<{
+            platformAgentId: string;
+            name?: string;
+            agentId?: string;
+        }>;
+    };
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/monitoring/start';
+};
+
+export type StartMonitoringErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+    /**
+     * The request was refused.
+     */
+    503: Refusal;
+};
+
+export type StartMonitoringError = StartMonitoringErrors[keyof StartMonitoringErrors];
+
+export type StartMonitoringResponses = {
+    /**
+     * What each ticked platform agent turned out to be: the ones now pulling their production calls, and the ones refused.
+     */
+    200: {
+        watching: Array<{
+            agentId: string;
+            agentName: string;
+            platformAgentId: string;
+            created: boolean;
+            pullProductionCalls: boolean;
+        }>;
+        refused: Array<{
+            platformAgentId: string;
+            reason: 'contested' | 'name_taken' | 'not_found';
+            message: string;
+        }>;
+    };
+};
+
+export type StartMonitoringResponse = StartMonitoringResponses[keyof StartMonitoringResponses];
+
+export type StopMonitoringData = {
+    body?: {
+        [key: string]: never;
+    };
+    path: {
+        agentId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/monitoring/agents/{agentId}/stop';
+};
+
+export type StopMonitoringErrors = {
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type StopMonitoringError = StopMonitoringErrors[keyof StopMonitoringErrors];
+
+export type StopMonitoringResponses = {
+    /**
+     * The agent, with its pull switch off.
+     */
+    200: {
+        monitoring: {
+            agentId: string;
+            pullProductionCalls: boolean;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringApiKeyHint: string | null;
+            lastReceivedAt: string | null;
+        };
+    };
+};
+
+export type StopMonitoringResponse = StopMonitoringResponses[keyof StopMonitoringResponses];
 
 export type ReplayMonitoringImportFailureData = {
     body?: never;

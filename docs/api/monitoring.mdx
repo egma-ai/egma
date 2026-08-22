@@ -1,25 +1,27 @@
 ---
-title: "Bring production conversations into Egma"
+title: "Start and stop production monitoring"
 sidebarTitle: "Monitoring"
-description: "How Egma receives production evidence, and the endpoints for checking a Retell key and retrying one failed import."
+description: "Turn on Egma's per-agent pull switch for Retell, stop it again, and retry one failed import."
 ---
 
-Egma receives evidence of real production conversations in one of two ways.
+Production evidence reaches Egma in one of two ways.
 
-**Egma pulls them.** An agent is bound to the platform that runs it, holds that
-platform's API key, and has **Pull production calls** turned on. Egma then asks
-that platform for the agent's finished conversations on a clock. This is the
-only stored monitoring choice in the product, and it is made per agent rather
-than per project.
+**Pull** is Egma asking the agent platform for the calls it has finished. It is
+a per-agent choice: an agent binds to its platform, holds that platform's API
+key, and one switch — **pull production calls** — turns polling on. Retell is
+the platform Egma pulls from today.
 
-**Your agent pushes them.** Your own process sends spans to Egma's OTLP door
-using a project API key. Nothing is configured and nothing is selected: the
-stored conversations are the whole record. See
-[Egma Python SDK](/integrations/python-sdk) for the worker setup, and
-[Traces](/api/traces) for the door itself.
+**Push** is your own agent process sending its spans to Egma. It needs no
+switch and no configuration on this page: set `EGMA_URL` and a project-scoped
+`EGMA_API_KEY` in the agent, call `monitor_livekit(ctx)` before
+`AgentSession.start`, and the conversations appear on the Monitoring page. See
+[Egma Python SDK](/integrations/python-sdk).
 
-Production conversations are read under **Monitoring** in the app, whichever
-way they arrived.
+There is no monitoring configuration object. The switch on the agent is the
+only stored monitoring choice, and an agent's fields are documented with
+[Agents](/api/agents). Production conversations are read under **Monitoring**
+in the app, whichever way they arrived. See [Traces](/api/traces) for the OTLP
+door itself.
 
 All routes on this page use the normal Egma authentication rules. Pass the
 project identifier in the `projectId` query parameter. A project-scoped API key
@@ -29,21 +31,26 @@ can omit it when the key already names the project.
 
 **`POST /v1/monitoring/retell/discover`**
 
-Checks one Retell API key and returns the voice agents it can see. Use it to
-find the Retell agent identifier to bind an Egma agent to. This request does
-not save the key.
-
-<ParamField query="projectId" type="string">
-  Project identifier. Required when the credential does not already select one project.
-</ParamField>
+Checks one Retell API key and returns only voice agents, together with what
+this project already knows about each one. This request does not save the key.
 
 <ParamField body="apiKey" type="string" required>
   Retell platform API key with Agent Read permission.
 </ParamField>
 
 <ResponseField name="agents" type="array">
-  Voice-agent choices shaped as `{ id, name }`, sorted by name. Chat agents are not returned.
+  Voice-agent choices, sorted by name. Chat agents are not returned.
 </ResponseField>
+
+Each choice has these fields:
+
+| Field | Meaning |
+|---|---|
+| `id` | Retell's own agent id. |
+| `name` | Retell's current name for the agent. |
+| `registeredAgentId` | The Egma agent already bound to it, or `null`. |
+| `registeredAgentName` | That agent's name, or `null`. |
+| `pullProductionCalls` | Whether that Egma agent already pulls its calls. |
 
 A key Retell rejects returns `422`. A key with Agent Read permission but no
 access to conversation history will pass this check and fail later when Egma
@@ -58,9 +65,104 @@ curl -X POST \
   -d '{ "apiKey": "key_live_..." }'
 ```
 
-## Retry one failed import
+## Start pulling production calls
 
-**`POST /v1/monitoring/retell/failures/{failureId}/replay`**
+**`POST /v1/monitoring/start`**
+
+Seals the Retell key onto every agent this request names, turns each agent's
+pull switch on, and starts a fixed 30-day import for each. After the import
+finishes, Egma checks for new finished conversations about every 30 seconds.
+
+<ParamField body="agentPlatform" type="string" required>
+  `retell`. Push platforms need no start request.
+</ParamField>
+
+<ParamField body="apiKey" type="string" required>
+  Retell platform API key. Egma seals it on each agent and never returns it.
+  It needs Retell Monitor or History Read permission as well as Agent Read.
+</ParamField>
+
+<ParamField body="watch" type="object[]" required>
+  One entry per Retell agent to watch, shaped as
+  `{ platformAgentId, name?, agentId? }`.
+</ParamField>
+
+Each `watch` entry resolves to one Egma agent:
+
+- With `agentId`, that agent is bound to `platformAgentId` and switched on.
+- Without `agentId`, Egma looks for an agent in the project already bound to
+  `platformAgentId` and updates it. When none exists, Egma registers a new
+  agent under `name` and switches it on. Watching a Retell agent Egma does not
+  know means registering it.
+
+<ResponseField name="watching" type="array">
+  One entry per started agent, shaped as
+  `{ agentId, agentName, platformAgentId, created, pullProductionCalls }`.
+  `created` is `true` when this request registered the agent.
+</ResponseField>
+
+<ResponseField name="refused" type="array">
+  One entry per `watch` entry that did not start, shaped as
+  `{ platformAgentId, reason, message }`. `reason` is `contested`,
+  `name_taken`, or `not_found`. `message` is the whole sentence to show.
+</ResponseField>
+
+**Every entry is attempted and every entry is answered.** Egma starts each
+`watch` entry on its own, so one entry failing does not stop the others and
+does not undo them. Read both arrays: `watching` is what is now running, and
+`refused` is what stayed as it was. Sending the request again with only the
+refused entries is safe — an agent already switched on is never started twice.
+
+One Egma agent watches one Retell agent. An entry that would put a second
+switched-on agent on the same Retell agent comes back in `refused` with
+`reason: "contested"` and a message naming the agent already watching it. Turn
+that agent's switch off first, or start monitoring from it instead.
+
+The key is a monitoring credential and is kept apart from any key a connection
+holds for simulations. Egma asks for it here even when a connection on the same
+agent already stores one for the same Retell account.
+
+```bash
+curl -X POST \
+  "https://your-egma-host/v1/monitoring/start?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agentPlatform": "retell",
+    "apiKey": "key_live_...",
+    "watch": [
+      { "platformAgentId": "agent_abc123", "agentId": "agt_abc123" },
+      { "platformAgentId": "agent_def456", "name": "Billing" }
+    ]
+  }'
+```
+
+## Stop pulling production calls
+
+**`POST /v1/monitoring/agents/:agentId/stop`**
+
+Turns one agent's pull switch off. Egma stops asking the platform and keeps
+everything it already has: the stored production conversations, the agent's
+platform binding, its sealed key, and its import progress. Starting again
+continues from where it stopped.
+
+<ParamField path="agentId" type="string" required>
+  Egma agent id.
+</ParamField>
+
+<ResponseField name="monitoring" type="object">
+  `{ agentId, pullProductionCalls, agentPlatform, platformAgentId, monitoringApiKeyHint, lastReceivedAt }`.
+</ResponseField>
+
+```bash
+curl -X POST \
+  "https://your-egma-host/v1/monitoring/agents/agt_abc123/stop?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..."
+```
+
+## Retry one Retell import
+
+**`POST /v1/monitoring/retell/failures/:failureId/replay`**
 
 When Egma cannot import one production conversation after its allowed attempts,
 it records an import failure and moves on rather than stopping on that
@@ -72,11 +174,7 @@ conversation once, so a successful retry cannot create a second copy of a
 conversation that was already imported.
 
 <ParamField path="failureId" type="string" required>
-  Import-failure identifier.
-</ParamField>
-
-<ParamField query="projectId" type="string">
-  Project identifier. Required when the credential does not already select one project.
+  Import failure id.
 </ParamField>
 
 <ResponseField name="monitoringImportFailure" type="object">
@@ -91,7 +189,7 @@ conversation that was already imported.
 |---|---|
 | `404` | No open import failure with this id in this project. |
 | `409` | Another retry already owns this failure, or the platform still cannot supply a complete conversation. The failure stays open. |
-| `422` | The platform rejected the agent's stored key. Update the key on the agent and try again. |
+| `422` | The platform rejected the agent's stored key. Start monitoring again with a current key, then retry this import. |
 | `429` | The platform rate-limited the request, or this agent is already waiting before it asks again. The message says when to retry. |
 | `503` | The platform did not answer. Try again. |
 

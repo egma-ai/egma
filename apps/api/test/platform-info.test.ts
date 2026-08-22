@@ -46,7 +46,7 @@ it("registers every contract operation only at its v1 Fastify route", async () =
   api = await createApi("platform_route_closure");
 
   const operations = Object.values(platformOperations);
-  expect(operations).toHaveLength(75);
+  expect(operations).toHaveLength(77);
 
   for (const operation of operations) {
     const v1Route = fastifyPath(operation.path);
