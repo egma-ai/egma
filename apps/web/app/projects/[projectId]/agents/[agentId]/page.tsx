@@ -389,7 +389,7 @@ function ProductionCalls({
         lead="This agent's own process reports its production calls to Egma. There is no switch to turn on."
         action={
           <Button asChild variant="secondary">
-            <Link href={startMonitoringPath(projectId)}>
+            <Link href={startMonitoringPath(projectId, agent.id)}>
               Read the setup steps
             </Link>
           </Button>
@@ -447,7 +447,9 @@ function ProductionCalls({
           </Button>
         ) : mayAuthor ? (
           <Button asChild variant="secondary">
-            <Link href={startMonitoringPath(projectId)}>Start monitoring</Link>
+            <Link href={startMonitoringPath(projectId, agent.id)}>
+              Start monitoring
+            </Link>
           </Button>
         ) : (
           <Button type="button" variant="secondary" disabled why={whyNot}>

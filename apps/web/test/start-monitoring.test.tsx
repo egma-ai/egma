@@ -97,6 +97,7 @@ function agent(over: Record<string, unknown> = {}) {
     monitoringKeyPresent: false,
     monitoringApiKeyHint: null,
     pullProductionCalls: false,
+    lastReceivedAt: null,
     archived: false,
     archivedAt: null,
     createdAt: "2026-08-01T00:00:00.000000Z",
@@ -209,9 +210,71 @@ function sent(seen: readonly Seen[], path: string): unknown {
   return seen.find((one) => one.path === path && one.method === "POST")?.body;
 }
 
+/** Open the flow the way a link from one agent's page opens it. */
+function sentAbout(agentId: string): void {
+  window.history.replaceState(
+    {},
+    "",
+    `/projects/prj_2/monitoring/start?agent=${agentId}`,
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState({}, "", "/projects/prj_2/monitoring/start");
+});
+
+/**
+ * **The flow opens about the agent the link came from.**
+ *
+ * Both monitoring buttons on an agent's page lead here. Without the agent, the
+ * flow opens on the account option with Retell chosen — so a LiveKit agent's
+ * *Read the setup steps* landed on the Retell key form, and an unbound Retell
+ * agent could be started as a *second* Egma agent for the same Retell agent.
+ */
+describe("an agent named by the link", () => {
+  it("opens on that agent, and on its own platform", async () => {
+    sentAbout("agt_1");
+    stub({ agents: [agent({ agentPlatform: "livekit_agents" })] });
+    render(<StartMonitoringPage />);
+
+    const picked = await screen.findByLabelText("Agent");
+    expect((picked as HTMLSelectElement).value).toBe("agt_1");
+    // A LiveKit agent is push, so its own instructions render — never the
+    // Retell key form, which is what an unseeded picker would have shown.
+    expect(
+      await screen.findByText("Install the Egma SDK where your agent runs"),
+    ).toBeDefined();
+    expect(screen.queryByLabelText("Retell API key")).toBeNull();
+    // And the platform cannot be argued with: the agent already answered it.
+    expect(
+      (screen.getByLabelText("Platform") as HTMLSelectElement).disabled,
+    ).toBe(true);
+  });
+
+  it("prefills the binding from that agent's own connection", async () => {
+    sentAbout("agt_1");
+    stub({ agents: [agent({ connections: [connection()] })] });
+    render(<StartMonitoringPage />);
+    await listTheAccount();
+
+    const bound = await screen.findByRole("radio", {
+      name: "“Front desk” is Front desk from Retell",
+    });
+    expect(bound.getAttribute("aria-checked")).toBe("true");
+  });
+
+  /** An id from an older page or another project names nothing here. */
+  it("falls back to the account option when it names no agent it can see", async () => {
+    sentAbout("agt_gone");
+    stub({});
+    render(<StartMonitoringPage />);
+
+    const picked = await screen.findByLabelText("Agent");
+    expect((picked as HTMLSelectElement).value).toBe("");
+    expect(await screen.findByLabelText("Retell API key")).toBeDefined();
+  });
 });
 
 describe("the Retell path", () => {
@@ -452,6 +515,21 @@ describe("the Retell path", () => {
     ).toBeDefined();
     expect(screen.getByRole("heading", { name: "Not started" })).toBeDefined();
     expect(screen.getByText(contested)).toBeDefined();
+
+    /*
+     * **The lead is true for every entry under it, not only a first start.**
+     *
+     * A stopped agent is offered here and restarted through the same door, and
+     * a resume opens no historical window at all: it floors the window at that
+     * moment and does not go back. A lead that told everybody their last 30
+     * days were being imported was a promise the database refuses.
+     */
+    expect(
+      screen.getByText(/An agent pulling for the first time also imports/),
+    ).toBeDefined();
+    expect(
+      screen.getByText(/starting again does not go back for the calls it missed/),
+    ).toBeDefined();
 
     // The account is read again, so the started one is a fact rather than a
     // tick, and pressing again cannot start it a second time.

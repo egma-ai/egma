@@ -27,9 +27,19 @@ export type RefusedWatch = StartMonitoringResponse["refused"][number];
  * there is no monitoring setup row, no per-platform integration, and nothing
  * on that page to save. What a person does there is *start monitoring* one
  * agent — the only stored monitoring choice in the product (ADR-0015).
+ *
+ * **A link from an agent carries that agent.** Without it the flow opens on
+ * "register agents from the Retell account" with Retell chosen, so a LiveKit
+ * agent lands on the Retell key form instead of its own instructions, and an
+ * unbound Retell agent can be started as a *second* Egma agent for the same
+ * Retell agent. The page reads the name back and falls through to the account
+ * option when it names nothing it can see.
  */
-export function startMonitoringPath(projectId: string): string {
-  return projectPath(projectId, "monitoring", "start");
+export function startMonitoringPath(projectId: string, agentId?: string): string {
+  const path = projectPath(projectId, "monitoring", "start");
+  return agentId === undefined
+    ? path
+    : `${path}?agent=${encodeURIComponent(agentId)}`;
 }
 
 /**

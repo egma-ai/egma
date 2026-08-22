@@ -149,7 +149,9 @@ const COPY = {
   notStartedLead:
     "These stayed as they were. Nothing about them changed.",
   startedLead:
-    "The last 30 days are being imported now, and new calls arrive within a minute of ending.",
+    "New calls arrive within a minute of ending. An agent pulling for the " +
+    "first time also imports the last 30 days; an agent starting again does " +
+    "not go back for the calls it missed.",
   openMonitoring: "Open Monitoring",
   nothingPicked: "Choose at least one Retell agent, then try again.",
   noAgents: "This Retell account has no voice agents",
@@ -227,6 +229,24 @@ function StartMonitoring({ projectId }: { readonly projectId: string }) {
   );
 }
 
+/**
+ * The agent a link sent this flow about, or the account option.
+ *
+ * **A link that names nothing this listing holds means the account option.**
+ * An id from an older page, another project, or a hand-typed address must not
+ * leave the picker naming an agent it cannot show — so the fall-through is the
+ * same state the flow opens in when nobody named an agent at all.
+ *
+ * The picker only ever renders on the client, after the listing has arrived,
+ * so the address is readable here.
+ */
+function askedFor(agents: readonly ListedAgentWithConnections[]): string {
+  if (typeof window === "undefined") return FROM_THE_ACCOUNT;
+  const asked = new URLSearchParams(window.location.search).get("agent")?.trim();
+  if (asked === undefined || asked === "") return FROM_THE_ACCOUNT;
+  return agents.some((one) => one.id === asked) ? asked : FROM_THE_ACCOUNT;
+}
+
 /** The one connection on an agent that can name it on Retell, if any. */
 function prefillingConnection(
   connections: readonly ListedConnection[],
@@ -260,8 +280,18 @@ function Picker({
   readonly projectId: string;
   readonly agents: readonly ListedAgentWithConnections[];
 }) {
-  const [agentId, setAgentId] = useState<string>(FROM_THE_ACCOUNT);
-  const [connectionId, setConnectionId] = useState<string>(NO_CONNECTION);
+  /*
+   * Seeded once, from the address, rather than kept in step with it: a person
+   * who then chooses a different agent has changed their mind, and a later
+   * render must not put the link's agent back.
+   */
+  const [agentId, setAgentId] = useState<string>(() => askedFor(agents));
+  const [connectionId, setConnectionId] = useState<string>(() => {
+    const named = agents.find((one) => one.id === askedFor(agents));
+    return named === undefined
+      ? NO_CONNECTION
+      : (prefillingConnection(named.connections)?.id ?? NO_CONNECTION);
+  });
   const [chosenPlatform, setChosenPlatform] = useState<Platform>("retell");
 
   const agent = agents.find((one) => one.id === agentId);

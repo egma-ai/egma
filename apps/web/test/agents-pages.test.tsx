@@ -901,9 +901,12 @@ describe("an agent's production calls", () => {
     expect(screen.getByText("Off")).toBeDefined();
     // Nothing binds it yet, and the page says so rather than showing a blank.
     expect(screen.getAllByText("Not bound")).toHaveLength(2);
+    // The link carries the agent it came from, so the flow opens about this
+    // agent instead of the account roster — which is what stops an unbound
+    // agent being started a second time under a new roster entry.
     expect(
       screen.getByRole("link", { name: "Start monitoring" }).getAttribute("href"),
-    ).toBe("/projects/prj_1/monitoring/start");
+    ).toBe("/projects/prj_1/monitoring/start?agent=agt_1");
     expect(screen.queryByRole("button", { name: "Stop pulling" })).toBeNull();
   });
 
@@ -930,9 +933,11 @@ describe("an agent's production calls", () => {
     expect(screen.queryByText("Off")).toBeNull();
     expect(screen.queryByText("Pull production calls")).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop pulling" })).toBeNull();
+    // And a LiveKit agent carries itself too, so the flow shows its own SDK
+    // steps rather than opening on the Retell key form.
     expect(
       screen.getByRole("link", { name: "Read the setup steps" }).getAttribute("href"),
-    ).toBe("/projects/prj_1/monitoring/start");
+    ).toBe("/projects/prj_1/monitoring/start?agent=agt_1");
   });
 
   it("shows the binding and the key hint, and never the key", async () => {
