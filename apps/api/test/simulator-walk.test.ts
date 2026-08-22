@@ -19,6 +19,7 @@ import { rowsIn } from "../../../packages/db/test/support/clickhouse.ts";
 import { makeLog } from "../../grader/src/log.ts";
 import { startService, type Service } from "../../grader/src/service.ts";
 import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
+import { REPORTS_PATH } from "../src/routes/reports.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
 import {
   startObjectStorage,
@@ -122,6 +123,39 @@ const RETELL_CHAT_PREFLIGHT: typeof fetch = async (input) => {
 const COUNTERPART_KEEP_ALIVE_MILLISECONDS = 65_000;
 const COUNTERPART_HEADERS_TIMEOUT_MILLISECONDS = 70_000;
 
+type Gate = {
+  readonly opened: Promise<void>;
+  open(): void;
+};
+
+/** One test-owned pause point, opened once and safe to open again. */
+function gate(): Gate {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open };
+}
+
+/** Wait for a controlled test signal without leaving a timer behind. */
+async function waitForSignal(
+  signal: Promise<void>,
+  within: number,
+  message: string,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      signal,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), within);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * A Retell-shaped chat platform on loopback: the three endpoints the shipped
  * plug speaks — create-chat, create-chat-completion, end-chat — with
@@ -138,6 +172,14 @@ class RetellCounterpart {
 
   /** Reply cursor per chat, so two exchanges cannot eat each other's script. */
   private readonly delivered = new Map<string, number>();
+  /**
+   * Hold the first agent answer so the walk can inspect a stable, live
+   * Simulation. Earlier evidence has flushed, but the conversation cannot
+   * finish until the test opens the second gate.
+   */
+  private readonly firstCompletionArrived = gate();
+  private readonly firstCompletionCanAnswer = gate();
+  private hasHeldFirstCompletion = false;
   port = 0;
 
   async start(): Promise<void> {
@@ -201,8 +243,17 @@ class RetellCounterpart {
         send(422, { error: "the script ran dry" });
         return;
       }
-      this.delivered.set(chatId, turn + 1);
-      send(200, { messages: [{ role: "agent", content: reply }] });
+      const answer = (): void => {
+        this.delivered.set(chatId, turn + 1);
+        send(200, { messages: [{ role: "agent", content: reply }] });
+      };
+      if (turn === 0 && !this.hasHeldFirstCompletion) {
+        this.hasHeldFirstCompletion = true;
+        this.firstCompletionArrived.open();
+        void this.firstCompletionCanAnswer.opened.then(answer);
+        return;
+      }
+      answer();
       return;
     }
     if (request.method === "PATCH" && url.startsWith("/end-chat/")) {
@@ -212,7 +263,22 @@ class RetellCounterpart {
     send(404, { error: `nothing at ${url}` });
   }
 
+  /** Wait until the live conversation is held before its first agent answer. */
+  async waitForHeldCompletion(within: number): Promise<void> {
+    await waitForSignal(
+      this.firstCompletionArrived.opened,
+      within,
+      `the counterpart received no completion within ${within}ms`,
+    );
+  }
+
+  /** Let the held agent answer return and the Simulation continue. */
+  releaseHeldCompletion(): void {
+    this.firstCompletionCanAnswer.open();
+  }
+
   async stop(): Promise<void> {
+    this.releaseHeldCompletion();
     await new Promise<void>((resolve) => {
       this.server?.close(() => {
         resolve();
@@ -284,6 +350,9 @@ let simulator: ChildProcess | undefined;
 let grader: Service | undefined;
 let simulatorSaid = "";
 let scratch: string;
+let terminalReportSimulationId: string | undefined;
+const terminalReportArrived = gate();
+const terminalReportCanLand = gate();
 
 /** One request against the instance as a person's terminal makes one. */
 async function call(
@@ -449,54 +518,50 @@ async function gradingJobsFor(simulationId: string): Promise<number> {
   return Number(rows[0]?.count);
 }
 
-/** What one poll of a running simulation saw, in both stores at once. */
-type Sighting = {
-  readonly status: string;
-  readonly spans: readonly string[];
-};
-
 /**
- * Watch one simulation from queued to terminal, reading both stores as it
- * goes, and answer with everything seen — plus the conversation as it stands
- * once the evidence behind it has been stored.
- *
- * The order inside the loop is deliberate. Spans are read *first* and the row's
- * status *second*, so a sighting is saying the spans beside it were already
- * there before the transition it reports.
- *
- * **The terminal look waits, and that is the design rather than a slow test.**
- * The two facts about a finished simulation are separate and arrive in either
- * order: the lifecycle transition that ends it, and its evidence becoming
- * query-visible. A span batch is answered when it is durable in the object
- * store, which is a promise that it is safe rather than that it is readable —
- * so a terminal row may be written while the last segment is still on its way
- * into the trace store. What has to be true is that the conversation a verdict
- * will cite does arrive, whole, and the reconciliation of the two arrivals
- * belongs to the grading boundary rather than to either producer.
+ * Read evidence while the counterpart holds the conversation open. This is
+ * an eventual-delivery wait, not a race to catch a short-lived state: the
+ * held Retell answer prevents the Simulation from becoming terminal.
  */
-async function watchToTerminal(
+async function runningEvidence(
   simulationId: string,
   traceId: string,
   within: number,
-): Promise<{ seen: Sighting[]; atTerminal: readonly string[] }> {
+): Promise<readonly string[]> {
   const deadline = Date.now() + within;
-  const seen: Sighting[] = [];
   for (;;) {
     const spans = (await storedSpans(traceId)).map((span) => span.name);
     const status = String((await rowOf(simulationId)).status);
-    seen.push({ status, spans });
+    if (status === "running" && spans.length > 0) return spans;
     if (status === "completed" || status === "failed" || status === "canceled") {
-      // The root span is the last thing the simulator sends, so its arrival is
-      // what says the whole conversation is readable. Waited for rather than
-      // demanded in the same instant, and answered with whatever the last look
-      // saw either way, so a conversation that never lands fails on what is
-      // missing rather than on a timer.
-      let atTerminal = (await storedSpans(traceId)).map((span) => span.name);
-      while (!atTerminal.includes("simulation") && Date.now() <= deadline) {
-        await new Promise((resume) => setTimeout(resume, 25));
-        atTerminal = (await storedSpans(traceId)).map((span) => span.name);
-      }
-      return { seen, atTerminal };
+      throw new Error(
+        `simulation ${simulationId} became ${status} while its agent answer was held`,
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `simulation ${simulationId} has no readable running evidence after ${within}ms; ` +
+          `last read: ${JSON.stringify({ status, spans })}; ` +
+          `the simulator said:\n${simulatorSaid}`,
+      );
+    }
+    await new Promise((resume) => setTimeout(resume, 25));
+  }
+}
+
+/**
+ * Wait for one Simulation to reach a terminal state. The cross-store ordering
+ * is proved separately while the terminal report is held at the API route.
+ */
+async function waitForTerminal(
+  simulationId: string,
+  within: number,
+): Promise<string> {
+  const deadline = Date.now() + within;
+  for (;;) {
+    const status = String((await rowOf(simulationId)).status);
+    if (status === "completed" || status === "failed" || status === "canceled") {
+      return status;
     }
     if (Date.now() > deadline) {
       throw new Error(
@@ -541,10 +606,37 @@ beforeAll(async () => {
     traces: true,
     retellFetch: RETELL_CHAT_PREFLIGHT,
     ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
+    beforeApiListen(api) {
+      api.addHook("preHandler", async (request) => {
+        if (
+          terminalReportSimulationId === undefined ||
+          request.routeOptions.url !== REPORTS_PATH
+        ) {
+          return;
+        }
+        const { simulationId } = request.params as { simulationId?: string };
+        if (simulationId !== terminalReportSimulationId) return;
+        const report = request.body as {
+          readonly events?: readonly { readonly status?: unknown }[];
+        };
+        const hasTerminalEvent =
+          report.events?.some(
+            (event) =>
+              event.status === "completed" ||
+              event.status === "failed" ||
+              event.status === "canceled",
+          ) ?? false;
+        if (!hasTerminalEvent) return;
+
+        terminalReportArrived.open();
+        await terminalReportCanLand.opened;
+      });
+    },
   });
 }, 120_000);
 
 afterAll(async () => {
+  terminalReportCanLand.open();
   simulator?.kill("SIGTERM");
   grader?.stop();
   await grader?.finished;
@@ -557,7 +649,9 @@ afterAll(async () => {
 describe.skipIf(!storage.available)("the shipped simulator against the real API", () => {
   it(
     "walks queued → claimed → running → completed, and a refused key to an honest failed",
-    { timeout: 90_000 },
+    // Every controlled wait below has its own smaller deadline and diagnostic.
+    // This outer limit must not replace one with Vitest's generic timeout.
+    { timeout: 420_000 },
     async () => {
       const { key, userId, organizationId, projectId } = await signedUpKey();
 
@@ -675,6 +769,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       };
       const conducted = await startRunOver(goodConnection);
       const refused = await startRunOver(refusedConnection);
+      terminalReportSimulationId = conducted.simulationId;
 
       // The shipped service loop, pointed at this instance and holding the
       // deployment's service token. Its model client is the one explicit test
@@ -743,38 +838,75 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         },
       });
 
-      // The conversation watched as it happens, in both stores at once.
+      // Hold the first agent answer. The greeting has already crossed the
+      // answer boundary and flushed, but the conversation cannot finish.
       const traceId = traceIdOf(conducted.simulationId);
-      const watched = await watchToTerminal(
-        conducted.simulationId,
-        traceId,
+      await counterpart.waitForHeldCompletion(60_000);
+      try {
+        // Streamed, not posted at the end: evidence is readable in ClickHouse
+        // while the Simulation is held in its running state.
+        const whileRunning = await runningEvidence(
+          conducted.simulationId,
+          traceId,
+          30_000,
+        );
+        expect(whileRunning).toContain("agent_turn");
+        // The root closes the trace. It cannot exist while the held
+        // conversation is still in progress.
+        expect(whileRunning).not.toContain("simulation");
+      } finally {
+        counterpart.releaseHeldCompletion();
+      }
+
+      // The terminal lifecycle document has reached the real report door, but
+      // the route has not applied it. The simulator sends every span before
+      // the report, and a span batch is answered when it is durable in the
+      // object store — readable moments later, once the standing drainer has
+      // landed it. The held report keeps PostgreSQL at running through that
+      // wait, so the complete conversation must become readable while the row
+      // still says running.
+      await waitForSignal(
+        terminalReportArrived.opened,
         60_000,
+        "the terminal report did not reach the API",
+      );
+      let spans: StoredSpan[] = [];
+      try {
+        expect((await rowOf(conducted.simulationId)).status).toBe("running");
+        // The root span closes the trace and rides the last segment, so its
+        // arrival is what says the whole conversation is readable. Bounded,
+        // and answered with whatever the last look saw, so a conversation
+        // that never lands fails on what is missing rather than on a timer.
+        const readableBy = Date.now() + 30_000;
+        spans = await storedSpans(traceId);
+        while (
+          !spans.some((span) => span.name === "simulation") &&
+          Date.now() <= readableBy
+        ) {
+          await new Promise((resume) => setTimeout(resume, 25));
+          spans = await storedSpans(traceId);
+        }
+        // Still running after the wait: the held report is the only terminal
+        // producer for this Simulation, and it has not landed.
+        expect((await rowOf(conducted.simulationId)).status).toBe("running");
+        const beforeTerminal = spans.map((span) => span.name);
+        expect(
+          beforeTerminal.filter((name) => name.endsWith("_turn")),
+        ).toHaveLength(4);
+        expect(
+          beforeTerminal.filter((name) => name === "simulation"),
+        ).toHaveLength(1);
+      } finally {
+        terminalReportCanLand.open();
+      }
+
+      expect(await waitForTerminal(conducted.simulationId, 60_000)).toBe(
+        "completed",
       );
 
       // The whole walk, as a person watching the run would see it settle.
       const conductedRun = await settledRun(key, conducted.runId, 60_000);
       const refusedRun = await settledRun(key, refused.runId, 60_000);
-
-      // Streamed, not posted at the end: turns were queryable in ClickHouse
-      // while the simulation was still running.
-      const whileRunning = watched.seen.filter(
-        (sighting) => sighting.status === "running" && sighting.spans.length > 0,
-      );
-      expect(
-        whileRunning.length,
-        `no span was ever seen while the simulation ran; sightings: ${JSON.stringify(
-          watched.seen,
-        )}`,
-      ).toBeGreaterThan(0);
-      expect(whileRunning[0]?.spans).toContain("agent_turn");
-      // And partial while it ran: the root closes the trace, so a live
-      // reader seeing it would mean the conversation was already over.
-      expect(whileRunning[0]?.spans).not.toContain("simulation");
-
-      // The guarantee: the whole conversation a verdict will cite is stored —
-      // root span and all — for a simulation the control plane has recorded as
-      // over.
-      expect(watched.atTerminal).toContain("simulation");
 
       // The conversation that happened: completed, concluded by the persona,
       // and every lifecycle column telling the truth about it.
@@ -797,9 +929,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
       expect(await gradingJobsFor(conducted.simulationId)).toBe(1);
 
-      // The conversation itself, read back out of the trace store the way a
-      // grader will read it — one span per timed thing, nothing invented.
-      const spans = await storedSpans(traceId);
+      // The complete conversation read while the terminal report was held,
+      // before PostgreSQL left running — one span per timed thing, nothing
+      // invented, in the same shape the grader reads.
       const names = spans.map((span) => span.name);
       expect(names.filter((name) => name === "agent_turn")).toHaveLength(2);
       expect(names.filter((name) => name === "human_turn")).toHaveLength(2);

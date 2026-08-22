@@ -399,6 +399,11 @@ describe("adding a colleague, with no mail configured", () => {
       // definition, so driving either would prove the same thing.
       const bob = page.locator("tr", { hasText: "bob@acme.example" });
       await bob.waitFor();
+      const dismissDialogThroughOverlay = async () => {
+        await page
+          .locator('[data-slot="dialog-overlay"]')
+          .click({ position: { x: 4, y: 4 } });
+      };
       // Three controls, and all one height. The height itself is the shared
       // system's token rather than this page's own now that Settings is built
       // from the same controls as every other product page, so what is held
@@ -431,7 +436,7 @@ describe("adding a colleague, with no mail configured", () => {
         expect(memberActions).toEqual([]);
 
         await bob.getByRole("button", { name: "Deactivate" }).click();
-        await page.mouse.click(4, 4);
+        await dismissDialogThroughOverlay();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toEqual([]);
 
@@ -463,7 +468,7 @@ describe("adding a colleague, with no mail configured", () => {
         expect(memberActions).toHaveLength(1);
 
         await bob.getByRole("button", { name: "Remove" }).click();
-        await page.mouse.click(4, 4);
+        await dismissDialogThroughOverlay();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toHaveLength(1);
 
@@ -2954,7 +2959,13 @@ describe("the complete product, walked in order in a second project", () => {
     "opens the run, which lists the simulation it wrote",
     async () => {
       await walk.goto(runAddress);
-      await saysWithin(walk, "Simulations");
+      // The section heading is present before its request finishes. Wait for
+      // the row that proves the simulations response has landed, so every
+      // assertion below reads the settled page rather than its loading shell.
+      const row = walk
+        .getByRole("link", { name: "Reschedules a booked appointment" })
+        .first();
+      await row.waitFor();
 
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
@@ -2965,10 +2976,6 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("The Support line");
       expect(shown).toContain("Retell staging");
 
-      const row = walk
-        .getByRole("link", { name: "Reschedules a booked appointment" })
-        .first();
-      await row.waitFor();
       conversation = (await row.getAttribute("href")) ?? "";
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
     },

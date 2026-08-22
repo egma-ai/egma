@@ -136,6 +136,14 @@ export type InstanceOptions = {
   readonly deviceAuthorizationInterval?: ServerOptions["deviceAuthorizationInterval"];
   /** Provider-read seam for the one browser journey that configures Retell. */
   readonly retellFetch?: ServerOptions["retellFetch"];
+  /**
+   * Test-only API configuration after shipped routes are registered and before
+   * Fastify starts listening. A test can add a hook at a real route boundary
+   * without changing the production server.
+   */
+  readonly beforeApiListen?: (
+    app: FastifyInstance,
+  ) => void | Promise<void>;
 };
 
 export type ObservedInstanceRequest = {
@@ -277,30 +285,31 @@ export async function startInstance(
       ? {}
       : { retellFetch: options.retellFetch }),
   });
-  if (options.observeRequest !== undefined) {
-    // `prependListener` puts this before Fastify's own request listener. A
-    // Fastify hook added here would come after the route's `onRequest` auth
-    // hook and would miss the exact 401 that this boundary evidence must see.
-    app.server.prependListener("request", (request) => {
-      let rawBody = "";
-      request.on("data", (chunk: Buffer) => {
-        rawBody += chunk.toString("utf8");
-      });
-      options.observeRequest?.({
-        method: request.method ?? "GET",
-        url: request.url ?? "/",
-        get rawBody() {
-          return rawBody;
-        },
-      });
-    });
-  }
-  await app.listen({ host: "127.0.0.1", port: apiPort });
-
   let webOutput: WebOutputLock | undefined;
   let web: ChildProcess | undefined;
 
   try {
+    await options.beforeApiListen?.(app);
+    if (options.observeRequest !== undefined) {
+      // `prependListener` puts this before Fastify's own request listener. A
+      // Fastify hook added here would come after the route's `onRequest` auth
+      // hook and would miss the exact 401 that this boundary evidence must see.
+      app.server.prependListener("request", (request) => {
+        let rawBody = "";
+        request.on("data", (chunk: Buffer) => {
+          rawBody += chunk.toString("utf8");
+        });
+        options.observeRequest?.({
+          method: request.method ?? "GET",
+          url: request.url ?? "/",
+          get rawBody() {
+            return rawBody;
+          },
+        });
+      });
+    }
+    await app.listen({ host: "127.0.0.1", port: apiPort });
+
     if (withPages) {
       // The development server below compiles into `apps/web/.next`, which is
       // the directory `next build` writes too. Taking the lock here is what
