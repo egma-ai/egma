@@ -671,6 +671,17 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -703,6 +714,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "lastReceivedAt",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -930,6 +942,17 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -962,6 +985,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "lastReceivedAt",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1335,6 +1359,17 @@
                           "pullProductionCalls": {
                             "type": "boolean"
                           },
+                          "lastReceivedAt": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "archived": {
                             "type": "boolean"
                           },
@@ -1511,6 +1546,7 @@
                           "monitoringKeyPresent",
                           "monitoringApiKeyHint",
                           "pullProductionCalls",
+                          "lastReceivedAt",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -1708,6 +1744,17 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -1740,6 +1787,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "lastReceivedAt",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2074,6 +2122,17 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2106,6 +2165,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "lastReceivedAt",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2705,6 +2765,17 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2737,6 +2808,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "lastReceivedAt",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2971,6 +3043,17 @@
                         "pullProductionCalls": {
                           "type": "boolean"
                         },
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3003,6 +3086,7 @@
                         "monitoringKeyPresent",
                         "monitoringApiKeyHint",
                         "pullProductionCalls",
+                        "lastReceivedAt",
                         "archived",
                         "archivedAt",
                         "createdAt",

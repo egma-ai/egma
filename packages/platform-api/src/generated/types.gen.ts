@@ -205,6 +205,7 @@ export type ListAgentsResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -324,6 +325,7 @@ export type RegisterAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -366,6 +368,7 @@ export type RegisterAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -449,6 +452,7 @@ export type GetAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -545,6 +549,7 @@ export type UpdateAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -721,6 +726,7 @@ export type ArchiveAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -797,6 +803,7 @@ export type RestoreAgentResponses = {
             monitoringKeyPresent: boolean;
             monitoringApiKeyHint: string | null;
             pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;

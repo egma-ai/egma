@@ -132,6 +132,7 @@ const AGENT = {
   monitoringKeyPresent: false,
   monitoringApiKeyHint: null,
   pullProductionCalls: false,
+  lastReceivedAt: null,
   archived: false,
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
@@ -948,6 +949,49 @@ describe("an agent's production calls", () => {
     expect(screen.getByText("…QRST")).toBeDefined();
   });
 
+  /**
+   * **Whether it pulls, and when it last received.** Those are the two facts an
+   * agent states about monitoring, and the second one had nowhere to be read
+   * until now. It is a bare fact: no condition word stands beside it, because
+   * a quiet agent is a quiet agent and not a fault.
+   */
+  it("says when a production call last arrived", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/agents/agt_1": {
+        status: 200,
+        body: {
+          agent: { ...PULLING, lastReceivedAt: "2026-08-15T09:30:00.000Z" },
+          connections: [],
+        },
+      },
+    });
+    render(<AgentDetailPage />);
+
+    await screen.findByRole("heading", { name: "Production calls" });
+    expect(screen.getByText("Last received")).toBeDefined();
+    expect(
+      screen
+        .getByText("Last received")
+        .closest("div")
+        ?.querySelector("time")
+        ?.getAttribute("datetime"),
+    ).toBe("2026-08-15T09:30:00.000Z");
+    // And no health word anywhere near it.
+    expect(screen.queryByText(/degraded/i)).toBeNull();
+  });
+
+  it("says nothing has arrived yet rather than leaving the fact blank", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/agents/agt_1": { status: 200, body: { agent: PULLING, connections: [] } },
+    });
+    render(<AgentDetailPage />);
+
+    await screen.findByRole("heading", { name: "Production calls" });
+    expect(screen.getByText("Nothing yet")).toBeDefined();
+  });
+
   it("stops pulling through the agent's own door, after naming the agent", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -972,12 +1016,18 @@ describe("an agent's production calls", () => {
       await screen.findByRole("button", { name: "Stop pulling" }),
     );
 
-    // The dialog names the agent and says what survives, because nothing is
-    // lost: the transcripts, the binding, the key and the cursor all stay.
+    // The dialog names the agent, says what survives — the transcripts, the
+    // binding and the key — and says the one thing that does not: starting
+    // again is a new observation, never a backfill of the quiet period.
     expect(
       await screen.findByText(/Egma stops asking Retell for “Front desk”/),
     ).toBeDefined();
     expect(screen.getByText(/stays stored/)).toBeDefined();
+    expect(
+      screen.getByText(
+        /does not go back for the calls that happen while the switch is off/,
+      ),
+    ).toBeDefined();
 
     fireEvent.click(
       within(screen.getByRole("dialog")).getByRole("button", {

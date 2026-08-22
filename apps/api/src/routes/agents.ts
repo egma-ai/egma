@@ -611,6 +611,9 @@ function describedAgent(one: Agent): Record<string, unknown> {
     monitoringKeyPresent: one.monitoringApiKeyHint !== null,
     monitoringApiKeyHint: one.monitoringApiKeyHint,
     pullProductionCalls: one.pullProductionCalls,
+    // Whether it pulls and when it last received: the two monitoring facts an
+    // agent states about itself, and never a condition word beside them.
+    lastReceivedAt: one.lastReceivedAt?.toISOString() ?? null,
     archived: one.archivedAt !== null,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),

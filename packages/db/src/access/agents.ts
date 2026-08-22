@@ -4,6 +4,7 @@ import {
   asc,
   desc,
   eq,
+  getTableName,
   ilike,
   inArray,
   isNotNull,
@@ -23,6 +24,7 @@ import {
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
+import { monitoringState } from "../schema/production.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
   credentialRuleOf,
@@ -175,6 +177,16 @@ export type Agent = {
   readonly monitoringApiKeyHint: string | null;
   /** The declared pull switch. Off until somebody turns it on. */
   readonly pullProductionCalls: boolean;
+  /**
+   * When a production call last arrived for this agent, or null while none
+   * has. Read from the machine notebook, which is where the drainer stamps it.
+   *
+   * It travels with the agent because the agent is where a person reads it:
+   * whether it pulls and when it last received are the two facts the agent
+   * shows about monitoring, and there is no condition word beside them
+   * (ADR-0015, ruling 6).
+   */
+  readonly lastReceivedAt: Date | null;
   /** When it stopped being available for new work, or null while it is. */
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -241,6 +253,7 @@ type AgentRow = {
   readonly platformAgentId: string | null;
   readonly monitoringApiKeyHint: string | null;
   readonly pullProductionCalls: boolean;
+  readonly lastReceivedAt: Date | null;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -254,6 +267,32 @@ function agentFromRow(row: AgentRow): Agent {
 const notArchived: SQL = isNull(agent.archivedAt);
 const connectionNotArchived: SQL = isNull(connection.archivedAt);
 
+/**
+ * The one fact an answer carries that is not on the agent's row.
+ *
+ * It is stamped on the machine notebook as pulled calls arrive, and it is read
+ * as a scalar subquery rather than a join so that *every* path answering an
+ * agent carries it — the writes that answer with `returning`, where a join
+ * cannot go, as much as the reads. `monitoring_state` is unique on `agent_id`,
+ * so it is one index lookup and it can never multiply a row.
+ *
+ * **The outer reference is spelled out because Drizzle will not spell it.** A
+ * select over one table emits its columns bare, inside a nested fragment as
+ * well as outside it, so `${agent.id}` here would render as `"id"` — which the
+ * subquery's own scope resolves to `monitoring_state.id`. That correlates a row
+ * to itself, matches nothing, and answers `null` for every agent without ever
+ * failing.
+ *
+ * `mapWith` hands the answer back to the column's own decoder, so this reads as
+ * the instant every other timestamp on an agent reads as rather than as the
+ * driver's text.
+ */
+const LAST_RECEIVED_AT = sql`(
+  select ${monitoringState.lastReceivedAt} from ${monitoringState}
+   where ${monitoringState.agentId}
+       = ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.id.name)}
+)`.mapWith(monitoringState.lastReceivedAt);
+
 /** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
   id: agent.id,
@@ -263,6 +302,7 @@ const COLUMNS = {
   platformAgentId: agent.platformAgentId,
   monitoringApiKeyHint: agent.monitoringApiKeyHint,
   pullProductionCalls: agent.pullProductionCalls,
+  lastReceivedAt: LAST_RECEIVED_AT,
   archivedAt: agent.archivedAt,
   createdAt: agent.createdAt,
   updatedAt: agent.updatedAt,

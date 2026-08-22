@@ -208,14 +208,18 @@ describe("the Egma-owned half of an agent", () => {
     expect(Object.keys(shape)).not.toContain("description");
     expect(Object.keys(shape)).not.toContain("revision");
 
-    // What it does carry: where the agent lives, and whether egma pulls its
-    // production calls. Unbound and off until somebody says otherwise.
+    // What it does carry: where the agent lives, whether egma pulls its
+    // production calls, and when one last arrived. Unbound and off until
+    // somebody says otherwise, and nothing has arrived — which is a fact and
+    // not a condition, so no word beside it says how the agent is doing.
     expect(shape).toMatchObject({
       agentPlatform: null,
       platformAgentId: null,
       monitoringKeyPresent: false,
       pullProductionCalls: false,
+      lastReceivedAt: null,
     });
+    expect(Object.keys(shape)).toContain("lastReceivedAt");
 
     // And an edit that tried to set the provider's own configuration is
     // refused by name rather than having the key quietly dropped.

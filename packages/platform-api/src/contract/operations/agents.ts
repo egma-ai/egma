@@ -23,6 +23,13 @@ const agent = {
     monitoringKeyPresent: { type: "boolean" },
     monitoringApiKeyHint: nullable({ type: "string" }),
     pullProductionCalls: { type: "boolean" },
+    /**
+     * When a production call last arrived for this agent, or null while none
+     * has. A bare fact and never a condition: the agent says whether it pulls
+     * and when it last received, and there is no health word anywhere near it
+     * (ADR-0015, ruling 6).
+     */
+    lastReceivedAt: nullable(dateTimeSchema),
     archived: { type: "boolean" },
     archivedAt: nullable(dateTimeSchema),
     createdAt: dateTimeSchema,
@@ -37,6 +44,7 @@ const agent = {
     "monitoringKeyPresent",
     "monitoringApiKeyHint",
     "pullProductionCalls",
+    "lastReceivedAt",
     "archived",
     "archivedAt",
     "createdAt",

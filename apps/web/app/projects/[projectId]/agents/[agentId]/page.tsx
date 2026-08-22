@@ -24,11 +24,16 @@ import { startMonitoringPath } from "../../../../../lib/monitoring.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../lib/roles.ts";
+import { agentPlatformLabel } from "../../../../../lib/transcripts.ts";
 import { Actions, Facts, Section } from "../../../../../ui/section.tsx";
 import { Field, Form, FormActions, Problem } from "../../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
+import {
+  RelativeInstant,
+  useMinuteClock,
+} from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
@@ -366,6 +371,7 @@ function ProductionCalls({
   const [stopping, setStopping] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+  const now = useMinuteClock();
 
   const on = agent.pullProductionCalls;
 
@@ -500,6 +506,21 @@ function ProductionCalls({
                 </span>
               ),
           },
+          /*
+           * **The second half of what an agent says about monitoring**:
+           * whether it pulls, and when it last received. It is a bare fact
+           * with no condition word — there is no health surface anywhere in
+           * the product, and a late arrival is not a fault to report.
+           */
+          {
+            label: "Last received",
+            value:
+              agent.lastReceivedAt === null ? (
+                NOTHING_YET
+              ) : (
+                <RelativeInstant instant={agent.lastReceivedAt} now={now} />
+              ),
+          },
         ]}
       />
 
@@ -510,10 +531,12 @@ function ProductionCalls({
           {(dismiss) => (
             <Form onSubmit={() => void stop()}>
               <p className="m-0 max-w-[72ch] text-base leading-(--line-normal) text-foreground">
-                {`Egma stops asking ${agentPlatformLabel(agent.agentPlatform)} `}
+                {`Egma stops asking ${platformOf(agent.agentPlatform)} `}
                 {`for “${agent.name}”. Every transcript already stored stays `}
                 {"stored, and its key and platform binding stay on the agent, so "}
-                {"starting again picks up where this left off."}
+                {"turning it back on is one action. That is a new observation "}
+                {"from that moment: Egma does not go back for the calls that "}
+                {"happen while the switch is off."}
               </p>
               {refused === null ? null : <Problem>{refused.message}</Problem>}
               <FormActions>
@@ -538,11 +561,19 @@ const NOT_BOUND = "Not bound";
 /** No monitoring key is sealed on this agent. Never the key itself. */
 const NO_KEY = "None";
 
-/** The platform's product name, said the way the rest of the product says it. */
-function agentPlatformLabel(platform: string | null): string {
-  if (platform === "retell") return "Retell";
-  if (platform === "livekit_agents") return "LiveKit Agents";
-  return "its platform";
+/** No production call has arrived for this agent yet, which is not a fault. */
+const NOTHING_YET = "Nothing yet";
+
+/**
+ * The platform this sentence is about, or the word that stands in for it.
+ *
+ * An agent with the switch on always has a platform, so the fallback is only
+ * ever read by a sentence about an agent that has none. The label itself is
+ * the shared one, so this screen and Monitoring cannot print two different
+ * words for one platform.
+ */
+function platformOf(platform: string | null): string {
+  return platform === null ? "its platform" : agentPlatformLabel(platform);
 }
 
 /**

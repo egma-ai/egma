@@ -8,6 +8,7 @@ import {
   enablePullProductionCalls,
   failMonitoringPull,
   finishMonitoringScan,
+  getAgent,
   MOST_RETELL_CALL_ATTEMPTS,
   readAgentPullState,
   recordPulledCallReceived,
@@ -618,6 +619,32 @@ describe('"last heard from"', () => {
 
     expect((await notebook(mine))?.last_received_at).toEqual(late);
     expect((await notebook(theirs))?.last_received_at).toBeNull();
+  });
+
+  /**
+   * **It travels with the agent, because the agent is where a person reads it.**
+   *
+   * Whether it pulls and when it last received are the two facts the agent
+   * states about monitoring, and the second one lives on the machine notebook.
+   * The agent read carries it across, so the screen needs no second request and
+   * no second door.
+   */
+  it("travels on the agent an ordinary read answers", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const auth = at(acme, ada);
+    expect((await getAgent(auth, agentId))?.lastReceivedAt).toBeNull();
+
+    const late = new Date(SETUP_TIME.getTime() + 60_000);
+    await recordPulledCallReceived(auth, {
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      receivedAt: late,
+    });
+
+    expect((await getAgent(auth, agentId))?.lastReceivedAt).toEqual(late);
+    // And an agent with no notebook at all reads as never, not as missing.
+    const unbound = await agentNamed("Night line");
+    expect((await getAgent(auth, unbound))?.lastReceivedAt).toBeNull();
   });
 });
 
