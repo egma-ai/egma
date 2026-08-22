@@ -93,7 +93,7 @@ function platformAgentReferenceOf(
   call: RetellCall,
 ): { readonly id: string; readonly name: string; readonly version: string } {
   if (!retellCallBelongsToTarget(target, call)) {
-    throw new Error("A Retell call belongs to a different selected agent");
+    throw new Error("A Retell call belongs to a different platform agent");
   }
   return {
     id: providerText(call["agent_id"]) || target.platformAgentId,

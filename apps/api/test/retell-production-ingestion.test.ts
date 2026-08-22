@@ -1191,7 +1191,7 @@ describe("Retell production ingestion", () => {
     }
   });
 
-  it("does not file a hydrated call under a different selected Retell agent", async () => {
+  it("does not file a hydrated call under a different platform agent", async () => {
     const recorded = record();
     const writes: RetellCall[] = [];
     const { log, events } = logger();

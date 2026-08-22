@@ -231,7 +231,7 @@ describe("the shared Retell production writer", () => {
         new Date("2026-08-19T00:00:05.000Z"),
         writeStore(mismatch, claim),
       ),
-    ).rejects.toThrow("different selected agent");
+    ).rejects.toThrow("different platform agent");
     expect(mismatch.claimed).toBeUndefined();
   });
 

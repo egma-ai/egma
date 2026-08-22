@@ -38,7 +38,7 @@ import {
   type WriteOutcome,
 } from "./retell/write.ts";
 
-/** Retell selected agents are due about every 30 seconds. */
+/** An agent with its pull switch on is due about every 30 seconds. */
 export const RETELL_PRODUCTION_POLL_INTERVAL_MILLISECONDS = 30_000;
 /** A cheap DB wake catches a jittered due target without waiting another 30s. */
 export const RETELL_PRODUCTION_INGESTION_WAKE_INTERVAL_MILLISECONDS = 5_000;
@@ -289,7 +289,7 @@ function stableUnit(value: string): number {
   return (hash >>> 0) / 4_294_967_296;
 }
 
-/** A stable 27-33 second spread stops all selected agents polling together. */
+/** A stable 27-33 second spread stops every pulled agent polling together. */
 function regularPollMilliseconds(target: MonitoringPullTarget): number {
   const spread = 0.9 + stableUnit(target.agentId) * 0.2;
   return Math.round(
