@@ -242,6 +242,21 @@ Production evidence is accepted into a second bucket on the same MinIO, and Egma
   How often the whole pending spool is listed. That listing is the recovery authority and runs once at startup as well — handing a freshly uploaded segment straight on is a speed hint, and a hint that is lost or delivered twice must not be able to lose evidence.
 </ParamField>
 
+### What the ingestion defaults measure as
+
+Numbers, not adjectives, from one bounded measurement of exactly these defaults on one machine: a 4-vCPU, 16 GiB VM running the API, PostgreSQL, ClickHouse, a loopback MinIO, and the load generator all at once, with records of about 2,750 evidence bytes. A dedicated host does better; an object store across a real network moves the acknowledgement tail. Nothing below is extrapolated.
+
+| Measured | Value |
+| --- | --- |
+| Sustained acceptance at 128 concurrent senders | ~170 conversations/s — 4,600 spans/s, 4.65 MB/s of evidence — held across three 60–75 s runs with every request answered 200 |
+| Acknowledgement latency at that rate | p50 0.85 s, p95 1.15–1.18 s |
+| Acknowledgement floor when nearly idle | ~0.5 s — a lone conversation's wait is the flush interval |
+| Readable after acknowledgement | p50 under 90 ms, p95 under 120 ms, through the standing drainer alone; none of 1,180 measured conversations failed to become readable |
+| Compression on the wire to the store | gzip ≈ 8.3:1 on full segments |
+| Refusal onset | exactly at the configured bounds — the byte bound refuses with less than one frame of headroom left, the record bound on the record after the last — always retryably, never discarding anything staged |
+
+Past 128 concurrent senders this machine buys almost no additional throughput and pays double the latency: one API process saturates one core. And the byte bound read as an outage buffer, by arithmetic on the measured peak: 512 MiB of staging holds roughly 110 seconds of peak-rate evidence, which is the window an object-store outage has before the door stops staging new evidence and starts refusing it.
+
 ### API and web ports
 
 <ParamField path="EGMA_API_PORT" type="number" default="3100">
