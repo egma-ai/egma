@@ -2080,7 +2080,7 @@ describe("the Expected behaviors project grader", () => {
     "shows its fixed scope and saves its pass threshold",
     async () => {
       await page.goto(`${origin}/projects/${acme}/graders`);
-      await page.waitForSelector("text=Expected behaviors");
+      await page.waitForSelector("text=Grades all simulations");
 
       const shown = await page.innerText("main");
       expect(shown).toContain("Grades all simulations");
