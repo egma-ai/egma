@@ -17,10 +17,9 @@ In practice:
 
 - **Test on the hosted compatibility floor.** Local development and CI use the
   oldest Postgres and ClickHouse feature versions the hosted platform still
-  runs. Never move a test image ahead of its hosted vendor. The exact hosted
-  builds, compatibility lines, and pinned public images live in
-  `../src/engine-versions.ts`; an integration test holds Compose and the live
-  test stores to that contract.
+  runs. Never move a test image ahead of its hosted vendor. The exact public
+  images are pinned in the root `docker-compose.yml`; the real migration and
+  product tests run on those images.
 - **Add freely.** New tables, new nullable columns, new indexes — code that
   does not know them never sees them.
 - **Prelaunch cleanup is the explicit exception.** A one-step removal is allowed
