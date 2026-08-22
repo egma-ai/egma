@@ -10,6 +10,16 @@ export type RetellAgentChoice = RetellAgentChoices["agents"][number];
 export type StartedMonitoring = StartMonitoringResponse["watching"][number];
 
 /**
+ * What one start commit turned out to be, tick by tick.
+ *
+ * Two lists rather than one answer, because starting an agent is a whole act
+ * on its own: one tick can lose the one-switched-on-agent rule while the ticks
+ * beside it start, and both facts have to reach the person.
+ */
+export type StartOutcome = StartMonitoringResponse;
+export type RefusedWatch = StartMonitoringResponse["refused"][number];
+
+/**
  * Where the start-monitoring flow lives.
  *
  * **The address says what happens there, and that is the whole rename.** It

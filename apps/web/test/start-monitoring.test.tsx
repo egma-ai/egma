@@ -146,18 +146,30 @@ function apiAnswers(answers: Record<string, Stubbed | (() => Stubbed)>): {
 /** The ordinary stub: a roster, an account listing, and a commit. */
 function stub(options: {
   readonly agents?: readonly ReturnType<typeof agent>[];
-  readonly account?: readonly ReturnType<typeof accountAgent>[];
+  /** The account listing. A list of lists answers each read in turn. */
+  readonly account?:
+    | readonly ReturnType<typeof accountAgent>[]
+    | readonly (readonly ReturnType<typeof accountAgent>[])[];
   readonly start?: Stubbed;
 }) {
+  const listings: readonly (readonly ReturnType<typeof accountAgent>[])[] =
+    options.account === undefined
+      ? [[accountAgent()]]
+      : Array.isArray(options.account[0])
+        ? (options.account as readonly (readonly ReturnType<typeof accountAgent>[])[])
+        : [options.account as readonly ReturnType<typeof accountAgent>[]];
+  let read = 0;
+
   return apiAnswers({
     "/api/me": { status: 200, body: ME },
     "/v1/agents": {
       status: 200,
       body: { agents: options.agents ?? [agent()], nextPageToken: null },
     },
-    "/v1/monitoring/retell/discover": {
-      status: 200,
-      body: { agents: options.account ?? [accountAgent()] },
+    "/v1/monitoring/retell/discover": () => {
+      const answering = listings[Math.min(read, listings.length - 1)] ?? [];
+      read += 1;
+      return { status: 200, body: { agents: answering } };
     },
     "/v1/monitoring/start":
       options.start ?? {
@@ -172,6 +184,7 @@ function stub(options: {
               pullProductionCalls: true,
             },
           ],
+          refused: [],
         },
       },
   });
@@ -254,9 +267,10 @@ describe("the Retell path", () => {
 
     // The chat connection's retellAgentId prefills the binding, so the row is
     // already chosen before anybody touches it.
-    expect(
-      await screen.findByRole("button", { name: "This is “Front desk”" }),
-    ).toBeDefined();
+    const bound = await screen.findByRole("radio", {
+      name: "“Front desk” is Front desk from Retell",
+    });
+    expect(bound.getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Also watch Billing" }));
     fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
@@ -269,6 +283,56 @@ describe("the Retell path", () => {
         { platformAgentId: "agent_voice_1", agentId: "agt_1" },
         { platformAgentId: "agent_voice_2", name: "Billing" },
       ],
+    });
+  });
+
+  /**
+   * **A picked agent that is not bound to a Retell row would be duplicated.**
+   *
+   * Sending the ticks without an agent id lets the server resolve them by
+   * platform id alone, and a second agent named after the Retell agent
+   * appears beside the one already picked. The page refuses to send anything
+   * until the question is answered.
+   */
+  it("will not commit a picked agent that names no Retell agent", async () => {
+    const { seen } = stub({
+      // No chat connection, so nothing prefills, and the agent holds no
+      // platform binding of its own yet.
+      agents: [agent({ connections: [] })],
+      account: [accountAgent()],
+    });
+    render(<StartMonitoringPage />);
+
+    fireEvent.change(await screen.findByLabelText("Agent"), {
+      target: { value: "agt_1" },
+    });
+    await listTheAccount();
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Also watch Front desk from Retell",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+
+    expect(
+      await screen.findByText(/Choose which Retell agent “Front desk” is/),
+    ).toBeDefined();
+    expect(sent(seen, "/v1/monitoring/start")).toBeUndefined();
+
+    // Answer it, and the same press commits the binding rather than a copy.
+    fireEvent.click(
+      screen.getByRole("radio", {
+        name: "“Front desk” is Front desk from Retell",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+
+    await screen.findByText("Egma is pulling production calls");
+    expect(sent(seen, "/v1/monitoring/start")).toEqual({
+      agentPlatform: "retell",
+      apiKey: RETELL_KEY,
+      watch: [{ platformAgentId: "agent_voice_1", agentId: "agt_1" }],
     });
   });
 
@@ -287,6 +351,7 @@ describe("the Retell path", () => {
               pullProductionCalls: true,
             },
           ],
+          refused: [],
         },
       },
     });
@@ -312,17 +377,106 @@ describe("the Retell path", () => {
   });
 
   /**
-   * The rule is the database's — one switched-on agent per (project, platform,
-   * platform agent id) — and the sentence that explains it is the server's.
+   * **A partial commit is two facts, and both are shown.**
+   *
+   * Showing only the refusal would leave a switch on that nothing on screen
+   * mentions — which is exactly what makes somebody press the button again.
    */
-  it("shows the one-switched-on-agent refusal in the server's own words", async () => {
-    const refusal =
-      "One Egma agent watches one Retell agent, and something in this " +
-      "project already watches agent_voice_1 (watched by “Billing desk”). " +
-      "Turn that agent's switch off first, or start monitoring from it instead.";
+  it("shows what started beside what did not, in the server's own words", async () => {
+    const contested =
+      "agent_voice_2 is already watched by “Billing desk”. One Egma agent " +
+      "watches one Retell agent, so turn that agent's switch off first, or " +
+      "start monitoring from it instead.";
+    const { seen } = stub({
+      account: [
+        [
+          accountAgent(),
+          accountAgent({ id: "agent_voice_2", name: "Billing" }),
+        ],
+        // What the account reads as after the commit: the started one is
+        // watched, and the contested one is unchanged.
+        [
+          accountAgent({
+            registeredAgentId: "agt_1",
+            registeredAgentName: "Front desk from Retell",
+            pullProductionCalls: true,
+          }),
+          accountAgent({ id: "agent_voice_2", name: "Billing" }),
+        ],
+      ],
+      start: {
+        status: 200,
+        body: {
+          watching: [
+            {
+              agentId: "agt_1",
+              agentName: "Front desk from Retell",
+              platformAgentId: "agent_voice_1",
+              created: true,
+              pullProductionCalls: true,
+            },
+          ],
+          refused: [
+            {
+              platformAgentId: "agent_voice_2",
+              reason: "contested",
+              message: contested,
+            },
+          ],
+        },
+      },
+    });
+    render(<StartMonitoringPage />);
+    await listTheAccount();
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Also watch Front desk from Retell",
+      }),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Also watch Billing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+
+    // Both halves of the answer, each naming what it is about.
+    expect(
+      await screen.findByRole("heading", {
+        name: "Egma is pulling production calls",
+      }),
+    ).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Not started" })).toBeDefined();
+    expect(screen.getByText(contested)).toBeDefined();
+
+    // The account is read again, so the started one is a fact rather than a
+    // tick, and pressing again cannot start it a second time.
+    await screen.findByText("Watching");
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Also watch Front desk from Retell",
+      }),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start monitoring" }));
+    await screen.findByRole("heading", { name: "Not started" });
+    const commits = seen.filter(
+      (one) => one.path === "/v1/monitoring/start" && one.method === "POST",
+    );
+    expect(
+      commits.map((one) => (one.body as { watch: unknown[] }).watch),
+    ).toEqual([
+      [
+        { platformAgentId: "agent_voice_1", name: "Front desk from Retell" },
+        { platformAgentId: "agent_voice_2", name: "Billing" },
+      ],
+      // The second press sends only what is still unstarted.
+      [{ platformAgentId: "agent_voice_2", name: "Billing" }],
+    ]);
+  });
+
+  it("relays a whole-request refusal without claiming anything started", async () => {
+    const refusal = "Enter a Retell API key.";
     stub({
       account: [accountAgent()],
-      start: { status: 409, body: { error: "conflict", message: refusal } },
+      start: { status: 422, body: { error: "unprocessable", message: refusal } },
     });
     render(<StartMonitoringPage />);
     await listTheAccount();

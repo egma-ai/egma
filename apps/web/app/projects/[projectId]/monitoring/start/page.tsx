@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +28,7 @@ import {
   platformAgentIdIn,
   platformOfConnectionType,
   type RetellAgentChoice,
-  type StartedMonitoring,
+  type StartOutcome,
 } from "../../../../../lib/monitoring.ts";
 import {
   platformAnswer,
@@ -118,6 +120,13 @@ const COPY = {
   listedLead:
     "Choose which one this agent is. Tick any others you want Egma to watch — ticking one Egma does not know registers it.",
   which: (name: string) => `Which Retell agent is “${name}”?`,
+  isThis: (name: string) => `This is “${name}”`,
+  pairing: (agentName: string, retellName: string) =>
+    `“${agentName}” is ${retellName}`,
+  bindFirst: (name: string) =>
+    `Choose which Retell agent “${name}” is, then start monitoring. Without ` +
+    "that, Egma would register a second agent for the same Retell agent.",
+  allWatched: "Egma already pulls every voice agent on this Retell account.",
   alsoWatch: "Also watch",
   watching: "Watching",
   registered: (name: string) => `In Egma as “${name}”`,
@@ -125,6 +134,10 @@ const COPY = {
   start: "Start monitoring",
   starting: "Starting…",
   started: "Egma is pulling production calls",
+  registeredNow: "registered now",
+  notStarted: "Not started",
+  notStartedLead:
+    "These stayed as they were. Nothing about them changed.",
   startedLead:
     "The last 30 days are being imported now, and new calls arrive within a minute of ending.",
   openMonitoring: "Open Monitoring",
@@ -321,6 +334,13 @@ function Picker({
         <LiveKitInstructions projectId={projectId} />
       ) : (
         <RetellPath
+          /*
+           * Keyed by the agent it is about. Everything inside — the pasted
+           * key, the account listing, the chosen binding — was decided for
+           * one agent, and carrying it across to another would commit a
+           * binding somebody chose for a different agent.
+           */
+          key={agent?.id ?? FROM_THE_ACCOUNT}
           projectId={projectId}
           agent={agent}
           prefilled={prefilled}
@@ -336,6 +356,12 @@ function Picker({
  * Everything about the account is asked for with the key that was just typed
  * and nothing is stored until the commit, so a person who changes their mind
  * after listing has changed nothing anywhere.
+ *
+ * **The commit is per tick and the answer says so.** One tick can lose the
+ * one-switched-on-agent rule while the ticks beside it start, so what comes
+ * back is two lists — what started and what did not — and both are shown. The
+ * account listing is then read again, so an agent that started reads as
+ * *Watching* and cannot be ticked a second time.
  */
 function RetellPath({
   projectId,
@@ -352,9 +378,7 @@ function RetellPath({
   const [bound, setBound] = useState<string | null>(null);
   const [ticked, setTicked] = useState<readonly string[]>([]);
   const [starting, setStarting] = useState(false);
-  const [started, setStarted] = useState<readonly StartedMonitoring[] | null>(
-    null,
-  );
+  const [outcome, setOutcome] = useState<StartOutcome | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -367,53 +391,78 @@ function RetellPath({
     return prefilled ?? null;
   }, [bound, agent, prefilled]);
 
-  async function list(): Promise<void> {
-    if (listing || apiKey.trim() === "") return;
-    setListing(true);
-    setRefused(null);
-    setProblem(null);
-    setStarted(null);
-
+  /**
+   * Read the account, and settle the ticks from what came back.
+   *
+   * `keep` is what a commit could not start: still wanted, still ticked, and
+   * the person does not have to find it again. Everything that did start is a
+   * fact rather than a tick, so it cannot be sent a second time.
+   */
+  async function readAccount(
+    quiet: boolean,
+    keep: readonly string[] = [],
+  ): Promise<readonly RetellAgentChoice[] | null> {
+    if (!quiet) setListing(true);
     const answer = await platformAnswer(
       discoverRetellVoiceAgents(
         { projectId, apiKey: apiKey.trim() },
         { client: platformClient },
       ),
     );
-    setListing(false);
+    if (!quiet) setListing(false);
 
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
-      return;
+      return null;
     }
     if (answer.status !== "ready") {
       setRefused(answer.refusal);
       setListed(null);
-      return;
+      return null;
     }
     setListed(answer.value.agents);
-    // Everything already switched on stays on screen as ticked and fixed:
-    // it is a fact rather than a choice, and the commit never sends it.
+    // Everything already switched on stays on screen as ticked and fixed: it
+    // is a fact rather than a choice, and the commit never sends it again.
     setTicked(
       answer.value.agents
-        .filter((one) => one.pullProductionCalls)
+        .filter((one) => one.pullProductionCalls || keep.includes(one.id))
         .map((one) => one.id),
     );
+    return answer.value.agents;
+  }
+
+  async function list(): Promise<void> {
+    if (listing || apiKey.trim() === "") return;
+    setRefused(null);
+    setProblem(null);
+    setOutcome(null);
+    await readAccount(false);
   }
 
   async function commit(): Promise<void> {
     if (starting || listed === null) return;
 
+    /*
+     * **A picked agent has to be bound before anything is committed.** Left
+     * unanswered, the ticks would go without an agent id, the server would
+     * resolve them by platform id alone, and a second agent named after the
+     * Retell agent would appear beside the one already picked — a silent
+     * duplicate of the same thing.
+     */
+    if (agent !== undefined && binding === null) {
+      setProblem(COPY.bindFirst(agent.name));
+      return;
+    }
+
     const watch = [
-      ...(binding === null
+      ...(binding === null || alreadyWatching(listed, binding)
         ? []
         : [
             {
               platformAgentId: binding,
-              ...(agent === undefined ? {} : { agentId: agent.id }),
               ...(agent === undefined
                 ? { name: nameOf(listed, binding) }
-                : {}),
+                : { agentId: agent.id }),
             },
           ]),
       ...ticked
@@ -442,20 +491,29 @@ function RetellPath({
         { client: platformClient },
       ),
     );
-    setStarting(false);
 
     if (answer.status === "signed-out") {
       window.location.replace("/sign-in");
       return;
     }
     if (answer.status !== "ready") {
-      // Never silent, and never paraphrased: the one-switched-on-agent rule
-      // refuses in the server's own words, which name the agent already
-      // watching the Retell agent that was ticked.
+      setStarting(false);
       setRefused(answer.refusal);
       return;
     }
-    setStarted(answer.value.watching);
+
+    setOutcome(answer.value);
+    /*
+     * Read the account again before the button comes back. What started now
+     * reads as *Watching*, so it is neither shown as a choice nor sent a
+     * second time — which is what makes pressing again harmless rather than a
+     * repeat of work already done.
+     */
+    await readAccount(
+      true,
+      answer.value.refused.map((one) => one.platformAgentId),
+    );
+    setStarting(false);
   }
 
   return (
@@ -472,7 +530,7 @@ function RetellPath({
             onChange={(event) => {
               setApiKey(event.target.value);
               setListed(null);
-              setStarted(null);
+              setOutcome(null);
             }}
           />
         </Field>
@@ -486,36 +544,51 @@ function RetellPath({
         </FormActions>
       </Form>
 
-      {started !== null ? (
-        <Started projectId={projectId} watching={started} />
-      ) : listed === null ? null : listed.length === 0 ? (
+      {outcome === null ? null : (
+        <Outcome projectId={projectId} outcome={outcome} />
+      )}
+
+      {listed === null ? null : listed.length === 0 ? (
         <Empty title={COPY.noAgents} lead={COPY.noAgentsLead} />
       ) : (
         <Section title={COPY.listed} lead={COPY.listedLead}>
-          <ul className="m-0 flex list-none flex-col gap-3 p-0">
-            {listed.map((one) => (
-              <AccountAgent
-                key={one.id}
-                choice={one}
-                agentName={agent?.name}
-                bound={binding === one.id}
-                ticked={ticked.includes(one.id)}
-                onBind={() => setBound(one.id)}
-                onTick={(next) =>
-                  setTicked(
-                    next
-                      ? [...ticked, one.id]
-                      : ticked.filter((id) => id !== one.id),
-                  )
-                }
-              />
-            ))}
-          </ul>
+          <RadioGroup
+            value={binding ?? ""}
+            aria-label={agent === undefined ? COPY.listed : COPY.which(agent.name)}
+            onValueChange={(next) => {
+              setBound(next);
+              if (problem !== null) setProblem(null);
+            }}
+          >
+            <ul className="m-0 flex list-none flex-col gap-3 p-0">
+              {listed.map((one) => (
+                <AccountAgent
+                  key={one.id}
+                  choice={one}
+                  agentName={agent?.name}
+                  bound={binding === one.id}
+                  ticked={ticked.includes(one.id)}
+                  onTick={(next) =>
+                    setTicked(
+                      next
+                        ? [...ticked, one.id]
+                        : ticked.filter((id) => id !== one.id),
+                    )
+                  }
+                />
+              ))}
+            </ul>
+          </RadioGroup>
 
           {problem === null ? null : <Problem>{problem}</Problem>}
 
           <FormActions>
-            <Button type="button" disabled={starting} onClick={() => void commit()}>
+            <Button
+              type="button"
+              disabled={starting || everyOneWatched(listed)}
+              why={everyOneWatched(listed) ? COPY.allWatched : undefined}
+              onClick={() => void commit()}
+            >
               {starting ? COPY.starting : COPY.start}
             </Button>
             <Button asChild variant="secondary">
@@ -547,6 +620,11 @@ function alreadyWatching(
   );
 }
 
+/** Nothing left to start, because every agent on the account is watched. */
+function everyOneWatched(listed: readonly RetellAgentChoice[]): boolean {
+  return listed.every((one) => one.pullProductionCalls);
+}
+
 /**
  * One agent on the Retell account.
  *
@@ -560,20 +638,20 @@ function AccountAgent({
   agentName,
   bound,
   ticked,
-  onBind,
   onTick,
 }: {
   readonly choice: RetellAgentChoice;
   readonly agentName: string | undefined;
   readonly bound: boolean;
   readonly ticked: boolean;
-  readonly onBind: () => void;
   readonly onTick: (next: boolean) => void;
 }) {
   const said =
     choice.registeredAgentName === null
       ? COPY.unregistered
       : COPY.registered(choice.registeredAgentName);
+  const tickId = `watch-${choice.id}`;
+  const bindId = `bind-${choice.id}`;
 
   return (
     <li
@@ -594,61 +672,104 @@ function AccountAgent({
         {choice.pullProductionCalls ? (
           <span className="text-sm text-muted-foreground">{COPY.watching}</span>
         ) : (
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            {COPY.alsoWatch}
+          <div className="flex min-h-(--tap-target) items-center gap-2">
+            <Label htmlFor={tickId}>{COPY.alsoWatch}</Label>
             <Checkbox
+              id={tickId}
               checked={ticked}
               aria-label={`${COPY.alsoWatch} ${choice.name}`}
               onChange={(event) => onTick(event.target.checked)}
             />
-          </label>
+          </div>
         )}
         {agentName === undefined || choice.pullProductionCalls ? null : (
-          <Button
-            type="button"
-            variant="secondary"
-            aria-pressed={bound}
-            onClick={onBind}
-          >
-            {bound ? `This is “${agentName}”` : COPY.which(agentName)}
-          </Button>
+          <div className="flex min-h-(--tap-target) items-center gap-2">
+            <Label htmlFor={bindId}>{COPY.isThis(agentName)}</Label>
+            {/*
+             * Every row's visible label reads the same words, because in the
+             * row they mean this row. Heard out of that context they would be
+             * one name for a whole group of choices, so the announced name
+             * carries both halves of the pairing.
+             */}
+            <RadioGroupItem
+              id={bindId}
+              value={choice.id}
+              aria-label={COPY.pairing(agentName, choice.name)}
+            />
+          </div>
         )}
       </div>
     </li>
   );
 }
 
-/** What the commit did, said as switches rather than as a saved object. */
-function Started({
+/**
+ * What the commit turned out to be, tick by tick.
+ *
+ * **Both lists are shown, always.** A commit that started three agents and
+ * lost the fourth is two facts, and showing only the refusal would leave three
+ * switches on that nothing on screen mentions — the exact thing that makes
+ * somebody press the button again.
+ */
+function Outcome({
   projectId,
-  watching,
+  outcome,
 }: {
   readonly projectId: string;
-  readonly watching: readonly StartedMonitoring[];
+  readonly outcome: StartOutcome;
 }) {
   return (
-    <Section title={COPY.started} lead={COPY.startedLead}>
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {watching.map((one) => (
-          <li key={one.agentId} className="text-base text-foreground">
-            {one.agentName}
-            <span className="ml-2 font-mono text-sm text-muted-foreground">
-              {one.platformAgentId}
-            </span>
-            {one.created ? (
-              <span className="ml-2 text-sm text-muted-foreground">
-                registered now
-              </span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <FormActions>
-        <Button asChild>
-          <Link href={transcriptsPath(projectId)}>{COPY.openMonitoring}</Link>
-        </Button>
-      </FormActions>
-    </Section>
+    <>
+      {outcome.watching.length === 0 ? null : (
+        <Section title={COPY.started} lead={COPY.startedLead}>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {outcome.watching.map((one) => (
+              <li key={one.agentId} className="text-base text-foreground">
+                {one.agentName}
+                <span className="ml-2 font-mono text-sm text-muted-foreground">
+                  {one.platformAgentId}
+                </span>
+                {one.created ? (
+                  <span className="ml-2 text-sm text-muted-foreground">
+                    {COPY.registeredNow}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <FormActions>
+            <Button asChild>
+              <Link href={transcriptsPath(projectId)}>{COPY.openMonitoring}</Link>
+            </Button>
+          </FormActions>
+        </Section>
+      )}
+
+      {outcome.refused.length === 0 ? null : (
+        <Section title={COPY.notStarted} lead={COPY.notStartedLead}>
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
+            {outcome.refused.map((one) => (
+              <li
+                key={one.platformAgentId}
+                className="rounded-card border border-border bg-surface p-4"
+              >
+                <p className="m-0 font-mono text-sm text-muted-foreground [overflow-wrap:anywhere]">
+                  {one.platformAgentId}
+                </p>
+                {/*
+                 * The server's own sentence, relayed word for word. The rule
+                 * it explains is the database's, and paraphrasing it here
+                 * would be this page inventing a rule it does not own.
+                 */}
+                <p className="mt-1 mb-0 max-w-[72ch] text-base leading-(--line-normal) text-foreground">
+                  {one.message}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+    </>
   );
 }
 
@@ -691,10 +812,14 @@ function LiveKitInstructions({ projectId }: { readonly projectId: string }) {
           title="Call monitor_livekit before AgentSession.start"
           lead="Before the session starts, so the first turn is recorded with everything after it."
           code={
-            "from egma import monitor_livekit\n\n" +
+            "from egma import monitor_livekit\n" +
+            "from livekit import agents\n" +
+            "from livekit.agents import Agent, AgentSession\n\n" +
             "async def entrypoint(ctx: agents.JobContext) -> None:\n" +
             "    monitor_livekit(ctx)\n" +
-            "    await ctx.connect()\n" +
+            "    await ctx.connect()\n\n" +
+            "    agent = Agent(instructions=INSTRUCTIONS)\n" +
+            "    session = AgentSession(stt=..., llm=..., tts=...)\n" +
             "    await session.start(agent=agent, room=ctx.room)"
           }
         />

@@ -369,6 +369,39 @@ function ProductionCalls({
 
   const on = agent.pullProductionCalls;
 
+  /*
+   * **A LiveKit Agents agent has no switch, here or anywhere.** Push is
+   * observed rather than declared: the agent's own process sends its spans to
+   * the OTLP door with the project key, and there is no server-side off for
+   * it. Drawing "Pull production calls: Off" would offer a control that can
+   * never be turned on for this agent and would read as a fault.
+   */
+  if (agent.agentPlatform === "livekit_agents") {
+    return (
+      <Section
+        title="Production calls"
+        lead="This agent's own process sends its spans to Egma. There is no switch to turn on."
+        action={
+          <Button asChild variant="secondary">
+            <Link href={startMonitoringPath(projectId)}>
+              Read the setup steps
+            </Link>
+          </Button>
+        }
+      >
+        <Facts
+          facts={[
+            { label: "Platform", value: "LiveKit Agents" },
+            {
+              label: "How evidence arrives",
+              value: "Pushed by the agent, using this project's API key.",
+            },
+          ]}
+        />
+      </Section>
+    );
+  }
+
   async function stop(): Promise<void> {
     if (stopping) return;
     setRefused(null);

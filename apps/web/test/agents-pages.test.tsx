@@ -906,6 +906,34 @@ describe("an agent's production calls", () => {
     expect(screen.queryByRole("button", { name: "Stop pulling" })).toBeNull();
   });
 
+  /**
+   * Push is observed, never declared: the agent's own process sends its spans
+   * to the OTLP door with the project key, and there is no server-side off for
+   * it. A switch here could never be turned on, and would read as a fault.
+   */
+  it("offers no switch at all for an agent that pushes its own spans", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/agents/agt_1": {
+        status: 200,
+        body: {
+          agent: { ...AGENT, agentPlatform: "livekit_agents" },
+          connections: [],
+        },
+      },
+    });
+    render(<AgentDetailPage />);
+
+    await screen.findByRole("heading", { name: "Production calls" });
+    expect(screen.getByText("LiveKit Agents")).toBeDefined();
+    expect(screen.queryByText("Off")).toBeNull();
+    expect(screen.queryByText("Pull production calls")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop pulling" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Read the setup steps" }).getAttribute("href"),
+    ).toBe("/projects/prj_1/monitoring/start");
+  });
+
   it("shows the binding and the key hint, and never the key", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
