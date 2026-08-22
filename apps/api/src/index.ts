@@ -18,19 +18,49 @@ import { buildApi } from "./server.ts";
 
 const config = loadConfig();
 
-// Migrations apply on boot, to both stores. There is no separate migration
-// container and no manual step, and two instances starting at once cannot both
-// apply to Postgres. A file that fails throws here, before anything is served:
+// Postgres migrations apply on boot and are a hard gate. There is no separate
+// migration container and no manual step, and two instances starting at once
+// cannot both apply. A file that fails throws here, before anything is served:
 // an instance running against a schema it could not finish applying would look
-// healthy until the first read of a column nobody created.
+// healthy until the first read of a column nobody created. Authentication and
+// acceptance both depend on this store, so nothing can usefully start without
+// it.
 const migrations = await runMigrations(config.databaseUrl);
-const traceMigrations = await runClickHouseMigrations(config.clickhouseUrl);
 
 connect({
   databaseUrl: config.databaseUrl,
   encryptionKey: config.encryptionKey,
 });
 connectClickHouse({ clickhouseUrl: config.clickhouseUrl });
+
+/**
+ * The trace store's own schema, applied in the background and never fatal.
+ *
+ * **This is the failure the durable boundary exists to remove.** A slow
+ * ClickHouse Cloud wake used to throw out of this module, so the process never
+ * reached `listen()` — and an egma that could have accepted evidence into
+ * object storage and drained it later instead accepted nothing, and took the
+ * hosted address down with it. Evidence is safe when it is durable in the
+ * bucket; ClickHouse is what happens next, and "next" is allowed to be late.
+ *
+ * So it runs beside the server rather than in front of it, its state is a
+ * reported component, and the drainer refuses to drain until it finishes —
+ * writing a segment into a schema still being built is how a good object
+ * becomes a retained defect for a reason that had nothing to do with it.
+ *
+ * The `ingest` role skips it: that process never writes ClickHouse, and a role
+ * that only accepts evidence has no business applying somebody else's schema.
+ */
+type TraceStoreSchema =
+  | { readonly state: "skipped" }
+  | { readonly state: "migrating" }
+  | { readonly state: "ready"; readonly applied: readonly string[] }
+  | { readonly state: "failed" };
+
+let traceSchema: TraceStoreSchema =
+  config.ingestion.role === "ingest"
+    ? { state: "skipped" }
+    : { state: "migrating" };
 
 // The carrier route this environment offers, written when the platform does
 // not already hold one. This is how an automated deployment configures phone
@@ -80,7 +110,35 @@ const shelved = await seedGraderLibrary();
 // keeps it off across every restart.
 const judging = await seedRunningGraders();
 
-const { app } = buildApi({ config });
+const { app } = buildApi({
+  config,
+  traceStoreReady: () => traceSchema.state === "ready",
+});
+
+if (traceSchema.state === "migrating") {
+  void (async () => {
+    try {
+      const applied = await runClickHouseMigrations(config.clickhouseUrl);
+      traceSchema = { state: "ready", applied: applied.applied };
+      app.log.info(
+        { traceStore: applied.applied },
+        applied.applied.length === 0
+          ? "trace-store schema already up to date"
+          : "trace-store schema migrations applied",
+      );
+    } catch (cause) {
+      // Reported and retried by the next start, never thrown: the acceptance
+      // path is already serving and taking it down would lose the evidence
+      // this arrangement exists to keep.
+      traceSchema = { state: "failed" };
+      app.log.error(
+        { err: cause },
+        "the trace-store schema could not be applied; draining is held until it is",
+      );
+    }
+  })();
+}
+
 if (seeded.length > 0) {
   // The names, never the values and never their hints: what is worth saying is
   // that this platform just gained settings it did not have, and which ones.
@@ -123,8 +181,8 @@ if (judging.length > 0) {
   );
 }
 app.log.info(
-  { applied: migrations.applied, traceStore: traceMigrations.applied },
-  migrations.applied.length === 0 && traceMigrations.applied.length === 0
+  { applied: migrations.applied, role: config.ingestion.role },
+  migrations.applied.length === 0
     ? "schema already up to date"
     : "schema migrations applied",
 );

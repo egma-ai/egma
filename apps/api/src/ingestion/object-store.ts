@@ -102,6 +102,18 @@ export type PendingObjectStore = {
   /** Every pending object, following every listing page. */
   list(): Promise<readonly PendingObject[]>;
   delete(key: string): Promise<void>;
+  /**
+   * Answers whether this process can still reach the bucket, and refuses
+   * otherwise.
+   *
+   * One bounded listing rather than the full walk `list` does: it proves the
+   * address, the credential and the prefix permission, which is everything the
+   * acceptance promise rests on, and it costs the same whether the backlog is
+   * empty or enormous. A health check that walked the whole prefix every few
+   * seconds would be most expensive exactly when a deployment is least able to
+   * afford it.
+   */
+  reachable(): Promise<void>;
 };
 
 /** What a store answers when a conditional create found an object already there. */
@@ -229,6 +241,16 @@ export function pendingObjectStore(
         continuationToken = page.IsTruncated === true ? page.NextContinuationToken : undefined;
       } while (continuationToken !== undefined);
       return found;
+    },
+
+    async reachable() {
+      await client.send(
+        new ListObjectsV2Command({
+          Bucket: store.bucket,
+          Prefix: PENDING_PREFIX,
+          MaxKeys: 1,
+        }),
+      );
     },
 
     async delete(key) {

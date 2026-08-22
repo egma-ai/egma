@@ -4,6 +4,7 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   listMonitoringSetups,
+  openDrainOwnership,
   type AuthContext,
 } from "@egma/db";
 import { gzipSync } from "node:zlib";
@@ -86,6 +87,7 @@ type Faults = {
 function faulting(real: PendingObjectStore, faults: Faults): PendingObjectStore {
   return {
     create: (segment) => real.create(segment),
+    reachable: () => real.reachable(),
     async read(key) {
       if (faults.failReadOf === key) {
         faults.failReadOf = undefined;
@@ -605,6 +607,96 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       expect(await drainer.drainNow()).toBe(0);
     } finally {
       faults.failListing = false;
+    }
+  });
+
+  /**
+   * Two `all` instances is the ordinary hosted shape, and only one of them may
+   * walk the prefix. Two that did could each probe the trace store, each find
+   * one immutable identity absent because the other's write had not landed
+   * yet, and each then write a different account of it — which is precisely
+   * what the integrity rule exists to refuse and cannot refuse from behind.
+   *
+   * The one that does not hold the claim is not broken. It keeps its scan
+   * loop, drains nothing, and takes over the moment the holder lets go, which
+   * is what makes restarting the drainer an operation nobody has to think
+   * about.
+   */
+  it("lets exactly one of two drainers walk the prefix, and hands over when it stops", async () => {
+    // Taken before either drainer exists, so which one is the holder is this
+    // test's decision rather than which startup scan asked first.
+    const holderClaim = await openDrainOwnership();
+    expect(await holderClaim.take()).toBe(true);
+    const standbyClaim = await openDrainOwnership();
+    expect(await standbyClaim.take()).toBe(false);
+
+    const holder = startDrainer({
+      store: pendingObjectStore(running.ingestStore),
+      log: { warn: () => undefined, error: () => undefined },
+      scanIntervalMilliseconds: 60 * 60_000,
+      ownership: holderClaim,
+    });
+    const standby = startDrainer({
+      store: pendingObjectStore(running.ingestStore),
+      log: { warn: () => undefined, error: () => undefined },
+      scanIntervalMilliseconds: 60 * 60_000,
+      ownership: standbyClaim,
+    });
+
+    try {
+      // Both startup scans settle before anything is put in the bucket, so
+      // what each drains below is a pass this test asked for.
+      await holder.drainNow();
+      await standby.drainNow();
+
+      const traceId = "ee00000000000000000000000000ee00";
+      await accepted(aConversation(traceId));
+      expect(await standby.drainNow()).toBe(0);
+      expect(standby.standingBy()).toBe("standby");
+      expect(await holder.drainNow()).toBe(1);
+      expect(holder.standingBy()).toBeUndefined();
+
+      // The holder stops. The other one asks again on its next pass, gets it,
+      // and drains what arrives after that without anybody intervening.
+      await holderClaim.release();
+      const nextTrace = "ff00000000000000000000000000ff00";
+      await accepted(aConversation(nextTrace));
+      expect(await standby.drainNow()).toBe(1);
+      expect(standby.standingBy()).toBeUndefined();
+    } finally {
+      await standby.stop();
+      await holder.stop();
+      await holderClaim.release();
+      await standbyClaim.release();
+    }
+  });
+
+  /**
+   * The trace store's schema is applied beside the server now rather than in
+   * front of it, so the drainer has to wait for it. Writing a segment into a
+   * half-built schema is how a perfectly good object becomes a retained defect
+   * for a reason that had nothing to do with it.
+   */
+  it("drains nothing while the trace store's schema is still being applied", async () => {
+    const traceId = "1100000000000000000000000000dd00";
+    await accepted(aConversation(traceId));
+
+    let ready = false;
+    const waiting = startDrainer({
+      store: pendingObjectStore(running.ingestStore),
+      log: { warn: () => undefined, error: () => undefined },
+      scanIntervalMilliseconds: 60 * 60_000,
+      traceStoreReady: () => ready,
+    });
+    try {
+      expect(await waiting.drainNow()).toBe(0);
+      expect(waiting.standingBy()).toBe("trace_store_migrating");
+
+      ready = true;
+      expect(await waiting.drainNow()).toBe(1);
+      expect(waiting.standingBy()).toBeUndefined();
+    } finally {
+      await waiting.stop();
     }
   });
 });

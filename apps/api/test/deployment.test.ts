@@ -365,6 +365,47 @@ describe("the API's deployment story", () => {
     }
   });
 
+  /**
+   * One image, three roles, and today exactly one of them is running.
+   *
+   * The point of the setting is that splitting acceptance from draining later
+   * is a value in an environment file rather than a second image and a second
+   * protocol. The point of the default is that this release does not split
+   * anything: the shipped stack runs `all`, adds no container, and adds no
+   * broker — which is the promise a reader of the compose file should be able
+   * to check without reading any code.
+   */
+  it("ships one image running the whole path, with no container or broker added", () => {
+    const api = serviceBlock("api");
+    expect(api).toContain("EGMA_ROLE: ${EGMA_ROLE:-all}");
+
+    // The exact list, so that adding a container fails here and has to be
+    // argued for rather than noticed later. `livekit-redis` is LiveKit's own
+    // dependency and predates this effort; nothing here is an ingestion broker
+    // or a second half of the API.
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    const services = compose
+      .slice(compose.indexOf("\nservices:"), compose.indexOf("\nvolumes:"))
+      .matchAll(/^ {2}([a-z][a-z0-9-]*):$/gmu);
+    expect([...services].map((match) => match[1])).toEqual([
+      "postgres",
+      "clickhouse",
+      "minio",
+      "minio-bucket",
+      "api",
+      "web",
+      "simulator",
+      "grader",
+      "livekit-redis",
+      "livekit",
+      "livekit-sip",
+    ]);
+
+    // And the api service builds one image rather than selecting a second one
+    // for a second role.
+    expect(api).toMatch(/build:|image:/u);
+  });
+
   it("never passes the Twilio Auth Token to any container", () => {
     // The one credential in this whole effort that no running container may
     // hold. It opens the entire account — every number, every recording, every

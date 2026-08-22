@@ -105,7 +105,10 @@ const WORK_DISPATCHING = [
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
   "claimDueRetellMonitoringAgent",
-  "sweepStaleProductionClaims",
+  // Which process, out of however many are running, drains the pending prefix.
+  // One claim per deployment rather than one per customer: the prefix holds
+  // every project's evidence, so there is no customer to name.
+  "openDrainOwnership",
 ];
 
 /**
@@ -206,7 +209,6 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failRetellIngestionFailureReplay",
   "failRetellMonitoringTarget",
   "finishGradingJob",
   "finishRetellMonitoringScan",
@@ -284,21 +286,22 @@ const CONTEXT_REQUIRING = [
   // merge is monotone, because the instant it is given comes from the evidence
   // and a replay therefore carries an older one than the row already holds.
   "recordProductionEvidenceReceived",
-  "recordRetellIngestionFailure",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger chooses one writer for a Retell call. Poll progress belongs to
-  // the selected Monitoring agent, never to a simulation connection.
+  // Poll progress belongs to the selected Monitoring agent, never to a
+  // simulation connection. A call that lands writes nothing here at all; only
+  // one that did not leaves a short-lived retry row behind it.
   "checkpointRetellMonitoringPage",
-  "claimRetellIngestionFailureReplay",
-  "claimProductionTrace",
-  "finishProductionTrace",
+  "deleteRetellCallRetry",
+  "dueRetellCallRetries",
+  "recordRetellCallAttempt",
+  "sweepExpiredRetellCallMarkers",
+  "transientRetellCallState",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
   "recoverRetellMonitoringSetup",
-  "releaseRetellIngestionFailureReplay",
   "releaseRetellMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
@@ -313,8 +316,6 @@ const CONTEXT_REQUIRING = [
   "removeMonitoringSetup",
   "renameTestSuite",
   "renewRetellMonitoringLease",
-  "retellCallIsAccountedFor",
-  "resolveRetellIngestionFailureReplay",
   "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
@@ -605,6 +606,18 @@ const THE_MONITORED_PLATFORMS = ["MONITORING_PLATFORMS"];
 const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
 
 /**
+ * The bounded budget one listed Retell call gets, and the lock that decides
+ * which process drains.
+ *
+ * The ceiling is exported for the reason every other number here is: the poller
+ * has to schedule against the same bound the table's own check enforces, and a
+ * bound written out twice is a bound that will one day disagree with itself.
+ * The lock's key is exported so an operator reading `pg_locks` can tell egma's
+ * two advisory locks apart without reading the source.
+ */
+const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
+
+/**
  * What a mock tool's answer may cost the exchange that carries it, and the two
  * pure functions that read one.
  *
@@ -734,6 +747,7 @@ describe("the data-access module's surface", () => {
         ...READ_LIMITS,
         ...THE_MONITORED_PLATFORMS,
         ...THE_GRADING_BUDGET,
+        ...THE_RETELL_BUDGET,
         ...THE_FOLD,
         ...THE_MEASURES,
         ...THE_MOCKED_WORLD,

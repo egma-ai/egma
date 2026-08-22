@@ -164,6 +164,17 @@ async function freePort(): Promise<number> {
 }
 
 /** Wait until something answers, or give up loudly rather than hang forever. */
+/**
+ * Wait until something is answering there, whatever it answers.
+ *
+ * **Answering rather than ready, deliberately.** `/health` reports write
+ * readiness now, and an instance given no ingestion bucket says `503` there
+ * for as long as it lives — truthfully, because it has nowhere to make
+ * evidence durable. Most instances here are not about ingestion and are
+ * started without one, so waiting for a `200` would be waiting for something
+ * that is never coming. What every caller actually means is *the process is
+ * up and serving*, and a reply of any kind is exactly that.
+ */
 async function answers(
   url: string,
   within: number,
@@ -176,7 +187,7 @@ async function answers(
 
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.status < 500 || response.status === 503) return;
     } catch {
       // Not up yet.
     }

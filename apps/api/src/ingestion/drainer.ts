@@ -92,7 +92,30 @@ export type DrainerOptions = {
   readonly log: IngestionLog;
   /** How often the whole pending prefix is listed. The startup scan is extra. */
   readonly scanIntervalMilliseconds: number;
+  /**
+   * The deployment's one drain claim, asked before every pass.
+   *
+   * A process that does not hold it lists nothing and writes nothing; it asks
+   * again on the next interval, so whoever is holding it can die and be
+   * replaced without anybody deciding that. A drainer given none of these owns
+   * the prefix unconditionally, which is what a suite driving one process
+   * wants and what a deployment must never rely on.
+   */
+  readonly ownership?: { take(): Promise<boolean> } | undefined;
+  /**
+   * Whether the trace store's own schema is ready, asked before every pass.
+   *
+   * ClickHouse migrations no longer gate the process — an instance that cannot
+   * reach ClickHouse still accepts evidence, which is the whole point of the
+   * durable boundary — so the drainer has to ask instead of assume. Writing a
+   * segment into a schema that is still being built is how a good object
+   * becomes a retained defect for a reason that had nothing to do with it.
+   */
+  readonly traceStoreReady?: (() => boolean) | undefined;
 };
+
+/** Why a drain pass did nothing, when it did nothing on purpose. */
+export type DrainStandby = "standby" | "trace_store_migrating";
 
 export type Drainer = {
   /**
@@ -109,6 +132,14 @@ export type Drainer = {
    * when it wants one pass to have finished rather than to have started.
    */
   drainNow(): Promise<number>;
+  /**
+   * Why this process is not draining, or `undefined` when it is.
+   *
+   * What the health surface reports as the drain component. `"standby"` is a
+   * second `all` or `drain` instance behaving exactly as intended, and is not a
+   * failure of anything.
+   */
+  standingBy(): DrainStandby | undefined;
   stop(): Promise<void>;
 };
 
@@ -132,6 +163,8 @@ type Running = {
   chain: Promise<number>;
   /** A pass that is waiting to start, so callers arriving together share it. */
   waiting: Promise<number> | undefined;
+  /** Why the last pass did nothing on purpose, for the health surface. */
+  standby: DrainStandby | undefined;
   stopped: boolean;
 };
 
@@ -431,6 +464,21 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
 async function pass(held: Running): Promise<number> {
   const { log, store } = held.options;
 
+  // Before the listing, because a process that is not the drainer should not
+  // be reading the prefix either: standing by costs one Postgres round trip
+  // and nothing else, and it is the ordinary state of a second instance.
+  if (held.options.ownership !== undefined) {
+    if (!(await held.options.ownership.take())) {
+      held.standby = "standby";
+      return 0;
+    }
+  }
+  if (held.options.traceStoreReady?.() === false) {
+    held.standby = "trace_store_migrating";
+    return 0;
+  }
+  held.standby = undefined;
+
   let keys: string[];
   try {
     keys = (await store.list()).map((object) => object.key).sort();
@@ -494,6 +542,9 @@ export function startDrainer(options: DrainerOptions): Drainer {
     timer: undefined,
     chain: Promise.resolve(0),
     waiting: undefined,
+    // Until the first pass has asked, this process has not been told it is the
+    // drainer, and reporting that it is would be a guess.
+    standby: options.ownership === undefined ? undefined : "standby",
     stopped: false,
   };
 
@@ -531,6 +582,10 @@ export function startDrainer(options: DrainerOptions): Drainer {
 
     drainNow() {
       return drainNow(held);
+    },
+
+    standingBy() {
+      return held.standby;
     },
 
     async stop() {

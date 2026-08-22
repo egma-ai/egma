@@ -698,3 +698,9 @@ export {
 } from "./grading.ts";
 export type { GradingJobStatus, GradingSource } from "../schema/grading.ts";
 export type { Listening } from "../client.ts";
+
+export {
+  DRAIN_ADVISORY_LOCK,
+  openDrainOwnership,
+  type DrainOwnership,
+} from "./drain-ownership.ts";

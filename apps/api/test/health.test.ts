@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import {
   connect,
   connectClickHouse,
@@ -13,8 +17,13 @@ import {
   type Email,
 } from "../src/auth/email.ts";
 import { loadConfig } from "../src/config.ts";
+import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
 import { buildApi } from "../src/server.ts";
-import { testConfig } from "./support/api.ts";
+import { createApi, testConfig } from "./support/api.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import {
   createEmptyDatabase,
   type EmptyDatabase,
@@ -514,19 +523,33 @@ describe("the email seam", () => {
 describe("the API once it has booted", () => {
   let database: EmptyDatabase;
   let traceStore: EmptyTraceStore;
+  let storage: ObjectStorage;
+  let logDirectory: string;
   let app: ReturnType<typeof buildApi>["app"];
 
   beforeAll(async () => {
     database = await createEmptyDatabase("api_health");
     traceStore = await createEmptyTraceStore("api_health");
+    storage = await startObjectStorage("api_health");
+    logDirectory = mkdtempSync(path.join(tmpdir(), "egma-health-"));
     await runMigrations(database.url);
     connect({ databaseUrl: database.url, maxConnections: 2 });
     connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 2 });
+    const base = testConfig({
+      databaseUrl: database.url,
+      clickhouseUrl: traceStore.url,
+    });
     app = buildApi({
-      config: testConfig({
-        databaseUrl: database.url,
-        clickhouseUrl: traceStore.url,
-      }),
+      config: storage.available
+        ? {
+            ...base,
+            ingestion: {
+              ...base.ingestion,
+              store: storage.ingestStore,
+              logDirectory,
+            },
+          }
+        : base,
     }).app;
     await app.ready();
   });
@@ -535,39 +558,181 @@ describe("the API once it has booted", () => {
     await app.close();
     await disconnect();
     await disconnectClickHouse();
+    if (storage.available) storage.stop();
+    rmSync(logDirectory, { recursive: true, force: true });
     await database.drop();
     await traceStore.drop();
   });
 
   /**
-   * Both stores, because the container health check is what the web service
-   * waits on and what an operator reads. An API that answered `ok` while the
-   * trace store was unreachable would be reporting on half of egma.
+   * `/health` is write readiness: whether this process can still accept
+   * evidence and keep the promise it makes when it does. Its body still names
+   * every store, so an operator reading it sees which one is in trouble.
    */
-  it("reports healthy, having reached both stores", async () => {
+  it("reports ready, having reached everything acceptance depends on", async () => {
+    if (!storage.available) return;
     const response = await app.inject({ method: "GET", url: "/health" });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       status: "ok",
+      role: "all",
       postgres: "reachable",
       clickhouse: "reachable",
+      ingestion: "reachable",
+      localLog: "writable",
     });
   });
 
   /**
-   * Last in the file, because it takes the trace store away and does not put it
-   * back. What it proves is that the response names which store is missing:
-   * "unavailable" on its own sends an operator looking at both.
+   * The failure this whole release exists to remove. A slow or absent trace
+   * store used to answer `503` here, which took the container out of its own
+   * health check and the hosted address down with it — while the write path
+   * was perfectly able to accept evidence and drain it later.
+   *
+   * Last in the file, because it takes the trace store away and does not put
+   * it back.
    */
-  it("says which store it could not reach, rather than only that it failed", async () => {
+  it("stays ready while the trace store is unreachable, and says so", async () => {
+    if (!storage.available) return;
     await disconnectClickHouse();
 
     const response = await app.inject({ method: "GET", url: "/health" });
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toEqual({
-      status: "unavailable",
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: "ok",
       postgres: "reachable",
       clickhouse: "unreachable",
+      ingestion: "reachable",
+      localLog: "writable",
     });
+  });
+});
+
+describe("write readiness", () => {
+  let storage: ObjectStorage;
+
+  beforeAll(async () => {
+    storage = await startObjectStorage("api_write_readiness");
+    if (!storage.available) {
+      process.stderr.write(`\nskipping write readiness — ${storage.why}\n\n`);
+    }
+  });
+
+  afterAll(() => {
+    if (storage.available) storage.stop();
+  });
+
+  it("is unavailable when the ingestion object store cannot be reached", async () => {
+    if (!storage.available) return;
+    const api = await createApi("health_ingest_unreachable", {
+      ingestStore: {
+        ...storage.ingestStore,
+        // A port nothing listens on: the acceptance promise cannot be kept,
+        // and a health check that answered `ok` would be promising it.
+        endpoint: "http://127.0.0.1:1",
+      },
+      ingestionRequestTimeoutMilliseconds: 300,
+    });
+    try {
+      const response = await api.app.inject({ method: "GET", url: "/health" });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        status: "unavailable",
+        postgres: "reachable",
+        ingestion: "unreachable",
+      });
+    } finally {
+      await api.close();
+    }
+  });
+
+  it("is unavailable when the local log will take no more", async () => {
+    if (!storage.available) return;
+    const api = await createApi("health_log_full", {
+      ingestStore: storage.ingestStore,
+      // Zero records is a log that is full before anything is staged, which is
+      // the same refusal a real bound reaches and the only way to reach it
+      // without writing half a gigabyte in a suite.
+      ingestionLogMaxRecords: 0,
+    });
+    try {
+      const response = await api.app.inject({ method: "GET", url: "/health" });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        status: "unavailable",
+        postgres: "reachable",
+        ingestion: "reachable",
+        localLog: "full",
+      });
+    } finally {
+      await api.close();
+    }
+  });
+
+  it("is unavailable when Postgres has gone, whatever else is reachable", async () => {
+    if (!storage.available) return;
+    const api = await createApi("health_no_postgres", {
+      ingestStore: storage.ingestStore,
+    });
+    try {
+      await disconnect();
+      const response = await api.app.inject({ method: "GET", url: "/health" });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        status: "unavailable",
+        postgres: "unreachable",
+      });
+    } finally {
+      await api.close();
+    }
+  });
+});
+
+describe("the three roles one image serves", () => {
+  let storage: ObjectStorage;
+
+  beforeAll(async () => {
+    storage = await startObjectStorage("api_roles");
+  });
+
+  afterAll(() => {
+    if (storage.available) storage.stop();
+  });
+
+  it("refuses a role that is not one of the three, by name", () => {
+    expect(() => loadConfig({ ...enough, EGMA_ROLE: "worker" })).toThrow(
+      /EGMA_ROLE must be all, ingest or drain/,
+    );
+  });
+
+  it("runs the whole path by default, which is what every deployment runs", () => {
+    expect(loadConfig(enough).ingestion.role).toBe("all");
+  });
+
+  it("accepts each role, and lets only the accepting ones serve the door", async () => {
+    if (!storage.available) return;
+    for (const role of ["all", "ingest", "drain"] as const) {
+      const api = await createApi(`health_role_${role}`, {
+        ingestStore: storage.ingestStore,
+        role,
+      });
+      try {
+        const response = await api.app.inject({ method: "GET", url: "/health" });
+        expect(response.json(), role).toMatchObject({ role });
+        expect(response.statusCode, role).toBe(200);
+
+        const door = await api.app.inject({
+          method: "POST",
+          url: OTLP_TRACES_PATH,
+          headers: { "content-type": "application/json" },
+          payload: "{}",
+        });
+        // `drain` serves no acceptance path at all, so the door is not there
+        // rather than there and refusing.
+        expect(door.statusCode === 404, role).toBe(role === "drain");
+      } finally {
+        await api.close();
+      }
+    }
   });
 });

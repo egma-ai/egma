@@ -82,6 +82,37 @@ Choose strong random values for all four. The write credential is the store's ro
   The object store port (`9000` by default) is bound to loopback by default. That is a security decision: what answers on that port is the store's admin surface. If you need browsers on other machines to play recordings, set `EGMA_S3_BIND=0.0.0.0` and update `EGMA_BLOB_PUBLIC_URL` to the address those browsers reach — but change `EGMA_S3_SECRET_ACCESS_KEY` first.
 </Warning>
 
+### The ingestion bucket, and one limit to know about
+
+The same MinIO service holds a second bucket for production evidence. Egma
+answers a customer's trace request successfully only after the evidence is in
+that bucket, so this is the point at which Egma promises the evidence is safe.
+It is a spool rather than an archive: Egma writes the evidence to ClickHouse
+soon afterwards and then deletes the object.
+
+```bash
+# The ingestion pair — the API writes accepted evidence with it
+EGMA_S3_INGEST_ACCESS_KEY_ID=your-chosen-ingest-key-id
+EGMA_S3_INGEST_SECRET_ACCESS_KEY=your-chosen-ingest-secret
+```
+
+A separate bucket and a separate credential from recordings, on purpose: this
+pair can only write, list, read and delete inside the ingestion bucket's
+`pending/` prefix, so it can never touch a recording.
+
+<Warning>
+  **The bundled MinIO runs on one node, so its durability is your host's.** The
+  volume survives a container replacement and a restart. It does not survive the
+  loss of that host or that disk. If your production evidence must survive
+  either, point `EGMA_INGEST_ENDPOINT` at a store that is remote from the
+  machine Egma runs on — AWS S3 or any S3-compatible service with its own
+  durability promise.
+
+  `docker compose down -v` deletes the volumes, which deletes the ingestion
+  bucket and the local write-ahead log with them. Any evidence Egma had accepted
+  and not yet written to ClickHouse goes with them.
+</Warning>
+
 ### Summary of all ten required variables
 
 | Variable | What it is | How to supply |
