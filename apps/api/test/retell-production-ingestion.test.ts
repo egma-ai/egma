@@ -696,8 +696,12 @@ describe("Retell production ingestion", () => {
       clock: () => BASE,
     });
 
+    // One door for every failure now, so a contract refusal is this agent's
+    // own retry clock moving rather than an account-wide gate closing.
     expect(recorded.releases).toEqual(["provider_contract"]);
-    expect(recorded.failures).toEqual([]);
+    expect(recorded.failures.map((one) => one.kind)).toEqual([
+      "provider_contract",
+    ]);
     expect(result.stoppedBecause).toBe("provider_contract");
   });
 
@@ -1587,7 +1591,7 @@ describe("the bounded Retell retry budget", () => {
     expect(dropped[0]).toMatchObject({
       organization_id: AUTH.organizationId,
       project_id: AUTH.projectId,
-      retell_monitored_agent_id: TARGET.agentId,
+      agent_id: TARGET.agentId,
       provider_call_id: "call_that_will_not_hydrate",
       error_kind: "provider_call_not_found",
       automatic_retries: 3,
