@@ -5,6 +5,7 @@ import {
   pinnedSimulationGraders,
   readTrace,
   MAXIMUM_WINDOW_MILLISECONDS,
+  MOST_GRADING_ATTEMPTS,
   type AuthContext,
   type ExecutableGrader,
   type GradingClaim,
@@ -22,6 +23,7 @@ import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
   conversationOfSimulation,
+  evidenceIsStillArriving,
   conversationOfTrace,
   type Conversation,
 } from "./conversation.ts";
@@ -260,11 +262,28 @@ async function theSimulation(claim: GradingClaim): Promise<Resolved> {
     );
   }
 
+  const trace = await theSimulationsTrace(claim.auth, simulation);
+
+  // **Ask again rather than answer now.** A conversation whose record is not
+  // all here yet would be judged as one egma could not read, and that verdict
+  // is permanent — so the claim is declined, the job goes back, and the next
+  // attempt looks again. The budget is what makes the waiting end: on the last
+  // attempt the answer below is written from whatever did arrive, so a
+  // conversation whose evidence never comes still gets the same list of checks
+  // a reader would have seen either way, and no job is abandoned for waiting.
+  if (
+    evidenceIsStillArriving(simulation, trace) &&
+    claim.attempts < MOST_GRADING_ATTEMPTS
+  ) {
+    throw new NotGradable(
+      `simulation ${simulation.id} is complete and egma does not hold all of ` +
+        `its conversation yet, so there is nothing to judge on attempt ` +
+        `${claim.attempts} of ${MOST_GRADING_ATTEMPTS}`,
+    );
+  }
+
   return {
-    conversation: conversationOfSimulation(
-      simulation,
-      await theSimulationsTrace(claim.auth, simulation),
-    ),
+    conversation: conversationOfSimulation(simulation, trace),
     graders: await (async () => {
       const pinned = await pinnedSimulationGraders(claim.auth, simulation.id);
       if (pinned === undefined) {

@@ -167,7 +167,15 @@ const DEFAULT_LEASE_SECONDS = 120;
  * mid-judgment — and a fourth attempt at a conversation that has broken three
  * copies is a queue of one job growing forever.
  */
-const MOST_ATTEMPTS = 3;
+/**
+ * How many times one conversation is handed out before egma stops trying.
+ *
+ * Exported because the service that does the judging decides, on its own last
+ * attempt, to answer with what it can see rather than to decline again — and a
+ * bound named in two places is a bound that will one day disagree with itself,
+ * quietly, as a job abandoned where an answer was owed.
+ */
+export const MOST_GRADING_ATTEMPTS = 3;
 
 /**
  * How long a production trace has to be quiet before egma judges it without a
@@ -642,8 +650,8 @@ export type GradingClaimRequest = {
  * transaction said so, and sampling and idleness are both about traffic egma did
  * not cause.
  *
- * A job that has been claimed `MOST_ATTEMPTS` times and still is not finished is
- * `abandoned` here instead of handed out again. egma stops trying; it does not
+ * A job that has been claimed `MOST_GRADING_ATTEMPTS` times and still is not
+ * finished is `abandoned` here instead of handed out again. egma stops trying; it does not
  * say anything about the agent, which is why the word is not `failed`.
  *
  * **It takes no `AuthContext` and cannot be given one.** See the note at the top
@@ -713,7 +721,7 @@ export async function claimGradingJobs(
     // locked just above, in this same transaction, so nothing below reaches
     // further than that select already did.
     const exhausted = candidates
-      .filter((candidate) => candidate.attempts >= MOST_ATTEMPTS)
+      .filter((candidate) => candidate.attempts >= MOST_GRADING_ATTEMPTS)
       .map((candidate) => candidate.id);
     if (exhausted.length > 0) {
       await tx
@@ -726,7 +734,7 @@ export async function claimGradingJobs(
     }
 
     const takeable = candidates
-      .filter((candidate) => candidate.attempts < MOST_ATTEMPTS)
+      .filter((candidate) => candidate.attempts < MOST_GRADING_ATTEMPTS)
       .map((candidate) => candidate.id);
     if (takeable.length === 0) return [];
 
