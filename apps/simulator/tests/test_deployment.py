@@ -409,6 +409,21 @@ MAY_BE_ABSENT = {
     "EGMA_S3_REGION": "empty is right for the store this file runs",
     "EGMA_BLOB_REGION": "falls back to EGMA_S3_REGION, which may be empty",
     "EGMA_SIMULATOR_S3_REGION": "falls back to EGMA_S3_REGION, which may be empty",
+    # The ingestion store, evidence's durable home. The API reads the
+    # EGMA_INGEST_* pair; each falls back to the EGMA_S3_INGEST_* pair, the
+    # bundled store's own ingestion credential. Empty is not hollow here: the
+    # accepting role refuses at boot and names EGMA_INGEST_ACCESS_KEY_ID when it
+    # has no credential to write with. That refusal lives in the API rather than
+    # a ${VAR:?} here, because Compose interpolates the whole file before it
+    # picks a service, so a required form would stop `docker compose down` too —
+    # the same reason the two store addresses are built rather than demanded.
+    # Left empty, the bundled store still makes the bucket and its confined
+    # policy; no user holds it.
+    "EGMA_S3_INGEST_ACCESS_KEY_ID": "empty makes no confined user; the API names it",
+    "EGMA_S3_INGEST_SECRET_ACCESS_KEY": "is that credential's secret half",
+    "EGMA_INGEST_ACCESS_KEY_ID": "falls back to EGMA_S3_INGEST_ACCESS_KEY_ID",
+    "EGMA_INGEST_SECRET_ACCESS_KEY": "is that credential's secret half",
+    "EGMA_INGEST_REGION": "falls back to EGMA_S3_REGION, which may be empty",
 }
 """Every variable the deployment description may leave empty, and why.
 
