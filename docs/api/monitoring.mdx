@@ -94,10 +94,22 @@ Each `watch` entry resolves to one Egma agent:
   `created` is `true` when this request registered the agent.
 </ResponseField>
 
-One Egma agent watches one Retell agent. A request that would put a second
-switched-on agent on the same Retell agent returns `409 conflict` and names the
-agent already watching it. Turn that agent's switch off first, or start
-monitoring from it instead.
+<ResponseField name="refused" type="array">
+  One entry per `watch` entry that did not start, shaped as
+  `{ platformAgentId, reason, message }`. `reason` is `contested`,
+  `name_taken`, or `not_found`. `message` is the whole sentence to show.
+</ResponseField>
+
+**Every entry is attempted and every entry is answered.** Egma starts each
+`watch` entry on its own, so one entry failing does not stop the others and
+does not undo them. Read both arrays: `watching` is what is now running, and
+`refused` is what stayed as it was. Sending the request again with only the
+refused entries is safe — an agent already switched on is never started twice.
+
+One Egma agent watches one Retell agent. An entry that would put a second
+switched-on agent on the same Retell agent comes back in `refused` with
+`reason: "contested"` and a message naming the agent already watching it. Turn
+that agent's switch off first, or start monitoring from it instead.
 
 The key is a monitoring credential and is kept apart from any key a connection
 holds for simulations. Egma asks for it here even when a connection on the same

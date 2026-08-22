@@ -190,14 +190,14 @@ After startup, the following services are available:
 
 The simulator and grader publish no ports — they claim work outbound and need no inbound networking.
 
-### Set up production Monitoring
+### Start production Monitoring
 
-Open **Monitoring → Set up monitoring** inside the project. Choose the agent
-platform first.
+Open **Monitoring → Start monitoring** inside the project. Which steps you take
+depends on the agent platform.
 
-- **Retell:** enter one Retell API key and select the voice agents to monitor.
-  The API service imports the previous 30 days and then polls for completed
-  conversations.
+- **Retell:** enter one Retell API key, choose which Retell agent your Egma
+  agent is, and start. The API service seals the key on that agent, imports the
+  previous 30 days, and then polls for completed conversations.
 - **LiveKit Agents:** install the Egma Python SDK in the agent process. Set
   `EGMA_URL` to the published API address and `EGMA_API_KEY` to an existing
   project key, then call `monitor_livekit(ctx)` before `AgentSession.start`.

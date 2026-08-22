@@ -154,12 +154,19 @@ agent: order-line (agt_01K...)
 Each run names one `connectionId`. The run freezes that connection's facts so
 later edits do not rewrite history.
 
-## Monitoring sources are separate
+## Monitoring is separate from reaching the agent
 
-A simulation connection tells Egma how to contact an agent during a test. A
-**monitoring source** tells Egma how to receive evidence from real production
-conversations.
+A simulation connection tells Egma how to contact an agent during a test.
+Monitoring is how Egma receives evidence from real production conversations,
+and it belongs to the agent rather than to any connection.
 
-Retell Monitoring uses API polling. LiveKit Agents Monitoring uses OTLP from the
-running agent process. Neither source creates or changes a simulation
+An agent may name the platform that runs it, hold that platform's API key, and
+carry one switch: **pull production calls**. With the switch on, Egma polls
+Retell for that agent's completed conversations. A LiveKit Agents agent needs no
+switch — its own process sends spans over OTLP.
+
+The key an agent holds for monitoring and the credentials a connection holds for
+simulations are separate on purpose, so the two jobs never share custody. If you
+chat-test and monitor the same Retell account, you enter the key twice, once for
+each job. Turning the switch on or off never creates or changes a simulation
 connection. See [Production telemetry](/concepts/telemetry).
