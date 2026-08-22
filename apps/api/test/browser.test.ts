@@ -2717,8 +2717,8 @@ describe("the complete product, walked in order in a second project", () => {
 
       /*
        * And the list says egma can reach it, without anybody opening it. This
-       * is the whole point of the widened read: the row carries the platform in
-       * the registry's own words, the channel, and the environment label —
+       * is the whole point of the widened read: the row carries the connection
+       * in the registry's own words, the channel, and the environment label —
        * written out, because this connection has none.
        */
       await walk.goto(at("agents"));
@@ -2726,12 +2726,19 @@ describe("the complete product, walked in order in a second project", () => {
       const row = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
         .first();
+      /*
+       * **Phone number**, not **Retell phone**, and that is ticket 01's rule
+       * showing through rather than a lost fact. A `phone_number` connection
+       * spans platforms, so it answers the platform question through its
+       * agent — and this agent is unbound, because binding an agent to its
+       * platform is Start monitoring's job and never Register agent's. The two
+       * custodies are separate on purpose (ADR-0015).
+       */
       await expect
         .poll(() => row.innerText(), { timeout: 30_000 })
-        .toContain("Retell phone · Voice");
+        .toContain("Phone number · Voice");
       const said = await row.innerText();
       expect(said).toContain("Unlabelled");
-      expect(said).toContain("The one that answers the phone at the front desk.");
       expect(said.toLowerCase()).not.toContain("not checked");
       expect(said.toLowerCase()).not.toContain("no connections");
     },
