@@ -5,7 +5,7 @@ import { hostname } from "node:os";
  *
  * Everything has a working default except where the two stores are, and those
  * are required on the same terms the API requires them: a grader that started
- * without somewhere to read conversations from and somewhere to write verdicts
+ * without somewhere to read conversations from and somewhere to write grades
  * to would look healthy and judge nothing. A misconfigured deployment is loud at
  * boot rather than silent for a week.
  */
@@ -22,8 +22,6 @@ export type Config = {
   readonly leaseSeconds: number;
   /** The backstop, for a notification nothing was listening for. */
   readonly sweepSeconds: number;
-  /** How long a production trace has to be quiet before it is judged anyway. */
-  readonly traceIdleSeconds: number;
   readonly logLevel: LogLevel;
 };
 
@@ -55,32 +53,13 @@ const DEFAULT_LEASE_SECONDS = 120;
  *
  * **This is not how work arrives.** Work arrives on a notification raised by the
  * transaction that finished the conversation, which is why nothing here promises
- * a latency and why no interval is on the path a verdict travels. This is the
+ * a latency and why no interval is on the path a grade travels. This is the
  * backstop underneath it: a notification raised while every copy was restarting
  * reaches nobody, and the queue would otherwise wait for the next conversation
  * to wake somebody up. Half a minute, because it costs one indexed query and
  * catches the case that would otherwise look like grading having stopped.
  */
 const DEFAULT_SWEEP_SECONDS = 30;
-
-/**
- * How long a production trace has to be quiet before egma judges it without a
- * closed root span.
- *
- * **This is the idle-timeout fallback, and it is the only path in this service
- * where a conversation waits on a clock.** A well-behaved exporter closes the
- * root span when the call ends, egma is woken by it, and this number decides
- * nothing. It exists for the exporter that never closes one — a crashed agent, a
- * framework that does not emit a session span — where the event to wait for is
- * the absence of events and no notification can ever arrive.
- *
- * Five minutes, matching the queue's own default, and the number is a
- * compromise: too short judges a caller left on hold halfway through their call,
- * too long leaves a broken exporter's conversations unjudged all afternoon.
- * Erring long, because the deployment paying for it is already misconfigured and
- * a verdict arriving late is a thing this product promises nothing about.
- */
-const DEFAULT_TRACE_IDLE_SECONDS = 300;
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -146,10 +125,6 @@ export function loadConfig(): Config {
     sweepSeconds: positiveWholeNumber(
       "EGMA_GRADER_SWEEP_SECONDS",
       DEFAULT_SWEEP_SECONDS,
-    ),
-    traceIdleSeconds: positiveWholeNumber(
-      "EGMA_GRADER_TRACE_IDLE_SECONDS",
-      DEFAULT_TRACE_IDLE_SECONDS,
     ),
     logLevel: logLevel(),
   };

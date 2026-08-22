@@ -43,7 +43,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       "grader service stop requested",
     );
     // Asked to stop rather than killed: the job in hand is finished and its
-    // verdicts are written before anything closes. A copy that was killed
+    // grades are written before anything closes. A copy that was killed
     // mid-judgment would cost one lease and no data — but there is no reason to
     // spend either when the container is being replaced on purpose.
     service.stop();

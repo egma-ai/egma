@@ -16,7 +16,7 @@ These flags work with every command.
 | `--cwd <path>` | The folder to operate in. Default: the current directory |
 | `--url <address>` | Which Egma instance this command talks to. Overrides any value in `egma/config.yaml` |
 | `--force` | With `login`: sign in again even when this machine already holds a key |
-| `--no-follow` | With `run`: start the run and return immediately, without waiting for a verdict |
+| `--no-follow` | With `run`: start the run and return immediately, without waiting for execution or grading |
 | `--headless` | Run with no terminal interaction: plain output, and the coding-agent task treated as already agreed |
 | `-h`, `--help` | Print the help text |
 | `-v`, `--version` | Print the package version |
@@ -350,7 +350,7 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     | Flag | Description |
     |---|---|
     | `--name <name>` | Optional display name for this run |
-    | `--no-follow` | Start the run and return immediately, without waiting for a verdict. The run continues on Egma |
+    | `--no-follow` | Start the run and return immediately, without waiting for execution or grading. The run continues on Egma |
 
     **Example output**
 
@@ -367,13 +367,19 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
     simulations: 2
     results: http://localhost:3101/runs/run_01K…
     simulation: quoted-a-price default-persona running
-    verdict: quoted-a-price default-persona passed
-    first-verdict: quoted-a-price default-persona passed
-    passed: 1
-    failed: 0
-    skipped: 1
-    errored: 0
-    pending: 0
+    simulation: quoted-a-price default-persona completed
+    grading: quoted-a-price default-persona pending
+    grading: quoted-a-price default-persona complete
+    first-result: quoted-a-price default-persona complete
+    execution-finished: 2
+    execution-failed: 0
+    execution-canceled: 0
+    grading-terminal: 2
+    grading-complete: 2
+    grading-not-requested: 0
+    grading-errors: 0
+    grading-pending: 0
+    grading-running: 0
     simulations: 2
     status: completed
     ```
@@ -382,19 +388,19 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
     | Code | Meaning |
     |---|---|
-    | `0` | Run finished; nothing failed or errored |
+    | `0` | Execution and grading became terminal with no system error. Grade scores do not change this code |
     | `1` | The selected suite has no tests, or the local suite is invalid |
     | `2` | Not signed in to Egma |
-    | `3` | At least one test failed |
     | `4` | Egma did not answer, or refused |
     | `5` | Egma refused to start the run (reason printed) |
-    | `6` | At least one simulation errored — no conclusion possible |
+    | `6` | A simulation execution, grader, or terminal grading job errored |
     | `130` | Stopped partway through |
 
     <Note>
-      A grader can return `skipped` when its own modality does not apply. Egma
-      does not skip a test because of a connection capability. Every test in
-      the suite gets a simulation.
+      Without `--no-follow`, `egma run` waits until every simulation has
+      terminal execution and every completed trace has terminal grading. A low
+      score never makes the command exit with a non-zero code. Execution and
+      grading system errors do.
     </Note>
   </Accordion>
 

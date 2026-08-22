@@ -1,7 +1,8 @@
 import {
-  listGraderLibrary,
+  listGraderDefinitions,
   NotPermittedError,
-  type LibraryEntry,
+  UnprocessableInputError,
+  type GraderDefinition,
 } from "@egma/db";
 import { isId } from "@egma/ids";
 import { graderLibraryOperations } from "@egma/platform-api/contract";
@@ -11,29 +12,15 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
-import { invalid, notPermitted } from "../http/refusals.ts";
+import { invalid, notPermitted, unprocessable } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
 
 /**
- * The grader library, as the Library screen reads it: the shelf of definitions
- * a developer picks from.
+ * The shared grader-definition library.
  *
- * **One verb, and that is the product decision showing through.** There is no
- * create, no edit and no delete here, because v0 ships a small shelf of graders
- * egma maintains rather than an authoring surface asking a team to design
- * judgment logic on their first day. Custom entries land in the same table when
- * authoring arrives, and this same list will answer them beside egma's with the
- * team as their owner.
- *
- * **Owner is the entry's own fact, not this door's.** It is derived from
- * tenancy inside the data-access module — null organization means egma owns it
- * — so a screen showing "egma" and a row belonging to a team can never be the
- * same row. Nothing here computes it and nothing here could override it.
- *
- * The address follows the standing rule: nothing is rooted at a project and the
- * organization is never in a path. A read may filter to a project and does not
- * have to; in a single-project organization nothing ever does.
+ * This read exposes identity and ownership. Executable prompts, source code,
+ * model choices, and output contracts stay inside the trusted grader service.
  */
 
 export type GraderLibraryRoutesOptions = {
@@ -46,30 +33,45 @@ type Query = {
   readonly pageToken?: string;
 };
 
-/**
- * One entry as every read of one describes it.
- *
- * The current immutable revision's prompt rides along so a developer can read
- * the words new runs will be judged by; its parameters draw the **Use** form.
- * Older runs keep the revision they pinned. Neither field is a secret — these
- * are egma's published product behaviour.
- */
-function described(entry: LibraryEntry): Record<string, unknown> {
+const PAGE_SIZE = 100;
+
+function described(entry: GraderDefinition): Record<string, unknown> {
   return {
     id: entry.id,
     name: entry.name,
     description: entry.description,
     type: entry.type,
-    // "egma" or "organization", from tenancy. The Library screen's Owner
-    // column, and the one field on this answer nothing stores.
     owner: entry.owner,
     projectId: entry.projectId,
-    version: entry.version,
-    prompt: entry.prompt,
-    params: entry.params,
-    outputDefinition: entry.outputDefinition,
+    scopeEditable: entry.scopeEditable,
+    currentDefinitionVersion: entry.currentDefinitionVersion,
     createdAt: entry.createdAt.toISOString(),
     updatedAt: entry.updatedAt.toISOString(),
+  };
+}
+
+function pageAfter(
+  all: readonly GraderDefinition[],
+  cursor: string | undefined,
+): {
+  readonly items: readonly GraderDefinition[];
+  readonly next: string | null;
+} {
+  let start = 0;
+  if (cursor !== undefined) {
+    const index = all.findIndex((one) => one.id === cursor);
+    if (index < 0) {
+      throw new UnprocessableInputError(
+        "pageToken is not a cursor from this grader library",
+      );
+    }
+    start = index + 1;
+  }
+  const items = all.slice(start, start + PAGE_SIZE);
+  return {
+    items,
+    next:
+      start + items.length < all.length ? (items.at(-1)?.id ?? null) : null,
   };
 }
 
@@ -82,48 +84,39 @@ export async function graderLibraryRoutes(
     rateLimit: options.rateLimit,
   });
 
-  /**
-   * The shelf, newest first, one page at a time.
-   *
-   * `{ graderLibraryEntries, nextPageToken }` is this list's envelope
-   * with, and the cursor is the last id of the page rather than a count of rows
-   * to skip.
-   */
-  registerPlatformOperation(app, graderLibraryOperations.listGraderLibrary, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const query = (request.query ?? {}) as Query;
-
-    const acting = await actingIn(auth, given(query.projectId));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-
-    const cursor = given(query.pageToken);
-    if (cursor !== undefined && !isId("grl", cursor)) {
-      return invalid(
-        reply,
-        `"${cursor}" is not a cursor this list issued. Send the nextPageToken ` +
-          `an earlier page answered with, or leave it out to start at the ` +
-          `newest library entry.`,
+  registerPlatformOperation(
+    app,
+    graderLibraryOperations.listGraderLibrary,
+    async (request, reply) => {
+      const query = (request.query ?? {}) as Query;
+      const acting = await actingIn(
+        requesterOf(request).auth,
+        given(query.projectId),
       );
-    }
+      if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const page = await listGraderLibrary(acting.auth, { cursor });
+      const cursor = given(query.pageToken);
+      if (cursor !== undefined && !isId("grl", cursor)) {
+        return invalid(
+          reply,
+          "pageToken must be the nextPageToken from an earlier grader-library page",
+        );
+      }
 
-    return reply.send({
-      graderLibraryEntries: page.items.map(described),
-      // Null rather than absent, so a client can tell "there is no next page"
-      // from "this response is an older shape that never had one".
-      nextPageToken: page.nextCursor ?? null,
-    });
-  });
+      const page = pageAfter(await listGraderDefinitions(acting.auth), cursor);
+      return reply.send({
+        graderLibraryEntries: page.items.map(described),
+        nextPageToken: page.next,
+      });
+    },
+  );
 
-  /**
-   * The one refusal this group owns. Reading the library is the `read`
-   * permission every role holds, so a caller reaching this is one whose
-   * credential names another customer.
-   */
   app.setErrorHandler(async (error, _request, reply) => {
     if (error instanceof NotPermittedError) {
       return notPermitted(reply, error.message);
+    }
+    if (error instanceof UnprocessableInputError) {
+      return unprocessable(reply, error.message);
     }
     throw error;
   });

@@ -62,7 +62,6 @@ describe("the visual theme", () => {
 describe("predefined grader names", () => {
   it("shows machine keys as human labels without changing team names", () => {
     expect(graderDisplayName("expected_behaviors")).toBe("Expected behaviors");
-    expect(graderDisplayName("latency")).toBe("Latency");
     expect(graderDisplayName("Never promises a price")).toBe(
       "Never promises a price",
     );

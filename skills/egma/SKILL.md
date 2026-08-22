@@ -1,6 +1,6 @@
 ---
 name: egma
-description: Operate Egma from a repository — inspect the egma folder, keep tests in step with the platform, start a run, and explain its verdicts. Use when working with Egma, running the tests in egma/, synchronizing them with pull or push, or reading what a run returned.
+description: Operate Egma from a repository — inspect the egma folder, keep tests in step with the platform, start a run, and explain trace grades. Use when working with Egma, running the tests in egma/, synchronizing them with pull or push, or reading what a run returned.
 ---
 
 # Operate Egma from this repository
@@ -80,11 +80,12 @@ agent over the selected connection. The local suite must exactly match the
 platform before Egma starts it. Each test produces one **simulation** per
 persona.
 
-The command prints identifiers, a results address, simulation progress, and a
-summary with one count for each verdict. The summary counts simulations, not
-tests. Use the printed address when detailed evidence is needed. If the address
-is missing, ask for the saved command output; do not start another run only to
-recover it.
+The command prints identifiers, a results address, execution progress, and
+grading progress. It waits until execution and all requested trace grading are
+terminal. A simulation that failed or was canceled before it produced a
+completed trace has no grading work to wait for. Use the printed address when
+detailed evidence is needed. If the address is missing, ask for the saved
+command output; do not start another run only to recover it.
 
 Use `--no-follow` when the developer asks to start the run and return without
 waiting:
@@ -95,25 +96,35 @@ egma run release --no-follow
 
 The run continues on Egma after the command returns.
 
-## Keep the four verdicts separate
+## Read grades without inventing an overall verdict
 
-A verdict is one of:
+A **metric** is an observed fact, such as duration or latency. A **grader** uses
+trace evidence, test values, or metrics to assign one normalized score from
+`0` through `1`. Each grade shows the grader's pass threshold and its individual
+result: `passed`, `failed`, or `errored`.
 
-- **`passed`** — the agent did what the test expected.
-- **`failed`** — the agent did not do what the test expected.
-- **`skipped`** — nothing was judged because the grader did not apply or the
-  simulation was canceled.
-- **`errored`** — the simulation did not complete.
+Expected behaviors is one grader. It evaluates the test's behavior statements,
+keeps the result of each statement in its details, and returns one normalized
+score for the trace. Report the score and the exact failed assertions with their
+evidence. If grading failed, report the stored error; do not turn it into a low
+score or an agent failure.
 
-Never report `skipped` or `errored` as `failed`. Report the count of all four.
-A test passes only when every simulation of that test passed.
+When every selected grader has a score, Egma may show their arithmetic mean as
+the **combined score**. This number is for comparison only. It is not a test,
+suite, run, or trace pass/fail result. A low score does not make `egma run` fail.
+An execution error or grading-system error does.
 
-For a failed simulation, report the unmet expected behavior and the transcript
-or tool evidence. For a skipped or errored simulation, report Egma's stated
-reason. Do not invent a cause from the summary count alone.
+Grading state is operational:
 
-Read that evidence before changing a failed test. Keep a useful test strict
-when it exposes a real voice-agent problem.
+- `not_requested` — no grader was selected for the trace.
+- `pending` — grading was requested but has not started.
+- `running` — a worker is grading the trace.
+- `complete` — all requested graders produced scores.
+- `error` — requested grading ended with an operational error.
+
+A scope or modality mismatch produces no grade row. Do not call it skipped.
+Read the trace evidence before changing a test. Keep a useful test strict when
+it exposes a real voice-agent problem.
 
 ## Recover from common refusals
 
@@ -136,5 +147,8 @@ when it exposes a real voice-agent problem.
 | `test suite` | a named container of tests in one project |
 | `run` | one execution of a complete suite against one agent |
 | `simulation` | one test executed once inside a run |
-| `verdict` | `passed`, `failed`, `skipped`, or `errored` |
-| `grader` | the logic that produces a verdict |
+| `metric` | an observed fact, such as duration or latency |
+| `grader` | logic that assigns one normalized score to a trace |
+| `grade` | one grader's score, details, threshold, and derived result |
+| `combined score` | the display-only mean of all selected grader scores |
+| `grading state` | operational progress of the trace's requested grading |

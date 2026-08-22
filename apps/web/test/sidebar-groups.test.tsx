@@ -40,16 +40,12 @@ const ADA: Me = {
 /**
  * The six addresses the bar offers, sorted.
  *
- * Five are the ones it offered before the groups existed. Graders is the one
- * that moved, and it moved for the same reason Monitoring's did: its section
- * holds two screens behind one strip, the strip now leads with Running, and a
- * first tab nobody lands on is not a first tab. `/projects/prj_2/graders` is
- * still the library and still opens it — this is where the *bar* points, not
- * which addresses exist.
+ * These values are written out so the test checks the product addresses rather
+ * than repeating the navigation implementation.
  */
 const EVERY_ADDRESS = [
   "/projects/prj_2/agents",
-  "/projects/prj_2/graders/running",
+  "/projects/prj_2/graders",
   "/projects/prj_2/monitoring/transcripts",
   "/projects/prj_2/personas",
   "/projects/prj_2/runs",
@@ -231,7 +227,7 @@ describe("the grouped sidebar", () => {
    */
   it.each([
     ["/projects/prj_2/agents", "Agents"],
-    ["/projects/prj_2/graders/running", "Graders"],
+    ["/projects/prj_2/graders", "Graders"],
     ["/projects/prj_2/personas/prs_3", "Personas"],
     ["/projects/prj_2/runs/run_9", "Runs"],
     ["/projects/prj_2/monitoring/transcripts/5c1e4b0f", "Transcripts"],

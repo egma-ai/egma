@@ -30,22 +30,21 @@ export type Facts = GetTraceResponse["trace"];
 export type Listed = ListTracesResponse["traces"][number];
 export type ListPage = ListTracesResponse;
 export type Step = TraceSpan;
-export type Judgment = GetTraceResponse["verdicts"][number];
-export type Outcome = NonNullable<GetTraceResponse["outcome"]>;
+export type Grade = GetTraceResponse["grades"][number];
 
 /**
  * One measure this exchange produced, as the read hands it over.
  *
  * **Computed by the platform, never here — the reduction included.** The
  * samples arrive already worked out by egma's one shared measure module, and so
- * does `worst`: the single number a grader holds against a bound. Both are the
+ * does `worst`: one reduced metric value. Both are the
  * platform's arithmetic, so this page renders figures rather than deriving any.
  *
  * The reduction is the part that matters. Taking the maximum here would look
- * harmless and would be a second implementation of the exact number a verdict
- * rests on — right up to the day a grader reduces by p90 instead, when the page
+ * harmless and would be a second implementation of the exact metric a grader
+ * reads — right up to the day a grader reduces by p90 instead, when the page
  * would go on showing the maximum with nothing failing anywhere. A developer who
- * found this page and a verdict disagreeing would be right to stop believing
+ * found this page and a grade disagreeing would be right to stop believing
  * both, so the page is not allowed to be capable of it.
  *
  * The unit rides each measure because the measure catalog owns it: a page that
@@ -54,25 +53,6 @@ export type Outcome = NonNullable<GetTraceResponse["outcome"]>;
  */
 export type Measured = GetTraceResponse["measures"][number];
 export type Detail = GetTraceResponse;
-
-/**
- * Which turn a judgment is about, as a position.
- *
- * A judgment cites `turn:9` because the judge was shown a numbered transcript
- * and answered with the number it read. Positions survive spans ageing out of
- * the store, which ids do not — so the citation stays readable long after the
- * span it came on is gone.
- */
-export function turnsCited(one: Judgment): readonly number[] {
-  const at: number[] = [];
-  for (const cited of one.citedTurns) {
-    const [prefix, number] = cited.split(":");
-    if (prefix !== "turn") continue;
-    const parsed = Number(number);
-    if (Number.isInteger(parsed) && parsed > 0) at.push(parsed);
-  }
-  return at;
-}
 
 /** Turn a machine-written assertion key into a label without hiding its meaning. */
 export function humanizeIdentifier(value: string): string {
@@ -90,23 +70,6 @@ export function agentPlatformLabel(value: string): string {
     default:
       return humanizeIdentifier(value);
   }
-}
-
-/**
- * What to head a judgment with: the sentence somebody wrote, where the read
- * resolved one, and the key itself where it did not.
- *
- * The fallback is the whole reason this is a function. A key that could not be
- * placed is shown as the key — `Behavior 3` — which says exactly as much as egma
- * actually knows. Putting the live test's third sentence there instead would be
- * a plausible sentence that might be about a different check entirely, and
- * nobody looking at the page could tell.
- */
-export function assertionHeading(one: Judgment): string {
-  const said = one.assertionText ?? null;
-  return said === null || said.trim() === ""
-    ? humanizeIdentifier(one.assertion)
-    : said;
 }
 
 export type Window = { readonly from: string; readonly to: string };
@@ -291,13 +254,12 @@ export function transcriptPath(projectId: string, facts: Facts): string {
  *   project actually **visible** to this reader. Customer OTLP rejects that
  *   scope because no project would own the evidence. This state points to the
  *   specific key change instead of repeating generic export setup.
- * - `nothing-watches-production` — traffic is arriving and no grader is scoped
- *   to it, so verdicts will stay absent. Every new grader defaults to
- *   simulations, and the seeded expected-behaviors copy is structurally
- *   simulations-only, so this is the ordinary state rather than the odd one.
+ * - `nothing-watches-production` — traffic is arriving and no project grader is
+ *   scoped to it, so grades stay absent. The Expected behaviors grader is fixed
+ *   to simulations, so this is an ordinary first state.
  *
  * Nothing at all is the fifth answer, and it is the one a healthy project gets:
- * traffic arriving, something judging it.
+ * traffic arriving, with at least one project grader that grades production.
  *
  * The order is the point. With no traffic, telling somebody that no grader
  * watches production is noise about a problem they do not have yet.
@@ -349,15 +311,11 @@ export function quietState(seen: {
   return seen.watchingProduction === 0 ? "nothing-watches-production" : null;
 }
 
-/**
- * Whether a running grader's verdicts can ever appear beside production
- * traffic.
- *
- * `both` counts, because a copy scoped to both judges production as well as
- * simulations. `simulations` does not, whatever its sampling rate says.
- */
-export function watchesProduction(grader: { readonly scope: string }): boolean {
-  return grader.scope === "production" || grader.scope === "both";
+/** Whether a project grader is configured to grade production traces. */
+export function watchesProduction(grader: {
+  readonly scope: { readonly production: unknown | null };
+}): boolean {
+  return grader.scope.production !== null;
 }
 
 /**

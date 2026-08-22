@@ -1,298 +1,134 @@
-import { isId, newId } from "@egma/ids";
+import { newId } from "@egma/ids";
+import {
+  simulationIdOfTrace,
+  traceIdOfSimulation,
+} from "@egma/simulation-contract";
 import {
   and,
   asc,
-  count,
   eq,
-  gte,
   inArray,
-  isNotNull,
   lt,
   or,
   sql,
   type SQL,
 } from "drizzle-orm";
 
+import { traceStore } from "../clickhouse/client.ts";
 import { db, listen, type Listening, type Queryable } from "../client.ts";
+import { combinedGradeScore } from "../grading/results.ts";
+import type { PlanGroup } from "../grading/plan.ts";
+import { graderDefinition, projectGrader } from "../schema/graders.ts";
 import {
   gradingJob,
+  type FrozenGradingEntry,
   type GradingJobStatus,
   type GradingSource,
 } from "../schema/grading.ts";
+import { gradingPlan } from "../schema/plans.ts";
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
 import type { AuthContext } from "./context.ts";
-import { getGrader } from "./graders.ts";
+import {
+  readCurrentSimulationGradeFacts,
+  readProductionGradingPlan,
+  readTraceGrades,
+  recordProductionGradingPlan,
+  type CurrentGrade,
+  type CurrentSimulationGradeFact,
+  type ProductionGradingPlanEntry,
+  type RecordedGrade,
+} from "./grades.ts";
+import { getExecutableGraderDefinition } from "./graders.ts";
 import { authorize, here } from "./permissions.ts";
+import {
+  pinnedSimulationGradersOn,
+  resolveProductionGraders,
+} from "./run-plans.ts";
+import {
+  EARLIEST_READABLE_MICROSECONDS,
+} from "./span-identity.ts";
 import type { NewSpan } from "./spans.ts";
+import {
+  MAXIMUM_WINDOW_MILLISECONDS,
+  type TimeWindow,
+} from "./traces.ts";
 import { within } from "./within.ts";
 
-/**
- * The grading queue: how a finished conversation becomes work, and how the
- * grader service takes it. What a job *is* is the schema file's story
- * (`schema/grading.ts`); this file is how it is reached.
- *
- * ## The one place in this module that works the whole deployment
- *
- * Everything else here reads or writes one customer's rows and takes an
- * `AuthContext` to say which customer — resolved from a credential, never from
- * anything a caller passed. **The grader service has no credential**, and there
- * is no honest one to give it: it is egma's own engine, standing behind every
- * organization on the deployment at once, and an API key minted inside one
- * customer would be a key that either sees too little to do the job or is
- * quietly shared between customers to do it.
- *
- * So the exception is drawn as narrowly as it can be drawn, and it is drawn
- * here:
- *
- * - **`claimGradingJobs` is the only call that crosses organizations**, and the
- *   only table it can reach is this one — egma's own queue. It cannot be *asked*
- *   about a customer: it takes a claimant's name and a capacity, and there is
- *   no argument by which a caller could name whose work they want. A build rule
- *   holds it to that.
- * - **It carries out identifiers and no content.** A claim is a job id, a
- *   source, the conversation's id, and the organization and project that
- *   conversation belongs to. No transcript, no name, no configuration — nothing
- *   a customer wrote.
- * - **It hands back the context the work is done under.** Every read the grader
- *   makes afterwards — the conversation, the graders, the pinned test version —
- *   and every verdict it writes goes through the ordinary scoped surface, with
- *   the context this module built from the claimed job's own tenancy. The
- *   service never constructs one and so has no way to widen one.
- *
- * That is the same shape `resolveApiKey` has, with the claim in the credential's
- * place: something egma issued is handed back, and what it resolves to is the
- * only thing the holder can then reach. The difference — and it is why this is
- * written out at length rather than added to a list — is that a key is issued to
- * a person and a claim is issued by egma to itself.
- *
- * ## Waking, rather than asking again
- *
- * `watchGradingWork` is a `LISTEN` on the channel the enqueue raises inside the
- * transaction that lands a terminal transition, so a service wakes when a
- * conversation finishes rather than at the top of some interval. It is a hint
- * and not a delivery: the claim query is the whole truth, and a service that was
- * not running when a notification was raised finds the row waiting when it next
- * asks. That is why the watch also fires once on every connection it
- * establishes, and why a slow backstop sweep costs a service nothing to keep.
- *
- * ## And the other source, which nobody can wake for
- *
- * A production trace has no transaction to ride and no moment anybody owns. It
- * arrives as spans, so `recordProductionTraces` is called by the drainer, once
- * per drained segment and only after its rows are query-visible, and writes the
- * two facts completion is decided from: when egma last heard about this trace,
- * and whether the segment carried a span the platform said ends it. **That is a
- * bookkeeping row and a notification and nothing else** — no grader is
- * resolved, no conversation is read, and no judgment is made anywhere near it.
- * Reporting before the evidence was readable would be worse than reporting
- * late: a grader woken for a trace it cannot read would judge an empty one.
- *
- * The two ways such a trace completes are answered in two different places, and
- * they have to be:
- *
- * - **Its platform said it ended.** Each supported platform states that fact on
- *   the one span that carries it, and the normalizer carries the statement
- *   through to here. The drainer stamps `root_closed_at` and raises the same
- *   notification a terminal transition does, so the wake-up is immediate and no
- *   interval is on the path. A platform that states nothing produces no
- *   completion here, and nothing infers one from the shape of a trace.
- * - **It went quiet.** An exporter that never closes a root would otherwise
- *   leave a conversation unjudged forever, and there is nothing to be woken by:
- *   the completing event is the *absence* of one. So this half is inherently a
- *   sweep, and it is the claim query below — a trace nothing has arrived for in
- *   longer than `idleSeconds` is claimable, which the grader service discovers
- *   on the backstop pass it already makes.
- *
- * ## Asking for a conversation to be judged again
- *
- * A conversation becomes work once, when it ends, and a job is unique on the
- * conversation — so asking for it again **reopens** that one job rather than
- * filing a second. `reopenGradingJob` is that verb, `regrade` is the deliberate
- * action a person takes with it over a run or a window, and both raise the same
- * notification the enqueue does, because a service should wake for a re-grade
- * exactly as it wakes for a conversation ending.
- *
- * Nothing about a re-grade names a grader *version*. A simulation keeps the
- * immutable grader versions its run pinned; editing a grader affects only a new
- * run. A production trace has no run plan, so it resolves the current versions
- * when it is judged. The source owns that choice and the reopened job does not
- * copy it.
- *
- * A re-grade **may** name a grader, and that is a question about spend rather
- * than about what the rows come to say. Re-judging the conversation whole
- * accumulates exactly the rows re-judging one grader would; it also asks every
- * LLM judge on the conversation again, and somebody who fixed one rubric did not
- * ask to pay for the other four. So the grader a re-grade named travels on the
- * reopened job — `grading_job.regrade_grader_id`, cleared the moment the job
- * settles — and the engine reads it off the claim. Omitting it re-judges the
- * conversation, which is what a re-grade has always meant.
- *
- * That narrowing is the one thing that makes "it is already in the queue" an
- * insufficient answer. A job **nobody has taken** is widened until it covers
- * both asks, so it stays sufficient. A job somebody has taken cannot be: it is
- * judged under the instruction it was claimed with, and a job claimed for one
- * grader carries out neither an ask about a different grader nor an ask about
- * the whole conversation. `Regraded.beingJudgedNarrower` counts exactly those,
- * so the surface asking can say nothing happened rather than report the ask as
- * covered and leave somebody waiting for verdicts that are not coming.
- */
-
-/**
- * The Postgres channel a finished conversation is announced on. One channel for
- * the whole deployment: the payload is a job id, and what a listener does with
- * it is claim, which is a query that sees every outstanding job anyway.
- */
+/** A notification is a wake-up hint. The Postgres row remains the queue. */
 export const GRADING_WORK_CHANNEL = "egma_grading_work";
 
-/** How many jobs one claim may take, however many copies are running. */
 const LARGEST_CLAIM_CAPACITY = 50;
-
-/**
- * How long a claimed job may go silent before another copy may take it.
- *
- * Generous next to the heartbeat interval, for the reason the orphan sweep's
- * window is: the one sin of a lease is calling a working service dead, and the
- * cost of waiting a little longer is a verdict arriving a little later — which
- * this product promises nothing about.
- */
 const DEFAULT_LEASE_SECONDS = 120;
-
-/**
- * How many times egma tries to judge one conversation before giving up on it.
- *
- * Counted on the claim rather than on the failure, so a copy that dies without
- * saying anything still counts. Three, because the failures worth retrying are
- * the transient ones — a judge model that timed out, a copy that was replaced
- * mid-judgment — and a fourth attempt at a conversation that has broken three
- * copies is a queue of one job growing forever.
- */
-/**
- * How many times one conversation is handed out before egma stops trying.
- *
- * Exported because the service that does the judging decides, on its own last
- * attempt, to answer with what it can see rather than to decline again — and a
- * bound named in two places is a bound that will one day disagree with itself,
- * quietly, as a job abandoned where an answer was owed.
- */
+/** The last failed attempt is retained as an abandoned job, never a grade. */
 export const MOST_GRADING_ATTEMPTS = 3;
+const THE_ENGINE = "engine";
 
-/**
- * How long a production trace has to be quiet before egma judges it without a
- * closed root span.
- *
- * Five minutes, and the number is a compromise nobody gets to avoid making. Too
- * short and a caller left on hold is judged mid-conversation, on half a
- * transcript; too long and a broken exporter's traces sit unjudged for an
- * afternoon. It only ever applies to telemetry that never closed its root — a
- * well-behaved exporter's traces are judged the moment the conversation ends,
- * whatever this says — so the cost of erring long is paid by the deployment that
- * is already misconfigured.
- */
-const DEFAULT_TRACE_IDLE_SECONDS = 300;
-
-/**
- * What a claim answers with, and no more — identifiers, tenancy, and the two
- * instants egma's own door stamped on the trace.
- *
- * The window is here because reading the conversation back needs one: the trace
- * store files spans by the minute they started in, so a read naming only a trace
- * id would have nothing to prune with. They are timestamps egma wrote, not
- * anything a customer authored, which is the line this claim has always drawn.
- *
- * The grader a re-grade narrowed to is here on the same terms: an identifier
- * egma minted, saying which of this customer's graders to judge with — never
- * what that grader says, which the engine reads for itself through the scoped
- * surface with the context this claim hands back.
- */
-const CLAIM_COLUMNS = {
-  id: gradingJob.id,
-  organizationId: gradingJob.organizationId,
-  projectId: gradingJob.projectId,
-  source: gradingJob.source,
-  simulationId: gradingJob.simulationId,
-  traceId: gradingJob.traceId,
-  firstSpanAt: gradingJob.firstSpanAt,
-  lastSpanAt: gradingJob.lastSpanAt,
-  regradeGraderId: gradingJob.regradeGraderId,
-  attempts: gradingJob.attempts,
-  claimedBy: gradingJob.claimedBy,
-  claimedAt: gradingJob.claimedAt,
-} as const;
-
-/**
- * One job as the grader service holds it: which conversation, whose it is, and
- * the context every read and write about it goes through.
- */
-export type GradingClaim = {
-  readonly id: string;
+export type GradingRequest = {
   readonly source: GradingSource;
-  /** The conversation, for a simulation's job; null for a production trace's. */
-  readonly simulationId: string | null;
-  /** And the other way round: the trace, for a production job; null otherwise. */
-  readonly traceId: string | null;
-  /**
-   * When the trace's earliest and latest spans began — the window its transcript
-   * is read inside. Null for a simulation, whose window comes off its own row:
-   * a simulation was conducted between two moments egma recorded, and this job
-   * was written by the transaction that recorded the second one rather than by
-   * a span arriving.
-   */
-  readonly firstSpanAt: Date | null;
-  readonly lastSpanAt: Date | null;
-  readonly organizationId: string;
-  readonly projectId: string;
-  /**
-   * The one grader this job was reopened for, or null for the whole
-   * conversation — which is what a first grading and an un-narrowed re-grade
-   * both are.
-   *
-   * The engine judges with this running copy and nothing else when it is set.
-   * Somebody who fixed one rubric asked for one rubric's judgment, and every
-   * other judge call on the conversation would be spend they did not ask for.
-   */
-  readonly regradeGraderId: string | null;
-  /** Including this one, so a copy can say which attempt it is making. */
-  readonly attempts: number;
-  readonly claimedBy: string;
-  readonly claimedAt: Date;
-  /**
-   * Narrowed to this job's own organization and project, built here from the
-   * claimed row and from nothing the claimant said. It is what the grader
-   * reads the conversation and writes the verdicts through, so the work is done
-   * inside one customer even though the claim that found it was not.
-   */
-  readonly auth: AuthContext;
+  readonly traceId: string;
+  readonly traceStartedAt: Date;
+  readonly runId?: string | undefined;
+  /** An explicit supported-platform end fact for production. */
+  readonly endsTrace: boolean;
+  /** The trace is query-visible in ClickHouse, not merely accepted for drain. */
+  readonly evidenceReady: boolean;
+  readonly modality: "chat" | "voice";
 };
 
-/** One job as anybody reads it back. */
+export type GradingRequestResult =
+  | { readonly kind: "waiting"; readonly for: "completion" | "evidence" }
+  | { readonly kind: "not_requested" }
+  | {
+      readonly kind: "queued";
+      readonly jobId: string;
+      readonly created: boolean;
+    }
+  | { readonly kind: "terminal"; readonly outcome: "complete" | "error" };
+
+export type RegradeTraceResult =
+  | { readonly kind: "not_requested" }
+  | {
+      readonly kind: "queued";
+      readonly jobId: string;
+      /** This request created or reopened whole-trace work. */
+      readonly reopened: boolean;
+      /** Whole-trace work was already pending or claimed. */
+      readonly alreadyWaiting: boolean;
+    };
+
 export type GradingJob = {
   readonly id: string;
   readonly organizationId: string;
   readonly projectId: string;
   readonly source: GradingSource;
   readonly simulationId: string | null;
-  readonly traceId: string | null;
-  readonly firstSpanAt: Date | null;
-  readonly lastSpanAt: Date | null;
-  /** When a span of this trace last arrived; what the idle window is measured from. */
-  readonly lastSeenAt: Date | null;
-  /** When the root span closed the trace, or null for one that never closed. */
-  readonly rootClosedAt: Date | null;
+  readonly traceId: string;
+  readonly traceStartedAt: Date;
+  readonly runId: string | null;
+  readonly entries: readonly FrozenGradingEntry[];
   readonly status: GradingJobStatus;
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
   readonly attempts: number;
   readonly lastError: string | null;
-  /**
-   * The one grader this job stands reopened for, or null for the whole
-   * conversation. Never set on a job that has settled: the narrowing belongs to
-   * the asking rather than to the job, and a check on the table holds it there.
-   */
-  readonly regradeGraderId: string | null;
   readonly finishedAt: Date | null;
   readonly createdAt: Date;
+};
+
+export type GradingClaim = GradingJob & {
+  readonly status: "claimed";
+  readonly claimedBy: string;
+  readonly claimedAt: Date;
+  readonly heartbeatAt: Date;
+  readonly auth: AuthContext;
+};
+
+export type GradingClaimRequest = {
+  readonly claimant: string;
+  readonly capacity: number;
+  readonly leaseSeconds?: number | undefined;
 };
 
 const JOB_COLUMNS = {
@@ -302,27 +138,38 @@ const JOB_COLUMNS = {
   source: gradingJob.source,
   simulationId: gradingJob.simulationId,
   traceId: gradingJob.traceId,
-  firstSpanAt: gradingJob.firstSpanAt,
-  lastSpanAt: gradingJob.lastSpanAt,
-  lastSeenAt: gradingJob.lastSeenAt,
-  rootClosedAt: gradingJob.rootClosedAt,
+  traceStartedAt: gradingJob.traceStartedAt,
+  runId: gradingJob.runId,
+  entries: gradingJob.entries,
   status: gradingJob.status,
   claimedBy: gradingJob.claimedBy,
   claimedAt: gradingJob.claimedAt,
   heartbeatAt: gradingJob.heartbeatAt,
   attempts: gradingJob.attempts,
   lastError: gradingJob.lastError,
-  regradeGraderId: gradingJob.regradeGraderId,
   finishedAt: gradingJob.finishedAt,
   createdAt: gradingJob.createdAt,
 } as const;
 
-type JobRow = Omit<GradingJob, "source" | "status"> & {
+function jobFromRow(row: {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly projectId: string;
   readonly source: string;
+  readonly simulationId: string | null;
+  readonly traceId: string;
+  readonly traceStartedAt: Date;
+  readonly runId: string | null;
+  readonly entries: readonly FrozenGradingEntry[];
   readonly status: string;
-};
-
-function jobFromRow(row: JobRow): GradingJob {
+  readonly claimedBy: string | null;
+  readonly claimedAt: Date | null;
+  readonly heartbeatAt: Date | null;
+  readonly attempts: number;
+  readonly lastError: string | null;
+  readonly finishedAt: Date | null;
+  readonly createdAt: Date;
+}): GradingJob {
   return {
     ...row,
     source: row.source as GradingSource,
@@ -330,27 +177,13 @@ function jobFromRow(row: JobRow): GradingJob {
   };
 }
 
-/**
- * The person the engine is, which is nobody.
- *
- * `AuthContext.userId` is egma's own user id everywhere else, and there is no
- * user here — the grader service is a process, and the work it does was asked
- * for by whoever started the run rather than by it. Deliberately not shaped like
- * an identifier: nothing on the grading path writes it, and anything that ever
- * tried would be refused out loud by the foreign key to `user` rather than
- * quietly attributing a machine's act to a person.
- */
-const THE_ENGINE = "engine";
+function projectOf(auth: AuthContext): string {
+  if (auth.projectId === undefined || auth.projectId === "") {
+    throw new TypeError("grading requires a project-scoped context");
+  }
+  return auth.projectId;
+}
 
-/**
- * The context one claimed job is graded under.
- *
- * `viewer`, and that is the whole permission the engine needs: it reads the
- * conversation, the graders and the pinned test version, and the two things it
- * writes — verdict rows and this job's own bookkeeping — are egma's own records
- * rather than anything a customer authored. A context that could author
- * definitions would be a context that could do more than grade.
- */
 function gradingContext(organizationId: string, projectId: string): AuthContext {
   return {
     userId: THE_ENGINE,
@@ -361,375 +194,489 @@ function gradingContext(organizationId: string, projectId: string): AuthContext 
   };
 }
 
-/* ------------------------------------------------------------------- *
- * Becoming work.
- * ------------------------------------------------------------------- */
+type ResolvedEntry = Awaited<
+  ReturnType<typeof resolveProductionGraders>
+>[number];
 
-export type NewGradingJob = {
-  readonly organizationId: string;
-  readonly projectId: string;
-  readonly source: GradingSource;
-  readonly simulationId: string | null;
-};
+function frozen(entry: ResolvedEntry): FrozenGradingEntry {
+  return {
+    projectGraderId: entry.projectGraderId,
+    graderDefinitionId: entry.definition.definitionId,
+    graderDefinitionVersion: entry.definition.definitionVersion,
+    graderPassThreshold: entry.passThreshold,
+    definition: entry.definition,
+  };
+}
 
-/**
- * A finished conversation becomes claimable work.
- *
- * **Internal, and called only from inside the transaction that made the
- * conversation terminal.** That is the whole design: a simulation cannot land
- * `completed` or `failed` and leave no work behind, because the row that says
- * so and the row that says it needs judging are one commit. Nothing polls the
- * simulation table looking for conversations somebody forgot to enqueue,
- * because there is no window in which one could have been forgotten.
- *
- * The insert is idempotent — one job per conversation, held by a unique — so a
- * replayed terminal transition is a no-op rather than a second judgment.
- *
- * The notification rides the same transaction, so it is raised on commit and
- * never before: a listener woken by it always finds the row.
- */
-export async function enqueueGradingJob(
+function receiptEntry(entry: FrozenGradingEntry): ProductionGradingPlanEntry {
+  return {
+    projectGraderId: entry.projectGraderId,
+    graderDefinitionId: entry.graderDefinitionId,
+    graderDefinitionVersion: entry.graderDefinitionVersion,
+    graderPassThreshold: entry.graderPassThreshold,
+  };
+}
+
+async function entriesFromReceipt(
   on: Queryable,
-  job: NewGradingJob,
-): Promise<void> {
-  const [written] = await on
+  auth: AuthContext,
+  receipt: readonly ProductionGradingPlanEntry[],
+): Promise<readonly FrozenGradingEntry[]> {
+  return Promise.all(receipt.map(async (entry) => {
+    const definition = await getExecutableGraderDefinition(
+      auth,
+      on,
+      entry.graderDefinitionId,
+      entry.graderDefinitionVersion,
+    );
+    if (definition === undefined) {
+      throw new Error(
+        `production grading plan names unreadable definition ${entry.graderDefinitionId} version ${entry.graderDefinitionVersion}`,
+      );
+    }
+    return { ...entry, definition };
+  }));
+}
+
+function micros(date: Date): bigint {
+  if (Number.isNaN(date.getTime())) throw new TypeError("traceStartedAt is invalid");
+  return BigInt(date.getTime()) * 1_000n;
+}
+
+/** Serialize the first durable decision for one tenant, project, and trace. */
+async function lockTrace(on: Queryable, auth: AuthContext, traceId: string): Promise<void> {
+  // JSON array framing is unambiguous and contains no NUL byte, which Postgres
+  // text refuses before `hashtextextended` can see it.
+  const key = JSON.stringify([auth.organizationId, projectOf(auth), traceId]);
+  await on.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+}
+
+async function jobForTrace(
+  on: Queryable,
+  auth: AuthContext,
+  traceId: string,
+): Promise<GradingJob | undefined> {
+  const [row] = await on
+    .select(JOB_COLUMNS)
+    .from(gradingJob)
+    .where(within(auth, gradingJob, and(
+      eq(gradingJob.projectId, projectOf(auth)),
+      eq(gradingJob.traceId, traceId),
+    )))
+    .limit(1);
+  return row === undefined ? undefined : jobFromRow(row);
+}
+
+function allEntriesHaveResults(
+  entries: readonly FrozenGradingEntry[],
+  current: readonly CurrentGrade[],
+): { readonly complete: boolean; readonly errored: boolean } {
+  const byProjectGrader = new Map(
+    current.map((grade) => [grade.projectGraderId, grade] as const),
+  );
+  let errored = false;
+  for (const entry of entries) {
+    const grade = byProjectGrader.get(entry.projectGraderId);
+    if (grade === undefined) return { complete: false, errored: false };
+    errored ||= grade.score === null;
+  }
+  return { complete: true, errored };
+}
+
+async function notify(on: Queryable, jobId: string): Promise<void> {
+  await on.execute(sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${jobId})`);
+}
+
+async function enqueue(
+  on: Queryable,
+  auth: AuthContext,
+  input: {
+    readonly source: GradingSource;
+    readonly simulationId: string | null;
+    readonly traceId: string;
+    readonly traceStartedAt: Date;
+    readonly runId: string | null;
+    readonly entries: readonly FrozenGradingEntry[];
+  },
+): Promise<{ readonly job: GradingJob; readonly created: boolean }> {
+  const held = await jobForTrace(on, auth, input.traceId);
+  if (held !== undefined) return { job: held, created: false };
+
+  const [row] = await on
     .insert(gradingJob)
     .values({
       id: newId("gjb"),
-      organizationId: job.organizationId,
-      projectId: job.projectId,
-      source: job.source,
-      simulationId: job.simulationId,
+      organizationId: auth.organizationId,
+      projectId: projectOf(auth),
+      source: input.source,
+      simulationId: input.simulationId,
+      traceId: input.traceId,
+      traceStartedAt: input.traceStartedAt,
+      runId: input.runId,
+      entries: input.entries,
       status: "pending",
     })
-    .onConflictDoNothing({ target: gradingJob.simulationId })
-    .returning({ id: gradingJob.id });
+    .onConflictDoNothing()
+    .returning(JOB_COLUMNS);
 
-  if (written === undefined) return;
-  await on.execute(
-    sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${written.id})`,
-  );
+  const job = row === undefined
+    ? await jobForTrace(on, auth, input.traceId)
+    : jobFromRow(row);
+  if (job === undefined) {
+    throw new Error(`grading job for trace ${input.traceId} lost its insert race`);
+  }
+  if (row !== undefined) await notify(on, job.id);
+  return { job, created: row !== undefined };
+}
+
+async function settleOrdinaryRequest(
+  on: Queryable,
+  auth: AuthContext,
+  input: {
+    readonly source: GradingSource;
+    readonly simulationId: string | null;
+    readonly traceId: string;
+    readonly traceStartedAt: Date;
+    readonly runId: string | null;
+    readonly entries: readonly FrozenGradingEntry[];
+  },
+): Promise<GradingRequestResult> {
+  if (input.entries.length === 0) return { kind: "not_requested" };
+
+  const held = await jobForTrace(on, auth, input.traceId);
+  if (held !== undefined) {
+    if (held.status === "abandoned") {
+      return { kind: "terminal", outcome: "error" };
+    }
+    return { kind: "queued", jobId: held.id, created: false };
+  }
+
+  const { current } = await readTraceGrades(auth, {
+    source: input.source,
+    traceId: input.traceId,
+    ...(input.runId === null ? {} : { runId: input.runId }),
+  });
+  const terminal = allEntriesHaveResults(input.entries, current);
+  if (terminal.complete) {
+    return {
+      kind: "terminal",
+      outcome: terminal.errored ? "error" : "complete",
+    };
+  }
+
+  const queued = await enqueue(on, auth, input);
+  return { kind: "queued", jobId: queued.job.id, created: queued.created };
 }
 
 /**
- * What one export said about one of the conversations it carried.
+ * Receive the two facts that make one trace gradeable.
  *
- * The two instants are the spans' own start times rather than anything about
- * when they arrived, and `rootClosed` is whether this export carried the span
- * the whole conversation happened inside.
+ * The simulation row is completion authority for simulations. `endsTrace` is
+ * used only for production, where it must come from a supported platform's
+ * normalized explicit end event. Evidence readiness is never inferred here.
  */
-type ProductionTraceActivity = {
+export async function requestGradingIn(
+  on: Queryable,
+  auth: AuthContext,
+  input: GradingRequest,
+): Promise<GradingRequestResult> {
+  authorize(auth, "read", here(auth));
+  await lockTrace(on, auth, input.traceId);
+
+  if (!input.evidenceReady) return { kind: "waiting", for: "evidence" };
+
+  if (input.source === "simulation") {
+    const simulationId = simulationIdOfTrace(input.traceId);
+    if (simulationId === undefined) {
+      throw new TypeError(`${input.traceId} is not a simulation trace id`);
+    }
+    const [row] = await on
+      .select({
+        id: simulation.id,
+        projectId: simulation.projectId,
+        runId: simulation.runId,
+        status: simulation.status,
+        modality: simulation.modality,
+      })
+      .from(simulation)
+      .where(within(auth, simulation, and(
+        eq(simulation.id, simulationId),
+        eq(simulation.projectId, projectOf(auth)),
+      )))
+      .limit(1)
+      .for("share");
+    if (row === undefined || row.status !== "completed") {
+      return { kind: "waiting", for: "completion" };
+    }
+    if (input.runId === undefined || input.runId !== row.runId) {
+      throw new Error(`simulation ${simulationId} grading handoff names the wrong run`);
+    }
+    if (input.modality !== row.modality) {
+      throw new Error(`simulation ${simulationId} grading handoff names the wrong modality`);
+    }
+    const resolved = await pinnedSimulationGradersOn(auth, on, simulationId);
+    if (resolved === undefined) {
+      throw new Error(`completed simulation ${simulationId} has no grading plan`);
+    }
+    return settleOrdinaryRequest(on, auth, {
+      source: "simulation",
+      simulationId,
+      traceId: input.traceId,
+      traceStartedAt: input.traceStartedAt,
+      runId: row.runId,
+      entries: resolved.map(frozen),
+    });
+  }
+
+  if (input.runId !== undefined) {
+    throw new TypeError("production grading cannot name a run");
+  }
+  if (!input.endsTrace) return { kind: "waiting", for: "completion" };
+
+  const receipt = await readProductionGradingPlan(auth, input.traceId);
+  let entries: readonly FrozenGradingEntry[];
+  let traceStartedAt = input.traceStartedAt;
+  if (receipt === undefined) {
+    const resolved = await resolveProductionGraders(auth, on, {
+      projectId: projectOf(auth),
+      modality: input.modality,
+      traceId: input.traceId,
+    });
+    entries = resolved.map(frozen);
+    await recordProductionGradingPlan(auth, {
+      traceId: input.traceId,
+      traceStartedAtMicroseconds: micros(input.traceStartedAt),
+      entries: entries.map(receiptEntry),
+    });
+  } else {
+    traceStartedAt = new Date(Number(receipt.traceStartedAtMicroseconds / 1_000n));
+    entries = await entriesFromReceipt(on, auth, receipt.entries);
+  }
+
+  return settleOrdinaryRequest(on, auth, {
+    source: "production",
+    simulationId: null,
+    traceId: input.traceId,
+    traceStartedAt,
+    runId: null,
+    entries,
+  });
+}
+
+export function requestGrading(
+  auth: AuthContext,
+  input: GradingRequest,
+): Promise<GradingRequestResult> {
+  return db().transaction((tx) => requestGradingIn(tx, auth, input));
+}
+
+/** The first span time in a small, bounded probe used by simulation completion. */
+export async function traceEvidenceStartedAt(
+  auth: AuthContext,
+  input: {
+    readonly source: GradingSource;
+    readonly traceId: string;
+    readonly runId?: string | undefined;
+    readonly window: TimeWindow;
+  },
+): Promise<Date | undefined> {
+  authorize(auth, "read", here(auth));
+  const projectId = projectOf(auth);
+  if (input.window.to <= input.window.from) {
+    throw new RangeError("trace evidence window must end after it starts");
+  }
+  const MILLION = 1_000_000n;
+  const literal = (value: bigint): string => {
+    let seconds = value / MILLION;
+    let remainder = value % MILLION;
+    if (remainder < 0n) {
+      seconds -= 1n;
+      remainder += MILLION;
+    }
+    const whole = new Date(Number(seconds) * 1_000).toISOString().slice(0, 19);
+    return `${whole.replace("T", " ")}.${remainder.toString().padStart(6, "0")}`;
+  };
+  const answered = await traceStore().query({
+    query: `select toString(toUnixTimestamp64Micro(started_at)) as started_at_micros
+              from spans
+             where organization_id = {organization_id:String}
+               and project_id = {project_id:String}
+               and source = {source:String}
+               and trace_id = {trace_id:String}
+               and started_at >= {from:DateTime64(6, 'UTC')}
+               and started_at < {to:DateTime64(6, 'UTC')}
+               and (${input.runId === undefined ? "1" : "run_id = {run_id:String}"})
+             order by started_at
+             limit 1`,
+    query_params: {
+      organization_id: auth.organizationId,
+      project_id: projectId,
+      source: input.source,
+      trace_id: input.traceId,
+      from: literal(input.window.from),
+      to: literal(input.window.to),
+      ...(input.runId === undefined ? {} : { run_id: input.runId }),
+    },
+    format: "JSONEachRow",
+  });
+  const [first] = await answered.json<{ readonly started_at_micros: string }>();
+  return first === undefined
+    ? undefined
+    : new Date(Number(BigInt(first.started_at_micros) / 1_000n));
+}
+
+type CompletedProductionTrace = {
   readonly traceId: string;
-  readonly firstSpanAt: Date;
-  readonly lastSpanAt: Date;
-  readonly rootClosed: boolean;
+  readonly endAtMicroseconds: bigint;
+  readonly modality: "chat" | "voice";
 };
 
 /**
- * A production trace becomes known, and — when its root closes — claimable work.
+ * The modality carried by an explicit end from a production platform this
+ * release supports. An end from any other producer is not completion authority.
+ */
+function supportedProductionEndModality(
+  span: NewSpan,
+): "chat" | "voice" | undefined {
+  if (span.source !== "production" || !span.endsTrace) return undefined;
+  if (span.agentPlatform === "retell") {
+    if (span.connectionKind === "retell_chat_api") return "chat";
+    if (span.connectionKind === "" || span.connectionKind === "phone_number") {
+      return "voice";
+    }
+    return undefined;
+  }
+  if (
+    span.agentPlatform === "livekit_agents" &&
+    (span.connectionKind === "" || span.connectionKind === "livekit_room")
+  ) {
+    return "voice";
+  }
+  return undefined;
+}
+
+function completedProductionTracesIn(
+  spans: readonly NewSpan[],
+): readonly CompletedProductionTrace[] {
+  const completed = new Map<string, CompletedProductionTrace>();
+  for (const span of spans) {
+    const modality = supportedProductionEndModality(span);
+    if (modality === undefined) continue;
+    const held = completed.get(span.traceId);
+    if (held !== undefined && held.modality !== modality) {
+      throw new Error(
+        `trace ${span.traceId} has conflicting production modalities`,
+      );
+    }
+    if (
+      held === undefined ||
+      span.startedAtMicroseconds > held.endAtMicroseconds
+    ) {
+      completed.set(span.traceId, {
+        traceId: span.traceId,
+        endAtMicroseconds: span.startedAtMicroseconds,
+        modality,
+      });
+    }
+  }
+  return [...completed.values()];
+}
+
+function traceWindowEndingAt(endAtMicroseconds: bigint): TimeWindow {
+  const to = endAtMicroseconds + 1n;
+  const width = BigInt(MAXIMUM_WINDOW_MILLISECONDS) * 1_000n;
+  const candidate = to - width;
+  return {
+    from: candidate < EARLIEST_READABLE_MICROSECONDS
+      ? EARLIEST_READABLE_MICROSECONDS
+      : candidate,
+    to,
+  };
+}
+
+/**
+ * Hand query-visible production evidence to grading.
  *
- * Called by the drainer with the very spans it just wrote, after they are
- * query-visible and once per segment. **It writes bookkeeping and raises a
- * notification, and does nothing else**: no grader is resolved, no conversation
- * is read, nothing is judged. Judging is the grader service's, and neither the
- * request path nor the drainer holds anything open for it.
- *
- * It takes the spans rather than a summary of them so that **what completion
- * means is written down once**. A caller that computed "which trace, how wide,
- * did the root arrive" for itself would be a second reader of span shape,
- * disagreeing with this one the first time either changed — and the disagreement
- * would show up as conversations that were never judged, which is the failure
- * nobody notices.
- *
- * The row is written on the first segment that carries any span of a trace and
- * updated by every segment after it, which is why the whole thing is one upsert
- * against the project-and-trace unique: an exporter flushes a conversation in
- * as many batches as it likes, in whatever order, they are drained in whatever
- * order they became durable, and they all land on one row. The project is part
- * of that key because a trace id comes from the customer.
- *
- * **Replaying a segment repeats this harmlessly**, which is what makes the
- * drainer's replay safe: the merge below is monotone in every column and the
- * upsert touches nothing that has moved past `pending`.
- *
- * **A job already claimed or already graded is not touched**, which is the whole
- * of what late spans do. Telemetry that arrives after egma judged a trace does
- * not resurrect the job, does not re-open the conversation and does not queue a
- * second judgment: re-grading history is a deliberate action somebody asks for,
- * never something a straggling export causes.
- *
- * The supported ingest door and the shared span writer both refuse telemetry
- * without a project. The guard below remains as a narrow data-access invariant:
- * a grading job cannot be formed when its project side of the tenancy triangle
- * is absent.
- *
- * No permission is asked for, on the same terms as `appendSpans` beside it: what
- * may write telemetry is decided once, at the door, before a byte of the body is
- * read, and the scope this is called with is the one sealed into the segment.
+ * The durable drainer calls this only after the spans were appended. A
+ * normalized, supported-platform end is the only completion fact. The true
+ * trace start is read from ClickHouse, so a final segment cannot shorten the
+ * frozen receipt to only the spans it happened to carry. Replays reach the same
+ * immutable receipt and, while work is live, the same temporary Postgres job.
  */
 export async function recordProductionTraces(
   auth: AuthContext,
   spans: readonly NewSpan[],
 ): Promise<void> {
-  const { projectId } = auth;
-  if (projectId === undefined) return;
-
-  const traces = productionTracesIn(spans);
-  if (traces.length === 0) return;
-
-  const seenAt = new Date();
-
-  // One statement, and it is safe to batch precisely because the traces were
-  // gathered by id above: Postgres refuses an upsert that would touch one row
-  // twice, so a values list with a trace in it twice would fail the whole
-  // export rather than record either half of it.
-  const written = await db()
-    .insert(gradingJob)
-    .values(
-      traces.map((trace) => ({
-        id: newId("gjb"),
-        organizationId: auth.organizationId,
-        projectId,
-        source: "production" as const,
-        traceId: trace.traceId,
-        status: "pending" as const,
-        firstSpanAt: trace.firstSpanAt,
-        lastSpanAt: trace.lastSpanAt,
-        lastSeenAt: seenAt,
-        rootClosedAt: trace.rootClosed ? seenAt : null,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: [gradingJob.projectId, gradingJob.traceId],
-      set: {
-        // Widened, never replaced: exports arrive in the order an exporter felt
-        // like sending them, so the window a trace is read inside is the widest
-        // anybody has seen rather than the newest anybody reported.
-        firstSpanAt: sql`least(${gradingJob.firstSpanAt}, excluded.first_span_at)`,
-        lastSpanAt: sql`greatest(${gradingJob.lastSpanAt}, excluded.last_span_at)`,
-        lastSeenAt: sql`excluded.last_seen_at`,
-        // A root closes once. Keeping the first answer means a trace cannot be
-        // un-completed by a later flush of spans that were buffered behind it.
-        rootClosedAt: sql`coalesce(${gradingJob.rootClosedAt}, excluded.root_closed_at)`,
-      },
-      // A row that came back is a row still waiting to be judged. One that did
-      // not is a conversation already claimed or already graded, and a late span
-      // is not a reason to do either again.
-      setWhere: eq(gradingJob.status, "pending"),
-    })
-    .returning({ id: gradingJob.id, rootClosedAt: gradingJob.rootClosedAt });
-
-  // The conversations that are over wake somebody — the same nudge a
-  // simulation's terminal transition raises, on the same channel, carrying the
-  // same nothing. A trace that goes quiet without a root raises none: there is
-  // no event to raise one on, which is why the claim query sweeps for it.
-  for (const job of written) {
-    if (job.rootClosedAt === null) continue;
-    await db().execute(sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${job.id})`);
+  if (auth.projectId === undefined) return;
+  for (const completed of completedProductionTracesIn(spans)) {
+    const traceStartedAt = await traceEvidenceStartedAt(auth, {
+      source: "production",
+      traceId: completed.traceId,
+      window: traceWindowEndingAt(completed.endAtMicroseconds),
+    });
+    if (traceStartedAt === undefined) {
+      throw new Error(
+        `completed production trace ${completed.traceId} is not query-visible`,
+      );
+    }
+    await requestGrading(auth, {
+      source: "production",
+      traceId: completed.traceId,
+      traceStartedAt,
+      endsTrace: true,
+      evidenceReady: true,
+      modality: completed.modality,
+    });
   }
 }
 
-/**
- * The production conversations one segment carried, gathered by trace.
- *
- * **A trace is over when the platform that ran it says so**, and each span
- * carries that word: `endsTrace` is set by the normalizer that recognised the
- * platform — LiveKit's own session span, Retell's reported end — and is `false`
- * everywhere else, including on a platform this release does not support.
- *
- * **A span having no parent is not an ending**, and is never read as one here.
- * A parentless span is a span whose parent did not arrive: an exporter flush
- * that lost its parent produces one, and so does a span whose parent id came in
- * malformed and was normalised to nothing at all. Either would mark a
- * conversation complete while the caller was still talking, which is a judgment
- * written about half a call. The end is a fact only the platform holds, so it
- * is carried from where the platform stated it. Where no supported platform
- * states one, this reports no completion and invents nothing.
- *
- * Simulation traces are excluded rather than treated as production: their
- * grading work is created by the transaction that ends the simulation, and this
- * filter is what stops the same evidence creating a second piece of it. It is
- * the **only** guard, because the drainer reports every segment it drains
- * without knowing whose conversation is whose — so the question is asked of
- * every span rather than of a segment.
- *
- * Nothing here decides whether a trace *should* be graded. It reports what
- * arrived; which graders apply, and whether this trace is their turn, are
- * questions asked much later by a service that holds no request open.
- */
-function productionTracesIn(
-  spans: readonly NewSpan[],
-): readonly ProductionTraceActivity[] {
-  const seen = new Map<
-    string,
-    { first: bigint; last: bigint; rootClosed: boolean }
-  >();
-
-  for (const span of spans) {
-    if (span.source !== "production") continue;
-
-    const found = seen.get(span.traceId);
-    if (found === undefined) {
-      seen.set(span.traceId, {
-        first: span.startedAtMicroseconds,
-        last: span.startedAtMicroseconds,
-        rootClosed: span.endsTrace,
-      });
-      continue;
-    }
-
-    if (span.startedAtMicroseconds < found.first) {
-      found.first = span.startedAtMicroseconds;
-    }
-    if (span.startedAtMicroseconds > found.last) {
-      found.last = span.startedAtMicroseconds;
-    }
-    found.rootClosed ||= span.endsTrace;
-  }
-
-  return [...seen].map(([traceId, when]) => ({
-    traceId,
-    // Milliseconds, because that is what a timestamp column reads back into.
-    // The lost microseconds cost nothing: the window is widened at both ends
-    // before a transcript is read with it, and the store buckets a span to the
-    // minute it started in regardless.
-    firstSpanAt: new Date(Number(when.first / 1_000n)),
-    lastSpanAt: new Date(Number(when.last / 1_000n)),
-    rootClosed: when.rootClosed,
-  }));
-}
-
-/* ------------------------------------------------------------------- *
- * Taking work. The one call that works the whole deployment.
- * ------------------------------------------------------------------- */
-
-export type GradingClaimRequest = {
-  /** This copy of the grader service's own name for itself. */
-  readonly claimant: string;
-  /** How many conversations it will judge at once. */
-  readonly capacity: number;
-  /** How long its claim survives its silence; the default is generous. */
-  readonly leaseSeconds?: number | undefined;
-  /**
-   * How long a production trace must have been quiet before it is judged
-   * without a closed root span. The deployment's own patience, which is why it
-   * is asked for here rather than stamped on the row at ingest: the door records
-   * what it saw, and how long is long enough is the judging side's policy.
-   */
-  readonly idleSeconds?: number | undefined;
-};
-
-/**
- * The atomic claim, across every organization on this deployment.
- *
- * Up to `capacity` of the oldest outstanding jobs move to `claimed` in one
- * transaction, stamped with the claimant and their first heartbeat; whatever
- * another copy holds locked is passed over rather than waited on, so two copies
- * drain one queue without ever taking the same conversation. `SKIP LOCKED`,
- * exactly as `claimSimulations` does it, because it is exactly the same
- * problem.
- *
- * **Outstanding means two things**, and that is what makes a crashed copy cost
- * nothing: a job nobody has taken, and a job whose holder has been silent longer
- * than the lease. The second case is why there is no orphan sweep beside this
- * function — reclaiming an abandoned job *is* claiming, and a job has no
- * half-finished state for a sweep to tidy, because grading either produced
- * verdict rows or did not.
- *
- * **A production trace adds a third condition to the first of those**, and this
- * is where the idle-timeout fallback actually lives. Such a job is written when
- * the trace's first span arrives, so `pending` alone would hand out a
- * conversation that is still happening; it is claimable once its root span
- * closed it, or once nothing has arrived for it in longer than `idleSeconds`.
- * The second half is a sweep by nature — the event it waits for is the absence
- * of events, so nobody can be woken for it — and it is a predicate here rather
- * than a background job because the query that hands out work is already run on
- * an interval by every copy of the service.
- *
- * A simulation is never asked either question. It is complete because a
- * transaction said so, and sampling and idleness are both about traffic egma did
- * not cause.
- *
- * A job that has been claimed `MOST_GRADING_ATTEMPTS` times and still is not
- * finished is `abandoned` here instead of handed out again. egma stops trying; it does not
- * say anything about the agent, which is why the word is not `failed`.
- *
- * **It takes no `AuthContext` and cannot be given one.** See the note at the top
- * of this file: it is the one call in the module that reaches across customers,
- * it reaches only egma's own queue, it carries out identifiers rather than
- * content, and every claim it returns arrives with the narrowed context the work
- * is actually done under.
- */
 export async function claimGradingJobs(
   request: GradingClaimRequest,
 ): Promise<readonly GradingClaim[]> {
   const claimant = validClaimant(request.claimant);
-  const { capacity } = request;
   if (
-    !Number.isInteger(capacity) ||
-    capacity < 1 ||
-    capacity > LARGEST_CLAIM_CAPACITY
+    !Number.isInteger(request.capacity) ||
+    request.capacity < 1 ||
+    request.capacity > LARGEST_CLAIM_CAPACITY
   ) {
-    throw new Error(
+    throw new RangeError(
       `a claim takes between 1 and ${LARGEST_CLAIM_CAPACITY} grading jobs`,
     );
   }
-
   const leaseSeconds = request.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   if (!Number.isInteger(leaseSeconds) || leaseSeconds < 1) {
-    throw new Error("a lease is a positive whole number of seconds");
-  }
-
-  const idleSeconds = request.idleSeconds ?? DEFAULT_TRACE_IDLE_SECONDS;
-  if (!Number.isInteger(idleSeconds) || idleSeconds < 1) {
-    throw new Error("an idle window is a positive whole number of seconds");
+    throw new RangeError("a lease is a positive whole number of seconds");
   }
 
   const now = new Date();
-  const silentSince = new Date(now.getTime() - leaseSeconds * 1000);
-  const quietSince = new Date(now.getTime() - idleSeconds * 1000);
-
-  // The conversation is over: a simulation's transaction said so, a trace's root
-  // span closed, or nothing has arrived for the trace in longer than the idle
-  // window and egma judges what it has rather than waiting forever.
-  const finished = or(
-    eq(gradingJob.source, "simulation"),
-    isNotNull(gradingJob.rootClosedAt),
-    lt(gradingJob.lastSeenAt, quietSince),
-  );
-
-  const claimed = await db().transaction(async (tx) => {
+  const silentSince = new Date(now.getTime() - leaseSeconds * 1_000);
+  const rows = await db().transaction(async (tx) => {
     const candidates = await tx
       .select({ id: gradingJob.id, attempts: gradingJob.attempts })
       .from(gradingJob)
-      .where(
-        or(
-          and(eq(gradingJob.status, "pending"), finished),
-          and(
-            eq(gradingJob.status, "claimed"),
-            lt(gradingJob.heartbeatAt, silentSince),
-          ),
-        ),
-      )
+      .where(or(
+        eq(gradingJob.status, "pending"),
+        and(eq(gradingJob.status, "claimed"), lt(gradingJob.heartbeatAt, silentSince)),
+      ))
       .orderBy(asc(gradingJob.id))
-      .limit(capacity)
+      .limit(request.capacity)
       .for("update", { skipLocked: true });
-
     if (candidates.length === 0) return [];
 
-    // Bare `eq`s and `inArray`s from here down: every id came off the rows
-    // locked just above, in this same transaction, so nothing below reaches
-    // further than that select already did.
     const exhausted = candidates
       .filter((candidate) => candidate.attempts >= MOST_GRADING_ATTEMPTS)
       .map((candidate) => candidate.id);
     if (exhausted.length > 0) {
       await tx
         .update(gradingJob)
-        // The narrowing goes with the giving-up. egma is not going to judge
-        // this conversation for that grader, and a job left narrowed after it
-        // settles would hand the instruction to whoever reopens it next.
-        .set({ status: "abandoned", finishedAt: now, regradeGraderId: null })
+        .set({
+          status: "abandoned",
+          claimedBy: null,
+          claimedAt: null,
+          heartbeatAt: null,
+          finishedAt: now,
+          lastError: sql`coalesce(${gradingJob.lastError}, 'grading worker lease expired after the final attempt')`,
+        })
         .where(inArray(gradingJob.id, exhausted));
     }
 
@@ -748,81 +695,43 @@ export async function claimGradingJobs(
         attempts: sql`${gradingJob.attempts} + 1`,
       })
       .where(inArray(gradingJob.id, takeable))
-      .returning(CLAIM_COLUMNS);
+      .returning(JOB_COLUMNS);
   });
 
-  return claimed
-    .map((row) => ({
-      id: row.id,
-      source: row.source as GradingSource,
-      simulationId: row.simulationId,
-      traceId: row.traceId,
-      firstSpanAt: row.firstSpanAt,
-      lastSpanAt: row.lastSpanAt,
-      organizationId: row.organizationId,
-      projectId: row.projectId,
-      regradeGraderId: row.regradeGraderId,
-      attempts: row.attempts,
-      claimedBy: row.claimedBy ?? claimant,
-      claimedAt: row.claimedAt ?? now,
-      auth: gradingContext(row.organizationId, row.projectId),
-    }))
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  return rows.map((row) => {
+    const job = jobFromRow(row);
+    if (
+      job.status !== "claimed" ||
+      job.claimedBy === null ||
+      job.claimedAt === null ||
+      job.heartbeatAt === null
+    ) {
+      throw new Error(`claimed grading job ${job.id} has no lease`);
+    }
+    return {
+      ...job,
+      status: "claimed" as const,
+      claimedBy: job.claimedBy,
+      claimedAt: job.claimedAt,
+      heartbeatAt: job.heartbeatAt,
+      auth: gradingContext(job.organizationId, job.projectId),
+    };
+  });
 }
 
-/**
- * Wake `onWork` whenever a conversation somewhere on this deployment becomes
- * claimable, and once when the watch is established.
- *
- * The nudge carries nothing — not which job, not whose — because what a listener
- * does with it is claim, and the claim is a query that sees everything
- * outstanding regardless. So this is the second call in the module that takes no
- * `AuthContext`, and the safer of the two: it names no table and returns no row.
- *
- * The handle is how a service stops listening. Closing it is the only thing to
- * do with it.
- */
-export async function watchGradingWork(
-  onWork: () => void,
-): Promise<Listening> {
+export function watchGradingWork(onWork: () => void): Promise<Listening> {
   return listen(GRADING_WORK_CHANNEL, onWork);
 }
 
-/* ------------------------------------------------------------------- *
- * Holding it, and letting it go. All inside one customer.
- * ------------------------------------------------------------------- */
-
-/**
- * The job as the caller can reach it: this customer's, and this project's when
- * the context names one.
- */
 function theJob(auth: AuthContext, id: string): SQL {
-  return within(
-    auth,
-    gradingJob,
+  return within(auth, gradingJob, and(
+    eq(gradingJob.id, id),
     auth.projectId === undefined
-      ? eq(gradingJob.id, id)
-      : and(eq(gradingJob.id, id), eq(gradingJob.projectId, auth.projectId)),
-  );
+      ? undefined
+      : eq(gradingJob.projectId, auth.projectId),
+  ));
 }
 
-/**
- * **No permission is asked for on the three calls below, deliberately**, on the
- * same terms as `appendVerdicts`: what may move a grading job is a question
- * about the caller, and the caller is the grader service, which answered it by
- * holding the claim. The guard is the claim itself — every one of them requires
- * the claimant's own name on the row, inside the context's tenancy — so a caller
- * who does not hold a job cannot move it, whatever their role.
- *
- * A row of the permission table decided in two places is a row that will one day
- * be decided two ways.
- */
-
-/**
- * Still alive, still holding this job. `undefined` is a heartbeat with nothing
- * under it: a job out of reach, not this claimant's, or no longer claimed — the
- * signal to stop, not to retry.
- */
 export async function recordGradingHeartbeat(
   auth: AuthContext,
   id: string,
@@ -831,67 +740,32 @@ export async function recordGradingHeartbeat(
   const [row] = await db()
     .update(gradingJob)
     .set({ heartbeatAt: new Date() })
-    .where(
-      and(
-        theJob(auth, id),
-        eq(gradingJob.claimedBy, validClaimant(claimant)),
-        eq(gradingJob.status, "claimed"),
-      ),
-    )
+    .where(and(
+      theJob(auth, id),
+      eq(gradingJob.status, "claimed"),
+      eq(gradingJob.claimedBy, validClaimant(claimant)),
+    ))
     .returning({ id: gradingJob.id });
-
   return row === undefined ? undefined : { held: true };
 }
 
-/**
- * The conversation has been judged and the verdicts are written: `claimed →
- * graded`, once, by whoever held it. The guarded update is the check, so there
- * is no window in which the job moves between being looked at and being moved.
- *
- * **Finishing is where a narrowing ends.** The grader a re-grade named was an
- * instruction for this one piece of work, and the work is done — so the next
- * time this conversation is asked about, whether by an ordinary re-grade or by a
- * narrowed one naming a different grader, it starts from the whole conversation
- * again. A job that carried its last instruction forward would judge less and
- * less of a conversation the more often anybody asked about it.
- */
+/** Delete temporary work only after all durable grades were appended. */
 export async function finishGradingJob(
   auth: AuthContext,
   id: string,
   claimant: string,
-): Promise<GradingJob | undefined> {
-  const now = new Date();
+): Promise<{ readonly id: string } | undefined> {
   const [row] = await db()
-    .update(gradingJob)
-    .set({
-      status: "graded",
-      finishedAt: now,
-      heartbeatAt: now,
-      lastError: null,
-      regradeGraderId: null,
-    })
-    .where(
-      and(
-        theJob(auth, id),
-        eq(gradingJob.claimedBy, validClaimant(claimant)),
-        eq(gradingJob.status, "claimed"),
-      ),
-    )
-    .returning(JOB_COLUMNS);
-
-  return row === undefined ? undefined : jobFromRow(row);
+    .delete(gradingJob)
+    .where(and(
+      theJob(auth, id),
+      eq(gradingJob.status, "claimed"),
+      eq(gradingJob.claimedBy, validClaimant(claimant)),
+    ))
+    .returning({ id: gradingJob.id });
+  return row;
 }
 
-/**
- * This copy could not finish, and says so: `claimed → pending`, the claim
- * cleared, the reason kept. The job is anybody's again at once rather than
- * after the lease — a copy that knows it failed should not make the queue wait
- * out a silence that is not happening.
- *
- * The attempt is already counted, on the claim, so a job released this way is
- * one attempt closer to being abandoned exactly as a job whose holder vanished
- * is.
- */
 export async function releaseGradingJob(
   auth: AuthContext,
   id: string,
@@ -899,748 +773,517 @@ export async function releaseGradingJob(
   why: string,
 ): Promise<GradingJob | undefined> {
   const reason = why.trim();
-  if (reason === "") {
-    throw new Error("releasing a grading job says why it was released");
-  }
-
-  const [row] = await db()
-    .update(gradingJob)
-    .set({
-      status: "pending",
-      claimedBy: null,
-      claimedAt: null,
-      heartbeatAt: null,
-      lastError: reason,
-    })
-    .where(
-      and(
+  if (reason === "") throw new TypeError("releasing a grading job says why");
+  return db().transaction(async (tx) => {
+    const [held] = await tx
+      .select({ attempts: gradingJob.attempts })
+      .from(gradingJob)
+      .where(and(
         theJob(auth, id),
-        eq(gradingJob.claimedBy, validClaimant(claimant)),
         eq(gradingJob.status, "claimed"),
-      ),
-    )
-    .returning(JOB_COLUMNS);
+        eq(gradingJob.claimedBy, validClaimant(claimant)),
+      ))
+      .limit(1)
+      .for("update");
+    if (held === undefined) return undefined;
 
-  return row === undefined ? undefined : jobFromRow(row);
+    const abandoned = held.attempts >= MOST_GRADING_ATTEMPTS;
+    const [row] = await tx
+      .update(gradingJob)
+      .set({
+        status: abandoned ? "abandoned" : "pending",
+        claimedBy: null,
+        claimedAt: null,
+        heartbeatAt: null,
+        lastError: reason,
+        finishedAt: abandoned ? new Date() : null,
+      })
+      .where(eq(gradingJob.id, id))
+      .returning(JOB_COLUMNS);
+    if (row === undefined) return undefined;
+    if (!abandoned) await notify(tx, row.id);
+    return jobFromRow(row);
+  });
 }
 
-/** One job as it stands, within the caller's tenancy. */
 export async function getGradingJob(
   auth: AuthContext,
   id: string,
 ): Promise<GradingJob | undefined> {
   authorize(auth, "read", here(auth));
-
   const [row] = await db()
     .select(JOB_COLUMNS)
     .from(gradingJob)
     .where(theJob(auth, id))
     .limit(1);
-
   return row === undefined ? undefined : jobFromRow(row);
 }
 
-/**
- * The jobs outstanding for one conversation — none once it has been graded.
- * What a page asking "is this judged yet" reads, and what a test asserts a
- * second grading of the same conversation did not create.
- */
-export async function listGradingJobsForSimulation(
-  auth: AuthContext,
-  simulationId: string,
-): Promise<readonly GradingJob[]> {
-  authorize(auth, "read", here(auth));
-
-  const rows = await db()
-    .select(JOB_COLUMNS)
-    .from(gradingJob)
-    .where(
-      within(
-        auth,
-        gradingJob,
-        and(
-          eq(gradingJob.simulationId, simulationId),
-          auth.projectId === undefined
-            ? undefined
-            : eq(gradingJob.projectId, auth.projectId),
-        ),
-      ),
-    )
-    .orderBy(asc(gradingJob.id));
-
-  return rows.map(jobFromRow);
-}
-
-/**
- * The job standing behind one production trace, if egma has heard of it.
- *
- * One rather than a list, and that is the project-and-trace unique speaking: a
- * trace has exactly one job in this project for its whole life, from the first
- * span that arrives to the verdicts that land. So this answers three questions
- * with one row — has egma seen this conversation, is it over, has it been
- * judged — without trusting a customer-controlled id across tenants.
- */
 export async function getGradingJobForTrace(
   auth: AuthContext,
   traceId: string,
 ): Promise<GradingJob | undefined> {
   authorize(auth, "read", here(auth));
+  return jobForTrace(db(), auth, traceId);
+}
 
-  const [row] = await db()
+export async function listGradingJobsForSimulation(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<readonly GradingJob[]> {
+  authorize(auth, "read", here(auth));
+  const rows = await db()
     .select(JOB_COLUMNS)
     .from(gradingJob)
-    .where(
-      within(
-        auth,
-        gradingJob,
-        and(
-          eq(gradingJob.traceId, traceId),
-          auth.projectId === undefined
-            ? undefined
-            : eq(gradingJob.projectId, auth.projectId),
-        ),
-      ),
-    )
-    .limit(1);
-
-  return row === undefined ? undefined : jobFromRow(row);
-}
-
-/* ------------------------------------------------------------------- *
- * Asking for it again.
- * ------------------------------------------------------------------- */
-
-/** A job that is finished with, one way or the other, and can be asked again. */
-const SETTLED: readonly GradingJobStatus[] = ["graded", "abandoned"];
-
-/** A job that is already going to be judged, and needs nothing asked of it. */
-const OUTSTANDING: readonly GradingJobStatus[] = ["pending", "claimed"];
-
-/**
- * How many conversations one re-grade may reopen.
- *
- * A re-grade re-spends the judge on every conversation it names, so the cost of
- * a window somebody got wrong is real money rather than a slow page. It is
- * **refused rather than quietly narrowed**, for the reason the trace store
- * refuses a window it cannot serve: narrowing answers a smaller question than
- * the one asked and says nothing about having done so, and a person who meant
- * the whole month would conclude the month was thinner than it is.
- *
- * A run conducts at most two hundred conversations, so a run can never reach
- * this — which is what keeps it a guard on the window rather than a limit on
- * the ordinary case.
- */
-const MOST_CONVERSATIONS_PER_REGRADE = 500;
-
-/**
- * A conversation that has been judged becomes claimable work again.
- *
- * `graded → pending`, or `abandoned → pending`, with the claim cleared and the
- * attempts back to nothing — an abandoned job is one egma gave up on after three
- * attempts, and reopening it without resetting the count would abandon it again
- * on the first claim. The last error is cleared with them: a reader seeing
- * `pending` beside a stale reason would read this attempt as already failed.
- *
- * **The row is reopened rather than replaced**, which is the whole reason the
- * unique on the conversation is worth having. `created_at` therefore stays the
- * moment the conversation became judgeable, so a window means the same thing
- * before and after a re-grade of it, and asking twice is asking twice rather
- * than moving the conversation to today.
- *
- * A job that is `pending` or `claimed` is left exactly alone and answers
- * `undefined`: it is already going to be judged. A simulation uses its run's
- * pinned grader versions; a production trace uses current versions. So does a
- * job out of the caller's reach — the answer reading it would have given.
- *
- * **This verb asks for the whole conversation and cannot ask for less.**
- * Narrowing to one grader is a re-grade's decision, made by the person who named
- * one, and it travels through `regrade` — so a job reopened here is explicitly
- * un-narrowed rather than left carrying whatever the last ask said.
- *
- * The notification rides the same transaction as the update, exactly as the
- * enqueue's does, so a service woken by it always finds the row pending.
- */
-export async function reopenGradingJob(
-  auth: AuthContext,
-  id: string,
-): Promise<GradingJob | undefined> {
-  authorize(auth, "regrade", here(auth));
-
-  const [only] = await db().transaction((tx) =>
-    reopenJobs(tx, theJob(auth, id), null),
-  );
-  return only;
-}
-
-/**
- * The reopen itself, over whatever set of this customer's jobs the caller
- * resolved. Every caller passes a predicate that already carries the tenancy,
- * and a predicate that came out empty is refused rather than run — an update
- * with no `where` on this table would reopen the whole deployment's queue, so
- * the one shape that could do it is the one shape that cannot be passed.
- *
- * `forGrader` is written every time, `null` included, so that what the engine
- * will read off these jobs is what this reopen asked for and never what an
- * earlier one did.
- *
- * **Where it runs is the caller's**, because both callers already own a
- * transaction this has to be inside. The notification has to commit with the
- * update that made the work claimable, exactly as the enqueue's does, so a
- * service woken by it always finds the row pending; and a re-grade's reopen has
- * to commit with the reading that decided it.
- */
-async function reopenJobs(
-  on: Queryable,
-  theseJobs: SQL | undefined,
-  forGrader: string | null,
-): Promise<readonly GradingJob[]> {
-  if (theseJobs === undefined) {
-    throw new Error("reopening grading work always names whose work it reaches");
-  }
-
-  const rows = await on
-    .update(gradingJob)
-    .set({
-      status: "pending",
-      claimedBy: null,
-      claimedAt: null,
-      heartbeatAt: null,
-      attempts: 0,
-      lastError: null,
-      finishedAt: null,
-      regradeGraderId: forGrader,
-    })
-    .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
-    .returning(JOB_COLUMNS);
-
-  if (rows.length === 0) return [];
-
-  // One notification per conversation, which is what the enqueue raises and
-  // what a copy of the service expects to be woken by. The payload is the job
-  // id and nothing reads it — a claim is a query that sees everything
-  // outstanding — so this is a nudge repeated, never a delivery.
-  await on.execute(
-    sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${gradingJob.id})
-        from ${gradingJob}
-        where ${inArray(
-          gradingJob.id,
-          rows.map((row) => row.id),
-        )}`,
-  );
-
+    .where(within(auth, gradingJob, eq(gradingJob.simulationId, simulationId)))
+    .orderBy(asc(gradingJob.id));
   return rows.map(jobFromRow);
 }
 
-/**
- * A window of time, closed at the start and open at the end, measured on the
- * moment each conversation **became judgeable** — the terminal transition that
- * made it work, which is the same commit that ended it.
- *
- * That anchor rather than the conversation's own clock, because it is the one
- * fact both sources have: a simulation ends in the transaction that enqueues it,
- * and a production trace completing is what will enqueue that. And because it
- * never moves — reopening a job leaves it alone — so re-grading the same window
- * twice names the same conversations both times.
- *
- * `Date`s, because this is Postgres and the column holds a timestamp. The trace
- * store's windows count microseconds for the opposite reason: its columns do.
- */
-export type RegradeWindow = {
-  readonly from: Date;
-  readonly to: Date;
+export type TraceGradingState =
+  | "not_requested"
+  | "pending"
+  | "running"
+  | "complete"
+  | "error";
+
+export type NamedRecordedGrade = RecordedGrade & { readonly graderName: string };
+export type NamedCurrentGrade = CurrentGrade & { readonly graderName: string };
+
+export type TraceGrading = {
+  readonly state: TraceGradingState;
+  readonly history: readonly NamedRecordedGrade[];
+  readonly current: readonly NamedCurrentGrade[];
+  readonly combinedScore: number | null;
 };
 
-/**
- * Which conversations to judge again: one conversation, one run's, or every one
- * that became judgeable inside a window.
- *
- * All three are honest halves of the same act rather than one shape with
- * conveniences on top. One simulation is how somebody reading a single
- * conversation's evidence asks for it to be looked at again; a run is how they
- * re-score a suite they just watched fail on a grader they have since fixed; a
- * window is how they re-score production, which belongs to no run and never
- * will.
- *
- * The single conversation is deliberately **not** expressible as a one-run
- * window, and that is why it is its own shape. A window names conversations by
- * when they became judgeable, so two conversations of one run that landed inside
- * the same second are indistinguishable to it — asking about one would ask about
- * both, and the person who opened one conversation's page would spend the judge
- * on its neighbour without being told.
- */
-type RegradeConversations =
-  | { readonly simulationId: string }
-  | { readonly runId: string }
-  | { readonly window: RegradeWindow };
-
-/**
- * What to judge again: which conversations, and — if the person asking says so
- * — which grader.
- *
- * The ticket's words are "a run (or a time window) **and a grader**", and this
- * makes the grader optional rather than required. Both readings are coherent,
- * and the difference is only ever about judge spend: re-judging the conversation
- * whole accumulates exactly the rows re-judging one grader would, because a
- * grader nobody edited rewrites its own row in place. What it also does is ask
- * every LLM judge on that conversation again.
- *
- * So:
- *
- * - **A grader named** narrows the re-judge to that one grader identity. A
- *   simulation still uses the version its run pinned; a production trace uses
- *   the current version. No other running copy on the conversation is judged,
- *   and nothing else's rows are touched. This is what
- *   somebody who fixed one rubric is asking for, and it is the only shape in
- *   which fixing a rubric costs one rubric's worth of judging.
- * - **No grader named** re-judges the conversation, which is what a re-grade has
- *   always meant here and stays the default so that the plain ask keeps working.
- *
- * The grader is named **by identity**, never by version. Which version judges
- * is a property of the original source: a simulation resolves that identity
- * from its run's frozen plan, while a production trace resolves the current
- * copy because it has no run plan.
- *
- * **The expected-behaviors grader can be named like any other**, and that is
- * what stopped being a special case. It used to be implicit — never a row in
- * any table, so it had no identity to name, and re-judging a test's own
- * expectations alone was future work. Every project now runs a copy of the
- * library entry, so it has an ordinary `grd_` id, it is what its verdict rows
- * carry, and a re-grade narrowed to it costs one grader's worth of judging
- * exactly as narrowing to any other does.
- */
-export type RegradeTarget = RegradeConversations & {
-  /**
-   * The one grader to judge with, or absent for every grader that applies.
-   * Validated like any other read: the shape first, then whether the caller can
-   * reach it at all.
-   */
-  readonly graderId?: string | undefined;
+export type TraceGradingRef = {
+  readonly source: GradingSource;
+  readonly traceId: string;
+  readonly runId?: string | undefined;
 };
 
-export type Regraded = {
-  /** The conversations asked for again, as their jobs now stand. */
-  readonly reopened: readonly GradingJob[];
-  /**
-   * The grader this re-grade narrowed to, or null for the whole conversation.
-   * It is what the reopened jobs carry, echoed back so a caller sees the ask
-   * that was actually made rather than the one they typed.
-   */
-  readonly graderId: string | null;
-  /**
-   * How many of the conversations named were already waiting to be judged and
-   * were left exactly alone. Almost all of them are neither a failure nor a
-   * skip: a conversation still in the queue is going to be judged from the
-   * version source it already has — a simulation's pinned plan or a production
-   * trace's current copy.
-   *
-   * **Almost**, because `beingJudgedNarrower` below counts the ones where that
-   * is not true, and they are counted in here as well. This number stays what
-   * it has always been — how many were left alone — so the one that says *and
-   * these will not be judged for what you asked* is a second number rather than
-   * a quiet subtraction from this one.
-   */
-  readonly alreadyWaiting: number;
-  /**
-   * How many of those already waiting are being judged **right now** under a
-   * narrowing that does not cover what has just been asked.
-   *
-   * A pending job that was narrowed is widened by this call, so it comes out
-   * covering both asks. A claimed one cannot be: it is being judged under the
-   * instruction it was claimed with, and the column decides nothing for it any
-   * more — so a job claimed for grader Y answers an ask about grader X, or about
-   * the whole conversation, by judging neither of them.
-   *
-   * That is the one case in which a re-grade names a conversation and nothing at
-   * all comes of it, and it is counted apart for exactly that reason. A surface
-   * that folded these into the number above would tell somebody their ask was
-   * covered and leave them waiting for verdicts that are never coming.
-   */
-  readonly beingJudgedNarrower: number;
-};
-
-/**
- * Judge these conversations again, with the versions their source resolves.
- *
- * **This is the only thing that ever re-scores history, and somebody has to ask
- * for it.** Editing a grader mints a version and changes nothing that was
- * already judged. A simulation re-grade stays on the run's pinned versions, so
- * a tightened threshold reaches only a new run. A production trace has no run
- * plan and therefore uses the current version when somebody explicitly asks it
- * to be judged again. Neither path changes history without this call.
- *
- * **The ask may name a grader, and then only that grader judges.** Every other
- * grader's rows on those conversations are left exactly where they are, and no
- * judge is asked anything on their behalf — which is what keeps fixing one
- * rubric from re-spending the whole conversation's judging. The narrowing rides
- * the reopened job, so the engine reads it long after the person asking has
- * gone, and it is cleared when the job finishes. Naming no grader re-judges the
- * conversation, which is what this call has always done.
- *
- * A simulation re-grade writes against the same pinned grader-version identity,
- * so it replaces that version's prior judgment. A production re-grade can add
- * rows for a newer current version; the read prefers the newest grading and
- * keeps the older version fetchable underneath. Nothing here rewrites a grader
- * version or a run plan.
- *
- * The conversations are resolved, their jobs reopened, and the service does the
- * judging — so a re-grade returns as soon as the work is queued rather than when
- * it is done, on the same terms as starting a run. What comes back says how many
- * conversations were asked for, how many were already going to be judged, and —
- * the one case where asking achieves nothing — how many are being judged this
- * moment under a narrowing that does not cover the ask, so a surface can say
- * that instead of claiming the ask was covered.
- *
- * A run or a conversation nobody can reach answers `undefined`, which is the
- * answer reading it would have given, and so does a grader nobody can reach — a
- * thing that is not there is not there, whichever of them was named. A window
- * that holds nothing still answers, because a window with nothing in it is a
- * different fact from a window that is not there.
- *
- * **All of it is one act.** Which conversations have settled, which are already
- * waiting, which are being judged under a narrowing that does not cover the ask,
- * and which are reopened are four readings of one queue, and a re-grade is most
- * likely to be asked exactly while that queue is moving. So they run in one
- * transaction over jobs held still — `holdTheConversations` below — and a
- * worker's claim, release or finish lands on either side of the whole answer
- * rather than in the middle of it.
- */
-export async function regrade(
+async function selectedEntries(
+  on: Queryable,
   auth: AuthContext,
-  target: RegradeTarget,
-): Promise<Regraded | undefined> {
+  ref: TraceGradingRef,
+): Promise<readonly FrozenGradingEntry[] | undefined> {
+  if (ref.source === "production") {
+    const receipt = await readProductionGradingPlan(auth, ref.traceId);
+    return receipt === undefined
+      ? undefined
+      : entriesFromReceipt(on, auth, receipt.entries);
+  }
+  const simulationId = simulationIdOfTrace(ref.traceId);
+  if (simulationId === undefined || ref.runId === undefined) return undefined;
+  const [row] = await on
+    .select({ status: simulation.status, runId: simulation.runId })
+    .from(simulation)
+    .where(within(auth, simulation, eq(simulation.id, simulationId)))
+    .limit(1);
+  if (row === undefined || row.status !== "completed" || row.runId !== ref.runId) {
+    return undefined;
+  }
+  const resolved = await pinnedSimulationGradersOn(auth, on, simulationId);
+  return resolved?.map(frozen);
+}
+
+async function namesFor(
+  on: Queryable,
+  auth: AuthContext,
+  projectGraderIds: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  if (projectGraderIds.length === 0) return new Map();
+  const rows = await on
+    .select({ id: projectGrader.id, name: graderDefinition.name })
+    .from(projectGrader)
+    .innerJoin(graderDefinition, eq(graderDefinition.id, projectGrader.graderDefinitionId))
+    .where(within(auth, projectGrader, inArray(projectGrader.id, [...new Set(projectGraderIds)])));
+  return new Map(rows.map((row) => [row.id, row.name] as const));
+}
+
+export async function readTraceGrading(
+  auth: AuthContext,
+  ref: TraceGradingRef,
+): Promise<TraceGrading | undefined> {
+  authorize(auth, "read", here(auth));
+  const entries = await selectedEntries(db(), auth, ref);
+  const grades = await readTraceGrades(auth, ref);
+  const job = await jobForTrace(db(), auth, ref.traceId);
+
+  // A production trace can be visible before its explicit end/evidence-ready
+  // handshake freezes selection. That is pending, not an empty decision.
+  if (entries === undefined) {
+    if (ref.source === "simulation") return undefined;
+    return { state: "pending", history: [], current: [], combinedScore: null };
+  }
+
+  const names = await namesFor(
+    db(),
+    auth,
+    [...entries.map((entry) => entry.projectGraderId),
+      ...grades.history.map((grade) => grade.projectGraderId)],
+  );
+  const named = <T extends RecordedGrade>(grade: T): T & { graderName: string } => {
+    const graderName = names.get(grade.projectGraderId);
+    if (graderName === undefined) {
+      throw new Error(`grade names unreadable project grader ${grade.projectGraderId}`);
+    }
+    return { ...grade, graderName };
+  };
+  const history = grades.history.map(named);
+  const current = grades.current.map(named);
+
+  if (entries.length === 0) {
+    return { state: "not_requested", history, current, combinedScore: null };
+  }
+  if (job?.status === "claimed") {
+    return { state: "running", history, current, combinedScore: null };
+  }
+  if (job?.status === "pending") {
+    return { state: "pending", history, current, combinedScore: null };
+  }
+  if (job?.status === "abandoned") {
+    return { state: "error", history, current, combinedScore: null };
+  }
+
+  const terminal = allEntriesHaveResults(entries, grades.current);
+  if (!terminal.complete) {
+    return { state: "pending", history, current, combinedScore: null };
+  }
+  if (terminal.errored) {
+    return { state: "error", history, current, combinedScore: null };
+  }
+  return {
+    state: "complete",
+    history,
+    current,
+    combinedScore: combinedGradeScore(
+      entries.map((entry) => entry.projectGraderId),
+      grades.current,
+    ),
+  };
+}
+
+const MOST_RUNS_PER_PROGRESS_READ = 100;
+const MOST_SIMULATIONS_PER_STATE_READ = 200;
+
+type SimulationPlanRow = {
+  readonly simulationId: string;
+  readonly runId: string;
+  readonly testId: string;
+  readonly testVersionId: string;
+  readonly status: string;
+  readonly groups: unknown;
+  readonly jobStatus: string | null;
+};
+
+type ResolvedSimulationState = {
+  readonly gradable: boolean;
+  readonly state: TraceGradingState | null;
+};
+
+export type SimulationGradingState = {
+  readonly simulationId: string;
+  readonly state: TraceGradingState | null;
+};
+
+export type SimulationGradingRef = {
+  readonly simulationId: string;
+  readonly runId: string;
+};
+
+export type RunGradingProgress = {
+  readonly runId: string;
+  readonly gradable: number;
+  readonly graded: number;
+};
+
+async function simulationPlanRows(
+  on: Queryable,
+  auth: AuthContext,
+  condition: SQL,
+): Promise<readonly SimulationPlanRow[]> {
+  const rows = await on
+    .select({
+      simulationId: simulation.id,
+      runId: simulation.runId,
+      testId: simulation.testId,
+      testVersionId: simulation.testVersionId,
+      status: simulation.status,
+      jobStatus: gradingJob.status,
+    })
+    .from(simulation)
+    .leftJoin(gradingJob, eq(gradingJob.simulationId, simulation.id))
+    .where(within(auth, simulation, condition));
+  if (rows.length === 0) return [];
+
+  // Read each run's plan once. Joining the JSON plan onto every simulation
+  // would repeat the same potentially large value for every row on the page.
+  const plans = await on
+    .select({ runId: gradingPlan.runId, groups: gradingPlan.groups })
+    .from(gradingPlan)
+    .where(within(
+      auth,
+      gradingPlan,
+      inArray(gradingPlan.runId, [...new Set(rows.map((row) => row.runId))]),
+    ));
+  const byRun = new Map(plans.map((plan) => [plan.runId, plan.groups] as const));
+  return rows.map((row) => {
+    const groups = byRun.get(row.runId);
+    if (groups === undefined) throw new Error(`run ${row.runId} has no grading plan`);
+    return { ...row, groups };
+  });
+}
+
+function factsByTrace(
+  facts: readonly CurrentSimulationGradeFact[],
+): ReadonlyMap<string, ReadonlyMap<string, CurrentSimulationGradeFact>> {
+  const traces = new Map<string, Map<string, CurrentSimulationGradeFact>>();
+  for (const fact of facts) {
+    const grades = traces.get(fact.traceId) ?? new Map();
+    grades.set(fact.projectGraderId, fact);
+    traces.set(fact.traceId, grades);
+  }
+  return traces;
+}
+
+function selectedGroup(row: SimulationPlanRow): PlanGroup {
+  const group = (row.groups as readonly PlanGroup[]).find(
+    (one) =>
+      one.tag === "test" &&
+      one.testId === row.testId &&
+      one.testVersionId === row.testVersionId,
+  );
+  if (group === undefined) {
+    throw new Error(`simulation ${row.simulationId} has no matching test grading plan`);
+  }
+  return group;
+}
+
+/** Whether Postgres alone cannot settle this simulation's grading state. */
+function needsCurrentGradeFacts(row: SimulationPlanRow): boolean {
+  if (row.status !== "completed") return false;
+  if (selectedGroup(row).items.length === 0) return false;
+  return row.jobStatus === null;
+}
+
+function resolvedSimulationState(
+  row: SimulationPlanRow,
+  facts: ReadonlyMap<string, ReadonlyMap<string, CurrentSimulationGradeFact>>,
+): ResolvedSimulationState {
+  if (row.status !== "completed") return { gradable: false, state: null };
+
+  const group = selectedGroup(row);
+  if (group.items.length === 0) {
+    return { gradable: false, state: "not_requested" };
+  }
+
+  if (row.jobStatus === "claimed") return { gradable: true, state: "running" };
+  if (row.jobStatus === "pending") return { gradable: true, state: "pending" };
+  if (row.jobStatus === "abandoned") return { gradable: true, state: "error" };
+
+  const traceId = traceIdOfSimulation(row.simulationId);
+  if (traceId === undefined) {
+    throw new Error(`simulation ${row.simulationId} has no trace identity`);
+  }
+  const current = facts.get(traceId);
+  let errored = false;
+  for (const item of group.items) {
+    const grade = current?.get(item.projectGraderId);
+    if (grade === undefined) return { gradable: true, state: "pending" };
+    errored ||= grade.errored;
+  }
+  return { gradable: true, state: errored ? "error" : "complete" };
+}
+
+/** One batch state read for the simulations on an API page. */
+export async function readSimulationGradingStates(
+  auth: AuthContext,
+  refs: readonly SimulationGradingRef[],
+): Promise<readonly SimulationGradingState[]> {
+  authorize(auth, "read", here(auth));
+  if (refs.length > MOST_SIMULATIONS_PER_STATE_READ) {
+    throw new RangeError(
+      `one grading-state read accepts at most ${MOST_SIMULATIONS_PER_STATE_READ} simulations`,
+    );
+  }
+  if (refs.length === 0) return [];
+
+  const bySimulation = new Map<string, SimulationGradingRef>();
+  for (const ref of refs) {
+    if (ref.simulationId === "" || ref.runId === "") {
+      throw new TypeError("a simulation grading-state read names its simulation and run");
+    }
+    if (bySimulation.has(ref.simulationId)) {
+      throw new TypeError("a simulation grading-state read cannot repeat a simulation");
+    }
+    bySimulation.set(ref.simulationId, ref);
+  }
+
+  const rows = await simulationPlanRows(
+    db(),
+    auth,
+    inArray(simulation.id, [...bySimulation.keys()]),
+  );
+  const eligible = rows.filter(
+    (row) => bySimulation.get(row.simulationId)?.runId === row.runId,
+  );
+  const traceIds = eligible.filter(needsCurrentGradeFacts).flatMap((row) => {
+    const traceId = traceIdOfSimulation(row.simulationId);
+    return traceId === undefined ? [] : [traceId];
+  });
+  const facts = factsByTrace(await readCurrentSimulationGradeFacts(auth, { traceIds }));
+  const byId = new Map(eligible.map((row) => [row.simulationId, row] as const));
+  return refs.flatMap((ref) => {
+    const row = byId.get(ref.simulationId);
+    return row === undefined
+      ? []
+      : [{
+          simulationId: row.simulationId,
+          state: resolvedSimulationState(row, facts).state,
+        }];
+  });
+}
+
+/** One batch projection for the run cards on a bounded list page. */
+export async function readRunGradingProgress(
+  auth: AuthContext,
+  runIds: readonly string[],
+): Promise<readonly RunGradingProgress[]> {
+  authorize(auth, "read", here(auth));
+  if (runIds.length > MOST_RUNS_PER_PROGRESS_READ) {
+    throw new RangeError(
+      `one grading-progress read accepts at most ${MOST_RUNS_PER_PROGRESS_READ} runs`,
+    );
+  }
+  const unique = [...new Set(runIds)];
+  if (unique.length === 0) return [];
+  if (unique.some((runId) => runId === "")) {
+    throw new TypeError("a grading-progress read cannot name an empty run");
+  }
+
+  const visible = await db()
+    .select({ id: run.id })
+    .from(run)
+    .where(within(auth, run, inArray(run.id, unique)));
+  const visibleIds = new Set(visible.map((one) => one.id));
+  const ordered = unique.filter((runId) => visibleIds.has(runId));
+  if (ordered.length === 0) return [];
+
+  const rows = await simulationPlanRows(
+    db(),
+    auth,
+    inArray(simulation.runId, ordered),
+  );
+  const traceIds = rows.filter(needsCurrentGradeFacts).flatMap((row) => {
+    const traceId = traceIdOfSimulation(row.simulationId);
+    return traceId === undefined ? [] : [traceId];
+  });
+  const facts = factsByTrace(
+    await readCurrentSimulationGradeFacts(auth, { traceIds }),
+  );
+  const totals = new Map<string, { runId: string; gradable: number; graded: number }>(
+    ordered.map((runId) => [runId, { runId, gradable: 0, graded: 0 }]),
+  );
+  for (const row of rows) {
+    const state = resolvedSimulationState(row, facts);
+    const total = totals.get(row.runId);
+    if (total === undefined || !state.gradable) continue;
+    total.gradable += 1;
+    if (state.state === "complete" || state.state === "error") total.graded += 1;
+  }
+  return ordered.map((runId) => totals.get(runId)!);
+}
+
+export async function regradeTrace(
+  auth: AuthContext,
+  ref: TraceGradingRef,
+): Promise<RegradeTraceResult> {
   authorize(auth, "regrade", here(auth));
-
-  const graderId = await theGraderNamed(auth, target.graderId);
-  if (graderId === undefined) return undefined;
-
-  const named = await conversationsNamed(auth, target);
-  if (named === undefined) return undefined;
-
   return db().transaction(async (tx) => {
-    // Asked twice, and for two different reasons. The first time refuses an
-    // over-wide window while nothing is held yet, so a window somebody got wrong
-    // costs one bounded read rather than a hold on every conversation it names.
-    // The second time is the list that is acted on, and it has to be read after
-    // the hold, because a list read before it is a list that can still move.
-    await theSettledConversations(tx, named);
-    await holdTheConversations(tx, named);
-    const settled = await theSettledConversations(tx, named);
+    await lockTrace(tx, auth, ref.traceId);
+    const entries = await selectedEntries(tx, auth, ref);
+    if (entries === undefined) {
+      throw new Error(`trace ${ref.traceId} has no frozen grading plan`);
+    }
+    if (entries.length === 0) return { kind: "not_requested" };
 
-    await widenWhatIsAlreadyWaiting(tx, named, graderId);
-
-    // One read for both numbers, and — because the conversations are held — a
-    // fact about the same instant as the settled read above it, the widen beside
-    // it and the reopen below it. The widen has settled every pending job, so
-    // what is still narrowed away here is exactly the work somebody had already
-    // taken when this re-grade began.
-    const [waiting] = await tx
-      .select({
-        howMany: count(),
-        narrower: sql<number>`count(*) filter (where ${and(
-          eq(gradingJob.status, "claimed"),
-          narrowedAwayFrom(graderId),
-        )})`.mapWith(Number),
-      })
-      .from(gradingJob)
-      .where(and(named, inArray(gradingJob.status, [...OUTSTANDING])));
-
-    const alreadyWaiting = Number(waiting?.howMany ?? 0);
-    const beingJudgedNarrower = Number(waiting?.narrower ?? 0);
-    if (settled.length === 0) {
-      return { reopened: [], graderId, alreadyWaiting, beingJudgedNarrower };
+    const existing = await jobForTrace(tx, auth, ref.traceId);
+    if (existing !== undefined) {
+      if (existing.status === "pending" || existing.status === "claimed") {
+        return {
+          kind: "queued",
+          jobId: existing.id,
+          reopened: false,
+          alreadyWaiting: true,
+        };
+      }
+      const [row] = await tx
+        .update(gradingJob)
+        .set({
+          status: "pending",
+          claimedBy: null,
+          claimedAt: null,
+          heartbeatAt: null,
+          attempts: 0,
+          lastError: null,
+          finishedAt: null,
+        })
+        .where(eq(gradingJob.id, existing.id))
+        .returning({ id: gradingJob.id });
+      if (row === undefined) throw new Error(`grading job ${existing.id} disappeared`);
+      await notify(tx, row.id);
+      return {
+        kind: "queued",
+        jobId: row.id,
+        reopened: true,
+        alreadyWaiting: false,
+      };
     }
 
+    const prior = await readTraceGrades(auth, ref);
+    const traceStartedAtMicroseconds = prior.history[0]?.traceStartedAtMicroseconds;
+    let traceStartedAt: Date;
+    let simulationId: string | null = null;
+    if (ref.source === "production") {
+      const receipt = await readProductionGradingPlan(auth, ref.traceId);
+      if (receipt === undefined) throw new Error(`trace ${ref.traceId} has no production plan`);
+      traceStartedAt = new Date(Number(receipt.traceStartedAtMicroseconds / 1_000n));
+    } else {
+      simulationId = simulationIdOfTrace(ref.traceId) ?? null;
+      if (simulationId === null || ref.runId === undefined) {
+        throw new Error(`trace ${ref.traceId} is not a simulation trace`);
+      }
+      const [row] = await tx
+        .select({ startedAt: simulation.startedAt })
+        .from(simulation)
+        .where(within(auth, simulation, eq(simulation.id, simulationId)))
+        .limit(1);
+      if (row?.startedAt === null || row?.startedAt === undefined) {
+        throw new Error(`simulation ${simulationId} has no trace start`);
+      }
+      traceStartedAt = row.startedAt;
+    }
+    if (traceStartedAtMicroseconds !== undefined) {
+      traceStartedAt = new Date(Number(traceStartedAtMicroseconds / 1_000n));
+    }
+
+    const queued = await enqueue(tx, auth, {
+      source: ref.source,
+      simulationId,
+      traceId: ref.traceId,
+      traceStartedAt,
+      runId: ref.runId ?? null,
+      entries,
+    });
     return {
-      reopened: await reopenJobs(
-        tx,
-        and(
-          named,
-          inArray(
-            gradingJob.id,
-            settled.map((row) => row.id),
-          ),
-        ),
-        graderId,
-      ),
-      graderId,
-      alreadyWaiting,
-      beingJudgedNarrower,
+      kind: "queued",
+      jobId: queued.job.id,
+      reopened: true,
+      alreadyWaiting: false,
     };
   });
 }
 
-/**
- * The conversations a re-grade names that are finished with, one way or the
- * other, and can therefore be asked for again.
- *
- * One over the cap, so the refusal is decided without reading a window that
- * holds a hundred thousand conversations in order to say it holds too many. The
- * refusal lives here rather than at the caller because the read that would
- * discover it and the read that acts on it are the same read asked twice, and a
- * cap enforced at only one of them is a cap on whichever one somebody edits
- * last.
- */
-async function theSettledConversations(
-  on: Queryable,
-  theseJobs: SQL,
-): Promise<readonly { readonly id: string }[]> {
-  const settled = await on
-    .select({ id: gradingJob.id })
-    .from(gradingJob)
-    .where(and(theseJobs, inArray(gradingJob.status, [...SETTLED])))
-    .orderBy(asc(gradingJob.id))
-    .limit(MOST_CONVERSATIONS_PER_REGRADE + 1);
-
-  if (settled.length > MOST_CONVERSATIONS_PER_REGRADE) {
-    throw new Error(
-      `a re-grade judges at most ${MOST_CONVERSATIONS_PER_REGRADE} conversations at once, and this one names more; ask for a narrower window`,
-    );
-  }
-
-  return settled;
-}
-
-/**
- * Every job a re-grade names, held still until the transaction it runs in ends.
- *
- * **This is what makes a re-grade one act rather than four.** Finding the
- * settled work, widening what is already waiting, counting what is outstanding
- * and reopening each decide something on the strength of a job's status, and a
- * worker moving a job between two of them left the answer describing a queue
- * that no longer existed. The worst of those was silent rather than loud: a
- * claimed job released back to `pending` after the widen had swept was neither
- * widened nor countable as narrowed, so the ask came back reported as already
- * covered, and the verdicts it wanted were never coming.
- *
- * **Ascending id, which is the order `claimGradingJobs` takes**, and one
- * statement rather than one per status — two lock orders is how a fix for a race
- * becomes a deadlock under exactly the load it was meant to survive.
- *
- * **It costs the grader service almost nothing.** A claim is `for update skip
- * locked`, so it never waits here: it passes over these conversations for as
- * long as the re-grade lasts, takes other work, and is woken again by the
- * reopen's own notification the moment the re-grade commits. A heartbeat, a
- * release and a finish do wait, because each is an ordinary update of one row —
- * and that is the whole point of this. They land before the re-grade reads or
- * after it has written, never in the middle of it, and the wait is four
- * statements long with no judging inside it.
- *
- * **What is held is what the target named**, which for a window is every
- * conversation in it. That is unbounded on purpose: the cap above bounds what
- * may be *reopened*, and a window holding ten thousand conversations that are
- * all still waiting is an ordinary thing to ask about. It costs one more
- * index-ordered pass over the rows the count was already going to scan.
- *
- * The `count(*)` is a wrapper and not an interest. The rows are locked to be
- * held, never to be carried out, and a window naming a hundred thousand
- * conversations should not send a hundred thousand identifiers back to say so.
- */
-async function holdTheConversations(
-  on: Queryable,
-  theseJobs: SQL,
-): Promise<void> {
-  await on.execute(
-    sql`select count(*)
-        from (select ${gradingJob.id}
-                from ${gradingJob}
-               where ${theseJobs}
-               order by ${gradingJob.id}
-                 for update) as held`,
-  );
-}
-
-/**
- * A job whose narrowing does not cover a re-grade for `forGrader`: it is queued
- * for one grader, and what has now been asked for is a different grader or the
- * whole conversation.
- *
- * Written once because the two places that read it are each other's halves —
- * the pending ones are widened until this is false of them, and the claimed ones
- * are counted because it cannot be made false of them — and two copies of this
- * test would drift into a job that is in neither half.
- */
-function narrowedAwayFrom(forGrader: string | null): SQL {
-  return forGrader === null
-    ? isNotNull(gradingJob.regradeGraderId)
-    : sql`${gradingJob.regradeGraderId} is not null
-          and ${gradingJob.regradeGraderId} <> ${forGrader}`;
-}
-
-/**
- * A conversation that is already waiting keeps waiting — but a narrowing it is
- * waiting *under* is widened to cover what has now been asked as well.
- *
- * Leaving an outstanding job alone was always sound because an outstanding job
- * judges everything, and that is exactly the invariant narrowing breaks: a job
- * queued for one grader would answer a second ask about a different grader by
- * judging neither of them, silently. Two asks that disagree about how narrow the
- * work is therefore settle on the wider one, which is the only answer that
- * carries out both.
- *
- * **Only a job nobody has taken.** A claimed job is being judged right now,
- * under the instruction it was claimed with; the column no longer decides
- * anything for it, and finishing clears it — so a second ask that arrives during
- * that window is not carried out at all, and the caller is told so rather than
- * counted as covered. `Regraded.beingJudgedNarrower` is where that is said.
- */
-async function widenWhatIsAlreadyWaiting(
-  on: Queryable,
-  theseJobs: SQL,
-  forGrader: string | null,
-): Promise<void> {
-  await on
-    .update(gradingJob)
-    .set({ regradeGraderId: null })
-    .where(
-      and(
-        theseJobs,
-        eq(gradingJob.status, "pending"),
-        narrowedAwayFrom(forGrader),
-      ),
-    );
-}
-
-/**
- * The caller's own jobs that the target names, as a predicate — or `undefined`
- * when the target is a run they cannot reach.
- *
- * The run case resolves the run's conversations first rather than joining,
- * because a run holds at most two hundred of them and the id list that comes
- * back is what makes the reopen's predicate the same shape as the window's. The
- * tenancy is on both halves: the simulations are read within it, and the jobs
- * are narrowed by it again.
- */
-async function conversationsNamed(
-  auth: AuthContext,
-  target: RegradeTarget,
-): Promise<SQL | undefined> {
-  const inActingProject =
-    auth.projectId === undefined
-      ? undefined
-      : eq(gradingJob.projectId, auth.projectId);
-
-  if ("window" in target) {
-    const { from, to } = validWindow(target.window);
-    return within(
-      auth,
-      gradingJob,
-      and(
-        inActingProject,
-        gte(gradingJob.createdAt, from),
-        lt(gradingJob.createdAt, to),
-      ),
-    );
-  }
-
-  if ("simulationId" in target) {
-    // The conversation is resolved within the caller's own tenancy before its
-    // job is named — exactly as the run below is — so a conversation of another
-    // customer, or of a project this credential does not act in, is as absent as
-    // one that was never conducted, and this call learns nothing about it either
-    // way. Naming the job straight from the id would reopen work on the strength
-    // of an identifier somebody guessed.
-    const [conversation] = await db()
-      .select({ id: simulation.id })
-      .from(simulation)
-      .where(
-        within(
-          auth,
-          simulation,
-          and(
-            eq(simulation.id, target.simulationId),
-            auth.projectId === undefined
-              ? undefined
-              : eq(simulation.projectId, auth.projectId),
-          ),
-        ),
-      )
-      .limit(1);
-
-    if (conversation === undefined) return undefined;
-
-    return within(
-      auth,
-      gradingJob,
-      and(inActingProject, eq(gradingJob.simulationId, conversation.id)),
-    );
-  }
-
-  const [reachable] = await db()
-    .select({ id: run.id })
-    .from(run)
-    .where(
-      within(
-        auth,
-        run,
-        and(
-          eq(run.id, target.runId),
-          auth.projectId === undefined
-            ? undefined
-            : eq(run.projectId, auth.projectId),
-        ),
-      ),
-    )
-    .limit(1);
-
-  if (reachable === undefined) return undefined;
-
-  const conversations = await db()
-    .select({ id: simulation.id })
-    .from(simulation)
-    .where(within(auth, simulation, eq(simulation.runId, reachable.id)));
-
-  return within(
-    auth,
-    gradingJob,
-    and(
-      inActingProject,
-      inArray(
-        gradingJob.simulationId,
-        conversations.map((conversation) => conversation.id),
-      ),
-    ),
-  );
-}
-
-/**
- * The grader this re-grade narrows to, as the reopened jobs will carry it:
- * `null` when nobody named one, and `undefined` when somebody named one the
- * caller cannot reach.
- *
- * The two halves are the two halves every read here has. **The shape is refused
- * out loud**, because a string that is not a grader identifier is a caller
- * mistake rather than a grader that is missing — the same line `startRun` draws
- * when it is handed something that is not an agent. **Existence and tenancy are
- * one question and are asked through the ordinary scoped read**, so a grader in
- * another customer's project is exactly as absent as one that was never created,
- * and this call learns nothing about it either way.
- *
- * A grader somebody deleted is unreachable and answers the same, which is right:
- * a deleted grader judges nothing from now on, and a re-grade is from now on.
- */
-async function theGraderNamed(
-  auth: AuthContext,
-  graderId: string | undefined,
-): Promise<string | null | undefined> {
-  if (graderId === undefined) return null;
-
-  if (!isId("grd", graderId)) {
-    throw new Error(
-      "a re-grade narrows to a grader by its identifier, and this is not one",
-    );
-  }
-
-  const reachable = await getGrader(auth, graderId);
-  return reachable === undefined ? undefined : reachable.id;
-}
-
-function validWindow(window: RegradeWindow): RegradeWindow {
-  const { from, to } = window;
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-    throw new Error("a re-grade's window is two moments, and one of these is not");
-  }
-  if (from.getTime() >= to.getTime()) {
-    throw new Error("a re-grade's window starts before it ends");
-  }
-  return window;
-}
+export type { FrozenGradingEntry, GradingJobStatus, GradingSource, Listening };

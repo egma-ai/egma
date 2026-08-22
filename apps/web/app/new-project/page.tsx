@@ -54,8 +54,8 @@ import { useUnsavedChanges } from "../../ui/settings-read.ts";
  * afterwards in project Settings.
  *
  * What is created is the whole thing: the project, the persona a first test
- * gets when it names none, and this deployment's judge where it has one. That
- * is the server's business and not this page's — but it is why this page can
+ * gets when it names none, and the Expected behaviors project grader. That is
+ * the server's business and not this page's — but it is why this page can
  * send somebody straight into the new project rather than to a checklist.
  */
 export default function NewProjectPage() {
@@ -109,8 +109,8 @@ function NewProject() {
     }
 
     // Straight into the new project, at the landing every project has. It is
-    // usable from this moment: it has a default persona and, where the
-    // deployment has one, a judge.
+    // usable from this moment: it has a default persona and its fixed-scope
+    // Expected behaviors project grader.
     includeProject(written.value);
     await refreshSession();
     router.push(projectLanding(written.value.id));

@@ -75,8 +75,8 @@ export function capturedCall(overrides: Partial<RetellCall> = {}): RetellCall {
     // summary out from. This is the documented shape and not a captured
     // payload — no live Retell document is checked in yet — so the stage names
     // are held here to be settled by the next live capture. The 2145 ms sample
-    // is the live proof's own reading: the turn that beat a two-second bound
-    // with no verdict to say so.
+    // is the live proof's own reading: the slow turn that the old read path did
+    // not surface as a metric.
     latency: {
       e2e: {
         p50: 820,
@@ -510,9 +510,8 @@ describe("the reported-measurements block", () => {
       measurements: [
         {
           // Retell's `e2e` is what the catalog calls `turn_response_latency`:
-          // same meaning, same name, so the day the measure module reads this
-          // block, the latency grader a developer already configured judges
-          // this trace with nothing reconfigured.
+          // same meaning, same name, so every reader sees the same metric for
+          // Retell and for traces Egma measures itself.
           measure: "turn_response_latency",
           // The catalog's own unit for that measure, not a word chosen here.
           unit: "milliseconds",

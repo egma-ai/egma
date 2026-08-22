@@ -17,6 +17,9 @@ const BASE = {
   EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
   EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
   EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
+  EGMA_INGEST_ENDPOINT: "http://minio.example:9000",
+  EGMA_INGEST_ACCESS_KEY_ID: "ingestion-access-key",
+  EGMA_INGEST_SECRET_ACCESS_KEY: "ingestion-secret-key",
 } as const;
 
 describe("phone readiness", () => {

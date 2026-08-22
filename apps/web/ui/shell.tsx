@@ -197,7 +197,7 @@ export function ProductShellBoundary({ children }: { readonly children: ReactNod
  *
  * Each icon says what its row says. `MessageSquareText` for the monitoring row
  * because the row says Transcripts, and `ScaleIcon` for graders because a
- * grader weighs a thing and returns a verdict — neither imitates the Egma mark,
+ * grader weighs a trace and returns a score — neither imitates the Egma mark,
  * which `DESIGN.md` forbids of a product icon.
  */
 const NAVIGATION_ICONS: Record<SectionId, LucideIcon> = {

@@ -65,9 +65,9 @@ beforeAll(async () => {
     { id: projectId, slug: "default" },
   ]);
   await seedUser(database, ada, "ada@acme.example");
-  // No running graders: what races here is two claimants over one queue, and
-  // the guarantee under test is Postgres's locking. Nothing in this file is
-  // ever judged.
+  // No project grader is needed: what races here is two claimants over one
+  // queue, and the guarantee under test is Postgres's locking. Nothing in this
+  // file reaches grading.
 
   const created = await createAgent(auth, {
     name: "Front desk",

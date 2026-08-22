@@ -1,17 +1,18 @@
 /**
- * The wizard's last step: start the run, show the first verdicts, offer the
+ * The wizard's last step: start the run, show the first trace result, offer the
  * skill, and leave.
  *
- * **The wizard does not wait for the suite.** It waits for the first verdict
- * and nothing more. That is the moment the whole walk is timed against — a
+ * **The wizard does not wait for the suite.** It waits until the first
+ * completed trace has terminal grading and nothing more. That is the moment
+ * the whole walk is timed against — a
  * developer who has watched egma find their voice agent, reach it and write
- * tests for it has still only been told things until a verdict lands, and
+ * tests for it has still only been told things until a result is ready, and
  * then they have been shown one. Everything after that is the suite finishing,
  * which happens on the platform whether a terminal is open or not.
  *
  * So the follow keeps going in the background while the developer answers the
  * last question, and the counts in the exit line are the counts at the moment
- * the wizard closed. "Three of twelve graded so far" is a true sentence and a
+ * the wizard closed. "Three of twelve results ready" is a true sentence and a
  * useful one; waiting nine more minutes to be able to say twelve of twelve
  * would be the wizard holding a terminal open for its own tidiness.
  *
@@ -73,8 +74,8 @@ function viewOf(follower: RunFollower): RunView {
   return {
     runId: follower.runId,
     rows: follower.rows,
-    tally: follower.tally,
-    firstVerdict: follower.firstVerdict,
+    progress: follower.progress,
+    firstResult: follower.firstResult,
     resultsUrl: follower.resultsUrl,
   };
 }
@@ -163,14 +164,14 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   const stopWatching = (): void => watching.abort();
   signal.addEventListener("abort", stopWatching, { once: true });
 
-  let firstLanded!: () => void;
-  const firstVerdict = new Promise<void>((resolve) => {
-    firstLanded = resolve;
+  let resultReady!: () => void;
+  const firstResult = new Promise<void>((resolve) => {
+    resultReady = resolve;
     // The simulator can finish one conversation between the run POST and the
     // first bounded simulation page. In that case hydration already carries
-    // the first verdict, so there will be no new `change.first` event to open
+    // the first terminal grading state, so there is no new change to open
     // the offer below.
-    if (follower.firstVerdict !== null) resolve();
+    if (follower.firstResult !== null) resolve();
   });
 
   const following = followRun({
@@ -180,10 +181,10 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     ...(options.everyMs === undefined ? {} : { everyMs: options.everyMs }),
     onChange: (change) => {
       ui.setRun(viewOf(follower));
-      if (change.first) firstLanded();
+      if (change.firstResult) resultReady();
     },
   })
-    // A run that finished without a verdict, or one egma stopped talking to,
+    // A run that finished without a completed trace result, or one Egma stopped talking to,
     // must still let the wizard move on — otherwise the last question is never
     // asked and the developer is left watching a list that will not move.
     .catch((cause: unknown) => {
@@ -196,9 +197,9 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
       }
       return "interrupted" as const;
     })
-    .finally(() => firstLanded());
+    .finally(() => resultReady());
 
-  await untilAborted(firstVerdict, signal);
+  await untilAborted(firstResult, signal);
 
   // From here the walk has done what it set out to do, and it says so however
   // it ends. The tests are on egma, the run is live, and the screen the
@@ -215,11 +216,11 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     signal.removeEventListener("abort", stopWatching);
     await following;
     ui.setRun(viewOf(follower));
-    const stopped = follower.tally;
+    const stopped = follower.progress;
     return {
       kind: "run-started",
       resultsUrl: follower.resultsUrl,
-      graded: stopped.graded,
+      resultsReady: stopped.gradingTerminal,
       total: stopped.total,
       // Never asked, so there is no answer to report.
       skill: { kind: "not-offered" },
@@ -240,14 +241,14 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   signal.removeEventListener("abort", stopWatching);
   await following;
 
-  const tally = follower.tally;
+  const progress = follower.progress;
   ui.setRun(viewOf(follower));
 
   return {
     kind: "run-started",
     resultsUrl: follower.resultsUrl,
-    graded: tally.graded,
-    total: tally.total,
+    resultsReady: progress.gradingTerminal,
+    total: progress.total,
     skill,
   };
 }

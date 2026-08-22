@@ -20,9 +20,7 @@ import {
 } from "../lib/return-to.ts";
 import {
   citedTurnPositions,
-  judgedAssertions,
   type EvidenceStep,
-  type EvidenceVerdict,
 } from "../lib/simulations.ts";
 import {
   DEFAULT_PROJECT_NAME,
@@ -512,7 +510,7 @@ describe("the pages", () => {
     }
   });
 
-  it("show real run verdicts without folding execution failures into grader failures", async () => {
+  it("keeps simulation execution and grading progress separate", async () => {
     const run = await readFile(
       path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
       "utf8",
@@ -524,27 +522,24 @@ describe("the pages", () => {
       ),
       "utf8",
     );
-    const judgment = await readFile(
-      path.join(WEB, "app/judgment-card.tsx"),
+    const grades = await readFile(
+      path.join(WEB, "ui/simulation-evidence.tsx"),
       "utf8",
     );
-    // A simulation egma could not conduct is egma's own failure, and both
-    // surfaces say so in the same sentence rather than colouring it like a
-    // grader's verdict.
+    // A simulation Egma could not conduct is an execution failure. It does not
+    // become a zero score or an errored grader.
     for (const page of [run, simulation]) {
       expect(page).toContain("Egma could not conduct this simulation.");
-      expect(page).toContain("not a failed grader verdict");
     }
-    // Grading progress is reported apart from execution progress on both.
+    // The run reports grading progress, while the simulation reads its own
+    // trace-level grading state and grade results.
     expect(run).toContain("read.gradedCount");
-    expect(simulation).toContain("evidence.gradingJobs.some");
-    // And the rationale and the turns it cites are what a judgement is worth
-    // reading for, wherever one is drawn.
-    expect(judgment).toContain("judgment.rationale");
-    expect(judgment).toContain("judgment.citedTurns");
+    expect(simulation).toContain('evidence.gradingState === "pending"');
+    expect(grades).toContain("evidence.grades");
+    expect(grades).toContain("evidence.gradeHistory");
   });
 
-  it("shows the aggregate trace outcome", async () => {
+  it("shows trace grading without inventing a pass or fail result", async () => {
     const transcript = await readFile(
       path.join(WEB, TRANSCRIPT_PAGE),
       "utf8",
@@ -555,70 +550,12 @@ describe("the pages", () => {
     );
 
     expect(contract).toContain("export type Detail = GetTraceResponse");
-    expect(transcript).toContain("<OutcomeSummary");
-    expect(transcript).toContain("outcome={detail.outcome}");
-    expect(transcript).toContain('aria-label="Grading outcome"');
-  });
-
-  /**
-   * The outcome above is folded over the graders that can fail something, so
-   * the lane it was folded *without* has to be on the same page — otherwise the
-   * failures on the cards below have nothing up here to belong to, and a reader
-   * is left to work out for themselves why a red judgment sits under a green
-   * verdict.
-   *
-   * It is carried on the model rather than reached for off a loose response,
-   * which is what stops the read sending a field the page quietly drops.
-   */
-  it("shows the diagnostic lane beside that outcome, from the model", async () => {
-    const transcript = await readFile(
-      path.join(WEB, TRANSCRIPT_PAGE),
-      "utf8",
-    );
-    const contract = await readFile(
-      path.join(WEB, "lib/transcripts.ts"),
-      "utf8",
-    );
-
-    expect(contract).toContain("export type Detail = GetTraceResponse");
-    expect(transcript).toContain("diagnostics={detail.diagnostics");
-    expect(transcript).toContain("GRADING.diagnosticLane");
-    // Never coloured by what it says: `data-verdict` is what paints a fact red,
-    // and a red diagnostic would read as a reason the verdict beside it is red.
-    expect(transcript).not.toMatch(
-      /diagnostics\.verdict[^\n]*data-verdict/u,
-    );
-  });
-
-  /**
-   * **The fraction, which is the whole reason a diagnostic exists.** A grader
-   * carrying `required: false` is switched on to be read rather than to decide,
-   * and passed ÷ counted is what that reading produces. Its counts are a
-   * different statement — a skipped assertion leaves the fraction's denominator
-   * and stays in the counts — so showing only the counts would report something
-   * true and not the thing that was asked for.
-   *
-   * Both lanes go through one formatter, so the day the required score learns to
-   * round differently the diagnostic's cannot be left behind.
-   *
-   * **And it is the product's formatter rather than this page's.** The page
-   * used to declare a `shownScore` of its own beside the one in
-   * `ui/run-status.tsx`, which made "one formatter" true of these two lanes
-   * and false of the product: a run's verdict and a production transcript's
-   * could have come to round a score differently. So the assertion is now that
-   * the page *imports* it and declares none — a local copy reappearing fails
-   * here, which is the only thing that stops it reappearing.
-   */
-  it("reports the diagnostic fraction, not only its counts", async () => {
-    const transcript = await readFile(
-      path.join(WEB, TRANSCRIPT_PAGE),
-      "utf8",
-    );
-
-    expect(transcript).toContain("shownScore(diagnostics.score)");
-    expect(transcript).toContain("GRADING.diagnosticScore");
-    // One formatter, both lanes: a proportion of nothing is a dash in each.
-    expect(transcript).toContain("shownScore(outcome.score)");
+    expect(transcript).toContain("<GradeSummary");
+    expect(transcript).toContain("combinedScore={detail.combinedScore}");
+    expect(transcript).toContain("grades={detail.grades}");
+    expect(transcript).toContain("history={detail.gradeHistory}");
+    expect(transcript).toContain("It is not a pass or fail result.");
+    expect(transcript).toContain("shownScore(combinedScore)");
     expect(transcript).toMatch(
       /import \{ shownScore \} from "[^"]*ui\/run-status\.tsx"/u,
     );
@@ -813,76 +750,8 @@ describe("a refusal of a recording", () => {
   });
 });
 
-/**
- * Which judgement counts, once a grader has judged the same assertion twice.
- *
- * The page shows the working — which row counts and which are superseded — so
- * the fold is a decision this module makes rather than a shape the server hands
- * over. The rule is the store's: the newest judgement speaks and the earlier
- * ones stay readable underneath it.
- *
- * **There were three proofs here about a person's correction outranking the
- * machine's word, and they go with the endpoint.** ADR-0009 takes corrections
- * out of v0; they return as the reserved `human` grader type, writing rows
- * under a grader id of their own — at which point they are simply another
- * grader's rows and nothing here has a second author to prefer.
- */
-describe("which verdict speaks", () => {
-  function row(overrides: Partial<EvidenceVerdict> = {}): EvidenceVerdict {
-    return {
-      graderId: "grd_1",
-      assertion: "behavior_1",
-      assertionText: "confirms the new time back",
-      required: true,
-      verdict: "failed",
-      score: 0,
-      rationale: "the agent never said it back",
-      citedTurns: [],
-      judgedAt: "2026-08-15T10:00:00.000000Z",
-      ...overrides,
-    };
-  }
-
-  it("lets the newest judgement speak, with the older one kept as evidence", () => {
-    const [only] = judgedAssertions([
-      row({ verdict: "passed", score: 1 }),
-      row({
-        verdict: "failed",
-        rationale: "the tightened grader disagrees",
-        judgedAt: "2026-08-15T12:00:00.000000Z",
-      }),
-    ]);
-
-    expect(only?.speaking.verdict).toBe("failed");
-    expect(only?.superseded.map((its) => its.verdict)).toEqual(["passed"]);
-  });
-
-  it("keeps two assertions of one grader apart", () => {
-    const folded = judgedAssertions([
-      row({ assertion: "behavior_1" }),
-      row({ assertion: "behavior_2" }),
-    ]);
-    expect(folded).toHaveLength(2);
-  });
-
-  /**
-   * A key nothing could place is shown as itself. A page that fell back to a
-   * plausible sentence would be unfalsifiable; `behavior_3` is merely terse.
-   */
-  it("carries the key through when nothing could resolve its words", () => {
-    const [only] = judgedAssertions([row({ assertionText: null })]);
-    expect(only?.assertionText).toBeNull();
-    expect(only?.assertion).toBe("behavior_1");
-  });
-
-  /** A diagnostic copy's row says so, so a card can mark it. */
-  it("carries whether the copy that wrote it can fail anything", () => {
-    const [only] = judgedAssertions([row({ required: false })]);
-    expect(only?.required).toBe(false);
-  });
-});
-
-describe("the turns a judgement points at", () => {
+/** The transcript turns cited by one grade's assertion details. */
+describe("the turns a grade cites", () => {
   function step(id: string, children: EvidenceStep[] = []): EvidenceStep {
     return {
       spanId: id,

@@ -760,16 +760,6 @@ describe("the persona junction's rename (0008)", () => {
     ).rejects.toThrow(/test_persona_test_version_id_prefix/);
   });
 
-  it("gives the grader its own deferred current-version pointer, like the test's", async () => {
-    const { rows } = await client.query<{
-      condeferrable: boolean;
-      condeferred: boolean;
-    }>(
-      `select condeferrable, condeferred from pg_constraint
-        where conname = 'grader_current_version_id_grader_version_id_fk'`,
-    );
-    expect(rows).toEqual([{ condeferrable: true, condeferred: true }]);
-  });
 });
 
 describe("the simulation's test pin (0009)", () => {

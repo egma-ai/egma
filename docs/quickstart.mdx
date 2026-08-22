@@ -1,7 +1,7 @@
 ---
-title: "Quickstart: From Install to First Simulation Verdict"
+title: "Quickstart: From install to first graded result"
 sidebarTitle: "Quickstart"
-description: "Install the Egma CLI, connect your Retell or LiveKit agent, auto-generate a test suite, and see your first simulation verdicts in one wizard session."
+description: "Install the Egma CLI, connect your Retell or LiveKit agent, generate a test suite, and see your first completed trace reach terminal grading."
 ---
 
 The fastest path to your first Egma test run is the CLI wizard. Run it from your voice agent's repository and it handles everything in sequence: signing in, registering your agent, generating tests with your existing coding agent, and starting a run. This guide walks you through each step so you know exactly what to expect before you press a key.
@@ -227,22 +227,31 @@ egma push   # sync local files to Egma
 egma run receptionist-core   # run this complete suite and follow it
 ```
 
-The simulator claims each simulation, conducts the conversation, and the grader writes one verdict per expected behavior after each simulation ends. The wizard follows the run live:
+The simulator claims each simulation and conducts the conversation. The
+Expected behaviors grader then writes one grade for the completed trace. Its
+assertion details show each expected behavior, and its top-level score is
+normalized from `0` to `1`. The wizard follows the run live:
 
 ```
 run run_01K7QXV2M8  ·  12 simulations
 
-◼ quoted-a-price            passed
+◼ quoted-a-price            grading complete
 ▶ lost-the-order-number     in progress
 ▶ open-on-sunday            dialing…
 ◻ after-hours-emergency     queued
 
-✓ First verdict: quoted-a-price passed
+✓ First result: quoted-a-price grading complete
 
-passed 1  ·  failed 0  ·  errored 0  ·  waiting 11
+execution 1/12 finished  ·  grading 1/1 terminal  ·  errors 0
 ```
 
-The wizard closes after the first verdict arrives. The run continues on Egma — closing your terminal never stops a run.
+The wizard closes after the first completed trace's whole grading work becomes
+terminal. The run continues on Egma. Closing your terminal never stops a run.
+
+The standalone `egma run` command waits longer. It returns only after every
+simulation reaches a terminal execution state and every completed trace reaches
+a terminal grading state. It does not wait for grading after a simulation fails
+or is canceled without a completed trace.
 
 **Full `egma run` output:**
 
@@ -256,29 +265,42 @@ tests: 12
 simulations: 12
 results: http://localhost:3101/runs/run_01K…
 simulation: quoted-a-price default-persona running
-verdict: quoted-a-price default-persona passed
-first-verdict: quoted-a-price default-persona passed
-passed: 1
-failed: 0
-errored: 0
-pending: 11
+simulation: quoted-a-price default-persona completed
+grading: quoted-a-price default-persona pending
+grading: quoted-a-price default-persona complete
+first-result: quoted-a-price default-persona complete
+execution-finished: 12
+execution-failed: 0
+execution-canceled: 0
+grading-terminal: 12
+grading-complete: 12
+grading-not-requested: 0
+grading-errors: 0
+grading-pending: 0
+grading-running: 0
+simulations: 12
+status: completed
 ```
 
 <Accordion title="Run exit codes">
   | Code | Meaning |
   |------|---------|
-  | `0` | Run finished with no failures or errors |
+  | `0` | Execution and grading became terminal with no system error. Grade scores do not change this code |
   | `1` | The selected suite has no tests |
   | `2` | Not signed in to Egma |
-  | `3` | At least one test failed |
   | `4` | Egma did not answer, or refused |
   | `5` | Egma refused to start the run, and said why |
-  | `6` | A simulation errored — nothing concluded |
+  | `6` | A simulation execution, grader, or terminal grading job errored |
   | `130` | Interrupted (Ctrl-C) |
 </Accordion>
 
 <Note>
-  Pass `--no-follow` to start a run and return immediately without waiting for verdicts. The run carries on on Egma and you can read results in the dashboard at the URL printed on the `results:` line.
+  A low grade score never makes `egma run` exit with a non-zero code. Execution
+  and grading system errors do.
+
+  Pass `--no-follow` to start a run and return immediately without waiting for
+  execution or grading. The run carries on on Egma and you can read it in the
+  dashboard at the URL printed on the `results:` line.
 
   ```bash
   egma run receptionist-core --no-follow

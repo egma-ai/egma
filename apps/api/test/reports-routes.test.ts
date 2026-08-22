@@ -18,6 +18,7 @@ import {
   signUp,
   type Customer,
 } from "./support/traces.ts";
+import { fileTranscriptOf } from "./support/recordings.ts";
 
 /**
  * The report door, over real HTTP against real Postgres: the shipped
@@ -174,6 +175,7 @@ async function aCustomerReadyToRun(
 }> {
   api = await createApi(label, {
     ...options,
+    traceStore: options.traceStore ?? true,
     retellFetch: options.retellFetch ?? RETELL_CHAT_FETCH,
   });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -428,6 +430,16 @@ describe("the lifecycle lands", () => {
       versionId,
     );
 
+    // The completion handoff may create grading work only after this trace is
+    // query-visible. File the evidence before the terminal report so this test
+    // proves that complete two-fact handoff rather than completion alone.
+    await fileTranscriptOf(
+      api.app,
+      simulationId,
+      { human: "Please move my appointment.", agent: "I moved it." },
+      new Date(STARTED_AT),
+    );
+
     const answered = await report(simulationId, [
       terminalEvent("completed", "persona_concluded"),
     ]);
@@ -446,8 +458,8 @@ describe("the lifecycle lands", () => {
     expect(row?.startedAt?.toISOString()).toBe("2026-08-05T09:00:00.000Z");
     expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
 
-    // The landing minted the judgement and froze the header, exactly as the
-    // access layer promises every terminal transition does.
+    // The completed landing queued its frozen whole-trace grading plan and
+    // finalized the run header.
     expect(await gradingJobsFor(simulationId)).toBe(1);
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
@@ -652,8 +664,8 @@ describe("the lifecycle lands", () => {
     expect(row?.endingReason).toBe("simulator_error");
     expect(row?.turnCount).toBe(3);
 
-    // A failed conversation is judged too — errored, never left unjudged.
-    expect(await gradingJobsFor(simulationId)).toBe(1);
+    // No completed trace exists, so the execution failure creates no grade job.
+    expect(await gradingJobsFor(simulationId)).toBe(0);
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
     expect(header.body.failedCount).toBe(1);
@@ -704,7 +716,7 @@ describe("the lifecycle lands", () => {
     expect(row?.endingReason).toBeNull();
     expect(row?.turnCount).toBe(6);
 
-    // A canceled conversation was never judged — no grading work minted.
+    // A canceled conversation is not graded, so no grading work is created.
     expect(await gradingJobsFor(simulationId)).toBe(0);
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("canceled");

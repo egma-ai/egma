@@ -3,7 +3,7 @@ import { newId } from "@egma/ids";
 import { db, type Queryable } from "../client.ts";
 import { EGMA_PROVIDED_PERSONAS } from "../persona-library/catalog.ts";
 import { organization, project } from "../schema/tenancy.ts";
-import { insertSeededGrader } from "./seeded-graders.ts";
+import { insertExpectedBehaviorsProjectGrader } from "./seeded-graders.ts";
 import type { Membership } from "./memberships.ts";
 import { insertMembership } from "./memberships.ts";
 
@@ -64,17 +64,14 @@ export async function insertProject(
     createdBy: input.createdBy,
   });
 
-  // The project's mandatory grading, in the same transaction as everything
-  // else: an active, required copy of egma's `expected_behaviors` grader,
-  // scoped to simulations and holding nothing of its own. It is what makes a
-  // first run judged with no setup at all — the behaviors somebody wrote on
-  // their first test are checked because this row exists, and a project born
-  // without it would be a project whose suite goes green having judged
-  // nothing.
-  await insertSeededGrader(on, {
+  // The project's expected-behavior grading, in the same transaction as
+  // everything else: one project grader with fixed all-simulations scope.
+  // It holds project policy, not grader code. The behaviors somebody wrote on
+  // their first test are graded because this row exists. There is no separate
+  // `required`, `mandatory`, or running-copy field.
+  await insertExpectedBehaviorsProjectGrader(on, {
     organizationId: input.organizationId,
     projectId: input.projectId,
-    createdBy: input.createdBy ?? null,
   });
 
 }

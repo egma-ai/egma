@@ -1,4 +1,11 @@
+import {
+  appendGrades,
+  claimGradingJobs,
+  finishGradingJob,
+  getGradingJobForTrace,
+} from "@egma/db";
 import { newId } from "@egma/ids";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { Browser, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -1373,6 +1380,19 @@ describe("one exchange, read as a transcript", () => {
        */
       expect(recorded).toContain("Source");
       expect(recorded).toContain("production");
+
+      /*
+       * Expected behaviors grades simulations only. This production trace
+       * reached an explicit supported-platform end, so its empty frozen
+       * selection is a durable decision: no grader was requested. It is not a
+       * pending grade, and the page does not invent one to fill the surface.
+       */
+      const grades = page.getByRole("region", { name: "Grades" });
+      expect(await grades.innerText()).toContain("Not requested");
+      expect(await grades.innerText()).toContain(
+        "No grader was selected for this transcript.",
+      );
+      expect(await grades.innerText()).toMatch(/Current grades\s+0/iu);
     },
     SETTLE,
   );
@@ -2052,257 +2072,29 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
 });
 
 /**
- * The grader screens' addresses, which are inside a project.
- *
- * The library and the running copies moved under `/projects/:projectId` when
- * the product UI took over these screens: a running copy belongs to one
- * project, and an address that does not name one leaves the page to guess —
- * which it did, by drawing whichever project came first. So this asks the
- * platform which project this browser is standing in rather than assuming, and
- * both describes below go through it rather than each writing the address out.
+ * The current Graders surface: one fixed-scope project grader and one editable
+ * policy value. There is no Library activation flow and no Latency grader.
  */
-async function gradersUrl(step?: string): Promise<string> {
-  const hers = (await page.context().cookies(origin))
-    .map((cookie) => `${cookie.name}=${cookie.value}`)
-    .join("; ");
-  const who = await standingOf(instance.api, hers, "her graders");
-  const at = `${origin}/projects/${who.auth.projectId ?? ""}/graders`;
-  return step === undefined ? at : `${at}/${step}`;
-}
-
-/**
- * Switching the Use form from one grader to another, in a real browser.
- *
- * **The one thing about this screen a source scan cannot prove.** Every other
- * assertion about the Library screen is that it draws its controls from what the
- * entry declared and holds no list of its own, which reading the file settles.
- * What it cannot settle is what happens between two presses: a form is state,
- * and state that outlives the thing it was answering questions about is a bug
- * only a running page can show.
- *
- * The failure it is here to catch: the entry that asks for nothing was open,
- * somebody pressed Use on the entry that asks for a measure and a bound, and the
- * new entry's controls drew over the old entry's empty answers — a measure
- * dropdown with nothing chosen. Typing a bound and submitting then sends a bound
- * with no measure, and the write door refuses it naming a field the person can
- * see is filled in.
- */
-describe("pressing Use on a second grader while the first one's form is open", () => {
-  /** One library row's Use button, from the table rather than the mobile list. */
-  function useOn(named: string) {
-    return page
-      .locator("table")
-      .getByRole("row")
-      .filter({ hasText: named })
-      .getByRole("button", { name: "Use" });
-  }
-
+describe("the Expected behaviors project grader", () => {
   it(
-    "draws the second grader's form, with its own fields and nothing left over",
+    "shows its fixed scope and saves its pass threshold",
     async () => {
-      await page.goto(await gradersUrl());
-      // Both of egma's own graders, written onto the shelf at boot.
+      await page.goto(`${origin}/projects/${acme}/graders`);
       await page.waitForSelector("text=Expected behaviors");
-      await page.waitForSelector("text=Latency");
 
-      // The entry whose assertions are each test's own sentences: it asks for
-      // nothing, so its form has no fields at all.
-      await useOn("Expected behaviors").click();
-      await page.waitForSelector("text=Uses each test's expected behaviors");
-      expect(await page.locator("form select").count()).toBe(0);
+      const shown = await page.innerText("main");
+      expect(shown).toContain("Grades all simulations");
+      expect(shown).toContain("Production off");
+      expect(shown).not.toContain("Latency");
 
-      // And now the other one, **without closing the first**.
-      await useOn("Latency").click();
+      await page.getByRole("button", { name: "Edit threshold" }).click();
+      const threshold = page.getByLabel("Pass threshold");
+      expect(await threshold.inputValue()).toBe("1");
+      await threshold.fill("0.75");
+      await page.getByRole("button", { name: "Save threshold" }).click();
 
-      // The heading followed, and the sentence belonging to the entry that asks
-      // nothing is gone rather than sitting above fields that ask for two things.
-      await page.waitForSelector("text=Use Latency");
-      expect(
-        await page.locator("text=Uses each test's expected behaviors").count(),
-      ).toBe(0);
-
-      // The measure dropdown is there, and so is the bound.
-      const measure = page.locator("form select");
-      await measure.waitFor();
-      expect(await page.locator('form input[type="number"]').inputValue()).toBe(
-        "",
-      );
-
-      /**
-       * **Submitted, because the DOM cannot be asked this question.**
-       *
-       * A `<select>` whose React value is the empty string still *displays* its
-       * first option and reports that option from `inputValue()` — so reading
-       * the control back says "a measure is chosen" in exactly the case where
-       * none is. The only witness that cannot be fooled is what the form
-       * actually sends, and the write door is the thing that would refuse it:
-       * "this grader needs metric".
-       *
-       * So this fills in the bound the way somebody would and presses the
-       * button. A copy appearing is the proof that the measure travelled with
-       * it.
-       */
-      await page.locator('form input[type="number"]').fill("2000");
-      await page.getByRole("button", { name: "Start judging" }).click();
-
-      await page.waitForSelector("text=is running on this project now");
-      // And no refusal — a missing measure would have come back as one rather
-      // than as a copy.
-      expect(await page.locator("text=this grader needs").count()).toBe(0);
-    },
-    SETTLE,
-  );
-
-  it(
-    "starts from the entry's own answers again when somebody switches back",
-    async () => {
-      // Type into the latency form, so there is something that could be left
-      // behind, then go to the entry that asks nothing and come back.
-      await useOn("Latency").click();
-      await page.waitForSelector("text=Use Latency");
-      await page.locator('form input[type="number"]').fill("1234");
-
-      await useOn("Expected behaviors").click();
-      await page.waitForSelector("text=Uses each test's expected behaviors");
-
-      await useOn("Latency").click();
-      await page.waitForSelector("text=Use Latency");
-
-      // Nothing survived the round trip. This is the assertion the DOM *can*
-      // answer honestly: an input holds the string it was given, so a bound
-      // still reading 1234 is state that outlived the question it answered.
-      expect(await page.locator('form input[type="number"]').inputValue()).toBe(
-        "",
-      );
-    },
-    SETTLE,
-  );
-});
-
-/**
- * Changing a running copy and switching one off, in a real browser.
- *
- * **The one thing about this screen a source scan cannot prove**, and it is the
- * same shape as the Use form's above: the edit form is drawn from the library
- * entry and pre-filled from the copy, so what a person sees when they open it
- * is state assembled from two answers that arrived separately. A source scan
- * settles that the right components are wired together; only a running page
- * settles that the values come back.
- *
- * It is also the only place the **forwarding rule** for a copy's own address is
- * exercised. `/v1/graders/:path*` is a rewrite this Next process resolves at
- * build time; without it the edit would post into this app's own file routing
- * and read Next's 404 page as though egma had refused it — and every other test
- * in the repository would still pass, because they all speak to the API
- * directly.
- *
- * It runs after the Use flow above and depends on it: that flow left a copy of
- * `latency` running on Ada's project, which is the row this one changes and
- * then switches off.
- */
-describe("changing a running grader and switching it off", () => {
-  /** One running copy's button, from the table rather than the mobile list. */
-  function on(named: string, button: string) {
-    return page
-      .locator("table")
-      .getByRole("row")
-      .filter({ hasText: named })
-      .getByRole("button", { name: button });
-  }
-
-  /** Every row of the table, the heading row included. */
-  function rows() {
-    return page.locator("table").getByRole("row");
-  }
-
-  /**
-   * **Wait for the list to say it, never for the write to say it.**
-   *
-   * The screen shows what happened the moment the request comes back, and
-   * *then* reads the list again — two commits, not one. So the sentence
-   * confirming a write is not a signal that the table has caught up, and
-   * counting rows straight after it is a race that widens under load until it
-   * loses: this file counted three rows where two were expected the first time
-   * the whole suite ran beside it.
-   *
-   * `expect.poll` is how the rest of this file waits on a list settling, and it
-   * is the right shape here for the same reason — the assertion *is* the wait,
-   * so there is no gap left between them for the screen to change in.
-   */
-  function settlesAt(howMany: number) {
-    return expect.poll(() => rows().count(), { timeout: 30_000 }).toBe(howMany);
-  }
-
-  /**
-   * The bound, which is the entry's own question — named by what it is not,
-   * because what a grader asks for is the library entry's business and a test
-   * spelling the parameter would be the copy of egma's catalog this screen
-   * exists without.
-   */
-  const theEntrysNumber = 'form input[type="number"]:not(#edit-sample-rate)';
-
-  it(
-    "saves a new value and reads it back, and turns a blocker into a diagnostic",
-    async () => {
-      await page.goto(await gradersUrl("running"));
-      // The table, settled: two graders on this project, and a heading row.
-      await settlesAt(3);
-      // Blocking, as anything switched on is unless somebody said otherwise.
-      await page.waitForSelector("text=Blocks");
-
-      await on("Latency", "Edit").click();
-      await page.waitForSelector("text=Edit Latency");
-
-      // Filled in from the copy, which is the half a source scan cannot see:
-      // this is what was typed when Use was pressed, come back round.
-      expect(await page.locator(theEntrysNumber).inputValue()).toBe("2000");
-
-      await page.locator(theEntrysNumber).fill("1500");
-      await page.locator("#edit-required").uncheck();
-      await page.getByRole("button", { name: "Save" }).click();
-
-      // What the write said, which is the sentence being asserted and **not**
-      // the moment the table is fresh.
-      await page.waitForSelector("text=is saved");
-      // And what the *list* says, which is: the row's own cell, from the read
-      // that happened after the write. This is the wait the next line depends
-      // on — the form closes with the notice, so "Diagnostic" can only be
-      // coming from the table by the time it matches.
-      await page.waitForSelector("text=Diagnostic");
-
-      // And opening it again shows the saved value rather than the old one —
-      // which is the whole round trip: the browser wrote it, the API versioned
-      // it, and the list handed it back.
-      await on("Latency", "Edit").click();
-      await page.waitForSelector("text=Edit Latency");
-      expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
-    },
-    SETTLE,
-  );
-
-  it(
-    "says what a switched-off grader keeps before it switches one off",
-    async () => {
-      await page.goto(await gradersUrl("running"));
-      await settlesAt(3);
-
-      await on("Latency", "Switch off").click();
-
-      // The sentence that makes the button pressable: what stops is obvious,
-      // and what stays is the thing somebody is actually worried about.
-      await page.waitForSelector("text=already judged keeps exactly what it said");
-
-      await page.getByRole("button", { name: "Switch it off" }).click();
-      // What the write said — the sentence, asserted for its own sake.
-      await page.waitForSelector("text=is switched off");
-
-      // And then what the list says, waited for rather than read straight off
-      // the back of the sentence above: the row is gone, and the copy every
-      // project is created with is still there — only the one that was named
-      // stopped judging.
-      await settlesAt(2);
-      expect(await on("Latency", "Switch off").count()).toBe(0);
-      await page.waitForSelector("text=Expected behaviors");
+      await page.waitForSelector("text=Pass threshold saved.");
+      await page.waitForSelector("text=0.75");
     },
     SETTLE,
   );
@@ -2396,6 +2188,17 @@ describe("the complete product, walked in order in a second project", () => {
   let runAddress = "";
   let conversation = "";
 
+  /** The seven statements one Expected behaviors grade reads in this walk. */
+  const expectedBehaviors = [
+    "confirms the new time back before finishing",
+    "checks that an afternoon next week is acceptable",
+    "keeps the existing booking until the new time is confirmed",
+    "states the day of the rescheduled cleaning",
+    "states the time of the rescheduled cleaning",
+    "does not create a second booking",
+    "explains what happens to the Thursday booking",
+  ] as const;
+
   /** Where the walk stands, for the one thing no browser can do. */
   let auth: {
     readonly userId: string;
@@ -2456,6 +2259,69 @@ describe("the complete product, walked in order in a second project", () => {
     await expect
       .poll(() => which.innerText("main").catch(() => ""), { timeout: 30_000 })
       .toContain(said);
+  }
+
+  /**
+   * Finish the one browser journey's real queue row with one grade.
+   *
+   * No grader worker runs in this browser lane. The queue, frozen definition,
+   * project threshold, ClickHouse grade row, and successful job deletion are
+   * still the production doors; only the model call is replaced with the
+   * deterministic answer this proof needs to read in Chrome.
+   */
+  async function finishExpectedBehaviorsGrade(traceId: string): Promise<void> {
+    await expect
+      .poll(
+        async () =>
+          (await getGradingJobForTrace(auth, traceId))?.status ?? "missing",
+        { timeout: 30_000 },
+      )
+      .toBe("pending");
+
+    const claimant = "browser-grader-proof";
+    const claims = await claimGradingJobs({ claimant, capacity: 50 });
+    const claim = claims.find((candidate) => candidate.traceId === traceId);
+    expect(claim, `grading work exists for ${traceId}`).toBeDefined();
+    if (claim === undefined) return;
+    expect(claim.entries).toHaveLength(1);
+    const entry = claim.entries[0];
+    expect(entry, "Expected behaviors is in the frozen plan").toBeDefined();
+    if (entry === undefined || claim.runId === null) return;
+
+    const score = 6 / 7;
+    const citedAgentTurn = `${traceId.slice(0, 14)}03`;
+    await appendGrades(claim.auth, [
+      {
+        source: "simulation",
+        traceId,
+        traceStartedAtMicroseconds:
+          BigInt(claim.traceStartedAt.getTime()) * 1_000n,
+        runId: claim.runId,
+        projectGraderId: entry.projectGraderId,
+        graderDefinitionId: entry.graderDefinitionId,
+        graderDefinitionVersion: entry.graderDefinitionVersion,
+        score,
+        details: {
+          rationale: "Six of seven expected behaviors were present.",
+          assertions: expectedBehaviors.map((behavior, at) => ({
+            key: `behavior_${String(at + 1)}`,
+            score: at === expectedBehaviors.length - 1 ? 0 : 1,
+            rationale:
+              at === expectedBehaviors.length - 1
+                ? "The transcript did not explain what happened to the Thursday booking."
+                : `The transcript supports: ${behavior}`,
+            ...(at === expectedBehaviors.length - 1
+              ? {}
+              : { citedSpanIds: [citedAgentTurn] }),
+          })),
+        },
+        graderPassThreshold: entry.graderPassThreshold,
+        gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+      },
+    ]);
+    expect(
+      await finishGradingJob(claim.auth, claim.id, claimant),
+    ).toEqual({ id: claim.id });
   }
 
   /**
@@ -2766,61 +2632,49 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "switches a grader on, in this project and not in the first",
+    "edits this project's Expected behaviors threshold and not the first project's",
     async () => {
       await walk.goto(at("graders"));
-      // Both of egma's own entries, written onto the shelf at boot.
       await walk.waitForSelector("text=Expected behaviors");
-      await walk.waitForSelector("text=Latency");
+      await saysWithin(walk, "Grades all simulations");
+      await saysWithin(walk, "Production off");
 
-      await walk
+      const secondProjectGrader = walk
         .locator("table")
         .getByRole("row")
-        .filter({ hasText: "Latency" })
-        .getByRole("button", { name: "Use" })
+        .filter({ hasText: "Expected behaviors" });
+      await secondProjectGrader
+        .getByRole("button", { name: "Edit threshold" })
         .click();
-      await walk.waitForSelector("text=Use Latency");
-
-      await walk.locator("form select").first().selectOption({ index: 1 });
-      await walk.locator('form input[type="number"]').fill("2500");
-      await walk.getByRole("button", { name: "Start judging" }).click();
-      await walk.waitForSelector("text=is running on this project now");
-
-      // On this project's own list, beside the copy every project is created
-      // with — and the request that made it named this project in its body.
-      await walk.goto(at("graders", "running"));
+      await walk.getByLabel("Pass threshold").fill("0.62");
+      await walk.getByRole("button", { name: "Save threshold" }).click();
+      await walk.waitForSelector("text=Pass threshold saved.");
       await expect
-        .poll(() => walk.locator("table").getByRole("row").count(), {
-          timeout: 30_000,
-        })
-        .toBe(3);
-      expect(await walk.innerText("main")).toContain("Latency");
+        .poll(() => secondProjectGrader.innerText(), { timeout: 30_000 })
+        .toContain("0.62");
 
-      /*
-       * **And not in the first**, which this case is named for and used never
-       * to open.
-       *
-       * A copy is a project's own, so switching one on here must leave every
-       * other project exactly as it was. The first project is the one that
-       * would be moved by a write reading the session's acting project instead
-       * of the address — the same fault five doors had — and it is also the one
-       * project whose running list this file already knows the whole of:
-       * `latency` was switched on there and then switched off again above, so
-       * what is left is the copy every project is created with, and one heading
-       * row.
-       */
-      await walk.goto(`${origin}/projects/${first}/graders/running`);
+      // Project grader policy belongs to the project named by the address. A
+      // write in the second project must not change the first project's row.
+      await walk.goto(`${origin}/projects/${first}/graders`);
+      const firstProjectGrader = walk
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: "Expected behaviors" });
+      await firstProjectGrader.waitFor();
+      expect(await firstProjectGrader.innerText()).not.toContain("0.62");
+
+      await walk.goto(at("graders"));
       await expect
-        .poll(() => walk.locator("table").getByRole("row").count(), {
-          timeout: 30_000,
-        })
-        .toBe(2);
-      const inTheFirst = await walk.innerText("main");
-      expect(inTheFirst).toContain("Expected behaviors");
-      expect(inTheFirst).not.toContain("Latency");
-
-      await walk.goto(at("graders", "running"));
-      await saysWithin(walk, "Latency");
+        .poll(
+          () =>
+            walk
+              .locator("table")
+              .getByRole("row")
+              .filter({ hasText: "Expected behaviors" })
+              .innerText(),
+          { timeout: 30_000 },
+        )
+        .toContain("0.62");
     },
     SETTLE,
   );
@@ -2875,9 +2729,18 @@ describe("the complete product, walked in order in a second project", () => {
         "#test-scenario",
         "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
       );
-      await walk
-        .getByRole("textbox", { name: "Expected behavior 1" })
-        .fill("confirms the new time back before finishing");
+      for (let at = 1; at < expectedBehaviors.length; at += 1) {
+        await walk
+          .getByRole("button", { name: "Add expected behavior" })
+          .click();
+      }
+      for (const [at, behavior] of expectedBehaviors.entries()) {
+        await walk
+          .getByRole("textbox", {
+            name: `Expected behavior ${String(at + 1)}`,
+          })
+          .fill(behavior);
+      }
       expect(
         await walk.getByRole("button", { name: "Choose agents" }).count(),
         "a test has no agent assignment",
@@ -2897,7 +2760,12 @@ describe("the complete product, walked in order in a second project", () => {
         await walk
           .getByRole("textbox", { name: "Expected behavior 1" })
           .inputValue(),
-      ).toBe("confirms the new time back before finishing");
+      ).toBe(expectedBehaviors[0]);
+      expect(
+        await walk
+          .getByRole("textbox", { name: "Expected behavior 7" })
+          .inputValue(),
+      ).toBe(expectedBehaviors[6]);
     },
     SETTLE,
   );
@@ -2931,8 +2799,8 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.waitForSelector("#run-name");
       await walk.fill("#run-name", "The first run in Support");
-      // Nothing here is a run that judges nothing: a grader was switched on two
-      // steps ago and every project is created holding another.
+      // Nothing here is a run with no grading plan: every project receives the
+      // Expected behaviors project grader when the project is created.
       expect(
         await walk.locator("text=No grader is running in this project").count(),
       ).toBe(0);
@@ -3026,7 +2894,7 @@ describe("the complete product, walked in order in a second project", () => {
           aRecording(),
         );
       }
-      await fileTranscriptOf(
+      const filed = await fileTranscriptOf(
         instance,
         landed,
         {
@@ -3035,6 +2903,8 @@ describe("the complete product, walked in order in a second project", () => {
         },
         new Date(),
       );
+      expect(filed.traceId).toBe(traceIdOfSimulation(landed));
+      await finishExpectedBehaviorsGrade(filed.traceId);
 
       await walk.goto(`${origin}${conversation}`);
       const evidence = walk.getByRole("dialog", {
@@ -3051,6 +2921,40 @@ describe("the complete product, walked in order in a second project", () => {
       const shown = await evidence.innerText();
       expect(shown).toContain("Of course — which afternoon suits you?");
       expect(shown).not.toContain("No transcript was filed");
+
+      // One trace, one current grade, seven nested assertions, and one mean.
+      // With one selected grader the display-only mean is that grader's score.
+      const summary = walk.getByRole("region", { name: "Simulation summary" });
+      expect(await summary.innerText()).toMatch(/Combined score\s+0\.86/u);
+
+      const grades = walk.getByRole("region", { name: "Grades" });
+      const expected = grades.getByRole("region", {
+        name: "Expected behaviors",
+      });
+      expect(await expected.innerText()).toContain(
+        "Score 0.86 · pass threshold 0.62",
+      );
+      expect(await expected.innerText()).toContain(
+        "Six of seven expected behaviors were present.",
+      );
+      expect(
+        await expected.getByText(/^Assertion \d{2}$/u).count(),
+      ).toBe(7);
+      expect(await expected.innerText()).toContain(expectedBehaviors[0]);
+      expect(await expected.innerText()).toContain(expectedBehaviors[6]);
+      expect(await expected.innerText()).toContain(
+        "The transcript did not explain what happened to the Thursday booking.",
+      );
+      for (const retired of [
+        "overall verdict",
+        "required grader",
+        "gate",
+        "Latency",
+      ]) {
+        expect((await grades.innerText()).toLowerCase()).not.toContain(
+          retired.toLowerCase(),
+        );
+      }
 
       /*
        * And the run it belongs to has caught up with it, on the page somebody
@@ -3167,13 +3071,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Graders",
         address: at("graders"),
-        // Egma's own library entry, written onto the shelf at boot.
-        says: "Expected behaviors",
-      },
-      {
-        what: "the running graders",
-        address: at("graders", "running"),
-        // The copy every project is created with.
+        // The protected project grader every project is created with.
         says: "Expected behaviors",
       },
       {
@@ -3670,7 +3568,7 @@ describe("the complete product, walked in order in a second project", () => {
           at("agents"),
           at("tests"),
           at("personas"),
-          at("graders", "running"),
+          at("graders"),
           at("runs"),
         ];
 
@@ -3773,7 +3671,7 @@ describe("the complete product, walked in order in a second project", () => {
     it(
       "keeps one status meaning on a list and on the page it links to",
       async () => {
-        const theRunsStatus = 'main span[title^="The machinery finished"]';
+        const theRunsStatus = 'main span[title^="The run finished"]';
         const stateOf = async (): Promise<string> =>
           walk
             .locator(theRunsStatus)

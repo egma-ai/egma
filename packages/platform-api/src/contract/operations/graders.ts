@@ -1,6 +1,5 @@
 import { defineOperation } from "../definition.ts";
 import {
-  anySchema,
   arrayOf,
   dateTimeSchema,
   nullable,
@@ -10,13 +9,46 @@ import {
   stringIdSchema,
 } from "../schemas.ts";
 
-const judgeModel = {
+const allSimulationSelector = {
   type: "object",
   properties: {
-    provider: { type: "string" },
-    model: { type: "string" },
+    kind: { type: "string", enum: ["all"] },
   },
-  required: ["provider", "model"],
+  required: ["kind"],
+  additionalProperties: false,
+} as const;
+
+const identifiedSimulationSelector = (kind: "test_suite" | "test") =>
+  ({
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: [kind] },
+      id: stringIdSchema,
+    },
+    required: ["kind", "id"],
+    additionalProperties: false,
+  }) as const;
+
+const scope = {
+  type: "object",
+  properties: {
+    simulations: arrayOf({
+      oneOf: [
+        allSimulationSelector,
+        identifiedSimulationSelector("test_suite"),
+        identifiedSimulationSelector("test"),
+      ],
+    }),
+    production: nullable({
+      type: "object",
+      properties: {
+        samplePercent: { type: "number", minimum: 1, maximum: 100 },
+      },
+      required: ["samplePercent"],
+      additionalProperties: false,
+    }),
+  },
+  required: ["simulations", "production"],
   additionalProperties: false,
 } as const;
 
@@ -24,49 +56,29 @@ const grader = {
   type: "object",
   properties: {
     id: stringIdSchema,
-    libraryId: stringIdSchema,
     projectId: stringIdSchema,
+    graderDefinitionId: stringIdSchema,
     name: { type: "string" },
     description: nullable({ type: "string" }),
-    type: { type: "string" },
-    required: { type: "boolean" },
-    scope: { type: "string" },
-    productionSampleRate: { type: "number" },
-    version: { type: "integer", minimum: 1 },
-    versionId: stringIdSchema,
-    config: anySchema,
-    judgeModel: nullable(judgeModel),
+    scopeEditable: { type: "boolean" },
+    scope,
+    passThreshold: { type: "number", minimum: 0, maximum: 1 },
     createdAt: dateTimeSchema,
     updatedAt: dateTimeSchema,
   },
   required: [
     "id",
-    "libraryId",
     "projectId",
+    "graderDefinitionId",
     "name",
     "description",
-    "type",
-    "required",
+    "scopeEditable",
     "scope",
-    "productionSampleRate",
-    "version",
-    "versionId",
-    "config",
-    "judgeModel",
+    "passThreshold",
     "createdAt",
     "updatedAt",
   ],
   additionalProperties: false,
-} as const;
-
-const graderBodyProperties = {
-  params: { type: "object", additionalProperties: true },
-  name: { type: "string" },
-  description: nullable({ type: "string" }),
-  required: { type: "boolean" },
-  scope: { type: "string" },
-  productionSampleRate: { type: "number" },
-  judgeModel: nullable(judgeModel),
 } as const;
 
 const graderParams = parameters({ graderId: stringIdSchema }, ["graderId"]);
@@ -77,7 +89,7 @@ export const graderOperations = {
     operationId: "listGraders",
     method: "GET",
     path: "/v1/graders",
-    summary: "List running graders",
+    summary: "List project graders",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -88,7 +100,7 @@ export const graderOperations = {
     },
     responses: {
       200: {
-        description: "Running graders, newest first.",
+        description: "Project graders, newest first.",
         schema: {
           type: "object",
           properties: {
@@ -106,40 +118,11 @@ export const graderOperations = {
     },
   }),
 
-  createGrader: defineOperation({
-    operationId: "createGrader",
-    method: "POST",
-    path: "/v1/graders",
-    summary: "Use a grader library entry",
-    tag: "Graders",
-    security: "credentialed",
-    request: {
-      query: projectQuery,
-      body: {
-        type: "object",
-        properties: {
-          libraryId: stringIdSchema,
-          ...graderBodyProperties,
-        },
-        required: ["libraryId"],
-        additionalProperties: false,
-      },
-    },
-    responses: {
-      201: { description: "The new running grader.", schema: grader },
-      400: refusalResponse,
-      401: refusalResponse,
-      403: refusalResponse,
-      422: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
-
   updateGrader: defineOperation({
     operationId: "updateGrader",
     method: "PATCH",
     path: "/v1/graders/{graderId}",
-    summary: "Update a running grader",
+    summary: "Update a project grader's pass threshold",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -147,46 +130,20 @@ export const graderOperations = {
       query: projectQuery,
       body: {
         type: "object",
-        properties: graderBodyProperties,
+        properties: {
+          passThreshold: { type: "number", minimum: 0, maximum: 1 },
+        },
+        required: ["passThreshold"],
         additionalProperties: false,
       },
     },
     responses: {
-      200: { description: "The updated grader.", schema: grader },
+      200: { description: "The updated project grader.", schema: grader },
       400: refusalResponse,
       401: refusalResponse,
       403: refusalResponse,
       404: refusalResponse,
       422: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
-
-  deleteGrader: defineOperation({
-    operationId: "deleteGrader",
-    method: "DELETE",
-    path: "/v1/graders/{graderId}",
-    summary: "Switch off a grader",
-    tag: "Graders",
-    security: "credentialed",
-    request: { params: graderParams, query: projectQuery },
-    responses: {
-      200: {
-        description: "The grader that was switched off.",
-        schema: {
-          type: "object",
-          properties: {
-            id: stringIdSchema,
-            name: { type: "string" },
-            deletedAt: dateTimeSchema,
-          },
-          required: ["id", "name", "deletedAt"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      404: refusalResponse,
       429: rateLimitResponse,
     },
   }),

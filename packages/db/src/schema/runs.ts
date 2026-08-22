@@ -29,9 +29,9 @@ import { createdAt, idText, moment, oneOf, prefixCheck } from "./columns.ts";
  * personas is three conversations, and improving that test tomorrow rewrites
  * none of them. Every simulation always has both exact pins.
  *
- * Verdict counts and the gate result are the graders' side of the line; the
- * counts on this header are simulation outcomes — did each conversation happen
- * — never judgements of what happened in one.
+ * Grader scores are the grader system's side of the line. The counts on this
+ * header are simulation outcomes — did each conversation happen — never a
+ * score or a grade of what happened in one.
  */
 
 /**
@@ -80,7 +80,7 @@ export type SimulationStatus = (typeof SIMULATION_STATUSES)[number];
 
 /**
  * How a completed conversation ended — a fact about the conversation, not a
- * judgement of it. An agent that hung up mid-sentence completed its
+ * grade of it. An agent that hung up mid-sentence completed its
  * simulation; whether that was acceptable is the graders' question, later.
  */
 export const COMPLETED_ENDING_REASONS = [
@@ -98,7 +98,7 @@ export const COMPLETED_ENDING_REASONS = [
  * afford.
  *
  * The last two are the platform's own words, never a simulator's report:
- * `orphaned` is the sweep's verdict on a simulator that stopped answering,
+ * `orphaned` is the sweep's finding that a simulator stopped answering,
  * and `dispatch_failed` is the claim path's confession that it could not turn
  * a claimed row into a spec worth handing over — a broken row is the
  * platform's fault, never pinned on a simulator that was handed nothing.
@@ -118,17 +118,6 @@ export const SIMULATION_ENDING_REASONS = [
 ] as const;
 export type SimulationEndingReason =
   (typeof SIMULATION_ENDING_REASONS)[number];
-
-/**
- * What the graders made of a simulation. Four, and never three.
- *
- * `skipped` and `errored` are answers in their own right and are never folded
- * into `failed`: a grader may skip evidence outside its modality, and a
- * platform outage is not an agent that did the wrong thing. The pairing with
- * the status is held by a check below.
- */
-export const VERDICTS = ["passed", "failed", "skipped", "errored"] as const;
-export type Verdict = (typeof VERDICTS)[number];
 
 /** What one event is about: one simulation moving, or the run itself. */
 export const RUN_EVENT_KINDS = ["run", "simulation"] as const;
@@ -193,7 +182,7 @@ export const run = pgTable(
     /**
      * Written once, together, when the last simulation lands terminal — and
      * frozen from then on by the same trigger that freezes the status. They
-     * count conversations, not verdicts: verdict counts arrive with graders.
+     * count conversations, not grades: grades are stored separately by trace.
      */
     completedCount: integer("completed_count"),
     failedCount: integer("failed_count"),
@@ -592,9 +581,10 @@ export const simulation = pgTable(
  * densely from one within the run.
  *
  * **A row lands here in the same transaction as the change it describes.** A
- * simulation moving, a verdict arriving, the run's own header settling: each
- * writes its event beside itself or neither is written. That is what makes the
- * feed a record rather than a guess.
+ * simulation moving or the run's own header settling writes its event beside
+ * itself, or neither is written. That is what makes the feed a record rather
+ * than a guess. Grader results live in the grade store and do not rewrite this
+ * lifecycle log.
  *
  * **Deriving the feed from the run and simulation rows was rejected.** Those
  * rows are overwritten by every transition, so a follower that was away while a
@@ -608,9 +598,7 @@ export const simulation = pgTable(
  * client's own no-op. The server is stateless about who has read what.
  *
  * The row is written once and never rewritten — a trigger in the migration says
- * so, the way the two lifecycle guards do — and it holds a place for the
- * verdict from the day this table exists, so the graders land with no change to
- * anything a client reads.
+ * so, the way the two lifecycle guards do.
  */
 export const runEvent = pgTable(
   "run_event",
@@ -635,11 +623,6 @@ export const runEvent = pgTable(
      * once — the checks below hold the kind to its own words.
      */
     status: text("status").notNull(),
-    /**
-     * What the graders made of it, once they have. Null until then, and null
-     * forever on an event that is not about a judged conversation.
-     */
-    verdict: text("verdict"),
     /** How it ended, in the ending-reason vocabulary; null while it has not. */
     reason: text("reason"),
     createdAt: createdAt(),
@@ -652,13 +635,12 @@ export const runEvent = pgTable(
     oneOf("run_event_kind_allowed", table.kind, [...RUN_EVENT_KINDS]),
     check("run_event_seq_counts_from_one", sql`${table.seq} >= 1`),
     // Each kind speaks its own vocabulary and carries its own facts. A run
-    // event is about the header, so it names no simulation and holds no
-    // judgement of one.
+    // event is about the header, so it names no simulation ending reason.
     check(
       "run_event_run_shape",
       sql`${table.kind} <> 'run'
         or (${table.simulationId} is null
-          and ${table.verdict} is null and ${table.reason} is null
+          and ${table.reason} is null
           and ${table.status} in ${quoted(RUN_STATUSES)})`,
     ),
     check(
@@ -666,20 +648,6 @@ export const runEvent = pgTable(
       sql`${table.kind} <> 'simulation'
         or (${table.simulationId} is not null
           and ${table.status} in ${quoted(SIMULATION_STATUSES)})`,
-    ),
-    check(
-      "run_event_verdict_allowed",
-      sql`${table.verdict} is null or ${table.verdict} in ${quoted(VERDICTS)}`,
-    ),
-    // The pairing, held by the database: a completed conversation may be
-    // passed, failed, or skipped by a grader; a machinery failure is errored;
-    // and a canceled conversation has no grading evidence and reads skipped.
-    check(
-      "run_event_verdict_agrees",
-      sql`${table.verdict} is null
-        or (${table.status} = 'completed' and ${table.verdict} in ('passed', 'failed', 'skipped'))
-        or (${table.status} = 'failed' and ${table.verdict} = 'errored')
-        or (${table.status} = 'canceled' and ${table.verdict} = 'skipped')`,
     ),
     // And the ending reason keeps to its own class, exactly as it does on the
     // simulation row it came from.

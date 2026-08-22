@@ -15,7 +15,7 @@ import {
 import { createTestSuite } from "../access/suites.ts";
 import type { AuthContext } from "../access/context.ts";
 import { projectsOf } from "../access/projects.ts";
-import { seedGraderLibrary } from "../access/grader-library.ts";
+import { reconcileGraderCatalog } from "../access/grader-library.ts";
 import { seedPersonaLibrary } from "../persona-library/seed.ts";
 import { provisionOrganization } from "../access/provisioning.ts";
 import { runMigrations } from "../migrate.ts";
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
   connect({ databaseUrl: DATABASE_URL, maxConnections: 2 });
   // egma's own graders, on the shelf before a project can be created — every
   // project is born holding a copy of one, and the pointer is a foreign key.
-  await seedGraderLibrary();
+  await reconcileGraderCatalog();
   await seedPersonaLibrary();
 
   const auth = await actAsDevelopmentTenant();

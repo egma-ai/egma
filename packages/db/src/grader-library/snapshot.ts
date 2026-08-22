@@ -1,84 +1,99 @@
 import type {
-  LibraryOutputDefinition,
-  LibraryParameter,
+  GraderOutputContract,
+  GraderParameter,
 } from "./catalog.ts";
 import {
-  LIBRARY_TYPES,
-  type LibraryType,
+  GRADER_DEFINITION_TYPES,
+  GRADER_MODALITIES,
+  type GraderDefinitionType,
+  type GraderJudgeModel,
+  type GraderModality,
 } from "../schema/graders.ts";
 
-/**
- * The complete library definition one grader version executes.
- *
- * The stable Library identity owns `type`; one shared immutable Library-version
- * row owns every other field in this shape. A grader version references that
- * row, so runtime joins the stable type and exact revision without following
- * the Library's mutable current pointer. A pinned run cannot change later.
- */
 export type GraderDefinitionSnapshot = {
-  readonly libraryId: string;
-  readonly libraryVersion: number;
-  readonly type: LibraryType;
+  readonly definitionId: string;
+  readonly definitionVersion: number;
+  readonly type: GraderDefinitionType;
   readonly prompt: string | null;
-  readonly params: readonly LibraryParameter[];
-  readonly outputDefinition: LibraryOutputDefinition | null;
+  readonly parameterContract: readonly GraderParameter[];
+  readonly outputContract: GraderOutputContract | null;
   readonly sourceCode: string | null;
   readonly sourceCodeLanguage: string | null;
+  readonly modalities: readonly GraderModality[];
+  readonly judgeModel: GraderJudgeModel | null;
 };
 
-/** The fields read from one library row before they become a snapshot. */
-export type LibraryDefinitionSource = {
-  readonly id: string;
+export type GraderDefinitionSource = {
+  readonly definitionId: string;
   readonly version: number;
   readonly type: string;
   readonly prompt: string | null;
-  readonly params: unknown;
-  readonly outputDefinition: unknown;
+  readonly parameterContract: unknown;
+  readonly outputContract: unknown;
   readonly sourceCode: string | null;
   readonly sourceCodeLanguage: string | null;
+  readonly modalities: unknown;
+  readonly judgeModel: unknown;
 };
 
-/**
- * Turn a Library-version row into the value execution reads.
- *
- * This is the only writer of the JSON shape. It checks the parts execution
- * depends on before a new version can own them.
- */
-export function snapshotLibraryDefinition(
-  source: LibraryDefinitionSource,
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Validate the complete immutable value before execution can receive it. */
+export function snapshotGraderDefinition(
+  source: GraderDefinitionSource,
 ): GraderDefinitionSnapshot {
   const malformed = (because: string): Error =>
-    new Error(`library entry ${source.id} ${because}`);
+    new Error(`grader definition ${source.definitionId} ${because}`);
 
   if (!Number.isInteger(source.version) || source.version < 1) {
-    throw malformed("has no readable positive version");
+    throw malformed("has no positive version");
   }
-  if (!(LIBRARY_TYPES as readonly string[]).includes(source.type)) {
-    throw malformed(`has an executable type Egma does not know: ${source.type}`);
+  if (!(GRADER_DEFINITION_TYPES as readonly string[]).includes(source.type)) {
+    throw malformed(`has an execution type Egma does not know: ${source.type}`);
   }
-  if (!Array.isArray(source.params)) {
-    throw malformed("holds parameters in a shape Egma never writes");
+  if (!Array.isArray(source.parameterContract)) {
+    throw malformed("holds a parameter contract Egma never writes");
   }
-  if (
-    source.outputDefinition !== null &&
-    (typeof source.outputDefinition !== "object" ||
-      Array.isArray(source.outputDefinition))
-  ) {
-    throw malformed("holds an output definition in a shape Egma never writes");
+  if (source.outputContract !== null && !isObject(source.outputContract)) {
+    throw malformed("holds an output contract Egma never writes");
   }
   if ((source.sourceCode === null) !== (source.sourceCodeLanguage === null)) {
-    throw malformed("holds only half of its executable source definition");
+    throw malformed("holds only half of its executable source");
+  }
+  if (
+    !Array.isArray(source.modalities) ||
+    source.modalities.length === 0 ||
+    new Set(source.modalities).size !== source.modalities.length ||
+    source.modalities.some(
+      (modality) =>
+        typeof modality !== "string" ||
+        !(GRADER_MODALITIES as readonly string[]).includes(modality),
+    )
+  ) {
+    throw malformed("holds modalities Egma never writes");
+  }
+
+  const type = source.type as GraderDefinitionType;
+  if (type === "llm_as_judge" && !isObject(source.judgeModel)) {
+    throw malformed("needs one LLM model selection");
+  }
+  if (type === "code" && source.judgeModel !== null) {
+    throw malformed("is code but holds an LLM model selection");
   }
 
   return {
-    libraryId: source.id,
-    libraryVersion: source.version,
-    type: source.type as LibraryType,
+    definitionId: source.definitionId,
+    definitionVersion: source.version,
+    type,
     prompt: source.prompt,
-    params: source.params as readonly LibraryParameter[],
-    outputDefinition:
-      source.outputDefinition as LibraryOutputDefinition | null,
+    parameterContract:
+      source.parameterContract as readonly GraderParameter[],
+    outputContract: source.outputContract as GraderOutputContract | null,
     sourceCode: source.sourceCode,
     sourceCodeLanguage: source.sourceCodeLanguage,
+    modalities: source.modalities as readonly GraderModality[],
+    judgeModel: source.judgeModel as GraderJudgeModel | null,
   };
 }

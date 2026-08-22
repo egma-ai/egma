@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { isId, newId } from "@egma/ids";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import {
   and,
   asc,
@@ -20,6 +21,7 @@ import {
 } from "drizzle-orm";
 
 import { db, type Queryable, type Transaction } from "../client.ts";
+import { planGroupsFor } from "../grading/plan.ts";
 import {
   agent,
   connection,
@@ -42,7 +44,6 @@ import {
   type RunTrigger,
   type SimulationEndingReason,
   type SimulationStatus,
-  type Verdict,
 } from "../schema/runs.ts";
 import { test, testPersona, testSuite, testVersion } from "../schema/tests.ts";
 import { openCredentials } from "../sealing.ts";
@@ -59,15 +60,15 @@ import {
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
-import { enqueueGradingJob } from "./grading.ts";
+import { requestGradingIn, traceEvidenceStartedAt } from "./grading.ts";
 import { mockToolsApplyingTo } from "./mock-tools.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
 import { authorize, here } from "./permissions.ts";
 import {
   applicableGraders,
-  planGroupsFor,
   refuseRun,
   resolvePersonaVersions,
+  simulationHasPlannedGradersOn,
   writeGradingPlan,
 } from "./run-plans.ts";
 import {
@@ -399,7 +400,6 @@ type NewRunEvent =
       readonly kind: "simulation";
       readonly simulationId: string;
       readonly status: SimulationStatus;
-      readonly verdict?: Verdict | undefined;
       readonly reason?: SimulationEndingReason | null | undefined;
     };
 
@@ -440,7 +440,6 @@ async function appendRunEvents(
         kind: event.kind,
         simulationId: event.kind === "simulation" ? event.simulationId : null,
         status: event.status,
-        verdict: event.kind === "simulation" ? (event.verdict ?? null) : null,
         reason: event.kind === "simulation" ? (event.reason ?? null) : null,
         createdAt: at,
       };
@@ -457,28 +456,6 @@ function inActingProject(
 
 function theRun(auth: AuthContext, id: string): SQL {
   return within(auth, run, and(eq(run.id, id), inActingProject(auth, run)));
-}
-
-function isGradable(status: SimulationStatus): boolean {
-  return status === "completed" || status === "failed";
-}
-
-async function makeGradable(
-  tx: Transaction,
-  row: {
-    readonly id: string;
-    readonly status: string;
-    readonly organizationId: string;
-    readonly projectId: string;
-  },
-): Promise<void> {
-  if (!isGradable(row.status as SimulationStatus)) return;
-  await enqueueGradingJob(tx, {
-    organizationId: row.organizationId,
-    projectId: row.projectId,
-    source: "simulation",
-    simulationId: row.id,
-  });
 }
 
 function nothingLeftToCancel(runId: string): string {
@@ -645,7 +622,13 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionKind, reached.modality));
       }
 
-      const groups = planGroupsFor(await applicableGraders(tx, auth, projectId));
+      const graderCandidates = await applicableGraders(auth, tx, projectId);
+      const plannedTests: {
+        suiteId: string;
+        testId: string;
+        testVersionId: string;
+        modality: Modality;
+      }[] = [];
       const mockToolSnapshot = await freezeMockTools(
         tx,
         auth,
@@ -704,6 +687,12 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
             refuseRun("not_admitted", "the suite changed after this run request was prepared; read it again and retry");
           }
           expectedIndex += 1;
+          plannedTests.push({
+            suiteId: suite.id,
+            testId: current.id,
+            testVersionId: current.versionId,
+            modality: reached.modality as Modality,
+          });
 
           let personaPosition = 0;
           let namedPersona = false;
@@ -723,8 +712,8 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
             if (personaRows.length === 0) break;
             namedPersona = true;
             const pins = await resolvePersonaVersions(
-              tx,
               auth,
+              tx,
               projectId,
               personaRows.map((one) => one.personaId),
             );
@@ -761,10 +750,9 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       if (simulationCount !== expectedSimulationCount) {
         throw new Error(`test suite ${suite.id} changed while its run was being planned`);
       }
-      await writeGradingPlan(tx, {
+      const groups = planGroupsFor(graderCandidates, plannedTests);
+      await writeGradingPlan(auth, tx, {
         runId,
-        organizationId: auth.organizationId,
-        projectId,
         groups,
         capturedAt: at,
       });
@@ -1474,8 +1462,7 @@ export async function claimSimulations(
  * The row is answered in whatever state it stands, terminal and swept
  * included, and each door decides what that standing permits: the lifecycle
  * doors refuse a claim about a row beyond help, while the telemetry door
- * keeps a late-returning orphan's spans — evidence arriving after the
- * verdict on the messenger.
+ * keeps a late-returning orphan's spans after its terminal lifecycle state.
  */
 export async function resolveSimulationStanding(
   simulationId: string,
@@ -1793,12 +1780,49 @@ async function landSimulation(
 
     if (row === undefined) return undefined;
 
-    // The judgement is queued in the same transaction as the landing, so a
-    // conversation that ended is never recorded without the work to judge it.
-    // The organization comes off the context: the row was reached through
-    // `within`, so its organization is this one by construction, and the
-    // answer's columns stay the tenant-free view they are everywhere else.
-    await makeGradable(tx, { ...row, organizationId: auth.organizationId });
+    if (row.status === "completed") {
+      const traceId = traceIdOfSimulation(row.id);
+      if (traceId === undefined || row.startedAt === null) {
+        throw new Error(`completed simulation ${row.id} has no trace identity or start time`);
+      }
+      const hasPlannedGraders = await simulationHasPlannedGradersOn(
+        auth,
+        tx,
+        row.id,
+      );
+      if (hasPlannedGraders === undefined) {
+        throw new Error(`completed simulation ${row.id} has no grading plan`);
+      }
+      if (hasPlannedGraders) {
+        // Evidence may have drained before this lifecycle transition. Probe the
+        // bounded trace window, then request work inside this same Postgres
+        // transaction. A crash cannot commit "completed" without also
+        // committing the queue row when evidence was already visible.
+        const evidenceStartedAt = await traceEvidenceStartedAt(auth, {
+          source: "simulation",
+          traceId,
+          runId: row.runId,
+          window: {
+            // The simulation row and provider spans do not share one clock. A
+            // five-minute cushion keeps an earlier provider timestamp visible
+            // when evidence drains before this completion transaction.
+            from: BigInt(row.startedAt.getTime() - 5 * 60 * 1_000) * 1_000n,
+            // The store uses an exclusive upper bound. One second keeps a span
+            // stamped at the landing boundary inside this small probe.
+            to: BigInt(now.getTime() + 1_000) * 1_000n,
+          },
+        });
+        await requestGradingIn(tx, auth, {
+          source: "simulation",
+          traceId,
+          traceStartedAt: evidenceStartedAt ?? row.startedAt,
+          runId: row.runId,
+          endsTrace: true,
+          modality: row.modality as Modality,
+          evidenceReady: evidenceStartedAt !== undefined,
+        });
+      }
+    }
     const settled = await finalizeRunIfDone(tx, row.runId, now);
     await appendRunEvents(tx, row.runId, now, [
       {
@@ -1850,7 +1874,7 @@ export async function completeSimulation(
  * one, whatever reached the trace store before it stopped, which is the
  * honest "started, never finished" record. From `claimed`
  * (the agent never joined, the line was never answered) or from `running`
- * (something died mid-conversation). Never a judgement: the reasons here are the
+ * (something died mid-conversation). Never graded: the reasons here are the
  * "test never ran" class, and keeping them apart from a bad conversation is
  * the one normalisation a test product cannot get wrong.
  */
@@ -1883,9 +1907,9 @@ export async function failSimulation(
  * fails — never left for the sweep to misname `orphaned` (the simulator did
  * not stop answering; it was never handed anything to answer for), and never
  * re-queued to fail the same way again — and through the same terminal
- * machinery as every landing: the judgement minted and the run finalized in
- * the same transaction, so a run waiting only on a broken row still settles
- * with truthful counts.
+ * machinery as every landing, so a run waiting only on a broken row settles
+ * with truthful counts. No grading job is created because no completed trace
+ * exists.
  *
  * Only a context minted by a claim may write it, on the terms
  * `resolveSimulationConnection` drew: the check is on how the caller came to
@@ -2020,16 +2044,15 @@ export type SweptSimulation = {
  * terms (see the note at the top of this file): silence is noticed by egma
  * standing behind every organization at once, because the simulator whose
  * silence this is stood there too. The only rows it moves are ones egma's own
- * claim machinery stamped, each orphan's grading work is filed under the
- * tenancy the row itself carries, and the answer is identifiers and no
- * content.
+ * claim machinery stamped, and the answer is identifiers and no content.
+ * Orphaned simulations have no completed trace and create no grading work.
  *
  * **Racing sweeps collide harmlessly**, which is what makes it safe to run on
  * an interval in every replica with nothing elected to go first. The guarded
  * update is the whole arbiter: of two sweeps reaching one row, whichever
  * arrives second re-reads it after the first commits, finds it no longer
- * `claimed` or `running`, and leaves it alone — so a row is ended once, its
- * grading work enqueued once, its run finalized once. And the after-work
+ * `claimed` or `running`, and leaves it alone — so a row is ended once and its
+ * run is finalized once. And the after-work
  * walks rows and runs in id order, so two sweeps over one set cannot
  * deadlock over the order they took things in.
  *
@@ -2067,16 +2090,6 @@ export async function sweepOrphanedSimulations(
         projectId: simulation.projectId,
         status: simulation.status,
       });
-
-    // An orphan is a terminal transition like any other, so it becomes work
-    // like any other: a simulator that died mid-conversation produces a `failed`
-    // simulation, and a `failed` simulation is judged `errored` rather than left
-    // unjudged. In id order, so two sweeps racing over one set take the rows in
-    // one order and cannot deadlock over them. The tenancy each job is filed
-    // under is the row's own — the one thing here `within` would otherwise say.
-    for (const row of [...rows].sort((a, b) => (a.id < b.id ? -1 : 1))) {
-      await makeGradable(tx, row);
-    }
 
     // Each affected run at most once, in one order, as everywhere else — and
     // each one's events beside its own finish.
@@ -2127,8 +2140,6 @@ export type RunEvent = {
   readonly personaName: string | null;
   /** A run status on a run event; a simulation status on a simulation one. */
   readonly status: RunStatus | SimulationStatus;
-  /** What the graders made of it, once there is one to carry. */
-  readonly verdict: Verdict | null;
   readonly reason: SimulationEndingReason | null;
 };
 
@@ -2190,7 +2201,6 @@ export async function listRunEvents(
       testName: test.name,
       personaName: persona.name,
       status: runEvent.status,
-      verdict: runEvent.verdict,
       reason: runEvent.reason,
     })
     .from(runEvent)
@@ -2216,7 +2226,6 @@ export async function listRunEvents(
     ...row,
     kind: row.kind as RunEventKind,
     status: row.status as RunStatus | SimulationStatus,
-    verdict: row.verdict as Verdict | null,
     reason: row.reason as SimulationEndingReason | null,
   }));
 

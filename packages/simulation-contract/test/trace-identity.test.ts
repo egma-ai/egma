@@ -16,7 +16,7 @@ import {
  * trace id it is, "always" — and this is that sentence executed. The fixtures
  * are the same promise as bytes, so every one of them is checked through this
  * export too: a fixture the emitter wrote and a trace id the platform derives
- * have to be the same 32 characters, or a verdict and its evidence would file
+ * have to be the same 32 characters, or a grade and its evidence would file
  * under two different traces and neither side would notice.
  *
  * `span-fixtures.test.ts` beside this file checks the fixtures against its own

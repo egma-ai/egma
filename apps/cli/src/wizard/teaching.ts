@@ -4,7 +4,7 @@
  * Writing a suite takes a couple of minutes. In that time a developer either
  * learns what egma is talking about or does not, and every screen after this one
  * assumes they did: the gate says "suite", the exit line says "tests", the
- * results say "passed" and "skipped" and mean different things by them. So the
+ * results show grade scores and grading progress. So the
  * wait teaches the vocabulary, one card at a time, beside the files as they
  * land.
  *
@@ -98,19 +98,19 @@ export const LEARN_CARDS: readonly LearnCard[] = [
       "",
       "A grader judges. It reads the",
       "transcript, the outcome, or a",
-      "metric, and returns a verdict.",
+      "metric, and returns one score",
+      "from 0 to 1.",
     ],
   },
   {
-    heading: "The four verdicts",
+    heading: "Grade results",
     lines: [
-      "passed, failed, skipped,",
-      "errored.",
+      "Each grade is compared with",
+      "that grader's pass threshold.",
       "",
-      "A test that could not run is not",
-      "a test that failed, so Egma",
-      "never counts skipped or errored",
-      "as one.",
+      "Several grades can have one",
+      "display-only combined score.",
+      "It is not a run result.",
     ],
   },
 ];

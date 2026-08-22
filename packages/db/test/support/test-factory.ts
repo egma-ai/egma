@@ -131,8 +131,8 @@ export async function rowCounts(): Promise<{
   tests: number;
   versions: number;
   named: number;
-  graders: number;
-  graderVersions: number;
+  projectGraders: number;
+  graderDefinitionVersions: number;
 }> {
   const count = async (table: string): Promise<number> => {
     const { rows } = await database.sql<{ count: string }>(
@@ -144,8 +144,8 @@ export async function rowCounts(): Promise<{
     tests: await count("test"),
     versions: await count("test_version"),
     named: await count("test_persona"),
-    graders: await count("grader"),
-    graderVersions: await count("grader_version"),
+    projectGraders: await count("project_grader"),
+    graderDefinitionVersions: await count("grader_definition_version"),
   };
 }
 

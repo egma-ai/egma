@@ -1,7 +1,7 @@
 ---
 title: "Start and follow complete test suite runs via API"
 sidebarTitle: "Runs"
-description: "Run one complete test suite against one agent connection, page through simulations, follow events, and cancel work."
+description: "Run one complete test suite, follow execution and grading, read simulation grades, and request a whole-trace regrade."
 ---
 
 A run executes one complete test suite against one agent and one connection.
@@ -114,8 +114,22 @@ The start response is a bounded run header. It does not embed every simulation.
   Canceled simulations when the run is settled.
 </ResponseField>
 
-<ResponseField name="verdict" type="string | null">
-  Folded grader verdict when grading is complete.
+<ResponseField name="simulationCounts" type="object">
+  Current counts for each simulation execution state.
+</ResponseField>
+
+<ResponseField name="finishedCount" type="integer">
+  Simulations whose execution is `completed`, `failed`, or `canceled`.
+</ResponseField>
+
+<ResponseField name="gradableCount" type="integer">
+  Simulations that produced a completed trace and therefore have trace-level
+  grading work.
+</ResponseField>
+
+<ResponseField name="gradedCount" type="integer">
+  Completed traces whose grading state is terminal: `not_requested`,
+  `complete`, or `error`.
 </ResponseField>
 
 <ResponseField name="resultsUrl" type="string">
@@ -177,15 +191,77 @@ Returns a bounded page:
 Each simulation names `testId`, `testVersionId`, `personaId`, and
 `personaVersionId`. These are the exact identities and versions that ran.
 Simulation status is `queued`, `claimed`, `running`, `completed`, `failed`, or
-`canceled`. A grader verdict may separately be `passed`, `failed`, `skipped`, or
-`errored`.
+`canceled`.
+
+`gradingState` reports whole-trace grading progress for a completed simulation:
+`not_requested`, `pending`, `running`, `complete`, or `error`. It is `null` when
+the simulation has not produced a completed trace, including after execution
+fails or is canceled.
+
+## Get a simulation and its grades
+
+`GET /v1/simulations/:simulationId`
+
+The response includes the complete simulation evidence and these trace-level
+grading fields:
+
+<ResponseField name="gradingState" type="string | null">
+  Whole-trace grading progress. See the states above.
+</ResponseField>
+
+<ResponseField name="grades" type="array">
+  The current grade from each selected project grader. Each grade includes
+  `projectGraderId`, `graderDefinitionId`, `graderDefinitionVersion`,
+  `graderName`, a normalized `score` or `null`, `details`, the frozen
+  `passThreshold`, its individual `result`, and `gradedAt`.
+</ResponseField>
+
+<ResponseField name="gradeHistory" type="array">
+  All appended grades for the trace, including older grades replaced in the
+  current view by a later regrade.
+</ResponseField>
+
+<ResponseField name="combinedScore" type="number | null">
+  The unweighted arithmetic mean of the current scores. It is `null` while
+  selected grading is unfinished or when a selected grader errors. Egma does
+  not apply an overall threshold to this value.
+</ResponseField>
+
+An individual grade result is `passed`, `failed`, or `errored`. It describes
+only that grader. Egma does not assign an overall `passed` or `failed` result to
+the trace, test, test suite, or run.
+
+## Regrade a completed simulation trace
+
+`POST /v1/simulations/:simulationId/regrade`
+
+Send no request body. Egma reruns the whole grader selection frozen when the
+run started, including its definition versions and pass thresholds. You cannot
+target one grader or apply current policy to the old trace. New grades append
+to `gradeHistory`; the latest grade from each project grader becomes current.
+
+The response names the `simulationId` and reports whether Egma reopened
+finished grading work or found the same work already waiting:
+
+```json
+{
+  "simulationId": "sim_01K…",
+  "reopened": 1,
+  "alreadyWaiting": 0
+}
+```
+
+The request is refused when the simulation has no completed trace or no frozen
+grader selection.
 
 ## Stream run events
 
 `GET /v1/runs/:runId/events`
 
 Use `after` as a sequence cursor. Save the last sequence you applied and send
-it again after a disconnect.
+it again after a disconnect. The response's `done` field becomes `true` only
+after all simulation execution is terminal and every completed trace has
+terminal grading.
 
 <ParamField query="after" type="integer">
   Return events after this sequence number. Omit it for the first page.

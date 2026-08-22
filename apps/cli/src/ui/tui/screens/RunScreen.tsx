@@ -4,28 +4,28 @@
  * This is the payoff, and it is the only screen in the walk whose job is to be
  * watched rather than answered. A developer who has spent nine minutes being
  * told what egma is about to do now sees it happen: twelve lines, each moving
- * through its own lifecycle, and then a verdict.
+ * through execution and then trace-level grading.
  *
- * **The first verdict is marked.** It is the moment the whole walk is timed
- * against — the point where the developer stops taking egma's word for it —
- * so it does not scroll past looking like every other change. It is called out
- * on its own line, once, and stays called out.
- *
- * **The four verdicts are drawn as four.** `skipped` and `errored` have their
- * own marks and their own words, and neither is ever coloured or worded like
- * `failed`. A test egma could not run is not a test the agent got wrong, and a
- * screen that suggested otherwise would be egma blaming somebody else for its
- * own outage.
+ * **The first result is marked.** It is the first completed trace whose whole
+ * grading work is terminal. A low grade is still a completed result. A grader
+ * error is an operational error, not a quality verdict.
  *
  * **Nothing here waits for the suite.** The wizard leaves as soon as the first
- * verdict has landed and the developer has answered the last question. The run
+ * first result is ready and the developer has answered the last question. The run
  * is on the platform; closing a terminal has never stopped one.
  */
 
 import { Box, Text } from "ink";
 
 import type { RunView, SimulationRow } from "../../../run/view.ts";
-import type { SimulationStatus, Verdict } from "../../../platform/runs.ts";
+import type { GradingState, SimulationStatus } from "../../../platform/runs.ts";
+import { isTerminalGrading } from "../../../run/follow.ts";
+import {
+  assertionBehavior,
+  assertionLabel,
+  graderLabel,
+  scoreText,
+} from "../../../run/lines.ts";
 
 export type RunScreenProps = { readonly run: RunView };
 
@@ -48,27 +48,32 @@ const STATUS_SAID: Readonly<Record<SimulationStatus, string>> = {
   canceled: "stopped",
 };
 
-/**
- * What each verdict is called on screen.
- *
- * Four words for four verdicts. None of them is a synonym for another and none
- * of them is left out.
- */
-const VERDICT_SAID: Readonly<Record<Verdict, string>> = {
-  passed: "passed",
-  failed: "failed",
-  skipped: "skipped",
-  errored: "errored",
+const GRADING_SAID: Readonly<Record<GradingState, string>> = {
+  not_requested: "not graded",
+  pending: "waiting to grade",
+  running: "grading…",
+  complete: "grading complete",
+  error: "grading error",
 };
 
 function markFor(row: SimulationRow): string {
-  if (row.verdict !== null) return ENDED_MARK;
+  if (
+    row.status === "failed" ||
+    row.status === "canceled" ||
+    isTerminalGrading(row.gradingState)
+  ) {
+    return ENDED_MARK;
+  }
   return row.status === "queued" ? QUEUED_MARK : RUNNING_MARK;
 }
 
-/** The right-hand column: the verdict when there is one, the state when not. */
+/** The right-hand column: execution first, then grading for completed traces. */
 function saidFor(row: SimulationRow): string {
-  if (row.verdict !== null) return VERDICT_SAID[row.verdict];
+  if (row.status === "completed") {
+    return row.gradingState === null
+      ? "waiting to grade"
+      : GRADING_SAID[row.gradingState];
+  }
   return STATUS_SAID[row.status];
 }
 
@@ -77,30 +82,82 @@ function columnWidth(names: readonly string[]): number {
   return names.reduce((widest, name) => Math.max(widest, name.length), 0);
 }
 
+export function GradeResult({ row }: { readonly row: SimulationRow }) {
+  const projection = row.gradeProjection;
+  if (
+    projection === null ||
+    (projection.combinedScore === null && projection.grades.length === 0)
+  ) {
+    return null;
+  }
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>
+        {projection.combinedScore === null
+          ? "Combined score unavailable"
+          : `Combined score ${scoreText(projection.combinedScore)}`}
+      </Text>
+      {projection.grades.map((grade) => (
+        <Box key={grade.projectGraderId} flexDirection="column">
+          <Text>
+            {`${graderLabel(grade.graderName)}  ·  score ${scoreText(grade.score)}  ·  pass threshold ${scoreText(grade.passThreshold)}  ·  ${grade.result}`}
+          </Text>
+          <Text dimColor>{`Graded ${grade.gradedAt}`}</Text>
+          {grade.details.rationale === undefined ? null : (
+            <Text dimColor>{grade.details.rationale}</Text>
+          )}
+          {grade.details.error === undefined ? null : (
+            <Text color="red">{grade.details.error}</Text>
+          )}
+          {(grade.details.assertions ?? []).map((assertion, at) => {
+            const parts = [`Assertion ${assertionLabel(assertion.key, at)}`];
+            if (assertion.score !== undefined) {
+              parts.push(`score ${scoreText(assertion.score)}`);
+            }
+            const behavior = assertionBehavior(
+              assertion.key,
+              projection.expectedBehaviors,
+            );
+            if (behavior !== null) parts.push(behavior);
+            if (assertion.rationale !== undefined) parts.push(assertion.rationale);
+            if (assertion.error !== undefined) parts.push(`error ${assertion.error}`);
+            return (
+              <Text key={`${grade.projectGraderId}:${assertion.key}`}>
+                {parts.join("  ·  ")}
+              </Text>
+            );
+          })}
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 export function RunScreen({ run }: RunScreenProps) {
   const width = columnWidth(run.rows.map((row) => row.name));
 
   // The window follows the work: whatever is moving now stays on screen, and
-  // rows already judged scroll off the top rather than pushing the live ones
+  // rows already finished scroll off the top rather than pushing the live ones
   // out of sight.
-  const live = run.rows.findIndex((row) => row.verdict === null);
+  const live = run.rows.findIndex(
+    (row) =>
+      row.status !== "failed" &&
+      row.status !== "canceled" &&
+      !isTerminalGrading(row.gradingState),
+  );
   const throughTo = live === -1 ? run.rows.length : Math.min(run.rows.length, live + VISIBLE_ROWS);
   const from = Math.max(0, throughTo - VISIBLE_ROWS);
   const shown = run.rows.slice(from, from + VISIBLE_ROWS);
 
-  const { tally } = run;
-  const marked = run.firstVerdict;
-  const first =
-    marked === null || marked.verdict === null
-      ? null
-      : { name: marked.name, verdict: marked.verdict };
+  const { progress } = run;
+  const first = run.firstResult;
 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
-        {`run ${run.runId}  ·  ${tally.total} ${tally.total === 1 ? "simulation" : "simulations"}`}
+        {`run ${run.runId}  ·  ${progress.total} ${progress.total === 1 ? "simulation" : "simulations"}`}
       </Text>
       <Box height={1} />
       <Box flexDirection="column">
@@ -110,21 +167,20 @@ export function RunScreen({ run }: RunScreenProps) {
           </Text>
         ))}
       </Box>
-      {/* Drawn from the verdict itself rather than from the row being marked,
-          because a default here would be a word egma made up: a row with no
-          verdict on it has nothing to say about one, and "passed" is the worst
-          possible guess. */}
       {first === null ? null : (
-        <Box marginTop={1}>
-          <Text bold>{`✓ First verdict: ${first.name} ${VERDICT_SAID[first.verdict]}`}</Text>
-        </Box>
+        <>
+          <Box marginTop={1}>
+            <Text bold>{`✓ First result: ${first.name} ${saidFor(first)}`}</Text>
+          </Box>
+          <GradeResult row={first} />
+        </>
       )}
       <Box height={1} />
       <Text dimColor>
-        {`passed ${tally.passed}  ·  failed ${tally.failed}  ·  skipped ${tally.skipped}  ·  errored ${tally.errored}  ·  waiting ${tally.pending}`}
+        {`execution ${progress.executionFinished}/${progress.total} finished  ·  grading ${progress.gradingTerminal}/${progress.gradingTotal} terminal  ·  errors ${progress.executionFailed + progress.gradingErrors}`}
       </Text>
       <Box height={1} />
-      <Text dimColor>The suite keeps running on Egma whether this stays open or not.</Text>
+      <Text dimColor>The run continues on Egma whether this stays open or not.</Text>
       <Box height={1} />
       <Text dimColor>[ctrl-c] stop</Text>
     </Box>

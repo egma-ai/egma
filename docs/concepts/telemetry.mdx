@@ -1,7 +1,7 @@
 ---
 title: "Production monitoring: Retell and LiveKit Agents"
 sidebarTitle: "Telemetry"
-description: "Set up platform-specific production monitoring, then read real conversations as transcripts, measures, and grader verdicts."
+description: "Set up platform-specific production monitoring, then read real conversations as transcripts, metrics, and grades."
 ---
 
 Egma receives real production conversations through a platform-specific
@@ -13,7 +13,9 @@ Both paths produce the same Egma conversation record. Egma shows a structured
 transcript, tool evidence, supported measures, and production grader work when
 the received evidence supports them.
 
-The same grading engine that evaluates simulations can also evaluate production traces. You control the scope on each grader.
+The same grading engine can grade simulations and production traces when a
+project grader's scope selects them. The predefined **Expected behaviors**
+grader selects simulations only, so it does not grade production traffic.
 
 ## How it works
 
@@ -30,8 +32,8 @@ See [Monitoring API](/api/monitoring) for the project source, health, and
 exact Retell retry contracts.
 
 Egma stores the resulting spans and shows each production conversation under
-**Monitoring** at `/projects/{projectId}/monitoring/transcripts`. A grader with
-`scope: production` or `scope: both` can judge it automatically.
+**Monitoring** at `/projects/{projectId}/monitoring/transcripts`. A project
+grader whose scope selects production can grade it automatically.
 
 The ingest endpoint also accepts standard OTLP/HTTP in protobuf or JSON form.
 This is an advanced path for another instrumented agent process. Environment
@@ -125,7 +127,10 @@ curl "https://your-egma:3100/v1/traces/abc123...?from=2024-01-15T00:00:00Z&to=20
   -H "Authorization: Bearer egma_your_project_key"
 ```
 
-The response includes `turns` (transcript-ordered turn spans), `spans` (top-level non-turn spans), `measures` (computed latency and other metrics), and `verdicts` if any graders have judged the conversation.
+The response includes `turns` (transcript-ordered turn spans), `spans`
+(top-level non-turn spans), `measures` (computed latency and other metrics),
+`gradingState`, current `grades`, `gradeHistory`, and a display-only
+`combinedScore` when all selected graders produced scores.
 
 ## Reading transcripts in the dashboard
 

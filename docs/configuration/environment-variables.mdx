@@ -312,8 +312,8 @@ Email is entirely optional. Without it, invitation links are returned directly t
 ## Model provider credentials
 
 Persona versions choose the LLM, speech-to-text, text-to-speech, and voice.
-Grader versions choose their judge model. The variables below supply only the
-credentials needed to call those providers.
+LLM grader versions choose the model they use. The variables below supply only
+the credentials needed to call those providers.
 
 `egma self-host setup` does not ask for provider credentials. Put one current
 key per provider in `.env`, then recreate the API and grader containers so they

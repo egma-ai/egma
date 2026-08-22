@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import pg from "pg";
 
-import { seedGraderLibrary } from "../../src/access/grader-library.ts";
+import { reconcileGraderCatalog } from "../../src/access/grader-library.ts";
 import { seedPersonaLibrary } from "../../src/persona-library/seed.ts";
 import { connect, disconnect } from "../../src/client.ts";
 import { runMigrations } from "../../src/migrate.ts";
@@ -201,7 +201,7 @@ export async function createConnectedDatabase(
 ): Promise<MigratedDatabase> {
   const database = await createMigratedDatabase(label);
   connect({ databaseUrl: database.url, encryptionKey: TEST_ENCRYPTION_KEY });
-  if (options.seedGraders !== false) await seedGraderLibrary();
+  if (options.seedGraders !== false) await reconcileGraderCatalog();
   if (options.seedPersonas !== false) await seedPersonaLibrary();
 
   return {

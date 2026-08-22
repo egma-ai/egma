@@ -12,13 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import TranscriptPage from "../app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
 import type { Me } from "../lib/me.ts";
-import { GRADING } from "../lib/grading-copy.ts";
 import { DETAIL, FACTS, LIST, MEASURES, RECORDING } from "../lib/transcript-copy.ts";
 import { SPEAKERS } from "../ui/evidence.tsx";
 import type {
   Detail,
   Facts as TraceFacts,
-  Judgment,
+  Grade,
   Measured,
   Step,
 } from "../lib/transcripts.ts";
@@ -28,8 +27,8 @@ import { observeRequest, type FetchInput } from "./platform-request.ts";
  * **One transcript**, rendered rather than read as source.
  *
  * This page had no rendered proof at all. Everything asserted about it lived in
- * `pages.test.ts` and `transcripts.test.ts` as source-text matches — the page
- * *contains* `outcome={detail.outcome}` — which is a real claim about wiring and
+ * `pages.test.ts` and `transcripts.test.ts` as source-text matches, which is a
+ * real claim about wiring and
  * says nothing whatever about what a person ends up looking at. A page can hold
  * every one of those strings and draw an empty screen.
  *
@@ -167,16 +166,24 @@ const MEASURE: Measured = {
   partial: false,
 };
 
-const JUDGMENT: Judgment = {
-  graderId: "grd_1",
-  assertion: "behavior_1",
-  assertionText: "The agent offers a new time",
-  required: true,
-  verdict: "passed",
+const GRADE: Grade = {
+  projectGraderId: "grd_1",
+  graderDefinitionId: "grl_expected",
+  graderDefinitionVersion: 1,
+  graderName: "expected_behaviors",
   score: 1,
-  rationale: "The agent offered Tuesday and the caller agreed.",
-  citedTurns: ["turn:2"],
-  judgedAt: "2026-08-02T18:06:00.000000Z",
+  details: {
+    rationale: "The agent offered Tuesday and the caller agreed.",
+    assertions: [{
+      key: "behavior_1",
+      score: 1,
+      rationale: "The agent offered Tuesday and the caller agreed.",
+      citedSpanIds: ["span_turn_agent"],
+    }],
+  },
+  passThreshold: 1,
+  result: "passed",
+  gradedAt: "2026-08-02T18:06:00.000000Z",
 };
 
 /** The whole answer, with a case naming only the part it is about. */
@@ -188,13 +195,10 @@ function detail(over: Partial<Detail> = {}): Detail {
     spansTruncated: false,
     measures: [MEASURE],
     simulationId: null,
-    outcome: {
-      verdict: "passed",
-      score: 1,
-      counts: { passed: 2, failed: 0, skipped: 0, errored: 0, total: 2 },
-    },
-    verdicts: [JUDGMENT],
-    diagnostics: null,
+    gradingState: "complete",
+    grades: [GRADE],
+    gradeHistory: [GRADE],
+    combinedScore: 1,
     ...over,
   };
 }
@@ -575,85 +579,71 @@ describe("what the exchange measured", () => {
   });
 });
 
-/**
- * The verdict, and the lane beside it that reports and never decides.
- *
- * The arrangement is the point: folding a diagnostic into the outcome would
- * move a verdict it is not allowed to move, and leaving it out would strand the
- * failed cards further down the page.
- */
 describe("what egma made of the exchange", () => {
-  it("shows the verdict, the score and what was counted", async () => {
+  it("shows grading progress, the combined score, and individual grades", async () => {
     stub({ status: 200, body: detail() });
     await open();
     await settled();
 
-    const outcome = screen.getByLabelText("Grading outcome");
-    expect(within(outcome).getByText("Verdict")).toBeTruthy();
-    expect(within(outcome).getByText("passed")).toBeTruthy();
-    expect(within(outcome).getByText("2/2 passed")).toBeTruthy();
+    const grades = screen.getByLabelText("Grades");
+    expect(within(grades).getByText("Grading state")).toBeTruthy();
+    expect(within(grades).getByText("Combined score")).toBeTruthy();
+    expect(within(grades).getByText("Expected behaviors")).toBeTruthy();
+    expect(within(grades).getAllByText("1").length).toBeGreaterThan(0);
+    expect(grades.textContent).toContain("not a pass or fail result");
   });
 
-  it("shows the diagnostic lane beside the verdict when one judged", async () => {
+  it("shows an errored grader without turning it into a zero score", async () => {
+    const errored: Grade = {
+      ...GRADE,
+      score: null,
+      result: "errored",
+      details: { error: "The model did not return a valid score." },
+    };
     stub({
       status: 200,
       body: detail({
-        diagnostics: {
-          verdict: "failed",
-          score: 0.5,
-          counts: { passed: 1, failed: 1, skipped: 0, errored: 0, total: 2 },
-        },
+        gradingState: "error",
+        grades: [errored],
+        gradeHistory: [errored],
+        combinedScore: null,
       }),
     });
     await open();
     await settled();
 
-    const outcome = screen.getByLabelText("Grading outcome");
-    const lane = within(outcome).getByText(GRADING.diagnosticLane);
-    expect(lane).toBeTruthy();
-    expect(outcome.textContent).toContain(GRADING.diagnosticScore);
-    expect(outcome.textContent).toContain("1 failed");
+    const grades = screen.getByLabelText("Grades");
+    expect(within(grades).getByText("errored")).toBeTruthy();
+    expect(grades.textContent).toContain("The model did not return a valid score.");
   });
 
-  it("draws no outcome at all before anything has judged", async () => {
-    stub({ status: 200, body: detail({ outcome: null, verdicts: [] }) });
-    await open();
-    await settled();
-
-    expect(screen.queryByLabelText("Grading outcome")).toBeNull();
-  });
-
-  /**
-   * A judgment is drawn against the turn it read, which is what makes the
-   * rationale worth anything: the sentence and the words it is about are on
-   * one screen.
-   */
-  it("puts a judgment against the turn it cites", async () => {
-    stub({ status: 200, body: detail() });
-    await open();
-    await settled();
-
-    expect(screen.getByText(JUDGMENT.rationale)).toBeTruthy();
-    expect(screen.getByText("The agent offers a new time")).toBeTruthy();
-  });
-
-  it("marks a judgment that only reports", async () => {
+  it("shows a waiting state before grades arrive", async () => {
     stub({
       status: 200,
-      body: detail({ verdicts: [{ ...JUDGMENT, required: false }] }),
+      body: detail({
+        gradingState: "pending",
+        grades: [],
+        gradeHistory: [],
+        combinedScore: null,
+      }),
     });
     await open();
     await settled();
 
-    expect(screen.getByText(GRADING.diagnostic)).toBeTruthy();
+    const grades = screen.getByLabelText("Grades");
+    expect(within(grades).getByText("Waiting")).toBeTruthy();
+    expect(grades.textContent).toContain("will appear here");
   });
 
-  it("marks nothing on an ordinary blocking grader", async () => {
+  it("shows nested assertion details inside the grade", async () => {
     stub({ status: 200, body: detail() });
     await open();
     await settled();
 
-    expect(screen.queryByText(GRADING.diagnostic)).toBeNull();
+    expect(screen.getByText("Assertion details")).toBeTruthy();
+    expect(screen.getByText("Behavior 1")).toBeTruthy();
+    expect(screen.getAllByText("The agent offered Tuesday and the caller agreed.").length)
+      .toBeGreaterThan(0);
   });
 });
 
@@ -720,7 +710,7 @@ describe("the three views of what happened", () => {
   });
 
   it("says no turns were recorded, and still shows what did arrive", async () => {
-    stub({ status: 200, body: detail({ turns: [], verdicts: [] }) });
+    stub({ status: 200, body: detail({ turns: [], grades: [], gradeHistory: [] }) });
     await open();
     await settled();
 
@@ -780,7 +770,7 @@ describe("the three views of what happened", () => {
   it("says no timed work was recorded when there is none", async () => {
     stub({
       status: 200,
-      body: detail({ turns: [], spans: [], verdicts: [], measures: [] }),
+      body: detail({ turns: [], spans: [], grades: [], gradeHistory: [], measures: [] }),
     });
     await open();
     await settled();
@@ -865,7 +855,7 @@ describe("the inspector", () => {
   it("says to select something when there is nothing to select", async () => {
     stub({
       status: 200,
-      body: detail({ turns: [], spans: [], verdicts: [], measures: [] }),
+      body: detail({ turns: [], spans: [], grades: [], gradeHistory: [], measures: [] }),
     });
     await open();
     await settled();

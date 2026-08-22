@@ -74,7 +74,7 @@ export type ToolCall = {
  * **Taken from the conversation rather than re-read out of it.** The shared
  * measure module computed these off the spans, and the words a judge reads are
  * that answer rendered — so the number in a prompt, the number on the metrics
- * display and the number a latency verdict rests on are one arithmetic, not
+ * display and the number a future metric-based grader rests on are one arithmetic, not
  * three readings that agree today.
  */
 export type Measure = {
@@ -86,7 +86,7 @@ export type Measure = {
 /**
  * How a judgment points at a turn.
  *
- * The verdict row's column is `cited_span_ids`, and what a judgment cites is a
+ * A grade assertion's `citedSpanIds` value, and what a judgment cites is a
  * turn's **position** rather than the id of the span it came on. That is
  * deliberate on both sources: a judge is shown a numbered transcript and
  * answers with the numbers it read, so a position is the one reference that is

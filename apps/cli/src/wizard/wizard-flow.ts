@@ -9,7 +9,7 @@
  * takes shown as it happens.
  *
  * The last step is the only one that does not end when it is finished. It ends
- * when the developer has seen a verdict, which is the whole point of the ten
+ * when the developer has seen one trace reach terminal grading, which is the point of the ten
  * minutes before it; the suite carries on running on the platform, and closing
  * a terminal has never stopped one.
  */

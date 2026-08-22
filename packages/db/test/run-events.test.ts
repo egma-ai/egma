@@ -5,10 +5,12 @@ import {
   cancelRun,
   claimSimulations,
   completeSimulation,
+  connectClickHouse,
   createAgent,
   createPersona,
   createTest,
   createTestSuite,
+  disconnectClickHouse,
   failSimulation,
   getRun,
   listRunEvents,
@@ -22,6 +24,10 @@ import {
   type SimulationClaim,
 } from "@egma/db";
 
+import {
+  createMigratedTraceStore,
+  type MigratedTraceStore,
+} from "./support/clickhouse.ts";
 import {
   createConnectedDatabase,
   type MigratedDatabase,
@@ -47,6 +53,7 @@ import { seedOrganization, seedUser } from "./support/tenancy.ts";
  */
 
 let database: MigratedDatabase;
+let traceStore: MigratedTraceStore;
 
 const acme = { organization: newId("org"), project: newId("prj") };
 const globex = { organization: newId("org"), project: newId("prj") };
@@ -147,6 +154,8 @@ async function statusOf(simulationId: string): Promise<string> {
 }
 
 beforeAll(async () => {
+  traceStore = await createMigratedTraceStore("run_events");
+  connectClickHouse({ clickhouseUrl: traceStore.url, maxOpenConnections: 2 });
   database = await createConnectedDatabase("run_events");
 
   await seedOrganization(database, acme.organization, [
@@ -157,10 +166,9 @@ beforeAll(async () => {
   ]);
   await seedUser(database, ada, "ada@acme.example");
   await seedUser(database, grace, "grace@globex.example");
-  // No running graders: what is recorded here is a run's lifecycle and the
-  // numbering of its feed, neither of which a grader takes any part in. A
-  // verdict never appears in this file — the one place it could, the ending
-  // event, is asserted to be empty.
+  // This file records only the run lifecycle and its event numbering. The
+  // empty trace store lets completion check for already-landed evidence without
+  // adding grading work to these lifecycle cases.
 
   const created = await createAgent(actingAsAcme(), {
     name: "Front desk",
@@ -216,6 +224,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await database.drop();
+  await disconnectClickHouse();
+  await traceStore.drop();
 });
 
 describe("a run that has only just started", () => {
@@ -261,7 +271,7 @@ describe("every lifecycle change", () => {
     expect(feed.done).toBe(true);
   });
 
-  it("carries how a conversation ended, and no verdict until there is one", async () => {
+  it("carries how a conversation ended", async () => {
     const started = await aRun();
     const [only] = await claimOwn(started.id);
     if (only === undefined) throw new Error("the claim missed the run");
@@ -275,12 +285,9 @@ describe("every lifecycle change", () => {
       (event) => event.status === "completed" && event.kind === "simulation",
     );
     expect(landed?.reason).toBe("persona_concluded");
-    // The place a verdict will ride, empty until the graders land — and the
-    // day they do, nothing a client reads changes shape.
-    expect(landed?.verdict).toBeNull();
   });
 
-  it("records the sweep's own verdict-free ending too", async () => {
+  it("records the sweep's own ending too", async () => {
     const started = await aRun();
     const [only] = await claimOwn(started.id);
     if (only === undefined) throw new Error("the claim missed the run");

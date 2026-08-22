@@ -8,10 +8,10 @@ import path from "node:path";
 
 import {
   createPersona,
-  listGraders,
-  readVerdicts,
+  listProjectGraders,
+  readTraceGrades,
   type AuthContext,
-  type RecordedVerdict,
+  type CurrentGrade,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -21,10 +21,6 @@ import { startService, type Service } from "../../grader/src/service.ts";
 import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
 import { REPORTS_PATH } from "../src/routes/reports.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
-import {
-  startObjectStorage,
-  type ObjectStorage,
-} from "./support/object-storage.ts";
 import { NEUTRAL_TRAITS } from "./support/traces.ts";
 
 /**
@@ -52,10 +48,10 @@ import { NEUTRAL_TRAITS } from "./support/traces.ts";
  * simulation row turns terminal the conversation is already queryable in
  * ClickHouse, root span included.
  *
- * **And it runs to a verdict.** The real grader service claims the work the
+ * **And it runs to a grade.** The real grader service claims the work the
  * terminal landing minted, reads the conversation back out of ClickHouse the
- * way it reads a production trace, and writes verdicts that cite turns by
- * their position in that transcript. Which closes the walk on the only claim
+ * way it reads a production trace, and writes one normalized score with nested
+ * assertion details that cite turns. This closes the walk on the only claim
  * that matters end to end: a team's check was answered from a conversation
  * that exists as spans and as nothing else — the row has no column left to
  * hold one, and this asserts that of the schema itself.
@@ -64,8 +60,7 @@ import { NEUTRAL_TRAITS } from "./support/traces.ts";
  * deployment's. A criterion written in a team's own words is answered by a
  * model, and a walk that called one would need an account and a network and
  * would still not answer the same way twice. Everything around it is real,
- * including the deterministic grader beside it, whose pass depends on no
- * model at all.
+ * including the persisted grade and its frozen project policy.
  *
  * The failed walk rides the same session: a second connection whose key the
  * counterpart refuses, landing `failed` with the honest reason. The canceled
@@ -328,22 +323,6 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  */
 const THE_PHRASE = "Wednesday afternoon";
 
-/**
- * The walk needs somewhere for evidence to become durable, because the whole of
- * what it watches runs through the real door: the simulator's span batches are
- * answered on object-store durability, and its terminal report is sent behind
- * them in order. An instance with no ingestion bucket answers those batches the
- * way an unconfigured deployment does — retryably — and the simulation never
- * reaches the report that ends it.
- */
-const storage: ObjectStorage = await startObjectStorage("simulator-walk");
-
-if (!storage.available) {
-  process.stderr.write(
-    `\nskipping the shipped-simulator walk — ${storage.why}\n\n`,
-  );
-}
-
 let instance: Instance;
 let counterpart: RetellCounterpart;
 let simulator: ChildProcess | undefined;
@@ -477,32 +456,43 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
 }
 
 /**
- * The one grader this project judges with: the copy of `expectedBehaviors`
- * every project is created with, found rather than authored.
+ * The Expected behaviors project grader every project is created with.
  */
 async function theProjectsGrader(
   auth: AuthContext,
-): Promise<{ readonly id: string; readonly versionId: string }> {
-  const page = await listGraders(auth);
-  const [only] = page.items;
+): Promise<{
+  readonly id: string;
+  readonly definitionId: string;
+  readonly definitionVersion: number;
+}> {
+  const [only] = await listProjectGraders(auth);
   if (only === undefined) throw new Error("the project has no graders");
-  return { id: only.id, versionId: only.versionId };
+  return {
+    id: only.id,
+    definitionId: only.graderDefinitionId,
+    definitionVersion: only.currentDefinitionVersion,
+  };
 }
 
-/** The verdicts on one conversation, once the grader has written them. */
-async function verdictsOn(
+/** The current grades on one trace, once the grader has written them. */
+async function gradesOn(
   auth: AuthContext,
   simulationId: string,
+  runId: string,
   atLeast: number,
   within: number,
-): Promise<readonly RecordedVerdict[]> {
+): Promise<readonly CurrentGrade[]> {
   const deadline = Date.now() + within;
   for (;;) {
-    const { verdicts } = await readVerdicts(auth, simulationId);
-    if (verdicts.length >= atLeast) return verdicts;
+    const { current } = await readTraceGrades(auth, {
+      source: "simulation",
+      traceId: traceIdOf(simulationId),
+      runId,
+    });
+    if (current.length >= atLeast) return current;
     if (Date.now() > deadline) {
       throw new Error(
-        `${simulationId} has ${verdicts.length} verdict(s) after ${within}ms, ` +
+        `${simulationId} has ${current.length} grade(s) after ${within}ms, ` +
           `wanted ${atLeast}`,
       );
     }
@@ -605,7 +595,6 @@ beforeAll(async () => {
     web: false,
     traces: true,
     retellFetch: RETELL_CHAT_PREFLIGHT,
-    ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
     beforeApiListen(api) {
       api.addHook("preHandler", async (request) => {
         if (
@@ -643,10 +632,9 @@ afterAll(async () => {
   await instance?.close();
   await counterpart?.stop();
   await rm(scratch, { recursive: true, force: true });
-  if (storage.available) storage.stop();
 });
 
-describe.skipIf(!storage.available)("the shipped simulator against the real API", () => {
+describe("the shipped simulator against the real API", () => {
   it(
     "walks queued → claimed → running → completed, and a refused key to an honest failed",
     // Every controlled wait below has its own smaller deadline and diagnostic.
@@ -801,7 +789,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
 
       // The real grader, in this process and against these same two stores,
       // claiming the work each terminal landing mints. Started beside the
-      // simulator rather than after it, so the walk to a verdict is one
+      // simulator rather than after it, so the walk to a grade is one
       // continuous thing and not a second act arranged afterwards.
       const judge = scriptedJudge({
         answers: {
@@ -822,11 +810,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           capacity: 4,
           heartbeatSeconds: 1,
           leaseSeconds: 3_600,
-          // Short, because a claim declined for a conversation whose evidence
-          // is still being drained goes back to the queue and is taken up
-          // again by a sweep. A deployment's own default is thirty seconds.
-          sweepSeconds: 1,
-          traceIdleSeconds: 3_600,
+          sweepSeconds: 3_600,
           logLevel: "ERROR",
         },
         log: makeLog("ERROR", "walking-grader-1"),
@@ -859,12 +843,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       }
 
       // The terminal lifecycle document has reached the real report door, but
-      // the route has not applied it. The simulator sends every span before
-      // the report, and a span batch is answered when it is durable in the
-      // object store — readable moments later, once the standing drainer has
-      // landed it. The held report keeps PostgreSQL at running through that
-      // wait, so the complete conversation must become readable while the row
-      // still says running.
+      // the route has not applied it. The simulator drains every span first,
+      // so the complete trace must already be readable while PostgreSQL still
+      // says this Simulation is running.
       await waitForSignal(
         terminalReportArrived.opened,
         60_000,
@@ -873,22 +854,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       let spans: StoredSpan[] = [];
       try {
         expect((await rowOf(conducted.simulationId)).status).toBe("running");
-        // The root span closes the trace and rides the last segment, so its
-        // arrival is what says the whole conversation is readable. Bounded,
-        // and answered with whatever the last look saw, so a conversation
-        // that never lands fails on what is missing rather than on a timer.
-        const readableBy = Date.now() + 30_000;
         spans = await storedSpans(traceId);
-        while (
-          !spans.some((span) => span.name === "simulation") &&
-          Date.now() <= readableBy
-        ) {
-          await new Promise((resume) => setTimeout(resume, 25));
-          spans = await storedSpans(traceId);
-        }
-        // Still running after the wait: the held report is the only terminal
-        // producer for this Simulation, and it has not landed.
-        expect((await rowOf(conducted.simulationId)).status).toBe("running");
         const beforeTerminal = spans.map((span) => span.name);
         expect(
           beforeTerminal.filter((name) => name.endsWith("_turn")),
@@ -927,7 +893,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const startedAt = new Date(String(row.started_at));
       const endedAt = new Date(String(row.ended_at));
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
-      expect(await gradingJobsFor(conducted.simulationId)).toBe(1);
+      // Successful work is temporary: the worker deletes the Postgres queue
+      // row only after the durable ClickHouse grade has landed.
+      expect(await gradingJobsFor(conducted.simulationId)).toBe(0);
 
       // The complete conversation read while the terminal report was held,
       // before PostgreSQL left running — one span per timed thing, nothing
@@ -992,12 +960,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
 
       // The conversation that could not happen: the platform refused the
       // key, and the record says failed with the simulator's honest word —
-      // never a judgement of an agent nothing ever reached.
+      // never a grade of an agent nothing ever reached.
       const refusedRow = await rowOf(refused.simulationId);
       expect(refusedRow.status).toBe("failed");
       expect(refusedRow.ending_reason).toBe("simulator_error");
       expect(refusedRow.claimed_by).toBe("walking-simulator-1");
-      expect(await gradingJobsFor(refused.simulationId)).toBe(1);
+      expect(await gradingJobsFor(refused.simulationId)).toBe(0);
 
       // A simulation that never got a conversation still says it happened:
       // one root span, no turns, nothing invented to fill the silence.
@@ -1008,36 +976,41 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       expect(refusedRun.completedCount).toBe(0);
       expect(refusedRun.failedCount).toBe(1);
 
-      // And the verdict, which is what the whole walk was for. One grader
-      // judged this conversation — the copy of `expectedBehaviors` the project
-      // was created with — and it answered out of a transcript that exists only
-      // as the spans above.
-      const verdicts = await verdictsOn(auth, conducted.simulationId, 1, 30_000);
-      const [behavior] = verdicts;
+      // And the grade, which is what the whole walk was for. The Expected
+      // behaviors grader scored this trace from the spans above.
+      const grades = await gradesOn(
+        auth,
+        conducted.simulationId,
+        conducted.runId,
+        1,
+        30_000,
+      );
+      const [grade] = grades;
 
-      // **It names a real grader**, which is the whole of what the seeded copy
-      // bought: a verdict row used to carry the word `expectedBehaviors` where
-      // a grader id belongs, because the built-in was never a row anywhere.
+      // The row names both the project policy and the shared definition version.
       const seeded = await theProjectsGrader(auth);
-      expect(behavior).toMatchObject({
-        graderId: seeded.id,
-        graderVersionId: seeded.versionId,
-        verdict: "passed",
-        traceId: conducted.simulationId,
+      expect(grade).toMatchObject({
+        projectGraderId: seeded.id,
+        graderDefinitionId: seeded.definitionId,
+        graderDefinitionVersion: seeded.definitionVersion,
+        score: 1,
+        result: "passed",
+        traceId: traceIdOf(conducted.simulationId),
         runId: conducted.runId,
-        agentId,
       });
       // Cited at its position in the span-assembled transcript: the third
       // thing said, which is the agent turn carrying the phrase — the same
       // turn the store holds and the same one this test read back above.
-      expect(behavior?.citedSpanIds).toEqual(["turn:3"]);
+      expect(grade?.details.assertions?.[0]?.citedSpanIds).toEqual(["turn:3"]);
       expect(
         spans.filter((span) => span.name.endsWith("_turn"))[2]?.text,
       ).toContain(THE_PHRASE);
 
-      // The assertion is the behavior's position in the test, which is how a
-      // page lines a run's checks up whatever each one says.
-      expect(behavior).toMatchObject({ verdict: "passed", assertion: "behavior_1" });
+      // Assertion details stay nested under the one normalized grader score.
+      expect(grade?.details.assertions?.[0]).toMatchObject({
+        key: "behavior_1",
+        score: 1,
+      });
       // The judge was shown the conversation egma assembled, not a report:
       // four turns, the ending the row records, and no tool call, because the
       // counterpart made none.

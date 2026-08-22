@@ -39,27 +39,16 @@ const PRUNING_KEY = "organization_id, project_id, trace_id";
 const PARTITION_KEY = "toYYYYMM(started_at)";
 
 /**
- * The verdicts table's identity, which is what a `ReplacingMergeTree` collapses
- * on: the customer, the conversation, the grader, the version of it, the
- * assertion, and where the conversation came from. Every part after the third is
- * there so that a re-grade adds a row rather than losing one.
- *
- * **It ends at `source`.** There is no `judged_by`: a human judgment returns as
- * a grader of its own — the reserved `human` type — and a grader of its own is
- * already in the key.
- */
-const VERDICT_IDENTITY =
-  "organization_id, project_id, trace_id, grader_id, grader_version_id, " +
-  "assertion, source";
-
-/**
  * The migrations allowed to drop a table, each because a ClickHouse sorting key
  * is fixed at creation and no `ALTER` reaches one. The verdict store's rebuild
  * was the first; the span identity's rebuild is the second, and the table it
  * drops is the carryover it made itself, dropped last so that every earlier
  * failure leaves the refill's source standing.
  */
-const THE_ONE_FILE_THAT_DROPS_A_TABLE = "0003_verdicts_speak_the_redesign.sql";
+const THE_FILES_THAT_DROP_A_TABLE = [
+  "0003_verdicts_speak_the_redesign.sql",
+  "0010_grades_and_production_grading_plans.sql",
+];
 
 /**
  * The pre-launch rebuild of the span identity, and the only file that may carry
@@ -95,8 +84,13 @@ async function migrationsBefore(name: string): Promise<string> {
 }
 
 /** The explicit synchronous pre-launch reset; later migrations stay shape-only. */
-const THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA =
-  "0006_production_platform_identity.sql";
+const THE_FILES_THAT_DELETE_TRACE_DATA = [
+  "0006_production_platform_identity.sql",
+  "0010_grades_and_production_grading_plans.sql",
+];
+
+const GRADER_RESULT_CUTOVER = "0010_grades_and_production_grading_plans.sql";
+const PRODUCTION_TRACE_RESET = "0006_production_platform_identity.sql";
 
 /**
  * These files have run in production. Even a comment edit changes the hash in
@@ -406,8 +400,7 @@ describe("the trace store's migration files", () => {
           expect(statement, migration.name).not.toMatch(/\bSELECT \*/i);
         }
         if (
-          migration.name !==
-          THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA
+          !THE_FILES_THAT_DELETE_TRACE_DATA.includes(migration.name)
         ) {
           expect(statement).not.toMatch(
             /^ALTER TABLE .*\b(?:UPDATE|DELETE)\b/i,
@@ -416,7 +409,7 @@ describe("the trace store's migration files", () => {
           expect(statement).toMatch(/\bSETTINGS mutations_sync = 2\s*;?$/i);
         }
         if (
-          migration.name !== THE_ONE_FILE_THAT_DROPS_A_TABLE &&
+          !THE_FILES_THAT_DROP_A_TABLE.includes(migration.name) &&
           !mayRebuild(migration.name)
         ) {
           expect(statement, migration.name).not.toMatch(/^DROP TABLE\b/i);
@@ -559,16 +552,19 @@ describe("four instances booting at the same moment", () => {
     const every = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
 
     const result = await runClickHouseMigrations(store.url);
-    expect(result.applied).toEqual([
-      THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
-    ]);
+    expect(result.applied).toEqual(
+      every
+        .map((migration) => migration.name)
+        .filter((name) => !additiveNames.includes(name)),
+    );
 
     expect(await tablesIn(store)).toEqual([
       "egma_meta_migration",
+      "grades",
+      "production_grading_plans",
       "spans",
       "turns",
       "turns_mv",
-      "verdicts",
     ]);
 
     const ledger = await rowsIn<{ name: string }>(
@@ -892,130 +888,87 @@ describe("the schema a boot leaves behind", () => {
     expect(await tableNamed("spans_carryover")).toBeUndefined();
   });
 
-  it("collapses a verdict only onto the identical judgment", async () => {
-    const verdicts = await tableNamed("verdicts");
-
-    expect(verdicts?.engine).toBe("ReplacingMergeTree");
-    expect(verdicts?.sorting_key).toBe(VERDICT_IDENTITY);
-    // The retired columns are gone from the row as well as from the key: one
-    // word at every layer, and no ladder left for a failure to hide behind.
-    const typeOf = await typesOf("verdicts");
-    for (const name of ["dimension", "priority", "judged_by"]) {
-      expect(typeOf(name)).toBeUndefined();
-    }
-
-    // The later judgment wins, which is what makes a re-run after a transient
-    // error a correction rather than a second opinion.
-    const [created] = await store.rows<{ create_table_query: string }>(
-      `select create_table_query from system.tables
-        where database = '${store.name}' and name = 'verdicts'`,
+  it("keeps every grade attempt as an append-only row", async () => {
+    const grades = await tableNamed("grades");
+    expect(grades?.engine).toBe("MergeTree");
+    expect(grades?.sorting_key).toBe(
+      "organization_id, project_id, trace_id, project_grader_id, graded_at",
     );
-    expect(created?.create_table_query).toMatch(
-      /ReplacingMergeTree\(event_ts\)/,
-    );
+    expect(grades?.primary_key).toBe("organization_id, project_id, trace_id");
+    expect(grades?.partition_key).toBe("toYYYYMM(trace_started_at)");
   });
 
-  /**
-   * A `ReplacingMergeTree` collapses rows inside a partition and never across
-   * one, so a partition key derived from a clock would leave a re-run that
-   * happened to land in the next month as two rows forever. The table is small
-   * enough not to need one, so it does not have one — and this says so, because
-   * adding a partition key later would look like an optimisation and would
-   * quietly break the collapse.
-   */
-  it("files verdicts in one partition, so an identity can never straddle two", async () => {
-    const verdicts = await tableNamed("verdicts");
-    expect(verdicts?.partition_key).toBe("");
-    // The index prunes on the customer and the conversation; the rest of the
-    // sorting key is there to collapse rows, which happens after the granule
-    // has been found.
-    expect(verdicts?.primary_key).toBe(
-      "organization_id, project_id, trace_id",
+  it("stores the frozen production selection apart from temporary jobs", async () => {
+    const plans = await tableNamed("production_grading_plans");
+    expect(plans?.engine).toBe("MergeTree");
+    expect(plans?.sorting_key).toBe(
+      "organization_id, project_id, trace_id, plan_hash",
     );
+    expect(plans?.primary_key).toBe("organization_id, project_id, trace_id");
   });
 
-  it("types a verdict's columns as the vocabulary they hold", async () => {
-    const typeOf = await typesOf("verdicts");
-
-    // Closed vocabularies, so the store refuses a fifth word rather than filing
-    // it. `skipped` and `errored` are in the enum because they must never be
-    // collapsed into `failed`.
-    expect(typeOf("verdict")).toBe(
-      "Enum8('passed' = 1, 'failed' = 2, 'skipped' = 3, 'errored' = 4)",
+  it("types grade identity, score, details, threshold, and time explicitly", async () => {
+    const typeOf = await typesOf("grades");
+    expect(typeOf("source")).toBe(
+      "Enum8('simulation' = 1, 'production' = 2)",
     );
-
-    // Tenancy takes the shape it has on `spans`, and so does `source`: the two
-    // tables are read together and a word that meant two things would make that
-    // impossible.
-    expect(typeOf("organization_id")).toBe("LowCardinality(String)");
-    expect(typeOf("project_id")).toBe("LowCardinality(String)");
-    expect(typeOf("source")).toBe("LowCardinality(String)");
-
-    expect(typeOf("trace_id")).toBe("String");
-    expect(typeOf("grader_id")).toBe("String");
-    expect(typeOf("grader_version_id")).toBe("String");
-    expect(typeOf("assertion")).toBe("String");
-    expect(typeOf("score")).toBe("Float64");
-    expect(typeOf("rationale")).toBe("String");
-    expect(typeOf("cited_span_ids")).toBe("Array(String)");
-    expect(typeOf("run_id")).toBe("String");
-    expect(typeOf("agent_id")).toBe("String");
-    expect(typeOf("agent_version_id")).toBe("String");
-    expect(typeOf("event_ts")).toBe("DateTime64(6, 'UTC')");
+    expect(typeOf("project_grader_id")).toBe("String");
+    expect(typeOf("grader_definition_id")).toBe("String");
+    expect(typeOf("grader_definition_version")).toBe("UInt32");
+    expect(typeOf("score")).toBe("Nullable(Float64)");
+    expect(typeOf("grader_pass_threshold")).toBe("Float64");
+    expect(typeOf("graded_at")).toBe("DateTime64(6, 'UTC')");
   });
 
-  /**
-   * The fold divides by this number, so a row outside 0 to 1 would not be one
-   * wrong figure — it would be a wrong figure everywhere the row is ever
-   * counted. Refused at the door instead.
-   */
-  it("refuses a score that is not a proportion", async () => {
-    const judgment = {
+  it("refuses a score that is not normalized", async () => {
+    const grade = {
       organization_id: "org_01JQZ0000000000000000000AA",
-      trace_id: "cccccccccccccccccccccccccccccccc",
-      grader_id: "grd_01JQZ0000000000000000000AA",
-      grader_version_id: "grv_01JQZ00000000000000000000AA",
-      assertion: "behavior_1",
+      project_id: "prj_01JQZ0000000000000000000AA",
       source: "simulation",
-      verdict: "passed",
-      event_ts: "2026-08-07 09:00:00.000000",
+      trace_id: "cccccccccccccccccccccccccccccccc",
+      trace_started_at: "2026-08-07 09:00:00.000000",
+      run_id: "run_01JQZ0000000000000000000AA",
+      project_grader_id: "grd_01JQZ0000000000000000000AA",
+      grader_definition_id: "grl_01JQZ0000000000000000000AA",
+      grader_definition_version: 1,
+      details: {},
+      grader_pass_threshold: 0.5,
+      graded_at: "2026-08-07 09:00:01.000000",
     };
-
-    await expect(
-      store.append("verdicts", [{ ...judgment, score: 1.5 }]),
-    ).rejects.toThrow(/Constraint `score_is_a_proportion`.*is violated/);
-    await expect(
-      store.append("verdicts", [{ ...judgment, score: -0.1 }]),
-    ).rejects.toThrow(/Constraint `score_is_a_proportion`.*is violated/);
-
-    await store.append("verdicts", [{ ...judgment, score: 1 }]);
-    expect(await store.rows("select 1 from verdicts")).toHaveLength(1);
+    await expect(store.append("grades", [{ ...grade, score: 1.5 }]))
+      .rejects.toThrow(/Constraint `grade_score_is_normalized`.*is violated/);
+    await store.append("grades", [{ ...grade, score: 1 }]);
+    expect(await store.rows("select 1 from grades")).toHaveLength(1);
   });
 
-  it("refuses a word that is not one of the four", async () => {
-    await expect(
-      store.append("verdicts", [
-        {
-          organization_id: "org_01JQZ0000000000000000000AA",
-          trace_id: "dddddddddddddddddddddddddddddddd",
-          grader_id: "grd_01JQZ0000000000000000000AA",
-          grader_version_id: "grv_01JQZ00000000000000000000AA",
-          assertion: "behavior_1",
-          source: "simulation",
-          verdict: "inconclusive",
-          score: 0.5,
-          event_ts: "2026-08-07 09:00:00.000000",
-        },
-      ]),
-    ).rejects.toThrow(/UNKNOWN_ELEMENT_OF_ENUM|Unknown element/);
+  it("refuses a production grade that claims a simulation run", async () => {
+    await expect(store.append("grades", [{
+      organization_id: "org_01JQZ0000000000000000000AA",
+      project_id: "prj_01JQZ0000000000000000000AA",
+      source: "production",
+      trace_id: "dddddddddddddddddddddddddddddddd",
+      trace_started_at: "2026-08-07 09:00:00.000000",
+      run_id: "run_01JQZ0000000000000000000AA",
+      project_grader_id: "grd_01JQZ0000000000000000000AA",
+      grader_definition_id: "grl_01JQZ0000000000000000000AA",
+      grader_definition_version: 1,
+      score: 0.5,
+      details: {},
+      grader_pass_threshold: 0.5,
+      graded_at: "2026-08-07 09:00:01.000000",
+    }])).rejects.toThrow(/Constraint `grade_source_matches_run`.*is violated/);
   });
 });
 
 describe("the pre-launch Monitoring trace reset", () => {
-  let store: MigratedTraceStore;
+  let store: EmptyTraceStore;
 
   beforeAll(async () => {
-    store = await createMigratedTraceStore("monitoring_cutover");
+    store = await createEmptyTraceStore("monitoring_cutover");
+    await runClickHouseMigrations(
+      store.url,
+      await migrationsBefore(PRODUCTION_TRACE_RESET),
+    );
   });
 
   afterAll(async () => {
@@ -1023,7 +976,7 @@ describe("the pre-launch Monitoring trace reset", () => {
   });
 
   it("waits for production rows to be removed and keeps simulation evidence", async () => {
-    await store.append("spans", [
+    await appendIn(store, "spans", [
       {
         trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
         span_id: "00f067aa0ba902b7",
@@ -1051,7 +1004,7 @@ describe("the pre-launch Monitoring trace reset", () => {
         payload: "{}",
       },
     ]);
-    await store.append("verdicts", [
+    await appendIn(store, "verdicts", [
       {
         organization_id: "org_01JQZ0000000000000000000AA",
         trace_id: "4bf92f3577b34da6a3ce929d0e0e4736",
@@ -1076,25 +1029,19 @@ describe("the pre-launch Monitoring trace reset", () => {
       },
     ]);
 
-    expect(await store.rows("select 1 from spans")).toHaveLength(2);
-    expect(await store.rows("select 1 from turns")).toHaveLength(2);
-    expect(await store.rows("select 1 from verdicts")).toHaveLength(2);
+    expect(await rowsIn(store, "select 1 from spans")).toHaveLength(2);
+    expect(await rowsIn(store, "select 1 from turns")).toHaveLength(2);
+    expect(await rowsIn(store, "select 1 from verdicts")).toHaveLength(2);
 
-    const migrations = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
-    const cutover = migrations.find(
-      (migration) =>
-        migration.name === THE_ONE_FILE_THAT_DELETES_PRODUCTION_TRACE_DATA,
+    const cutover = await runClickHouseMigrations(
+      store.url,
+      await migrationsBefore(THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY),
     );
-    expect(cutover).toBeDefined();
-    for (const statement of statementsOf(cutover?.sql ?? "")) {
-      if (/^ALTER TABLE .*\bDELETE\b/i.test(statement)) {
-        await store.command(statement);
-      }
-    }
+    expect(cutover.applied).toEqual([PRODUCTION_TRACE_RESET]);
 
     for (const table of ["spans", "turns", "verdicts"]) {
       expect(
-        await store.rows<{ source: string }>(`select source from ${table}`),
+        await rowsIn<{ source: string }>(store, `select source from ${table}`),
       ).toEqual([{ source: "simulation" }]);
     }
   });
@@ -1190,7 +1137,10 @@ describe("the identity rebuild against a populated store", () => {
       judgment(productionTrace, "production"),
     ]);
 
-    await runClickHouseMigrations(store.url);
+    await runClickHouseMigrations(
+      store.url,
+      await migrationsBefore(GRADER_RESULT_CUTOVER),
+    );
   });
 
   afterAll(async () => {
@@ -1386,11 +1336,13 @@ describe("the identity rebuild resumed after a partial run", () => {
   const productionTrace = "9cf92f3577b34da6a3ce929d0e0e4739";
 
   let beforeTheRebuild: string;
+  let throughTheRebuild: string;
 
   beforeAll(async () => {
     beforeTheRebuild = await migrationsBefore(
       THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
     );
+    throughTheRebuild = await migrationsBefore(GRADER_RESULT_CUTOVER);
   });
 
   /** A store at the schema the rebuild starts from, with mixed evidence in it. */
@@ -1432,7 +1384,10 @@ describe("the identity rebuild resumed after a partial run", () => {
         }
 
         // The boot after it. Nothing was recorded, so all of the file runs.
-        const result = await runClickHouseMigrations(store.url);
+        const result = await runClickHouseMigrations(
+          store.url,
+          throughTheRebuild,
+        );
         expect(result.applied).toEqual([
           THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
         ]);
@@ -1477,6 +1432,64 @@ describe("the identity rebuild resumed after a partial run", () => {
       }
     },
   );
+});
+
+describe("the grader result cutover against old simulation evidence", () => {
+  let store: EmptyTraceStore;
+
+  beforeAll(async () => {
+    store = await createEmptyTraceStore("grader_result_cutover");
+    await runClickHouseMigrations(
+      store.url,
+      await migrationsBefore(GRADER_RESULT_CUTOVER),
+    );
+    await appendIn(store, "spans", [{
+      trace_id: "6cf92f3577b34da6a3ce929d0e0e4738",
+      span_id: "20f067aa0ba902b9",
+      organization_id: "org_01JQZ0000000000000000000AA",
+      project_id: "prj_01JQZ0000000000000000000AA",
+      source: "simulation",
+      emitter: "egma-runtime",
+      started_at: "2026-08-01 09:14:03.500000",
+      duration_ns: 1_420_000_000,
+      name: "human turn",
+      kind: "turn:human",
+      text: "old simulation evidence",
+      payload: "{}",
+    }]);
+    await appendIn(store, "verdicts", [{
+      organization_id: "org_01JQZ0000000000000000000AA",
+      project_id: "prj_01JQZ0000000000000000000AA",
+      trace_id: "6cf92f3577b34da6a3ce929d0e0e4738",
+      grader_id: "grd_01JQZ0000000000000000000AA",
+      grader_version_id: "grv_01JQZ00000000000000000000AA",
+      assertion: "behavior_1",
+      source: "simulation",
+      verdict: "passed",
+      score: 1,
+      event_ts: "2026-08-01 09:15:00.000000",
+    }]);
+
+    await runClickHouseMigrations(store.url);
+  });
+
+  afterAll(async () => {
+    await store.drop();
+  });
+
+  it("removes simulation spans and their derived turns synchronously", async () => {
+    expect(await rowsIn(store, "select 1 from spans where source = 'simulation'"))
+      .toEqual([]);
+    expect(await rowsIn(store, "select 1 from turns where source = 'simulation'"))
+      .toEqual([]);
+  });
+
+  it("replaces the assertion-grain verdict table with the two grade stores", async () => {
+    const tables = await tablesIn(store);
+    expect(tables).not.toContain("verdicts");
+    expect(tables).toContain("grades");
+    expect(tables).toContain("production_grading_plans");
+  });
 });
 
 describe("a span arriving twice", () => {

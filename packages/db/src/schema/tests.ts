@@ -92,7 +92,7 @@ export const test = pgTable(
      * What an edit to the live half says it was written against: opaque, and
      * new after every identity write and permanent deletion. The name, the
      * description and the deleted state are live; the scenario and everything
-     * else a run is judged by is versioned, and carries a version id instead.
+     * else a run executes is versioned, and carries a version id instead.
      *
      * **Two tokens because they guard two different losses.** A rename that
      * loses a race is retyped in a second; a scenario edit that loses one may
@@ -225,15 +225,14 @@ export const testPersona = pgTable(
  * **A test names no graders, and there is no junction to name them through.**
  *
  * There was one — `test_grader`, the persona junction's shape verb for verb —
- * and it is gone. Which graders judge a simulation is answered entirely by the
- * project's running copies and their scope: every active copy whose scope
- * covers the source judges everything in it. Attachment through test content
+ * and it is gone. Which graders grade a simulation is answered entirely by the
+ * project's project graders and their scope: every matching project grader is
+ * included once in the grading plan. Attachment through test content
  * forced a scenario-specific decision through the wrong object, when "where does
  * this grader apply" is the grader's own setting.
  *
  * A version's content is therefore the scenario, the expected behaviors and the
  * mock overrides, and nothing else. Scenario-specific grading returns as
- * Langfuse-shaped **filters on the running copy** — `{field, operator, values}`
- * over test and agent — in the custom-grader era, where the same question is
- * asked once per grader rather than once per test.
+ * selectors on the project grader's JSON scope, over test suites and tests,
+ * where the same question is asked once per grader rather than once per test.
  */

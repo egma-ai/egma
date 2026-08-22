@@ -50,13 +50,11 @@ const PERMISSIONS = {
   start_and_cancel_runs:  [          "member", "admin"],
 
   /**
-   * Re-grade a run or a window: ask for a judgment already made to be made
-   * again.
+   * Re-grade a trace: run its whole frozen grader plan again.
    *
    * A `viewer` is refused, and the reviewer of the user story holds `member`.
-   * A re-grade changes what a run *means* — it spends the judge over history and
-   * can turn a red release green — so a credential that can ask for one is not a
-   * read-only credential, whatever it is called.
+   * A re-grade appends new grade history and can spend model-provider capacity,
+   * so a credential that can ask for one is not read-only.
    */
   regrade:                [          "member", "admin"],
 
