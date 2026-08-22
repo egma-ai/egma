@@ -4,7 +4,7 @@
   "modality": "voice",
   "connection": {
     "agent_platform": "livekit_agents",
-    "connection_kind": "livekit_room",
+    "connection_type": "livekit_room",
     "access_variant": "livekit_room.customer_token_endpoint",
     "config": {
       "url": "wss://lakeside-dental.livekit.cloud",

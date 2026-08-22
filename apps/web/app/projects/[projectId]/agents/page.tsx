@@ -78,8 +78,7 @@ function columnsFor(projectId: string): readonly Column<ListedAgentWithConnectio
       /*
        * Second, because it is what somebody came to read. The width is claimed
        * rather than left to the browser: this cell holds a line per connection
-       * and the description beside it would otherwise take the room those lines
-       * need. Half the table, because a line here is four facts — the
+       * need — half the table, because a line here is four facts: the
        * environment, the platform, the channel and whether the target has been
        * measured — and the platform is named in the registry's own words,
        * which are words rather than tokens.
@@ -90,12 +89,6 @@ function columnsFor(projectId: string): readonly Column<ListedAgentWithConnectio
       cell: (agent) => (
         <ConnectionsOnRow connections={agent.connections} />
       ),
-    },
-    {
-      key: "description",
-      header: "Description",
-      hideOnMobile: true,
-      cell: (agent) => agent.description ?? "—",
     },
   ];
 }

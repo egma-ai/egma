@@ -35,78 +35,6 @@ const importFailure = {
   additionalProperties: false,
 } as const;
 
-const monitoredAgent = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    platformAgentId: { type: "string" },
-    platformAgentName: { type: "string" },
-    state: { type: "string" },
-    scanKind: nullable({ type: "string" }),
-    lastSuccessAt: optionalInstant,
-    lastConversationAt: optionalInstant,
-    lastErrorKind: nullable({ type: "string" }),
-    lastErrorAt: optionalInstant,
-    consecutiveFailures: { type: "integer", minimum: 0 },
-    failures: arrayOf(importFailure),
-  },
-  required: [
-    "id",
-    "platformAgentId",
-    "platformAgentName",
-    "state",
-    "scanKind",
-    "lastSuccessAt",
-    "lastConversationAt",
-    "lastErrorKind",
-    "lastErrorAt",
-    "consecutiveFailures",
-    "failures",
-  ],
-  additionalProperties: false,
-} as const;
-
-const monitoringSource = {
-  type: "object",
-  properties: {
-    id: stringIdSchema,
-    projectId: stringIdSchema,
-    agentPlatform: { type: "string" },
-    strategy: { type: "string" },
-    credentialsHint: nullable({ type: "string" }),
-    health: {
-      type: "object",
-      properties: {
-        state: { type: "string" },
-        blockedUntil: optionalInstant,
-        consecutiveFailures: { type: "integer", minimum: 0 },
-        lastErrorAt: optionalInstant,
-        lastRecoveredAt: optionalInstant,
-        lastReceivedAt: optionalInstant,
-      },
-      required: [
-        "state",
-        "blockedUntil",
-        "consecutiveFailures",
-        "lastErrorAt",
-        "lastRecoveredAt",
-        "lastReceivedAt",
-      ],
-      additionalProperties: false,
-    },
-    agents: arrayOf(monitoredAgent),
-  },
-  required: [
-    "id",
-    "projectId",
-    "agentPlatform",
-    "strategy",
-    "credentialsHint",
-    "health",
-    "agents",
-  ],
-  additionalProperties: false,
-} as const;
 
 const projectQuery = parameters({ projectId: stringIdSchema });
 const retellAgent = {
@@ -120,30 +48,6 @@ const retellAgent = {
 } as const;
 
 export const monitoringOperations = {
-  listMonitoringSources: defineOperation({
-    operationId: "listMonitoringSources",
-    method: "GET",
-    path: "/v1/monitoring",
-    summary: "List monitoring sources",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: { query: projectQuery },
-    responses: {
-      200: {
-        description: "Configured monitoring sources.",
-        schema: {
-          type: "object",
-          properties: { monitoringSources: arrayOf(monitoringSource) },
-          required: ["monitoringSources"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
-
   discoverRetellVoiceAgents: defineOperation({
     operationId: "discoverRetellVoiceAgents",
     method: "POST",
@@ -178,69 +82,6 @@ export const monitoringOperations = {
     },
   }),
 
-  configureRetellMonitoring: defineOperation({
-    operationId: "configureRetellMonitoring",
-    method: "PUT",
-    path: "/v1/monitoring/retell",
-    summary: "Configure Retell monitoring",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: {
-      query: projectQuery,
-      body: {
-        type: "object",
-        properties: {
-          apiKey: { type: "string" },
-          agents: arrayOf(retellAgent),
-        },
-        required: ["apiKey", "agents"],
-        additionalProperties: false,
-      },
-    },
-    responses: {
-      200: {
-        description: "The configured monitoring source.",
-        schema: {
-          type: "object",
-          properties: { monitoringSource },
-          required: ["monitoringSource"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      422: refusalResponse,
-      429: rateLimitResponse,
-      503: refusalResponse,
-    },
-  }),
-
-  configureLiveKitMonitoring: defineOperation({
-    operationId: "configureLiveKitMonitoring",
-    method: "PUT",
-    path: "/v1/monitoring/livekit-agents",
-    summary: "Configure LiveKit Agents monitoring",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: {
-      query: projectQuery,
-    },
-    responses: {
-      200: {
-        description: "The configured monitoring source.",
-        schema: {
-          type: "object",
-          properties: { monitoringSource },
-          required: ["monitoringSource"],
-          additionalProperties: false,
-        },
-      },
-      401: refusalResponse,
-      403: refusalResponse,
-      422: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
 
   replayMonitoringImportFailure: defineOperation({
     operationId: "replayMonitoringImportFailure",
@@ -289,24 +130,4 @@ export const monitoringOperations = {
     },
   }),
 
-  deleteMonitoringSource: defineOperation({
-    operationId: "deleteMonitoringSource",
-    method: "DELETE",
-    path: "/v1/monitoring/{platform}",
-    summary: "Delete a monitoring source",
-    tag: "Monitoring",
-    security: "credentialed",
-    request: {
-      params: parameters({ platform: { type: "string" } }, ["platform"]),
-      query: projectQuery,
-    },
-    responses: {
-      204: { description: "The monitoring source was deleted." },
-      401: refusalResponse,
-      403: refusalResponse,
-      404: refusalResponse,
-      422: refusalResponse,
-      429: rateLimitResponse,
-    },
-  }),
 } as const;

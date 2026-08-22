@@ -101,10 +101,10 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
-  // The poller names no customer. It claims the next due selected agent and
+  // The poller names no customer. It claims the next due pulled agent and
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringPull",
   "sweepStaleProductionClaims",
 ];
 
@@ -150,15 +150,13 @@ const CONTEXT_REQUIRING = [
   "cancelRun",
   "changeRole",
   "completeSimulation",
-  "configureLiveKitMonitoring",
-  "configureRetellMonitoring",
   // The kind of one connection, by its id alone — the only connection read
   // that does not name an agent. It exists for the deployment gate in front of
   // run creation, which is handed a connection id and no agent id and has to
   // know whether a phone call is what this run would place. It answers a kind
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
-  "connectionKindOf",
+  "connectionTypeOf",
   "createAgent",
   "createApiKey",
   "createInvitation",
@@ -192,10 +190,10 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failRetellIngestionFailureReplay",
-  "failRetellMonitoringTarget",
+  "failMonitoringFailureReplay",
+  "failMonitoringPull",
   "finishGradingJob",
-  "finishRetellMonitoringScan",
+  "finishMonitoringScan",
   "getAgent",
   "getConnection",
   "getGrader",
@@ -218,11 +216,11 @@ const CONTEXT_REQUIRING = [
   "listAgents",
   "listApiKeys",
   "listConnections",
+  "listMonitoringFailures",
   "listGraderLibrary",
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
-  "listMonitoringSetups",
   "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
@@ -258,29 +256,30 @@ const CONTEXT_REQUIRING = [
   // test.
   "readAssertionShelf",
   "readAssertionWords",
+  "readAgentPullState",
   "readProject",
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
-  "recordLiveKitMonitoringReceived",
-  "recordRetellCallReceived",
-  "recordRetellIngestionFailure",
-  "recordRetellMonitoringReceived",
+  "recordPulledCallReceived",
+  "recordMonitoringFailure",
+  "recordPulledCallReceivedForPlatformAgent",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // The ledger chooses one writer for a Retell call. Poll progress belongs to
-  // the selected Monitoring agent, never to a simulation connection.
-  "checkpointRetellMonitoringPage",
-  "claimRetellIngestionFailureReplay",
+  // The ledger chooses one writer for a production call. Poll progress belongs
+  // to the pulled agent's own notebook, never to a simulation connection.
+  "checkpointMonitoringPage",
+  "claimMonitoringFailureReplay",
+  "disablePullProductionCalls",
+  "enablePullProductionCalls",
   "claimProductionTrace",
   "finishProductionTrace",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
   "regrade",
-  "recoverRetellMonitoringSetup",
-  "releaseRetellIngestionFailureReplay",
-  "releaseRetellMonitoringLease",
+  "releaseMonitoringFailureReplay",
+  "releaseMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
   "reopenGradingJob",
@@ -291,11 +290,10 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
-  "removeMonitoringSetup",
   "renameTestSuite",
-  "renewRetellMonitoringLease",
-  "retellCallIsAccountedFor",
-  "resolveRetellIngestionFailureReplay",
+  "renewMonitoringLease",
+  "productionCallIsAccountedFor",
+  "resolveMonitoringFailureReplay",
   "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
@@ -364,7 +362,7 @@ const CONTEXT_REQUIRING = [
   // and the answers to whatever that entry's form asked.
   "useLibraryEntry",
   "writePlatformSettings",
-  "yieldRetellMonitoringLease",
+  "yieldMonitoringLease",
 ];
 
 /**
@@ -528,7 +526,7 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
-  "connectionKindUsesPlatformCarrier",
+  "connectionTypeUsesPlatformCarrier",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",

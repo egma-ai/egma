@@ -1,12 +1,26 @@
 import {
-  claimDueRetellMonitoringAgent,
-  finishRetellMonitoringScan,
-  recordRetellIngestionFailure,
+  claimDueMonitoringPull,
+  createAgent,
+  enablePullProductionCalls,
+  finishMonitoringScan,
+  listMonitoringFailures,
+  recordMonitoringFailure,
+  type AuthContext,
 } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import { colleagueOf, signUp } from "./support/traces.ts";
+
+/**
+ * What is left of the Monitoring routes once the setup object is gone.
+ *
+ * The per-platform setup routes went with the tables they named: pull is
+ * declared on the agent, and the flow that turns it on is ticket 02's. Two
+ * routes survive the change, because neither one is about a setup row —
+ * discovery asks Retell what a key can see, and replay is the customer's
+ * explicit retry of one poison call.
+ */
 
 let api: TestApi;
 
@@ -18,7 +32,6 @@ const RETELL_KEY = "key_live_monitoring_route_secret_QRST";
 
 function provider(
   options: {
-    readonly historyStatus?: number;
     readonly getCall?: Record<string, unknown>;
     readonly getCallStatus?: number;
     readonly getCallHeaders?: Readonly<Record<string, string>>;
@@ -52,12 +65,9 @@ function provider(
       );
     }
     if (new URL(url).pathname === "/v3/list-calls") {
-      return new Response(
-        options.historyStatus === undefined
-          ? JSON.stringify({ items: [], has_more: false })
-          : JSON.stringify({ message: `do not log ${RETELL_KEY}` }),
-        { status: options.historyStatus ?? 200 },
-      );
+      return new Response(JSON.stringify({ items: [], has_more: false }), {
+        status: 200,
+      });
     }
     if (new URL(url).pathname.startsWith("/v2/get-call/")) {
       if (options.getCallStatus !== undefined) {
@@ -77,8 +87,48 @@ function provider(
   return { asked, fetchImpl };
 }
 
-describe("platform-first Monitoring setup", () => {
-  it("discovers voice agents, proves call-history access, and stores one sealed key", async () => {
+function at(signedUp: {
+  readonly userId: string;
+  readonly organizationId: string;
+  readonly projectId: string;
+}): AuthContext {
+  return {
+    userId: signedUp.userId,
+    organizationId: signedUp.organizationId,
+    projectId: signedUp.projectId,
+    role: "admin",
+    via: "session",
+  };
+}
+
+/** One agent, bound to Retell with its own key and its pull switch on. */
+async function pulling(signedUp: Parameters<typeof at>[0]): Promise<string> {
+  const auth = at(signedUp);
+  const created = await createAgent(auth, { name: "Front desk" });
+  await enablePullProductionCalls(auth, {
+    agentId: created.id,
+    agentPlatform: "retell",
+    platformAgentId: "agent_voice_1",
+    apiKey: RETELL_KEY,
+  });
+  return created.id;
+}
+
+/** Poll once, record one poison call against it, and let the scan finish. */
+async function poisoned(providerCallId: string): Promise<void> {
+  const target = await claimDueMonitoringPull({ now: new Date() });
+  expect(target).toBeDefined();
+  if (target === undefined) return;
+  await recordMonitoringFailure(target.auth, target, {
+    providerCallId,
+    errorKind: "provider_call_not_found",
+    now: new Date(),
+  });
+  await finishMonitoringScan(target.auth, target, { now: new Date() });
+}
+
+describe("discovering what a Retell key can see", () => {
+  it("answers voice agents only, and never echoes the key", async () => {
     const retell = provider();
     const logs: string[] = [];
     api = await createApi("monitoring_routes_retell", {
@@ -93,93 +143,13 @@ describe("platform-first Monitoring setup", () => {
       headers: { cookie: ada.cookie },
       payload: { apiKey: RETELL_KEY },
     });
+
     expect(discovered.statusCode, discovered.body).toBe(200);
     expect(discovered.json()).toEqual({
       agents: [{ id: "agent_voice_1", name: "Front desk from Retell" }],
     });
-
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "A browser cannot rename it" }],
-      },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
-    expect(configured.json()).toMatchObject({
-      monitoringSource: {
-        agentPlatform: "retell",
-        strategy: "retell_api_polling",
-        credentialsHint: "QRST",
-        agents: [
-          {
-            platformAgentId: "agent_voice_1",
-            platformAgentName: "Front desk from Retell",
-            state: "importing",
-          },
-        ],
-      },
-    });
-    expect(configured.body).not.toContain(RETELL_KEY);
-
-    const calls = retell.asked.filter(
-      (request) => new URL(request.url).pathname === "/v3/list-calls",
-    );
-    expect(calls).toHaveLength(1);
-    expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({
-      filter_criteria: {
-        agent: [{ agent_id: "agent_voice_1" }],
-        call_status: {
-          value: ["ended", "error", "not_connected"],
-        },
-      },
-      limit: 1,
-    });
-
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(listed.statusCode).toBe(200);
-    expect(listed.body).not.toContain(RETELL_KEY);
-
-    const stored = await api.database.sql<{ credentials: string }>(
-      "select credentials from monitoring_setup",
-    );
-    expect(stored.rows[0]?.credentials.startsWith("v1.")).toBe(true);
-    expect(stored.rows[0]?.credentials).not.toContain(RETELL_KEY);
+    expect(discovered.body).not.toContain(RETELL_KEY);
     expect(logs.join("\n")).not.toContain(RETELL_KEY);
-  });
-
-  it("does not save a key that cannot read Retell call history", async () => {
-    const retell = provider({ historyStatus: 403 });
-    api = await createApi("monitoring_routes_history_scope", {
-      retellFetch: retell.fetchImpl,
-    });
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "Front desk" }],
-      },
-    });
-
-    expect(configured.statusCode).toBe(422);
-    expect(configured.json()).toMatchObject({
-      error: "unprocessable",
-      message: expect.stringContaining("Monitor or History Read"),
-    });
-    const stored = await api.database.sql<{ count: string }>(
-      "select count(*) as count from monitoring_setup",
-    );
-    expect(stored.rows[0]?.count).toBe("0");
   });
 
   it("refuses a viewer before any Retell provider read", async () => {
@@ -195,31 +165,49 @@ describe("platform-first Monitoring setup", () => {
       "viewer",
     );
 
+    const refused = await api.app.inject({
+      method: "POST",
+      url: `/v1/monitoring/retell/discover?projectId=${ada.projectId}`,
+      headers: { cookie: viewer.cookie },
+      payload: { apiKey: RETELL_KEY },
+    });
+
+    expect(refused.statusCode, refused.body).toBe(403);
+    expect(retell.asked).toEqual([]);
+  });
+});
+
+describe("the setup routes the redesign removed", () => {
+  it("are gone: there is no monitoring source to list, save or delete", async () => {
+    api = await createApi("monitoring_routes_removed");
+    const ada = await signUp(api.app, "ada-removed@acme.example", "Acme");
+
     for (const request of [
-      {
-        method: "POST" as const,
-        url: `/v1/monitoring/retell/discover?projectId=${ada.projectId}`,
-        payload: { apiKey: RETELL_KEY },
-      },
+      { method: "GET" as const, url: `/v1/monitoring?projectId=${ada.projectId}` },
       {
         method: "PUT" as const,
         url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-        payload: {
-          apiKey: RETELL_KEY,
-          agents: [{ id: "agent_voice_1", name: "Front desk" }],
-        },
+      },
+      {
+        method: "PUT" as const,
+        url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
+      },
+      {
+        method: "DELETE" as const,
+        url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
       },
     ]) {
-      const refused = await api.app.inject({
+      const answered = await api.app.inject({
         ...request,
-        headers: { cookie: viewer.cookie },
+        headers: { cookie: ada.cookie },
       });
-      expect(refused.statusCode, refused.body).toBe(403);
+      expect(answered.statusCode, `${request.method} ${request.url}`).toBe(404);
     }
-    expect(retell.asked).toEqual([]);
   });
+});
 
-  it("replays one exact durable Retell failure outside the list window", async () => {
+describe("replaying one poison call", () => {
+  it("fetches the exact call, writes it, and closes the failure", async () => {
     const providerCallId = "call_from_2020_exact_replay";
     const retell = provider({
       getCall: {
@@ -242,83 +230,49 @@ describe("platform-first Monitoring setup", () => {
       traceStore: true,
     });
     const ada = await signUp(api.app, "ada-replay@acme.example", "Acme");
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "Front desk" }],
-      },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
+    const agentId = await pulling(ada);
+    await poisoned(providerCallId);
 
-    const target = await claimDueRetellMonitoringAgent({ now: new Date() });
-    expect(target).toBeDefined();
-    if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
-      providerCallId,
-      errorKind: "provider_call_not_found",
-      now: new Date(),
-    });
-    await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
+    const [failure] = await listMonitoringFailures(at(ada), agentId);
+    expect(failure?.providerCallId).toBe(providerCallId);
 
-    const before = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    const failure = before.json().monitoringSources[0].agents[0].failures[0] as {
-      id: string;
-      providerCallId: string;
-    };
-    expect(failure.providerCallId).toBe(providerCallId);
-
+    const replayUrl =
+      `/v1/monitoring/retell/failures/${failure?.id}/replay` +
+      `?projectId=${ada.projectId}`;
     const replayed = await api.app.inject({
       method: "POST",
-      url:
-        `/v1/monitoring/retell/failures/${failure.id}/replay` +
-        `?projectId=${ada.projectId}`,
+      url: replayUrl,
       headers: { cookie: ada.cookie },
     });
     expect(replayed.statusCode, replayed.body).toBe(200);
     expect(replayed.json()).toMatchObject({
-      monitoringImportFailure: { id: failure.id, status: "resolved" },
+      monitoringImportFailure: { id: failure?.id, status: "resolved" },
       trace: { write: "written" },
     });
+
+    // A resolved failure is nobody's to replay a second time.
     const repeated = await api.app.inject({
       method: "POST",
-      url:
-        `/v1/monitoring/retell/failures/${failure.id}/replay` +
-        `?projectId=${ada.projectId}`,
+      url: replayUrl,
       headers: { cookie: ada.cookie },
     });
     expect(repeated.statusCode).toBe(404);
 
     const paths = retell.asked.map((request) => new URL(request.url).pathname);
-    expect(paths.filter((path) => path === "/v3/list-calls")).toHaveLength(1);
     expect(
       paths.filter((path) => path === `/v2/get-call/${providerCallId}`),
     ).toHaveLength(1);
+
     const stored = await api.database.sql<{
       claims: string;
       open_failures: string;
     }>(
       "select " +
         "(select count(*) from production_trace_claim) as claims, " +
-        "(select count(*) from retell_ingestion_failure where status = 'open') as open_failures",
+        "(select count(*) from monitoring_failure where status = 'open') as open_failures",
     );
     expect(stored.rows[0]).toEqual({ claims: "1", open_failures: "0" });
-
-    const after = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(after.json().monitoringSources[0].agents[0]).toMatchObject({
-      state: "active",
-      failures: [],
-    });
+    expect(await listMonitoringFailures(at(ada), agentId)).toHaveLength(0);
   });
 
   it("does not call Retell again while a replay Retry-After gate is active", async () => {
@@ -331,34 +285,12 @@ describe("platform-first Monitoring setup", () => {
       retellFetch: retell.fetchImpl,
     });
     const ada = await signUp(api.app, "ada-retry-after@acme.example", "Acme");
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "Front desk" }],
-      },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
+    const agentId = await pulling(ada);
+    await poisoned(providerCallId);
 
-    const target = await claimDueRetellMonitoringAgent({ now: new Date() });
-    expect(target).toBeDefined();
-    if (target === undefined) return;
-    await recordRetellIngestionFailure(target.auth, target, {
-      providerCallId,
-      errorKind: "provider_call_not_found",
-      now: new Date(),
-    });
-    await finishRetellMonitoringScan(target.auth, target, { now: new Date() });
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    const failureId = listed.json().monitoringSources[0].agents[0].failures[0].id as string;
+    const [failure] = await listMonitoringFailures(at(ada), agentId);
     const replayUrl =
-      `/v1/monitoring/retell/failures/${failureId}/replay` +
+      `/v1/monitoring/retell/failures/${failure?.id}/replay` +
       `?projectId=${ada.projectId}`;
 
     const first = await api.app.inject({
@@ -379,39 +311,5 @@ describe("platform-first Monitoring setup", () => {
         new URL(request.url).pathname === `/v2/get-call/${providerCallId}`,
     );
     expect(getCalls).toHaveLength(1);
-  });
-
-  it("creates and removes the separate LiveKit Agents setup", async () => {
-    api = await createApi("monitoring_routes_livekit");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
-    expect(configured.json()).toMatchObject({
-      monitoringSource: {
-        agentPlatform: "livekit_agents",
-        strategy: "livekit_otlp",
-        credentialsHint: null,
-        agents: [],
-      },
-    });
-
-    const removed = await api.app.inject({
-      method: "DELETE",
-      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(removed.statusCode).toBe(204);
-
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(listed.json()).toEqual({ monitoringSources: [] });
   });
 });

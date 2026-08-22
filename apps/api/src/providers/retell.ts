@@ -19,7 +19,7 @@ import {
 export type RetellConnectionCandidate =
   | {
       readonly agentPlatform: "retell";
-      readonly connectionKind: "retell_chat_api";
+      readonly connectionType: "retell_chat_api";
       readonly accessVariant: "retell_chat_api.api_key";
       readonly modality: "chat";
       readonly productLabel: string;
@@ -27,7 +27,7 @@ export type RetellConnectionCandidate =
     }
   | {
       readonly agentPlatform: "retell";
-      readonly connectionKind: "phone_number";
+      readonly connectionType: "phone_number";
       readonly accessVariant: "phone_number.public_e164";
       readonly modality: "voice";
       readonly productLabel: string;
@@ -56,11 +56,11 @@ export type RetellCandidateConfirmation =
 
 type RetellCandidateToConfirm =
   | {
-      readonly connectionKind: "retell_chat_api";
+      readonly connectionType: "retell_chat_api";
       readonly config: { readonly retellAgentId: string };
     }
   | {
-      readonly connectionKind: "phone_number";
+      readonly connectionType: "phone_number";
       readonly config: { readonly phoneNumber: string };
     };
 
@@ -87,7 +87,7 @@ function discoveryFailure(
 function chatCandidate(platformAgentId: string): RetellConnectionCandidate {
   return {
     agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     productLabel: productLabelOf(
@@ -103,7 +103,7 @@ function chatCandidate(platformAgentId: string): RetellConnectionCandidate {
 function phoneCandidate(phoneNumber: string): RetellConnectionCandidate {
   return {
     agentPlatform: "retell",
-    connectionKind: "phone_number",
+    connectionType: "phone_number",
     accessVariant: "phone_number.public_e164",
     modality: "voice",
     productLabel: productLabelOf(
@@ -181,7 +181,7 @@ export async function confirmRetellCandidate(
     };
   }
 
-  if (candidate.connectionKind === "retell_chat_api") {
+  if (candidate.connectionType === "retell_chat_api") {
     if (
       candidate.config.retellAgentId !== platformAgentId ||
       agent.modality !== "chat"

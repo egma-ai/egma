@@ -11,7 +11,6 @@ import {
   isNull,
   lt,
   lte,
-  notInArray,
   or,
   sql,
   type SQL,
@@ -19,23 +18,33 @@ import {
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";
 
 import { db } from "../client.ts";
+import { agent, type AgentPlatform } from "../schema/agents.ts";
 import {
-  monitoringSetup,
+  monitoringFailure,
+  monitoringState,
   productionTraceClaim,
-  retellIngestionFailure,
-  retellMonitoredAgent,
-  type MonitoringHealthState,
-  type MonitoringPlatform,
-  type MonitoringStrategy,
-  type RetellMonitoredAgentState,
-  type RetellFailureStatus,
-  type RetellScanKind,
+  type MonitoringFailureStatus,
+  type MonitoringScanKind,
 } from "../schema/production.ts";
 import { openCredentials, sealCredentials } from "../sealing.ts";
 import type { AuthContext } from "./context.ts";
 import { UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
+
+/**
+ * Production monitoring, agent-shaped.
+ *
+ * There is no setup object and no account-wide health machine. An agent binds
+ * to its platform, holds that platform's sealed monitoring key, and its
+ * `pull_production_calls` switch is the only stored monitoring choice in the
+ * product. The switch opens one machine notebook — `monitoring_state` — and
+ * the poller works from that notebook joined to the agent's own key.
+ *
+ * Push is not here at all, by design: the OTLP door authenticates with the
+ * project key, stores and grades, and writes nothing down about having done
+ * it. See ADR-0015.
+ */
 
 const HISTORY_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
 const RECONCILIATION_MILLISECONDS = 24 * 60 * 60 * 1_000;
@@ -66,7 +75,7 @@ function projectOf(auth: AuthContext): string {
   const projectId = auth.projectId;
   if (projectId === undefined) {
     throw new UnprocessableInputError(
-      "Monitoring setup belongs to one project. Select a project first.",
+      "Monitoring belongs to one project. Select a project first.",
     );
   }
   return projectId;
@@ -90,359 +99,20 @@ function withinMonitoringProject(
   );
 }
 
-function retellKey(value: unknown): string {
+function monitoringKey(value: unknown): string {
   if (typeof value !== "string") {
-    throw new UnprocessableInputError("Retell API key must be text.");
+    throw new UnprocessableInputError("The platform API key must be text.");
   }
   const key = value.trim();
   if (key.length < SHORTEST_KEY) {
     throw new UnprocessableInputError(
-      "Retell API key is shorter than any key Retell issues.",
+      "The platform API key is shorter than any key the platform issues.",
     );
   }
   return key;
 }
 
-export type SelectedRetellAgent = {
-  readonly platformAgentId: string;
-  readonly platformAgentName: string;
-};
-
-function selectedAgents(
-  values: readonly SelectedRetellAgent[],
-): readonly SelectedRetellAgent[] {
-  if (values.length === 0) {
-    throw new UnprocessableInputError(
-      "Select at least one Retell voice agent to monitor.",
-    );
-  }
-  const seen = new Set<string>();
-  return values.map((value) => {
-    const platformAgentId = value.platformAgentId.trim();
-    const platformAgentName = value.platformAgentName.trim();
-    if (platformAgentId === "" || platformAgentName === "") {
-      throw new UnprocessableInputError(
-        "Every selected Retell agent needs its Retell id and name.",
-      );
-    }
-    if (seen.has(platformAgentId)) {
-      throw new UnprocessableInputError(
-        `Retell agent ${platformAgentId} was selected more than once.`,
-      );
-    }
-    seen.add(platformAgentId);
-    return { platformAgentId, platformAgentName };
-  });
-}
-
-export type RetellMonitoredAgent = {
-  readonly id: string;
-  readonly platformAgentId: string;
-  readonly platformAgentName: string;
-  readonly state: RetellMonitoredAgentState;
-  readonly scanKind: RetellScanKind | null;
-  readonly lastSuccessAt: Date | null;
-  readonly lastCallReceivedAt: Date | null;
-  readonly lastErrorKind: string | null;
-  readonly lastErrorAt: Date | null;
-  readonly consecutiveFailures: number;
-  readonly failures: readonly RetellIngestionFailureSummary[];
-};
-
-export type RetellIngestionFailureSummary = {
-  readonly id: string;
-  readonly providerCallId: string;
-  readonly errorKind: string;
-  readonly attempts: number;
-  readonly status: RetellFailureStatus;
-  readonly lastAttemptAt: Date;
-  readonly createdAt: Date;
-};
-
-export type MonitoringSetup = {
-  readonly id: string;
-  readonly projectId: string;
-  readonly agentPlatform: MonitoringPlatform;
-  readonly strategy: MonitoringStrategy;
-  readonly credentialsHint: string | null;
-  readonly healthState: MonitoringHealthState;
-  readonly blockedUntil: Date | null;
-  readonly consecutiveFailures: number;
-  readonly lastErrorAt: Date | null;
-  readonly lastRecoveredAt: Date | null;
-  readonly lastReceivedAt: Date | null;
-  readonly agents: readonly RetellMonitoredAgent[];
-};
-
-/** Read Monitoring setup state. No credential column is selected. */
-export async function listMonitoringSetups(
-  auth: AuthContext,
-): Promise<readonly MonitoringSetup[]> {
-  authorize(auth, "read", here(auth));
-  const setups = await db()
-    .select({
-      id: monitoringSetup.id,
-      projectId: monitoringSetup.projectId,
-      agentPlatform: monitoringSetup.agentPlatform,
-      strategy: monitoringSetup.strategy,
-      credentialsHint: monitoringSetup.credentialsHint,
-      healthState: monitoringSetup.healthState,
-      blockedUntil: monitoringSetup.blockedUntil,
-      consecutiveFailures: monitoringSetup.consecutiveFailures,
-      lastErrorAt: monitoringSetup.lastErrorAt,
-      lastRecoveredAt: monitoringSetup.lastRecoveredAt,
-      lastReceivedAt: monitoringSetup.lastReceivedAt,
-    })
-    .from(monitoringSetup)
-    .where(withinMonitoringProject(auth, monitoringSetup))
-    .orderBy(asc(monitoringSetup.agentPlatform));
-
-  if (setups.length === 0) return [];
-  const agents = await db()
-    .select({
-      id: retellMonitoredAgent.id,
-      monitoringSetupId: retellMonitoredAgent.monitoringSetupId,
-      platformAgentId: retellMonitoredAgent.platformAgentId,
-      platformAgentName: retellMonitoredAgent.platformAgentName,
-      state: retellMonitoredAgent.state,
-      scanKind: retellMonitoredAgent.scanKind,
-      lastSuccessAt: retellMonitoredAgent.lastSuccessAt,
-      lastCallReceivedAt: retellMonitoredAgent.lastCallReceivedAt,
-      lastErrorKind: retellMonitoredAgent.lastErrorKind,
-      lastErrorAt: retellMonitoredAgent.lastErrorAt,
-      consecutiveFailures: retellMonitoredAgent.consecutiveFailures,
-    })
-    .from(retellMonitoredAgent)
-    .where(
-      and(
-        withinMonitoringProject(auth, retellMonitoredAgent),
-        inArray(
-          retellMonitoredAgent.monitoringSetupId,
-          setups.map((setup) => setup.id),
-        ),
-      ),
-    )
-    .orderBy(asc(retellMonitoredAgent.platformAgentName));
-
-  const failures =
-    agents.length === 0
-      ? []
-      : await db()
-        .select({
-          id: retellIngestionFailure.id,
-          retellMonitoredAgentId:
-            retellIngestionFailure.retellMonitoredAgentId,
-          providerCallId: retellIngestionFailure.providerCallId,
-          errorKind: retellIngestionFailure.errorKind,
-          attempts: retellIngestionFailure.attempts,
-          status: retellIngestionFailure.status,
-          lastAttemptAt: retellIngestionFailure.lastAttemptAt,
-          createdAt: retellIngestionFailure.createdAt,
-        })
-        .from(retellIngestionFailure)
-        .where(
-          and(
-            withinMonitoringProject(auth, retellIngestionFailure),
-            inArray(
-              retellIngestionFailure.retellMonitoredAgentId,
-              agents.map((agent) => agent.id),
-            ),
-            eq(retellIngestionFailure.status, "open"),
-          ),
-        )
-          .orderBy(
-            asc(retellIngestionFailure.createdAt),
-            asc(retellIngestionFailure.id),
-          );
-
-  return setups.map((setup) => ({
-    ...setup,
-    agentPlatform: setup.agentPlatform as MonitoringPlatform,
-    strategy: setup.strategy as MonitoringStrategy,
-    healthState: setup.healthState as MonitoringHealthState,
-    agents: agents
-      .filter((agent) => agent.monitoringSetupId === setup.id)
-      .map(({ monitoringSetupId: _setupId, ...agent }) => ({
-        ...agent,
-        state: agent.state as RetellMonitoredAgentState,
-        scanKind: agent.scanKind as RetellScanKind | null,
-        failures: failures
-          .filter((failure) => failure.retellMonitoredAgentId === agent.id)
-          .map(({ retellMonitoredAgentId: _agentId, ...failure }) => ({
-            ...failure,
-            status: failure.status as RetellFailureStatus,
-          })),
-      })),
-  }));
-}
-
-/** Create or rotate Retell setup and synchronize its selected voice agents. */
-export async function configureRetellMonitoring(
-  auth: AuthContext,
-  input: {
-    readonly apiKey: unknown;
-    readonly agents: readonly SelectedRetellAgent[];
-    readonly now?: Date | undefined;
-  },
-): Promise<MonitoringSetup> {
-  authorize(auth, "configure_monitoring", here(auth));
-  const projectId = projectOf(auth);
-  const apiKey = retellKey(input.apiKey);
-  const agents = selectedAgents(input.agents);
-  const now = input.now ?? new Date();
-  const historyFrom = new Date(now.getTime() - HISTORY_MILLISECONDS);
-  const reconcileAt = new Date(now.getTime() + RECONCILIATION_MILLISECONDS);
-
-  await db().transaction(async (tx) => {
-    // There is no setup row to lock on the first save. Serialize this one
-    // project's Retell setup before the read, so two first saves do not both
-    // decide that they must insert it. The lock ends with this transaction.
-    const setupLock = `${auth.organizationId}:${projectId}:retell-monitoring`;
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${setupLock}::text, 0))`,
-    );
-
-    const [held] = await tx
-      .select({ id: monitoringSetup.id })
-      .from(monitoringSetup)
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.projectId, projectId),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      )
-      .for("update");
-
-    const sealed = sealCredentials({ apiKey });
-    const setupId = held?.id ?? newId("mns");
-    if (held === undefined) {
-      await tx.insert(monitoringSetup).values({
-        id: setupId,
-        organizationId: auth.organizationId,
-        projectId,
-        agentPlatform: "retell",
-        strategy: "retell_api_polling",
-        credentials: sealed,
-        credentialsHint: apiKey.slice(-HINT_CHARACTERS),
-        createdBy: auth.userId,
-      });
-    } else {
-      await tx
-        .update(monitoringSetup)
-        .set({
-          credentials: sealed,
-          credentialsHint: apiKey.slice(-HINT_CHARACTERS),
-          healthState: "healthy",
-          blockedUntil: null,
-          failureStartedAt: null,
-          consecutiveFailures: 0,
-          lastErrorAt: null,
-          updatedAt: now,
-        })
-        .where(eq(monitoringSetup.id, setupId));
-    }
-
-    const selectedIds = agents.map((agent) => agent.platformAgentId);
-    await tx
-      .delete(retellMonitoredAgent)
-      .where(
-        and(
-          eq(retellMonitoredAgent.monitoringSetupId, setupId),
-          notInArray(retellMonitoredAgent.platformAgentId, selectedIds),
-        ),
-      );
-
-    for (const selected of agents) {
-      await tx
-        .insert(retellMonitoredAgent)
-        .values({
-          id: newId("rma"),
-          monitoringSetupId: setupId,
-          organizationId: auth.organizationId,
-          projectId,
-          platformAgentId: selected.platformAgentId,
-          platformAgentName: selected.platformAgentName,
-          state: "importing",
-          scanKind: "historical_import",
-          scanFrom: historyFrom,
-          scanThrough: now,
-          nextRegularPollAt: now,
-          nextPollAt: now,
-          nextReconciliationAt: reconcileAt,
-        })
-        .onConflictDoUpdate({
-          target: [
-            retellMonitoredAgent.monitoringSetupId,
-            retellMonitoredAgent.platformAgentId,
-          ],
-          set: {
-            platformAgentName: selected.platformAgentName,
-            nextPollAt: now,
-            consecutiveFailures: 0,
-            lastErrorKind: null,
-            lastErrorAt: null,
-            updatedAt: now,
-          },
-        });
-    }
-  });
-
-  const configured = (await listMonitoringSetups(auth)).find(
-    (setup) => setup.agentPlatform === "retell",
-  );
-  if (configured === undefined) throw new Error("Retell Monitoring setup was not written");
-  return configured;
-}
-
-/** Mark LiveKit Agents Monitoring as configured for this project. */
-export async function configureLiveKitMonitoring(
-  auth: AuthContext,
-): Promise<MonitoringSetup> {
-  authorize(auth, "configure_monitoring", here(auth));
-  const projectId = projectOf(auth);
-  await db()
-    .insert(monitoringSetup)
-    .values({
-      id: newId("mns"),
-      organizationId: auth.organizationId,
-      projectId,
-      agentPlatform: "livekit_agents",
-      strategy: "livekit_otlp",
-      createdBy: auth.userId,
-    })
-    .onConflictDoUpdate({
-      target: [monitoringSetup.projectId, monitoringSetup.agentPlatform],
-      set: { updatedAt: new Date() },
-    });
-  const configured = (await listMonitoringSetups(auth)).find(
-    (setup) => setup.agentPlatform === "livekit_agents",
-  );
-  if (configured === undefined) throw new Error("LiveKit Monitoring setup was not written");
-  return configured;
-}
-
-/** Remove setup and polling state. Stored traces and Retell call claims remain. */
-export async function removeMonitoringSetup(
-  auth: AuthContext,
-  agentPlatform: MonitoringPlatform,
-): Promise<boolean> {
-  authorize(auth, "configure_monitoring", here(auth));
-  const projectId = projectOf(auth);
-  const deleted = await db()
-    .delete(monitoringSetup)
-    .where(
-      and(
-        withinMonitoringProject(auth, monitoringSetup),
-        eq(monitoringSetup.projectId, projectId),
-        eq(monitoringSetup.agentPlatform, agentPlatform),
-      ),
-    )
-    .returning({ id: monitoringSetup.id });
-  return deleted.length > 0;
-}
-
-function openedRetellKey(envelope: string): string {
+function openedMonitoringKey(envelope: string): string {
   const opened = openCredentials(envelope);
   if (
     typeof opened !== "object" ||
@@ -450,35 +120,246 @@ function openedRetellKey(envelope: string): string {
     Array.isArray(opened) ||
     typeof (opened as { apiKey?: unknown }).apiKey !== "string"
   ) {
-    throw new Error("Retell Monitoring credential is unreadable");
+    throw new Error("The agent's monitoring credential is unreadable");
   }
   return (opened as { apiKey: string }).apiKey;
 }
 
-export type RetellMonitoringTarget = {
-  readonly setupId: string;
-  readonly monitoredAgentId: string;
+export type MonitoringFailureSummary = {
+  readonly id: string;
+  readonly providerCallId: string;
+  readonly errorKind: string;
+  readonly attempts: number;
+  readonly status: MonitoringFailureStatus;
+  readonly lastAttemptAt: Date;
+  readonly createdAt: Date;
+};
+
+/** What the pull switch says about one agent. No health, no progress. */
+export type AgentPullState = {
+  readonly agentId: string;
+  readonly pullProductionCalls: boolean;
+  readonly agentPlatform: AgentPlatform | null;
+  readonly platformAgentId: string | null;
+  readonly monitoringApiKeyHint: string | null;
+  readonly scanKind: MonitoringScanKind | null;
+  readonly completedThrough: Date | null;
+  readonly lastReceivedAt: Date | null;
+  readonly failures: readonly MonitoringFailureSummary[];
+};
+
+/**
+ * Turn pull on for one agent: bind it to its platform, seal its monitoring
+ * key, and open the notebook with the historical-import window.
+ *
+ * The key is asked for even when a connection already holds one for the same
+ * account. Simulation custody and monitoring custody are two jobs with two
+ * secrets on purpose, and the double paste is a decision, not an oversight.
+ */
+export async function enablePullProductionCalls(
+  auth: AuthContext,
+  input: {
+    readonly agentId: string;
+    readonly agentPlatform: AgentPlatform;
+    readonly platformAgentId: string;
+    readonly apiKey: unknown;
+    readonly now?: Date | undefined;
+  },
+): Promise<AgentPullState> {
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const apiKey = monitoringKey(input.apiKey);
+  const platformAgentId = input.platformAgentId.trim();
+  if (platformAgentId === "") {
+    throw new UnprocessableInputError(
+      "The platform's own id for this agent is required to pull its calls.",
+    );
+  }
+  const now = input.now ?? new Date();
+  const historyFrom = new Date(now.getTime() - HISTORY_MILLISECONDS);
+  const reconcileAt = new Date(now.getTime() + RECONCILIATION_MILLISECONDS);
+
+  await db().transaction(async (tx) => {
+    const [held] = await tx
+      .select({ id: agent.id })
+      .from(agent)
+      .where(
+        and(
+          within(auth, agent, eq(agent.projectId, projectId)),
+          eq(agent.id, input.agentId),
+          isNull(agent.archivedAt),
+        ),
+      )
+      .for("update");
+    if (held === undefined) {
+      throw new UnprocessableInputError(
+        "That agent is not in this project, or has been archived.",
+      );
+    }
+    await tx
+      .update(agent)
+      .set({
+        agentPlatform: input.agentPlatform,
+        platformAgentId,
+        monitoringApiKey: sealCredentials({ apiKey }),
+        monitoringApiKeyHint: apiKey.slice(-HINT_CHARACTERS),
+        pullProductionCalls: true,
+        updatedAt: now,
+      })
+      .where(eq(agent.id, input.agentId));
+
+    // The notebook is created by the switch and, in v1, only by it. A second
+    // enable resumes the notebook it already has rather than losing its
+    // cursor, and only wakes it up.
+    await tx
+      .insert(monitoringState)
+      .values({
+        id: newId("mst"),
+        agentId: input.agentId,
+        organizationId: auth.organizationId,
+        projectId,
+        scanKind: "historical_import",
+        scanFrom: historyFrom,
+        scanThrough: now,
+        nextRegularPollAt: now,
+        nextPollAt: now,
+        nextReconciliationAt: reconcileAt,
+      })
+      .onConflictDoUpdate({
+        target: [monitoringState.agentId],
+        set: { nextPollAt: now, consecutiveFailures: 0, updatedAt: now },
+      });
+  });
+
+  const state = await readAgentPullState(auth, input.agentId);
+  if (state === undefined) throw new Error("The pull switch was not written");
+  return state;
+}
+
+/**
+ * Turn pull off for one agent. The notebook survives — its cursor is what a
+ * later re-enable resumes from — and the poller stops claiming the row because
+ * the switch, not the notebook, is what makes an agent due.
+ */
+export async function disablePullProductionCalls(
+  auth: AuthContext,
+  agentId: string,
+  options: { readonly now?: Date | undefined } = {},
+): Promise<boolean> {
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const now = options.now ?? new Date();
+  const stopped = await db()
+    .update(agent)
+    .set({ pullProductionCalls: false, updatedAt: now })
+    .where(
+      and(
+        within(auth, agent, eq(agent.projectId, projectId)),
+        eq(agent.id, agentId),
+        eq(agent.pullProductionCalls, true),
+      ),
+    )
+    .returning({ id: agent.id });
+  return stopped.length > 0;
+}
+
+/** Read one agent's pull state. No credential column is selected. */
+export async function readAgentPullState(
+  auth: AuthContext,
+  agentId: string,
+): Promise<AgentPullState | undefined> {
+  authorize(auth, "read", here(auth));
+  const projectId = projectOf(auth);
+  const [row] = await db()
+    .select({
+      agentId: agent.id,
+      pullProductionCalls: agent.pullProductionCalls,
+      agentPlatform: agent.agentPlatform,
+      platformAgentId: agent.platformAgentId,
+      monitoringApiKeyHint: agent.monitoringApiKeyHint,
+      scanKind: monitoringState.scanKind,
+      completedThrough: monitoringState.completedThrough,
+      lastReceivedAt: monitoringState.lastReceivedAt,
+    })
+    .from(agent)
+    .leftJoin(monitoringState, eq(monitoringState.agentId, agent.id))
+    .where(
+      and(
+        within(auth, agent, eq(agent.projectId, projectId)),
+        eq(agent.id, agentId),
+      ),
+    )
+    .limit(1);
+  if (row === undefined) return undefined;
+  return {
+    ...row,
+    agentPlatform: row.agentPlatform as AgentPlatform | null,
+    scanKind: row.scanKind as MonitoringScanKind | null,
+    completedThrough: row.completedThrough ?? null,
+    lastReceivedAt: row.lastReceivedAt ?? null,
+    failures: await listMonitoringFailures(auth, agentId),
+  };
+}
+
+/** The open poison-call records for one agent, oldest first. */
+export async function listMonitoringFailures(
+  auth: AuthContext,
+  agentId: string,
+): Promise<readonly MonitoringFailureSummary[]> {
+  const rows = await db()
+    .select({
+      id: monitoringFailure.id,
+      providerCallId: monitoringFailure.providerCallId,
+      errorKind: monitoringFailure.errorKind,
+      attempts: monitoringFailure.attempts,
+      status: monitoringFailure.status,
+      lastAttemptAt: monitoringFailure.lastAttemptAt,
+      createdAt: monitoringFailure.createdAt,
+    })
+    .from(monitoringFailure)
+    .where(
+      and(
+        withinMonitoringProject(auth, monitoringFailure),
+        eq(monitoringFailure.agentId, agentId),
+        eq(monitoringFailure.status, "open"),
+      ),
+    )
+    .orderBy(asc(monitoringFailure.createdAt), asc(monitoringFailure.id));
+  return rows.map((row) => ({
+    ...row,
+    status: row.status as MonitoringFailureStatus,
+  }));
+}
+
+export type MonitoringPullTarget = {
+  readonly agentId: string;
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly apiKey: string;
-  readonly scanKind: RetellScanKind;
+  readonly scanKind: MonitoringScanKind;
   readonly scanFrom: Date;
   readonly scanThrough: Date;
   readonly paginationKey: string | null;
   readonly seenPaginationKeys: readonly string[];
-  readonly setupConsecutiveFailures: number;
+  readonly consecutiveFailures: number;
   readonly leaseOwner: string;
   readonly leaseExpiresAt: Date;
   readonly auth: AuthContext;
 };
 
-/** Claim one due Retell target before any provider request. */
-export async function claimDueRetellMonitoringAgent(
+/**
+ * Claim one due pulled agent before any provider request.
+ *
+ * Due-ness is the switch joined to the notebook: an agent whose switch is off
+ * keeps its cursor and is never claimed. Backoff is per agent, so a shared key
+ * that starts refusing is discovered independently by each agent's poll.
+ */
+export async function claimDueMonitoringPull(
   options: {
     readonly now?: Date | undefined;
     readonly leaseMilliseconds?: number | undefined;
   } = {},
-): Promise<RetellMonitoringTarget | undefined> {
+): Promise<MonitoringPullTarget | undefined> {
   const now = options.now ?? new Date();
   const leaseMilliseconds =
     options.leaseMilliseconds ?? DEFAULT_LEASE_MILLISECONDS;
@@ -488,61 +369,60 @@ export async function claimDueRetellMonitoringAgent(
   const claimed = await db().transaction(async (tx) => {
     const [candidate] = await tx
       .select({
-        id: retellMonitoredAgent.id,
-        setupId: retellMonitoredAgent.monitoringSetupId,
-        organizationId: retellMonitoredAgent.organizationId,
-        projectId: retellMonitoredAgent.projectId,
-        platformAgentId: retellMonitoredAgent.platformAgentId,
-        platformAgentName: retellMonitoredAgent.platformAgentName,
-        state: retellMonitoredAgent.state,
-        scanKind: retellMonitoredAgent.scanKind,
-        scanFrom: retellMonitoredAgent.scanFrom,
-        scanThrough: retellMonitoredAgent.scanThrough,
-        paginationKey: retellMonitoredAgent.paginationKey,
-        paginationTrail: retellMonitoredAgent.paginationTrail,
-        reconciliationFrom: retellMonitoredAgent.reconciliationFrom,
-        reconciliationThrough: retellMonitoredAgent.reconciliationThrough,
-        reconciliationPaginationKey:
-          retellMonitoredAgent.reconciliationPaginationKey,
+        id: monitoringState.id,
+        agentId: monitoringState.agentId,
+        organizationId: monitoringState.organizationId,
+        projectId: monitoringState.projectId,
+        platformAgentId: agent.platformAgentId,
+        platformAgentName: agent.name,
+        credentials: agent.monitoringApiKey,
+        scanKind: monitoringState.scanKind,
+        scanFrom: monitoringState.scanFrom,
+        scanThrough: monitoringState.scanThrough,
+        paginationKey: monitoringState.paginationKey,
+        paginationTrail: monitoringState.paginationTrail,
+        reconciliationFrom: monitoringState.reconciliationFrom,
+        reconciliationThrough: monitoringState.reconciliationThrough,
+        reconciliationPaginationKey: monitoringState.reconciliationPaginationKey,
         reconciliationPaginationTrail:
-          retellMonitoredAgent.reconciliationPaginationTrail,
-        reconciliationNeedsRegular:
-          retellMonitoredAgent.reconciliationNeedsRegular,
-        completedThrough: retellMonitoredAgent.completedThrough,
-        nextRegularPollAt: retellMonitoredAgent.nextRegularPollAt,
-        nextReconciliationAt: retellMonitoredAgent.nextReconciliationAt,
-        credentials: monitoringSetup.credentials,
-        setupConsecutiveFailures: monitoringSetup.consecutiveFailures,
+          monitoringState.reconciliationPaginationTrail,
+        reconciliationNeedsRegular: monitoringState.reconciliationNeedsRegular,
+        completedThrough: monitoringState.completedThrough,
+        nextRegularPollAt: monitoringState.nextRegularPollAt,
+        nextReconciliationAt: monitoringState.nextReconciliationAt,
+        consecutiveFailures: monitoringState.consecutiveFailures,
       })
-      .from(retellMonitoredAgent)
+      .from(monitoringState)
       .innerJoin(
-        monitoringSetup,
+        agent,
         and(
-          eq(monitoringSetup.id, retellMonitoredAgent.monitoringSetupId),
-          eq(monitoringSetup.projectId, retellMonitoredAgent.projectId),
-          eq(
-            monitoringSetup.organizationId,
-            retellMonitoredAgent.organizationId,
-          ),
+          eq(agent.id, monitoringState.agentId),
+          eq(agent.projectId, monitoringState.projectId),
         ),
       )
       .where(
         and(
-          eq(monitoringSetup.agentPlatform, "retell"),
-          lte(retellMonitoredAgent.nextPollAt, now),
+          eq(agent.pullProductionCalls, true),
+          isNull(agent.archivedAt),
+          lte(monitoringState.nextPollAt, now),
           or(
-            isNull(retellMonitoredAgent.leaseExpiresAt),
-            lte(retellMonitoredAgent.leaseExpiresAt, now),
+            isNull(monitoringState.leaseExpiresAt),
+            lte(monitoringState.leaseExpiresAt, now),
           ),
-          or(isNull(monitoringSetup.blockedUntil), lte(monitoringSetup.blockedUntil, now)),
         ),
       )
-      .orderBy(asc(retellMonitoredAgent.nextPollAt), asc(retellMonitoredAgent.id))
+      .orderBy(asc(monitoringState.nextPollAt), asc(monitoringState.id))
       .limit(1)
-      .for("update", { of: retellMonitoredAgent, skipLocked: true });
-    if (candidate === undefined || candidate.credentials === null) return undefined;
+      .for("update", { of: monitoringState, skipLocked: true });
+    if (
+      candidate === undefined ||
+      candidate.credentials === null ||
+      candidate.platformAgentId === null
+    ) {
+      return undefined;
+    }
 
-    let scanKind = candidate.scanKind as RetellScanKind | null;
+    let scanKind = candidate.scanKind as MonitoringScanKind | null;
     let scanFrom = candidate.scanFrom;
     let scanThrough = candidate.scanThrough;
     let paginationKey = candidate.paginationKey;
@@ -598,7 +478,7 @@ export async function claimDueRetellMonitoringAgent(
     }
 
     await tx
-      .update(retellMonitoredAgent)
+      .update(monitoringState)
       .set({
         scanKind,
         scanFrom,
@@ -609,10 +489,11 @@ export async function claimDueRetellMonitoringAgent(
         leaseExpiresAt,
         updatedAt: now,
       })
-      .where(eq(retellMonitoredAgent.id, candidate.id));
+      .where(eq(monitoringState.id, candidate.id));
 
     return {
       ...candidate,
+      platformAgentId: candidate.platformAgentId,
       scanKind,
       scanFrom,
       scanThrough,
@@ -624,26 +505,25 @@ export async function claimDueRetellMonitoringAgent(
   });
   if (claimed === undefined) return undefined;
   return {
-    setupId: claimed.setupId,
-    monitoredAgentId: claimed.id,
+    agentId: claimed.agentId,
     platformAgentId: claimed.platformAgentId,
     platformAgentName: claimed.platformAgentName,
-    apiKey: openedRetellKey(claimed.credentials as string),
+    apiKey: openedMonitoringKey(claimed.credentials as string),
     scanKind: claimed.scanKind,
     scanFrom: claimed.scanFrom,
     scanThrough: claimed.scanThrough,
     paginationKey: claimed.paginationKey,
     seenPaginationKeys: claimed.seenPaginationKeys,
-    setupConsecutiveFailures: claimed.setupConsecutiveFailures,
+    consecutiveFailures: claimed.consecutiveFailures,
     leaseOwner: claimed.leaseOwner,
     leaseExpiresAt: claimed.leaseExpiresAt,
     auth: monitoringContext(claimed.organizationId, claimed.projectId),
   };
 }
 
-export async function renewRetellMonitoringLease(
+export async function renewMonitoringLease(
   auth: AuthContext,
-  target: Pick<RetellMonitoringTarget, "monitoredAgentId" | "leaseOwner">,
+  target: Pick<MonitoringPullTarget, "agentId" | "leaseOwner">,
   options: {
     readonly now?: Date | undefined;
     readonly leaseMilliseconds?: number | undefined;
@@ -651,58 +531,50 @@ export async function renewRetellMonitoringLease(
 ): Promise<boolean> {
   const now = options.now ?? new Date();
   const expires = new Date(
-    now.getTime() +
-      (options.leaseMilliseconds ?? DEFAULT_LEASE_MILLISECONDS),
+    now.getTime() + (options.leaseMilliseconds ?? DEFAULT_LEASE_MILLISECONDS),
   );
   return db().transaction(async (tx) => {
     const [requestable] = await tx
-      .select({ id: retellMonitoredAgent.id })
-      .from(retellMonitoredAgent)
-      .innerJoin(
-        monitoringSetup,
-        eq(monitoringSetup.id, retellMonitoredAgent.monitoringSetupId),
-      )
+      .select({ id: monitoringState.id })
+      .from(monitoringState)
+      .innerJoin(agent, eq(agent.id, monitoringState.agentId))
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-          isNotNull(retellMonitoredAgent.leaseExpiresAt),
-          or(
-            isNull(monitoringSetup.blockedUntil),
-            lte(monitoringSetup.blockedUntil, now),
-          ),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
+          isNotNull(monitoringState.leaseExpiresAt),
+          eq(agent.pullProductionCalls, true),
         ),
       )
-      .for("update", { of: retellMonitoredAgent });
+      .for("update", { of: monitoringState });
     if (requestable === undefined) return false;
     const renewed = await tx
-      .update(retellMonitoredAgent)
+      .update(monitoringState)
       .set({ leaseExpiresAt: expires, updatedAt: now })
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
-      .returning({ id: retellMonitoredAgent.id });
+      .returning({ id: monitoringState.id });
     return renewed.length === 1;
   });
 }
 
 /** Save an opaque provider cursor only after every call on that page is durable. */
-export async function checkpointRetellMonitoringPage(
+export async function checkpointMonitoringPage(
   auth: AuthContext,
-  target: Pick<RetellMonitoringTarget, "monitoredAgentId" | "leaseOwner">,
+  target: Pick<MonitoringPullTarget, "agentId" | "leaseOwner">,
   input: {
     readonly paginationKey: string;
     readonly seenPaginationKeys: readonly string[];
   },
 ): Promise<boolean> {
   const updated = await db()
-    .update(retellMonitoredAgent)
+    .update(monitoringState)
     .set({
       paginationKey: input.paginationKey,
       paginationTrail: JSON.stringify(input.seenPaginationKeys),
@@ -710,22 +582,19 @@ export async function checkpointRetellMonitoringPage(
     })
     .where(
       and(
-        withinMonitoringProject(auth, retellMonitoredAgent),
-        eq(retellMonitoredAgent.id, target.monitoredAgentId),
-        eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+        withinMonitoringProject(auth, monitoringState),
+        eq(monitoringState.agentId, target.agentId),
+        eq(monitoringState.leaseOwner, target.leaseOwner),
       ),
     )
-    .returning({ id: retellMonitoredAgent.id });
+    .returning({ id: monitoringState.id });
   return updated.length === 1;
 }
 
 /** Yield bounded work without treating a healthy backlog as a failure. */
-export async function yieldRetellMonitoringLease(
+export async function yieldMonitoringLease(
   auth: AuthContext,
-  target: Pick<
-    RetellMonitoringTarget,
-    "monitoredAgentId" | "leaseOwner" | "scanKind"
-  >,
+  target: Pick<MonitoringPullTarget, "agentId" | "leaseOwner" | "scanKind">,
   input: {
     readonly retryAt: Date;
     readonly now?: Date | undefined;
@@ -735,19 +604,19 @@ export async function yieldRetellMonitoringLease(
   return db().transaction(async (tx) => {
     const [held] = await tx
       .select({
-        scanKind: retellMonitoredAgent.scanKind,
-        scanFrom: retellMonitoredAgent.scanFrom,
-        scanThrough: retellMonitoredAgent.scanThrough,
-        paginationKey: retellMonitoredAgent.paginationKey,
-        paginationTrail: retellMonitoredAgent.paginationTrail,
-        nextRegularPollAt: retellMonitoredAgent.nextRegularPollAt,
+        scanKind: monitoringState.scanKind,
+        scanFrom: monitoringState.scanFrom,
+        scanThrough: monitoringState.scanThrough,
+        paginationKey: monitoringState.paginationKey,
+        paginationTrail: monitoringState.paginationTrail,
+        nextRegularPollAt: monitoringState.nextRegularPollAt,
       })
-      .from(retellMonitoredAgent)
+      .from(monitoringState)
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
       .for("update");
@@ -759,7 +628,7 @@ export async function yieldRetellMonitoringLease(
       held.scanFrom !== null &&
       held.scanThrough !== null;
     const updated = await tx
-      .update(retellMonitoredAgent)
+      .update(monitoringState)
       .set({
         ...(pausesReconciliation
           ? {
@@ -784,20 +653,20 @@ export async function yieldRetellMonitoringLease(
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
-      .returning({ id: retellMonitoredAgent.id });
+      .returning({ id: monitoringState.id });
     return updated.length === 1;
   });
 }
 
 /** Finish the fixed scan and release its lease. */
-export async function finishRetellMonitoringScan(
+export async function finishMonitoringScan(
   auth: AuthContext,
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   options: {
     readonly now?: Date | undefined;
     readonly pollMilliseconds?: number | undefined;
@@ -812,38 +681,22 @@ export async function finishRetellMonitoringScan(
   return db().transaction(async (tx) => {
     const [held] = await tx
       .select({
-        reconciliationFrom: retellMonitoredAgent.reconciliationFrom,
-        reconciliationThrough: retellMonitoredAgent.reconciliationThrough,
-        reconciliationNeedsRegular:
-          retellMonitoredAgent.reconciliationNeedsRegular,
-        nextRegularPollAt: retellMonitoredAgent.nextRegularPollAt,
-        nextReconciliationAt: retellMonitoredAgent.nextReconciliationAt,
+        reconciliationFrom: monitoringState.reconciliationFrom,
+        reconciliationThrough: monitoringState.reconciliationThrough,
+        reconciliationNeedsRegular: monitoringState.reconciliationNeedsRegular,
+        nextRegularPollAt: monitoringState.nextRegularPollAt,
+        nextReconciliationAt: monitoringState.nextReconciliationAt,
       })
-      .from(retellMonitoredAgent)
+      .from(monitoringState)
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
       .for("update");
     if (held === undefined) return false;
-    const [openFailure] = await tx
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(
-            retellIngestionFailure.retellMonitoredAgentId,
-            target.monitoredAgentId,
-          ),
-          eq(retellIngestionFailure.status, "open"),
-        ),
-      )
-      .limit(1);
-    const degraded = openFailure !== undefined;
     const resumesReconciliation =
       target.scanKind === "regular" &&
       held.reconciliationNeedsRegular &&
@@ -853,9 +706,8 @@ export async function finishRetellMonitoringScan(
       target.scanKind === "regular" &&
       (resumesReconciliation || held.nextReconciliationAt <= now);
     const updated = await tx
-      .update(retellMonitoredAgent)
+      .update(monitoringState)
       .set({
-        state: degraded ? "degraded" : "active",
         scanKind: null,
         scanFrom: null,
         scanThrough: null,
@@ -888,18 +740,16 @@ export async function finishRetellMonitoringScan(
         leaseOwner: null,
         leaseExpiresAt: null,
         consecutiveFailures: 0,
-        ...(degraded ? {} : { lastErrorKind: null, lastErrorAt: null }),
-        lastSuccessAt: now,
         updatedAt: now,
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
-      .returning({ id: retellMonitoredAgent.id });
+      .returning({ id: monitoringState.id });
     return updated.length === 1;
   });
 }
@@ -909,40 +759,50 @@ export type MonitoringFailureKind =
   | "rate_limited"
   | "provider_unavailable";
 
-/** Record one setup-wide provider failure and release this target. */
-export async function failRetellMonitoringTarget(
+/**
+ * Record one provider failure against this agent and release its lease.
+ *
+ * The counter is a retry clock, not a health surface: it pushes `next_poll_at`
+ * out and nobody reads it on a screen. There is no key-wide gate to raise,
+ * because a sealed key on one agent is unrecognizable as the same key sealed
+ * on another.
+ */
+export async function failMonitoringPull(
   auth: AuthContext,
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   input: {
     readonly kind: MonitoringFailureKind;
     readonly retryAt: Date;
     readonly now?: Date | undefined;
   },
-): Promise<{ readonly changed: boolean; readonly failures: number; readonly startedAt: Date }> {
+): Promise<{ readonly changed: boolean; readonly failures: number }> {
   const now = input.now ?? new Date();
   return db().transaction(async (tx) => {
     const [held] = await tx
       .select({
-        credentials: monitoringSetup.credentials,
-        healthState: monitoringSetup.healthState,
-        blockedUntil: monitoringSetup.blockedUntil,
-        failureStartedAt: monitoringSetup.failureStartedAt,
-        consecutiveFailures: monitoringSetup.consecutiveFailures,
+        credentials: agent.monitoringApiKey,
+        consecutiveFailures: monitoringState.consecutiveFailures,
+        nextPollAt: monitoringState.nextPollAt,
       })
-      .from(monitoringSetup)
+      .from(monitoringState)
+      .innerJoin(agent, eq(agent.id, monitoringState.agentId))
       .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
+        and(
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
+        ),
       )
-      .for("update");
-    if (held === undefined) {
-      return { changed: false, failures: 0, startedAt: now };
-    }
+      .for("update", { of: monitoringState });
+    if (held === undefined) return { changed: false, failures: 0 };
+    // The key rotated under this poll. Its verdict is about a key nobody holds
+    // any more, so drop it and wake the agent to try the current one.
     if (
       held.credentials === null ||
-      openedRetellKey(held.credentials) !== target.apiKey
+      openedMonitoringKey(held.credentials) !== target.apiKey
     ) {
       await tx
-        .update(retellMonitoredAgent)
+        .update(monitoringState)
         .set({
           nextPollAt: now,
           leaseOwner: null,
@@ -951,208 +811,38 @@ export async function failRetellMonitoringTarget(
         })
         .where(
           and(
-            withinMonitoringProject(auth, retellMonitoredAgent),
-            eq(retellMonitoredAgent.id, target.monitoredAgentId),
-            eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-            eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+            withinMonitoringProject(auth, monitoringState),
+            eq(monitoringState.agentId, target.agentId),
+            eq(monitoringState.leaseOwner, target.leaseOwner),
           ),
         );
-      return {
-        changed: false,
-        failures: held.consecutiveFailures,
-        startedAt: held.failureStartedAt ?? now,
-      };
+      return { changed: false, failures: held.consecutiveFailures };
     }
-    const [leased] = await tx
-      .select({ id: retellMonitoredAgent.id })
-      .from(retellMonitoredAgent)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-        ),
-      )
-      .for("update");
-    if (leased === undefined) {
-      return {
-        changed: false,
-        failures: held.consecutiveFailures,
-        startedAt: held.failureStartedAt ?? now,
-      };
-    }
-    const keepExistingGate =
-      input.kind !== "invalid_credential" &&
-      (held.healthState === "invalid_credential" ||
-        (held.blockedUntil !== null && held.blockedUntil > input.retryAt));
-    const healthState = keepExistingGate ? held.healthState : input.kind;
-    const blockedUntil = keepExistingGate
-      ? (held.blockedUntil ?? input.retryAt)
-      : input.retryAt;
-    const changed = held.healthState !== healthState;
-    const startedAt = held.failureStartedAt ?? now;
     const failures = held.consecutiveFailures + 1;
     await tx
-      .update(monitoringSetup)
+      .update(monitoringState)
       .set({
-        healthState,
-        blockedUntil,
-        failureStartedAt: startedAt,
-        consecutiveFailures: failures,
-        lastErrorAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-        ),
-      );
-    await tx
-      .update(retellMonitoredAgent)
-      .set({
-        nextPollAt: blockedUntil,
+        nextPollAt: input.retryAt,
         leaseOwner: null,
         leaseExpiresAt: null,
-        consecutiveFailures: sql`${retellMonitoredAgent.consecutiveFailures} + 1`,
-        lastErrorKind: input.kind,
-        lastErrorAt: now,
+        consecutiveFailures: failures,
         updatedAt: now,
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       );
-    return { changed, failures, startedAt };
+    return { changed: held.consecutiveFailures === 0, failures };
   });
 }
 
-/** Clear a setup-wide outage. The caller decides whether to emit recovery log. */
-export async function recoverRetellMonitoringSetup(
+/** Release a lease after a call-only failure without moving its fixed scan. */
+export async function releaseMonitoringLease(
   auth: AuthContext,
-  target: {
-    readonly setupId: string;
-    readonly monitoredAgentId: string;
-    readonly failureId?: string | undefined;
-    readonly leaseOwner: string;
-    readonly apiKey: string;
-    readonly setupConsecutiveFailures: number;
-  },
-  now = new Date(),
-): Promise<
-  | { readonly recovered: false }
-  | {
-      readonly recovered: true;
-      readonly failures: number;
-      readonly startedAt: Date;
-    }
-> {
-  return db().transaction(async (tx) => {
-    const [held] = await tx
-      .select({
-        credentials: monitoringSetup.credentials,
-        healthState: monitoringSetup.healthState,
-        blockedUntil: monitoringSetup.blockedUntil,
-        failureStartedAt: monitoringSetup.failureStartedAt,
-        consecutiveFailures: monitoringSetup.consecutiveFailures,
-      })
-      .from(monitoringSetup)
-      .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
-      )
-      .for("update");
-    if (
-      held === undefined ||
-      held.credentials === null ||
-      openedRetellKey(held.credentials) !== target.apiKey ||
-      held.consecutiveFailures !== target.setupConsecutiveFailures
-    ) {
-      return { recovered: false } as const;
-    }
-    const [leased] =
-      target.failureId === undefined
-        ? await tx
-          .select({ id: retellMonitoredAgent.id })
-          .from(retellMonitoredAgent)
-          .where(
-            and(
-              withinMonitoringProject(auth, retellMonitoredAgent),
-              eq(retellMonitoredAgent.id, target.monitoredAgentId),
-              eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-              eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-            ),
-          )
-          .for("update")
-        : await tx
-          .select({ id: retellIngestionFailure.id })
-          .from(retellIngestionFailure)
-          .innerJoin(
-            retellMonitoredAgent,
-            and(
-              eq(
-                retellMonitoredAgent.id,
-                retellIngestionFailure.retellMonitoredAgentId,
-              ),
-              eq(
-                retellMonitoredAgent.projectId,
-                retellIngestionFailure.projectId,
-              ),
-              eq(
-                retellMonitoredAgent.organizationId,
-                retellIngestionFailure.organizationId,
-              ),
-            ),
-          )
-          .where(
-            and(
-              withinMonitoringProject(auth, retellIngestionFailure),
-              withinMonitoringProject(auth, retellMonitoredAgent),
-              eq(retellIngestionFailure.id, target.failureId),
-              eq(
-                retellIngestionFailure.retellMonitoredAgentId,
-                target.monitoredAgentId,
-              ),
-              eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-              eq(retellIngestionFailure.status, "open"),
-              eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-            ),
-          )
-          .for("update", { of: retellIngestionFailure });
-    if (leased === undefined || held.healthState === "healthy") {
-      return { recovered: false } as const;
-    }
-    await tx
-      .update(monitoringSetup)
-      .set({
-        healthState: "healthy",
-        blockedUntil: null,
-        failureStartedAt: null,
-        consecutiveFailures: 0,
-        lastRecoveredAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
-      );
-    return {
-      recovered: true,
-      failures: held.consecutiveFailures,
-      startedAt: held.failureStartedAt ?? now,
-    } as const;
-  });
-}
-
-/** Release a lease after a target-only failure without moving its fixed scan. */
-export async function releaseRetellMonitoringLease(
-  auth: AuthContext,
-  target: Pick<
-    RetellMonitoringTarget,
-    "setupId" | "monitoredAgentId" | "leaseOwner" | "apiKey"
-  >,
+  target: Pick<MonitoringPullTarget, "agentId" | "leaseOwner" | "apiKey">,
   input: {
     readonly retryAt: Date;
     readonly errorKind: string;
@@ -1161,31 +851,30 @@ export async function releaseRetellMonitoringLease(
 ): Promise<void> {
   const now = input.now ?? new Date();
   await db().transaction(async (tx) => {
-    const [setup] = await tx
-      .select({ credentials: monitoringSetup.credentials })
-      .from(monitoringSetup)
+    const [held] = await tx
+      .select({ credentials: agent.monitoringApiKey })
+      .from(monitoringState)
+      .innerJoin(agent, eq(agent.id, monitoringState.agentId))
       .where(
         and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
-      .for("update");
-    if (setup === undefined || setup.credentials === null) return;
+      .for("update", { of: monitoringState });
+    if (held === undefined || held.credentials === null) return;
 
-    const currentKey = openedRetellKey(setup.credentials);
+    const currentKey = openedMonitoringKey(held.credentials);
     await tx
-      .update(retellMonitoredAgent)
+      .update(monitoringState)
       .set(
         currentKey === target.apiKey
           ? {
               nextPollAt: input.retryAt,
               leaseOwner: null,
               leaseExpiresAt: null,
-              consecutiveFailures: sql`${retellMonitoredAgent.consecutiveFailures} + 1`,
-              lastErrorKind: input.errorKind,
-              lastErrorAt: now,
+              consecutiveFailures: sql`${monitoringState.consecutiveFailures} + 1`,
               updatedAt: now,
             }
           : {
@@ -1197,42 +886,33 @@ export async function releaseRetellMonitoringLease(
       )
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       );
   });
 }
 
-export async function recordRetellCallReceived(
+/** Stamp the notebook as pulled calls arrive. */
+export async function recordPulledCallReceived(
   auth: AuthContext,
-  target: Pick<RetellMonitoringTarget, "setupId" | "monitoredAgentId">,
+  target: Pick<MonitoringPullTarget, "agentId">,
   receivedAt: Date,
 ): Promise<void> {
-  await db().transaction(async (tx) => {
-    await tx
-      .update(monitoringSetup)
-      .set({ lastReceivedAt: receivedAt, updatedAt: new Date() })
-      .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
-      );
-    await tx
-      .update(retellMonitoredAgent)
-      .set({ lastCallReceivedAt: receivedAt, updatedAt: new Date() })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-        ),
-      );
-  });
+  await db()
+    .update(monitoringState)
+    .set({ lastReceivedAt: receivedAt, updatedAt: new Date() })
+    .where(
+      and(
+        withinMonitoringProject(auth, monitoringState),
+        eq(monitoringState.agentId, target.agentId),
+      ),
+    );
 }
 
-/** Keep setup health truthful when a stale claim finishes after a restart. */
-export async function recordRetellMonitoringReceived(
+/** Keep the notebook truthful when a stale claim finishes after a restart. */
+export async function recordPulledCallReceivedForPlatformAgent(
   auth: AuthContext,
   input: {
     readonly platformAgentId: string;
@@ -1240,47 +920,32 @@ export async function recordRetellMonitoringReceived(
   },
 ): Promise<void> {
   const receivedAt = input.receivedAt ?? new Date();
-  await db().transaction(async (tx) => {
-    await tx
-      .update(monitoringSetup)
-      .set({ lastReceivedAt: receivedAt, updatedAt: receivedAt })
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      );
-    await tx
-      .update(retellMonitoredAgent)
-      .set({ lastCallReceivedAt: receivedAt, updatedAt: receivedAt })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.platformAgentId, input.platformAgentId),
-        ),
-      );
-  });
-}
-
-/** Called after a valid LiveKit production export reaches the shared store. */
-export async function recordLiveKitMonitoringReceived(
-  auth: AuthContext,
-  receivedAt = new Date(),
-): Promise<void> {
-  if (auth.projectId === undefined) return;
+  const pulled = await db()
+    .select({ id: agent.id })
+    .from(agent)
+    .where(
+      and(
+        within(auth, agent, eq(agent.projectId, projectOf(auth))),
+        eq(agent.platformAgentId, input.platformAgentId),
+      ),
+    );
+  if (pulled.length === 0) return;
   await db()
-    .update(monitoringSetup)
+    .update(monitoringState)
     .set({ lastReceivedAt: receivedAt, updatedAt: receivedAt })
     .where(
       and(
-        withinMonitoringProject(auth, monitoringSetup),
-        eq(monitoringSetup.agentPlatform, "livekit_agents"),
+        withinMonitoringProject(auth, monitoringState),
+        inArray(
+          monitoringState.agentId,
+          pulled.map((row) => row.id),
+        ),
       ),
     );
 }
 
 /** A summary is already owned by a completed claim or a durable failure. */
-export async function retellCallIsAccountedFor(
+export async function productionCallIsAccountedFor(
   auth: AuthContext,
   providerCallId: string,
 ): Promise<boolean> {
@@ -1298,14 +963,14 @@ export async function retellCallIsAccountedFor(
       )
       .limit(1),
     db()
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
+      .select({ id: monitoringFailure.id })
+      .from(monitoringFailure)
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.projectId, projectId),
-          eq(retellIngestionFailure.providerCallId, providerCallId),
-          eq(retellIngestionFailure.status, "open"),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.projectId, projectId),
+          eq(monitoringFailure.providerCallId, providerCallId),
+          eq(monitoringFailure.status, "open"),
         ),
       )
       .limit(1),
@@ -1313,9 +978,13 @@ export async function retellCallIsAccountedFor(
   return claim.length > 0 || failure.length > 0;
 }
 
-export async function recordRetellIngestionFailure(
+/**
+ * Write the poison-call record: after bounded retries on one broken call,
+ * record it, move the cursor, and keep the replay lease available.
+ */
+export async function recordMonitoringFailure(
   auth: AuthContext,
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   input: {
     readonly providerCallId: string;
     readonly errorKind: string;
@@ -1326,23 +995,24 @@ export async function recordRetellIngestionFailure(
   const now = input.now ?? new Date();
   const projectId = projectOf(auth);
   return db().transaction(async (tx) => {
-    const [setup] = await tx
-      .select({ credentials: monitoringSetup.credentials })
-      .from(monitoringSetup)
+    const [owned] = await tx
+      .select({ credentials: agent.monitoringApiKey })
+      .from(monitoringState)
+      .innerJoin(agent, eq(agent.id, monitoringState.agentId))
       .where(
         and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+          eq(monitoringState.leaseOwner, target.leaseOwner),
         ),
       )
-      .for("update");
-    if (setup === undefined || setup.credentials === null) {
+      .for("update", { of: monitoringState });
+    if (owned === undefined || owned.credentials === null) {
       return { recorded: false, changed: false };
     }
-    if (openedRetellKey(setup.credentials) !== target.apiKey) {
+    if (openedMonitoringKey(owned.credentials) !== target.apiKey) {
       await tx
-        .update(retellMonitoredAgent)
+        .update(monitoringState)
         .set({
           nextPollAt: now,
           leaseOwner: null,
@@ -1351,40 +1021,32 @@ export async function recordRetellIngestionFailure(
         })
         .where(
           and(
-            withinMonitoringProject(auth, retellMonitoredAgent),
-            eq(retellMonitoredAgent.id, target.monitoredAgentId),
-            eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-            eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+            withinMonitoringProject(auth, monitoringState),
+            eq(monitoringState.agentId, target.agentId),
+            eq(monitoringState.leaseOwner, target.leaseOwner),
           ),
         );
       return { recorded: false, changed: false };
     }
 
-    const [owned] = await tx
-      .select({
-        id: retellMonitoredAgent.id,
-        state: retellMonitoredAgent.state,
-      })
-      .from(retellMonitoredAgent)
+    const [existing] = await tx
+      .select({ id: monitoringFailure.id })
+      .from(monitoringFailure)
       .where(
         and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.agentId, target.agentId),
+          eq(monitoringFailure.status, "open"),
         ),
       )
-      .for("update");
-    if (owned === undefined) {
-      return { recorded: false, changed: false };
-    }
+      .limit(1);
     await tx
-      .insert(retellIngestionFailure)
+      .insert(monitoringFailure)
       .values({
-        id: newId("rif"),
+        id: newId("mnf"),
+        agentId: target.agentId,
         organizationId: auth.organizationId,
         projectId,
-        retellMonitoredAgentId: target.monitoredAgentId,
         providerCallId: input.providerCallId,
         errorKind: input.errorKind,
         payload: input.safePayload,
@@ -1392,79 +1054,69 @@ export async function recordRetellIngestionFailure(
         lastAttemptAt: now,
       })
       .onConflictDoUpdate({
-        target: [
-          retellIngestionFailure.projectId,
-          retellIngestionFailure.providerCallId,
-        ],
+        target: [monitoringFailure.projectId, monitoringFailure.providerCallId],
         set: {
           errorKind: input.errorKind,
           payload: input.safePayload,
-          attempts: sql`${retellIngestionFailure.attempts} + 1`,
+          attempts: sql`${monitoringFailure.attempts} + 1`,
           status: "open",
           resolvedAt: null,
           lastAttemptAt: now,
         },
       });
-    await tx
-      .update(retellMonitoredAgent)
-      .set({
-        state: "degraded",
-        lastErrorKind: input.errorKind,
-        lastErrorAt: now,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
-          eq(retellMonitoredAgent.leaseOwner, target.leaseOwner),
-        ),
-      );
-    return { changed: owned.state !== "degraded" };
+    return { changed: existing === undefined };
   });
 }
 
-export type RetellIngestionFailureReplayTarget = {
-  readonly setupId: string;
-  readonly monitoredAgentId: string;
+export type MonitoringFailureReplayTarget = {
+  readonly agentId: string;
   readonly failureId: string;
   readonly providerCallId: string;
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly apiKey: string;
-  readonly setupConsecutiveFailures: number;
+  /** The agent's own retry clock, so a replay backs off exactly as a poll does. */
+  readonly consecutiveFailures: number;
   readonly leaseOwner: string;
   readonly leaseExpiresAt: Date;
   readonly auth: AuthContext;
 };
 
-export type RetellIngestionFailureReplayClaim =
+export type MonitoringFailureReplayClaim =
   | {
       readonly kind: "claimed";
-      readonly target: RetellIngestionFailureReplayTarget;
+      readonly target: MonitoringFailureReplayTarget;
     }
   | {
       readonly kind: "busy";
-      readonly reason: MonitoringFailureKind | "replay_in_progress";
+      /**
+       * `backing_off` is the agent's own retry clock, and it is deliberately
+       * mute about what the provider said. The account-wide health state that
+       * used to name the cause is gone (ADR-0015), so all the server truthfully
+       * knows here is *this agent is waiting until `retryAt`*.
+       */
+      readonly reason:
+        | MonitoringFailureKind
+        | "replay_in_progress"
+        | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "not_found" };
 
 /**
- * Lease one customer-requested failed call and open the current setup key.
+ * Lease one customer-requested failed call and open the agent's current key.
  *
  * The failure id is always resolved inside the caller's project. A failure in
  * another tenant therefore has the same result as an unknown failure id.
  */
-export async function claimRetellIngestionFailureReplay(
+export async function claimMonitoringFailureReplay(
   auth: AuthContext,
   failureId: string,
   options: {
     readonly now?: Date | undefined;
     readonly leaseMilliseconds?: number | undefined;
   } = {},
-): Promise<RetellIngestionFailureReplayClaim> {
+): Promise<MonitoringFailureReplayClaim> {
   authorize(auth, "configure_monitoring", here(auth));
   projectOf(auth);
   const now = options.now ?? new Date();
@@ -1477,67 +1129,41 @@ export async function claimRetellIngestionFailureReplay(
   const claimed = await db().transaction(async (tx) => {
     const [candidate] = await tx
       .select({
-        failureId: retellIngestionFailure.id,
-        providerCallId: retellIngestionFailure.providerCallId,
-        replayLeaseExpiresAt: retellIngestionFailure.replayLeaseExpiresAt,
-        monitoredAgentId: retellMonitoredAgent.id,
-        platformAgentId: retellMonitoredAgent.platformAgentId,
-        platformAgentName: retellMonitoredAgent.platformAgentName,
-        setupId: monitoringSetup.id,
-        organizationId: monitoringSetup.organizationId,
-        projectId: monitoringSetup.projectId,
-        credentials: monitoringSetup.credentials,
-        healthState: monitoringSetup.healthState,
-        blockedUntil: monitoringSetup.blockedUntil,
-        setupConsecutiveFailures: monitoringSetup.consecutiveFailures,
+        failureId: monitoringFailure.id,
+        providerCallId: monitoringFailure.providerCallId,
+        replayLeaseExpiresAt: monitoringFailure.replayLeaseExpiresAt,
+        agentId: agent.id,
+        organizationId: agent.organizationId,
+        projectId: agent.projectId,
+        platformAgentId: agent.platformAgentId,
+        platformAgentName: agent.name,
+        credentials: agent.monitoringApiKey,
+        consecutiveFailures: monitoringState.consecutiveFailures,
+        nextPollAt: monitoringState.nextPollAt,
       })
-      .from(retellIngestionFailure)
+      .from(monitoringFailure)
       .innerJoin(
-        retellMonitoredAgent,
+        agent,
         and(
-          eq(
-            retellMonitoredAgent.id,
-            retellIngestionFailure.retellMonitoredAgentId,
-          ),
-          eq(retellMonitoredAgent.projectId, retellIngestionFailure.projectId),
-          eq(
-            retellMonitoredAgent.organizationId,
-            retellIngestionFailure.organizationId,
-          ),
+          eq(agent.id, monitoringFailure.agentId),
+          eq(agent.projectId, monitoringFailure.projectId),
         ),
       )
-      .innerJoin(
-        monitoringSetup,
-        and(
-          eq(monitoringSetup.id, retellMonitoredAgent.monitoringSetupId),
-          eq(monitoringSetup.projectId, retellMonitoredAgent.projectId),
-          eq(
-            monitoringSetup.organizationId,
-            retellMonitoredAgent.organizationId,
-          ),
-        ),
-      )
+      .leftJoin(monitoringState, eq(monitoringState.agentId, agent.id))
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(retellIngestionFailure.id, failureId),
-          eq(retellIngestionFailure.status, "open"),
-          eq(monitoringSetup.agentPlatform, "retell"),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, failureId),
+          eq(monitoringFailure.status, "open"),
         ),
       )
-      .for("update", { of: retellIngestionFailure });
-    if (candidate === undefined || candidate.credentials === null) {
+      .for("update", { of: monitoringFailure });
+    if (
+      candidate === undefined ||
+      candidate.credentials === null ||
+      candidate.platformAgentId === null
+    ) {
       return { kind: "not_found" } as const;
-    }
-    if (candidate.blockedUntil !== null && candidate.blockedUntil > now) {
-      const reason = candidate.healthState as MonitoringHealthState;
-      return {
-        kind: "busy",
-        reason: reason === "healthy" ? "provider_unavailable" : reason,
-        retryAt: candidate.blockedUntil,
-      } as const;
     }
     if (
       candidate.replayLeaseExpiresAt !== null &&
@@ -1549,41 +1175,61 @@ export async function claimRetellIngestionFailureReplay(
         retryAt: candidate.replayLeaseExpiresAt,
       } as const;
     }
-    const apiKey = openedRetellKey(candidate.credentials);
+    // The agent's retry clock gates the explicit replay too, and it has to:
+    // without this, a customer pressing Retry would spend the provider request
+    // the backoff was taken to stop, and a rate limit would be answered by
+    // asking again. The gate is the failure streak *and* the clock together —
+    // `next_poll_at` also carries the ordinary 30-second cadence, and an
+    // explicit replay must never wait for that.
+    if (
+      candidate.consecutiveFailures !== null &&
+      candidate.consecutiveFailures > 0 &&
+      candidate.nextPollAt !== null &&
+      candidate.nextPollAt > now
+    ) {
+      return {
+        kind: "busy",
+        reason: "backing_off",
+        retryAt: candidate.nextPollAt,
+      } as const;
+    }
+    const apiKey = openedMonitoringKey(candidate.credentials);
 
     const updated = await tx
-      .update(retellIngestionFailure)
+      .update(monitoringFailure)
       .set({
         replayLeaseOwner: leaseOwner,
         replayLeaseExpiresAt: leaseExpiresAt,
-        attempts: sql`${retellIngestionFailure.attempts} + 1`,
+        attempts: sql`${monitoringFailure.attempts} + 1`,
         lastAttemptAt: now,
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, candidate.failureId),
-          eq(retellIngestionFailure.status, "open"),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, candidate.failureId),
+          eq(monitoringFailure.status, "open"),
         ),
       )
-      .returning({ id: retellIngestionFailure.id });
+      .returning({ id: monitoringFailure.id });
     if (updated.length !== 1) return { kind: "not_found" } as const;
-    return { kind: "claimed", candidate, apiKey } as const;
+    return {
+      kind: "claimed",
+      candidate: { ...candidate, platformAgentId: candidate.platformAgentId },
+      apiKey,
+    } as const;
   });
 
   if (claimed.kind !== "claimed") return claimed;
   return {
     kind: "claimed",
     target: {
-      setupId: claimed.candidate.setupId,
-      monitoredAgentId: claimed.candidate.monitoredAgentId,
+      agentId: claimed.candidate.agentId,
       failureId: claimed.candidate.failureId,
       providerCallId: claimed.candidate.providerCallId,
       platformAgentId: claimed.candidate.platformAgentId,
       platformAgentName: claimed.candidate.platformAgentName,
       apiKey: claimed.apiKey,
-      setupConsecutiveFailures:
-        claimed.candidate.setupConsecutiveFailures,
+      consecutiveFailures: claimed.candidate.consecutiveFailures ?? 0,
       leaseOwner,
       leaseExpiresAt,
       auth: monitoringContext(
@@ -1595,15 +1241,11 @@ export async function claimRetellIngestionFailureReplay(
 }
 
 /** Keep a durable failure open after an exact-call replay still cannot import. */
-export async function releaseRetellIngestionFailureReplay(
+export async function releaseMonitoringFailureReplay(
   auth: AuthContext,
   target: Pick<
-    RetellIngestionFailureReplayTarget,
-    | "setupId"
-    | "monitoredAgentId"
-    | "failureId"
-    | "leaseOwner"
-    | "apiKey"
+    MonitoringFailureReplayTarget,
+    "agentId" | "failureId" | "leaseOwner" | "apiKey"
   >,
   input: {
     readonly errorKind: string;
@@ -1612,59 +1254,41 @@ export async function releaseRetellIngestionFailureReplay(
 ): Promise<boolean> {
   const now = input.now ?? new Date();
   return db().transaction(async (tx) => {
-    const [setup] = await tx
-      .select({ credentials: monitoringSetup.credentials })
-      .from(monitoringSetup)
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      )
-      .for("update");
-    if (setup === undefined || setup.credentials === null) return false;
-
     const [failure] = await tx
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .innerJoin(
-        retellMonitoredAgent,
-        eq(
-          retellMonitoredAgent.id,
-          retellIngestionFailure.retellMonitoredAgentId,
-        ),
-      )
+      .select({
+        id: monitoringFailure.id,
+        credentials: agent.monitoringApiKey,
+      })
+      .from(monitoringFailure)
+      .innerJoin(agent, eq(agent.id, monitoringFailure.agentId))
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.status, "open"),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, target.failureId),
+          eq(monitoringFailure.status, "open"),
+          eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
+          eq(agent.id, target.agentId),
         ),
       )
-      .for("update", { of: retellIngestionFailure });
-    if (failure === undefined) return false;
+      .for("update", { of: monitoringFailure });
+    if (failure === undefined || failure.credentials === null) return false;
 
-    if (openedRetellKey(setup.credentials) !== target.apiKey) {
+    if (openedMonitoringKey(failure.credentials) !== target.apiKey) {
       await tx
-        .update(retellIngestionFailure)
+        .update(monitoringFailure)
         .set({ replayLeaseOwner: null, replayLeaseExpiresAt: null })
         .where(
           and(
-            withinMonitoringProject(auth, retellIngestionFailure),
-            eq(retellIngestionFailure.id, target.failureId),
-            eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
+            withinMonitoringProject(auth, monitoringFailure),
+            eq(monitoringFailure.id, target.failureId),
+            eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
           ),
         );
       return false;
     }
 
     const released = await tx
-      .update(retellIngestionFailure)
+      .update(monitoringFailure)
       .set({
         errorKind: input.errorKind,
         lastAttemptAt: now,
@@ -1673,99 +1297,63 @@ export async function releaseRetellIngestionFailureReplay(
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, target.failureId),
+          eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
         ),
       )
-      .returning({ id: retellIngestionFailure.id });
+      .returning({ id: monitoringFailure.id });
     return released.length === 1;
   });
 }
 
-export type RetellIngestionFailureReplayProviderResult = {
+export type MonitoringFailureReplayProviderResult = {
   readonly recorded: boolean;
   readonly changed: boolean;
   readonly failures: number;
-  readonly startedAt: Date;
 };
 
-/** Record a setup-wide provider failure and release one manual replay lease. */
-export async function failRetellIngestionFailureReplay(
+/** Record a provider failure against the agent and release one replay lease. */
+export async function failMonitoringFailureReplay(
   auth: AuthContext,
   target: Pick<
-    RetellIngestionFailureReplayTarget,
-    "setupId" | "failureId" | "leaseOwner" | "apiKey"
+    MonitoringFailureReplayTarget,
+    "agentId" | "failureId" | "leaseOwner" | "apiKey"
   >,
   input: {
     readonly kind: MonitoringFailureKind;
     readonly retryAt: Date;
     readonly now?: Date | undefined;
   },
-): Promise<RetellIngestionFailureReplayProviderResult> {
+): Promise<MonitoringFailureReplayProviderResult> {
   const now = input.now ?? new Date();
   return db().transaction(async (tx) => {
-    const [held] = await tx
-      .select({
-        credentials: monitoringSetup.credentials,
-        healthState: monitoringSetup.healthState,
-        blockedUntil: monitoringSetup.blockedUntil,
-        failureStartedAt: monitoringSetup.failureStartedAt,
-        consecutiveFailures: monitoringSetup.consecutiveFailures,
-      })
-      .from(monitoringSetup)
-      .where(
-        and(
-          withinMonitoringProject(auth, monitoringSetup),
-          eq(monitoringSetup.id, target.setupId),
-          eq(monitoringSetup.agentPlatform, "retell"),
-        ),
-      )
-      .for("update");
-    if (held === undefined) {
-      return {
-        recorded: false,
-        changed: false,
-        failures: 0,
-        startedAt: now,
-      };
-    }
-
     const [failure] = await tx
-      .select({ id: retellIngestionFailure.id })
-      .from(retellIngestionFailure)
-      .innerJoin(
-        retellMonitoredAgent,
-        eq(
-          retellMonitoredAgent.id,
-          retellIngestionFailure.retellMonitoredAgentId,
-        ),
-      )
+      .select({
+        id: monitoringFailure.id,
+        credentials: agent.monitoringApiKey,
+      })
+      .from(monitoringFailure)
+      .innerJoin(agent, eq(agent.id, monitoringFailure.agentId))
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.status, "open"),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
-          eq(retellMonitoredAgent.monitoringSetupId, target.setupId),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, target.failureId),
+          eq(monitoringFailure.status, "open"),
+          eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
+          eq(agent.id, target.agentId),
         ),
       )
-      .for("update", { of: retellIngestionFailure });
+      .for("update", { of: monitoringFailure });
     if (failure === undefined) {
-      return {
-        recorded: false,
-        changed: false,
-        failures: held.consecutiveFailures,
-        startedAt: held.failureStartedAt ?? now,
-      };
+      return { recorded: false, changed: false, failures: 0 };
     }
     if (
-      held.credentials === null ||
-      openedRetellKey(held.credentials) !== target.apiKey
+      failure.credentials === null ||
+      openedMonitoringKey(failure.credentials) !== target.apiKey
     ) {
       await tx
-        .update(retellIngestionFailure)
+        .update(monitoringFailure)
         .set({
           replayLeaseOwner: null,
           replayLeaseExpiresAt: null,
@@ -1773,45 +1361,43 @@ export async function failRetellIngestionFailureReplay(
         })
         .where(
           and(
-            withinMonitoringProject(auth, retellIngestionFailure),
-            eq(retellIngestionFailure.id, target.failureId),
-            eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
+            withinMonitoringProject(auth, monitoringFailure),
+            eq(monitoringFailure.id, target.failureId),
+            eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
           ),
         );
-      return {
-        recorded: false,
-        changed: false,
-        failures: held.consecutiveFailures,
-        startedAt: held.failureStartedAt ?? now,
-      };
+      return { recorded: false, changed: false, failures: 0 };
     }
 
-    const keepExistingGate =
-      input.kind !== "invalid_credential" &&
-      (held.healthState === "invalid_credential" ||
-        (held.blockedUntil !== null && held.blockedUntil > input.retryAt));
-    const healthState = keepExistingGate ? held.healthState : input.kind;
-    const blockedUntil = keepExistingGate
-      ? (held.blockedUntil ?? input.retryAt)
-      : input.retryAt;
-    const changed = held.healthState !== healthState;
-    const startedAt = held.failureStartedAt ?? now;
-    const failures = held.consecutiveFailures + 1;
-    await tx
-      .update(monitoringSetup)
-      .set({
-        healthState,
-        blockedUntil,
-        failureStartedAt: startedAt,
-        consecutiveFailures: failures,
-        lastErrorAt: now,
-        updatedAt: now,
-      })
+    const [held] = await tx
+      .select({ consecutiveFailures: monitoringState.consecutiveFailures })
+      .from(monitoringState)
       .where(
-        and(withinMonitoringProject(auth, monitoringSetup), eq(monitoringSetup.id, target.setupId)),
-      );
+        and(
+          withinMonitoringProject(auth, monitoringState),
+          eq(monitoringState.agentId, target.agentId),
+        ),
+      )
+      .for("update");
+    const before = held?.consecutiveFailures ?? 0;
+    const failures = before + 1;
+    if (held !== undefined) {
+      await tx
+        .update(monitoringState)
+        .set({
+          nextPollAt: input.retryAt,
+          consecutiveFailures: failures,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            withinMonitoringProject(auth, monitoringState),
+            eq(monitoringState.agentId, target.agentId),
+          ),
+        );
+    }
     await tx
-      .update(retellIngestionFailure)
+      .update(monitoringFailure)
       .set({
         replayLeaseOwner: null,
         replayLeaseExpiresAt: null,
@@ -1819,45 +1405,28 @@ export async function failRetellIngestionFailureReplay(
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, target.failureId),
+          eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
         ),
       );
-    return { recorded: true, changed, failures, startedAt };
+    return { recorded: true, changed: before === 0, failures };
   });
 }
 
-/** Resolve one replayed failure and recover the agent only when none remain. */
-export async function resolveRetellIngestionFailureReplay(
+/** Resolve one replayed failure; report whether the agent has none left. */
+export async function resolveMonitoringFailureReplay(
   auth: AuthContext,
   target: Pick<
-    RetellIngestionFailureReplayTarget,
-    "monitoredAgentId" | "failureId" | "leaseOwner"
+    MonitoringFailureReplayTarget,
+    "agentId" | "failureId" | "leaseOwner"
   >,
   options: { readonly now?: Date | undefined } = {},
 ): Promise<{ readonly resolved: boolean; readonly agentRecovered: boolean }> {
   const now = options.now ?? new Date();
   return db().transaction(async (tx) => {
-    const [agent] = await tx
-      .select({
-        state: retellMonitoredAgent.state,
-        scanKind: retellMonitoredAgent.scanKind,
-      })
-      .from(retellMonitoredAgent)
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-        ),
-      )
-      .for("update");
-    if (agent === undefined) {
-      return { resolved: false, agentRecovered: false };
-    }
-
     const resolved = await tx
-      .update(retellIngestionFailure)
+      .update(monitoringFailure)
       .set({
         status: "resolved",
         resolvedAt: now,
@@ -1866,70 +1435,34 @@ export async function resolveRetellIngestionFailureReplay(
       })
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(retellIngestionFailure.id, target.failureId),
-          eq(
-            retellIngestionFailure.retellMonitoredAgentId,
-            target.monitoredAgentId,
-          ),
-          eq(retellIngestionFailure.status, "open"),
-          eq(retellIngestionFailure.replayLeaseOwner, target.leaseOwner),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.id, target.failureId),
+          eq(monitoringFailure.agentId, target.agentId),
+          eq(monitoringFailure.status, "open"),
+          eq(monitoringFailure.replayLeaseOwner, target.leaseOwner),
         ),
       )
-      .returning({ id: retellIngestionFailure.id });
+      .returning({ id: monitoringFailure.id });
     if (resolved.length !== 1) {
       return { resolved: false, agentRecovered: false };
     }
 
     const [remaining] = await tx
-      .select({
-        errorKind: retellIngestionFailure.errorKind,
-        lastAttemptAt: retellIngestionFailure.lastAttemptAt,
-      })
-      .from(retellIngestionFailure)
+      .select({ id: monitoringFailure.id })
+      .from(monitoringFailure)
       .where(
         and(
-          withinMonitoringProject(auth, retellIngestionFailure),
-          eq(
-            retellIngestionFailure.retellMonitoredAgentId,
-            target.monitoredAgentId,
-          ),
-          eq(retellIngestionFailure.status, "open"),
+          withinMonitoringProject(auth, monitoringFailure),
+          eq(monitoringFailure.agentId, target.agentId),
+          eq(monitoringFailure.status, "open"),
         ),
       )
       .orderBy(
-        desc(retellIngestionFailure.lastAttemptAt),
-        desc(retellIngestionFailure.id),
+        desc(monitoringFailure.lastAttemptAt),
+        desc(monitoringFailure.id),
       )
       .limit(1);
-    const agentRecovered =
-      agent.state === "degraded" && remaining === undefined;
-    await tx
-      .update(retellMonitoredAgent)
-      .set(
-        remaining === undefined
-          ? {
-              state: agent.scanKind === null ? "active" : "importing",
-              consecutiveFailures: 0,
-              lastErrorKind: null,
-              lastErrorAt: null,
-              lastSuccessAt: now,
-              updatedAt: now,
-            }
-          : {
-              state: "degraded",
-              lastErrorKind: remaining.errorKind,
-              lastErrorAt: remaining.lastAttemptAt,
-              updatedAt: now,
-            },
-      )
-      .where(
-        and(
-          withinMonitoringProject(auth, retellMonitoredAgent),
-          eq(retellMonitoredAgent.id, target.monitoredAgentId),
-        ),
-      );
-    return { resolved: true, agentRecovered };
+    return { resolved: true, agentRecovered: remaining === undefined };
   });
 }
 
@@ -1949,7 +1482,7 @@ export type ProductionTraceClaim = ProductionTraceOffer & {
   readonly auth: AuthContext;
 };
 
-/** Atomically own one Retell call before writing it to ClickHouse. */
+/** Atomically own one production call before writing it to ClickHouse. */
 export async function claimProductionTrace(
   auth: AuthContext,
   offer: ProductionTraceOffer,

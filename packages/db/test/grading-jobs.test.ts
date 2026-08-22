@@ -150,7 +150,7 @@ beforeAll(async () => {
     name: "Front desk",
     connection: {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -221,7 +221,7 @@ function aSpan(over: Partial<NewSpan> & { readonly traceId: string }): NewSpan {
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
-    connectionKind: "livekit",
+    connectionType: "livekit",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -631,7 +631,7 @@ describe("the claim", () => {
       name: "Support line",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_2" },

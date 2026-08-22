@@ -475,7 +475,7 @@ export async function simulationRoutes(
       // sealed column and was never copied into the snapshot.
       connectionSnapshot: {
         agentPlatform: run.connectionSnapshot.agentPlatform,
-        connectionKind: run.connectionSnapshot.connectionKind,
+        connectionType: run.connectionSnapshot.connectionType,
         accessVariant: run.connectionSnapshot.accessVariant,
         modality: run.connectionSnapshot.modality,
         topology: run.connectionSnapshot.topology,

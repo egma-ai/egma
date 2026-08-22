@@ -7,7 +7,6 @@ import { getAgent, updateAgent } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import type { Refusal } from "../../../../../lib/api.ts";
 import {
   NO_ENVIRONMENT,
@@ -39,7 +38,7 @@ import { modalityLabel } from "../connection-facts.tsx";
  * One agent: what egma owns about it, and every way egma can reach it.
  *
  * **Two things, and the split is the product boundary.** The header is the
- * Egma-owned identity — a name and a description, and nothing about the
+ * Egma-owned identity — a name, and nothing about the
  * provider's prompt, model or tools, because those live where the customer
  * configures them and a copy here would be stale from the moment it was taken.
  * The body is the connections, which are how Egma reaches the agent, and this
@@ -73,7 +72,7 @@ export default function AgentDetailPage() {
  * A connection, said the same way the agents list says it.
  *
  * The product label comes down on the connection, derived by the registry from
- * its platform, connection kind, access variant, and modality. A label table
+ * its platform, connection type, access variant, and modality. A label table
  * kept in this application would be a second vocabulary able to disagree with
  * the registry that gates the connection forms.
  */
@@ -219,7 +218,6 @@ function AgentDetailView({
           { label: "Agents", href: agents },
           { label: agent.name },
         ]}
-        lead={agent.description ?? "No description yet."}
         action={
           role === null ? undefined : (
             <Actions>
@@ -312,13 +310,12 @@ function AgentDetailView({
 }
 
 /**
- * The Egma-owned identity, edited against the revision the form was opened on.
+ * The Egma-owned identity: the name, and nothing about the agent itself.
  *
- * **The revision goes with the save and is not a formality.** Two people
- * editing one agent from two browsers is the ordinary case; without it the
- * second save silently erases the first and neither of them is told. When egma
- * refuses for that reason the typing stays exactly where it is and the sentence
- * says what to do — reading again is one click, retyping is not.
+ * **Saving is last-writer-wins.** The revision column was dropped pre-launch
+ * (ADR-0015), so two people editing one agent from two browsers is a silent
+ * overwrite — accepted with eyes open, and the exact failure the column
+ * existed to stop.
  */
 function EditAgent({
   projectId,
@@ -332,13 +329,11 @@ function EditAgent({
   readonly onSaved: () => void;
 }) {
   const [name, setName] = useState(agent.name);
-  const [description, setDescription] = useState(agent.description ?? "");
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
 
-  const changed =
-    name !== agent.name || description !== (agent.description ?? "");
+  const changed = name !== agent.name;
   useUnsavedChanges(changed && !saving, saving);
 
   async function save(): Promise<void> {
@@ -359,8 +354,6 @@ function EditAgent({
           agentId: agent.id,
           projectId,
           name: wanted,
-          description: description.trim() === "" ? null : description.trim(),
-          expectedRevision: agent.revision,
         },
         { client: platformClient },
       ),
@@ -401,15 +394,6 @@ function EditAgent({
             {nameProblem === null ? null : (
               <Problem id="edit-agent-name-problem">{nameProblem}</Problem>
             )}
-          </Field>
-
-          <Field label="Description" htmlFor="edit-agent-description">
-            <Textarea
-              id="edit-agent-description"
-              value={description}
-              rows={3}
-              onChange={(event) => setDescription(event.target.value)}
-            />
           </Field>
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}

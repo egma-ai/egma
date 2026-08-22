@@ -288,6 +288,13 @@
       "when": 1787342878596,
       "tag": "0040_test_suites",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787378881296,
+      "tag": "0041_agents_own_platform_monitoring",
+      "breakpoints": true
     }
   ]
 }

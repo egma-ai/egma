@@ -100,7 +100,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
-    connectionKind: "",
+    connectionType: "",
     runId: "",
     agentId: "",
     agentVersionId: "",

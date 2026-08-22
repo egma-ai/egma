@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -27,8 +28,16 @@ import {
  * connection is how egma reaches one: the same logical agent might be a Retell
  * chat endpoint in CI, a Retell web call in staging, and a phone number in
  * production, and its history must stay under one identity through all of
- * them. So the platform lives entirely on the connection and never on the
- * agent — a team that migrates frameworks keeps their agent and its record.
+ * them.
+ *
+ * The agent owns its platform binding, and the connection does not. Which
+ * platform a connection reaches is answered by its connection type where the
+ * type pins one (`retell_chat_api` -> retell, `livekit_room` ->
+ * livekit_agents), else through the agent, else unknown — `phone_number`
+ * spans platforms. The agent's own binding is what production monitoring
+ * needs: the platform, that platform's identity for this agent, and the
+ * sealed monitoring key egma pulls its finished production conversations
+ * with. See ADR-0015.
  *
  * Deliberately unversioned, both tables. egma versions what egma authors, and
  * an agent's real content — prompt, model, tools — lives on the provider's
@@ -42,14 +51,14 @@ export const AGENT_PLATFORMS = ["retell", "livekit_agents"] as const;
 export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 
 /** The direct paths Egma's simulator can select to reach an agent. */
-export const CONNECTION_KINDS = [
+export const CONNECTION_TYPES = [
   "retell_chat_api",
   "phone_number",
   "livekit_room",
 ] as const;
-export type ConnectionKind = (typeof CONNECTION_KINDS)[number];
+export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
-/** The authority and configuration used inside one connection kind. */
+/** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
   "retell_chat_api.api_key",
   "phone_number.public_e164",
@@ -66,7 +75,7 @@ export const MODALITIES = ["voice", "chat"] as const;
 export type Modality = (typeof MODALITIES)[number];
 
 /**
- * Who moves first when a simulation starts. Derived from the connection kind by the
+ * Who moves first when a simulation starts. Derived from the connection type by the
  * access layer, never supplied by a caller — it predicts whether an agent on a
  * laptop is reachable, and a caller's guess would just be wrong.
  */
@@ -86,14 +95,35 @@ export const agent = pgTable(
       .references(() => organization.id, { onDelete: "cascade" }),
     projectId: idText("project_id").notNull(),
     name: text("name").notNull(),
-    description: text("description"),
     /**
-     * What an edit says it was written against: opaque, and new after every
-     * change that lands. Two people editing one agent from two browsers is the
-     * ordinary case, and without this the second save silently erases the first
-     * — the last writer wins and neither of them is told.
+     * Which platform runs this agent, and that platform's own identity for
+     * it. Both null until somebody binds the agent — a bare roster entry is
+     * lawful, and a LiveKit agent that only ever pushes never needs either.
      */
-    revision: idText("revision").notNull(),
+    agentPlatform: text("agent_platform"),
+    platformAgentId: text("platform_agent_id"),
+    /**
+     * The platform key egma pulls this agent's production conversations with,
+     * sealed in the same envelope a connection's credentials use and opened
+     * by the same one opener. **A monitoring-only credential**: a customer who
+     * chat-tests and pull-monitors one Retell account pastes the key twice,
+     * once per job, so the two custodies never entangle. Custody is per agent
+     * and duplication across agents of one account is accepted knowingly —
+     * sealing is randomized, so the copies are not even recognizable as the
+     * same key.
+     */
+    monitoringApiKey: text("monitoring_api_key"),
+    /** The last characters of the key, kept so a person can tell keys apart. */
+    monitoringApiKeyHint: text("monitoring_api_key_hint"),
+    /**
+     * The declared switch: egma asks this agent's platform for its finished
+     * production conversations, on a clock. Off by default, and the only
+     * stored monitoring choice in the product — push is observed, never
+     * declared.
+     */
+    pullProductionCalls: boolean("pull_production_calls")
+      .notNull()
+      .default(false),
     /**
      * When this agent stopped being available for new work, or null while it
      * is. Archive rather than delete: past runs name it and stay readable, and
@@ -108,6 +138,24 @@ export const agent = pgTable(
   },
   (table) => [
     prefixCheck("agent_id_prefix", table.id, "agt"),
+    oneOf("agent_platform_allowed", table.agentPlatform, [...AGENT_PLATFORMS]),
+    check(
+      "agent_monitoring_key_hint_agrees",
+      sql`(${table.monitoringApiKey} is null) = (${table.monitoringApiKeyHint} is null)`,
+    ),
+    // A key names the platform it opens. Without the platform there is no
+    // provider to spend it against, so the pair is meaningless apart.
+    check(
+      "agent_monitoring_key_needs_platform",
+      sql`${table.monitoringApiKey} is null or ${table.agentPlatform} is not null`,
+    ),
+    // The switch is a promise the poller has to be able to keep: it can only
+    // be on when there is a platform to ask, an id to ask about, and a key to
+    // ask with.
+    check(
+      "agent_pull_needs_binding",
+      sql`${table.pullProductionCalls} = false or (${table.agentPlatform} is not null and ${table.platformAgentId} is not null and ${table.monitoringApiKey} is not null)`,
+    ),
     // The pairing, not each column on its own: an agent cannot name one
     // organization and another organization's project.
     foreignKey({
@@ -125,6 +173,13 @@ export const agent = pgTable(
     index("agent_organization_id_project_id_idx")
       .on(table.organizationId, table.projectId)
       .where(sql`${table.archivedAt} is null`),
+    // Two egma agents polling one platform agent would double the API load and
+    // contest attribution. The claim ledger would absorb the duplicates, but
+    // the fight should be unrepresentable instead. Partial on the switch, so
+    // two switched-off rows may still name the same platform agent.
+    uniqueIndex("agent_pulled_platform_agent_unique")
+      .on(table.projectId, table.agentPlatform, table.platformAgentId)
+      .where(sql`${table.pullProductionCalls}`),
   ],
 );
 
@@ -140,14 +195,16 @@ export const connection = pgTable(
       .notNull()
       .references(() => agent.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    /** The framework behind the target, or null when it is unknown. */
-    agentPlatform: text("agent_platform"),
-    /** The direct path the simulator selects. */
-    connectionKind: text("connection_kind").notNull(),
+    /**
+     * The direct path the simulator selects. It answers the platform question
+     * on its own where it pins one; where it does not — `phone_number` spans
+     * platforms — the agent answers, or nobody does.
+     */
+    connectionType: text("connection_type").notNull(),
     modality: text("modality").notNull(),
     topology: text("topology").notNull(),
     /**
-     * The authority and configuration used inside this connection kind,
+     * The authority and configuration used inside this connection type,
      * written down once at create and never changed.
      *
      * The access variant used to be re-derived from config on every read, by looking
@@ -171,8 +228,6 @@ export const connection = pgTable(
     credentials: text("credentials"),
     /** The last characters of the secret, kept so a person can tell keys apart. */
     credentialsHint: text("credentials_hint"),
-    /** See the agent's own: the opaque revision an edit is written against. */
-    revision: idText("revision").notNull(),
     /** When this connection stopped being reachable for new work, or null. */
     archivedAt: moment("archived_at"),
     createdBy: idText("created_by").references(() => user.id, {
@@ -183,11 +238,8 @@ export const connection = pgTable(
   },
   (table) => [
     prefixCheck("connection_id_prefix", table.id, "con"),
-    oneOf("connection_agent_platform_allowed", table.agentPlatform, [
-      ...AGENT_PLATFORMS,
-    ]),
-    oneOf("connection_kind_allowed", table.connectionKind, [
-      ...CONNECTION_KINDS,
+    oneOf("connection_type_allowed", table.connectionType, [
+      ...CONNECTION_TYPES,
     ]),
     oneOf("connection_access_variant_allowed", table.accessVariant, [
       ...ACCESS_VARIANTS,

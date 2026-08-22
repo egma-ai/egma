@@ -99,7 +99,7 @@ export type NewSpan = {
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly platformAgentVersion: string;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly runId: string;
   readonly agentId: string;
   readonly agentVersionId: string;
@@ -168,7 +168,7 @@ const FIELD_LIMITS = {
   platformAgentId: 512,
   platformAgentName: 512,
   platformAgentVersion: 128,
-  connectionKind: 64,
+  connectionType: 64,
   environment: 128,
 } as const satisfies Readonly<Record<string, number>>;
 
@@ -274,7 +274,7 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
       span.platformAgentVersion,
       FIELD_LIMITS.platformAgentVersion,
     ),
-    connection_type: truncated(span.connectionKind, FIELD_LIMITS.connectionKind),
+    connection_type: truncated(span.connectionType, FIELD_LIMITS.connectionType),
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,

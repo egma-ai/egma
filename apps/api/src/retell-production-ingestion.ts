@@ -1,23 +1,22 @@
 import {
-  checkpointRetellMonitoringPage,
-  claimDueRetellMonitoringAgent,
-  claimRetellIngestionFailureReplay,
-  failRetellIngestionFailureReplay,
-  failRetellMonitoringTarget,
-  finishRetellMonitoringScan,
-  recordRetellIngestionFailure,
-  recoverRetellMonitoringSetup,
-  releaseRetellIngestionFailureReplay,
-  releaseRetellMonitoringLease,
-  renewRetellMonitoringLease,
-  retellCallIsAccountedFor,
-  resolveRetellIngestionFailureReplay,
+  checkpointMonitoringPage,
+  claimDueMonitoringPull,
+  claimMonitoringFailureReplay,
+  failMonitoringFailureReplay,
+  failMonitoringPull,
+  finishMonitoringScan,
+  recordMonitoringFailure,
+  releaseMonitoringFailureReplay,
+  releaseMonitoringLease,
+  renewMonitoringLease,
+  productionCallIsAccountedFor,
+  resolveMonitoringFailureReplay,
   sweepStaleProductionClaims,
-  yieldRetellMonitoringLease,
+  yieldMonitoringLease,
   type AuthContext,
   type MonitoringFailureKind,
-  type RetellIngestionFailureReplayTarget,
-  type RetellMonitoringTarget,
+  type MonitoringFailureReplayTarget,
+  type MonitoringPullTarget,
 } from "@egma/db";
 import { safeRetellProviderData } from "@egma/retell";
 import { metrics as openTelemetryMetrics } from "@opentelemetry/api";
@@ -61,7 +60,7 @@ export type RetellProductionIngestionLog = {
 };
 
 export type RetellProductionIngestionMetricTurn = {
-  readonly scanKind: RetellMonitoringTarget["scanKind"];
+  readonly scanKind: MonitoringPullTarget["scanKind"];
   readonly outcome: "completed" | NonNullable<
     RetellProductionIngestionResult["stoppedBecause"]
   >;
@@ -73,10 +72,10 @@ export type RetellProductionIngestionMetricTurn = {
 
 /** Low-cardinality process metrics. Provider and customer ids never enter it. */
 export type RetellProductionIngestionMetrics = {
-  recordAttempt(scanKind: RetellMonitoringTarget["scanKind"]): void;
+  recordAttempt(scanKind: MonitoringPullTarget["scanKind"]): void;
   recordTurn(turn: RetellProductionIngestionMetricTurn): void;
   recordIngestionLag(
-    scanKind: RetellMonitoringTarget["scanKind"],
+    scanKind: MonitoringPullTarget["scanKind"],
     lagMilliseconds: number,
   ): void;
   recordProviderFailure(kind: MonitoringFailureKind): void;
@@ -85,16 +84,15 @@ export type RetellProductionIngestionMetrics = {
 /** Postgres operations at the production-ingestion seam. */
 export type RetellProductionIngestionStore = {
   readonly sweepStaleProductionClaims: typeof sweepStaleProductionClaims;
-  readonly claimDueRetellMonitoringAgent: typeof claimDueRetellMonitoringAgent;
-  readonly renewRetellMonitoringLease: typeof renewRetellMonitoringLease;
-  readonly checkpointRetellMonitoringPage: typeof checkpointRetellMonitoringPage;
-  readonly yieldRetellMonitoringLease: typeof yieldRetellMonitoringLease;
-  readonly finishRetellMonitoringScan: typeof finishRetellMonitoringScan;
-  readonly failRetellMonitoringTarget: typeof failRetellMonitoringTarget;
-  readonly recoverRetellMonitoringSetup: typeof recoverRetellMonitoringSetup;
-  readonly releaseRetellMonitoringLease: typeof releaseRetellMonitoringLease;
-  readonly retellCallIsAccountedFor: typeof retellCallIsAccountedFor;
-  readonly recordRetellIngestionFailure: typeof recordRetellIngestionFailure;
+  readonly claimDueMonitoringPull: typeof claimDueMonitoringPull;
+  readonly renewMonitoringLease: typeof renewMonitoringLease;
+  readonly checkpointMonitoringPage: typeof checkpointMonitoringPage;
+  readonly yieldMonitoringLease: typeof yieldMonitoringLease;
+  readonly finishMonitoringScan: typeof finishMonitoringScan;
+  readonly failMonitoringPull: typeof failMonitoringPull;
+  readonly releaseMonitoringLease: typeof releaseMonitoringLease;
+  readonly productionCallIsAccountedFor: typeof productionCallIsAccountedFor;
+  readonly recordMonitoringFailure: typeof recordMonitoringFailure;
 };
 
 /** Retell HTTP reads at the production-ingestion seam. */
@@ -111,15 +109,14 @@ export type RetellProductionWriter = {
 
 /** Postgres operations used by one customer-requested failed-call replay. */
 export type RetellIngestionFailureReplayStore = {
-  readonly claimRetellIngestionFailureReplay:
-    typeof claimRetellIngestionFailureReplay;
-  readonly releaseRetellIngestionFailureReplay:
-    typeof releaseRetellIngestionFailureReplay;
-  readonly failRetellIngestionFailureReplay:
-    typeof failRetellIngestionFailureReplay;
-  readonly resolveRetellIngestionFailureReplay:
-    typeof resolveRetellIngestionFailureReplay;
-  readonly recoverRetellMonitoringSetup: typeof recoverRetellMonitoringSetup;
+  readonly claimMonitoringFailureReplay:
+    typeof claimMonitoringFailureReplay;
+  readonly releaseMonitoringFailureReplay:
+    typeof releaseMonitoringFailureReplay;
+  readonly failMonitoringFailureReplay:
+    typeof failMonitoringFailureReplay;
+  readonly resolveMonitoringFailureReplay:
+    typeof resolveMonitoringFailureReplay;
 };
 
 export type RetellIngestionFailureReplayProvider = {
@@ -128,16 +125,15 @@ export type RetellIngestionFailureReplayProvider = {
 
 const STORE: RetellProductionIngestionStore = {
   sweepStaleProductionClaims,
-  claimDueRetellMonitoringAgent,
-  renewRetellMonitoringLease,
-  checkpointRetellMonitoringPage,
-  yieldRetellMonitoringLease,
-  finishRetellMonitoringScan,
-  failRetellMonitoringTarget,
-  recoverRetellMonitoringSetup,
-  releaseRetellMonitoringLease,
-  retellCallIsAccountedFor,
-  recordRetellIngestionFailure,
+  claimDueMonitoringPull,
+  renewMonitoringLease,
+  checkpointMonitoringPage,
+  yieldMonitoringLease,
+  finishMonitoringScan,
+  failMonitoringPull,
+  releaseMonitoringLease,
+  productionCallIsAccountedFor,
+  recordMonitoringFailure,
 };
 
 const PROVIDER: RetellProductionProvider = {
@@ -151,11 +147,10 @@ const WRITER: RetellProductionWriter = {
 };
 
 const FAILURE_REPLAY_STORE: RetellIngestionFailureReplayStore = {
-  claimRetellIngestionFailureReplay,
-  releaseRetellIngestionFailureReplay,
-  failRetellIngestionFailureReplay,
-  resolveRetellIngestionFailureReplay,
-  recoverRetellMonitoringSetup,
+  claimMonitoringFailureReplay,
+  releaseMonitoringFailureReplay,
+  failMonitoringFailureReplay,
+  resolveMonitoringFailureReplay,
 };
 
 const FAILURE_REPLAY_PROVIDER: RetellIngestionFailureReplayProvider = {
@@ -283,25 +278,22 @@ function stableUnit(value: string): number {
 }
 
 /** A stable 27-33 second spread stops all selected agents polling together. */
-function regularPollMilliseconds(target: RetellMonitoringTarget): number {
-  const spread = 0.9 + stableUnit(target.monitoredAgentId) * 0.2;
+function regularPollMilliseconds(target: MonitoringPullTarget): number {
+  const spread = 0.9 + stableUnit(target.agentId) * 0.2;
   return Math.round(
     RETELL_PRODUCTION_POLL_INTERVAL_MILLISECONDS * spread,
   );
 }
 
 function backoffMilliseconds(
-  target: Pick<
-    RetellMonitoringTarget,
-    "setupId" | "setupConsecutiveFailures"
-  >,
+  target: Pick<MonitoringPullTarget, "agentId" | "consecutiveFailures">,
 ): number {
-  const exponent = Math.min(target.setupConsecutiveFailures, 6);
+  const exponent = Math.min(target.consecutiveFailures, 6);
   const base = Math.min(
     BACKOFF_CAP_MILLISECONDS,
     BACKOFF_BASE_MILLISECONDS * 2 ** exponent,
   );
-  const jitter = 0.8 + stableUnit(target.setupId) * 0.4;
+  const jitter = 0.8 + stableUnit(target.agentId) * 0.4;
   return Math.min(BACKOFF_CAP_MILLISECONDS, Math.round(base * jitter));
 }
 
@@ -368,7 +360,7 @@ function targetResult(
 
 function logBatch(
   log: RetellProductionIngestionLog,
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   counts: TargetCounts,
   durationMilliseconds: number,
 ): void {
@@ -389,56 +381,23 @@ function logBatch(
   );
 }
 
-function logHealthChange(
+/**
+ * One agent started failing. There is no account-wide health to change — the
+ * counter is a retry clock on this agent's own notebook — so this says what
+ * happened and to whom, and nothing reads it back.
+ */
+function logPullFailure(
   log: RetellProductionIngestionLog,
   kind: MonitoringFailureKind,
   failures: number,
 ): void {
   const event = platformEvent(
-    "egma.monitoring.retell.health.changed",
-    "Retell Monitoring health changed",
-    { health_state: kind, consecutive_failures: failures },
+    "egma.monitoring.pull.failed",
+    "Pulling production calls failed",
+    { failure_kind: kind, consecutive_failures: failures },
   );
   if (kind === "invalid_credential") log.error(event);
   else log.warn(event);
-}
-
-async function recover(
-  store: Pick<
-    RetellProductionIngestionStore,
-    "recoverRetellMonitoringSetup"
-  >,
-  target: {
-    readonly setupId: string;
-    readonly monitoredAgentId: string;
-    readonly failureId?: string | undefined;
-    readonly leaseOwner: string;
-    readonly apiKey: string;
-    readonly setupConsecutiveFailures: number;
-    readonly auth: AuthContext;
-  },
-  log: RetellProductionIngestionLog,
-  now: Date,
-): Promise<void> {
-  const result = await store.recoverRetellMonitoringSetup(
-    target.auth,
-    target,
-    now,
-  );
-  if (!result.recovered) return;
-  log.info(
-    platformEvent(
-      "egma.monitoring.retell.health.recovered",
-      "Retell Monitoring recovered",
-      {
-        outage_duration_ms: Math.max(
-          0,
-          now.getTime() - result.startedAt.getTime(),
-        ),
-        failure_count: result.failures,
-      },
-    ),
-  );
 }
 
 type ProviderFailure = Exclude<
@@ -455,10 +414,7 @@ function providerHealth(failure: ProviderFailure): MonitoringFailureKind {
 }
 
 function retryAtFor(
-  target: Pick<
-    RetellMonitoringTarget,
-    "setupId" | "setupConsecutiveFailures"
-  >,
+  target: Pick<MonitoringPullTarget, "agentId" | "consecutiveFailures">,
   failure: ProviderFailure,
   now: Date,
 ): Date {
@@ -476,20 +432,20 @@ function retryAtFor(
 
 async function failForProvider(
   store: RetellProductionIngestionStore,
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   failure: ProviderFailure,
   log: RetellProductionIngestionLog,
   metrics: RetellProductionIngestionMetrics,
   now: Date,
 ): Promise<void> {
   const kind = providerHealth(failure);
-  const result = await store.failRetellMonitoringTarget(
+  const result = await store.failMonitoringPull(
     target.auth,
     target,
     { kind, retryAt: retryAtFor(target, failure, now), now },
   );
   metrics.recordProviderFailure(kind);
-  if (result.changed) logHealthChange(log, kind, result.failures);
+  if (result.changed) logPullFailure(log, kind, result.failures);
 }
 
 function providerEndMilliseconds(call: RetellCall): number | undefined {
@@ -515,7 +471,10 @@ export type RetellIngestionFailureReplayResult =
   | { readonly kind: "not_found" }
   | {
       readonly kind: "busy";
-      readonly reason: MonitoringFailureKind | "replay_in_progress";
+      readonly reason:
+        | MonitoringFailureKind
+        | "replay_in_progress"
+        | "backing_off";
       readonly retryAt: Date;
     }
   | { readonly kind: "lease_lost" }
@@ -566,7 +525,7 @@ export async function replayRetellIngestionFailure(
     input.requestTimeoutMilliseconds ?? DEFAULT_REQUEST_TIMEOUT_MILLISECONDS,
     "the Retell replay request timeout",
   );
-  const claim = await store.claimRetellIngestionFailureReplay(
+  const claim = await store.claimMonitoringFailureReplay(
     input.auth,
     input.failureId,
     { now: clock() },
@@ -585,7 +544,7 @@ export async function replayRetellIngestionFailure(
     if (retrieved.kind === "call") {
       if (!retellCallBelongsToTarget(target, retrieved.call)) {
         const errorKind = "platform_agent_mismatch";
-        const released = await store.releaseRetellIngestionFailureReplay(
+        const released = await store.releaseMonitoringFailureReplay(
           target.auth,
           target,
           { errorKind, now: clock() },
@@ -599,13 +558,12 @@ export async function replayRetellIngestionFailure(
           : { kind: "lease_lost" };
       }
       const now = clock();
-      await recover(store, target, input.log, now);
       const outcome = await writer.writeRetellCall(
         target,
         retrieved.call,
         now,
       );
-      const resolved = await store.resolveRetellIngestionFailureReplay(
+      const resolved = await store.resolveMonitoringFailureReplay(
         target.auth,
         target,
         { now: clock() },
@@ -631,7 +589,7 @@ export async function replayRetellIngestionFailure(
 
     const permanentKind = permanentHydrationFailure(retrieved);
     if (permanentKind !== undefined) {
-      const released = await store.releaseRetellIngestionFailureReplay(
+      const released = await store.releaseMonitoringFailureReplay(
         target.auth,
         target,
         { errorKind: permanentKind, now: clock() },
@@ -648,17 +606,17 @@ export async function replayRetellIngestionFailure(
     const now = clock();
     const kind = providerHealth(retrieved);
     const retryAt = retryAtFor(target, retrieved, now);
-    const failed = await store.failRetellIngestionFailureReplay(
+    const failed = await store.failMonitoringFailureReplay(
       target.auth,
       target,
       { kind, retryAt, now },
     );
     if (!failed.recorded) return { kind: "lease_lost" };
-    if (failed.changed) logHealthChange(input.log, kind, failed.failures);
+    if (failed.changed) logPullFailure(input.log, kind, failed.failures);
     return { kind, retryAt };
   } catch (error) {
     try {
-      await store.releaseRetellIngestionFailureReplay(
+      await store.releaseMonitoringFailureReplay(
         target.auth,
         target,
         { errorKind: "internal_failure", now: clock() },
@@ -673,12 +631,12 @@ export async function replayRetellIngestionFailure(
 
 async function releaseAfterInternalFailure(
   store: RetellProductionIngestionStore,
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   clock: () => Date,
 ): Promise<void> {
   const now = clock();
   try {
-    await store.releaseRetellMonitoringLease(target.auth, target, {
+    await store.releaseMonitoringLease(target.auth, target, {
       retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
       errorKind: "internal_failure",
       now,
@@ -690,7 +648,7 @@ async function releaseAfterInternalFailure(
 }
 
 async function runTarget(
-  target: RetellMonitoringTarget,
+  target: MonitoringPullTarget,
   options: {
     readonly log: RetellProductionIngestionLog;
     readonly metrics: RetellProductionIngestionMetrics;
@@ -754,8 +712,7 @@ async function runTarget(
   const yieldBoundedTurn = async (): Promise<RetellProductionIngestionResult> => {
     const now = options.clock();
     leaseFinished = true;
-    await recover(options.store, target, options.log, now);
-    await options.store.yieldRetellMonitoringLease(target.auth, target, {
+    await options.store.yieldMonitoringLease(target.auth, target, {
       retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
       now,
     });
@@ -766,7 +723,7 @@ async function runTarget(
     while (counts.pages < options.maxPagesPerTurn) {
       if (counts.pages > 0 && turnBoundReached()) return yieldBoundedTurn();
 
-      const renewed = await options.store.renewRetellMonitoringLease(
+      const renewed = await options.store.renewMonitoringLease(
         target.auth,
         target,
         { now: options.clock() },
@@ -798,7 +755,7 @@ async function runTarget(
           listed.kind === "refused" &&
           listed.reason === "provider-contract"
         ) {
-          await options.store.releaseRetellMonitoringLease(
+          await options.store.releaseMonitoringLease(
             target.auth,
             target,
             {
@@ -830,7 +787,7 @@ async function runTarget(
         const providerCallId = callIdOf(listedCall);
         if (providerCallId === "") {
           const now = options.clock();
-          await options.store.releaseRetellMonitoringLease(target.auth, target, {
+          await options.store.releaseMonitoringLease(target.auth, target, {
             retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
             errorKind: "provider_contract",
             now,
@@ -840,7 +797,7 @@ async function runTarget(
         }
 
         if (
-          await options.store.retellCallIsAccountedFor(
+          await options.store.productionCallIsAccountedFor(
             target.auth,
             providerCallId,
           )
@@ -857,7 +814,7 @@ async function runTarget(
           attempt += 1
         ) {
           if (turnBoundReached()) return yieldBoundedTurn();
-          const requestable = await options.store.renewRetellMonitoringLease(
+          const requestable = await options.store.renewMonitoringLease(
             target.auth,
             target,
             { now: options.clock() },
@@ -891,7 +848,7 @@ async function runTarget(
         if (turnBoundReached()) return yieldBoundedTurn();
         if (hydrated.kind !== "call") {
           if (permanentKind !== undefined) {
-            const recorded = await options.store.recordRetellIngestionFailure(
+            const recorded = await options.store.recordMonitoringFailure(
               target.auth,
               target,
               {
@@ -932,7 +889,7 @@ async function runTarget(
         }
 
         if (!retellCallBelongsToTarget(target, hydrated.call)) {
-          const recorded = await options.store.recordRetellIngestionFailure(
+          const recorded = await options.store.recordMonitoringFailure(
             target.auth,
             target,
             {
@@ -979,8 +936,7 @@ async function runTarget(
 
       if (!listed.hasMore) {
         const now = options.clock();
-        await recover(options.store, target, options.log, now);
-        const finished = await options.store.finishRetellMonitoringScan(
+        const finished = await options.store.finishMonitoringScan(
           target.auth,
           target,
           { now, pollMilliseconds: regularPollMilliseconds(target) },
@@ -999,7 +955,7 @@ async function runTarget(
         seenPaginationKeys.has(nextPaginationKey)
       ) {
         const now = options.clock();
-        await options.store.releaseRetellMonitoringLease(target.auth, target, {
+        await options.store.releaseMonitoringLease(target.auth, target, {
           retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
           errorKind: "provider_contract",
           now,
@@ -1009,7 +965,7 @@ async function runTarget(
       }
 
       seenPaginationKeys.add(nextPaginationKey);
-      const checkpointed = await options.store.checkpointRetellMonitoringPage(
+      const checkpointed = await options.store.checkpointMonitoringPage(
         target.auth,
         target,
         {
@@ -1025,8 +981,7 @@ async function runTarget(
     }
 
     const now = options.clock();
-    await recover(options.store, target, options.log, now);
-    await options.store.yieldRetellMonitoringLease(target.auth, target, {
+    await options.store.yieldMonitoringLease(target.auth, target, {
       retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
       now,
     });
@@ -1041,7 +996,7 @@ async function runTarget(
     if (!leaseFinished) {
       const now = options.clock();
       try {
-        await options.store.yieldRetellMonitoringLease(target.auth, target, {
+        await options.store.yieldMonitoringLease(target.auth, target, {
           retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
           now,
         });
@@ -1096,7 +1051,7 @@ export async function runRetellProductionIngestion(
     );
   }
 
-  const target = await store.claimDueRetellMonitoringAgent({ now: clock() });
+  const target = await store.claimDueMonitoringPull({ now: clock() });
   if (target === undefined) return emptyResult(replayed, replayFailed);
   return runTarget(
     target,

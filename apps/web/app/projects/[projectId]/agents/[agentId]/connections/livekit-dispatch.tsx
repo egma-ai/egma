@@ -36,18 +36,18 @@ export function savedLiveKitDispatch(
  * drift apart. The returned option omits `agentName`, which this module owns.
  */
 export function liveKitDispatchForm({
-  connectionKind,
+  connectionType,
   option,
   config,
   mode,
 }: {
-  readonly connectionKind: string | undefined;
+  readonly connectionType: string | undefined;
   readonly option: ConnectionOption | undefined;
   readonly config: LiveKitConfig;
   readonly mode: LiveKitDispatch;
 }): LiveKitDispatchForm {
   const enabled =
-    connectionKind === "livekit_room" &&
+    connectionType === "livekit_room" &&
     option?.fields.some((field) => field.key === "agentName") === true;
   const agentName = config.agentName ?? "";
 

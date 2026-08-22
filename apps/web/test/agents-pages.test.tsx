@@ -127,8 +127,11 @@ const AGENT = {
   id: "agt_1",
   projectId: "prj_1",
   name: "Front desk",
-  description: "Answers the main line.",
-  revision: "rev_one",
+  agentPlatform: null,
+  platformAgentId: null,
+  monitoringKeyPresent: false,
+  monitoringApiKeyHint: null,
+  pullProductionCalls: false,
   archived: false,
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
@@ -141,7 +144,7 @@ const CONNECTION = {
   projectId: "prj_1",
   name: "staging",
   agentPlatform: "retell",
-  connectionKind: "retell_chat_api",
+  connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   productLabel: "Retell chat",
   modality: "chat",
@@ -150,7 +153,6 @@ const CONNECTION = {
   config: { retellAgentId: "agent_abc" },
   credentialPresent: true,
   credentialsHint: "WXYZ",
-  revision: "rev_con_one",
   archived: false,
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
@@ -168,7 +170,7 @@ const MEASURED_CONNECTION = {
   // the same would let a cell showing the wrong one pass.
   name: "phone line",
   agentPlatform: null,
-  connectionKind: "phone_number",
+  connectionType: "phone_number",
   accessVariant: "phone_number.public_e164",
   productLabel: "Phone number",
   modality: "voice",
@@ -198,7 +200,7 @@ const TYPES = {
     {
       agentPlatform: "retell",
       agentPlatformLabel: "Retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       accessVariantLabel: "Retell API key",
       modality: "chat",
@@ -230,7 +232,7 @@ const TYPES = {
     {
       agentPlatform: "retell",
       agentPlatformLabel: "Retell",
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       accessVariantLabel: "Public E.164 number",
       modality: "voice",
@@ -254,7 +256,7 @@ const TYPES = {
     {
       agentPlatform: "livekit_agents",
       agentPlatformLabel: "LiveKit Agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       accessVariantLabel: "API key and secret",
       modality: "voice",
@@ -309,7 +311,7 @@ const TYPES = {
     {
       agentPlatform: "livekit_agents",
       agentPlatformLabel: "LiveKit Agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       accessVariantLabel: "Token endpoint",
       modality: "voice",
@@ -349,7 +351,7 @@ const TYPES = {
     {
       agentPlatform: null,
       agentPlatformLabel: "Any or unknown",
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       accessVariantLabel: "Public E.164 number",
       modality: "voice",
@@ -577,7 +579,7 @@ describe("reading an agent's reach from the list", () => {
 /* ------------------------------------------------------------------------ */
 
 describe("registering an agent", () => {
-  it("sends the name and description, and nothing about the provider", async () => {
+  it("sends the name, and nothing about the provider", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents": { status: 201, body: { agent: AGENT } },
@@ -587,9 +589,9 @@ describe("registering an agent", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
     });
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Answers the main line." },
-    });
+    // No description field: the column was dropped pre-launch (ADR-0015), and
+    // a form that still collected one would be collecting what egma refuses.
+    expect(screen.queryByLabelText("Description")).toBeNull();
     const register = screen.getByRole("button", { name: "Register agent" });
     expectSharedFormLayout(register);
     fireEvent.click(register);
@@ -613,10 +615,7 @@ describe("registering an agent", () => {
      * has to know which half a door happens to read.
      */
     expect(sent[0]?.url).toBe("/v1/agents?projectId=prj_1");
-    expect(sent[0]?.body).toEqual({
-      name: "Front desk",
-      description: "Answers the main line.",
-    });
+    expect(sent[0]?.body).toEqual({ name: "Front desk" });
     // No prompt, no model, no tools: this form does not have them, so it cannot
     // send them.
     for (const provider of ["prompt", "model", "tools"]) {
@@ -663,9 +662,6 @@ describe("registering an agent", () => {
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Front desk" },
     });
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Answers the main line." },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Register agent" }));
 
     // Egma's own sentence, unchanged — and the typing still on screen, so the
@@ -678,9 +674,6 @@ describe("registering an agent", () => {
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Front desk",
     );
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("Answers the main line.");
   });
 
   it("tells a viewer the page is not theirs instead of pretending it worked", async () => {
@@ -842,26 +835,26 @@ describe("one agent's page", () => {
     ).toBe(false);
   });
 
-  it("sends the revision it was opened on, and keeps the edit when it is stale", async () => {
+  it("saves the name with no revision, because edits are last-writer-wins", async () => {
+    // The revision column was dropped pre-launch (ADR-0015), so there is
+    // nothing for the save to be written against and no conflict to show. Two
+    // browsers editing one agent is a silent overwrite now — accepted with
+    // eyes open, and the exact failure the column existed to stop.
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },
       "/v1/agents/agt_1": [
         { status: 200, body: { agent: AGENT, connections: [] } },
-        {
-          status: 409,
-          body: {
-            error: "identity_conflict",
-            message:
-              "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
-          },
-        },
+        { status: 200, body: { agent: AGENT, connections: [] } },
       ],
     });
     render(<AgentDetailPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Description"), {
-      target: { value: "Rewritten while somebody else was editing" },
+    // There is no description to edit either; the name is the whole of what
+    // egma owns about an agent's identity.
+    expect(screen.queryByLabelText("Description")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Renamed front desk" },
     });
     const save = screen.getByRole("button", { name: "Save" });
     expectSharedFormLayout(save);
@@ -869,18 +862,8 @@ describe("one agent's page", () => {
 
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.method).toBe("PATCH");
-    expect(sent[0]?.body.expectedRevision).toBe("rev_one");
-
-    // The conflict is shown in egma's own words and the work stays on screen:
-    // reading again is one click, retyping is not.
-    expect(
-      await screen.findByText(
-        "agent agt_1 changed after you opened it. Read it again, keep or reapply your edits, and send the update with expectedRevision set to its new revision.",
-      ),
-    ).toBeDefined();
-    expect(
-      (screen.getByLabelText("Description") as HTMLTextAreaElement).value,
-    ).toBe("Rewritten while somebody else was editing");
+    expect(sent[0]?.body).toEqual({ name: "Renamed front desk" });
+    expect(sent[0]?.body).not.toHaveProperty("expectedRevision");
   });
 
 });
@@ -929,7 +912,7 @@ describe("adding a connection", () => {
               connectionCandidates: [
                 {
                   agentPlatform: "retell",
-                  connectionKind: "retell_chat_api",
+                  connectionType: "retell_chat_api",
                   accessVariant: "retell_chat_api.api_key",
                   modality: "chat",
                   productLabel: "Retell chat",
@@ -937,7 +920,7 @@ describe("adding a connection", () => {
                 },
                 {
                   agentPlatform: "retell",
-                  connectionKind: "phone_number",
+                  connectionType: "phone_number",
                   accessVariant: "phone_number.public_e164",
                   modality: "voice",
                   productLabel: "Retell phone",
@@ -954,7 +937,7 @@ describe("adding a connection", () => {
           connection: {
             ...CONNECTION,
             agentPlatform: "retell",
-            connectionKind: "phone_number",
+            connectionType: "phone_number",
             accessVariant: "phone_number.public_e164",
             productLabel: "Retell phone",
             modality: "voice",
@@ -1002,7 +985,7 @@ describe("adding a connection", () => {
     });
     expect(sent[1]?.body).toEqual({
       agentPlatform: "retell",
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+14155550100" },
@@ -1058,7 +1041,7 @@ describe("adding a connection", () => {
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
@@ -1125,7 +1108,7 @@ describe("adding a connection", () => {
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: {
@@ -1184,7 +1167,7 @@ describe("adding a connection", () => {
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://rooms.example.test" },
@@ -1276,7 +1259,7 @@ describe("one connection's page", () => {
       {
         ...CONNECTION,
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         productLabel: "Phone number",
         modality: "voice",
@@ -1285,7 +1268,7 @@ describe("one connection's page", () => {
       {
         ...CONNECTION,
         agentPlatform: "livekit_agents",
-        connectionKind: "livekit_room",
+        connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         productLabel: "LiveKit token endpoint",
         modality: "voice",
@@ -1348,7 +1331,6 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "Primary Retell connection",
       config: { retellAgentId: "agent_moved" },
-      expectedRevision: "rev_con_one",
     });
   });
 
@@ -1356,7 +1338,7 @@ describe("one connection's page", () => {
     const named = {
       ...CONNECTION,
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",
       modality: "voice",
@@ -1383,7 +1365,6 @@ describe("one connection's page", () => {
     expect(sent[0]?.body).toEqual({
       name: "staging",
       config: { url: "wss://example.livekit.cloud" },
-      expectedRevision: "rev_con_one",
     });
 
     cleanup();
@@ -1429,7 +1410,6 @@ describe("one connection's page", () => {
         url: "wss://example.livekit.cloud",
         agentName: "customer-support",
       },
-      expectedRevision: "rev_con_one",
     });
   });
 

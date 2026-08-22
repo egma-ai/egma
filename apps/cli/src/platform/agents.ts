@@ -34,7 +34,7 @@ export type NewConnection = {
   /** Who runs the agent, or null when Egma does not know. */
   readonly agentPlatform: ConnectionInput["agentPlatform"];
   /** What Egma connects to for this simulation. */
-  readonly connectionKind: ConnectionInput["connectionKind"];
+  readonly connectionType: ConnectionInput["connectionType"];
   /** How Egma gets access to that connection. */
   readonly accessVariant: ConnectionInput["accessVariant"];
   readonly modality: ConnectionInput["modality"];
@@ -56,7 +56,6 @@ export type NewConnection = {
 
 export type Registration = {
   readonly name: string;
-  readonly description?: string | undefined;
   /** Which project the agent lands in. Omit and the key's own project applies. */
   readonly project?: string | undefined;
   readonly connection: NewConnection;
@@ -72,7 +71,7 @@ export type RegisteredConnection = {
   readonly id: string;
   readonly name: string;
   readonly agentPlatform: string | null;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly accessVariant: string;
   readonly modality: string;
   readonly productLabel: string;
@@ -139,7 +138,7 @@ function cleanConnection(connection: AnsweredConnection): RegisteredConnection {
     name: platformText(connection.name),
     agentPlatform:
       connection.agentPlatform === null ? null : platformText(connection.agentPlatform),
-    connectionKind: platformText(connection.connectionKind),
+    connectionType: platformText(connection.connectionType),
     accessVariant: platformText(connection.accessVariant),
     modality: platformText(connection.modality),
     productLabel: platformText(connection.productLabel),
@@ -157,7 +156,7 @@ function connectionParameters(connection: NewConnection): ConnectionInput {
   return {
     ...(connection.name === undefined ? {} : { name: connection.name }),
     agentPlatform: connection.agentPlatform,
-    connectionKind: connection.connectionKind,
+    connectionType: connection.connectionType,
     accessVariant: connection.accessVariant,
     modality: connection.modality,
     ...(connection.environment === undefined
@@ -315,9 +314,6 @@ export async function registerAgent(
   const answer = await registerAgentRequest(
     {
       name: registration.name,
-      ...(registration.description === undefined
-        ? {}
-        : { description: registration.description }),
       ...(registration.project === undefined
         ? {}
         : { projectId: registration.project }),

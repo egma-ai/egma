@@ -63,7 +63,7 @@ function registration(name: string, project: string): Record<string, unknown> {
     projectId: project,
     connection: {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_for_${name.replace(/\W/g, "")}` },
@@ -75,7 +75,7 @@ function registration(name: string, project: string): Record<string, unknown> {
 /** A voice connection that starts without carrier configuration in this API. */
 const LIVEKIT_VOICE = {
   agentPlatform: "livekit_agents",
-  connectionKind: "livekit_room",
+  connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
@@ -325,7 +325,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Outbound desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_outbound" },
@@ -535,7 +535,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Outbound desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_unnamed" },
@@ -617,7 +617,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Outbound desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_by_address" },
@@ -810,7 +810,7 @@ describe("a key for the whole organization, where the organization holds two pro
           ? LIVEKIT_VOICE
           : {
               agentPlatform: "retell",
-              connectionKind: "retell_chat_api",
+              connectionType: "retell_chat_api",
               accessVariant: "retell_chat_api.api_key",
               modality: "chat",
               config: { retellAgentId: `agent_in_retell_${label}` },

@@ -186,7 +186,7 @@ export {
  *
  * They are here beside the verdict fold and for the fold's reason: they reach
  * no store, take no context, and have no tenancy to stamp. The connection
- * registry decides what a connection kind is made of in code rather than a
+ * registry decides what a connection type is made of in code rather than a
  * table, so stored rows cannot name a kind no adapter can run.
  *
  * Exported all the same, and from this entry point, because a browser form has
@@ -196,7 +196,7 @@ export {
  * application would be a second opinion able to disagree with the gate.
  */
 export {
-  connectionKindUsesPlatformCarrier,
+  connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   credentialRuleOf,
   productLabelOf,

@@ -34,7 +34,7 @@ import { mintKey, NEUTRAL_TRAITS, request as ask } from "./traces.ts";
 /** A voice connection that needs no live worker in these route-only tests. */
 const A_VOICE_AGENT = {
   agentPlatform: "livekit_agents",
-  connectionKind: "livekit_room",
+  connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
   config: { url: "wss://acme.livekit.cloud" },
@@ -47,7 +47,7 @@ const A_VOICE_AGENT = {
 /** The same shape, over chat, for the refusal that a chat has no audio. */
 const A_CHAT_AGENT = {
   agentPlatform: "retell",
-  connectionKind: "retell_chat_api",
+  connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_2" },

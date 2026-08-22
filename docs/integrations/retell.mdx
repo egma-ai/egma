@@ -4,7 +4,7 @@ sidebarTitle: "Retell"
 description: "Connect Retell chat and voice agents for simulations, then set up production voice monitoring with Retell API polling."
 ---
 
-Retell is an **agent platform**. It is not one connection kind. Egma supports
+Retell is an **agent platform**. It is not one connection type. Egma supports
 two Retell simulation paths and one separate production Monitoring strategy:
 
 | Purpose | Retell agent | Egma path |
@@ -40,7 +40,7 @@ Retell chat agent ID and a sealed API key.
 
 ```text
 agent_platform: retell
-connection_kind: retell_chat_api
+connection_type: retell_chat_api
 access_variant: retell_chat_api.api_key
 product_label: Retell chat
 connection_modality: chat
@@ -55,7 +55,7 @@ agent ID because the phone adapter needs neither to place the simulation call.
 
 ```text
 agent_platform: retell
-connection_kind: phone_number
+connection_type: phone_number
 access_variant: phone_number.public_e164
 product_label: Retell phone
 connection_modality: voice

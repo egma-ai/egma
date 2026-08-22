@@ -251,7 +251,7 @@ const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
 // is not settled, so it must not be relabelled as platform-agent identity.
 const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
 const PLATFORM_AGENT_VERSION_ATTRIBUTES = ["lk.agent_version"];
-const CONNECTION_KIND_ATTRIBUTES = ["egma.connection_kind"];
+const CONNECTION_TYPE_ATTRIBUTES = ["egma.connection_type"];
 
 /** The visible marker left where an OTLP producer supplied a credential. */
 const OTLP_REDACTED = "[REDACTED]";
@@ -695,14 +695,14 @@ export function normaliseOtlpExport(
             PLATFORM_AGENT_VERSION_ATTRIBUTES,
           ),
           // The service-token path is Egma's own simulator and may state the
-          // connection kind it used. Customer OTLP is production evidence;
+          // connection type it used. Customer OTLP is production evidence;
           // this release does not let an arbitrary payload create a shared
-          // production connection-kind fact.
-          connectionKind:
+          // production connection-type fact.
+          connectionType:
             attribution.source === "simulation"
               ? firstAttribute(
                   [attributes, resourceSpans.resource?.attributes],
-                  CONNECTION_KIND_ATTRIBUTES,
+                  CONNECTION_TYPE_ATTRIBUTES,
                 )
               : "",
           // The run and pins ride the attribution: the door resolved them from
