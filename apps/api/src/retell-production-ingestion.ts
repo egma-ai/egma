@@ -1101,7 +1101,7 @@ async function runTarget(
     };
 
   /** Answer one call's outcome where it ends the turn rather than the call. */
-  const stoppedBy = async (
+  const turnEndedBy = async (
     outcome: CallOutcome,
   ): Promise<RetellProductionIngestionResult | undefined> => {
     if (outcome.kind === "lease_lost") {
@@ -1136,6 +1136,15 @@ async function runTarget(
       leaseFinished = true;
       return completed("ingestion_unavailable");
     }
+    return undefined;
+  };
+
+  /** One call's whole answer: what ends the turn, and what only counts. */
+  const stoppedBy = async (
+    outcome: CallOutcome,
+  ): Promise<RetellProductionIngestionResult | undefined> => {
+    const stopped = await turnEndedBy(outcome);
+    if (stopped !== undefined) return stopped;
     if (outcome.kind === "dropped") counts.dropped += 1;
     if (outcome.kind === "scheduled") counts.settled += 1;
     return undefined;
@@ -1352,9 +1361,19 @@ async function runTarget(
           counts,
           turnBoundReached,
         );
+        // Page-mates finish together, so their retry rows and terminal drops
+        // are durable whatever answer stands beside them in listed order. The
+        // turn's own record must carry what the store already holds, which is
+        // why every answer is counted before any answer is allowed to end the
+        // turn.
+        for (const hydration of hydrations) {
+          if (hydration.status !== "fulfilled") continue;
+          if (hydration.value.kind === "dropped") counts.dropped += 1;
+          if (hydration.value.kind === "scheduled") counts.settled += 1;
+        }
         for (const hydration of hydrations) {
           if (hydration.status === "rejected") throw hydration.reason;
-          const stopped = await stoppedBy(hydration.value);
+          const stopped = await turnEndedBy(hydration.value);
           if (stopped !== undefined) return stopped;
         }
         // The turn ran out of time inside this page, so what follows must not

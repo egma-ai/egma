@@ -1324,6 +1324,75 @@ describe("Retell production ingestion", () => {
     expect(recorded.finishes).toHaveLength(1);
   });
 
+  it("counts a page-mate's durable answer when another answer ends the turn", async () => {
+    const recorded = record();
+    // Listed first, so the settle order meets the turn-ending answer before
+    // the page-mate whose retry row is already in the store.
+    const listed = [
+      summary("call_pauses_agent"),
+      summary("call_beside_durable"),
+    ];
+    const held = heldHydrations(listed.length);
+    const taken = acceptance();
+    const { log } = logger();
+    const observed = metricRecorder();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      metrics: observed.metrics,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return callId === "call_pauses_agent"
+            ? {
+                kind: "refused",
+                reason: "rate-limited",
+                status: 429,
+                retryAfterMilliseconds: 12_000,
+              }
+            : { kind: "not-found" };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // Both were open together: the rate limit pauses the whole selected
+    // agent, and the page-mate's retry row was durable before the pause was
+    // acted on — so the turn's answer and its recorded metrics both carry the
+    // row the store holds.
+    expect(held.mostOpen).toBe(listed.length);
+    expect(recorded.rows.get("call_beside_durable")).toMatchObject({
+      attempts: 1,
+      errorKind: "provider_call_not_found",
+    });
+    expect(recorded.failures).toEqual([
+      { kind: "rate_limited", retryAt: new Date(BASE.getTime() + 12_000) },
+    ]);
+    expect(result).toMatchObject({
+      accepted: 0,
+      settled: 1,
+      dropped: 0,
+      stoppedBecause: "provider_failure",
+    });
+    expect(observed.recorded).toMatchObject({
+      turns: [
+        { outcome: "provider_failure", accepted: 0, settled: 1, dropped: 0 },
+      ],
+    });
+  });
+
   it("yields inside a large page without checkpointing past unprocessed calls", async () => {
     const recorded = record();
     const hydratedIds: string[] = [];

@@ -983,6 +983,73 @@ describe("the bounded Retell call budget", () => {
     expect(await state()).toBe("active");
   });
 
+  it("restores a selected agent when two calls are made durable at the same moment", async () => {
+    const imported = await configured();
+    const state = async (): Promise<string | undefined> => {
+      const rows = await database.sql<{ state: string }>(
+        "select state from retell_monitored_agent",
+      );
+      return rows.rows[0]?.state;
+    };
+    await finishRetellMonitoringScan(imported.auth, imported, {
+      now: SETUP_TIME,
+    });
+    const target = await leased(new Date(SETUP_TIME.getTime() + 60_000));
+    for (const providerCallId of ["call_racing_a", "call_racing_b"]) {
+      await recordRetellCallAttempt(target.auth, target, {
+        providerCallId,
+        errorKind: "provider_call_refused",
+        retryBackoffMilliseconds: BACKOFF,
+        now: SETUP_TIME,
+      });
+    }
+    expect(await state()).toBe("degraded");
+
+    // A sibling deleter held open mid-transaction: it has taken the agent
+    // row, removed its own call, seen the other still in flight and left the
+    // restore to it — the moment two concurrent durable calls share. The
+    // delete under test must wait for this transaction rather than read past
+    // it, or both sides leave the restore to the other and the agent stays
+    // degraded owing nothing.
+    const sibling = await openSingleConnection(database.url);
+    try {
+      await sibling.sql("begin");
+      await sibling.sql(
+        "select id from retell_monitored_agent where id = $1 for update",
+        [target.monitoredAgentId],
+      );
+      await sibling.sql(
+        "delete from retell_call_retry where provider_call_id = $1",
+        ["call_racing_b"],
+      );
+      const inFlight = await sibling.sql(
+        "select id from retell_call_retry where next_attempt_at is not null",
+      );
+      expect(inFlight.rows).toHaveLength(1);
+
+      const deleting = deleteRetellCallRetry(target.auth, target, {
+        providerCallId: "call_racing_a",
+        now: SETUP_TIME,
+      });
+      // Long enough that a delete reading past the sibling would have
+      // finished inside the window; with the wait in place the length does
+      // not matter.
+      await new Promise<void>((wake) => {
+        setTimeout(wake, 100);
+      });
+      await sibling.sql("commit");
+      await deleting;
+    } finally {
+      await sibling.close();
+    }
+
+    const remaining = await database.sql<{ count: string }>(
+      "select count(*)::text as count from retell_call_retry",
+    );
+    expect(remaining.rows[0]?.count).toBe("0");
+    expect(await state()).toBe("active");
+  });
+
   it("clears the one budget two selected agents share for a call they both meet", async () => {
     // Two selected agents in one project, so a provider call that turns out to
     // belong to one of them is a `platform_agent_mismatch` the other can also
