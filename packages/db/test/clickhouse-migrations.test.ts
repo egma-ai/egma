@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -15,6 +16,7 @@ import {
 import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
 import {
   appendIn,
+  commandsIn,
   createEmptyTraceStore,
   createMigratedTraceStore,
   rowsIn,
@@ -53,28 +55,24 @@ const VERDICT_IDENTITY =
 /**
  * The migrations allowed to drop a table, each because a ClickHouse sorting key
  * is fixed at creation and no `ALTER` reaches one. The verdict store's rebuild
- * was the first; the span identity's rebuild is the second, and it takes three
- * files rather than one so that a lost response on the last of them cannot
- * strand the middle one with its source table gone.
+ * was the first; the span identity's rebuild is the second, and the table it
+ * drops is the carryover it made itself, dropped last so that every earlier
+ * failure leaves the refill's source standing.
  */
 const THE_ONE_FILE_THAT_DROPS_A_TABLE = "0003_verdicts_speak_the_redesign.sql";
 
 /**
- * The pre-launch rebuild of the span identity, and the only files that may
- * carry rows.
+ * The pre-launch rebuild of the span identity, and the only file that may carry
+ * rows.
  *
  * A backfill is normally forbidden here because a migration file has no
- * transaction and a re-run would move the same rows twice. These may, and the
- * rule that makes it safe is checked below: both destinations collapse on the
- * complete span identity, so a second run writes the same rows onto themselves.
+ * transaction and a re-run would move the same rows twice. This one may, and
+ * the rule that makes it safe is checked below: both destinations collapse on
+ * the complete span identity, so a second run writes the same rows onto
+ * themselves.
  */
-const THE_FILES_THAT_REBUILD_THE_SPAN_IDENTITY = [
-  "0007_carry_simulation_evidence_aside.sql",
-  "0008_spans_and_turns_replay_safe.sql",
-  "0009_drop_the_simulation_carryover.sql",
-];
-
-const [FIRST_REBUILD_FILE = ""] = THE_FILES_THAT_REBUILD_THE_SPAN_IDENTITY;
+const THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY =
+  "0007_spans_and_turns_replay_safe.sql";
 
 /**
  * Everything up to one file, written where a runner can be pointed at it.
@@ -359,7 +357,7 @@ describe("the trace store's migration files", () => {
           // it puts the rows back — and it is what removes the instant in
           // which a rebuilt table does not exist for another booting instance.
           const guard =
-            THE_FILES_THAT_REBUILD_THE_SPAN_IDENTITY.includes(migration.name)
+            migration.name === THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY
               ? /^CREATE (?:OR REPLACE TABLE |(?:TABLE|VIEW|MATERIALIZED VIEW) IF NOT EXISTS )/i
               : /^CREATE (?:TABLE|VIEW|MATERIALIZED VIEW|DICTIONARY|FUNCTION) IF NOT EXISTS /i;
           expect(statement, migration.name).toMatch(guard);
@@ -395,7 +393,7 @@ describe("the trace store's migration files", () => {
    */
   it("move no rows, ever", async () => {
     const mayRebuild = (name: string): boolean =>
-      THE_FILES_THAT_REBUILD_THE_SPAN_IDENTITY.includes(name);
+      name === THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY;
 
     for (const migration of await readMigrations(
       CLICKHOUSE_MIGRATIONS_DIRECTORY,
@@ -424,6 +422,28 @@ describe("the trace store's migration files", () => {
           expect(statement, migration.name).not.toMatch(/^DROP TABLE\b/i);
         }
       }
+    }
+  });
+
+  /**
+   * Grader-owned storage belongs to the grader effort, so the rebuild of the
+   * trace tables never reaches into it. Verdicts left pointing at traces the
+   * rebuild deleted are that effort's cleanup to make, and a statement here
+   * that tidied them would be this effort taking a decision that is not its
+   * own. Checked on the file rather than on a store, because the strongest form
+   * of untouched is unnamed.
+   */
+  it("leaves grader-owned storage unnamed in the rebuild", async () => {
+    const migrations = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
+    const rebuild = migrations.find(
+      (migration) =>
+        migration.name === THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
+    );
+    expect(rebuild).toBeDefined();
+
+    for (const statement of statementsOf(rebuild?.sql ?? "")) {
+      expect(statement).not.toMatch(/\bverdicts\b/i);
+      expect(statement).not.toMatch(/\bgrading_job\b/i);
     }
   });
 });
@@ -471,7 +491,9 @@ describe("four instances booting at the same moment", () => {
 
   beforeAll(async () => {
     store = await createEmptyTraceStore("concurrent");
-    additive = await migrationsBefore(FIRST_REBUILD_FILE);
+    additive = await migrationsBefore(
+      THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
+    );
     additiveNames = (await readMigrations(additive)).map(
       (migration) => migration.name,
     );
@@ -537,7 +559,9 @@ describe("four instances booting at the same moment", () => {
     const every = await readMigrations(CLICKHOUSE_MIGRATIONS_DIRECTORY);
 
     const result = await runClickHouseMigrations(store.url);
-    expect(result.applied).toEqual(THE_FILES_THAT_REBUILD_THE_SPAN_IDENTITY);
+    expect(result.applied).toEqual([
+      THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
+    ]);
 
     expect(await tablesIn(store)).toEqual([
       "egma_meta_migration",
@@ -1076,58 +1100,64 @@ describe("the pre-launch Monitoring trace reset", () => {
   });
 });
 
+const ORGANIZATION_ID = "org_01JQZ0000000000000000000AA";
+const PROJECT_ID = "prj_01JQZ0000000000000000000AA";
+
+/** One turn-grain span, in the columns the shape before the rebuild holds. */
+function turnSpan(
+  traceId: string,
+  spanId: string,
+  source: string,
+  text: string,
+): Record<string, unknown> {
+  return {
+    trace_id: traceId,
+    span_id: spanId,
+    organization_id: ORGANIZATION_ID,
+    project_id: PROJECT_ID,
+    source,
+    emitter: source === "simulation" ? "egma-runtime" : "agent",
+    started_at: "2026-08-01 09:14:03.500000",
+    duration_ns: 1_420_000_000,
+    name: "human turn",
+    kind: "turn:human",
+    text,
+    agent_platform: source === "simulation" ? "" : "livekit_agents",
+    payload: "{}",
+  };
+}
+
+/** One judgment about a trace, which no rebuild statement ever names. */
+function judgment(traceId: string, source: string): Record<string, unknown> {
+  return {
+    organization_id: ORGANIZATION_ID,
+    project_id: PROJECT_ID,
+    trace_id: traceId,
+    grader_id: "grd_01JQZ0000000000000000000AA",
+    grader_version_id: "grv_01JQZ00000000000000000000AA",
+    assertion: "behavior_1",
+    source,
+    verdict: "passed",
+    score: 1,
+    event_ts: "2026-08-01 09:15:00.000000",
+  };
+}
+
 /**
  * The identity rebuild meeting a store that already has rows in it, which is
  * the only shape it will ever meet in a deployment.
  *
  * An empty store proves the statements parse. This proves what they do: it
  * migrates to the schema the rebuild starts from, writes evidence of both
- * kinds and a judgment about each, and then applies the three files the same
- * way a boot does.
+ * kinds and a judgment about each, and then applies the file the same way a
+ * boot does.
  */
 describe("the identity rebuild against a populated store", () => {
   let store: EmptyTraceStore;
 
-  const organizationId = "org_01JQZ0000000000000000000AA";
   const simulationTrace = "4bf92f3577b34da6a3ce929d0e0e4736";
   const productionTrace = "5cf92f3577b34da6a3ce929d0e0e4737";
-
-  function turn(
-    traceId: string,
-    spanId: string,
-    source: string,
-  ): Record<string, unknown> {
-    return {
-      trace_id: traceId,
-      span_id: spanId,
-      organization_id: organizationId,
-      project_id: "prj_01JQZ0000000000000000000AA",
-      source,
-      emitter: source === "simulation" ? "egma-runtime" : "agent",
-      started_at: "2026-08-01 09:14:03.500000",
-      duration_ns: 1_420_000_000,
-      name: "human turn",
-      kind: "turn:human",
-      text: `${source} hello`,
-      agent_platform: source === "simulation" ? "" : "livekit_agents",
-      payload: "{}",
-    };
-  }
-
-  function verdict(traceId: string, source: string): Record<string, unknown> {
-    return {
-      organization_id: organizationId,
-      project_id: "prj_01JQZ0000000000000000000AA",
-      trace_id: traceId,
-      grader_id: "grd_01JQZ0000000000000000000AA",
-      grader_version_id: "grv_01JQZ00000000000000000000AA",
-      assertion: "behavior_1",
-      source,
-      verdict: "passed",
-      score: 1,
-      event_ts: "2026-08-01 09:15:00.000000",
-    };
-  }
+  const simulationSpan = "00f067aa0ba902b7";
 
   beforeAll(async () => {
     store = await createEmptyTraceStore("populated_rebuild");
@@ -1135,19 +1165,29 @@ describe("the identity rebuild against a populated store", () => {
     // Everything the rebuild starts from, and nothing of the rebuild itself.
     await runClickHouseMigrations(
       store.url,
-      await migrationsBefore(FIRST_REBUILD_FILE),
+      await migrationsBefore(THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY),
     );
 
     // Mixed evidence, written after the reset that precedes the rebuild, so
     // that production rows are here to be removed by the rebuild itself rather
     // than by the file before it.
     await appendIn(store, "spans", [
-      turn(simulationTrace, "00f067aa0ba902b7", "simulation"),
-      turn(productionTrace, "10f067aa0ba902b8", "production"),
+      turnSpan(
+        simulationTrace,
+        simulationSpan,
+        "simulation",
+        "simulation hello",
+      ),
+      turnSpan(
+        productionTrace,
+        "10f067aa0ba902b8",
+        "production",
+        "production hello",
+      ),
     ]);
     await appendIn(store, "verdicts", [
-      verdict(simulationTrace, "simulation"),
-      verdict(productionTrace, "production"),
+      judgment(simulationTrace, "simulation"),
+      judgment(productionTrace, "production"),
     ]);
 
     await runClickHouseMigrations(store.url);
@@ -1223,6 +1263,220 @@ describe("the identity rebuild against a populated store", () => {
       ),
     ).toEqual([{ content_hash: "" }]);
   });
+
+  /**
+   * And the point of the whole rebuild, on evidence that predates it: the
+   * carried row now files under the span identity, so the same span arriving
+   * again is the same span. Under the old filing order it was a second row
+   * forever, because a timestamp and a trace-id hash stood in the key.
+   *
+   * Last in this block, because it is the only test here that writes.
+   */
+  it("collapses a replay of a carried span onto the one it carried", async () => {
+    await appendIn(store, "spans", [
+      turnSpan(
+        simulationTrace,
+        simulationSpan,
+        "simulation",
+        "simulation hello",
+      ),
+    ]);
+
+    expect(
+      await rowsIn<{ text: string }>(
+        store,
+        `select text from spans final where span_id = '${simulationSpan}'`,
+      ),
+    ).toEqual([{ text: "simulation hello" }]);
+    expect(
+      await rowsIn<{ text_preview: string }>(
+        store,
+        `select text_preview from turns final where span_id = '${simulationSpan}'`,
+      ),
+    ).toEqual([{ text_preview: "simulation hello" }]);
+  });
+});
+
+/**
+ * The rebuild's opening clauses, which is what a statement is called here.
+ * Everything from the first bracket on is columns, and a case name is not the
+ * place for them.
+ */
+function opening(statement: string): string {
+  const clause =
+    /^(?:CREATE (?:OR REPLACE )?(?:MATERIALIZED )?(?:TABLE|VIEW) (?:IF NOT EXISTS )?|DROP (?:TABLE|VIEW) IF EXISTS |INSERT INTO )\w+/i.exec(
+      statement,
+    );
+  return clause?.[0] ?? statement;
+}
+
+/**
+ * The rebuild's statements, read where Vitest can see them while it collects:
+ * there is one case per statement below, and a list awaited in a hook arrives
+ * too late to make cases from. The trailing semicolon comes off the way the
+ * runner takes it off before sending, which is also what lets a case bound one
+ * of the copies with `LIMIT`.
+ */
+const THE_REBUILDS_STATEMENTS = statementsOf(
+  readFileSync(
+    path.join(
+      CLICKHOUSE_MIGRATIONS_DIRECTORY,
+      THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
+    ),
+    "utf8",
+  ),
+).map((statement) => statement.replace(/\s*;$/, ""));
+
+/**
+ * Where a run can stop. `through` is how many statements finished; `partly`
+ * then runs the one after them bounded to a single row.
+ */
+type CrashPoint = { readonly through: number; readonly partly: boolean };
+
+/**
+ * Every one of them: after each statement, and part-way through each of the two
+ * copies, which are the only statements that can leave some of their rows
+ * behind.
+ */
+const CRASH_POINTS: readonly CrashPoint[] = THE_REBUILDS_STATEMENTS.flatMap(
+  (statement, index) =>
+    /^INSERT\b/i.test(statement)
+      ? [
+          { through: index, partly: true },
+          { through: index + 1, partly: false },
+        ]
+      : [{ through: index + 1, partly: false }],
+);
+
+/** What a crash point is called, taken from the statement it stopped on. */
+function crashPointName({ through, partly }: CrashPoint): string {
+  const clause = opening(
+    THE_REBUILDS_STATEMENTS[partly ? through : through - 1] ?? "",
+  );
+  return partly ? `one row into \`${clause}\`` : `as far as \`${clause}\``;
+}
+
+/**
+ * The identity rebuild resumed after a run that stopped inside it.
+ *
+ * **The ledger records a file, never a statement.** A failure anywhere in this
+ * one — a real error or a lost response — records nothing, so the next boot
+ * runs the whole file again on top of whatever the attempt before it left. Each
+ * case below builds one of those leftovers on purpose by driving the front of
+ * the file straight into the store, and then points the runner at the real
+ * directory the way a boot points at it.
+ *
+ * Two of the leftovers are the ones the order of the file exists to survive:
+ *
+ * - **After the tables are replaced**, the carry-aside at the top reads the new
+ *   shape. It has to parse there, which is why it names only columns both
+ *   shapes hold, and it has to put nothing wrong into the carryover, which is
+ *   why the carryover collapses on the span identity.
+ * - **After the carryover is dropped**, the carry-aside is the only thing that
+ *   can make it again, and the refilled `spans` is what it reads. That is what
+ *   the drop being last buys.
+ */
+describe("the identity rebuild resumed after a partial run", () => {
+  // Two simulation traces, because a copy that stopped part-way is only a state
+  // at all when there is more than one row for it to have stopped between.
+  const evidence = [
+    { trace_id: "1bf92f3577b34da6a3ce929d0e0e4731", text: "the first thing" },
+    { trace_id: "2bf92f3577b34da6a3ce929d0e0e4732", text: "the second thing" },
+  ] as const;
+  const productionTrace = "9cf92f3577b34da6a3ce929d0e0e4739";
+
+  let beforeTheRebuild: string;
+
+  beforeAll(async () => {
+    beforeTheRebuild = await migrationsBefore(
+      THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
+    );
+  });
+
+  /** A store at the schema the rebuild starts from, with mixed evidence in it. */
+  async function populatedStore(): Promise<EmptyTraceStore> {
+    const store = await createEmptyTraceStore("resume");
+    await runClickHouseMigrations(store.url, beforeTheRebuild);
+    await appendIn(store, "spans", [
+      ...evidence.map((row, index) =>
+        turnSpan(
+          row.trace_id,
+          `00f067aa0ba902b${index}`,
+          "simulation",
+          row.text,
+        ),
+      ),
+      turnSpan(productionTrace, "10f067aa0ba902b9", "production", "and this"),
+    ]);
+    await appendIn(store, "verdicts", [
+      judgment(evidence[0].trace_id, "simulation"),
+      judgment(productionTrace, "production"),
+    ]);
+    return store;
+  }
+
+  it.each(CRASH_POINTS.map((crash) => [crashPointName(crash), crash] as const))(
+    "settles the same store from a run that got %s",
+    async (_name, crash) => {
+      const store = await populatedStore();
+      try {
+        // Where the failed run stopped.
+        await commandsIn(
+          store,
+          THE_REBUILDS_STATEMENTS.slice(0, crash.through),
+        );
+        if (crash.partly) {
+          await commandsIn(store, [
+            `${THE_REBUILDS_STATEMENTS[crash.through] ?? ""} LIMIT 1`,
+          ]);
+        }
+
+        // The boot after it. Nothing was recorded, so all of the file runs.
+        const result = await runClickHouseMigrations(store.url);
+        expect(result.applied).toEqual([
+          THE_ONE_FILE_THAT_REBUILDS_THE_SPAN_IDENTITY,
+        ]);
+
+        // Every simulation span, once, holding the values it arrived with.
+        expect(
+          await rowsIn<{ trace_id: string; text: string }>(
+            store,
+            "select trace_id, text from spans final order by trace_id",
+          ),
+        ).toEqual(evidence);
+        expect(
+          await rowsIn<{ trace_id: string; text_preview: string }>(
+            store,
+            "select trace_id, text_preview from turns final order by trace_id",
+          ),
+        ).toEqual(
+          evidence.map((row) => ({
+            trace_id: row.trace_id,
+            text_preview: row.text,
+          })),
+        );
+
+        // Production evidence gone, and the judgments left as they were.
+        expect(
+          await rowsIn<{ source: string }>(
+            store,
+            "select source from verdicts final order by source",
+          ),
+        ).toEqual([{ source: "production" }, { source: "simulation" }]);
+
+        // The settled schema, with the carryover no longer part of it.
+        expect(await tablesIn(store)).toEqual([
+          "egma_meta_migration",
+          "spans",
+          "turns",
+          "turns_mv",
+          "verdicts",
+        ]);
+      } finally {
+        await store.drop();
+      }
+    },
+  );
 });
 
 describe("a span arriving twice", () => {

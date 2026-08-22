@@ -104,6 +104,26 @@ export async function appendIn(
   }
 }
 
+/**
+ * Statements into a store the migration tests are stepping through by hand, on
+ * `rowsIn`'s terms and for its reason. Taken as a list rather than one at a
+ * time, because what a caller has is the front of a migration file and what it
+ * wants is the state that front leaves behind.
+ */
+export async function commandsIn(
+  store: EmptyTraceStore,
+  queries: readonly string[],
+): Promise<void> {
+  const client = createClient({ url: store.url, max_open_connections: 1 });
+  try {
+    for (const query of queries) {
+      await client.command({ query });
+    }
+  } finally {
+    await client.close();
+  }
+}
+
 /** Every table the database holds, ledger included, in name order. */
 export async function tablesIn(store: EmptyTraceStore): Promise<string[]> {
   const tables = await rowsIn<{ name: string }>(

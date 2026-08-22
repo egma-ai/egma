@@ -41,8 +41,11 @@ In practice:
   a file, so every schema statement uses `IF EXISTS`, `IF NOT EXISTS` or
   `CREATE OR REPLACE`, and survives a second run after a partial failure. An
   approved data mutation must be idempotent and may name only a table
-  guaranteed by an earlier immutable migration; ClickHouse has no `IF EXISTS`
-  form for `ALTER TABLE ... DELETE`.
+  guaranteed by an earlier immutable migration, or one an idempotent `CREATE`
+  earlier in the same file guarantees — and then a test proves that file
+  re-runs safely from every point inside it, because the ledger records a file
+  and never a statement; ClickHouse has no `IF EXISTS` form for
+  `ALTER TABLE ... DELETE`.
 - **A rebuild is applied by one instance.** There is no advisory lock on this
   side either, so several instances normally boot together and arrive at the
   same schema because every statement is idempotent. A file that replaces a

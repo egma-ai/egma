@@ -3,10 +3,10 @@
 -- **This file rewrites `spans`, which `0000_spans.sql:9-12` says nothing in this
 -- chain may ever do.** That claim is amended here rather than there: an applied
 -- migration is immutable and the runner refuses a file whose bytes changed
--- (`src/migrate.ts:105-111`), so the correction belongs in a new file. What the
--- old claim was protecting is still protected — the filing order and the
--- partition key are settled and effectively irreversible, and this is the one
--- moment before launch when they can be settled *correctly*.
+-- (`pendingMigrations` in `src/migrate.ts`), so the correction belongs in a new
+-- file. What the old claim was protecting is still protected — the filing order
+-- and the partition key are settled and effectively irreversible, and this is
+-- the one moment before launch when they can be settled *correctly*.
 --
 -- The old filing order was
 -- `(organization_id, project_id, toStartOfMinute(started_at), xxHash32(trace_id), span_id)`.
@@ -30,11 +30,32 @@
 -- only a lock would, and ClickHouse has none to take. The cutover already
 -- requires it: the writers are stopped before shared storage changes.
 --
--- What survives: simulation evidence, carried aside by `0007` and refilled at
--- the end of this file. What does not: production spans and the turns derived
--- from them, deleted **by construction** — `0007` copied only
--- `source = 'simulation'`, and the tables holding the rest are replaced whole
--- below. No `ALTER TABLE ... DELETE` is needed and none is written.
+-- **A file is recorded once every statement in it has succeeded, so a crash
+-- anywhere re-runs the whole of it.** There is no ledger between the phases
+-- below and no transaction around them, so their order carries the resume
+-- safety on its own:
+--
+--   1. the carryover table, made whether or not it is already there;
+--   2. the simulation evidence copied into it, read through columns `spans`
+--      carries in both the shape this file starts from and the shape it leaves,
+--      and collapsing on the span identity;
+--   3. the view dropped, the two tables replaced, the view rebuilt;
+--   4. the refill;
+--   5. the carryover dropped, **last**, so every earlier crash leaves the
+--      refill's source table standing.
+--
+-- That order closes both ends. A re-run that arrives after 3 finds the copy in 2
+-- reading the replaced `spans` — holding either nothing yet or exactly what the
+-- refill put there — and writing it onto the identities already in the
+-- carryover. A re-run that arrives after 5 finds the refilled `spans` and makes
+-- the carryover from it again. Either way the file ends with one visible copy of
+-- the same evidence.
+--
+-- What survives: simulation evidence, carried aside and refilled below. What
+-- does not: production spans and the turns derived from them, deleted **by
+-- construction** — only `source = 'simulation'` is carried across, and the
+-- tables holding the rest are replaced whole. No `ALTER TABLE ... DELETE` is
+-- needed and none is written.
 --
 -- **`verdicts` and `grading_job` are not named by this file and are not touched
 -- by it.** That is deliberate, not an oversight: grader-owned storage belongs to
@@ -42,19 +63,96 @@
 -- that effort's cleanup to make. `0006_production_platform_identity.sql` deleted
 -- from `verdicts` alongside the trace tables; this file does not repeat that.
 
--- The view goes first and comes back at the end, because it is defined over
--- the two tables below and both are about to be replaced.
+-- Where the simulation evidence waits while the tables under it are replaced.
+--
+-- `ReplacingMergeTree` on the span identity and **no partition key**: rows
+-- collapse inside a partition and never across one, so a single partition
+-- collapses a re-inserted identity unconditionally. That is what makes the copy
+-- below safe to run again — one identity written twice is one visible row,
+-- whatever the run before it managed to write.
+CREATE TABLE IF NOT EXISTS spans_carryover
+(
+    trace_id                 String,
+    span_id                  String,
+    parent_span_id           String,
+    organization_id          LowCardinality(String),
+    project_id               LowCardinality(String) DEFAULT 'default',
+    source                   LowCardinality(String),
+    emitter                  LowCardinality(String),
+    environment              LowCardinality(String) DEFAULT 'default',
+    started_at               DateTime64(6, 'UTC'),
+    duration_ns              UInt64,
+    name                     String,
+    kind                     LowCardinality(String),
+    status                   LowCardinality(String) DEFAULT 'unset',
+    text                     String,
+    audio_url                String,
+    tool_name                LowCardinality(String),
+    tool_arguments           String,
+    tool_result              String,
+    provider_call_id         String,
+    agent_platform           LowCardinality(String),
+    platform_agent_id        String,
+    platform_agent_name      String,
+    platform_agent_version   String,
+    connection_type          LowCardinality(String),
+    run_id                   String,
+    agent_id                 String,
+    agent_version_id         String,
+    test_version_id          String,
+    persona_version_id       String,
+    payload                  String
+)
+ENGINE = ReplacingMergeTree
+ORDER BY (organization_id, project_id, trace_id, span_id)
+;
+--> statement-breakpoint
+
+-- Only `source = 'simulation'` is carried. Production evidence is not copied,
+-- and the table holding it is replaced whole below, which is the whole of its
+-- removal.
+--
+-- **Every column named here belongs to both shapes of `spans`** — the one this
+-- file starts from and the one it leaves behind, which adds `content_hash` and
+-- takes nothing away. So the statement parses and means the same thing on a
+-- re-run that arrives after the replacement: it reads the refilled rows back and
+-- writes them onto themselves. Columns are named on both sides rather than
+-- `SELECT *` for exactly that reason.
+INSERT INTO spans_carryover
+(
+    trace_id, span_id, parent_span_id, organization_id, project_id, source,
+    emitter, environment, started_at, duration_ns, name, kind, status, text,
+    audio_url, tool_name, tool_arguments, tool_result, provider_call_id,
+    agent_platform, platform_agent_id, platform_agent_name,
+    platform_agent_version, connection_type, run_id, agent_id,
+    agent_version_id, test_version_id, persona_version_id, payload
+)
+SELECT
+    trace_id, span_id, parent_span_id, organization_id, project_id, source,
+    emitter, environment, started_at, duration_ns, name, kind, status, text,
+    audio_url, tool_name, tool_arguments, tool_result, provider_call_id,
+    agent_platform, platform_agent_id, platform_agent_name,
+    platform_agent_version, connection_type, run_id, agent_id,
+    agent_version_id, test_version_id, persona_version_id, payload
+FROM spans
+WHERE source = 'simulation'
+;
+--> statement-breakpoint
+
+-- The view goes first and comes back further down, because it is defined over
+-- the two tables between here and there and both are about to be replaced.
 DROP VIEW IF EXISTS turns_mv
 ;
 --> statement-breakpoint
 
 -- **`CREATE OR REPLACE`, not `DROP` then `CREATE`.** There is no lock around a
 -- ClickHouse migration and no transaction. A `DROP` followed by a `CREATE`
--- leaves an instant in which `spans` does not exist, and every statement below
--- names it — so a second boot arriving inside that instant would fail on a
--- table that is about to be there. A replace is atomic and leaves no such
--- instant. It does not make the file safe to apply twice at once, which nothing
--- could; it takes away the one failure that has nothing to do with rebuilding.
+-- leaves an instant in which `spans` does not exist, and a crash inside that
+-- instant has nowhere to go: every statement below names `spans`, and so does
+-- the carry-aside above that a re-run starts from. A replace is atomic and
+-- leaves no such instant. It does not make the file safe to apply twice at once,
+-- which nothing could; it takes away the one failure that has nothing to do with
+-- rebuilding.
 CREATE OR REPLACE TABLE spans
 (
     -- Identity, and now the whole of it. `trace_id` and `span_id` are adopted
@@ -140,8 +238,10 @@ CREATE OR REPLACE TABLE spans
     -- the same key so the check can see the conflict, not beside each other as
     -- two rows nobody compares.
     --
-    -- Empty on the simulation rows `0007` carried aside, which were written
-    -- before the hash existed.
+    -- Empty on the simulation rows carried aside above, which were written
+    -- before the hash existed. It is also the one column the carryover does not
+    -- hold, which is why the copies on both sides of the replacement name their
+    -- columns.
     content_hash             String
 )
 -- **Plain `ReplacingMergeTree()`, with no version column, on purpose.** With a
@@ -236,10 +336,10 @@ WHERE startsWith(kind, 'turn:')
 --> statement-breakpoint
 
 -- The simulation evidence, back where it belongs. Re-run safe because both
--- destinations now collapse on the span identity and the copy is a pure
--- function of the source: a second run writes the same rows onto themselves.
--- Columns are named on both sides rather than `SELECT *`, because the
--- destination has one column the carryover does not.
+-- destinations now collapse on the span identity and the copy is a pure function
+-- of the source: a second run writes the same rows onto themselves. `FINAL`
+-- because the carryover may hold a re-inserted identity twice until it merges,
+-- and this reads it once.
 INSERT INTO spans
 (
     trace_id, span_id, parent_span_id, organization_id, project_id, source,
@@ -257,3 +357,11 @@ SELECT
     platform_agent_version, connection_type, run_id, agent_id,
     agent_version_id, test_version_id, persona_version_id, payload
 FROM spans_carryover FINAL
+;
+--> statement-breakpoint
+
+-- Last, and that placement is the point: until this statement the refill's
+-- source is still standing, so a crash at any statement above re-runs a file
+-- that can still put the evidence back. A crash on this one re-runs a file whose
+-- carry-aside reads the refilled `spans` and builds the carryover again.
+DROP TABLE IF EXISTS spans_carryover
