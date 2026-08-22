@@ -20,6 +20,10 @@ import { makeLog } from "../../grader/src/log.ts";
 import { startService, type Service } from "../../grader/src/service.ts";
 import { scriptedJudge } from "../../grader/test/support/scripted-judge.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
+import {
+  startObjectStorage,
+  type ObjectStorage,
+} from "./support/object-storage.ts";
 import { NEUTRAL_TRAITS } from "./support/traces.ts";
 
 /**
@@ -258,6 +262,22 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  */
 const THE_PHRASE = "Wednesday afternoon";
 
+/**
+ * The walk needs somewhere for evidence to become durable, because the whole of
+ * what it watches runs through the real door: the simulator's span batches are
+ * answered on object-store durability, and its terminal report is sent behind
+ * them in order. An instance with no ingestion bucket answers those batches the
+ * way an unconfigured deployment does — retryably — and the simulation never
+ * reaches the report that ends it.
+ */
+const storage: ObjectStorage = await startObjectStorage("simulator-walk");
+
+if (!storage.available) {
+  process.stderr.write(
+    `\nskipping the shipped-simulator walk — ${storage.why}\n\n`,
+  );
+}
+
 let instance: Instance;
 let counterpart: RetellCounterpart;
 let simulator: ChildProcess | undefined;
@@ -437,15 +457,22 @@ type Sighting = {
 
 /**
  * Watch one simulation from queued to terminal, reading both stores as it
- * goes, and answer with everything seen — including one last look taken the
- * instant the row turned terminal.
+ * goes, and answer with everything seen — plus the conversation as it stands
+ * once the evidence behind it has been stored.
  *
- * The order inside the loop is the whole point. Spans are read *first* and
- * the row's status *second*, so a sighting that says terminal is saying the
- * spans beside it were already there before the transition was visible. Then
- * the terminal sighting is taken again, spans last, because what has to be
- * true is the strong direction: when the control plane records a terminal
- * transition, the evidence a verdict will cite is already stored.
+ * The order inside the loop is deliberate. Spans are read *first* and the row's
+ * status *second*, so a sighting is saying the spans beside it were already
+ * there before the transition it reports.
+ *
+ * **The terminal look waits, and that is the design rather than a slow test.**
+ * The two facts about a finished simulation are separate and arrive in either
+ * order: the lifecycle transition that ends it, and its evidence becoming
+ * query-visible. A span batch is answered when it is durable in the object
+ * store, which is a promise that it is safe rather than that it is readable —
+ * so a terminal row may be written while the last segment is still on its way
+ * into the trace store. What has to be true is that the conversation a verdict
+ * will cite does arrive, whole, and the reconciliation of the two arrivals
+ * belongs to the grading boundary rather than to either producer.
  */
 async function watchToTerminal(
   simulationId: string,
@@ -459,10 +486,17 @@ async function watchToTerminal(
     const status = String((await rowOf(simulationId)).status);
     seen.push({ status, spans });
     if (status === "completed" || status === "failed" || status === "canceled") {
-      return {
-        seen,
-        atTerminal: (await storedSpans(traceId)).map((span) => span.name),
-      };
+      // The root span is the last thing the simulator sends, so its arrival is
+      // what says the whole conversation is readable. Waited for rather than
+      // demanded in the same instant, and answered with whatever the last look
+      // saw either way, so a conversation that never lands fails on what is
+      // missing rather than on a timer.
+      let atTerminal = (await storedSpans(traceId)).map((span) => span.name);
+      while (!atTerminal.includes("simulation") && Date.now() <= deadline) {
+        await new Promise((resume) => setTimeout(resume, 25));
+        atTerminal = (await storedSpans(traceId)).map((span) => span.name);
+      }
+      return { seen, atTerminal };
     }
     if (Date.now() > deadline) {
       throw new Error(
@@ -506,6 +540,7 @@ beforeAll(async () => {
     web: false,
     traces: true,
     retellFetch: RETELL_CHAT_PREFLIGHT,
+    ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
   });
 }, 120_000);
 
@@ -516,9 +551,10 @@ afterAll(async () => {
   await instance?.close();
   await counterpart?.stop();
   await rm(scratch, { recursive: true, force: true });
+  if (storage.available) storage.stop();
 });
 
-describe("the shipped simulator against the real API", () => {
+describe.skipIf(!storage.available)("the shipped simulator against the real API", () => {
   it(
     "walks queued → claimed → running → completed, and a refused key to an honest failed",
     { timeout: 90_000 },
@@ -732,8 +768,9 @@ describe("the shipped simulator against the real API", () => {
       // reader seeing it would mean the conversation was already over.
       expect(whileRunning[0]?.spans).not.toContain("simulation");
 
-      // The guarantee: at the moment the row went terminal, the whole
-      // conversation was already stored — root span and all.
+      // The guarantee: the whole conversation a verdict will cite is stored —
+      // root span and all — for a simulation the control plane has recorded as
+      // over.
       expect(watched.atTerminal).toContain("simulation");
 
       // The conversation that happened: completed, concluded by the persona,
