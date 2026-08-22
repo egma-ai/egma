@@ -14,9 +14,16 @@
  * Approval always names the complete suite. If any file is invalid, the wizard
  * stops before the atomic repository push. It never asks whether a smaller set
  * may continue.
+ *
+ * **The mocked world is on the list too.** A simulation runs inside the answers
+ * Egma serves for the agent's tools, so approving a suite is approving those
+ * answers — the project's mocked world beside the tests, and the branch each
+ * test forces beside its own name. A list that showed only the test names would
+ * be asking for agreement to half of what is about to happen.
  */
 
 import type { FolderContents } from "../folder/egma-folder.ts";
+import type { MockToolEntry } from "../folder/mock-tools.ts";
 import type { FilePersona } from "../folder/test-file.ts";
 
 /** What a persona column says for a test that names nobody. */
@@ -31,6 +38,28 @@ export type GateRow = {
   readonly shown: string;
   /** Absolute, for opening in an editor and for the push. */
   readonly file: string;
+  /**
+   * The tools this test answers for itself, by name.
+   *
+   * The project's mocked world is what every test starts in, so the news on
+   * this row is the branch this one forces: an empty calendar, a lookup that
+   * fails. Empty means the test runs in the project's world unchanged.
+   */
+  readonly overrides: readonly string[];
+};
+
+/**
+ * One tool of the mocked world, as the list shows it.
+ *
+ * The answer is summarised rather than printed: a gate is a pause to scan, and
+ * a JSON body on a terminal row is neither scannable nor the thing being
+ * agreed to. What is being agreed to is that this tool is answered by Egma at
+ * all, and whether the answer is a success or a failure.
+ */
+export type GateMock = {
+  readonly tool: string;
+  /** `answers`, `errors`, or what the block actually said. */
+  readonly says: string;
 };
 
 /** A file egma will not push, and why, in words a developer can act on. */
@@ -52,6 +81,15 @@ export type HeldBack = {
 export type TestGate = {
   readonly rows: readonly GateRow[];
   readonly heldBack: readonly HeldBack[];
+  /**
+   * The project's mocked world, shown beside the tests it will serve.
+   *
+   * The two are one decision. Approving a suite is approving the world it runs
+   * in, and a developer who saw only the tests would be agreeing to answers
+   * they had never read. Empty on a platform where nothing is mocked yet, and
+   * the screen then says nothing about mock tools at all.
+   */
+  readonly mocks: readonly GateMock[];
   /** What the tests would run against, for the sentence above the keys. */
   readonly agentName: string;
   readonly connectionName: string;
@@ -119,6 +157,30 @@ function personaColumn(personas: readonly FilePersona[]): string {
   return named.length === 0 ? DEFAULT_PERSONA : named.join(", ");
 }
 
+/**
+ * What one mock tool answers with, in the few words a row has for it.
+ *
+ * Read off the block's own keys rather than from a shape with named fields:
+ * what a mock tool may hold is Egma's to decide, and a summary that only knew
+ * today's keys would quietly say nothing about tomorrow's.
+ */
+export function saysOf(entry: MockToolEntry): string {
+  const held = entry.says;
+  const delay = typeof held["delay_ms"] === "number" ? `, after ${String(held["delay_ms"])}ms` : "";
+  if ("error" in held) {
+    const said = typeof held["error"] === "string" ? held["error"] : "an error";
+    return `fails: ${said}${delay}`;
+  }
+  if ("answer" in held) return `answers${delay}`;
+  const keys = Object.keys(held);
+  return keys.length === 0 ? "says nothing" : `says ${keys.join(", ")}${delay}`;
+}
+
+/** The mocked world as rows, in the order the file wrote it. */
+export function mocksFrom(entries: readonly MockToolEntry[]): readonly GateMock[] {
+  return entries.map((entry) => ({ tool: entry.tool, says: saysOf(entry) }));
+}
+
 /** The list, and what was kept out of it, from what is on disk. */
 export function gateFrom(
   folder: FolderContents,
@@ -130,6 +192,8 @@ export function gateFrom(
     readonly destination: string | null;
     readonly suite: string;
   },
+  /** The project's mock tools, which every row runs inside. */
+  mockTools: readonly MockToolEntry[] = [],
 ): TestGate {
   const rows: GateRow[] = [];
   const heldBack: HeldBack[] = folder.unreadable.map((file) => ({
@@ -148,6 +212,7 @@ export function gateFrom(
       persona: personaColumn(held.test.personas),
       shown: held.shown,
       file: held.file,
+      overrides: held.test.mockTools.map((entry) => entry.tool),
     });
   }
 
@@ -155,5 +220,5 @@ export function gateFrom(
   // held back for, so the screen is the folder rather than egma's bookkeeping.
   heldBack.sort((a, b) => (a.shown < b.shown ? -1 : a.shown > b.shown ? 1 : 0));
 
-  return { rows, heldBack, ...about };
+  return { rows, heldBack, mocks: mocksFrom(mockTools), ...about };
 }

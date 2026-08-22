@@ -17,7 +17,12 @@ const PACKAGE_ROOT = path.join(CODE_ROOT, "apps", "cli", "skills");
 
 // Public release is an allowlist. Adding a directory does not publish it by
 // accident, and this script never walks the private Planning repository.
-const PUBLIC_SKILLS = ["egma", "find-voice-agent", "write-egma-tests"];
+const PUBLIC_SKILLS = [
+  "egma",
+  "find-voice-agent",
+  "integrate-egma-sdk",
+  "write-egma-tests",
+];
 
 async function filesUnder(root, below = "") {
   const entries = await readdir(path.join(root, below), { withFileTypes: true });

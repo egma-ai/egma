@@ -26,7 +26,7 @@ import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./suppo
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { bannedWordsIn } from "./support/glossary.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { runInTerminal, showing } from "./support/pty.ts";
+import { chooseTesting, runInTerminal, showing } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -225,6 +225,7 @@ describe("the pane, while the files land", () => {
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
+      await chooseTesting(terminal);
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
@@ -331,6 +332,7 @@ describe("the pane, while the files land", () => {
     try {
       await showing(terminal, "[enter] begin");
       terminal.write("\r");
+      await chooseTesting(terminal);
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 

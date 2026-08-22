@@ -1,10 +1,12 @@
 /**
  * The wizard's generate step: from what egma has learned to tests on egma.
  *
- * Four things happen, in one order, and the developer is in exactly one of
+ * Five things happen, in one order, and the developer is in exactly one of
  * them: they are asked once whether they already have test cases written down;
  * what they point at is converted into files; what is missing is generated;
- * and the whole list is put on screen for one keystroke.
+ * the lane's own work between the files landing and the list going up runs —
+ * on LiveKit, the mocked world those tests will run in — and the whole list is
+ * put on screen for one keystroke.
  *
  * Both dispatches are the same shape as every other intelligent step — the
  * developer's own coding agent, egma's own notes at the top of the task, every
@@ -47,6 +49,7 @@ import type { ExitReport } from "./exit-line.ts";
 import type { Facts } from "./discovery.ts";
 import { readExistingTests } from "./existing-tests.ts";
 import { destinationOf, gateFrom } from "./gate.ts";
+import type { MockToolEntry } from "../folder/mock-tools.ts";
 import { MarkerStream, type ParsedLine } from "./markers.ts";
 import { ACTION_MARK, DETAIL_MARK, FAILURE_MARK } from "./status.ts";
 import { stopReasonOf, stopReport, untilAborted } from "./stop.ts";
@@ -100,9 +103,28 @@ export type GenerateStepOptions = {
   readonly facts: Facts;
   /** How many tests a first suite holds. The default when it is left out. */
   readonly howMany?: number;
-  /** State-machine seams. They report ordering and perform no I/O themselves. */
-  readonly onReviewReady?: ((count: number) => void) | undefined;
+  /**
+   * What happens between the test files landing and the list going up.
+   *
+   * The lane's own work, handed in rather than known here: on LiveKit it is the
+   * mocked world being written, and on Retell there is nothing to do and no
+   * screen for it. It answers the report the walk must stop on, or `null` to
+   * carry on to the gate. It is also where the state machine learns the tests
+   * exist, because that is the same moment.
+   */
+  readonly betweenWritingAndReview?:
+    | ((written: WrittenTests) => Promise<ExitReport | null>)
+    | undefined;
+  /** State-machine seam for the approval. It performs no I/O itself. */
   readonly onReviewApproved?: ((count: number) => void) | undefined;
+};
+
+/** The tests that landed, and the suite directory they landed in. */
+export type WrittenTests = {
+  /** Every test Egma could use, by name, in the folder's own order. */
+  readonly tests: readonly string[];
+  /** The direct suite directory under `egma/tests/`. */
+  readonly suiteDirectory: string;
 };
 
 /**
@@ -375,11 +397,16 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
   };
 }
 
-async function contentsFor(paths: FolderPaths, suiteId: string): Promise<FolderContents> {
+/** What is in the folder for this suite, and the world every test runs in. */
+type SuiteContents = FolderContents & {
+  readonly mockTools: readonly MockToolEntry[];
+};
+
+async function contentsFor(paths: FolderPaths, suiteId: string): Promise<SuiteContents> {
   try {
     const repository = await readRepository(paths);
     const suite = repository.suites.find((entry) => entry.manifest.id === suiteId);
-    return { found: suite?.tests ?? [], unreadable: [] };
+    return { found: suite?.tests ?? [], unreadable: [], mockTools: repository.mockTools };
   } catch (cause) {
     if (!(cause instanceof RepositoryValidationError)) throw cause;
     // A complete repository parse has no partial success. Give the gate the
@@ -387,6 +414,7 @@ async function contentsFor(paths: FolderPaths, suiteId: string): Promise<FolderC
     // developer's approval into permission to push fewer tests.
     return {
       found: [],
+      mockTools: [],
       unreadable: cause.issues.map((issue) => {
         const [named = issue, ...detail] = issue.split(": ");
         const shown = named.startsWith("egma/") ? named : "egma";
@@ -526,7 +554,32 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     suite: suite.name,
   };
 
-  const gate = gateFrom(await contentsFor(paths, suite.id), about);
+  const written = await contentsFor(paths, suite.id);
+  const usable = written.found.filter(
+    (file) => file.test.expectedBehaviors.length > 0,
+  );
+  if (usable.length === 0 && written.unreadable.length === 0) {
+    return ending({
+      kind: "failed",
+      reason: `${options.drivenAgent.name} wrote no test Egma could use. What it printed is in ${options.log.file}.`,
+    });
+  }
+
+  // The lane's own work between the files landing and the list going up. On
+  // LiveKit that is the mocked world; on Retell it is nothing, and nothing is
+  // exactly what the developer sees.
+  if (usable.length > 0) {
+    const halted = await options.betweenWritingAndReview?.({
+      tests: usable.map((file) => file.test.name),
+      suiteDirectory: suite.directory,
+    });
+    if (halted != null) return ending(halted);
+  }
+
+  // Read again, because the step above may have written into these files and
+  // into the mocked world beside them. What is on disk is what is agreed to.
+  const contents = await contentsFor(paths, suite.id);
+  const gate = gateFrom(contents, about, contents.mockTools);
   for (const held of gate.heldBack) {
     ui.pushStatus(`${FAILURE_MARK} ${held.shown} was not pushed: ${held.reason}`);
   }
@@ -537,7 +590,6 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
     });
   }
 
-  if (gate.rows.length > 0) options.onReviewReady?.(gate.rows.length);
   ui.setGate(gate);
   await untilAborted(ui.waitForGate("run-tests"), signal);
   ui.setGate(null);
@@ -551,7 +603,8 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
 
   // Re-read the complete repository after the editor returns. Approval never
   // means permission to omit a held-back file.
-  const approved = gateFrom(await contentsFor(paths, suite.id), about);
+  const reread = await contentsFor(paths, suite.id);
+  const approved = gateFrom(reread, about, reread.mockTools);
   if (approved.heldBack.length > 0) {
     return ending({
       kind: "failed",

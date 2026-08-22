@@ -9,9 +9,12 @@
  * costs nothing — the CLI is fully drivable from `egma --help` either way, and
  * the exit line says so.
  *
- * Nothing is written by this screen. It answers the question; the flow writes
- * the file, and it writes it with egma's own code — one directory and one
- * file, at a path printed here first.
+ * Nothing is written by this screen. It answers the question; the flow runs the
+ * standard skills installer that shipped inside this package, against the
+ * skills this package carries. Where each one lands is that installer's
+ * business — it is what tracks the many places a coding agent reads skills from
+ * — so what is said here is which tree it writes into, and the lines the
+ * installer prints afterwards say the rest.
  */
 
 import { Box, Text, useInput } from "ink";
@@ -59,16 +62,19 @@ export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) 
       <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
-        {`Install the Egma skill into ${places.name}, so it can drive Egma on its own next time?`}
+        {`Install ${places.skills.length} Egma skills into ${places.name}, so it can drive Egma on its own next time?`}
       </Text>
+      <Text dimColor>{places.skills.join(", ")}</Text>
       <Box height={1} />
-      {/* Said before anything is written, because a path a developer reads
-          afterwards is a path they were not asked about. */}
-      <Text dimColor>{`[p] writes ${places.project}`}</Text>
-      <Text dimColor>{`[g] writes ${places.global}`}</Text>
+      {/* Said before anything is written, because a tree a developer reads
+          afterwards is a tree they were not asked about. */}
+      <Text dimColor>{`[p] writes into ${places.repository}`}</Text>
+      <Text dimColor>{`[g] writes into ${places.home}`}</Text>
       <Text dimColor>[s] writes nothing at all</Text>
       <Box height={1} />
-      <Text dimColor>Egma writes the one file itself. Nothing is downloaded.</Text>
+      <Text dimColor>
+        Egma runs the skills installer it shipped with. Nothing is downloaded.
+      </Text>
       <Box height={1} />
       <Text dimColor>{hintBar(bindings)}</Text>
     </Box>

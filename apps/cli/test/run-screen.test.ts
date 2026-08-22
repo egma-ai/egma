@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -173,6 +173,7 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
 
+  await chooseTesting(run);
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
@@ -196,6 +197,7 @@ const OFFER_HINTS = ["[p] project", "[g] global", "[s] skip"] as const;
 
 /** Where a skill lands, under whichever tree. */
 const SKILL_PATH = path.join(".claude", "skills", "egma", "SKILL.md");
+const SDK_SKILL_PATH = path.join(".claude", "skills", "integrate-egma-sdk", "SKILL.md");
 
 describe("the run screen", () => {
   it("shows simulations moving, marks the first verdict, then leaves the run going", async () => {
@@ -237,7 +239,7 @@ describe("the run screen", () => {
     // waiting on this terminal.
     expect(landed).toContain("The suite keeps running on Egma");
 
-    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
+    await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     const held = platform.running.simulationsOf();
     expect(held.filter((one) => one.verdict !== null)).toHaveLength(1);
     expect(held.filter((one) => one.verdict === null)).toHaveLength(2);
@@ -303,11 +305,11 @@ describe("the skill offer and what is left behind", () => {
       verdict: "passed",
     });
 
-    await showing(run, "Install the Egma skill into Claude Code", ...OFFER_HINTS);
+    await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     return run;
   }
 
-  it("writes the skill into the repository on [p], and says so in scrollback", async () => {
+  it("writes the skills into the repository on [p], and says so in scrollback", async () => {
     const run = await toTheOffer();
     run.write("p");
 
@@ -315,14 +317,20 @@ describe("the skill offer and what is left behind", () => {
 
     const landed = path.join(workspace.dir, SKILL_PATH);
     expect(await readFile(landed, "utf8")).toContain("name: egma");
+    // Every public skill, not only the one that drives the command.
+    expect(
+      await readFile(path.join(workspace.dir, SDK_SKILL_PATH), "utf8"),
+    ).toContain("name: integrate-egma-sdk");
     expect(existsSync(path.join(home, SKILL_PATH))).toBe(false);
 
     const left = run.scrollback();
-    expect(left).toContain(landed);
-    expect(left).toContain("Commit it");
+    // Where they went, in the installer's own words rather than in a path egma
+    // guessed at before it ran.
+    expect(left).toContain(path.join(".claude", "skills", "egma"));
+    expect(left).toContain("Commit them");
   });
 
-  it("writes the skill into the home on [g], leaving the repository alone", async () => {
+  it("writes the skills into the home on [g], leaving the repository alone", async () => {
     const before = await filesUnder(workspace.dir);
     const run = await toTheOffer();
     run.write("g");
@@ -335,7 +343,7 @@ describe("the skill offer and what is left behind", () => {
     // The repository gained only what the walk was always going to write.
     expect(before.length).toBeLessThan((await filesUnder(workspace.dir)).length);
 
-    expect(run.scrollback()).toContain(landed);
+    expect(run.scrollback()).toContain(path.join(".claude", "skills", "egma"));
   });
 
   /**
@@ -347,8 +355,9 @@ describe("the skill offer and what is left behind", () => {
     const homeBefore = await filesUnder(home);
 
     const offer = await showing(run, "writes nothing at all");
-    expect(offer).toContain(path.join(workspace.dir, SKILL_PATH));
-    expect(offer).toContain(path.join(home, SKILL_PATH));
+    // Which tree each key writes into, said before anything is written.
+    expect(offer).toContain(workspace.dir);
+    expect(offer).toContain(home);
     expect(existsSync(path.join(workspace.dir, SKILL_PATH))).toBe(false);
     expect(existsSync(path.join(home, SKILL_PATH))).toBe(false);
 

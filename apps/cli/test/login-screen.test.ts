@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copySequence } from "../src/platform/clipboard.ts";
 import { columnsNeeded } from "../src/ui/tui/width.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
-import { runInTerminal, showing, showingIn, type TerminalRun } from "./support/pty.ts";
+import { chooseTesting, runInTerminal, showing, showingIn, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -139,6 +139,7 @@ async function loginScreen(
  * run ends here, and the line it leaves says exactly that.
  */
 async function declineTheKey(terminal: TerminalRun): Promise<void> {
+  await chooseTesting(terminal);
   await showing(terminal, "Paste your Retell API key");
   terminal.write("");
   expect(await terminal.exited).toBe(1);

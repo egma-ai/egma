@@ -21,6 +21,7 @@ import type {
   CodingAgentChoice,
   DrivenAgent,
   GateId,
+  GoalAsk,
   PlatformNotice,
   WizardUI,
 } from "../wizard-ui.ts";
@@ -66,6 +67,10 @@ export class InkUI implements WizardUI {
 
   setLogin(prompt: LoginPrompt | null): void {
     this.store.setLogin(prompt);
+  }
+
+  setGoalAsk(ask: GoalAsk | null): void {
+    this.store.setGoalAsk(ask);
   }
 
   setKeyAsk(ask: KeyAsk | null): void {

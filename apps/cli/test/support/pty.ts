@@ -34,6 +34,8 @@ import process from "node:process";
 
 import type { IBuffer } from "@xterm/headless";
 
+import { GOAL_ASK_LINE } from "../../src/ui/wizard-ui.ts";
+
 const require = createRequire(import.meta.url);
 
 // @xterm/headless ships CommonJS, and its `module` field points at the browser
@@ -257,4 +259,17 @@ export async function showing(
   ...parts: readonly string[]
 ): Promise<string> {
   return showingIn(terminal, (screen) => screen, ...parts);
+}
+
+/**
+ * The one question the wizard asks about itself, answered on the way past.
+ *
+ * Every walk in a real terminal meets it after discovery, and almost every
+ * check in this suite is about something on the far side of it. So the answer
+ * is given here, once, in the lane those checks are about — and a check that is
+ * about the question itself asks for the screen by name instead.
+ */
+export async function chooseTesting(terminal: TerminalRun): Promise<void> {
+  await showing(terminal, GOAL_ASK_LINE, "[t] Test it");
+  terminal.write("t");
 }

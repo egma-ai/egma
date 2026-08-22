@@ -17,6 +17,11 @@
  * then would not open them would be pointing at a problem while holding the door
  * shut.
  *
+ * The mocked world is on the same screen for the same reason the tests are:
+ * approving a suite is approving the world it runs in. A developer who read
+ * only the test names would be agreeing to answers they had never seen, and the
+ * answers are what keeps a simulation off their real backend.
+ *
  * The sentence above the keys says what enter costs, and it says it in the
  * plainest terms the screen has: which agent, which connection, what kind of
  * connection that is, and — when the connection dials — the number every
@@ -108,9 +113,11 @@ export function GateScreen({
       <Box flexDirection="column">
         {shown.map((row, index) => {
           const isSelected = from + index === on;
+          const overridden =
+            row.overrides.length === 0 ? "" : `  · mocks ${row.overrides.join(", ")}`;
           return (
             <Text key={row.shown} inverse={isSelected}>
-              {`${isSelected ? "›" : " "} ${row.name.padEnd(width)}  ${row.persona}`}
+              {`${isSelected ? "›" : " "} ${row.name.padEnd(width)}  ${row.persona}${overridden}`}
             </Text>
           );
         })}
@@ -127,6 +134,16 @@ export function GateScreen({
           ))}
         </Box>
       ) : null}
+      {gate.mocks.length === 0 ? null : (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>
+            {`Egma answers ${gate.mocks.length} of this agent's tools itself, so a simulation never reaches your backend:`}
+          </Text>
+          {gate.mocks.map((mock) => (
+            <Text key={mock.tool} dimColor>{`  ${mock.tool} — ${mock.says}`}</Text>
+          ))}
+        </Box>
+      )}
       {problem === null ? null : (
         <Box marginTop={1}>
           <Text>{problem}</Text>

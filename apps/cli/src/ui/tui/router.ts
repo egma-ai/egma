@@ -19,6 +19,7 @@ export type ScreenId =
   | "coding-agent"
   | "intro"
   | "login"
+  | "goal"
   | "connection-field"
   | "retell-key"
   | "retell-agent"

@@ -25,28 +25,41 @@
 import {
   installedLine,
   skippedLine,
+  type SkillPlaces,
   type SkillScope,
 } from "../skills/install.ts";
 import { pasteFallbackMessage } from "./no-coding-agent.ts";
+import type { WizardGoal } from "./wizard-machine.ts";
 
 /**
  * What the developer said to the skill offer, and what egma did about it.
  *
- * `not-offered` is a real answer: egma knows where two coding agents keep
- * their skills, and it will not write a file into a directory an agent it does
- * not know may never read.
+ * `not-offered` is a real answer: the installer knows a long list of coding
+ * agents and egma will not aim an install at one that is not on it.
+ * `install-failed` is a real answer too — an offer accepted and not kept has to
+ * say so, or a developer walks away believing their agent learned something.
  */
 export type SkillOutcome =
   | {
       readonly kind: "installed";
       readonly scope: SkillScope;
-      readonly file: string;
-      readonly drivenAgentName: string;
-      /** A file was already there, and the line has to say it is gone. */
-      readonly replaced: boolean;
+      readonly places: SkillPlaces;
+      /** Where the installer said each skill went, in its own words. */
+      readonly landed: readonly string[];
     }
   | { readonly kind: "skipped"; readonly drivenAgentName: string }
+  | { readonly kind: "install-failed"; readonly reason: string }
   | { readonly kind: "not-offered" };
+
+/**
+ * The path to watching production traffic that needs no terminal, said once.
+ *
+ * Two endings point at it and they must not drift: the machine with no coding
+ * agent on it, and a developer who asked for monitoring before the wizard could
+ * do it. Both are told the same thing because it is the same thing.
+ */
+export const WEB_MONITORING_POINTER =
+  "To watch production traffic, open Egma in your browser and start monitoring from its Monitoring page.";
 
 /** Why the wizard stopped, and what it can honestly say about it. */
 export type ExitReport =
@@ -103,6 +116,28 @@ export type ExitReport =
     }
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
+  /**
+   * The developer asked egma to watch production traffic, and the wizard
+   * cannot yet.
+   *
+   * A successful ending rather than a failure: nothing was created, nothing is
+   * half-done, and the flow that can do it today is named. It is temporary —
+   * the monitoring lane replaces it — and it is honest while it stands.
+   */
+  | {
+      readonly kind: "monitoring-in-the-web";
+      readonly goal: Exclude<WizardGoal, "testing">;
+      /** Which egma to open, or `null` when this walk signed in to none. */
+      readonly platformUrl: string | null;
+    }
+  /**
+   * The repository has an egma folder already, so it is not a new one.
+   *
+   * v1 of the wizard onboards new repositories. A second run over a folder
+   * somebody already committed would half-write another suite into it, so it
+   * refuses before it starts anything and says the one thing that redoes setup.
+   */
+  | { readonly kind: "already-onboarded"; readonly folder: string }
   /**
    * The coding agent stopped the work itself and said why. It is not the same
    * as finding nothing, and saying it was would put words in the agent's mouth.
@@ -221,7 +256,30 @@ export function buildExitLine(report: ExitReport): string {
       );
     }
     case "no-coding-agent":
-      return "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.";
+      return (
+        "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead. " +
+        WEB_MONITORING_POINTER
+      );
+    case "monitoring-in-the-web": {
+      const asked =
+        report.goal === "both"
+          ? "Egma cannot yet set up testing and production monitoring together from the terminal, so it set up neither."
+          : "Egma cannot yet set up production monitoring from the terminal, so it set nothing up.";
+      const where =
+        report.platformUrl === null
+          ? WEB_MONITORING_POINTER
+          : `To watch production traffic, open Egma at ${report.platformUrl} and start monitoring from its Monitoring page.`;
+      const again =
+        report.goal === "both"
+          ? " Run egma again and choose testing for the rest."
+          : " Run egma again and choose testing whenever you want tests as well.";
+      return `${asked} ${where}${again}`;
+    }
+    case "already-onboarded":
+      return (
+        `Egma is already set up here: ${report.folder} exists, and the wizard only works with new repositories for now. ` +
+        `Delete or rename ${report.folder} and run egma again to redo setup, or use egma push and egma run on what is already there.`
+      );
     case "coding-agent-stopped":
       return oneLine(report.reason) === ""
         ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`
@@ -298,14 +356,11 @@ export function buildExitNotice(report: ExitReport): string | null {
 
   switch (report.skill.kind) {
     case "installed":
-      return installedLine(
-        report.skill.scope,
-        report.skill.file,
-        report.skill.drivenAgentName,
-        report.skill.replaced,
-      );
+      return installedLine(report.skill.scope, report.skill.places, report.skill.landed);
     case "skipped":
       return skippedLine(report.skill.drivenAgentName);
+    case "install-failed":
+      return report.skill.reason;
     case "not-offered":
       return null;
   }

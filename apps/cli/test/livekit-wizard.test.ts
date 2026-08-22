@@ -13,7 +13,7 @@ import {
 } from "../src/livekit/connect.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
-import { connectLiveKitStep } from "../src/wizard/livekit-connect-step.ts";
+import { liveKitConnectionSetupStep } from "../src/wizard/livekit-connection-setup-step.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
@@ -27,6 +27,66 @@ const API_KEY = "APIhx4bmvHnLcWXYZ";
 const API_SECRET = "livekit-secret-E5F6G7H8QRST";
 const HEADERS = '{"Authorization":"Bearer private-token"}';
 
+/**
+ * The customer's worker before Egma touches it: an ordinary LiveKit job
+ * entrypoint with one tool and no Egma anywhere in it.
+ */
+const WORKER_BEFORE = [
+  "from livekit import agents",
+  "from livekit.agents import Agent, AgentSession, function_tool",
+  "",
+  "",
+  "class FrontDesk(Agent):",
+  "    @function_tool",
+  "    async def check_availability(self, day: str) -> str:",
+  '        """Look up the free slots on one day."""',
+  '        return "nothing free"',
+  "",
+  "",
+  "async def entrypoint(ctx: agents.JobContext) -> None:",
+  "    await ctx.connect()",
+  "    agent = FrontDesk()",
+  "    session = AgentSession()",
+  "    await session.start(agent=agent, room=ctx.room)",
+  "",
+].join("\n");
+
+/** The same file after the coding agent has applied the testing entry. */
+const WORKER_AFTER = WORKER_BEFORE.replace(
+  "    await session.start(agent=agent, room=ctx.room)",
+  [
+    "    await mockable(agent, ctx, session)",
+    "    await session.start(agent=agent, room=ctx.room)",
+  ].join("\n"),
+).replace("from livekit import agents", "from egma import mockable\nfrom livekit import agents");
+
+/** The project's mocked world, as the driven agent would write the file. */
+const MOCK_TOOLS_FILE = [
+  "# The mock tools this project answers with",
+  "",
+  "## Mock tools",
+  "### check_availability",
+  "```json",
+  '{ "answer": { "slots": ["Wednesday 15:00"] } }',
+  "```",
+  "",
+].join("\n");
+
+/** The one fragment that names the mock-authoring task and nothing else. */
+const MOCK_AUTHORING_TASK = "run isolated from its real";
+
+/** What the scripted agent does when Egma sends it the mock-authoring task. */
+function mockingSteps(): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:plan check_availability\n" },
+    { kind: "write-file", path: "agent.py", content: WORKER_AFTER },
+    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
+    { kind: "write-file", path: "egma/mock-tools.md", content: MOCK_TOOLS_FILE },
+    { kind: "say", text: "egma:wrote check_availability\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
 let platform: Platform;
 let workspace: Workspace;
 
@@ -35,6 +95,7 @@ beforeEach(async () => {
   workspace = await makeWorkspace({
     "package.json": '{"name":"livekit-front-desk","dependencies":{"livekit-agents":"latest"}}\n',
     "agent.ts": "// LiveKit AgentSession with a front desk prompt\n",
+    "agent.py": WORKER_BEFORE,
   });
   await workspace.signIn(platform.url, platform.device.mint());
 });
@@ -151,8 +212,8 @@ class CorrectionUI extends HeadlessUI {
   }
 }
 
-function connectStep(ui: HeadlessUI) {
-  return connectLiveKitStep({
+function connectionSetupStep(ui: HeadlessUI) {
+  return liveKitConnectionSetupStep({
     ui,
     platform: {
       url: platform.url,
@@ -212,6 +273,7 @@ describe("LiveKit in the wizard", () => {
             { kind: "stop", reason: "end_turn" },
           ],
         },
+        { contains: MOCK_AUTHORING_TASK, steps: mockingSteps() },
         { contains: "Write 1 test", steps: writingSteps() },
       ],
     });
@@ -285,7 +347,102 @@ describe("LiveKit in the wizard", () => {
     ) as { processIds: number[]; sessionIds: string[]; promptSessionIds: string[] };
     expect(new Set(driven.processIds).size).toBe(1);
     expect(driven.sessionIds).toHaveLength(1);
-    expect(driven.promptSessionIds).toEqual([driven.sessionIds[0], driven.sessionIds[0]]);
+    // Three dispatches now — find the agent, write the tests, write the world
+    // those tests run in — and all of them in the one process and the one
+    // protocol connection the wizard opened.
+    expect(driven.promptSessionIds).toEqual([
+      driven.sessionIds[0],
+      driven.sessionIds[0],
+      driven.sessionIds[0],
+    ]);
+  });
+
+  /**
+   * The whole LiveKit testing lane, offline, asserted on what a developer could
+   * check afterwards: which files landed and what they say, what the platform
+   * was sent, and what the last line said.
+   *
+   * The gap this closes is the one the effort exists for. Before it, a
+   * wizard-onboarded LiveKit repository ran its first simulations with no Egma
+   * in the worker, no mocked world, and nothing on screen that said so.
+   */
+  it("wires the SDK, writes the mocked world, and shows both at the gate", async () => {
+    const script = await workspace.script({
+      steps: [{ kind: "stop", reason: "end_turn" }],
+      stepsByTask: [
+        {
+          contains: "Find the voice agent in",
+          steps: [
+            { kind: "say", text: "egma:found framework livekit-agents\n" },
+            { kind: "say", text: "egma:found agent-name front-desk\n" },
+            { kind: "say", text: "egma:found tools agent.py (1 definition)\n" },
+            { kind: "stop", reason: "end_turn" },
+          ],
+        },
+        { contains: MOCK_AUTHORING_TASK, steps: mockingSteps() },
+        { contains: "Write 1 test", steps: writingSteps() },
+      ],
+    });
+    const ui = new HeadlessUI({
+      answers: {
+        "connection:agent-name": "front-desk",
+        "connection:variant": LIVEKIT_KEY_PAIR_VARIANT,
+        "connection:config:url": "wss://acme.livekit.cloud",
+        "connection:credentials:apiKey": API_KEY,
+        "connection:credentials:apiSecret": API_SECRET,
+      },
+    });
+
+    const grading = gradeEveryRun(platform, { atMost: 1 });
+    let report;
+    try {
+      report = await runWizard({
+        ui,
+        launch: { ...workspace.launch(script), id: "codex-acp", name: "Codex" },
+        cwd: workspace.dir,
+        signal: new AbortController().signal,
+        platform: selectedPlatform({
+          url: platform.url,
+          credentialsFile: workspace.credentialsFile,
+        }),
+        connectionFetchImpl: connectionFetch(),
+        howManyTests: 1,
+        runPollMs: 20,
+      });
+    } finally {
+      grading.stop();
+    }
+
+    expect(report.kind).toBe("run-started");
+
+    // The seam: the customer's own worker now awaits Egma where the tools are
+    // attached and nothing has been said yet.
+    const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+    expect(worker).toContain("from egma import mockable");
+    expect(worker).toContain("await mockable(agent, ctx, session)");
+    expect(worker.indexOf("await mockable")).toBeLessThan(worker.indexOf("await session.start"));
+    expect(ui.record.statuses).toContain("◆ Egma's testing entry is in agent.py");
+
+    // The world: one grounded answer per real tool, in the committed file.
+    const mocks = await readFile(
+      path.join(workspace.dir, "egma", "mock-tools.md"),
+      "utf8",
+    );
+    expect(mocks).toContain("### check_availability");
+
+    // And it reached the platform with the tests, which is what lets a
+    // simulation be served an answer and stamped for coverage at all.
+    expect(platform.mocking.mockTools.map((tool) => tool.tool)).toEqual([
+      "check_availability",
+    ]);
+
+    // The gate showed the tests and the world they run in, together.
+    expect(ui.record.gate?.rows.map((row) => row.name)).toEqual([
+      "greets-a-new-customer",
+    ]);
+    expect(ui.record.gate?.mocks).toEqual([
+      { tool: "check_availability", says: "answers" },
+    ]);
   });
 });
 
@@ -318,7 +475,7 @@ describe("LiveKit correction paths", () => {
       "connection:credentials:apiSecret": [API_SECRET, API_SECRET],
     });
 
-    const result = await connectStep(ui);
+    const result = await connectionSetupStep(ui);
 
     const collision =
       "An Egma agent already uses the name front-desk. Choose another name.";
@@ -349,7 +506,7 @@ describe("LiveKit correction paths", () => {
       "connection:credentials:apiSecret": [API_SECRET, API_SECRET],
     });
 
-    const result = await connectStep(ui);
+    const result = await connectionSetupStep(ui);
 
     const refusal =
       "the config's url must be a ws, wss, http or https URL, which looks like wss://example.livekit.cloud";
@@ -377,7 +534,7 @@ describe("LiveKit correction paths", () => {
       "connection:config:url": [null],
     });
 
-    const result = await connectStep(ui);
+    const result = await connectionSetupStep(ui);
 
     expect(result).toEqual({
       report: {

@@ -19,7 +19,11 @@ import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
-import type { WizardPhase } from "../wizard/wizard-machine.ts";
+import type {
+  WizardAgentPlatform,
+  WizardGoal,
+  WizardPhase,
+} from "../wizard/wizard-machine.ts";
 
 /**
  * A point the flow waits at until the developer has moved past it.
@@ -71,6 +75,17 @@ export type ConnectionAsk = {
 export type AskId =
   | ConnectionAskId
   | "coding-agent"
+  /**
+   * What Egma is here to do for the agent it just found: test it, watch its
+   * production traffic, or both.
+   *
+   * A question rather than a gate because there are three answers and none of
+   * them is agreement to the other two. It is asked after discovery so the
+   * choices can speak about this repository's own agent rather than about
+   * voice agents in general. No answer means testing, which is the lane every
+   * `npx egma` has run until now.
+   */
+  | "goal"
   | "retell-key"
   | "retell-agent"
   /**
@@ -97,6 +112,27 @@ export type AskId =
 
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
+
+/** What the goal question knows about the agent it is asking about. */
+export type GoalAsk = {
+  readonly platform: WizardAgentPlatform;
+  /** What a developer calls that agent platform, e.g. `LiveKit Agents`. */
+  readonly platformLabel: string;
+  /** What the repository calls the agent, when discovery reported a name. */
+  readonly agentName: string | null;
+  /** The answers on offer, in the order they are shown. */
+  readonly goals: readonly WizardGoal[];
+};
+
+/** What each answer to the goal question means, in one line each. */
+export const GOAL_LINES: Readonly<Record<WizardGoal, string>> = {
+  testing: "Test it — write tests, run them, and grade what the agent did.",
+  monitoring: "Watch its production traffic — bring real transcripts into Egma.",
+  both: "Both — watch production traffic and test the agent.",
+};
+
+/** The question itself, said the same way on a screen and in plain lines. */
+export const GOAL_ASK_LINE = "What should Egma do for this voice agent?";
 
 /**
  * Which egma a walk will use, and how a developer would change it.
@@ -175,6 +211,15 @@ export interface WizardUI {
    * is wanted and what happens to it; whether that is drawn in a box with the
    * characters hidden or printed as two plain lines is the UI's business.
    */
+  /**
+   * The one question about what Egma is here to do, while it is open, or
+   * `null` when it is closed.
+   *
+   * A write and not a question, exactly as every other offer is: the flow says
+   * the choice is open and what it is about, and the screen collects the word.
+   */
+  setGoalAsk(ask: GoalAsk | null): void;
+
   setKeyAsk(ask: KeyAsk | null): void;
 
   /**

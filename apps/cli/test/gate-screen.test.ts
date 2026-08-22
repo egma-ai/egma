@@ -28,7 +28,7 @@ import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./suppo
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -181,6 +181,7 @@ async function toTheGate(
   await showing(run, "[enter] begin", "[q] quit");
   run.write("\r");
 
+  await chooseTesting(run);
   await showing(run, "Paste your Retell API key");
   run.write(`${KEY}\r`);
 
@@ -342,6 +343,7 @@ describe("the files arriving", () => {
 
     await showing(run, "[enter] begin", "[q] quit");
     run.write("\r");
+    await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\r`);
 

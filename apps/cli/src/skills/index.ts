@@ -11,10 +11,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export type PublicSkillName = "egma" | "find-voice-agent" | "write-egma-tests";
+export type PublicSkillName =
+  | "egma"
+  | "find-voice-agent"
+  | "integrate-egma-sdk"
+  | "write-egma-tests";
 export const PUBLIC_SKILL_NAMES: readonly PublicSkillName[] = [
   "egma",
   "find-voice-agent",
+  "integrate-egma-sdk",
   "write-egma-tests",
 ];
 
@@ -24,6 +29,16 @@ const cache = new Map<string, string>();
 
 function packageFile(relative: string): string {
   return fileURLToPath(new URL(`../../${relative}`, import.meta.url));
+}
+
+/**
+ * The whole projected skills tree inside this package.
+ *
+ * It is what the end-of-wizard offer points the skills CLI at: one directory
+ * holding one directory per skill, which is the shape that installer reads.
+ */
+export function publicSkillsDirectory(): string {
+  return packageFile(SKILLS_DIRECTORY);
 }
 
 /** One public Agent Skill in the package projection. */
@@ -48,14 +63,14 @@ export function publicSkill(name: PublicSkillName): string {
   return contentAt(publicSkillFile(name));
 }
 
-/** The public skill the wizard offers to install after a run. */
-export const INSTALLABLE_SKILL_PATH = `${SKILLS_DIRECTORY}/egma/SKILL.md`;
+/** The public skill that teaches a coding agent to drive Egma afterwards. */
+export const DRIVING_SKILL_PATH = `${SKILLS_DIRECTORY}/egma/SKILL.md`;
 
-export function installableSkillFile(): string {
+export function drivingSkillFile(): string {
   return publicSkillFile("egma");
 }
 
-export function installableSkill(): string {
+export function drivingSkill(): string {
   return publicSkill("egma");
 }
 
