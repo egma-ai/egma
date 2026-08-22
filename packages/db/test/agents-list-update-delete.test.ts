@@ -73,7 +73,7 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
   return {
     name: `retell-${newId("con").slice(-8)}`,
     agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_1" },
@@ -206,31 +206,26 @@ describe("listing agents", () => {
 });
 
 describe("updating an agent", () => {
-  it("changes name and description in place, and fetch round-trips both", async () => {
+  it("changes the name in place, and fetch round-trips it", async () => {
     const created = await createAgent(actingIn(acme.updating), {
       name: "Draft",
-      description: "First try",
     });
 
     const updated = await updateAgent(actingIn(acme.updating), created.id, {
       name: "Front Desk",
-      description: "Books appointments for the clinic",
     });
 
     expect(updated?.id).toBe(created.id);
     expect(updated?.projectId).toBe(created.projectId);
     expect(updated?.name).toBe("Front Desk");
-    expect(updated?.description).toBe("Books appointments for the clinic");
 
     const fetched = await getAgent(actingIn(acme.updating), created.id);
     expect(fetched?.name).toBe("Front Desk");
-    expect(fetched?.description).toBe("Books appointments for the clinic");
   });
 
   it("treats an empty change as no edit: nothing written, not even updated_at", async () => {
     const created = await createAgent(actingIn(acme.updating), {
       name: "Unmoved",
-      description: "As it was",
     });
     const before = await getAgent(actingIn(acme.updating), created.id);
 
@@ -240,24 +235,6 @@ describe("updating an agent", () => {
 
     const after = await getAgent(actingIn(acme.updating), created.id);
     expect(after?.updatedAt).toEqual(before?.updatedAt);
-  });
-
-  it("keeps what a change leaves absent, and clears a description set to null", async () => {
-    const created = await createAgent(actingIn(acme.updating), {
-      name: "Keeper",
-      description: "Still here",
-    });
-
-    const renamed = await updateAgent(actingIn(acme.updating), created.id, {
-      name: "Kept",
-    });
-    expect(renamed?.description).toBe("Still here");
-
-    const cleared = await updateAgent(actingIn(acme.updating), created.id, {
-      description: null,
-    });
-    expect(cleared?.name).toBe("Kept");
-    expect(cleared?.description).toBeNull();
   });
 
   it("stores the new name trimmed, and refuses one that is only whitespace", async () => {
@@ -309,10 +286,10 @@ describe("updating an agent", () => {
     });
 
     const updated = await updateAgent(actingIn(undefined), created.id, {
-      description: "Edited for the whole customer",
+      name: "Edited for the whole customer",
     });
     expect(updated?.id).toBe(created.id);
-    expect(updated?.description).toBe("Edited for the whole customer");
+    expect(updated?.name).toBe("Edited for the whole customer");
   });
 
   it("returns nothing for another customer's agent, and leaves it untouched", async () => {

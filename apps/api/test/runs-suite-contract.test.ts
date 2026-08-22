@@ -32,7 +32,7 @@ afterEach(async () => {
 
 const RETELL = {
   agentPlatform: "retell",
-  connectionKind: "retell_chat_api",
+  connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_run_contract" },
@@ -41,7 +41,7 @@ const RETELL = {
 
 const PHONE = {
   agentPlatform: null,
-  connectionKind: "phone_number",
+  connectionType: "phone_number",
   accessVariant: "phone_number.public_e164",
   modality: "voice",
   config: { phoneNumber: "+15551234567" },
@@ -228,7 +228,7 @@ describe("run admission", () => {
     const started = await start(ready);
     expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
     expect(started.body).toMatchObject({
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
     });

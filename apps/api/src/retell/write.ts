@@ -3,8 +3,7 @@ import {
   claimProductionTrace,
   finishProductionTrace,
   recordProductionTraces,
-  recordRetellCallReceived,
-  recordRetellMonitoringReceived,
+  recordPulledCallReceived,
   type AuthContext,
   type ProductionTraceClaim,
 } from "@egma/db";
@@ -40,8 +39,7 @@ export type WriteOutcome =
     };
 
 export type RetellProductionWriteTarget = {
-  readonly setupId: string;
-  readonly monitoredAgentId: string;
+  readonly agentId: string;
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly auth: AuthContext;
@@ -53,8 +51,7 @@ export type RetellProductionWriteStore = {
   readonly appendSpans: typeof appendSpans;
   readonly recordProductionTraces: typeof recordProductionTraces;
   readonly finishProductionTrace: typeof finishProductionTrace;
-  readonly recordRetellCallReceived: typeof recordRetellCallReceived;
-  readonly recordRetellMonitoringReceived: typeof recordRetellMonitoringReceived;
+  readonly recordPulledCallReceived: typeof recordPulledCallReceived;
 };
 
 const STORES: RetellProductionWriteStore = {
@@ -62,8 +59,7 @@ const STORES: RetellProductionWriteStore = {
   appendSpans,
   recordProductionTraces,
   finishProductionTrace,
-  recordRetellCallReceived,
-  recordRetellMonitoringReceived,
+  recordPulledCallReceived,
 };
 
 function projectIdOf(target: Pick<RetellProductionWriteTarget, "auth">): string {
@@ -94,7 +90,7 @@ function platformAgentReferenceOf(
   call: RetellCall,
 ): { readonly id: string; readonly name: string; readonly version: string } {
   if (!retellCallBelongsToTarget(target, call)) {
-    throw new Error("A Retell call belongs to a different selected agent");
+    throw new Error("A Retell call belongs to a different platform agent");
   }
   return {
     id: providerText(call["agent_id"]) || target.platformAgentId,
@@ -110,12 +106,49 @@ function platformAgentVersionOf(call: RetellCall): string {
     : "";
 }
 
-function parsedCall(payload: string): RetellCall {
+/**
+ * What a claim's payload holds: the agent that pulled the conversation, and
+ * the safe provider document.
+ *
+ * `production_trace_claim` references nothing — no agent, no setup, no
+ * connection — which is what makes it survive a redesign of everything around
+ * it, and the column list stays exactly as it is. But crash recovery still has
+ * to stamp the notebook of the agent that pulled the call, and that fact
+ * cannot be recovered from the platform identity afterwards: a switched-off
+ * agent keeps its notebook, and a replacement may lawfully be switched on for
+ * the same platform agent id. A lookup would find whoever is switched on
+ * *now*, not whoever pulled. So the id rides inside the payload the claim
+ * already carries.
+ */
+type ClaimedCall = {
+  readonly agentId: string | undefined;
+  readonly call: RetellCall;
+};
+
+function claimedCall(payload: string): ClaimedCall {
   const value: unknown = JSON.parse(payload);
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("A stale Retell production claim has an invalid safe payload");
   }
-  return value as RetellCall;
+  const held = value as Record<string, unknown>;
+  // A bare provider document always names its own call. A claim in that shape
+  // was written before the pulling agent rode along; it can still be finished,
+  // and the stamp — which is cosmetic — is simply skipped rather than guessed.
+  if (typeof held["call_id"] === "string") {
+    return { agentId: undefined, call: held as RetellCall };
+  }
+  const inner = held["call"];
+  if (typeof inner !== "object" || inner === null || Array.isArray(inner)) {
+    throw new Error("A stale Retell production claim has an invalid safe payload");
+  }
+  const agentId = held["agentId"];
+  return {
+    agentId:
+      typeof agentId === "string" && agentId.trim() !== ""
+        ? agentId
+        : undefined,
+    call: inner as RetellCall,
+  };
 }
 
 /**
@@ -152,7 +185,7 @@ export async function writeRetellCall(
     ...(platformAgentReference.version === ""
       ? {}
       : { platformAgentVersion: platformAgentReference.version }),
-    payload: JSON.stringify(safeCall),
+    payload: JSON.stringify({ agentId: target.agentId, call: safeCall }),
     endedAt: normalised.endedAt,
   });
 
@@ -177,7 +210,7 @@ export async function writeRetellCall(
   // provider conversation is durable. If this health update fails, the claim
   // remains stale and replay can finish it instead of leaving Monitoring in
   // "waiting" after the trace already arrived.
-  await stores.recordRetellCallReceived(target.auth, target, receivedAt);
+  await stores.recordPulledCallReceived(target.auth, target, receivedAt);
   await stores.finishProductionTrace(target.auth, {
     traceId: normalised.traceId,
     degraded: normalised.degraded,
@@ -197,13 +230,13 @@ export async function replayProductionClaim(
   claim: ProductionTraceClaim,
   stores: RetellProductionWriteStore = STORES,
 ): Promise<void> {
-  const call = parsedCall(claim.payload);
+  const claimed = claimedCall(claim.payload);
   const projectId = claim.auth.projectId;
   if (projectId === undefined) {
     throw new Error("A stale Retell production claim has no project context");
   }
   const normalised = normaliseRetellCall(
-    call,
+    claimed.call,
     {
       projectId,
       environment: "production",
@@ -228,9 +261,13 @@ export async function replayProductionClaim(
   ) {
     await stores.recordProductionTraces(claim.auth, normalised.spans);
   }
-  await stores.recordRetellMonitoringReceived(claim.auth, {
-    platformAgentId: claim.platformAgentId,
-  });
+  if (claimed.agentId !== undefined) {
+    await stores.recordPulledCallReceived(
+      claim.auth,
+      { agentId: claimed.agentId },
+      new Date(),
+    );
+  }
   await stores.finishProductionTrace(claim.auth, {
     traceId: claim.traceId,
     degraded: normalised.degraded,

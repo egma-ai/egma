@@ -1,7 +1,7 @@
 import {
   cancelRun,
-  connectionKindOf,
-  connectionKindUsesPlatformCarrier,
+  connectionTypeOf,
+  connectionTypeUsesPlatformCarrier,
   foldSimulation,
   getAgent,
   getConnection,
@@ -133,12 +133,12 @@ function describedHeader(
     agentId: run.agentId,
     connectionId: run.connectionId,
     agentPlatform: run.connectionSnapshot.agentPlatform,
-    connectionKind: run.connectionSnapshot.connectionKind,
+    connectionType: run.connectionSnapshot.connectionType,
     accessVariant: run.connectionSnapshot.accessVariant,
     modality: run.connectionSnapshot.modality,
     productLabel: productLabelOf(
       run.connectionSnapshot.agentPlatform,
-      run.connectionSnapshot.connectionKind,
+      run.connectionSnapshot.connectionType,
       run.connectionSnapshot.accessVariant,
       run.connectionSnapshot.modality,
     ),
@@ -327,8 +327,8 @@ export async function runRoutes(
 
     const carrier = phoneReadiness(await platformFacts());
     if (carrier.state !== "ready") {
-      const kind = await connectionKindOf(acting.auth, connectionId);
-      if (kind !== undefined && connectionKindUsesPlatformCarrier(kind)) {
+      const kind = await connectionTypeOf(acting.auth, connectionId);
+      if (kind !== undefined && connectionTypeUsesPlatformCarrier(kind)) {
         return phoneSetupRequired(reply, phoneSetupRequiredMessage(carrier));
       }
     }
@@ -384,7 +384,7 @@ export async function runRoutes(
       counts: found.fold.counts,
       connectionSnapshot: {
         agentPlatform: found.run.connectionSnapshot.agentPlatform,
-        connectionKind: found.run.connectionSnapshot.connectionKind,
+        connectionType: found.run.connectionSnapshot.connectionType,
         accessVariant: found.run.connectionSnapshot.accessVariant,
         modality: found.run.connectionSnapshot.modality,
         topology: found.run.connectionSnapshot.topology,

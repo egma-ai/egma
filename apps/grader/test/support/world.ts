@@ -149,7 +149,7 @@ export async function makeWorld(label: string): Promise<World> {
     name: "Front desk",
     connection: {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -589,7 +589,7 @@ function simulationSpan(
     // Empty, as the door writes it here: the type is read off the emitting
     // instrumentation's scope name, and only LiveKit's is one egma knows —
     // this world reaches its agent over a Retell chat connection.
-    connectionKind: "",
+    connectionType: "",
     // Resolved by the door from egma's own row, never from the payload.
     runId: simulation.runId,
     agentId: simulation.agentId,
@@ -867,7 +867,7 @@ function productionSpan(traceId: string, over: Partial<NewSpan>): NewSpan {
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
-    connectionKind: "livekit",
+    connectionType: "livekit",
     // Empty, as the door writes them: a trace arriving there was not started by
     // egma, so there is no run and no agent behind it.
     runId: "",

@@ -21,8 +21,9 @@ For a LiveKit agent on Python 3.11 or newer.
 
 ## Production monitoring
 
-Open **Monitoring → Set up monitoring** and choose **LiveKit Agents**. The page
-shows the same SDK, key, and helper steps below.
+Open **Monitoring → Start monitoring** and choose **LiveKit Agents**. That page
+shows the same SDK, key, and helper steps below. It is instructions only: a
+LiveKit agent pushes its own spans, so there is nothing to switch on in Egma.
 
 Set the Egma API origin and an existing project API key in the agent's
 environment:
@@ -82,8 +83,9 @@ If this job was dispatched by Egma for a simulation, the helper returns
 without adding a production exporter. The simulation keeps its own trace and
 does not appear a second time in Monitoring.
 
-After deployment, confirm **I added this setup** on the Monitoring setup page.
-That records waiting state in Egma; the deployed helper is what sends spans.
+After deployment, open **Monitoring**. Nothing needs to be confirmed in Egma —
+the deployed helper is what sends spans, and the first production conversation
+appears in the list as soon as it arrives.
 
 The caller's phone, SIP, or WebRTC entry path does not change this setup. The
 SDK does not guess that path from a LiveKit trace.
@@ -94,11 +96,11 @@ The helper stops immediately with one direct error when required settings are
 missing or malformed, or when tracer providers conflict. It does not include
 the key in that error.
 
-After setup, Monitoring shows **Waiting for first conversation** until the
-first trace reaches Egma. It then shows the last conversation received. This
-release uses one-way OTLP export. The Egma page cannot see a DNS, firewall, or
-network failure inside the worker. Check the worker's OpenTelemetry logs and
-confirm that it can reach `EGMA_URL` when the page stays in the waiting state.
+After deployment, Monitoring stays empty until the first trace reaches Egma,
+then lists each production conversation as it arrives. This release uses one-way
+OTLP export. Egma cannot see a DNS, firewall, or network failure inside the
+worker. Check the worker's OpenTelemetry logs and confirm that it can reach
+`EGMA_URL` when nothing appears.
 
 ## Simulation mock tools
 

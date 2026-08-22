@@ -33,9 +33,9 @@ Requires Python 3.11 or newer and `livekit-agents>=1.6.7,<1.7`.
 
 ## Monitor production LiveKit agents
 
-Open **Monitoring → Set up monitoring** and choose **LiveKit Agents**. The page
-shows the same steps below and records waiting state after you confirm that you
-added them.
+Open **Monitoring → Start monitoring** and choose **LiveKit Agents**. That page
+shows the same steps below. It is instructions only: a LiveKit agent pushes its
+own spans, so there is nothing to switch on and nothing to save.
 
 Create a project API key in **Settings → API keys**. Set the API origin and key where the agent runs:
 
@@ -83,16 +83,15 @@ Use the same function for a customer-hosted worker and a LiveKit Cloud-hosted Py
 
 The caller's phone, SIP, or WebRTC entry path does not change the setup. Egma does not infer an entry path from a LiveKit trace.
 
-After you deploy this code and the two secrets, return to the setup page and
-select **I added this setup**. This records the monitoring source; the page stays
-in **Waiting for first conversation** until the first valid production trace
-arrives.
+After you deploy this code and the two secrets, open **Monitoring**. Nothing
+needs to be confirmed in Egma — the first production conversation appears in the
+list as soon as the worker sends it.
 
 ### What the status can prove
 
 The helper stops with a direct, safe setup error when required settings are missing or malformed, or when tracer providers conflict. The error never includes the key.
 
-Monitoring shows **Waiting for first conversation** until a trace reaches Egma. It then shows the last conversation received. OTLP is one-way in this release, so the Egma page cannot see a DNS, firewall, or network failure inside the worker. If the page stays in the waiting state, check the worker's OpenTelemetry logs and confirm that it can reach `EGMA_URL`.
+Monitoring stays empty until a trace reaches Egma, then lists each production conversation as it arrives. OTLP is one-way in this release, so Egma cannot see a DNS, firewall, or network failure inside the worker. If nothing appears, check the worker's OpenTelemetry logs and confirm that it can reach `EGMA_URL`.
 
 ## Use mock tools in simulations
 

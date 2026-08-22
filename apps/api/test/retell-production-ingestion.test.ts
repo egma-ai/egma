@@ -1,7 +1,7 @@
 import type {
   ProductionTraceClaim,
-  RetellIngestionFailureReplayTarget,
-  RetellMonitoringTarget,
+  MonitoringFailureReplayTarget,
+  MonitoringPullTarget,
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -32,9 +32,8 @@ const AUTH = {
   via: "monitoring",
 } as const;
 
-const TARGET: RetellMonitoringTarget = {
-  setupId: "mns_ingestion_test",
-  monitoredAgentId: "rma_ingestion_test",
+const TARGET: MonitoringPullTarget = {
+  agentId: "agt_ingestion_test",
   platformAgentId: "agent-secret-id-must-not-be-logged",
   platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
@@ -43,21 +42,20 @@ const TARGET: RetellMonitoringTarget = {
   scanThrough: BASE,
   paginationKey: null,
   seenPaginationKeys: [],
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
 };
 
-const REPLAY_TARGET: RetellIngestionFailureReplayTarget = {
-  setupId: TARGET.setupId,
-  monitoredAgentId: TARGET.monitoredAgentId,
-  failureId: "rif_explicit_replay_test",
+const REPLAY_TARGET: MonitoringFailureReplayTarget = {
+  agentId: TARGET.agentId,
+  failureId: "mnf_explicit_replay_test",
   providerCallId: "call_older_than_import_window",
   platformAgentId: TARGET.platformAgentId,
   platformAgentName: TARGET.platformAgentName,
   apiKey: TARGET.apiKey,
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "replay-lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
@@ -97,7 +95,7 @@ type StoreChanges = Partial<RetellProductionIngestionStore>;
 
 function store(
   recorded: StoreRecord,
-  target: RetellMonitoringTarget | undefined = TARGET,
+  target: MonitoringPullTarget | undefined = TARGET,
   changes: StoreChanges = {},
 ): RetellProductionIngestionStore {
   let offered = false;
@@ -105,43 +103,40 @@ function store(
     async sweepStaleProductionClaims() {
       return [];
     },
-    async claimDueRetellMonitoringAgent() {
+    async claimDueMonitoringPull() {
       recorded.claims += 1;
       if (offered) return undefined;
       offered = true;
       return target;
     },
-    async renewRetellMonitoringLease() {
+    async renewMonitoringLease() {
       recorded.renewals += 1;
       return true;
     },
-    async checkpointRetellMonitoringPage(_auth, _target, checkpoint) {
+    async checkpointMonitoringPage(_auth, _target, checkpoint) {
       recorded.checkpoints.push(checkpoint);
       return true;
     },
-    async yieldRetellMonitoringLease(_auth, _target, input) {
+    async yieldMonitoringLease(_auth, _target, input) {
       recorded.yields.push(input.retryAt);
       return true;
     },
-    async finishRetellMonitoringScan(_auth, _target, options) {
+    async finishMonitoringScan(_auth, _target, options) {
       recorded.finishes.push(options?.pollMilliseconds ?? -1);
       return true;
     },
-    async failRetellMonitoringTarget(_auth, _target, input) {
+    async failMonitoringPull(_auth, _target, input) {
       recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
-      return { changed: true, failures: 1, startedAt: input.now ?? BASE };
+      return { changed: true, failures: 1 };
     },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
-    },
-    async releaseRetellMonitoringLease(_auth, _target, input) {
+    async releaseMonitoringLease(_auth, _target, input) {
       recorded.releases.push(input.errorKind);
     },
-    async retellCallIsAccountedFor(_auth, providerCallId) {
+    async productionCallIsAccountedFor(_auth, providerCallId) {
       recorded.accounted.push(providerCallId);
       return false;
     },
-    async recordRetellIngestionFailure(_auth, _target, input) {
+    async recordMonitoringFailure(_auth, _target, input) {
       recorded.permanentFailures.push(input.providerCallId);
       return { changed: true };
     },
@@ -165,29 +160,21 @@ function replayStore(
   changes: Partial<RetellIngestionFailureReplayStore> = {},
 ): RetellIngestionFailureReplayStore {
   return {
-    async claimRetellIngestionFailureReplay(_auth, failureId) {
+    async claimMonitoringFailureReplay(_auth, failureId) {
       recorded.claimed.push(failureId);
       return { kind: "claimed", target: REPLAY_TARGET };
     },
-    async releaseRetellIngestionFailureReplay(_auth, _target, input) {
+    async releaseMonitoringFailureReplay(_auth, _target, input) {
       recorded.released.push(input.errorKind);
       return true;
     },
-    async failRetellIngestionFailureReplay(_auth, _target, input) {
+    async failMonitoringFailureReplay(_auth, _target, input) {
       recorded.providerFailures.push(input.kind);
-      return {
-        recorded: true,
-        changed: true,
-        failures: 1,
-        startedAt: input.now ?? BASE,
-      };
+      return { recorded: true, changed: true, failures: 1 };
     },
-    async resolveRetellIngestionFailureReplay() {
+    async resolveMonitoringFailureReplay() {
       recorded.resolved += 1;
       return { resolved: true, agentRecovered: true };
-    },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
     },
     ...changes,
   };
@@ -277,7 +264,7 @@ function logger(): {
 }
 
 type MetricRecord = {
-  attempts: RetellMonitoringTarget["scanKind"][];
+  attempts: MonitoringPullTarget["scanKind"][];
   turns: RetellProductionIngestionMetricTurn[];
   lags: number[];
   providerFailures: string[];
@@ -323,7 +310,7 @@ describe("Retell production ingestion", () => {
     const third = summary("call_new_second_page");
     let page = 0;
     const storage = store(recorded, TARGET, {
-      async retellCallIsAccountedFor(_auth, callId) {
+      async productionCallIsAccountedFor(_auth, callId) {
         recorded.accounted.push(callId);
         return callId === "call_already_accounted";
       },
@@ -457,7 +444,7 @@ describe("Retell production ingestion", () => {
     const recorded = record();
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         recorded.renewals += 1;
         return false;
       },
@@ -486,7 +473,7 @@ describe("Retell production ingestion", () => {
     let renewals = 0;
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -516,13 +503,13 @@ describe("Retell production ingestion", () => {
     expect(result.stoppedBecause).toBe("lease_lost");
   });
 
-  it("checks the setup-wide request gate before hydrating a listed call", async () => {
+  it("checks its own lease before hydrating a listed call", async () => {
     const recorded = record();
     let renewals = 0;
     let listRequests = 0;
     let hydrationRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -732,10 +719,10 @@ describe("Retell production ingestion", () => {
     });
   });
 
-  it("uses one setup-wide Retry-After gate without a repeated log", async () => {
+  it("waits exactly as long as the provider asked, and says nothing", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
-      async failRetellMonitoringTarget(_auth, _target, input) {
+      async failMonitoringPull(_auth, _target, input) {
         recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
         return { changed: false, failures: 4, startedAt: BASE };
       },
@@ -771,12 +758,12 @@ describe("Retell production ingestion", () => {
     expect(observed.recorded.providerFailures).toEqual(["rate_limited"]);
   });
 
-  it("caps unavailable-provider backoff and logs only the health transition", async () => {
+  it("caps this agent's backoff and logs the failure once", async () => {
     const recorded = record();
     const { log, events } = logger();
-    const failedManyTimes: RetellMonitoringTarget = {
+    const failedManyTimes: MonitoringPullTarget = {
       ...TARGET,
-      setupConsecutiveFailures: 20,
+      consecutiveFailures: 20,
     };
 
     await runRetellProductionIngestion({
@@ -805,38 +792,29 @@ describe("Retell production ingestion", () => {
     expect(events.error).toHaveLength(0);
   });
 
-  it("logs one recovery after a successful provider turn", async () => {
+  it("logs nothing at all when a provider turn simply works", async () => {
+    // There is no account-wide health to recover: the counter is a retry clock
+    // on this agent's own notebook, cleared by the scan that finished. So a
+    // good turn is silent (ADR-0015).
     const recorded = record();
     const { log, events } = logger();
-    const storage = store(recorded, TARGET, {
-      async recoverRetellMonitoringSetup() {
-        return {
-          recovered: true,
-          failures: 3,
-          startedAt: new Date(BASE.getTime() - 60_000),
-        };
-      },
-    });
 
     await runRetellProductionIngestion({
       log,
-      store: storage,
+      store: store(recorded, TARGET),
       provider: provider(),
       writer: writer(),
       clock: () => BASE,
     });
 
-    expect(events.info).toHaveLength(1);
-    expect(events.info[0]).toMatchObject({
-      "otel.event.name": "egma.monitoring.retell.health.recovered",
-      outage_duration_ms: 60_000,
-      failure_count: 3,
-    });
-    expect(events.warn).toEqual([]);
-    expect(events.error).toEqual([]);
+    expect(events).toEqual({ info: [], warn: [], error: [] });
   });
 
-  it("blocks an invalid key until configuration changes and logs only its state change", async () => {
+  it("makes a refused key wait, bounded, without a health state to park it in", async () => {
+    // ADR-0015 drops `blocked_until` with the rest of the health machine. A
+    // refused key waits on this agent's own ladder — longer than a transient
+    // refusal, never for ever — so a key the customer fixes at Retell is tried
+    // again without anybody re-arming the switch here.
     const recorded = record();
     const { log, events } = logger();
 
@@ -854,14 +832,18 @@ describe("Retell production ingestion", () => {
 
     expect(recorded.failures).toHaveLength(1);
     expect(recorded.failures[0]?.kind).toBe("invalid_credential");
-    expect(recorded.failures[0]?.retryAt.getUTCFullYear()).toBe(9999);
+    const wait =
+      (recorded.failures[0]?.retryAt.getTime() ?? BASE.getTime()) -
+      BASE.getTime();
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(60 * 60_000);
     expect(events.error).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain(TARGET.apiKey);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentId);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentName);
   });
 
-  it("records a missing hydrated call, continues the page, and logs one degraded transition", async () => {
+  it("records a missing hydrated call, continues the page, and logs it once", async () => {
     const recorded = record();
     const writes: RetellCall[] = [];
     let missingHydrationAttempts = 0;
@@ -911,7 +893,7 @@ describe("Retell production ingestion", () => {
     const result = await runRetellProductionIngestion({
       log,
       store: store(recorded, TARGET, {
-        async recordRetellIngestionFailure() {
+        async recordMonitoringFailure() {
           return { recorded: false, changed: false };
         },
       }),
@@ -1161,7 +1143,7 @@ describe("Retell production ingestion", () => {
     expect(events).toEqual({ info: [], warn: [], error: [] });
   });
 
-  it("classifies setup-wide failures during an exact replay", async () => {
+  it("classifies provider failures during an exact replay", async () => {
     const cases = [
       {
         answer: { kind: "invalid-key" } as const,
@@ -1203,7 +1185,7 @@ describe("Retell production ingestion", () => {
     }
   });
 
-  it("does not file a hydrated call under a different selected Retell agent", async () => {
+  it("does not file a hydrated call under a different platform agent", async () => {
     const recorded = record();
     const writes: RetellCall[] = [];
     const { log, events } = logger();

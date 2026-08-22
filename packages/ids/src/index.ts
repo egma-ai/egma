@@ -76,14 +76,13 @@ export const ID_PREFIXES = [
    */
   "ptc",
   /**
-   * One project's setup for bringing production evidence in from an agent
-   * platform. This is separate from the connections used by simulations.
+   * One agent's monitoring state: the machine notebook the poller keeps —
+   * cursor, windows, lease and retry clock. Its own identity because nobody
+   * edits it and it is created by the pull switch, not by a person.
    */
-  "mns",
-  /** One Retell voice agent selected inside a Retell Monitoring setup. */
-  "rma",
-  /** One Retell call that bounded retries could not import. */
-  "rif",
+  "mst",
+  /** One production call that bounded retries could not import. */
+  "mnf",
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];

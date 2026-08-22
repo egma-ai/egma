@@ -103,7 +103,7 @@
                                     "retell"
                                   ]
                                 },
-                                "connectionKind": {
+                                "connectionType": {
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
@@ -136,7 +136,7 @@
                               },
                               "required": [
                                 "agentPlatform",
-                                "connectionKind",
+                                "connectionType",
                                 "accessVariant",
                                 "modality",
                                 "productLabel",
@@ -280,7 +280,7 @@
                           "agentPlatformLabel": {
                             "type": "string"
                           },
-                          "connectionKind": {
+                          "connectionType": {
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
@@ -412,7 +412,7 @@
                         "required": [
                           "agentPlatform",
                           "agentPlatformLabel",
-                          "connectionKind",
+                          "connectionType",
                           "accessVariant",
                           "accessVariantLabel",
                           "modality",
@@ -504,9 +504,6 @@
                   "name": {
                     "type": "string"
                   },
-                  "description": {
-                    "type": "string"
-                  },
                   "connection": {
                     "type": "object",
                     "properties": {
@@ -527,7 +524,7 @@
                           }
                         ]
                       },
-                      "connectionKind": {
+                      "connectionType": {
                         "type": "string",
                         "enum": [
                           "retell_chat_api",
@@ -591,7 +588,7 @@
                     },
                     "required": [
                       "agentPlatform",
-                      "connectionKind",
+                      "connectionType",
                       "accessVariant",
                       "modality"
                     ],
@@ -634,7 +631,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -644,9 +655,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -675,8 +698,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -716,7 +742,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -780,10 +806,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -813,7 +835,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -822,7 +844,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -869,7 +890,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -879,9 +914,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -910,8 +957,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -951,7 +1001,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -1015,10 +1065,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -1048,7 +1094,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -1057,7 +1103,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1250,7 +1295,21 @@
                           "name": {
                             "type": "string"
                           },
-                          "description": {
+                          "agentPlatform": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "retell",
+                                  "livekit_agents"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "platformAgentId": {
                             "anyOf": [
                               {
                                 "type": "string"
@@ -1260,9 +1319,21 @@
                               }
                             ]
                           },
-                          "revision": {
-                            "type": "string",
-                            "minLength": 1
+                          "monitoringKeyPresent": {
+                            "type": "boolean"
+                          },
+                          "monitoringApiKeyHint": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "pullProductionCalls": {
+                            "type": "boolean"
                           },
                           "archived": {
                             "type": "boolean"
@@ -1320,7 +1391,7 @@
                                     }
                                   ]
                                 },
-                                "connectionKind": {
+                                "connectionType": {
                                   "type": "string",
                                   "enum": [
                                     "retell_chat_api",
@@ -1384,10 +1455,6 @@
                                     }
                                   ]
                                 },
-                                "revision": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
                                 "archived": {
                                   "type": "boolean"
                                 },
@@ -1417,7 +1484,7 @@
                                 "projectId",
                                 "name",
                                 "agentPlatform",
-                                "connectionKind",
+                                "connectionType",
                                 "accessVariant",
                                 "modality",
                                 "productLabel",
@@ -1426,7 +1493,6 @@
                                 "config",
                                 "credentialPresent",
                                 "credentialsHint",
-                                "revision",
                                 "archived",
                                 "archivedAt",
                                 "createdAt",
@@ -1440,8 +1506,11 @@
                           "id",
                           "projectId",
                           "name",
-                          "description",
-                          "revision",
+                          "agentPlatform",
+                          "platformAgentId",
+                          "monitoringKeyPresent",
+                          "monitoringApiKeyHint",
+                          "pullProductionCalls",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -1599,7 +1668,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -1609,9 +1692,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -1640,8 +1735,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -1683,7 +1781,7 @@
                               }
                             ]
                           },
-                          "connectionKind": {
+                          "connectionType": {
                             "type": "string",
                             "enum": [
                               "retell_chat_api",
@@ -1747,10 +1845,6 @@
                               }
                             ]
                           },
-                          "revision": {
-                            "type": "string",
-                            "minLength": 1
-                          },
                           "archived": {
                             "type": "boolean"
                           },
@@ -1780,7 +1874,7 @@
                           "projectId",
                           "name",
                           "agentPlatform",
-                          "connectionKind",
+                          "connectionType",
                           "accessVariant",
                           "modality",
                           "productLabel",
@@ -1789,7 +1883,6 @@
                           "config",
                           "credentialPresent",
                           "credentialsHint",
-                          "revision",
                           "archived",
                           "archivedAt",
                           "createdAt",
@@ -1912,20 +2005,6 @@
                 "properties": {
                   "name": {
                     "type": "string"
-                  },
-                  "description": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -1955,7 +2034,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -1965,9 +2058,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -1996,8 +2101,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2165,7 +2273,7 @@
                       }
                     ]
                   },
-                  "connectionKind": {
+                  "connectionType": {
                     "type": "string",
                     "enum": [
                       "retell_chat_api",
@@ -2229,7 +2337,7 @@
                 },
                 "required": [
                   "agentPlatform",
-                  "connectionKind",
+                  "connectionType",
                   "accessVariant",
                   "modality"
                 ],
@@ -2278,7 +2386,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -2342,10 +2450,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -2375,7 +2479,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -2384,7 +2488,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2534,12 +2637,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false
               }
             }
@@ -2567,7 +2665,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -2577,9 +2689,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -2608,8 +2732,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -2773,10 +2900,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "name": {
                     "type": "string"
                   }
@@ -2808,7 +2931,21 @@
                         "name": {
                           "type": "string"
                         },
-                        "description": {
+                        "agentPlatform": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -2818,9 +2955,21 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
+                        "monitoringKeyPresent": {
+                          "type": "boolean"
+                        },
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "archived": {
                           "type": "boolean"
@@ -2849,8 +2998,11 @@
                         "id",
                         "projectId",
                         "name",
-                        "description",
-                        "revision",
+                        "agentPlatform",
+                        "platformAgentId",
+                        "monitoringKeyPresent",
+                        "monitoringApiKeyHint",
+                        "pullProductionCalls",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3043,7 +3195,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -3107,10 +3259,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3140,7 +3288,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -3149,7 +3297,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3297,10 +3444,6 @@
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true
-                  },
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -3348,7 +3491,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -3412,10 +3555,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3445,7 +3584,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -3454,7 +3593,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3613,12 +3751,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false
               }
             }
@@ -3664,7 +3797,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -3728,10 +3861,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -3761,7 +3890,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -3770,7 +3899,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -3935,10 +4063,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedRevision": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "name": {
                     "type": "string"
                   },
@@ -4021,7 +4145,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string",
                           "enum": [
                             "retell_chat_api",
@@ -4085,10 +4209,6 @@
                             }
                           ]
                         },
-                        "revision": {
-                          "type": "string",
-                          "minLength": 1
-                        },
                         "archived": {
                           "type": "boolean"
                         },
@@ -4118,7 +4238,7 @@
                         "projectId",
                         "name",
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "productLabel",
@@ -4127,7 +4247,6 @@
                         "config",
                         "credentialPresent",
                         "credentialsHint",
-                        "revision",
                         "archived",
                         "archivedAt",
                         "createdAt",
@@ -7714,333 +7833,6 @@
         }
       }
     },
-    "/v1/monitoring": {
-      "get": {
-        "operationId": "listMonitoringSources",
-        "summary": "List monitoring sources",
-        "tags": [
-          "Monitoring"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Configured monitoring sources.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "monitoringSources": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "projectId": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "agentPlatform": {
-                            "type": "string"
-                          },
-                          "strategy": {
-                            "type": "string"
-                          },
-                          "credentialsHint": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "health": {
-                            "type": "object",
-                            "properties": {
-                              "state": {
-                                "type": "string"
-                              },
-                              "blockedUntil": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "consecutiveFailures": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "lastErrorAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastRecoveredAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastReceivedAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": [
-                              "state",
-                              "blockedUntil",
-                              "consecutiveFailures",
-                              "lastErrorAt",
-                              "lastRecoveredAt",
-                              "lastReceivedAt"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "agents": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "platformAgentId": {
-                                  "type": "string"
-                                },
-                                "platformAgentName": {
-                                  "type": "string"
-                                },
-                                "state": {
-                                  "type": "string"
-                                },
-                                "scanKind": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "lastSuccessAt": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "lastConversationAt": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "lastErrorKind": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "lastErrorAt": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                },
-                                "consecutiveFailures": {
-                                  "type": "integer",
-                                  "minimum": 0
-                                },
-                                "failures": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "properties": {
-                                      "id": {
-                                        "type": "string",
-                                        "minLength": 1
-                                      },
-                                      "providerCallId": {
-                                        "type": "string"
-                                      },
-                                      "errorKind": {
-                                        "type": "string"
-                                      },
-                                      "attempts": {
-                                        "type": "integer",
-                                        "minimum": 0
-                                      },
-                                      "status": {
-                                        "type": "string"
-                                      },
-                                      "lastAttemptAt": {
-                                        "type": "string",
-                                        "format": "date-time"
-                                      },
-                                      "createdAt": {
-                                        "type": "string",
-                                        "format": "date-time"
-                                      }
-                                    },
-                                    "required": [
-                                      "id",
-                                      "providerCallId",
-                                      "errorKind",
-                                      "attempts",
-                                      "status",
-                                      "lastAttemptAt",
-                                      "createdAt"
-                                    ],
-                                    "additionalProperties": false
-                                  }
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "platformAgentId",
-                                "platformAgentName",
-                                "state",
-                                "scanKind",
-                                "lastSuccessAt",
-                                "lastConversationAt",
-                                "lastErrorKind",
-                                "lastErrorAt",
-                                "consecutiveFailures",
-                                "failures"
-                              ],
-                              "additionalProperties": false
-                            }
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "projectId",
-                          "agentPlatform",
-                          "strategy",
-                          "credentialsHint",
-                          "health",
-                          "agents"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "monitoringSources"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/monitoring/retell/discover": {
       "post": {
         "operationId": "discoverRetellVoiceAgents",
@@ -8104,11 +7896,38 @@
                           },
                           "name": {
                             "type": "string"
+                          },
+                          "registeredAgentId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "registeredAgentName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "pullProductionCalls": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
                           "id",
-                          "name"
+                          "name",
+                          "registeredAgentId",
+                          "registeredAgentName",
+                          "pullProductionCalls"
                         ],
                         "additionalProperties": false
                       }
@@ -8184,10 +8003,10 @@
         }
       }
     },
-    "/v1/monitoring/retell": {
-      "put": {
-        "operationId": "configureRetellMonitoring",
-        "summary": "Configure Retell monitoring",
+    "/v1/monitoring/start": {
+      "post": {
+        "operationId": "startMonitoring",
+        "summary": "Start pulling an agent's production calls",
         "tags": [
           "Monitoring"
         ],
@@ -8217,32 +8036,42 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "agentPlatform": {
+                    "type": "string",
+                    "enum": [
+                      "retell"
+                    ]
+                  },
                   "apiKey": {
                     "type": "string"
                   },
-                  "agents": {
+                  "watch": {
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
-                        "id": {
+                        "platformAgentId": {
                           "type": "string"
                         },
                         "name": {
                           "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string",
+                          "minLength": 1
                         }
                       },
                       "required": [
-                        "id",
-                        "name"
+                        "platformAgentId"
                       ],
                       "additionalProperties": false
                     }
                   }
                 },
                 "required": [
+                  "agentPlatform",
                   "apiKey",
-                  "agents"
+                  "watch"
                 ],
                 "additionalProperties": false
               }
@@ -8251,256 +8080,89 @@
         },
         "responses": {
           "200": {
-            "description": "The configured monitoring source.",
+            "description": "What each ticked platform agent turned out to be: the ones now pulling their production calls, and the ones refused.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "monitoringSource": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "projectId": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "agentPlatform": {
-                          "type": "string"
-                        },
-                        "strategy": {
-                          "type": "string"
-                        },
-                        "credentialsHint": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "health": {
-                          "type": "object",
-                          "properties": {
-                            "state": {
-                              "type": "string"
-                            },
-                            "blockedUntil": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "consecutiveFailures": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "lastErrorAt": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "lastRecoveredAt": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "lastReceivedAt": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            }
+                    "watching": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          "required": [
-                            "state",
-                            "blockedUntil",
-                            "consecutiveFailures",
-                            "lastErrorAt",
-                            "lastRecoveredAt",
-                            "lastReceivedAt"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "agents": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "platformAgentId": {
-                                "type": "string"
-                              },
-                              "platformAgentName": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string"
-                              },
-                              "scanKind": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastSuccessAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastConversationAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastErrorKind": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastErrorAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "consecutiveFailures": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "failures": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "providerCallId": {
-                                      "type": "string"
-                                    },
-                                    "errorKind": {
-                                      "type": "string"
-                                    },
-                                    "attempts": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
-                                    "status": {
-                                      "type": "string"
-                                    },
-                                    "lastAttemptAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "providerCallId",
-                                    "errorKind",
-                                    "attempts",
-                                    "status",
-                                    "lastAttemptAt",
-                                    "createdAt"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "platformAgentId",
-                              "platformAgentName",
-                              "state",
-                              "scanKind",
-                              "lastSuccessAt",
-                              "lastConversationAt",
-                              "lastErrorKind",
-                              "lastErrorAt",
-                              "consecutiveFailures",
-                              "failures"
-                            ],
-                            "additionalProperties": false
+                          "agentName": {
+                            "type": "string"
+                          },
+                          "platformAgentId": {
+                            "type": "string"
+                          },
+                          "created": {
+                            "type": "boolean"
+                          },
+                          "pullProductionCalls": {
+                            "type": "boolean"
                           }
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "projectId",
-                        "agentPlatform",
-                        "strategy",
-                        "credentialsHint",
-                        "health",
-                        "agents"
-                      ],
-                      "additionalProperties": false
+                        },
+                        "required": [
+                          "agentId",
+                          "agentName",
+                          "platformAgentId",
+                          "created",
+                          "pullProductionCalls"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "refused": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "platformAgentId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "contested",
+                              "name_taken",
+                              "not_found",
+                              "archived"
+                            ]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "platformAgentId",
+                          "reason",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
-                    "monitoringSource"
+                    "watching",
+                    "refused"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
                 }
               }
             }
@@ -8567,10 +8229,10 @@
         }
       }
     },
-    "/v1/monitoring/livekit-agents": {
-      "put": {
-        "operationId": "configureLiveKitMonitoring",
-        "summary": "Configure LiveKit Agents monitoring",
+    "/v1/monitoring/agents/{agentId}/stop": {
+      "post": {
+        "operationId": "stopMonitoring",
+        "summary": "Stop pulling an agent's production calls",
         "tags": [
           "Monitoring"
         ],
@@ -8584,6 +8246,15 @@
         ],
         "parameters": [
           {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
             "name": "projectId",
             "in": "query",
             "required": false,
@@ -8593,32 +8264,51 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "The configured monitoring source.",
+            "description": "The agent, with its pull switch off.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "monitoringSource": {
+                    "monitoring": {
                       "type": "object",
                       "properties": {
-                        "id": {
+                        "agentId": {
                           "type": "string",
                           "minLength": 1
                         },
-                        "projectId": {
-                          "type": "string",
-                          "minLength": 1
+                        "pullProductionCalls": {
+                          "type": "boolean"
                         },
                         "agentPlatform": {
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "retell",
+                                "livekit_agents"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
-                        "strategy": {
-                          "type": "string"
-                        },
-                        "credentialsHint": {
+                        "platformAgentId": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -8628,221 +8318,41 @@
                             }
                           ]
                         },
-                        "health": {
-                          "type": "object",
-                          "properties": {
-                            "state": {
+                        "monitoringApiKeyHint": {
+                          "anyOf": [
+                            {
                               "type": "string"
                             },
-                            "blockedUntil": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "consecutiveFailures": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "lastErrorAt": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "lastRecoveredAt": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
-                            },
-                            "lastReceivedAt": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "format": "date-time"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ]
+                            {
+                              "type": "null"
                             }
-                          },
-                          "required": [
-                            "state",
-                            "blockedUntil",
-                            "consecutiveFailures",
-                            "lastErrorAt",
-                            "lastRecoveredAt",
-                            "lastReceivedAt"
-                          ],
-                          "additionalProperties": false
+                          ]
                         },
-                        "agents": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "platformAgentId": {
-                                "type": "string"
-                              },
-                              "platformAgentName": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string"
-                              },
-                              "scanKind": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastSuccessAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastConversationAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastErrorKind": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "lastErrorAt": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "format": "date-time"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "consecutiveFailures": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "failures": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "providerCallId": {
-                                      "type": "string"
-                                    },
-                                    "errorKind": {
-                                      "type": "string"
-                                    },
-                                    "attempts": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
-                                    "status": {
-                                      "type": "string"
-                                    },
-                                    "lastAttemptAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    },
-                                    "createdAt": {
-                                      "type": "string",
-                                      "format": "date-time"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "providerCallId",
-                                    "errorKind",
-                                    "attempts",
-                                    "status",
-                                    "lastAttemptAt",
-                                    "createdAt"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              }
+                        "lastReceivedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time"
                             },
-                            "required": [
-                              "id",
-                              "platformAgentId",
-                              "platformAgentName",
-                              "state",
-                              "scanKind",
-                              "lastSuccessAt",
-                              "lastConversationAt",
-                              "lastErrorKind",
-                              "lastErrorAt",
-                              "consecutiveFailures",
-                              "failures"
-                            ],
-                            "additionalProperties": false
-                          }
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
                       },
                       "required": [
-                        "id",
-                        "projectId",
+                        "agentId",
+                        "pullProductionCalls",
                         "agentPlatform",
-                        "strategy",
-                        "credentialsHint",
-                        "health",
-                        "agents"
+                        "platformAgentId",
+                        "monitoringApiKeyHint",
+                        "lastReceivedAt"
                       ],
                       "additionalProperties": false
                     }
                   },
                   "required": [
-                    "monitoringSource"
+                    "monitoring"
                   ],
                   "additionalProperties": false
                 }
@@ -8860,6 +8370,16 @@
             }
           },
           "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -9057,106 +8577,6 @@
           },
           "503": {
             "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/monitoring/{platform}": {
-      "delete": {
-        "operationId": "deleteMonitoringSource",
-        "summary": "Delete a monitoring source",
-        "tags": [
-          "Monitoring"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "platform",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "The monitoring source was deleted."
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
             "content": {
               "application/json": {
                 "schema": {
@@ -14528,7 +13948,7 @@
                         }
                       ]
                     },
-                    "connectionKind": {
+                    "connectionType": {
                       "type": "string"
                     },
                     "accessVariant": {
@@ -14723,7 +14143,7 @@
                     "agentId",
                     "connectionId",
                     "agentPlatform",
-                    "connectionKind",
+                    "connectionType",
                     "accessVariant",
                     "modality",
                     "productLabel",
@@ -15024,7 +14444,7 @@
                               }
                             ]
                           },
-                          "connectionKind": {
+                          "connectionType": {
                             "type": "string"
                           },
                           "accessVariant": {
@@ -15219,7 +14639,7 @@
                           "agentId",
                           "connectionId",
                           "agentPlatform",
-                          "connectionKind",
+                          "connectionType",
                           "accessVariant",
                           "modality",
                           "productLabel",
@@ -15434,7 +14854,7 @@
                         }
                       ]
                     },
-                    "connectionKind": {
+                    "connectionType": {
                       "type": "string"
                     },
                     "accessVariant": {
@@ -15658,7 +15078,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string"
                         },
                         "accessVariant": {
@@ -15688,7 +15108,7 @@
                       },
                       "required": [
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "topology",
@@ -15769,7 +15189,7 @@
                     "agentId",
                     "connectionId",
                     "agentPlatform",
-                    "connectionKind",
+                    "connectionType",
                     "accessVariant",
                     "modality",
                     "productLabel",
@@ -16612,7 +16032,7 @@
                         }
                       ]
                     },
-                    "connectionKind": {
+                    "connectionType": {
                       "type": "string"
                     },
                     "accessVariant": {
@@ -16807,7 +16227,7 @@
                     "agentId",
                     "connectionId",
                     "agentPlatform",
-                    "connectionKind",
+                    "connectionType",
                     "accessVariant",
                     "modality",
                     "productLabel",
@@ -17349,7 +16769,7 @@
                             }
                           ]
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string"
                         },
                         "accessVariant": {
@@ -17379,7 +16799,7 @@
                       },
                       "required": [
                         "agentPlatform",
-                        "connectionKind",
+                        "connectionType",
                         "accessVariant",
                         "modality",
                         "topology",
@@ -21302,7 +20722,7 @@
                           "environment": {
                             "type": "string"
                           },
-                          "connectionKind": {
+                          "connectionType": {
                             "type": "string"
                           },
                           "providerCallId": {
@@ -21342,7 +20762,7 @@
                           "source",
                           "emitter",
                           "environment",
-                          "connectionKind",
+                          "connectionType",
                           "providerCallId",
                           "agentPlatform",
                           "platformAgentId",
@@ -21561,7 +20981,7 @@
                         "environment": {
                           "type": "string"
                         },
-                        "connectionKind": {
+                        "connectionType": {
                           "type": "string"
                         },
                         "providerCallId": {
@@ -21598,7 +21018,7 @@
                         "source",
                         "emitter",
                         "environment",
-                        "connectionKind",
+                        "connectionType",
                         "providerCallId",
                         "agentPlatform",
                         "platformAgentId",

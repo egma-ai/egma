@@ -83,7 +83,7 @@ function span(overrides: Partial<NewSpan> = {}): NewSpan {
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
-    connectionKind: "livekit",
+    connectionType: "livekit",
     runId: "",
     agentId: "",
     agentVersionId: "",

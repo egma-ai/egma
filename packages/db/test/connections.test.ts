@@ -5,10 +5,14 @@ import {
   addConnection,
   createAgent,
   archiveAgent,
+  enablePullProductionCalls,
   getConnection,
+  listAgents,
   listConnections,
   NotPermittedError,
+  AgentWriteRefusedError,
   archiveConnection,
+  restoreConnection,
   updateConnection,
   type AuthContext,
   type NewConnection,
@@ -65,7 +69,7 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
   return {
     name: `retell-${newId("con").slice(-8)}`,
     agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_1" },
@@ -82,7 +86,7 @@ function livekitConnection(overrides: Partial<NewConnection> = {}): NewConnectio
   return {
     name: `livekit-${newId("con").slice(-8)}`,
     agentPlatform: "livekit_agents",
-    connectionKind: "livekit_room",
+    connectionType: "livekit_room",
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
     config: { url: "wss://acme.livekit.cloud" },
@@ -124,7 +128,7 @@ describe("adding a connection", () => {
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "staging",
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       environment: "staging",
@@ -140,7 +144,7 @@ describe("adding a connection", () => {
       agentId,
       name: "staging",
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       productLabel: "Retell chat",
       modality: "chat",
@@ -157,7 +161,7 @@ describe("adding a connection", () => {
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "production-line",
       agentPlatform: null,
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
@@ -194,6 +198,245 @@ describe("adding a connection", () => {
   });
 });
 
+/**
+ * Which platform a connection reaches is answered by its type where the type
+ * pins one, and through the agent where it does not. The connection row holds
+ * no platform of its own (ADR-0015).
+ */
+describe("which platform a connection belongs to", () => {
+  async function boundToRetell(name: string): Promise<string> {
+    const agentId = await agentNamed(name);
+    await enablePullProductionCalls(actingAsAcme("admin"), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: `agent_${newId("con").slice(-8)}`,
+      apiKey: "key_live_retell_monitoring_secret_QRST",
+    });
+    return agentId;
+  }
+
+  it("comes from the type where the type pins one", async () => {
+    const agentId = await agentNamed("Pinned by its type");
+
+    const chat = await addConnection(
+      actingAsAcme(),
+      agentId,
+      retellConnection({ name: "chat" }),
+    );
+
+    // The agent is unbound, and it does not matter: `retell_chat_api` reaches
+    // exactly one platform.
+    expect(chat?.agentPlatform).toBe("retell");
+    expect(chat?.productLabel).toBe("Retell chat");
+  });
+
+  it("comes through the agent where the type spans platforms", async () => {
+    const agentId = await boundToRetell("Retell by phone");
+
+    // `phone_number` reaches any platform, so this one belongs to Retell only
+    // because its agent does.
+    const added = await addConnection(actingAsAcme(), agentId, {
+      name: "hotline",
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+    expect(added?.agentPlatform).toBe("retell");
+    expect(added?.productLabel).toBe("Retell phone");
+
+    // And every read answers the same, which is the whole point: a create and
+    // the next GET disagreeing about the product label is a bug a person meets
+    // as a label that changes when they refresh.
+    const fetched = await getConnection(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+    );
+    expect(fetched?.agentPlatform).toBe("retell");
+    expect(fetched?.productLabel).toBe("Retell phone");
+
+    const [listed] = (await listConnections(actingAsAcme(), agentId)) ?? [];
+    expect(listed?.agentPlatform).toBe("retell");
+    expect(listed?.productLabel).toBe("Retell phone");
+
+    const renamed = await updateConnection(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+      { name: "hotline, renamed" },
+    );
+    expect(renamed?.agentPlatform).toBe("retell");
+    expect(renamed?.productLabel).toBe("Retell phone");
+
+    const archived = await archiveConnection(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+    );
+    expect(archived?.connection.agentPlatform).toBe("retell");
+
+    const restored = await restoreConnection(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+    );
+    expect(restored?.agentPlatform).toBe("retell");
+    expect(restored?.productLabel).toBe("Retell phone");
+  });
+
+  it("is nobody's where the type spans platforms and the agent is unbound", async () => {
+    const agentId = await agentNamed("Unbound by phone");
+
+    const added = await addConnection(actingAsAcme(), agentId, {
+      name: "hotline",
+      agentPlatform: null,
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+    expect(added?.agentPlatform).toBeNull();
+    expect(added?.productLabel).toBe("Phone number");
+
+    const fetched = await getConnection(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+    );
+    expect(fetched?.agentPlatform).toBeNull();
+    expect(fetched?.productLabel).toBe("Phone number");
+  });
+
+  it("refuses a payload naming a platform its agent contradicts", async () => {
+    const agentId = await boundToRetell("Bound to Retell");
+
+    // `phone_number` reaches any platform, so this connection would be
+    // represented as Retell's whatever the payload says. Saying
+    // `livekit_agents` is therefore a claim egma cannot honour, and it is told
+    // rather than quietly relabelled.
+    const refused = await addConnection(actingAsAcme(), agentId, {
+      name: "hotline",
+      agentPlatform: "livekit_agents",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    }).catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(AgentWriteRefusedError);
+    const problem = refused as AgentWriteRefusedError;
+    expect(problem.reason).toBe("platform_contradicts_agent");
+    // Both platforms are named, so the sentence says what to send instead.
+    expect(problem.message).toContain("livekit_agents");
+    expect(problem.message).toContain("retell");
+
+    // And nothing was written.
+    expect(await listConnections(actingAsAcme(), agentId)).toHaveLength(0);
+  });
+
+  it("admits a payload that agrees with its agent, and reads it back", async () => {
+    const agentId = await boundToRetell("Agrees with its agent");
+
+    const added = await addConnection(actingAsAcme(), agentId, {
+      name: "hotline",
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+
+    expect(added?.agentPlatform).toBe("retell");
+    expect(added?.productLabel).toBe("Retell phone");
+    const fetched = await getConnection(
+      actingAsAcme(),
+      agentId,
+      added?.id ?? "",
+    );
+    expect(fetched?.agentPlatform).toBe("retell");
+    expect(fetched?.productLabel).toBe("Retell phone");
+  });
+
+  it("names no platform, and lets the agent answer", async () => {
+    const agentId = await boundToRetell("Names nothing");
+
+    // Naming nothing contradicts nothing: it is the ordinary way to say
+    // "whatever this agent is on".
+    const added = await addConnection(actingAsAcme(), agentId, {
+      name: "hotline",
+      agentPlatform: null,
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+    expect(added?.agentPlatform).toBe("retell");
+    expect(added?.productLabel).toBe("Retell phone");
+  });
+
+  it("takes either platform on an unbound agent, and stores neither", async () => {
+    // With no agent to contradict, a payload may still name a platform to
+    // choose the tuple it is checked against — and what comes back says what
+    // is actually stored, which is nothing.
+    for (const named of ["retell", "livekit_agents"] as const) {
+      const agentId = await agentNamed(`Unbound for ${named}`);
+      const added = await addConnection(actingAsAcme(), agentId, {
+        name: "hotline",
+        agentPlatform: named,
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551234567" },
+      });
+      expect(added?.agentPlatform).toBeNull();
+      expect(added?.productLabel).toBe("Phone number");
+
+      const fetched = await getConnection(
+        actingAsAcme(),
+        agentId,
+        added?.id ?? "",
+      );
+      expect(fetched?.agentPlatform).toBeNull();
+      expect(fetched?.productLabel).toBe("Phone number");
+    }
+  });
+
+  it("lets a pinned type name its own platform whatever the agent is on", async () => {
+    const agentId = await boundToRetell("Pinned wins");
+
+    // `retell_chat_api` reaches Retell by construction, so the agent is never
+    // consulted and there is nothing here to contradict.
+    const chat = await addConnection(
+      actingAsAcme(),
+      agentId,
+      retellConnection({ name: "chat" }),
+    );
+    expect(chat?.agentPlatform).toBe("retell");
+    expect(chat?.productLabel).toBe("Retell chat");
+  });
+
+  it("travels with the agent in the list read too", async () => {
+    const agentId = await boundToRetell("Retell in the list");
+    await addConnection(actingAsAcme(), agentId, {
+      name: "hotline",
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+
+    const page = await listAgents(actingAsAcme());
+    const listed = page.items.find((one) => one.id === agentId);
+    expect(listed?.connections[0]).toMatchObject({
+      agentPlatform: "retell",
+      productLabel: "Retell phone",
+    });
+  });
+});
+
 describe("what the registry refuses at the door, by name", () => {
   it("refuses phone + chat: a phone connection speaks voice", async () => {
     const agentId = await agentNamed("Modality Rules");
@@ -202,7 +445,7 @@ describe("what the registry refuses at the door, by name", () => {
       addConnection(actingAsAcme(), agentId, {
         name: "impossible",
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "chat",
         config: { phoneNumber: "+15551234567" },
@@ -239,7 +482,7 @@ describe("what the registry refuses at the door, by name", () => {
       addConnection(actingAsAcme(), agentId, {
         name: "landline",
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "555-1234" },
@@ -254,7 +497,7 @@ describe("what the registry refuses at the door, by name", () => {
       addConnection(actingAsAcme(), agentId, {
         name: "with-secret",
         agentPlatform: null,
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
@@ -312,7 +555,7 @@ describe("a livekit connection", () => {
     expect(fetched).toMatchObject({
       name: "quickstart",
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",
       modality: "voice",
@@ -407,7 +650,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     return {
       name: `livekit-endpoint-${newId("con").slice(-8)}`,
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {
@@ -426,7 +669,7 @@ describe("a livekit connection that asks an endpoint for its tokens", () => {
     const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
     expect(fetched).toMatchObject({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       productLabel: "LiveKit token endpoint",
       topology: "agent-dials-out",
@@ -658,7 +901,7 @@ describe("updating a connection", () => {
 
     await expect(
       updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
       } as never),
     ).rejects.toThrow(/new connection/);
 
@@ -669,7 +912,7 @@ describe("updating a connection", () => {
     ).rejects.toThrow(/new connection/);
 
     const untouched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(untouched?.connectionKind).toBe("retell_chat_api");
+    expect(untouched?.connectionType).toBe("retell_chat_api");
     expect(untouched?.modality).toBe("chat");
   });
 });

@@ -4,7 +4,7 @@
   "modality": "email",
   "connection": {
     "agent_platform": "retell",
-    "connection_kind": "retell_chat_api",
+    "connection_type": "retell_chat_api",
     "access_variant": "retell_chat_api.api_key",
     "config": {
       "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
