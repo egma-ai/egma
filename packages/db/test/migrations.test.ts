@@ -2065,22 +2065,22 @@ describe("the connection type leaving the simulation row (0019)", () => {
         where conname in (
           'connection_type_allowed',
           'connection_agent_platform_allowed',
-          'connection_type_allowed',
+          'connection_kind_allowed',
           'connection_access_variant_allowed'
         ) order by conname`,
     );
     expect(rows.map((row) => row.name)).toEqual([
       "connection_access_variant_allowed",
       "connection_agent_platform_allowed",
-      "connection_type_allowed",
+      "connection_kind_allowed",
     ]);
   });
 
-  it("keeps modality, which remains separate from the connection type", async () => {
+  it("keeps modality, which remains separate from the connection kind", async () => {
     // The row's own check names it, and a CHECK cannot join — which is why
     // this column stayed where the legacy type went. A recording on a conversation
     // that was not voice is still refused by the row itself, and the write
-    // that proves it names no connection type at all.
+    // that proves it names no connection kind at all.
     await expect(
       client.query(
         `insert into simulation
@@ -3886,7 +3886,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       config: { retellAgentId: "agent_retell_chat" },
       expected: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
+        connectionKind: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
       },
     },
@@ -3901,7 +3901,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       config: { phoneNumber: "+15551234567" },
       expected: {
         agentPlatform: null,
-        connectionType: "phone_number",
+        connectionKind: "phone_number",
         accessVariant: "phone_number.public_e164",
       },
     },
@@ -3919,7 +3919,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       },
       expected: {
         agentPlatform: "livekit_agents",
-        connectionType: "livekit_room",
+        connectionKind: "livekit_room",
         accessVariant: "livekit_room.project_credentials",
       },
     },
@@ -3937,7 +3937,7 @@ describe("the direct Monitoring cutover (0038)", () => {
       },
       expected: {
         agentPlatform: "livekit_agents",
-        connectionType: "livekit_room",
+        connectionKind: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
       },
     },
@@ -4170,10 +4170,10 @@ describe("the direct Monitoring cutover (0038)", () => {
     const { rows: connections } = await client.query<{
       id: string;
       agent_platform: string | null;
-      connection_type: string;
+      connection_kind: string;
       access_variant: string;
     }>(
-      `select id, agent_platform, connection_type, access_variant
+      `select id, agent_platform, connection_kind, access_variant
          from connection order by id`,
     );
     const connectionById = new Map(connections.map((row) => [row.id, row]));
@@ -4190,12 +4190,12 @@ describe("the direct Monitoring cutover (0038)", () => {
       expect(connectionById.get(reach.connectionId)).toEqual({
         id: reach.connectionId,
         agent_platform: reach.expected.agentPlatform,
-        connection_type: reach.expected.connectionType,
+        connection_kind: reach.expected.connectionKind,
         access_variant: reach.expected.accessVariant,
       });
       expect(runById.get(reach.runId)).toEqual({
         agentPlatform: reach.expected.agentPlatform,
-        connectionType: reach.expected.connectionType,
+        connectionKind: reach.expected.connectionKind,
         accessVariant: reach.expected.accessVariant,
         modality: reach.modality,
         topology: reach.topology,
@@ -4212,7 +4212,7 @@ describe("the direct Monitoring cutover (0038)", () => {
 
     expect(rows[0]?.connection_snapshot).toEqual({
       agentPlatform: finishedRun.reach.expected.agentPlatform,
-      connectionType: finishedRun.reach.expected.connectionType,
+      connectionKind: finishedRun.reach.expected.connectionKind,
       accessVariant: finishedRun.reach.expected.accessVariant,
       modality: finishedRun.reach.modality,
       topology: finishedRun.reach.topology,
@@ -4427,7 +4427,7 @@ describe("the clean test-suite cutover (0040)", () => {
     await client.query(
       `insert into connection
          (id, organization_id, project_id, agent_id, name, agent_platform,
-          connection_type, modality, topology, access_variant, config,
+          connection_kind, modality, topology, access_variant, config,
           capability_state, capabilities_measured, capabilities_supported,
           capabilities_checked_at, capability_source, revision)
        values ($1, $2, $3, $4, 'Chat', 'retell', 'retell_chat_api', 'chat',
@@ -4532,7 +4532,7 @@ describe("the clean test-suite cutover (0040)", () => {
         JSON.stringify({ personaIds: [personaId] }),
         JSON.stringify({
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
+          connectionKind: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           topology: "hosted-broker",
