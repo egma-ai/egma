@@ -503,7 +503,7 @@ describe("Retell production ingestion", () => {
     expect(result.stoppedBecause).toBe("lease_lost");
   });
 
-  it("checks the setup-wide request gate before hydrating a listed call", async () => {
+  it("checks its own lease before hydrating a listed call", async () => {
     const recorded = record();
     let renewals = 0;
     let listRequests = 0;
@@ -719,7 +719,7 @@ describe("Retell production ingestion", () => {
     });
   });
 
-  it("uses one setup-wide Retry-After gate without a repeated log", async () => {
+  it("waits exactly as long as the provider asked, and says nothing", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
       async failMonitoringPull(_auth, _target, input) {
@@ -758,7 +758,7 @@ describe("Retell production ingestion", () => {
     expect(observed.recorded.providerFailures).toEqual(["rate_limited"]);
   });
 
-  it("caps unavailable-provider backoff and logs only the health transition", async () => {
+  it("caps this agent's backoff and logs the failure once", async () => {
     const recorded = record();
     const { log, events } = logger();
     const failedManyTimes: MonitoringPullTarget = {
@@ -816,7 +816,11 @@ describe("Retell production ingestion", () => {
     ).toEqual([]);
   });
 
-  it("blocks an invalid key until configuration changes and logs only its state change", async () => {
+  it("makes a refused key wait, bounded, without a health state to park it in", async () => {
+    // ADR-0015 drops `blocked_until` with the rest of the health machine. A
+    // refused key waits on this agent's own ladder — longer than a transient
+    // refusal, never for ever — so a key the customer fixes at Retell is tried
+    // again without anybody re-arming the switch here.
     const recorded = record();
     const { log, events } = logger();
 
@@ -834,14 +838,18 @@ describe("Retell production ingestion", () => {
 
     expect(recorded.failures).toHaveLength(1);
     expect(recorded.failures[0]?.kind).toBe("invalid_credential");
-    expect(recorded.failures[0]?.retryAt.getUTCFullYear()).toBe(9999);
+    const wait =
+      (recorded.failures[0]?.retryAt.getTime() ?? BASE.getTime()) -
+      BASE.getTime();
+    expect(wait).toBeGreaterThan(0);
+    expect(wait).toBeLessThanOrEqual(60 * 60_000);
     expect(events.error).toHaveLength(1);
     expect(JSON.stringify(events)).not.toContain(TARGET.apiKey);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentId);
     expect(JSON.stringify(events)).not.toContain(TARGET.platformAgentName);
   });
 
-  it("records a missing hydrated call, continues the page, and logs one degraded transition", async () => {
+  it("records a missing hydrated call, continues the page, and logs it once", async () => {
     const recorded = record();
     const writes: RetellCall[] = [];
     let missingHydrationAttempts = 0;
@@ -1141,7 +1149,7 @@ describe("Retell production ingestion", () => {
     expect(events).toEqual({ info: [], warn: [], error: [] });
   });
 
-  it("classifies setup-wide failures during an exact replay", async () => {
+  it("classifies provider failures during an exact replay", async () => {
     const cases = [
       {
         answer: { kind: "invalid-key" } as const,
