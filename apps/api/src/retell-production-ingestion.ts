@@ -64,7 +64,8 @@ import {
  *    trace store already holds, and which of them egma is already retrying or
  *    has recently dropped. Two statements for a hundred calls, never two per
  *    call.
- * 5. **Fetch and accept the remainder**, one hydration attempt each.
+ * 5. **Fetch and accept the remainder together**, one hydration attempt each
+ *    and at most `RETELL_HYDRATION_CONCURRENCY` of them open at once.
  * 6. **Advance only when every listed identity has an answer** — committed,
  *    durable in the object store, scheduled for a retry, or terminally dropped.
  *
@@ -124,6 +125,21 @@ const CALL_START_MARGIN_MILLISECONDS = 6 * 60 * 60 * 1_000;
 
 /** How many due retries one turn takes on, so a backlog cannot own the lease. */
 const RETRIES_PER_TURN = 25;
+
+/**
+ * How many of one page's calls egma hydrates at the same time.
+ *
+ * The ceiling is protective, not a throughput dial. A burst wide enough to make
+ * Retell refuse costs egma either way. A refusal that reads as this call's own
+ * spends one attempt of that call's bounded hydration budget — one initial
+ * attempt and at most three automatic retries — and a budget spent on refusals
+ * egma provoked ends where any exhausted budget ends: a terminal drop, and a
+ * conversation egma never imports. A refusal that reads as the account's pauses
+ * the whole selected agent until the provider says it may read again. Sixteen
+ * is narrow enough that a page cannot become that burst, and wide enough that a
+ * full page is a few waves rather than one sequential read per conversation.
+ */
+export const RETELL_HYDRATION_CONCURRENCY = 16;
 
 /**
  * How long an accepted-but-not-yet-visible identity is remembered.
@@ -898,6 +914,108 @@ async function handleCall(
   return { kind: "accepted" };
 }
 
+/** One listed call this page has not accounted for yet. */
+type OutstandingCall = {
+  readonly providerCallId: string;
+  readonly listedCall: RetellCall;
+  /** Whether this call already has a transient row. */
+  readonly held: boolean;
+};
+
+/** Whether one call's answer ends the turn rather than that call. */
+function endsTurn(outcome: CallOutcome): boolean {
+  return (
+    outcome.kind === "lease_lost" ||
+    outcome.kind === "provider_failure" ||
+    outcome.kind === "ingestion_unavailable"
+  );
+}
+
+/**
+ * Hydrate and accept a page's outstanding calls together, answering in listed
+ * order.
+ *
+ * At most `RETELL_HYDRATION_CONCURRENCY` hydrations are open at once, and each
+ * call keeps everything one at a time gave it: its own lease check, its own
+ * single attempt, and an answer that belongs to it alone — one call's failed
+ * hydration writes that call's retry row and leaves its page-mates to finish.
+ * Acceptances are deliberately not serialized: the door they go through already
+ * takes many senders at once, and acceptances that overlap share segment seals,
+ * which makes them fewer and fuller objects rather than a contended queue.
+ *
+ * The answer is shorter than `outstanding` where the turn bound stopped it
+ * short, and every call it did reach has finished before it answers: a turn
+ * about to yield its lease must have nothing of its own still writing.
+ */
+async function hydrateOutstanding(
+  target: RetellMonitoringTarget,
+  outstanding: readonly OutstandingCall[],
+  options: TurnOptions,
+  counts: TurnCounts,
+  boundReached: () => boolean,
+): Promise<readonly PromiseSettledResult<CallOutcome>[]> {
+  const settled: PromiseSettledResult<CallOutcome>[] = [];
+  let taken = 0;
+  // An answer that ends the turn — a lost lease, a failing setup, an object
+  // store that cannot take the evidence — stops this page being read further.
+  // What is already open finishes; nothing new is opened.
+  let stopping = false;
+
+  const hydrateOne = async (owed: OutstandingCall): Promise<CallOutcome> => {
+    const renewed = await options.store.renewRetellMonitoringLease(
+      target.auth,
+      target,
+      { now: options.clock() },
+    );
+    if (!renewed) return { kind: "lease_lost" };
+    return handleCall(
+      target,
+      owed.providerCallId,
+      () =>
+        withDeadline(
+          options.reach,
+          options.requestTimeoutMilliseconds,
+          (reach) =>
+            options.provider.hydrateRetellCall(
+              target.apiKey,
+              owed.listedCall,
+              reach,
+            ),
+        ),
+      options,
+      counts,
+      owed.held,
+    );
+  };
+
+  /** Take the next outstanding call, until there are none or the turn stops. */
+  const takeCalls = async (): Promise<void> => {
+    while (!stopping && !boundReached()) {
+      const index = taken;
+      if (index >= outstanding.length) return;
+      const owed = outstanding[index];
+      if (owed === undefined) return;
+      taken = index + 1;
+      try {
+        const outcome = await hydrateOne(owed);
+        settled[index] = { status: "fulfilled", value: outcome };
+        if (endsTurn(outcome)) stopping = true;
+      } catch (reason) {
+        settled[index] = { status: "rejected", reason };
+        stopping = true;
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(RETELL_HYDRATION_CONCURRENCY, outstanding.length) },
+      () => takeCalls(),
+    ),
+  );
+  return settled.slice(0, taken);
+}
+
 async function releaseAfterInternalFailure(
   store: RetellProductionIngestionStore,
   target: RetellMonitoringTarget,
@@ -1173,8 +1291,13 @@ async function runTarget(
           },
         );
 
+        // What this page still owes, decided in listed order before any of it
+        // is fetched. Nothing here reaches the provider or the store, so the
+        // two batched answers above settle every identity that is already
+        // accounted for and what is left is the page's outstanding work.
+        const outstanding: OutstandingCall[] = [];
+        const owing = new Set<string>();
         for (const [index, listedCall] of listed.calls.entries()) {
-          if (turnBoundReached()) return yieldBoundedTurn();
           const providerCallId = identities[index] ?? "";
           const traceId = traceIdFor(projectId, providerCallId);
           // Committed in the store, or accepted by this poller and not yet
@@ -1206,37 +1329,37 @@ async function runTarget(
             continue;
           }
 
-          const renewable = await options.store.renewRetellMonitoringLease(
-            target.auth,
-            target,
-            { now: options.clock() },
-          );
-          if (!renewable) {
-            leaseFinished = true;
-            return completed("lease_lost");
+          // One identity is read once a turn however often the page lists it.
+          // A second reading of one conversation under one immutable identity
+          // is the defect the memory above exists to keep out, and a page that
+          // repeats a row must not be the way it gets in.
+          if (owing.has(providerCallId)) {
+            counts.settled += 1;
+            continue;
           }
-          const stopped = await stoppedBy(
-            await handleCall(
-              target,
-              providerCallId,
-              () =>
-                withDeadline(
-                  options.reach,
-                  options.requestTimeoutMilliseconds,
-                  (reach) =>
-                    options.provider.hydrateRetellCall(
-                      target.apiKey,
-                      listedCall,
-                      reach,
-                    ),
-                ),
-              options,
-              counts,
-              held !== undefined,
-            ),
-          );
+          owing.add(providerCallId);
+          outstanding.push({
+            providerCallId,
+            listedCall,
+            held: held !== undefined,
+          });
+        }
+
+        const hydrations = await hydrateOutstanding(
+          target,
+          outstanding,
+          options,
+          counts,
+          turnBoundReached,
+        );
+        for (const hydration of hydrations) {
+          if (hydration.status === "rejected") throw hydration.reason;
+          const stopped = await stoppedBy(hydration.value);
           if (stopped !== undefined) return stopped;
         }
+        // The turn ran out of time inside this page, so what follows must not
+        // advance past the calls it never reached.
+        if (hydrations.length < outstanding.length) return yieldBoundedTurn();
       }
 
       if (!listed.hasMore) {

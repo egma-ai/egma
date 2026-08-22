@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IngestionUnavailableError } from "../src/ingestion/accept.ts";
 import {
   acceptedIdentities,
+  RETELL_HYDRATION_CONCURRENCY,
   runRetellProductionIngestion,
   startRetellProductionIngestion,
   type RetellCommittedLookup,
@@ -266,6 +267,65 @@ function provider(
       return { kind: "call", call: hydrated(callId) };
     },
     ...changes,
+  };
+}
+
+/** One page of listed summaries, wide enough to say something about a wave. */
+function page(size: number, prefix: string): RetellCall[] {
+  return Array.from({ length: size }, (_unused, index) =>
+    summary(`${prefix}_${index}`),
+  );
+}
+
+/**
+ * Hydrations a test can hold open, so overlap is observed and never timed.
+ *
+ * Each call reports itself open and waits; the one that brings the count to
+ * `together` releases them all. A page read one call at a time never brings the
+ * count that high, so the escape timer is there to make that a plain assertion
+ * failure rather than a hung test.
+ */
+function heldHydrations(together: number) {
+  const started: string[] = [];
+  const finished: string[] = [];
+  let open = 0;
+  let mostOpen = 0;
+  let waves = 0;
+  let openWhenFirstFinished = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    started,
+    finished,
+    /** The most hydrations open at one instant. */
+    get mostOpen(): number {
+      return mostOpen;
+    },
+    /** How many times the count rose from none open: one per wave. */
+    get waves(): number {
+      return waves;
+    },
+    /** How many were still open when the first of them finished. */
+    get openWhenFirstFinished(): number {
+      return openWhenFirstFinished;
+    },
+    async hold(callId: string): Promise<void> {
+      if (open === 0) waves += 1;
+      open += 1;
+      started.push(callId);
+      mostOpen = Math.max(mostOpen, open);
+      if (open >= together) release();
+      await Promise.race([
+        released,
+        new Promise<void>((resolve) => setTimeout(resolve, 50)),
+      ]);
+      if (finished.length === 0) openWhenFirstFinished = open;
+      open -= 1;
+      finished.push(callId);
+    },
   };
 }
 
@@ -1126,11 +1186,11 @@ describe("Retell production ingestion", () => {
     expect(JSON.stringify(events)).not.toContain("different-private-agent-id");
   });
 
-  it("yields inside a large page without checkpointing past unprocessed calls", async () => {
+  it("reads a page's outstanding calls together rather than one at a time", async () => {
     const recorded = record();
-    const hydratedIds: string[] = [];
-    let advanced = 0;
-    const clock = () => new Date(BASE.getTime() + advanced);
+    const listed = page(8, "call_together");
+    const held = heldHydrations(listed.length);
+    const taken = acceptance();
     const { log } = logger();
 
     const result = await runRetellProductionIngestion({
@@ -1140,14 +1200,155 @@ describe("Retell production ingestion", () => {
         async listTerminalCalls() {
           return {
             kind: "calls",
-            calls: [summary("call_first"), summary("call_second")],
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // Every call in the page was open at the same instant, and not one of them
+    // had finished by the time the last one started: one wave, not eight.
+    expect(held.started).toHaveLength(listed.length);
+    expect(held.mostOpen).toBe(listed.length);
+    expect(held.openWhenFirstFinished).toBe(listed.length);
+    expect(held.waves).toBe(1);
+    expect(result).toMatchObject({
+      accepted: listed.length,
+      settled: 0,
+      pages: 1,
+    });
+    expect(taken.recorded.traceIds).toHaveLength(listed.length);
+    expect(recorded.finishes).toHaveLength(1);
+  });
+
+  it("never opens more of a page at once than the hydration ceiling", async () => {
+    const recorded = record();
+    const listed = page(RETELL_HYDRATION_CONCURRENCY + 4, "call_wide");
+    const held = heldHydrations(RETELL_HYDRATION_CONCURRENCY);
+    const taken = acceptance();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // A page wider than the ceiling is still read in full, and the burst egma
+    // offers the provider never grows past the ceiling.
+    expect(held.mostOpen).toBe(RETELL_HYDRATION_CONCURRENCY);
+    expect(held.started).toHaveLength(listed.length);
+    expect(result).toMatchObject({ accepted: listed.length, settled: 0 });
+    expect(recorded.finishes).toHaveLength(1);
+  });
+
+  it("keeps one call's failed hydration off the page-mates open beside it", async () => {
+    const recorded = record();
+    const listed = [
+      summary("call_beside_one"),
+      summary("call_broken"),
+      summary("call_beside_two"),
+      summary("call_beside_three"),
+    ];
+    const held = heldHydrations(listed.length);
+    const taken = acceptance();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return callId === "call_broken"
+            ? { kind: "not-found" }
+            : { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // All four were open together. The one that failed spent one attempt of its
+    // own budget and took a retry row; the other three landed.
+    expect(held.mostOpen).toBe(listed.length);
+    expect(result).toMatchObject({ accepted: 3, settled: 1, dropped: 0 });
+    expect(taken.recorded.traceIds).toEqual(
+      ["call_beside_one", "call_beside_two", "call_beside_three"].map((id) =>
+        traceIdFor(AUTH.projectId, id),
+      ),
+    );
+    expect(recorded.rows.get("call_broken")).toMatchObject({
+      attempts: 1,
+      errorKind: "provider_call_not_found",
+    });
+    expect(recorded.rows.get("call_broken")?.nextAttemptAt).not.toBeNull();
+    // Every listed identity has an answer, so the page advanced.
+    expect(recorded.finishes).toHaveLength(1);
+  });
+
+  it("yields inside a large page without checkpointing past unprocessed calls", async () => {
+    const recorded = record();
+    const hydratedIds: string[] = [];
+    let advanced = 0;
+    const clock = () => new Date(BASE.getTime() + advanced);
+    const { log } = logger();
+    // One call more than a single wave can hold, so the wall-time bound falls
+    // between the waves and leaves the page part-read.
+    const listed = page(RETELL_HYDRATION_CONCURRENCY + 1, "call_late");
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
             hasMore: true,
             paginationKey: "page-after-large-page",
           };
         },
-        async hydrateRetellCall(_key, listed) {
-          hydratedIds.push(String(listed["call_id"]));
-          return { kind: "call", call: hydrated(String(listed["call_id"])) };
+        async hydrateRetellCall(_key, one) {
+          hydratedIds.push(String(one["call_id"]));
+          return { kind: "call", call: hydrated(String(one["call_id"])) };
         },
       }),
       lookup: lookup({ windows: [], asked: [] }),
@@ -1161,7 +1362,10 @@ describe("Retell production ingestion", () => {
       maxTurnMilliseconds: 50,
     });
 
-    expect(hydratedIds).toEqual(["call_first"]);
+    expect(hydratedIds).toHaveLength(RETELL_HYDRATION_CONCURRENCY);
+    expect(hydratedIds).not.toContain(
+      `call_late_${RETELL_HYDRATION_CONCURRENCY}`,
+    );
     expect(recorded.checkpoints).toEqual([]);
     expect(recorded.yields).toHaveLength(1);
     expect(result.stoppedBecause).toBe("bounded_turn");
