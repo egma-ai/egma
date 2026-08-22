@@ -565,7 +565,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
   );
 }
 
-/** Provider-specific teaching lives once, on the Monitoring setup page. */
+/** Provider-specific teaching lives once, in the start-monitoring flow. */
 function SetUp() {
   return (
     <Empty

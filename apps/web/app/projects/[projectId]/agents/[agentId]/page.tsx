@@ -261,7 +261,16 @@ function AgentDetailView({
           projectId={projectId}
           agent={agent}
           mayAuthor={mayAuthor}
-          whyNot={whyNot}
+          /*
+           * Its own sentence, because this control changes monitoring rather
+           * than the agent's identity, and a person told the wrong thing they
+           * cannot do goes looking in the wrong place.
+           */
+          whyNot={
+            role === null
+              ? undefined
+              : `Your ${role} role cannot change monitoring. Ask an organization admin to change your role.`
+          }
           onChanged={reload}
         />
         <Section

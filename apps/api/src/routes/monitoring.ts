@@ -4,6 +4,7 @@ import {
   createAgent,
   disablePullProductionCalls,
   enablePullProductionCalls,
+  getAgent,
   listAgents as listProjectAgents,
   NotPermittedError,
   readAgentPullState,
@@ -329,6 +330,22 @@ export async function monitoringRoutes(
       let agentName = one.name ?? one.platformAgentId;
       let created = false;
 
+      if (agentId !== undefined) {
+        // The caller named an egma agent, so the answer says that agent's
+        // name rather than the platform's word for it. A name the caller sent
+        // alongside would be the platform's, and the two need not agree.
+        const held = await getAgent(resolved.auth, agentId);
+        if (held === undefined) {
+          return sendRefusal(
+            reply,
+            "not_found",
+            `There is no agent ${agentId} available in this project. ` +
+              "Check the link, or choose it from the current project.",
+          );
+        }
+        agentName = held.name;
+      }
+
       if (agentId === undefined) {
         // No egma agent named, so the platform id decides: the agent already
         // bound to it, or a new roster entry for it.
@@ -461,31 +478,12 @@ export async function monitoringRoutes(
           "There is no open Retell import failure with this id in this project.",
         );
       }
+      // Two reasons a replay is refused before it spends a provider request,
+      // and only two: another replay already holds the lease, or the agent is
+      // waiting out its own retry clock. There is no stored health state any
+      // more, so nothing else can be known here — a branch for a rate limit or
+      // a bad key would be answering a question the claim never asks.
       if (replayed.kind === "busy") {
-        if (replayed.reason === "rate_limited") {
-          return sendRefusal(
-            reply,
-            "too_many_requests",
-            "Retell rate-limited this retry. Wait and try again.",
-          );
-        }
-        if (replayed.reason === "invalid_credential") {
-          return unprocessable(
-            reply,
-            "Retell rejected the current API key. Update the Retell Monitoring setup and try again.",
-          );
-        }
-        if (replayed.reason === "provider_unavailable") {
-          return sendRefusal(
-            reply,
-            "provider_unavailable",
-            "Retell did not answer this retry. Try again.",
-          );
-        }
-        // The agent is already waiting out its own retry clock, which this
-        // retry would otherwise spend a provider request against. There is no
-        // stored health state to say why any more, so the honest answer is the
-        // wait itself and when it ends.
         if (replayed.reason === "backing_off") {
           return sendRefusal(
             reply,
@@ -517,7 +515,8 @@ export async function monitoringRoutes(
       if (replayed.kind === "invalid_credential") {
         return unprocessable(
           reply,
-          "Retell rejected the current API key. Update the Retell Monitoring setup and try again.",
+          "Retell rejected this agent's monitoring key. Start monitoring " +
+            "again with a current Retell API key, then retry this import.",
         );
       }
       if (replayed.kind === "rate_limited") {
@@ -552,7 +551,7 @@ export async function monitoringRoutes(
     if (error instanceof NotPermittedError) {
       return notPermitted(
         reply,
-        "Your role cannot change Monitoring setup in this project.",
+        "Your role cannot change monitoring in this project.",
       );
     }
     throw error;
