@@ -5,11 +5,12 @@ import {
   appendGrades,
   ProductionGradingPlanConflictError,
   recordProductionGradingPlan,
+  readCurrentSimulationGradeFacts,
   readProductionGradingPlan,
   readTraceGrades,
   type NewGrade,
 } from "../src/access/grades.ts";
-import { combinedGradeScore } from "../src/grading/results.ts";
+import { combinedGradeScore, currentGrades } from "../src/grading/results.ts";
 import {
   connectClickHouse,
   disconnectClickHouse,
@@ -57,6 +58,7 @@ function grade(overrides: Partial<NewGrade> = {}): NewGrade {
       ],
     },
     graderPassThreshold: 0.75,
+    gradingSequence: 1,
     gradedAtMicroseconds: micros("2026-08-21T08:01:00Z"),
     ...overrides,
   };
@@ -73,6 +75,65 @@ afterAll(async () => {
 });
 
 describe("one grader result on one trace", () => {
+  it("keeps the higher grading sequence current when completion times tie", () => {
+    const projectGraderId = newId("grd");
+    const gradedAtMicroseconds = micros("2026-08-21T08:01:00Z");
+    const stale = {
+      projectGraderId,
+      score: 0,
+      graderPassThreshold: 0.5,
+      gradedAtMicroseconds,
+      gradingSequence: 1,
+    };
+    const reclaimed = {
+      ...stale,
+      score: 1,
+      gradingSequence: 2,
+    };
+
+    expect(currentGrades([stale, reclaimed])).toMatchObject([
+      { score: 1, gradingSequence: 2, result: "passed" },
+    ]);
+    expect(currentGrades([reclaimed, stale])).toMatchObject([
+      { score: 1, gradingSequence: 2, result: "passed" },
+    ]);
+  });
+
+  it("uses the higher sequence in batch state reads when completion times tie", async () => {
+    const traceId = "1212121212121212121212121212bbbb";
+    const runId = newId("run");
+    const projectGraderId = newId("grd");
+    const gradedAtMicroseconds = micros("2026-08-21T08:01:00Z");
+
+    await appendGrades(auth, [
+      grade({
+        traceId,
+        runId,
+        projectGraderId,
+        score: null,
+        details: { error: "the stale worker could not score" },
+        gradingSequence: 1,
+        gradedAtMicroseconds,
+      }),
+      grade({
+        traceId,
+        runId,
+        projectGraderId,
+        score: 1,
+        gradingSequence: 2,
+        gradedAtMicroseconds,
+      }),
+    ]);
+
+    await expect(readCurrentSimulationGradeFacts(auth, { traceIds: [traceId] }))
+      .resolves.toEqual([{
+        traceId,
+        runId,
+        projectGraderId,
+        errored: false,
+      }]);
+  });
+
   it("round-trips one normalized grade with its frozen identities and details", async () => {
     const written = grade();
 

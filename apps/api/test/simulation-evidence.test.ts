@@ -111,6 +111,7 @@ async function writeGrade(
         ],
       },
       graderPassThreshold: entry.graderPassThreshold,
+      gradingSequence: claim.sequenceBase + claim.attempts,
       gradedAtMicroseconds: BigInt(gradedAt.getTime()) * 1_000n,
     },
   ]);
@@ -170,6 +171,12 @@ describe("one simulation's grades", () => {
     ]) {
       expect(first.body).not.toHaveProperty(retired);
     }
+    const projection = first.body as {
+      readonly grades: readonly Record<string, unknown>[];
+      readonly gradeHistory: readonly Record<string, unknown>[];
+    };
+    expect(projection.grades[0]).not.toHaveProperty("gradingSequence");
+    expect(projection.gradeHistory[0]).not.toHaveProperty("gradingSequence");
 
     const narrowed = await request(
       api.app,
@@ -215,6 +222,7 @@ describe("one simulation's grades", () => {
         score: 0.75,
         details: { rationale: "The same frozen grader scored it again." },
         graderPassThreshold: entry.graderPassThreshold,
+        gradingSequence: claim.sequenceBase + claim.attempts,
         gradedAtMicroseconds:
           BigInt(new Date("2026-08-21T10:05:00Z").getTime()) * 1_000n,
       },

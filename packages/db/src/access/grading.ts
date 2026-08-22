@@ -112,6 +112,7 @@ export type GradingJob = {
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
+  readonly sequenceBase: number;
   readonly attempts: number;
   readonly lastError: string | null;
   readonly finishedAt: Date | null;
@@ -146,6 +147,7 @@ const JOB_COLUMNS = {
   claimedBy: gradingJob.claimedBy,
   claimedAt: gradingJob.claimedAt,
   heartbeatAt: gradingJob.heartbeatAt,
+  sequenceBase: gradingJob.sequenceBase,
   attempts: gradingJob.attempts,
   lastError: gradingJob.lastError,
   finishedAt: gradingJob.finishedAt,
@@ -166,6 +168,7 @@ function jobFromRow(row: {
   readonly claimedBy: string | null;
   readonly claimedAt: Date | null;
   readonly heartbeatAt: Date | null;
+  readonly sequenceBase: number;
   readonly attempts: number;
   readonly lastError: string | null;
   readonly finishedAt: Date | null;
@@ -284,6 +287,13 @@ function allEntriesHaveResults(
   return { complete: true, errored };
 }
 
+function maximumGradingSequence(grades: readonly RecordedGrade[]): number {
+  return grades.reduce(
+    (highest, grade) => Math.max(highest, grade.gradingSequence),
+    0,
+  );
+}
+
 async function notify(on: Queryable, jobId: string): Promise<void> {
   await on.execute(sql`select pg_notify(${GRADING_WORK_CHANNEL}, ${jobId})`);
 }
@@ -298,6 +308,7 @@ async function enqueue(
     readonly traceStartedAt: Date;
     readonly runId: string | null;
     readonly entries: readonly FrozenGradingEntry[];
+    readonly sequenceBase: number;
   },
 ): Promise<{ readonly job: GradingJob; readonly created: boolean }> {
   const held = await jobForTrace(on, auth, input.traceId);
@@ -315,6 +326,7 @@ async function enqueue(
       traceStartedAt: input.traceStartedAt,
       runId: input.runId,
       entries: input.entries,
+      sequenceBase: input.sequenceBase,
       status: "pending",
     })
     .onConflictDoNothing()
@@ -349,12 +361,12 @@ async function settleOrdinaryRequest(
     return { kind: "queued", jobId: held.id, created: false };
   }
 
-  const { current } = await readTraceGrades(auth, {
+  const grades = await readTraceGrades(auth, {
     source: input.source,
     traceId: input.traceId,
     ...(input.runId === null ? {} : { runId: input.runId }),
   });
-  const terminal = allEntriesHaveResults(input.entries, current);
+  const terminal = allEntriesHaveResults(input.entries, grades.current);
   if (terminal.complete) {
     return {
       kind: "terminal",
@@ -365,7 +377,10 @@ async function settleOrdinaryRequest(
     return { kind: "terminal", outcome: "error" };
   }
 
-  const queued = await enqueue(on, auth, input);
+  const queued = await enqueue(on, auth, {
+    ...input,
+    sequenceBase: maximumGradingSequence(grades.history),
+  });
   return { kind: "queued", jobId: queued.job.id, created: queued.created };
 }
 
@@ -1312,6 +1327,7 @@ export async function regradeTrace(
           alreadyWaiting: true,
         };
       }
+      const prior = await readTraceGrades(auth, ref);
       const [row] = await tx
         .update(gradingJob)
         .set({
@@ -1319,6 +1335,10 @@ export async function regradeTrace(
           claimedBy: null,
           claimedAt: null,
           heartbeatAt: null,
+          sequenceBase: Math.max(
+            maximumGradingSequence(prior.history),
+            existing.sequenceBase + existing.attempts,
+          ),
           attempts: 0,
           lastError: null,
           finishedAt: null,
@@ -1369,6 +1389,7 @@ export async function regradeTrace(
       traceStartedAt,
       runId: ref.runId ?? null,
       entries,
+      sequenceBase: maximumGradingSequence(prior.history),
     });
     return {
       kind: "queued",

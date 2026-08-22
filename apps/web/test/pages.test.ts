@@ -20,6 +20,9 @@ import {
 } from "../lib/return-to.ts";
 import {
   citedTurnPositions,
+  priorGrades,
+  withoutCurrentGrade,
+  type EvidenceGrade,
   type EvidenceStep,
 } from "../lib/simulations.ts";
 import {
@@ -782,5 +785,33 @@ describe("the turns a grade cites", () => {
 
   it("drops an id that is nowhere in the transcript rather than inventing a turn", () => {
     expect(citedTurnPositions(["nothing-here"], turns)).toEqual([]);
+  });
+});
+
+describe("equal-time grade history", () => {
+  const current: EvidenceGrade = {
+    projectGraderId: "grd_current",
+    graderDefinitionId: "grl_expected",
+    graderDefinitionVersion: 1,
+    graderName: "expected_behaviors",
+    score: 1,
+    details: { rationale: "the reclaimed worker scored it" },
+    passThreshold: 0.5,
+    result: "passed",
+    gradedAt: "2026-08-21T08:01:00.000000Z",
+  };
+  const stale: EvidenceGrade = {
+    ...current,
+    score: 0,
+    details: { rationale: "the stale worker scored it" },
+    result: "failed",
+  };
+
+  it("removes only the current public row", () => {
+    expect(withoutCurrentGrade(current, [stale, current])).toEqual([stale]);
+  });
+
+  it("keeps the equal-time stale row in simulation history", () => {
+    expect(priorGrades(current, [stale, current])).toEqual([stale]);
   });
 });

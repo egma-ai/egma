@@ -4,6 +4,8 @@ export type GradeForCurrentResult = {
   readonly projectGraderId: string;
   readonly score: number | null;
   readonly graderPassThreshold: number;
+  /** Internal order assigned when a worker claims the trace-level job. */
+  readonly gradingSequence: number;
   readonly gradedAtMicroseconds: bigint;
 };
 
@@ -11,7 +13,7 @@ export type CurrentGradeOf<Grade extends GradeForCurrentResult> = Grade & {
   readonly result: GradeResult;
 };
 
-/** Keep the latest appended result for each project grader. */
+/** Keep the latest claimed result for each project grader. */
 export function currentGrades<Grade extends GradeForCurrentResult>(
   history: readonly Grade[],
 ): readonly CurrentGradeOf<Grade>[] {
@@ -20,7 +22,9 @@ export function currentGrades<Grade extends GradeForCurrentResult>(
     const held = current.get(grade.projectGraderId);
     if (
       held === undefined ||
-      grade.gradedAtMicroseconds > held.gradedAtMicroseconds
+      grade.gradingSequence > held.gradingSequence ||
+      (grade.gradingSequence === held.gradingSequence &&
+        grade.gradedAtMicroseconds > held.gradedAtMicroseconds)
     ) {
       current.set(grade.projectGraderId, grade);
     }

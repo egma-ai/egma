@@ -1289,6 +1289,7 @@ describe.skipIf(!storage.available)("a production conversation selected by a fix
         }],
       },
       graderPassThreshold: entry.graderPassThreshold,
+      gradingSequence: claim.sequenceBase + claim.attempts,
       gradedAtMicroseconds: BigInt(STARTED_AT.getTime() + 10_000) * 1_000n,
     }]);
     await expect(

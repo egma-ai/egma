@@ -171,6 +171,7 @@ describe("the worker consumes one frozen trace plan", () => {
       graderDefinitionId: definitionId,
       score: null,
       graderPassThreshold: 0.6,
+      gradingSequence: claim.sequenceBase + claim.attempts,
       result: "errored",
       details: {
         error: expect.stringContaining("does not execute grader definition"),

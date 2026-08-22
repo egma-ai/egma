@@ -146,6 +146,7 @@ async function appendSuccess(claim: GradingClaim): Promise<void> {
     score: 1,
     details: { rationale: "met" },
     graderPassThreshold: entry.graderPassThreshold,
+    gradingSequence: claim.sequenceBase + claim.attempts,
     gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
   }]);
 }

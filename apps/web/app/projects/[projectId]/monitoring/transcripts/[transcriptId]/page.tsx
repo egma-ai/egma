@@ -12,6 +12,7 @@ import {
   platformAnswer,
   platformClient,
 } from "../../../../../../lib/platform-client.ts";
+import { withoutCurrentGrade } from "../../../../../../lib/simulations.ts";
 import {
   DETAIL,
   FACTS,
@@ -744,11 +745,9 @@ function GradeSummary({
   readonly grades: readonly Grade[];
   readonly history: readonly Grade[];
 }) {
-  const currentKeys = new Set(
-    grades.map((grade) => `${grade.projectGraderId}:${grade.gradedAt}`),
-  );
-  const earlier = history.filter(
-    (grade) => !currentKeys.has(`${grade.projectGraderId}:${grade.gradedAt}`),
+  const earlier = grades.reduce<readonly Grade[]>(
+    (remaining, grade) => withoutCurrentGrade(grade, remaining),
+    history,
   );
 
   return (

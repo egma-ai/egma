@@ -132,6 +132,7 @@ async function appendOne(
       ? { error: "the grader could not score" }
       : { rationale: `score ${score}` },
     graderPassThreshold: entry.graderPassThreshold,
+    gradingSequence: claim.sequenceBase + claim.attempts,
     gradedAtMicroseconds,
   }]);
 }
@@ -238,6 +239,29 @@ describe("one frozen production job", () => {
       kind: "terminal",
       outcome: "complete",
     });
+  });
+
+  it("keeps the reclaimed worker's grade current when completion times tie", async () => {
+    const traceId = "1212121212121212121212121212aaaa";
+    const sameCompletionTime = 1_777_000_001_250_000n;
+    await request(traceId);
+
+    const stale = await claimTrace(traceId, "grader-before-reclaim");
+    await appendOne(stale, 0, sameCompletionTime);
+    await releaseGradingJob(
+      stale.auth,
+      stale.id,
+      stale.claimedBy,
+      "cleanup failed after the first append",
+    );
+
+    const reclaimed = await claimTrace(traceId, "grader-after-reclaim");
+    await appendOne(reclaimed, 1, sameCompletionTime);
+    await finishGradingJob(reclaimed.auth, reclaimed.id, reclaimed.claimedBy);
+
+    const grades = await readTraceGrades(auth, { source: "production", traceId });
+    expect(grades.history.map((grade) => grade.score).sort()).toEqual([0, 1]);
+    expect(grades.current).toMatchObject([{ score: 1, result: "passed" }]);
   });
 
   it("keeps a terminal infrastructure failure instead of inventing grades", async () => {
@@ -692,6 +716,7 @@ describe("regrading uses frozen history", () => {
     expect(grades.history).toHaveLength(2);
     expect(grades.current).toMatchObject([{
       score: 0.5,
+      gradingSequence: 2,
       graderPassThreshold: 0.7,
       result: "failed",
     }]);
@@ -701,6 +726,61 @@ describe("regrading uses frozen history", () => {
         combinedScore: 0.5,
         current: [{ graderName: "Policy quality", result: "failed" }],
       });
+  });
+
+  it("reopens above the attempt range reserved by an abandoned worker", async () => {
+    const traceId = "3434343434343434343434343434dddd";
+    const sameCompletionTime = 1_777_000_003_500_000n;
+    await request(traceId);
+
+    const first = await claimTrace(traceId, "grader-abandoned-one");
+    await database.sql(
+      `update grading_job
+          set heartbeat_at = now() - interval '10 minutes'
+        where id = $1`,
+      [first.id],
+    );
+    const second = await claimTrace(traceId, "grader-abandoned-two");
+    await database.sql(
+      `update grading_job
+          set heartbeat_at = now() - interval '10 minutes'
+        where id = $1`,
+      [second.id],
+    );
+    const stale = await claimTrace(traceId, "grader-abandoned-three");
+    await database.sql(
+      `update grading_job
+          set heartbeat_at = now() - interval '10 minutes'
+        where id = $1`,
+      [stale.id],
+    );
+    await claimGradingJobs({
+      claimant: "grader-abandoned-sweeper",
+      capacity: 50,
+      leaseSeconds: 1,
+    });
+    await expect(getGradingJob(auth, stale.id)).resolves.toMatchObject({
+      status: "abandoned",
+      sequenceBase: 0,
+      attempts: 3,
+    });
+
+    await expect(regradeTrace(auth, { source: "production", traceId }))
+      .resolves.toMatchObject({ kind: "queued", reopened: true });
+    const fresh = await claimTrace(traceId, "grader-after-abandonment");
+    expect(fresh).toMatchObject({ sequenceBase: 3, attempts: 1 });
+
+    await appendOne(fresh, 1, sameCompletionTime);
+    await finishGradingJob(fresh.auth, fresh.id, fresh.claimedBy);
+    // The expired worker can still finish after its lease and the PG row are gone.
+    await appendOne(stale, 0, sameCompletionTime);
+
+    const grades = await readTraceGrades(auth, { source: "production", traceId });
+    expect(grades.current).toMatchObject([{
+      score: 1,
+      gradingSequence: 4,
+      result: "passed",
+    }]);
   });
 
   it("stores an empty selection as not requested and creates no job", async () => {

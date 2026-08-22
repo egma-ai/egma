@@ -185,6 +185,7 @@ function gradeRow(
     score: result.score,
     details: result.details,
     graderPassThreshold: entry.graderPassThreshold,
+    gradingSequence: claim.sequenceBase + claim.attempts,
     gradedAtMicroseconds: gradedNow(),
   };
 }
@@ -262,7 +263,7 @@ async function traceFor(
   return trace;
 }
 
-/** Strictly increasing inside one worker, including within one millisecond. */
+/** Preserve completion order inside one worker; the job sequence orders workers. */
 let lastStamp = 0n;
 function gradedNow(): bigint {
   const now = BigInt(Date.now()) * 1_000n;

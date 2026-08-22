@@ -32,12 +32,15 @@ CREATE TABLE IF NOT EXISTS grades
     score                      Nullable(Float64),
     details                    JSON,
     grader_pass_threshold      Float64,
+    grading_sequence           UInt32,
     graded_at                  DateTime64(6, 'UTC'),
 
     CONSTRAINT grade_score_is_normalized
       CHECK score IS NULL OR (score >= 0 AND score <= 1),
     CONSTRAINT grader_pass_threshold_is_normalized
       CHECK grader_pass_threshold >= 0 AND grader_pass_threshold <= 1,
+    CONSTRAINT grading_sequence_is_positive
+      CHECK grading_sequence > 0,
     CONSTRAINT grade_source_matches_run
       CHECK (source = 'simulation' AND run_id != '')
          OR (source = 'production' AND run_id = '')
@@ -49,6 +52,7 @@ ORDER BY (
   project_id,
   trace_id,
   project_grader_id,
+  grading_sequence,
   graded_at
 )
 PRIMARY KEY (organization_id, project_id, trace_id)

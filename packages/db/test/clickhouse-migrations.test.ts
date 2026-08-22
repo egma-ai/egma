@@ -892,7 +892,7 @@ describe("the schema a boot leaves behind", () => {
     const grades = await tableNamed("grades");
     expect(grades?.engine).toBe("MergeTree");
     expect(grades?.sorting_key).toBe(
-      "organization_id, project_id, trace_id, project_grader_id, graded_at",
+      "organization_id, project_id, trace_id, project_grader_id, grading_sequence, graded_at",
     );
     expect(grades?.primary_key).toBe("organization_id, project_id, trace_id");
     expect(grades?.partition_key).toBe("toYYYYMM(trace_started_at)");
@@ -907,7 +907,7 @@ describe("the schema a boot leaves behind", () => {
     expect(plans?.primary_key).toBe("organization_id, project_id, trace_id");
   });
 
-  it("types grade identity, score, details, threshold, and time explicitly", async () => {
+  it("types grade identity, score, details, threshold, sequence, and time explicitly", async () => {
     const typeOf = await typesOf("grades");
     expect(typeOf("source")).toBe(
       "Enum8('simulation' = 1, 'production' = 2)",
@@ -917,6 +917,7 @@ describe("the schema a boot leaves behind", () => {
     expect(typeOf("grader_definition_version")).toBe("UInt32");
     expect(typeOf("score")).toBe("Nullable(Float64)");
     expect(typeOf("grader_pass_threshold")).toBe("Float64");
+    expect(typeOf("grading_sequence")).toBe("UInt32");
     expect(typeOf("graded_at")).toBe("DateTime64(6, 'UTC')");
   });
 
@@ -933,12 +934,32 @@ describe("the schema a boot leaves behind", () => {
       grader_definition_version: 1,
       details: {},
       grader_pass_threshold: 0.5,
+      grading_sequence: 1,
       graded_at: "2026-08-07 09:00:01.000000",
     };
     await expect(store.append("grades", [{ ...grade, score: 1.5 }]))
       .rejects.toThrow(/Constraint `grade_score_is_normalized`.*is violated/);
     await store.append("grades", [{ ...grade, score: 1 }]);
     expect(await store.rows("select 1 from grades")).toHaveLength(1);
+  });
+
+  it("refuses a non-positive grading sequence", async () => {
+    await expect(store.append("grades", [{
+      organization_id: "org_01JQZ0000000000000000000AA",
+      project_id: "prj_01JQZ0000000000000000000AA",
+      source: "production",
+      trace_id: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      trace_started_at: "2026-08-07 09:00:00.000000",
+      run_id: "",
+      project_grader_id: "grd_01JQZ0000000000000000000AA",
+      grader_definition_id: "grl_01JQZ0000000000000000000AA",
+      grader_definition_version: 1,
+      score: 1,
+      details: {},
+      grader_pass_threshold: 0.5,
+      grading_sequence: 0,
+      graded_at: "2026-08-07 09:00:01.000000",
+    }])).rejects.toThrow(/Constraint `grading_sequence_is_positive`.*is violated/);
   });
 
   it("refuses a production grade that claims a simulation run", async () => {
@@ -955,6 +976,7 @@ describe("the schema a boot leaves behind", () => {
       score: 0.5,
       details: {},
       grader_pass_threshold: 0.5,
+      grading_sequence: 1,
       graded_at: "2026-08-07 09:00:01.000000",
     }])).rejects.toThrow(/Constraint `grade_source_matches_run`.*is violated/);
   });

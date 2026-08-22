@@ -5550,6 +5550,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sequence_base": {
+          "name": "sequence_base",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "attempts": {
           "name": "attempts",
           "type": "integer",
@@ -5716,6 +5723,10 @@
         "grading_job_abandoned_shape": {
           "name": "grading_job_abandoned_shape",
           "value": "(\"grading_job\".\"status\" = 'abandoned') = (\"grading_job\".\"finished_at\" is not null)"
+        },
+        "grading_job_sequence_base_is_counted": {
+          "name": "grading_job_sequence_base_is_counted",
+          "value": "\"grading_job\".\"sequence_base\" >= 0"
         },
         "grading_job_attempts_are_counted": {
           "name": "grading_job_attempts_are_counted",

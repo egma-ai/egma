@@ -1054,13 +1054,13 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         traceId: traceIdOf(conducted.simulationId),
         runId: conducted.runId,
       });
-      // Cited at its position in the span-assembled transcript: the third
-      // thing said, which is the agent turn carrying the phrase — the same
-      // turn the store holds and the same one this test read back above.
-      expect(grade?.details.assertions?.[0]?.citedSpanIds).toEqual(["turn:3"]);
-      expect(
-        spans.filter((span) => span.name.endsWith("_turn"))[2]?.text,
-      ).toContain(THE_PHRASE);
+      // The citation names the real third turn span, which carries the phrase
+      // and is the same evidence this test read back above.
+      const citedTurn = spans.filter((span) => span.name.endsWith("_turn"))[2];
+      expect(grade?.details.assertions?.[0]?.citedSpanIds).toEqual([
+        citedTurn?.span_id,
+      ]);
+      expect(citedTurn?.text).toContain(THE_PHRASE);
 
       // Assertion details stay nested under the one normalized grader score.
       expect(grade?.details.assertions?.[0]).toMatchObject({

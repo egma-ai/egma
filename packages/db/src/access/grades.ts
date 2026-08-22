@@ -35,6 +35,8 @@ export type NewGrade = {
   readonly score: number | null;
   readonly details: GradeDetails;
   readonly graderPassThreshold: number;
+  /** Internal attempt order. This is not part of the public grade contract. */
+  readonly gradingSequence: number;
   readonly gradedAtMicroseconds: bigint;
 };
 
@@ -127,6 +129,13 @@ function validate(grade: NewGrade): void {
     grade.graderDefinitionVersion > 0xffff_ffff
   ) {
     throw new RangeError("graderDefinitionVersion must fit UInt32");
+  }
+  if (
+    !Number.isInteger(grade.gradingSequence) ||
+    grade.gradingSequence < 1 ||
+    grade.gradingSequence > 0xffff_ffff
+  ) {
+    throw new RangeError("gradingSequence must fit positive UInt32");
   }
   if (grade.score === null && !grade.details.error) {
     throw new TypeError("a null-score grade must include details.error");
@@ -257,6 +266,7 @@ function rowFor(auth: AuthContext, grade: NewGrade): Record<string, unknown> {
     score: grade.score,
     details: storedDetails(grade.details),
     grader_pass_threshold: grade.graderPassThreshold,
+    grading_sequence: grade.gradingSequence,
     graded_at: asDateTime64(grade.gradedAtMicroseconds),
   };
 }
@@ -290,6 +300,7 @@ type GradeRow = {
   readonly score: number | null;
   readonly details: StoredDetails;
   readonly grader_pass_threshold: number;
+  readonly grading_sequence: number;
   readonly graded_at_micros: string;
 };
 
@@ -308,6 +319,7 @@ function gradeOf(row: GradeRow): RecordedGrade {
     score: row.score === null ? null : Number(row.score),
     details: detailsOf(row.details),
     graderPassThreshold: Number(row.grader_pass_threshold),
+    gradingSequence: Number(row.grading_sequence),
     gradedAtMicroseconds,
     gradedAt: rfc3339(gradedAtMicroseconds),
   };
@@ -336,6 +348,7 @@ export async function readTraceGrades(
               score,
               details,
               grader_pass_threshold,
+              grading_sequence,
               toString(toUnixTimestamp64Micro(graded_at)) as graded_at_micros
             from ${GRADES_TABLE}
             where organization_id = {organization_id:String}
@@ -343,7 +356,7 @@ export async function readTraceGrades(
               and source = {source:String}
               and trace_id = {trace_id:String}
               and ${ref.source === "simulation" ? "run_id = {run_id:String}" : "run_id = ''"}
-            order by project_grader_id, graded_at`,
+            order by project_grader_id, grading_sequence, graded_at`,
     query_params: {
       organization_id: auth.organizationId,
       project_id: projectOf(auth),
@@ -379,7 +392,10 @@ export async function readCurrentSimulationGradeFacts(
               trace_id,
               run_id,
               project_grader_id,
-              argMax(isNull(score), graded_at) as errored
+              argMax(
+                isNull(score),
+                tuple(grading_sequence, graded_at)
+              ) as errored
             from ${GRADES_TABLE}
             where organization_id = {organization_id:String}
               ${auth.projectId === undefined

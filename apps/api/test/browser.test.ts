@@ -2316,6 +2316,7 @@ describe("the complete product, walked in order in a second project", () => {
           })),
         },
         graderPassThreshold: entry.graderPassThreshold,
+        gradingSequence: claim.sequenceBase + claim.attempts,
         gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
       },
     ]);

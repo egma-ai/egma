@@ -145,6 +145,7 @@ ALTER TABLE "grading_job" DROP COLUMN "last_span_at";--> statement-breakpoint
 ALTER TABLE "grading_job" DROP COLUMN "last_seen_at";--> statement-breakpoint
 ALTER TABLE "grading_job" DROP COLUMN "root_closed_at";--> statement-breakpoint
 ALTER TABLE "grading_job" DROP COLUMN "regrade_grader_id";--> statement-breakpoint
+ALTER TABLE "grading_job" ADD COLUMN "sequence_base" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "run_event" ADD CONSTRAINT "run_event_run_shape" CHECK ("run_event"."kind" <> 'run'
         or ("run_event"."simulation_id" is null
           and "run_event"."reason" is null
@@ -157,4 +158,5 @@ ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_source_names_its_control_r
 ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_entries_are_a_nonempty_list" CHECK (jsonb_typeof("grading_job"."entries") = 'array'
         and jsonb_array_length("grading_job"."entries") > 0);--> statement-breakpoint
 ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_abandoned_shape" CHECK (("grading_job"."status" = 'abandoned') = ("grading_job"."finished_at" is not null));--> statement-breakpoint
+ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_sequence_base_is_counted" CHECK ("grading_job"."sequence_base" >= 0);--> statement-breakpoint
 ALTER TABLE "grading_job" ADD CONSTRAINT "grading_job_status_allowed" CHECK ("grading_job"."status" in ('pending', 'claimed', 'abandoned'));

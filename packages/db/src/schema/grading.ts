@@ -80,6 +80,8 @@ export const gradingJob = pgTable(
     claimedBy: text("claimed_by"),
     claimedAt: moment("claimed_at"),
     heartbeatAt: moment("heartbeat_at"),
+    /** The greatest order reserved before this job's attempt counter starts. */
+    sequenceBase: integer("sequence_base").notNull().default(0),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     /** Set only when retry exhaustion leaves an explainable terminal failure. */
@@ -129,6 +131,7 @@ export const gradingJob = pgTable(
       "grading_job_abandoned_shape",
       sql`(${table.status} = 'abandoned') = (${table.finishedAt} is not null)`,
     ),
+    check("grading_job_sequence_base_is_counted", sql`${table.sequenceBase} >= 0`),
     check("grading_job_attempts_are_counted", sql`${table.attempts} >= 0`),
     foreignKey({
       name: "grading_job_project_organization_fk",

@@ -52,20 +52,38 @@ export function simulationSection(runId: string): readonly string[] {
   return ["runs", runId, "simulations"];
 }
 
+function samePublicGrade(left: EvidenceGrade, right: EvidenceGrade): boolean {
+  return left.projectGraderId === right.projectGraderId &&
+    left.graderDefinitionId === right.graderDefinitionId &&
+    left.graderDefinitionVersion === right.graderDefinitionVersion &&
+    left.graderName === right.graderName &&
+    left.score === right.score &&
+    JSON.stringify(left.details) === JSON.stringify(right.details) &&
+    left.passThreshold === right.passThreshold &&
+    left.result === right.result &&
+    left.gradedAt === right.gradedAt;
+}
+
+/** Remove exactly the one public history row represented by `current`. */
+export function withoutCurrentGrade<Grade extends EvidenceGrade>(
+  current: Grade,
+  history: readonly Grade[],
+): readonly Grade[] {
+  let removed = false;
+  return history.filter((grade) => {
+    if (removed || !samePublicGrade(grade, current)) return true;
+    removed = true;
+    return false;
+  });
+}
+
 /** Historical grades for one project grader, newest first. */
 export function priorGrades(
   current: EvidenceGrade,
   history: readonly EvidenceGrade[],
 ): readonly EvidenceGrade[] {
-  return [...history]
-    .filter(
-      (grade) =>
-        grade.projectGraderId === current.projectGraderId &&
-        !(
-          grade.gradedAt === current.gradedAt &&
-          grade.graderDefinitionVersion === current.graderDefinitionVersion
-        ),
-    )
+  return withoutCurrentGrade(current, history)
+    .filter((grade) => grade.projectGraderId === current.projectGraderId)
     .sort(
       (left, right) => Date.parse(right.gradedAt) - Date.parse(left.gradedAt),
     );
