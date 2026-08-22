@@ -117,6 +117,8 @@ type RefusingStore = {
   refuseEveryPutAfter(calls: number): void;
   /** Answer normally again. */
   stopRefusing(): void;
+  /** How many object creations have been asked for, refused ones included. */
+  putsSeen(): number;
   close(): void;
 };
 
@@ -125,13 +127,15 @@ async function aStoreRefusingOnePut(
 ): Promise<RefusingStore> {
   const upstream = new URL(real.endpoint);
   let putsUntilRefusal: number | undefined;
+  let puts = 0;
 
   const held = createProxy((incoming, answering) => {
+    if (incoming.method === "PUT") puts += 1;
     if (incoming.method === "PUT" && putsUntilRefusal !== undefined) {
       if (putsUntilRefusal === 0) {
-        answering.writeHead(503, { "content-type": "application/xml" });
+        answering.writeHead(403, { "content-type": "application/xml" });
         answering.end(
-          "<Error><Code>SlowDown</Code><Message>not now</Message></Error>",
+          "<Error><Code>AccessDenied</Code><Message>not now</Message></Error>",
         );
         incoming.resume();
         return;
@@ -174,6 +178,9 @@ async function aStoreRefusingOnePut(
     },
     stopRefusing() {
       putsUntilRefusal = undefined;
+    },
+    putsSeen() {
+      return puts;
     },
     close() {
       held.close();
@@ -683,5 +690,103 @@ describe.skipIf(!storage.available)("a store that refuses one project's segment"
     expect(projects).toEqual([acme.projectId, globex.projectId].sort());
 
     await drainPendingEvidence(running.ingestStore);
+  });
+});
+
+/**
+ * A store that keeps refusing, and the pace at which Egma asks it again.
+ *
+ * A sealed segment whose upload failed stays sealed, which is what keeps the
+ * evidence — and it also means the group is permanently *due*, so the standing
+ * loop would otherwise wake, fail and wake again with nothing between the
+ * attempts. Against a store that is refusing quickly, that is a loop as fast as
+ * the network answers: it spends this service's capacity and lands on the
+ * failing store as a flood, at exactly the moment the store is least able to
+ * take one.
+ *
+ * So an attempt that failed puts its own group aside for a while. The wait
+ * starts at the flush interval and doubles up to the request bound — two
+ * settings this path already has, rather than a third nobody has tuned — and it
+ * ends the moment an attempt succeeds. Nothing is discarded while it waits, and
+ * a request that is waiting keeps its own bound and its own `503`.
+ */
+describe.skipIf(!storage.available)("a store that keeps refusing", () => {
+  const running = storage as Extract<ObjectStorage, { available: true }>;
+
+  let refusing: RefusingStore;
+  let api: TestApi;
+  let acme: Customer;
+
+  beforeAll(async () => {
+    if (!storage.available) return;
+    refusing = await aStoreRefusingOnePut(running.ingestStore);
+    api = await createApi("ingestion_refusing_store", {
+      traceStore: true,
+      ingestStore: refusing.store,
+      ingestionFlushMilliseconds: 100,
+      ingestionRequestTimeoutMilliseconds: 1_000,
+    });
+    acme = await signUp(api.app, "ada@acme.example", "Acme");
+  });
+
+  afterAll(async () => {
+    await api?.close();
+    refusing?.close();
+  });
+
+  it("spaces its attempts, keeps the evidence, and lands it once the store answers", async () => {
+    refusing.refuseEveryPutAfter(0);
+
+    await expect(
+      acceptEvidenceForProjects([
+        {
+          auth: {
+            userId: acme.userId,
+            organizationId: acme.organizationId,
+            projectId: acme.projectId,
+            role: "member",
+            via: "api_key",
+          },
+          spans: [aSpanOf("9c9c9c9c00000001")],
+        },
+      ]),
+    ).rejects.toBeInstanceOf(IngestionUnavailableError);
+
+    // Two seconds of a store saying no. Backing off from a 100ms flush toward
+    // a 1s bound is a handful of attempts; rescheduling for *now* on every
+    // failure measures in the hundreds against a store on loopback.
+    //
+    // The refusal is one the store client will not retry inside a single call,
+    // deliberately. A retryable status would be paced by that client's own
+    // policy — a dependency's property, and one that says nothing about
+    // whether this loop waits.
+    const before = refusing.putsSeen();
+    await new Promise((waited) => setTimeout(waited, 2_000));
+    const asked = refusing.putsSeen() - before;
+    expect(asked).toBeLessThan(15);
+    // And it has not given up either — the segment is still being offered.
+    expect(asked).toBeGreaterThan(0);
+
+    // Nothing was discarded to make the waiting cheap.
+    expect(stagedEvidence().map((one) => one.record.span_id)).toEqual([
+      "9c9c9c9c00000001",
+    ]);
+
+    // The first attempt that is answered lands it, once.
+    refusing.stopRefusing();
+    await expect
+      .poll(async () => (await pendingSegments(running.ingestStore)).length, {
+        timeout: 10_000,
+      })
+      .toBe(1);
+    expect(stagedEvidence()).toHaveLength(0);
+
+    expect(await drainPendingEvidence(running.ingestStore)).toBe(1);
+    const traceStore = api.traceStore;
+    if (traceStore === undefined) throw new Error("this API has no trace store");
+    const [row] = await traceStore.rows<{ n: string }>(
+      "select count() as n from spans final where span_id = '9c9c9c9c00000001'",
+    );
+    expect(Number(row?.n)).toBe(1);
   });
 });
