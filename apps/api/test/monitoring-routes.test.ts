@@ -99,8 +99,24 @@ afterAll(() => {
   if (storage.available) storage.stop();
 });
 
-describe("platform-first Monitoring setup", () => {
-  it("discovers voice agents, proves call-history access, and stores one sealed key", async () => {
+/** One registered agent, unbound, as the start-monitoring flow finds it. */
+async function anAgent(
+  app: TestApi["app"],
+  who: { readonly cookie: string; readonly projectId: string },
+  name: string,
+): Promise<string> {
+  const created = await app.inject({
+    method: "POST",
+    url: `/v1/agents?projectId=${who.projectId}`,
+    headers: { cookie: who.cookie },
+    payload: { name },
+  });
+  expect(created.statusCode, created.body).toBe(201);
+  return String((created.json() as { agent: { id: string } }).agent.id);
+}
+
+describe("starting and stopping the pull switch", () => {
+  it("reads the account, proves call-history access, and seals the key on the agent", async () => {
     const retell = provider();
     const logs: string[] = [];
     api = await createApi("monitoring_routes_retell", {
@@ -108,6 +124,7 @@ describe("platform-first Monitoring setup", () => {
       logTo: { write: (line) => logs.push(line) },
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agentId = await anAgent(api.app, ada, "Front desk");
 
     const discovered = await api.app.inject({
       method: "POST",
@@ -120,32 +137,29 @@ describe("platform-first Monitoring setup", () => {
       agents: [{ id: "agent_voice_1", name: "Front desk from Retell" }],
     });
 
-    const configured = await api.app.inject({
+    const started = await api.app.inject({
       method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
+      url: `/v1/agents/${agentId}/production-pull?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
-        apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "A browser cannot rename it" }],
-      },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
-    expect(configured.json()).toMatchObject({
-      monitoringSource: {
         agentPlatform: "retell",
-        strategy: "retell_api_polling",
-        credentialsHint: "QRST",
-        agents: [
-          {
-            platformAgentId: "agent_voice_1",
-            platformAgentName: "Front desk from Retell",
-            state: "importing",
-          },
-        ],
+        platformAgentId: "agent_voice_1",
+        apiKey: RETELL_KEY,
       },
     });
-    expect(configured.body).not.toContain(RETELL_KEY);
+    expect(started.statusCode, started.body).toBe(200);
+    expect(started.json()).toEqual({
+      pullSwitch: {
+        agentId,
+        agentPlatform: "retell",
+        platformAgentId: "agent_voice_1",
+        monitoringKeyHint: "QRST",
+        pullProductionCalls: true,
+      },
+    });
+    expect(started.body).not.toContain(RETELL_KEY);
 
+    // Both permissions polling needs are proved before anything is sealed.
     const calls = retell.asked.filter(
       (request) => new URL(request.url).pathname === "/v3/list-calls",
     );
@@ -160,48 +174,121 @@ describe("platform-first Monitoring setup", () => {
       limit: 1,
     });
 
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
+    const stored = await api.database.sql<{ monitoring_api_key: string }>(
+      "select monitoring_api_key from agent where id = $1",
+      [agentId],
+    );
+    expect(stored.rows[0]?.monitoring_api_key.startsWith("v1.")).toBe(true);
+    expect(stored.rows[0]?.monitoring_api_key).not.toContain(RETELL_KEY);
+    expect(logs.join("\n")).not.toContain(RETELL_KEY);
+
+    // The notebook the poller reads opens with the historical import.
+    const state = await api.database.sql<{ scan_kind: string }>(
+      "select scan_kind from monitoring_state where agent_id = $1",
+      [agentId],
+    );
+    expect(state.rows[0]?.scan_kind).toBe("historical_import");
+
+    const stopped = await api.app.inject({
+      method: "DELETE",
+      url: `/v1/agents/${agentId}/production-pull?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
     });
-    expect(listed.statusCode).toBe(200);
-    expect(listed.body).not.toContain(RETELL_KEY);
-
-    const stored = await api.database.sql<{ credentials: string }>(
-      "select credentials from monitoring_setup",
+    expect(stopped.statusCode, stopped.body).toBe(200);
+    expect(stopped.json()).toMatchObject({
+      pullSwitch: { pullProductionCalls: false, monitoringKeyHint: "QRST" },
+    });
+    // Off keeps the notebook, so turning it back on resumes rather than
+    // re-reading a customer's history.
+    const kept = await api.database.sql<{ count: string }>(
+      "select count(*) as count from monitoring_state where agent_id = $1",
+      [agentId],
     );
-    expect(stored.rows[0]?.credentials.startsWith("v1.")).toBe(true);
-    expect(stored.rows[0]?.credentials).not.toContain(RETELL_KEY);
-    expect(logs.join("\n")).not.toContain(RETELL_KEY);
+    expect(kept.rows[0]?.count).toBe("1");
   });
 
-  it("does not save a key that cannot read Retell call history", async () => {
+  it("does not seal a key that cannot read Retell call history", async () => {
     const retell = provider({ historyStatus: 403 });
     api = await createApi("monitoring_routes_history_scope", {
       retellFetch: retell.fetchImpl,
     });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agentId = await anAgent(api.app, ada, "Front desk");
 
-    const configured = await api.app.inject({
+    const started = await api.app.inject({
       method: "PUT",
-      url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
+      url: `/v1/agents/${agentId}/production-pull?projectId=${ada.projectId}`,
       headers: { cookie: ada.cookie },
       payload: {
+        agentPlatform: "retell",
+        platformAgentId: "agent_voice_1",
         apiKey: RETELL_KEY,
-        agents: [{ id: "agent_voice_1", name: "Front desk" }],
       },
     });
 
-    expect(configured.statusCode).toBe(422);
-    expect(configured.json()).toMatchObject({
+    expect(started.statusCode).toBe(422);
+    expect(started.json()).toMatchObject({
       error: "unprocessable",
       message: expect.stringContaining("Monitor or History Read"),
     });
     const stored = await api.database.sql<{ count: string }>(
-      "select count(*) as count from monitoring_setup",
+      "select count(*) as count from monitoring_state",
     );
     expect(stored.rows[0]?.count).toBe("0");
+  });
+
+  it("refuses an agent the account does not run", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_unknown_agent", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agentId = await anAgent(api.app, ada, "Front desk");
+
+    const started = await api.app.inject({
+      method: "PUT",
+      url: `/v1/agents/${agentId}/production-pull?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload: {
+        agentPlatform: "retell",
+        platformAgentId: "agent_nobody_runs",
+        apiKey: RETELL_KEY,
+      },
+    });
+    expect(started.statusCode, started.body).toBe(422);
+    expect(String(started.json().message)).toContain("agent_nobody_runs");
+  });
+
+  it("refuses a second switched-on agent for one platform agent", async () => {
+    const retell = provider();
+    api = await createApi("monitoring_routes_one_watcher", {
+      retellFetch: retell.fetchImpl,
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const first = await anAgent(api.app, ada, "Front desk");
+    const second = await anAgent(api.app, ada, "Front desk copy");
+
+    const payload = {
+      agentPlatform: "retell",
+      platformAgentId: "agent_voice_1",
+      apiKey: RETELL_KEY,
+    };
+    const started = await api.app.inject({
+      method: "PUT",
+      url: `/v1/agents/${first}/production-pull?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload,
+    });
+    expect(started.statusCode).toBe(200);
+
+    const refused = await api.app.inject({
+      method: "PUT",
+      url: `/v1/agents/${second}/production-pull?projectId=${ada.projectId}`,
+      headers: { cookie: ada.cookie },
+      payload,
+    });
+    expect(refused.statusCode, refused.body).toBe(422);
+    expect(String(refused.json().message)).toContain("already pulling");
   });
 
   it("refuses a viewer before any Retell provider read", async () => {
@@ -210,6 +297,7 @@ describe("platform-first Monitoring setup", () => {
       retellFetch: retell.fetchImpl,
     });
     const ada = await signUp(api.app, "ada-owner@acme.example", "Acme");
+    const agentId = await anAgent(api.app, ada, "Front desk");
     const viewer = await colleagueOf(
       api.app,
       ada,
@@ -225,10 +313,11 @@ describe("platform-first Monitoring setup", () => {
       },
       {
         method: "PUT" as const,
-        url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
+        url: `/v1/agents/${agentId}/production-pull?projectId=${ada.projectId}`,
         payload: {
+          agentPlatform: "retell",
+          platformAgentId: "agent_voice_1",
           apiKey: RETELL_KEY,
-          agents: [{ id: "agent_voice_1", name: "Front desk" }],
         },
       },
     ]) {
@@ -239,39 +328,5 @@ describe("platform-first Monitoring setup", () => {
       expect(refused.statusCode, refused.body).toBe(403);
     }
     expect(retell.asked).toEqual([]);
-  });
-
-  it("creates and removes the separate LiveKit Agents setup", async () => {
-    api = await createApi("monitoring_routes_livekit");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const configured = await api.app.inject({
-      method: "PUT",
-      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(configured.statusCode, configured.body).toBe(200);
-    expect(configured.json()).toMatchObject({
-      monitoringSource: {
-        agentPlatform: "livekit_agents",
-        strategy: "livekit_otlp",
-        credentialsHint: null,
-        agents: [],
-      },
-    });
-
-    const removed = await api.app.inject({
-      method: "DELETE",
-      url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(removed.statusCode).toBe(204);
-
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/monitoring?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(listed.json()).toEqual({ monitoringSources: [] });
   });
 });

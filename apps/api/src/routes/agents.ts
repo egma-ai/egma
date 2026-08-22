@@ -346,7 +346,6 @@ const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 const AGENT_KEYS = ["name", "projectId", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
-  "agentPlatform",
   "connectionType",
   "accessVariant",
   "modality",
@@ -475,24 +474,18 @@ function connectionIn(value: unknown): NewConnection | Refusal {
  * The selection and its key stop here; only the normalized connection reaches
  * the database, and only Retell chat keeps the key because that access method
  * needs it for every simulation.
+ *
+ * A create that brings no selection is written as it arrived. The demand that
+ * a phone connection bring one went with the connection's platform column: a
+ * number is where egma dials rather than who answers, and nothing in the
+ * request can now say the number is a Retell number.
  */
 async function confirmAgentPlatformSelection(
   wanted: NewConnection,
   selected: AgentPlatformSelection | undefined,
   fetchImpl: typeof fetch | undefined,
 ): Promise<NewConnection | Refusal> {
-  if (selected === undefined) {
-    if (
-      wanted.connectionType === "phone_number" &&
-      wanted.accessVariant === "phone_number.public_e164" &&
-      wanted.modality === "voice"
-    ) {
-      return invalid(
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
-      );
-    }
-    return wanted;
-  }
+  if (selected === undefined) return wanted;
   if (wanted.credentials !== undefined) {
     return invalid(
       "a discovered connection puts account credentials in agentPlatformSelection, not credentials",

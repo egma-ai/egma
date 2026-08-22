@@ -60,7 +60,6 @@ function registration(
       ...(overrides.connectionName === undefined
         ? {}
         : { name: overrides.connectionName }),
-      agentPlatform: "retell",
       connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: overrides.modality ?? "chat",
@@ -123,7 +122,6 @@ function connectionPayload(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    agentPlatform: "retell",
     connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
@@ -220,7 +218,7 @@ describe("discovering simulation agents", () => {
               connectionType: "phone_number",
               accessVariant: "phone_number.public_e164",
               modality: "voice",
-              productLabel: "Retell phone",
+              productLabel: "Phone number",
               config: { phoneNumber: "+14155550100" },
             },
           ],
@@ -351,20 +349,22 @@ describe("discovering simulation agents", () => {
     expect(JSON.stringify(answer.body)).not.toContain(retellKey);
   });
 
-  it("refuses a Retell phone connection that omits its platform selection", async () => {
-    api = await createApi("retell_discovery_selection_required");
+  it("writes a phone connection that names no platform selection", async () => {
+    api = await createApi("retell_discovery_selection_optional");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const created = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
     });
     const agentId = String(agentOf(created).id);
 
-    const refused = await post(
+    // A number is where egma dials rather than who answers, and nothing in
+    // the request can now say the number is a Retell number — so there is no
+    // Retell selection to demand.
+    const written = await post(
       `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
       withKey(ada.secret),
       {
-        name: "Retell main number",
-        agentPlatform: "retell",
+        name: "Main number",
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
@@ -372,24 +372,21 @@ describe("discovering simulation agents", () => {
       },
     );
 
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
+    expect(written.status).toBe(201);
+    expect(written.body.connection).toMatchObject({
+      connectionType: "phone_number",
+      productLabel: "Phone number",
+      agentPlatform: null,
     });
-    const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
-    expect(read.body.connections).toEqual([]);
   });
 
-  it("leaves no partial agent when an inline Retell phone omits its selection", async () => {
-    api = await createApi("retell_inline_selection_required");
+  it("writes an inline phone connection that names no platform selection", async () => {
+    api = await createApi("retell_inline_selection_optional");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    const refused = await post("/v1/agents", withKey(ada.secret), {
+    const written = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
@@ -397,13 +394,8 @@ describe("discovering simulation agents", () => {
       },
     });
 
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        "a Retell phone connection needs agentPlatformSelection so Egma can confirm the number still reaches the selected agent",
-    });
-    expect(await agentRowCount()).toBe(0);
+    expect(written.status).toBe(201);
+    expect(await agentRowCount()).toBe(1);
   });
 
   it("rechecks a discovered phone candidate inside the ordinary connection write", async () => {
@@ -449,7 +441,6 @@ describe("discovering simulation agents", () => {
       `/v1/agents/${String(agentOf(created).id)}/connections?projectId=${ada.projectId}`,
       withKey(ada.secret),
       {
-        agentPlatform: "retell",
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
@@ -463,7 +454,6 @@ describe("discovering simulation agents", () => {
 
     expect(connected.status).toBe(201);
     expect(connectionOf(connected)).toMatchObject({
-      agentPlatform: "retell",
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
@@ -516,7 +506,6 @@ describe("discovering simulation agents", () => {
       `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
       withKey(ada.secret),
       {
-        agentPlatform: "retell",
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
@@ -555,12 +544,15 @@ describe("registering an agent", () => {
     expect(agentOf(registered)).toMatchObject({
       name: "Front desk",
       projectId: ada.projectId,
-      description: null,
+      // An agent opens unbound: nothing about monitoring is settled yet.
+      agentPlatform: null,
+      platformAgentId: null,
+      monitoringKeyHint: null,
+      pullProductionCalls: false,
     });
     expect(connectionOf(registered)).toMatchObject({
       agentId: agentOf(registered).id,
       name: "retell_chat_api-1",
-      agentPlatform: "retell",
       connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       productLabel: "Retell chat",
@@ -589,7 +581,6 @@ describe("registering an agent", () => {
     const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
         connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
@@ -614,15 +605,12 @@ describe("registering an agent", () => {
 
     const claimed = await post("/v1/agents", withKey(ada.secret), {
       name: "Not wired yet",
-      description: "credentials are still with the platform team",
     });
 
     expect(claimed.status).toBe(201);
     expect(claimed.body.result).toBe("created");
     expect(claimed.body).not.toHaveProperty("connection");
-    expect(agentOf(claimed).description).toBe(
-      "credentials are still with the platform team",
-    );
+    expect(agentOf(claimed).name).toBe("Not wired yet");
   });
 
   it("refuses a registration with no name, in the factory's own words", async () => {
@@ -666,27 +654,24 @@ describe("a connection payload its kind will not take", () => {
     expect(await agentRowCount()).toBe(0);
   });
 
-  it("refuses an agent platform outside the explicit supported tuples", async () => {
-    api = await createApi("agents_unknown_platform");
+  it("refuses a tuple outside the explicit supported ones", async () => {
+    api = await createApi("agents_unknown_tuple");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Reception line",
       connection: {
-        agentPlatform: "vapi",
         connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
+        accessVariant: "retell_chat_api.api_key",
         modality: "voice",
         config: { phoneNumber: "+15551234567" },
       },
     });
 
     expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        "agent platform, connection type, access variant, and modality do not form a supported simulation connection",
-    });
+    expect(String(refused.body.message)).toContain(
+      "do not form a supported simulation connection",
+    );
     expect(await agentRowCount()).toBe(0);
   });
 
@@ -697,7 +682,6 @@ describe("a connection payload its kind will not take", () => {
     const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Reception line",
       connection: {
-        agentPlatform: null,
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "chat",
@@ -720,7 +704,6 @@ describe("a connection payload its kind will not take", () => {
     const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
         connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
@@ -788,7 +771,6 @@ describe("a livekit connection", () => {
     overrides: Record<string, unknown> = {},
   ): Record<string, unknown> {
     return {
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
@@ -810,7 +792,6 @@ describe("a livekit connection", () => {
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
       name: "livekit_room-1",
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       productLabel: "LiveKit project credentials",
@@ -874,7 +855,6 @@ describe("a livekit connection", () => {
     const registered = await post("/v1/agents", withKey(ada.secret), {
       name: "Production agent",
       connection: {
-        agentPlatform: "livekit_agents",
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
@@ -888,7 +868,6 @@ describe("a livekit connection", () => {
 
     expect(registered.status).toBe(201);
     expect(connectionOf(registered)).toMatchObject({
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       productLabel: "LiveKit token endpoint",
@@ -910,7 +889,6 @@ describe("a livekit connection", () => {
     const refused = await post("/v1/agents", withKey(ada.secret), {
       name: "Private-network agent",
       connection: {
-        agentPlatform: "livekit_agents",
         connectionType: "livekit_room",
         accessVariant: "livekit_room.customer_token_endpoint",
         modality: "voice",
@@ -1131,7 +1109,7 @@ describe("a livekit connection", () => {
       slug: "supplied_topology",
       payload: { topology: "agent-dials-out" },
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, ' +
+        'a connection has no key "topology"; it holds name, ' +
         "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection",
     },
     {
@@ -1253,7 +1231,6 @@ describe("a livekit connection", () => {
     const endpointPayload = (
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> => ({
-      agentPlatform: "livekit_agents",
       connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
@@ -1480,7 +1457,7 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "description, projectId, connection; the agent's content stays at the " +
+        "projectId, connection; the agent's content stays at the " +
         "provider, where Egma reads it fresh rather than out of a copy that " +
         "would go stale.",
     });
@@ -1509,7 +1486,7 @@ describe("the vendor payload egma no longer keeps", () => {
       error: "invalid_request",
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
-        'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
+        'connection has no "pulled" key. Drop it and send name, ' +
         "connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection; the agent's content " +
         "stays at the provider, where Egma reads it fresh rather than out of " +
         "a copy that would go stale.",
@@ -1529,7 +1506,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a registration has no key "organization"; it holds name, description, projectId, connection',
+        'a registration has no key "organization"; it holds name, projectId, connection',
     });
   });
 
@@ -1546,7 +1523,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
+        'a connection has no key "topology"; it holds name, connectionType, accessVariant, modality, environment, config, credentials, agentPlatformSelection',
     });
   });
 });
@@ -1798,7 +1775,6 @@ describe("reading agents", () => {
         // modality, so a row that showed one shape well and another badly
         // would be caught here rather than on screen.
         name: "production",
-        agentPlatform: null,
         connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
@@ -1856,7 +1832,6 @@ describe("reading agents", () => {
       (one) => one.name === "production",
     );
     expect(wired).toMatchObject({
-      agentPlatform: null,
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       // The registry's customer-facing label travels with the technical facts

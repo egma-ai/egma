@@ -164,6 +164,12 @@ export async function monitoringRoutes(
       projectNamed(request.query as Record<string, unknown>, body),
     );
     if (!("auth" in resolved)) return refuseActing(reply, resolved);
+    // Before the first provider read, so a role that cannot change Monitoring
+    // never causes a request to a customer's platform account.
+    authorize(resolved.auth, "configure_monitoring", {
+      organizationId: resolved.auth.organizationId,
+      projectId: resolved.auth.projectId,
+    });
 
     const apiKey = apiKeyIn(body);
     const platformAgentId = given(text(body.platformAgentId));
