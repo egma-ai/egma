@@ -1,6 +1,10 @@
 -- Prelaunch cleanup exception: the founder confirmed that no older API or
 -- rollback contract is supported for this cutover. The prior build cannot run
 -- after this migration. A suite is the required, stable home of every test.
+-- First-application correction: this file reached main with a PostgreSQL
+-- 18-only uuidv7() call, but no hosted ledger applied 0040. A later migration
+-- cannot repair a file that fails before it is recorded, so the helper below
+-- was corrected in place before the first hosted application.
 -- The nullable column
 -- exists only inside this migration while installed test rows are backfilled.
 CREATE TABLE "test_suite" (
@@ -30,12 +34,16 @@ ALTER TABLE "test" ADD COLUMN "suite_id" text COLLATE "C";
 
 -- Migration-only UUIDv7 encoder. Egma ids are the 128 UUID bits rendered as
 -- 26 Crockford base32 characters (the first character includes two leading
--- zero bits). This keeps the same time-sortable identity invariant as the
--- application generator without leaving a database default or helper behind.
+-- zero bits). Build the UUIDv7 bits from PostgreSQL 17 core functions so this
+-- migration runs on the Supabase production version; PostgreSQL's uuidv7()
+-- function is available only in PostgreSQL 18. The helper keeps the same
+-- time-sortable identity invariant as the application generator and leaves no
+-- database default or function behind.
 CREATE FUNCTION _migration_0040_test_suite_id() RETURNS text
 LANGUAGE plpgsql VOLATILE AS $$
 DECLARE
-	raw bytea := uuid_send(uuidv7());
+	raw bytea := decode(replace(gen_random_uuid()::text, '-', ''), 'hex');
+	unix_ms bigint := floor(extract(epoch from clock_timestamp()) * 1000)::bigint;
 	alphabet constant text := '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 	encoded text := '';
 	group_index integer;
@@ -43,6 +51,15 @@ DECLARE
 	source_index integer;
 	digit integer;
 BEGIN
+	raw := set_byte(raw, 0, ((unix_ms >> 40) & 255)::integer);
+	raw := set_byte(raw, 1, ((unix_ms >> 32) & 255)::integer);
+	raw := set_byte(raw, 2, ((unix_ms >> 24) & 255)::integer);
+	raw := set_byte(raw, 3, ((unix_ms >> 16) & 255)::integer);
+	raw := set_byte(raw, 4, ((unix_ms >> 8) & 255)::integer);
+	raw := set_byte(raw, 5, (unix_ms & 255)::integer);
+	raw := set_byte(raw, 6, 112 | (get_byte(raw, 6) & 15));
+	raw := set_byte(raw, 8, 128 | (get_byte(raw, 8) & 63));
+
 	FOR group_index IN 0..25 LOOP
 		digit := 0;
 		FOR bit_index IN 0..4 LOOP

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { mintedAt, newId } from "@egma/ids";
+import { CROCKFORD_ALPHABET, mintedAt, newId } from "@egma/ids";
 import { is } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import pg from "pg";
@@ -31,6 +31,17 @@ import {
   type EmptyDatabase,
 } from "./support/database.ts";
 import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
+
+function idBits(id: string): bigint {
+  const body = id.slice(id.indexOf("_") + 1);
+  let value = 0n;
+  for (const character of body) {
+    const digit = CROCKFORD_ALPHABET.indexOf(character);
+    if (digit === -1) throw new Error(`invalid Egma id: ${id}`);
+    value = (value << 5n) | BigInt(digit);
+  }
+  return value;
+}
 
 /** Add the historical tail without applying the destructive suite cutover. */
 async function addHistoricalMigration(
@@ -4574,6 +4585,9 @@ describe("the clean test-suite cutover (0040)", () => {
       deleted_at: null,
     });
     expect(rows[0]?.id).toMatch(/^ste_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    const bits = idBits(rows[0]?.id ?? "");
+    expect(Number((bits >> 76n) & 0xfn)).toBe(7);
+    expect(Number((bits >> 62n) & 0x3n)).toBe(0b10);
     expect(mintedAt(rows[0]?.id ?? "").getTime()).toBeGreaterThanOrEqual(
       cutoverStartedAt,
     );
