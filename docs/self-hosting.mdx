@@ -113,7 +113,7 @@ pair can only write, list, read and delete inside the ingestion bucket's
   and not yet written to ClickHouse goes with them.
 </Warning>
 
-### Summary of all ten required variables
+### Summary of all twelve required variables
 
 | Variable | What it is | How to supply |
 |----------|-----------|---------------|
@@ -124,6 +124,8 @@ pair can only write, list, read and delete inside the ingestion bucket's
 | `EGMA_S3_SECRET_ACCESS_KEY` | Object store root secret (write, min 8 chars) | Choose a strong random string |
 | `EGMA_S3_READ_ACCESS_KEY_ID` | Object store read-only credential | Choose a strong random string |
 | `EGMA_S3_READ_SECRET_ACCESS_KEY` | Object store read-only secret | Choose a strong random string |
+| `EGMA_S3_INGEST_ACCESS_KEY_ID` | Ingestion bucket credential (write, `pending/` only) | Choose a strong random string |
+| `EGMA_S3_INGEST_SECRET_ACCESS_KEY` | Ingestion bucket secret (min 8 chars) | Choose a strong random string |
 | `EGMA_BASE_URL` | The address people reach this instance at | Set automatically by `egma self-host up` |
 | `EGMA_LIVEKIT_API_KEY` | Media server authentication key | Set automatically by `egma self-host up` |
 | `EGMA_LIVEKIT_API_SECRET` | Media server authentication secret | Set automatically by `egma self-host up` |

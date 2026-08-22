@@ -140,7 +140,7 @@ export type RetellProductionIngestionMetricTurn = {
   >;
   readonly durationMilliseconds: number;
   readonly accepted: number;
-  readonly already: number;
+  readonly settled: number;
   readonly dropped: number;
 };
 
@@ -229,8 +229,12 @@ export type RetellProductionIngestionResult = {
   readonly pages: number;
   /** Calls made durable in the ingestion object store by this turn. */
   readonly accepted: number;
-  /** Calls the trace store already held, or that are waiting on a retry. */
-  readonly already: number;
+  /**
+   * Listed calls that needed nothing from this turn: already committed,
+   * already handled by the retry pass, waiting on a retry that is not yet due,
+   * or recently dropped. Each has an answer, which is what lets the page move.
+   */
+  readonly settled: number;
   /** Calls whose bounded budget ended in this turn. */
   readonly dropped: number;
   readonly stoppedBecause?:
@@ -271,7 +275,7 @@ export type RetellProductionIngestion = {
 type TurnCounts = {
   pages: number;
   accepted: number;
-  already: number;
+  settled: number;
   dropped: number;
 };
 
@@ -290,9 +294,9 @@ const acceptedCalls = meter.createCounter(
   "egma.monitoring.retell.calls.accepted",
   { description: "Retell calls made durable in the ingestion object store" },
 );
-const duplicateCalls = meter.createCounter(
-  "egma.monitoring.retell.calls.duplicate",
-  { description: "Retell calls the trace store already held" },
+const settledCalls = meter.createCounter(
+  "egma.monitoring.retell.calls.settled",
+  { description: "Listed Retell calls that needed no work this turn" },
 );
 const failedCalls = meter.createCounter(
   "egma.monitoring.retell.calls.failed",
@@ -318,7 +322,7 @@ const METRICS: RetellProductionIngestionMetrics = {
     };
     pollDuration.record(turn.durationMilliseconds, attributes);
     if (turn.accepted > 0) acceptedCalls.add(turn.accepted, attributes);
-    if (turn.already > 0) duplicateCalls.add(turn.already, attributes);
+    if (turn.settled > 0) settledCalls.add(turn.settled, attributes);
   },
   recordIngestionLag(scanKind, lagMilliseconds) {
     ingestionLag.record(lagMilliseconds, { scan_kind: scanKind });
@@ -354,6 +358,18 @@ function regularPollMilliseconds(target: RetellMonitoringTarget): number {
   return Math.round(
     RETELL_PRODUCTION_POLL_INTERVAL_MILLISECONDS * spread,
   );
+}
+
+/**
+ * When this agent is next due, from here.
+ *
+ * Every way a turn can end — finished, yielded, released, refused — hands the
+ * lease back with the same answer, so the answer is written once. Two spellings
+ * of one schedule is how one path quietly starts polling at a different cadence
+ * from the rest.
+ */
+function nextPollAfter(target: RetellMonitoringTarget, now: Date): Date {
+  return new Date(now.getTime() + regularPollMilliseconds(target));
 }
 
 function backoffMilliseconds(
@@ -437,7 +453,7 @@ function emptyResult(): RetellProductionIngestionResult {
     targetClaimed: false,
     pages: 0,
     accepted: 0,
-    already: 0,
+    settled: 0,
     dropped: 0,
   };
 }
@@ -468,7 +484,7 @@ function logBatch(
         scan_kind: target.scanKind,
         pages: counts.pages,
         accepted: counts.accepted,
-        already_accounted: counts.already,
+        settled: counts.settled,
         dropped: counts.dropped,
         duration_ms: Math.max(0, durationMilliseconds),
       },
@@ -738,6 +754,12 @@ async function handleCall(
   retrieve: () => Promise<RetrievedCall>,
   options: TurnOptions,
   counts: TurnCounts,
+  /**
+   * Whether this call already has a transient row. It decides one thing: a
+   * success writes to Postgres only where there is something to remove, so a
+   * page of ordinary conversations still leaves this database untouched.
+   */
+  held: boolean,
 ): Promise<CallOutcome> {
   const retrieved = await retrieve();
 
@@ -772,10 +794,16 @@ async function handleCall(
     return { kind: "ingestion_unavailable", cause };
   }
 
-  await options.store.deleteRetellCallRetry(target.auth, target, {
-    providerCallId,
-    now: options.clock(),
-  });
+  // After durability and never before it: a row removed while the evidence was
+  // still only in this process's memory would leave a call nobody is still
+  // trying and nobody has stored. And only where there is a row — a call that
+  // simply worked leaves no Postgres write behind it at all.
+  if (held) {
+    await options.store.deleteRetellCallRetry(target.auth, target, {
+      providerCallId,
+      now: options.clock(),
+    });
+  }
   counts.accepted += 1;
   if (ended.endedAt !== undefined) {
     options.metrics.recordIngestionLag(
@@ -794,7 +822,7 @@ async function releaseAfterInternalFailure(
   const now = clock();
   try {
     await store.releaseRetellMonitoringLease(target.auth, target, {
-      retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
+      retryAt: nextPollAfter(target, now),
       errorKind: "internal_failure",
       now,
     });
@@ -808,13 +836,22 @@ async function runTarget(
   target: RetellMonitoringTarget,
   options: TurnOptions,
 ): Promise<RetellProductionIngestionResult> {
-  const counts: TurnCounts = { pages: 0, accepted: 0, already: 0, dropped: 0 };
+  const counts: TurnCounts = { pages: 0, accepted: 0, settled: 0, dropped: 0 };
   const startedAt = options.clock();
   options.metrics.recordAttempt(target.scanKind);
   let paginationKey = target.paginationKey ?? undefined;
   const seenPaginationKeys = new Set(target.seenPaginationKeys);
   let leaseFinished = false;
   let batchLogged = false;
+  /**
+   * Provider call ids this turn has already dealt with.
+   *
+   * One turn, one attempt per call — and the two passes below can meet over the
+   * same call, because a retry that recovers deletes its row and its evidence
+   * is not visible until the drainer has taken it. Neither of the page's two
+   * batched questions can see work that recent, so this is what answers it.
+   */
+  const settledHere = new Set<string>();
 
   const completed = (
     stoppedBecause?: RetellProductionIngestionResult["stoppedBecause"],
@@ -831,7 +868,7 @@ async function runTarget(
         outcome: stoppedBecause ?? "completed",
         durationMilliseconds,
         accepted: counts.accepted,
-        already: counts.already,
+        settled: counts.settled,
         dropped: counts.dropped,
       });
       batchLogged = true;
@@ -848,7 +885,7 @@ async function runTarget(
     leaseFinished = true;
     await recover(options.store, target, options.log, now);
     await options.store.yieldRetellMonitoringLease(target.auth, target, {
-      retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
+      retryAt: nextPollAfter(target, now),
       now,
     });
     return completed("bounded_turn");
@@ -858,7 +895,7 @@ async function runTarget(
     async (): Promise<RetellProductionIngestionResult> => {
       const now = options.clock();
       await options.store.releaseRetellMonitoringLease(target.auth, target, {
-        retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
+        retryAt: nextPollAfter(target, now),
         errorKind: "provider_contract",
         now,
       });
@@ -896,14 +933,14 @@ async function runTarget(
       );
       const now = options.clock();
       await options.store.yieldRetellMonitoringLease(target.auth, target, {
-        retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
+        retryAt: nextPollAfter(target, now),
         now,
       });
       leaseFinished = true;
       return completed("ingestion_unavailable");
     }
     if (outcome.kind === "dropped") counts.dropped += 1;
-    if (outcome.kind === "scheduled") counts.already += 1;
+    if (outcome.kind === "scheduled") counts.settled += 1;
     return undefined;
   };
 
@@ -934,6 +971,10 @@ async function runTarget(
           leaseFinished = true;
           return completed("lease_lost");
         }
+        // Recorded before the attempt rather than after it: whatever this
+        // becomes — accepted, retried again, dropped — the page below has its
+        // answer already and must not ask the provider a second time.
+        settledHere.add(owed.providerCallId);
         const stopped = await stoppedBy(
           await handleCall(
             target,
@@ -951,6 +992,7 @@ async function runTarget(
               ),
             options,
             counts,
+            true,
           ),
         );
         if (stopped !== undefined) return stopped;
@@ -1051,15 +1093,27 @@ async function runTarget(
         for (const [index, listedCall] of listed.calls.entries()) {
           if (turnBoundReached()) return yieldBoundedTurn();
           const providerCallId = identities[index] ?? "";
+          // The retry pass above already dealt with this call this turn. Its
+          // row is gone and the drain that would make its evidence visible has
+          // not happened yet, so neither of the two questions below can see the
+          // work — and hydrating again would put a second reading of one
+          // conversation under one immutable identity. Where the provider
+          // reports no timestamps of its own, those two readings differ, and
+          // the drainer would rightly refuse the pair as an integrity defect
+          // that nothing outside this loop caused.
+          if (settledHere.has(providerCallId)) {
+            counts.settled += 1;
+            continue;
+          }
           if (committed.has(traceIdFor(projectId, providerCallId))) {
-            counts.already += 1;
+            counts.settled += 1;
             continue;
           }
           const held = transient.get(providerCallId);
           // A retry not yet due, and a call recently given up on, are both
           // already accounted for: this page owes them nothing today.
           if (held !== undefined && held.nextAttemptAt === null) {
-            counts.already += 1;
+            counts.settled += 1;
             continue;
           }
           if (
@@ -1067,7 +1121,7 @@ async function runTarget(
             held.nextAttemptAt !== null &&
             held.nextAttemptAt > options.clock()
           ) {
-            counts.already += 1;
+            counts.settled += 1;
             continue;
           }
 
@@ -1080,6 +1134,7 @@ async function runTarget(
             leaseFinished = true;
             return completed("lease_lost");
           }
+          settledHere.add(providerCallId);
           const stopped = await stoppedBy(
             await handleCall(
               target,
@@ -1097,6 +1152,7 @@ async function runTarget(
                 ),
               options,
               counts,
+              held !== undefined,
             ),
           );
           if (stopped !== undefined) return stopped;
@@ -1143,7 +1199,7 @@ async function runTarget(
     const now = options.clock();
     await recover(options.store, target, options.log, now);
     await options.store.yieldRetellMonitoringLease(target.auth, target, {
-      retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
+      retryAt: nextPollAfter(target, now),
       now,
     });
     leaseFinished = true;
@@ -1158,7 +1214,7 @@ async function runTarget(
       const now = options.clock();
       try {
         await options.store.yieldRetellMonitoringLease(target.auth, target, {
-          retryAt: new Date(now.getTime() + regularPollMilliseconds(target)),
+          retryAt: nextPollAfter(target, now),
           now,
         });
       } catch {

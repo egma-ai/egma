@@ -22,7 +22,7 @@ import { admitIdentity, onIdentityCreated } from "./auth/provisioning.ts";
 import {
   closeAcceptance,
   openAcceptance,
-  stagedEvidence,
+  stagedLoad,
 } from "./ingestion/accept.ts";
 import { retainedDefects } from "./ingestion/defects.ts";
 import { startDrainer, type Drainer } from "./ingestion/drainer.ts";
@@ -268,24 +268,23 @@ export function buildApi(options: ServerOptions): Api {
     }
   };
 
-  /** Whether staged evidence still fits, without reading any of it back. */
+  /** Whether the local log will take more, asked of the log rather than guessed. */
   const stagedState = (): {
     readonly state: "writable" | "full" | "unavailable";
+    readonly bytes: number;
     readonly records: number;
   } => {
-    if (config.ingestion.store === undefined) {
-      return { state: "unavailable", records: 0 };
-    }
     try {
-      const staged = stagedEvidence();
+      const load = stagedLoad();
+      if (load === undefined) return { state: "unavailable", bytes: 0, records: 0 };
       return {
-        state:
-          staged.length >= config.ingestion.logMaxRecords ? "full" : "writable",
-        records: staged.length,
+        state: load.full ? "full" : "writable",
+        bytes: load.bytes,
+        records: load.records,
       };
     } catch (cause) {
       app.log.error({ err: cause }, "health check could not read the local log");
-      return { state: "unavailable", records: 0 };
+      return { state: "unavailable", bytes: 0, records: 0 };
     }
   };
 
@@ -330,6 +329,8 @@ export function buildApi(options: ServerOptions): Api {
       ingestion,
       localLog: staged.state,
       // Reported so an operator can see a backlog forming before it refuses.
+      // Both, because both bounds bind and either one can be the near one.
+      stagedBytes: staged.bytes,
       stagedRecords: staged.records,
       drain: drainState(),
       // Every reason class this process has retained an accepted segment

@@ -2480,27 +2480,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "retell_call_retry_project_call_idx": {
-          "name": "retell_call_retry_project_call_idx",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "provider_call_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {

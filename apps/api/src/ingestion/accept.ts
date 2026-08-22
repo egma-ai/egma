@@ -183,6 +183,8 @@ type Group = {
 
 type Standing = {
   readonly log: WriteAheadLog;
+  /** What that log refuses past, kept so the load below can say *how close*. */
+  readonly logBounds: { readonly maxBytes: number; readonly maxRecords: number };
   readonly store: PendingObjectStore;
   readonly bounds: SegmentBounds;
   readonly requestTimeoutMilliseconds: number;
@@ -546,6 +548,10 @@ export function openAcceptance(options: AcceptanceOptions): void {
 
   const held: Standing = {
     log,
+    logBounds: {
+      maxBytes: settings.logMaxBytes,
+      maxRecords: settings.logMaxRecords,
+    },
     store: pendingObjectStore(store, {
       requestTimeoutMilliseconds: settings.requestTimeoutMilliseconds,
     }),
@@ -827,6 +833,42 @@ async function durableWithin(
  * on disk. A process that has opened no acceptance loop is holding nothing and
  * answers so.
  */
+/** How much of the local log is spoken for, and whether it will take more. */
+export type StagedLoad = {
+  /** Bytes across every file the log owns, sealed ones included. */
+  readonly bytes: number;
+  /** Frames staged and not yet released. */
+  readonly records: number;
+  /**
+   * Either bound is reached, so the next append is refused.
+   *
+   * **Either**, because both bind and they bind on different things: half a
+   * gigabyte of transcripts and two hundred thousand tiny records are the same
+   * answer — *not now* — and a readiness check that watched only the count
+   * would report a writable log while every request was already being refused
+   * for bytes.
+   */
+  readonly full: boolean;
+};
+
+/**
+ * What the local log is holding, asked of the log itself.
+ *
+ * `undefined` on a process that opened no acceptance loop, which is a different
+ * fact from an empty log and has to stay distinguishable: one is a deployment
+ * with nowhere to stage evidence, the other is one with nothing staged.
+ */
+export function stagedLoad(): StagedLoad | undefined {
+  const held = standing;
+  if (held === undefined) return undefined;
+  const { bytes, records } = held.log;
+  return {
+    bytes,
+    records,
+    full: bytes >= held.logBounds.maxBytes || records >= held.logBounds.maxRecords,
+  };
+}
+
 export function stagedEvidence(): readonly {
   readonly scope: SegmentScope;
   readonly record: IngestionRecord;

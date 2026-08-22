@@ -819,6 +819,7 @@ describe("the bounded Retell call budget", () => {
       monitoredAgentId: target.monitoredAgentId,
       importGeneration: target.importGeneration,
       now: new Date(at.getTime() + 60 * 60_000),
+      limit: 25,
     });
     expect(due).toEqual([]);
 
@@ -914,6 +915,44 @@ describe("the bounded Retell call budget", () => {
       now: reselectedAt,
     });
     expect(outcome).toMatchObject({ attempts: 1, dropped: false });
+  });
+
+  /**
+   * A row the new generation cannot see is a row nothing will ever read,
+   * sweep or delete — and the two existence checks that drive `degraded` and
+   * the poller's retry pass ask about the agent rather than the generation, so
+   * leaving one would pin a working agent degraded for work nobody owes.
+   */
+  it("takes the previous window's transient rows with it when the agent is selected again", async () => {
+    const first = await configured();
+    await recordRetellCallAttempt(first.auth, first, {
+      providerCallId: "call_retrying",
+      errorKind: "provider_call_refused",
+      retryBackoffMilliseconds: BACKOFF,
+      now: SETUP_TIME,
+    });
+    await spendBudget(first, "call_dropped");
+    const before = await database.sql<{ count: string }>(
+      "select count(*)::text as count from retell_call_retry",
+    );
+    expect(before.rows[0]?.count).toBe("2");
+
+    const reselectedAt = new Date(SETUP_TIME.getTime() + 60_000);
+    await configureRetellMonitoring(at(acme, ada), {
+      apiKey: RETELL_KEY,
+      agents: selected(),
+      now: reselectedAt,
+    });
+
+    const after = await database.sql<{ count: string }>(
+      "select count(*)::text as count from retell_call_retry",
+    );
+    expect(after.rows[0]?.count).toBe("0");
+
+    // And the agent is not left owing anything: nothing to poll for, and
+    // nothing keeping it degraded.
+    const second = await leased(reselectedAt);
+    expect(second.hasTransientCallState).toBe(false);
   });
 
   it("says a selected agent is degraded while a retry is in flight and not after it", async () => {

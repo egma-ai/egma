@@ -646,7 +646,7 @@ describe("write readiness", () => {
     }
   });
 
-  it("is unavailable when the local log will take no more", async () => {
+  it("is unavailable when the local log will take no more records", async () => {
     if (!storage.available) return;
     const api = await createApi("health_log_full", {
       ingestStore: storage.ingestStore,
@@ -663,6 +663,36 @@ describe("write readiness", () => {
         postgres: "reachable",
         ingestion: "reachable",
         localLog: "full",
+      });
+    } finally {
+      await api.close();
+    }
+  });
+
+  /**
+   * Both bounds bind, and they bind on different things: half a gigabyte of
+   * transcripts and two hundred thousand tiny records are the same answer.
+   * Readiness that watched only the count would report a writable log while
+   * every request was already being refused for bytes — a health check saying
+   * the opposite of what the door says, which is worse than no check at all.
+   */
+  it("is unavailable when the local log will take no more bytes", async () => {
+    if (!storage.available) return;
+    const api = await createApi("health_log_full_bytes", {
+      ingestStore: storage.ingestStore,
+      // Room for plenty of records, and no room at all for their bytes.
+      ingestionLogMaxRecords: 1_000,
+      ingestionLogMaxBytes: 0,
+    });
+    try {
+      const response = await api.app.inject({ method: "GET", url: "/health" });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        status: "unavailable",
+        postgres: "reachable",
+        ingestion: "reachable",
+        localLog: "full",
+        stagedRecords: 0,
       });
     } finally {
       await api.close();

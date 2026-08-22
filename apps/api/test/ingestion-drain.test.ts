@@ -3,6 +3,7 @@ import {
   configureLiveKitMonitoring,
   connectClickHouse,
   disconnectClickHouse,
+  DRAIN_ADVISORY_LOCK,
   listMonitoringSetups,
   openDrainOwnership,
   type AuthContext,
@@ -622,6 +623,32 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
    * is what makes restarting the drainer an operation nobody has to think
    * about.
    */
+  /**
+   * Cut the session holding the drain claim, the way a Postgres restart, a
+   * failover or an idle-socket reaper would. Postgres releases the advisory
+   * lock with the session, so what the holder has afterwards is a dead
+   * connection and no claim.
+   */
+  async function killTheDrainClaim(): Promise<void> {
+    await api.database.sql(
+      `select pg_terminate_backend(pid) from pg_locks
+        where locktype = 'advisory' and classid = $1 and objid = $2
+          and granted and pid <> pg_backend_pid()`,
+      [DRAIN_ADVISORY_LOCK.namespace, DRAIN_ADVISORY_LOCK.id],
+    );
+  }
+
+  /** Which backend holds the drain claim, or nobody. */
+  async function whoHoldsTheDrainClaim(): Promise<number | undefined> {
+    const { rows } = await api.database.sql<{ pid: number }>(
+      `select pid from pg_locks
+        where locktype = 'advisory' and classid = $1 and objid = $2
+          and granted and pid <> pg_backend_pid()`,
+      [DRAIN_ADVISORY_LOCK.namespace, DRAIN_ADVISORY_LOCK.id],
+    );
+    return rows[0]?.pid;
+  }
+
   it("lets exactly one of two drainers walk the prefix, and hands over when it stops", async () => {
     // Taken before either drainer exists, so which one is the holder is this
     // test's decision rather than which startup scan asked first.
@@ -663,6 +690,29 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       await accepted(aConversation(nextTrace));
       expect(await standby.drainNow()).toBe(1);
       expect(standby.standingBy()).toBeUndefined();
+
+      // Now take its connection away underneath it — a Postgres restart, a
+      // failover, an idle socket cut by something in between. Postgres drops
+      // the lock with the session, so at this moment nobody is the drainer.
+      const beforeTheKill = await whoHoldsTheDrainClaim();
+      expect(beforeTheKill).toBeDefined();
+      await killTheDrainClaim();
+      expect(await whoHoldsTheDrainClaim()).toBeUndefined();
+
+      // **It asks again and carries on.** The next pass builds a connection,
+      // takes the claim on it, and drains — which on the single-instance
+      // deployment everybody runs is the difference between one dropped socket
+      // and draining stopping until somebody restarts the process.
+      const thirdTrace = "aa11000000000000000000000000aa11";
+      await accepted(aConversation(thirdTrace));
+      expect(await standby.drainNow()).toBe(1);
+      expect(standby.standingBy()).toBeUndefined();
+
+      // And it is a genuinely new session holding it, so the claim really was
+      // lost and really was taken again rather than merely believed.
+      const afterTheKill = await whoHoldsTheDrainClaim();
+      expect(afterTheKill).toBeDefined();
+      expect(afterTheKill).not.toBe(beforeTheKill);
     } finally {
       await standby.stop();
       await holder.stop();

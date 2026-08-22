@@ -89,5 +89,4 @@ UPDATE "retell_monitored_agent" SET
 	"regular_floor_at" = now(),
 	"updated_at" = now();--> statement-breakpoint
 
-CREATE INDEX "retell_call_retry_due_idx" ON "retell_call_retry" USING btree ("retell_monitored_agent_id","next_attempt_at") WHERE "retell_call_retry"."next_attempt_at" is not null;--> statement-breakpoint
-CREATE INDEX "retell_call_retry_project_call_idx" ON "retell_call_retry" USING btree ("project_id","provider_call_id");
+CREATE INDEX "retell_call_retry_due_idx" ON "retell_call_retry" USING btree ("retell_monitored_agent_id","next_attempt_at") WHERE "retell_call_retry"."next_attempt_at" is not null;

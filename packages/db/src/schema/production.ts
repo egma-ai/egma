@@ -322,13 +322,13 @@ export const retellCallRetry = pgTable(
         retellMonitoredAgent.organizationId,
       ],
     }).onDelete("cascade"),
+    // The batched page lookup reads `(project_id, provider_call_id)`, and the
+    // unique constraint above already builds exactly that btree. A second
+    // index on the same pair would be one more thing every retry write has to
+    // maintain and nothing at all to read from.
     index("retell_call_retry_due_idx")
       .on(table.retellMonitoredAgentId, table.nextAttemptAt)
       .where(sql`${table.nextAttemptAt} is not null`),
-    index("retell_call_retry_project_call_idx").on(
-      table.projectId,
-      table.providerCallId,
-    ),
   ],
 );
 

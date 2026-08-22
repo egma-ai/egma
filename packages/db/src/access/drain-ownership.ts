@@ -1,3 +1,5 @@
+import type pg from "pg";
+
 import { dedicatedConnection } from "../client.ts";
 
 /**
@@ -55,36 +57,78 @@ export type DrainOwnership = {
 };
 
 export async function openDrainOwnership(): Promise<DrainOwnership> {
-  const client = dedicatedConnection();
-  // A connection that dies must not become an unhandled rejection, and must not
-  // be believed afterwards. Postgres has already dropped the lock at that
-  // point, so the honest state is "not held" and the next interval asks again.
-  let broken = false;
-  client.on("error", () => {
-    broken = true;
-  });
-  await client.connect();
-
+  let client: pg.Client | undefined;
   let held = false;
   let closed = false;
 
+  /**
+   * The connection this claim lives on, built if there is not one.
+   *
+   * **A dead connection is a lost lock and nothing more.** Postgres drops the
+   * lock the moment the session goes, so the honest state afterwards is "not
+   * held" — and the honest next step is to connect again and ask. A process
+   * that remembered the failure instead would stand by for the rest of its
+   * life over one dropped socket, which on the single-instance deployment
+   * everybody actually runs means draining stops until somebody restarts it.
+   */
+  const connected = async (): Promise<pg.Client> => {
+    const open = client;
+    if (open !== undefined) return open;
+    const fresh = dedicatedConnection();
+    // Registered before connecting, because a connection that dies has to
+    // arrive here rather than at an unhandled rejection.
+    fresh.on("error", () => {
+      if (client === fresh) {
+        client = undefined;
+        held = false;
+      }
+      fresh.end().catch(() => undefined);
+    });
+    await fresh.connect();
+    client = fresh;
+    return fresh;
+  };
+
+  // Opened here so that a deployment whose database is unreachable at boot
+  // fails where it can be seen, rather than standing by silently.
+  await connected();
+
   const ownership: DrainOwnership = {
     get held() {
-      return held && !broken && !closed;
+      return held && !closed && client !== undefined;
     },
+    /**
+     * Asked in full every time, including by the process that already holds it.
+     *
+     * **A claim believed without asking is the dangerous one.** A session can
+     * die without this process being told promptly — a failover, a reaper, a
+     * network that went away — and Postgres releases the lock the moment it
+     * does. A holder that short-circuited on its own memory would go on
+     * believing it was the drainer while another instance took the claim, and
+     * the two would walk the prefix together: exactly the arrangement this lock
+     * exists to prevent, arrived at by trusting a cached answer.
+     *
+     * Asking costs one round trip per scan interval. Postgres answers `true`
+     * immediately for a session that already holds it, counting the hold rather
+     * than taking a second one — so this is free, and it stays free only while
+     * nothing here ever calls `pg_advisory_unlock`. Releasing is closing the
+     * connection, deliberately.
+     */
     async take() {
       if (closed) return false;
-      if (held && !broken) return true;
-      if (broken) return false;
       try {
-        const answer = await client.query<{ taken: boolean }>(
+        const answer = await (
+          await connected()
+        ).query<{ taken: boolean }>(
           "select pg_try_advisory_lock($1, $2) as taken",
           [DRAIN_ADVISORY_LOCK.namespace, DRAIN_ADVISORY_LOCK.id],
         );
         held = answer.rows[0]?.taken === true;
       } catch {
-        // Postgres is unreachable or the connection went. Standing by is the
-        // truthful answer, and it costs one scan interval to find out again.
+        // Unreachable, or the connection went while the question was in
+        // flight. Standing by is the truthful answer, and the next interval
+        // builds a connection and asks again.
+        client = undefined;
         held = false;
       }
       return held;
@@ -92,7 +136,9 @@ export async function openDrainOwnership(): Promise<DrainOwnership> {
     async release() {
       closed = true;
       held = false;
-      await client.end().catch(() => undefined);
+      const open = client;
+      client = undefined;
+      await open?.end().catch(() => undefined);
     },
   };
   return ownership;

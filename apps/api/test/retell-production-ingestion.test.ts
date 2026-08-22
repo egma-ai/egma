@@ -394,7 +394,7 @@ function nothingClaimed(): RetellProductionIngestionResult {
     targetClaimed: false,
     pages: 0,
     accepted: 0,
-    already: 0,
+    settled: 0,
     dropped: 0,
   };
 }
@@ -473,7 +473,7 @@ describe("Retell production ingestion", () => {
     expect(recorded.finishes).toHaveLength(1);
     expect(recorded.finishes[0]).toBeGreaterThanOrEqual(27_000);
     expect(recorded.finishes[0]).toBeLessThanOrEqual(33_000);
-    expect(result).toMatchObject({ accepted: 2, already: 1, pages: 2 });
+    expect(result).toMatchObject({ accepted: 2, settled: 1, pages: 2 });
     expect(recorded.rows.size).toBe(0);
     expect(observed.recorded).toMatchObject({
       attempts: ["historical_import"],
@@ -482,7 +482,7 @@ describe("Retell production ingestion", () => {
           scanKind: "historical_import",
           outcome: "completed",
           accepted: 2,
-          already: 1,
+          settled: 1,
           dropped: 0,
         },
       ],
@@ -898,7 +898,7 @@ describe("Retell production ingestion", () => {
     expect(events).toEqual({ info: [], warn: [], error: [] });
     expect(observed.recorded).toMatchObject({
       attempts: ["historical_import"],
-      turns: [{ outcome: "completed", accepted: 0, already: 0, dropped: 0 }],
+      turns: [{ outcome: "completed", accepted: 0, settled: 0, dropped: 0 }],
     });
   });
 
@@ -1116,7 +1116,7 @@ describe("Retell production ingestion", () => {
       clock: () => BASE,
     });
 
-    expect(result).toMatchObject({ accepted: 0, already: 1 });
+    expect(result).toMatchObject({ accepted: 0, settled: 1 });
     expect(recorded.rows.get("call_wrong_agent")).toMatchObject({
       attempts: 1,
       errorKind: "platform_agent_mismatch",
@@ -1372,7 +1372,7 @@ describe("the bounded Retell retry budget", () => {
     ]);
     expect(world.hydrations).toHaveLength(hydrationsBefore);
     expect(world.directReads).toHaveLength(readsBefore);
-    expect(overlap).toMatchObject({ already: 1, accepted: 0, dropped: 0 });
+    expect(overlap).toMatchObject({ settled: 1, accepted: 0, dropped: 0 });
     expect(world.observed.recorded.dropped).toHaveLength(1);
 
     // Past every overlap window the provider no longer lists the call, the
@@ -1395,8 +1395,13 @@ describe("the bounded Retell retry budget", () => {
     const readsBefore = world.directReads.length;
 
     // Selecting the agent again is a new observation of the provider's
-    // history, so the import runs under a new generation.
+    // history, so the import runs under a new generation. Re-selection also
+    // deletes the rows belonging to the window it replaces, which is what
+    // `configureRetellMonitoring` does in the transaction that bumps the
+    // generation — modelled here, because this suite drives the poller and
+    // never the setup door.
     world.succeed();
+    world.recorded.rows.clear();
     const reimport: RetellMonitoringTarget = {
       ...TARGET,
       scanKind: "historical_import",
@@ -1411,6 +1416,103 @@ describe("the bounded Retell retry budget", () => {
       traceIdFor(AUTH.projectId, "call_that_will_not_hydrate"),
     ]);
     expect(world.recorded.rows.size).toBe(0);
+  });
+
+  /**
+   * The same rule from the other side: a marker the re-selection did not
+   * remove — because the poller reached the page before the delete, or because
+   * a future change left one — is still invisible to the new generation, and
+   * the new import still takes its own bounded look.
+   */
+  it("ignores an old-generation marker that is still in the table", async () => {
+    const world = failingWorld();
+    let at = BASE;
+    for (const wait of [0, ...BACKOFF]) {
+      at = new Date(at.getTime() + wait);
+      await world.turn(at);
+    }
+    expect(world.recorded.rows.size).toBe(1);
+
+    world.succeed();
+    const reimport: RetellMonitoringTarget = {
+      ...TARGET,
+      scanKind: "historical_import",
+      importGeneration: 2,
+    };
+    const imported = await world.turn(new Date(at.getTime() + 60_000), reimport);
+
+    expect(imported).toMatchObject({ accepted: 1 });
+    expect(world.taken.recorded.traceIds).toEqual([
+      traceIdFor(AUTH.projectId, "call_that_will_not_hydrate"),
+    ]);
+  });
+
+  /**
+   * The two passes of one turn can both reach the same call: the retry pass
+   * recovers it and deletes its row, and the page then lists it — with its
+   * transient row gone and its evidence not yet drained, so neither of the
+   * page's two batched questions can see the work.
+   *
+   * Accepting it twice would be two readings of one conversation under one
+   * immutable identity. Where the provider reports no timestamps of its own
+   * those readings differ, and the drainer would refuse the pair as an
+   * integrity defect that nothing outside the poller caused.
+   */
+  it("accepts a call recovered by the retry pass once, even though the same page lists it", async () => {
+    const world = failingWorld();
+    await world.turn(BASE);
+    expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
+      { attempts: 1 },
+    );
+    const acceptedBefore = world.taken.recorded.calls.length;
+
+    // The retry is due and the provider now answers. The same page still lists
+    // the call, because the overlap is meant to.
+    world.succeed();
+    const recovering = new Date(BASE.getTime() + BACKOFF[0]!);
+    const result = await world.turn(recovering);
+
+    expect(result).toMatchObject({ accepted: 1 });
+    expect(world.taken.recorded.calls).toHaveLength(acceptedBefore + 1);
+    // One provider read for it this turn — the retry pass's — and none from
+    // the page behind it.
+    expect(world.directReads).toEqual(["call_that_will_not_hydrate"]);
+    expect(world.hydrations).toEqual(["call_that_will_not_hydrate"]);
+    expect(world.recorded.rows.size).toBe(0);
+    expect(world.recorded.finishes).toHaveLength(2);
+  });
+
+  it("writes nothing to Postgres for a listed call that simply worked", async () => {
+    const recorded = record();
+    const taken = acceptance();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: [summary("call_that_works")],
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, listed) {
+          return { kind: "call", call: hydrated(String(listed["call_id"])) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    expect(result).toMatchObject({ accepted: 1 });
+    // No row existed, so nothing was deleted: a page of ordinary conversations
+    // leaves this database exactly as it found it.
+    expect(recorded.deletes).toEqual([]);
+    expect(recorded.rows.size).toBe(0);
   });
 
   it("deletes the retry row only after the evidence is durable in the object store", async () => {
@@ -1480,7 +1582,7 @@ describe("the bounded Retell retry budget", () => {
 
     expect(world.hydrations).toHaveLength(hydrationsBefore);
     expect(world.directReads).toEqual([]);
-    expect(result).toMatchObject({ already: 1, accepted: 0 });
+    expect(result).toMatchObject({ settled: 1, accepted: 0 });
     expect(world.recorded.finishes).toHaveLength(finishesBefore + 1);
     expect(world.recorded.rows.get("call_that_will_not_hydrate")).toMatchObject(
       { attempts: 1 },

@@ -332,7 +332,7 @@ export async function configureRetellMonitoring(
       );
 
     for (const selected of agents) {
-      await tx
+      const rearmed = await tx
         .insert(retellMonitoredAgent)
         .values({
           id: newId("rma"),
@@ -376,7 +376,23 @@ export async function configureRetellMonitoring(
             lastErrorAt: null,
             updatedAt: now,
           },
-        });
+        })
+        .returning({ id: retellMonitoredAgent.id });
+
+      // The new generation cannot see the old one's transient rows, so leaving
+      // them would leave rows nothing reads, nothing sweeps and nothing can
+      // ever delete — while the two existence checks below, which ask about
+      // the agent rather than about a generation, would keep reporting a
+      // selected agent as degraded for work no longer owed. They go with the
+      // window they belonged to, in the transaction that replaces it.
+      await tx
+        .delete(retellCallRetry)
+        .where(
+          and(
+            withinMonitoringProject(auth, retellCallRetry),
+            eq(retellCallRetry.retellMonitoredAgentId, rearmed[0]?.id ?? ""),
+          ),
+        );
     }
   });
 
@@ -467,6 +483,10 @@ export type RetellMonitoringTarget = {
    * common case by far is an agent that owes nothing and a page that is empty,
    * and it has to cost one claim and one provider read — not a query per turn
    * looking for work that is almost never there.
+   *
+   * It asks about the agent rather than about its current import generation,
+   * and it can: re-selecting an agent deletes the rows belonging to the window
+   * it replaces, so a row from a generation nothing reads cannot exist.
    */
   readonly hasTransientCallState: boolean;
   readonly setupConsecutiveFailures: number;
@@ -1272,7 +1292,12 @@ export async function dueRetellCallRetries(
     readonly monitoredAgentId: string;
     readonly importGeneration: number;
     readonly now?: Date | undefined;
-    readonly limit?: number | undefined;
+    /**
+     * How many to take on. Required, and the poller's to choose: it is the one
+     * that knows how long a turn may hold a lease, and a second default here
+     * would be a bound that could quietly disagree with it.
+     */
+    readonly limit: number;
   },
 ): Promise<readonly TransientRetellCall[]> {
   const now = input.now ?? new Date();
@@ -1289,12 +1314,9 @@ export async function dueRetellCallRetries(
       ),
     )
     .orderBy(asc(retellCallRetry.nextAttemptAt), asc(retellCallRetry.id))
-    .limit(input.limit ?? DUE_RETRIES_PER_TURN);
+    .limit(input.limit);
   return rows.map(transientOf);
 }
-
-/** How many due retries one turn takes on, so a backlog cannot own the lease. */
-const DUE_RETRIES_PER_TURN = 25;
 
 /** What one counted attempt did. */
 export type RetellCallAttemptOutcome =
@@ -1313,7 +1335,14 @@ type PgTransaction = Parameters<
   Parameters<ReturnType<typeof db>["transaction"]>[0]
 >[0];
 
-/** The agent still owes at least one call an automatic retry. */
+/**
+ * The agent still owes at least one call an automatic retry.
+ *
+ * Asked of the agent rather than of one import generation, on the same terms as
+ * the claim's own check: re-selecting an agent deletes the rows belonging to
+ * the window it replaces, so every row still here belongs to the generation
+ * running now.
+ */
 async function hasRetellCallInFlight(
   tx: PgTransaction,
   auth: AuthContext,
