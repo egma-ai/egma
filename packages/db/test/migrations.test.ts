@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { mintedAt, newId } from "@egma/ids";
+import { CROCKFORD_ALPHABET, mintedAt, newId } from "@egma/ids";
 import { is } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import pg from "pg";
@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   MIGRATION_ADVISORY_LOCK,
+  MIGRATION_HASH_CORRECTIONS,
   MIGRATIONS_DIRECTORY,
   readMigrations,
   runMigrations,
@@ -31,6 +32,17 @@ import {
   type EmptyDatabase,
 } from "./support/database.ts";
 import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
+
+function idBits(id: string): bigint {
+  const body = id.slice(id.indexOf("_") + 1);
+  let value = 0n;
+  for (const character of body) {
+    const digit = CROCKFORD_ALPHABET.indexOf(character);
+    if (digit === -1) throw new Error(`invalid Egma id: ${id}`);
+    value = (value << 5n) | BigInt(digit);
+  }
+  return value;
+}
 
 /** Add the historical tail without applying the destructive suite cutover. */
 async function addHistoricalMigration(
@@ -385,6 +397,42 @@ describe("applying migrations on boot", () => {
     expect(result.alreadyApplied).toEqual(
       expect.arrayContaining(expected.map((migration) => migration.name)),
     );
+  });
+
+  it("reconciles the exact pre-hosted 0040 correction without reapplying it", async () => {
+    const [correction] = MIGRATION_HASH_CORRECTIONS;
+    if (correction === undefined) throw new Error("0040 correction is missing");
+    const migration = (await readMigrations()).find(
+      (candidate) => candidate.name === correction.name,
+    );
+    expect(migration?.hash).toBe(correction.correctedHash);
+
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    try {
+      await client.query(
+        `update egma_meta.migration set hash = $1 where name = $2`,
+        [correction.previouslyRecordedHash, correction.name],
+      );
+    } finally {
+      await client.end();
+    }
+
+    const result = await runMigrations(database.url);
+    expect(result.applied).toEqual([]);
+    expect(result.alreadyApplied).toContain(correction.name);
+
+    const checked = new pg.Client({ connectionString: database.url });
+    await checked.connect();
+    try {
+      const { rows } = await checked.query<{ hash: string }>(
+        `select hash from egma_meta.migration where name = $1`,
+        [correction.name],
+      );
+      expect(rows).toEqual([{ hash: correction.correctedHash }]);
+    } finally {
+      await checked.end();
+    }
   });
 
   it("refuses a migration file that changed after it was applied", async () => {
@@ -4574,6 +4622,9 @@ describe("the clean test-suite cutover (0040)", () => {
       deleted_at: null,
     });
     expect(rows[0]?.id).toMatch(/^ste_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    const bits = idBits(rows[0]?.id ?? "");
+    expect(Number((bits >> 76n) & 0xfn)).toBe(7);
+    expect(Number((bits >> 62n) & 0x3n)).toBe(0b10);
     expect(mintedAt(rows[0]?.id ?? "").getTime()).toBeGreaterThanOrEqual(
       cutoverStartedAt,
     );

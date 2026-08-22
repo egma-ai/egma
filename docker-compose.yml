@@ -2,7 +2,10 @@ name: egma
 
 services:
   postgres:
-    image: postgres:18-alpine
+    # This is the Supabase production version. Local development and CI must
+    # never run a newer Postgres feature line than the hosted database, or a
+    # migration can pass here and fail during production boot.
+    image: postgres:17.6-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-egma}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-egma}
@@ -26,7 +29,10 @@ services:
       # set POSTGRES_PASSWORD in the same breath.
       - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql
+      # PostgreSQL cannot open a data directory written by a newer major.
+      # The versioned volume gives 17.6 a clean store and leaves the former
+      # `postgres-data` volume intact for an explicit export or deletion.
+      - postgres-17-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-egma} -d ${POSTGRES_DB:-egma}"]
       interval: 2s
@@ -34,12 +40,13 @@ services:
       retries: 30
 
   # The trace store. Single node, no Keeper and no replication: this is the
-  # honest floor for a self-host, not a cluster. The version is pinned to the
-  # newest long-term-support release rather than to a moving tag, because the
-  # one thing a self-hoster must never get from `docker compose pull` is a
-  # different engine underneath their stored traces.
+  # honest floor for a self-host, not a cluster. This public image is on the
+  # same 26.2.1 feature line as ClickHouse Cloud production. Its exact build is
+  # pinned rather than left on a moving tag, because the one thing a
+  # self-hoster must never get from `docker compose pull` is a different engine
+  # underneath their stored traces.
   clickhouse:
-    image: clickhouse/clickhouse-server:26.3.17.56
+    image: clickhouse/clickhouse-server:26.2.1.1139
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-egma}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-egma}
@@ -51,7 +58,9 @@ services:
       # trace of. See the paragraph on the Postgres port.
       - "${CLICKHOUSE_BIND:-127.0.0.1}:${CLICKHOUSE_PORT:-8124}:8123"
     volumes:
-      - clickhouse-data:/var/lib/clickhouse
+      # A ClickHouse downgrade may not mount a newer server's data directory.
+      # Keep the former `clickhouse-data` volume intact and give 26.2 its own.
+      - clickhouse-26-2-data:/var/lib/clickhouse
     # No `ulimits` here on purpose. ClickHouse wants far more descriptors than
     # a shell's default hands it, but asking for them in this file makes
     # `docker compose up` fail outright — a container may not raise its limit
@@ -854,8 +863,8 @@ services:
     # dial, which fails honestly and says so.
 
 volumes:
-  postgres-data:
-  clickhouse-data:
+  postgres-17-data:
+  clickhouse-26-2-data:
   minio-data:
   # Still here, and still needed, though no recording lands on it any more:
   # the write-ahead log that protects a report lives in it, and that log is

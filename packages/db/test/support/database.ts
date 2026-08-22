@@ -257,12 +257,11 @@ export const POSTGRES_ERROR = {
   uniqueViolation: "23505",
   foreignKeyViolation: "23503",
   /**
-   * What `on delete restrict` raises, and deliberately its own code rather
-   * than the foreign-key one above: a delete refused because something still
-   * points at the row is a different fact from a write naming a row that was
-   * never there, and a test asserting one must not pass on the other.
+   * PostgreSQL 17 reports `on delete restrict` with the ordinary foreign-key
+   * code. A caller that must distinguish those cases has to inspect the named
+   * constraint; SQLSTATE alone cannot do it on the hosted compatibility floor.
    */
-  restrictViolation: "23001",
+  restrictViolation: "23503",
   checkViolation: "23514",
   /** What a lifecycle-guard trigger raises: `raise exception`'s own code. */
   raiseException: "P0001",

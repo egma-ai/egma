@@ -431,6 +431,7 @@ describe("adding a colleague, with no mail configured", () => {
 
         await bob.getByRole("button", { name: "Deactivate" }).click();
         await page.mouse.click(4, 4);
+        await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toEqual([]);
 
         // Only the destructive button sends the request, and it sends the
@@ -453,13 +454,16 @@ describe("adding a colleague, with no mail configured", () => {
         await bob.getByRole("button", { name: "Remove" }).click();
         expect(memberActions).toHaveLength(1);
         await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+        await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
 
         await bob.getByRole("button", { name: "Remove" }).click();
         await page.keyboard.press("Escape");
+        await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toHaveLength(1);
 
         await bob.getByRole("button", { name: "Remove" }).click();
         await page.mouse.click(4, 4);
+        await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toHaveLength(1);
 
         await bob.getByRole("button", { name: "Remove" }).click();
