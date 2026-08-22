@@ -11,7 +11,7 @@ import type { ProviderCredentialSource } from "@egma/provider-credentials";
 import { SpanStatusCode, trace } from "@opentelemetry/api";
 
 import type { Config } from "./config.ts";
-import { gradeClaim } from "./grade.ts";
+import { gradeClaim, NotGradable } from "./grade.ts";
 import type { JudgeMakers } from "./judge/index.ts";
 import {
   platformEvent,
@@ -92,6 +92,24 @@ export type ServiceOptions = {
   readonly makers?: JudgeMakers | undefined;
 };
 
+/**
+ * How the loop paces a claim it had to decline because the conversation is not
+ * all here yet.
+ *
+ * A still-arriving claim is held before it is claimable again, rather than
+ * released at once: without the hold a run whose simulations all land together
+ * would spend its whole retry budget in one hot burst — the capacity shortcut
+ * re-claiming the instant every copy declines — and write a permanent verdict
+ * during the exact cold start the retry exists to survive. The hold is the sweep
+ * interval, so the retries fall on the clock the backstop already runs on; the
+ * job is claimed throughout it, so no other copy takes it either, and it is
+ * released to the queue only once the hold is over.
+ */
+type Pacing = {
+  /** Resolve after the backoff, or at once when the service is stopping. */
+  hold(): Promise<void>;
+};
+
 export function startService(options: ServiceOptions): Service {
   const { config, log } = options;
 
@@ -99,6 +117,8 @@ export function startService(options: ServiceOptions): Service {
   let woken = false;
   let wake: (() => void) | undefined;
   let watching: Listening | undefined;
+  /** Cancels for the holds in flight, so `stop` can end every one at once. */
+  const activeHolds = new Set<() => void>();
 
   /**
    * Something may be claimable. Two things arrive here — a notification and the
@@ -129,6 +149,30 @@ export function startService(options: ServiceOptions): Service {
     });
   };
 
+  // The sweep is a positive whole number of seconds, so this is at least the
+  // second a test sets it to. A still-arriving claim waits this before it is
+  // released.
+  const backoffMilliseconds = config.sweepSeconds * 1000;
+
+  /** Sleep for the backoff, or return at once when the service is stopping. */
+  const holdBeforeRetry = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      if (!running) {
+        resolve();
+        return;
+      }
+      const done = (): void => {
+        clearTimeout(timer);
+        activeHolds.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, backoffMilliseconds);
+      timer.unref();
+      activeHolds.add(done);
+    });
+
+  const pacing: Pacing = { hold: holdBeforeRetry };
+
   const finished = (async (): Promise<void> => {
     watching = await watchGradingWork(nudge);
     log.info(
@@ -158,7 +202,9 @@ export function startService(options: ServiceOptions): Service {
       }
 
       if (claimed.length > 0) {
-        await Promise.all(claimed.map((claim) => holdAndGrade(claim, options)));
+        await Promise.all(
+          claimed.map((claim) => holdAndGrade(claim, options, pacing)),
+        );
         // A full claim means the queue may hold more, so ask again before
         // sleeping — otherwise a burst of two hundred conversations would be
         // drained one backstop interval at a time.
@@ -177,6 +223,9 @@ export function startService(options: ServiceOptions): Service {
     finished,
     stop() {
       running = false;
+      // End every hold in flight at once, so a held job is released now rather
+      // than after a full backoff and shutdown never waits one out.
+      for (const cancel of [...activeHolds]) cancel();
       nudge();
     },
   };
@@ -196,13 +245,14 @@ export function startService(options: ServiceOptions): Service {
 async function holdAndGrade(
   claim: GradingClaim,
   options: ServiceOptions,
+  pacing: Pacing,
 ): Promise<void> {
   await tracer.startActiveSpan(
     "egma.grading_job.process",
     { attributes: claimAttributes(claim) },
     async (span) => {
       try {
-        await gradeHeldClaim(claim, options);
+        await gradeHeldClaim(claim, options, pacing);
       } finally {
         span.end();
       }
@@ -214,6 +264,7 @@ async function holdAndGrade(
 async function gradeHeldClaim(
   claim: GradingClaim,
   options: ServiceOptions,
+  pacing: Pacing,
 ): Promise<void> {
   const { config, log } = options;
   const about = claimAttributes(claim);
@@ -261,18 +312,37 @@ async function gradeHeldClaim(
       "grading job finished",
     );
   } catch (error) {
-    const span = trace.getActiveSpan();
-    span?.setAttribute("error.type", "grading_job_failed");
-    span?.setStatus({ code: SpanStatusCode.ERROR });
-    log.error(
-      platformEvent("egma.grading_job.finished", {
-        ...about,
-        "egma.outcome": "failed",
-        "error.type": "grading_job_failed",
-        "exception.type": safeExceptionType(error),
-      }),
-      "grading job failed",
-    );
+    const stillArriving = error instanceof NotGradable;
+    if (stillArriving) {
+      // Not a failure: the conversation is not all here yet, and asking again is
+      // the whole answer. The job is held before it is claimable again — for the
+      // sweep interval — so a run whose simulations all land together retries on
+      // the backstop clock instead of spending its budget the instant the trace
+      // store is cold. The attempt is already counted on the claim, so the
+      // budget still ends; the heartbeat keeps the lease while the job is held.
+      log.info(
+        platformEvent("egma.grading_job.deferred", about),
+        "grading job deferred while its evidence drains",
+      );
+      // Held for the sweep interval before it is released back to the queue.
+      // The next claim comes on the backstop sweep, or at once from the capacity
+      // shortcut when the batch was full — either way the retries are a sweep
+      // apart rather than a hot loop.
+      await pacing.hold();
+    } else {
+      const span = trace.getActiveSpan();
+      span?.setAttribute("error.type", "grading_job_failed");
+      span?.setStatus({ code: SpanStatusCode.ERROR });
+      log.error(
+        platformEvent("egma.grading_job.finished", {
+          ...about,
+          "egma.outcome": "failed",
+          "error.type": "grading_job_failed",
+          "exception.type": safeExceptionType(error),
+        }),
+        "grading job failed",
+      );
+    }
     await releaseGradingJob(
       claim.auth,
       claim.id,
@@ -287,7 +357,7 @@ async function gradeHeldClaim(
           "error.type": "grading_job_release_failed",
           "exception.type": safeExceptionType(releasing),
         }),
-        "failed grading job could not be released",
+        "grading job could not be released",
       );
       return undefined;
     });

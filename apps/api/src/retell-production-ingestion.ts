@@ -125,6 +125,76 @@ const CALL_START_MARGIN_MILLISECONDS = 6 * 60 * 60 * 1_000;
 /** How many due retries one turn takes on, so a backlog cannot own the lease. */
 const RETRIES_PER_TURN = 25;
 
+/**
+ * How long an accepted-but-not-yet-visible identity is remembered.
+ *
+ * Long enough to outlast the five-minute overlap a regular scan rereads, so a
+ * call this poller has already made durable is recognised on every poll that
+ * could list it again — right up until the drainer makes it query-visible and
+ * the committed probe takes the recognition over. Bounded so a drainer that
+ * never catches up cannot grow this memory without end: past this window the
+ * call is outside every overlap and nothing lists it, so forgetting it imports
+ * nothing.
+ */
+const ACCEPTED_IDENTITY_MEMORY_MILLISECONDS = 15 * 60_000;
+
+/**
+ * A per-poller memory of identities this process has accepted but has not yet
+ * seen the trace store commit.
+ *
+ * A call is durable in the object store the instant `acceptEvidence` returns,
+ * but query-visible only once the drainer has taken its segment — a gap of at
+ * least one scan interval, and longer when the drainer is behind. Across that
+ * gap the five-minute overlap lists the same call again, and neither guard the
+ * page keeps would recognise it: the committed probe is blind until the drain,
+ * and a call that simply worked leaves no transient row. This is what does — an
+ * identity is remembered when it is accepted and consulted beside the probe on
+ * every later turn, so one conversation is imported once even while its drain is
+ * behind.
+ *
+ * In memory and per process, never Postgres: a successful call leaves no row and
+ * this keeps that true. The residual the design accepts is here: a monitored
+ * agent whose lease moves to another process between acceptance and visibility
+ * carries none of this memory, so that process can accept the same call again —
+ * and the store's identity check then retains the changed pair as a conflict
+ * rather than replacing the first. That outcome is operator-visible and never
+ * silent, which is why one process's memory is enough and a shared one is not
+ * built.
+ */
+export type AcceptedIdentities = {
+  /** Remember one trace made durable at `now`. */
+  remember(traceId: string, now: Date): void;
+  /** Whether this trace was accepted here and is not yet known committed. */
+  has(traceId: string): boolean;
+  /**
+   * Forget the traces the probe now reports committed, and any older than the
+   * overlap that could still list them — so the drain reclaims the recognition
+   * and the memory cannot grow past a bound.
+   */
+  reconcile(committed: ReadonlySet<string>, now: Date): void;
+};
+
+export function acceptedIdentities(): AcceptedIdentities {
+  const acceptedAt = new Map<string, number>();
+  return {
+    remember(traceId, now) {
+      acceptedAt.set(traceId, now.getTime());
+    },
+    has(traceId) {
+      return acceptedAt.has(traceId);
+    },
+    reconcile(committed, now) {
+      const floor = now.getTime() - ACCEPTED_IDENTITY_MEMORY_MILLISECONDS;
+      for (const [traceId, when] of acceptedAt) {
+        if (committed.has(traceId) || when <= floor) acceptedAt.delete(traceId);
+      }
+    },
+  };
+}
+
+/** No probe answer, for the turn-start prune that only ages entries out. */
+const NO_COMMITTED_IDENTITIES: ReadonlySet<string> = new Set();
+
 type PlatformLogEvent = Record<string, unknown>;
 
 export type RetellProductionIngestionLog = {
@@ -257,6 +327,12 @@ export type RunRetellProductionIngestionOptions = {
   readonly requestTimeoutMilliseconds?: number | undefined;
   readonly maxPagesPerTurn?: number | undefined;
   readonly maxTurnMilliseconds?: number | undefined;
+  /**
+   * The per-poller accepted-identity memory, carried across turns. A single
+   * turn defaults to its own, which is why a test that wants to prove one
+   * standing poller does not re-import across turns passes one in and reuses it.
+   */
+  readonly accepted?: AcceptedIdentities | undefined;
 };
 
 export type RetellProductionIngestionOptions =
@@ -635,6 +711,7 @@ type TurnOptions = {
   readonly provider: RetellProductionProvider;
   readonly lookup: RetellCommittedLookup;
   readonly acceptance: RetellEvidenceAcceptance;
+  readonly accepted: AcceptedIdentities;
   readonly clock: () => Date;
   readonly reach: RetellReach;
   readonly requestTimeoutMilliseconds: number;
@@ -805,6 +882,13 @@ async function handleCall(
     });
   }
   counts.accepted += 1;
+  // Durable now, query-visible only once the drainer takes it: remember the
+  // identity so a later overlap listing the same call recognises this poller's
+  // own work rather than importing one conversation twice.
+  options.accepted.remember(
+    traceIdFor(projectOf(target), providerCallId),
+    acceptedAt,
+  );
   if (ended.endedAt !== undefined) {
     options.metrics.recordIngestionLag(
       target.scanKind,
@@ -843,15 +927,10 @@ async function runTarget(
   const seenPaginationKeys = new Set(target.seenPaginationKeys);
   let leaseFinished = false;
   let batchLogged = false;
-  /**
-   * Provider call ids this turn has already dealt with.
-   *
-   * One turn, one attempt per call — and the two passes below can meet over the
-   * same call, because a retry that recovers deletes its row and its evidence
-   * is not visible until the drainer has taken it. Neither of the page's two
-   * batched questions can see work that recent, so this is what answers it.
-   */
-  const settledHere = new Set<string>();
+  // Age out anything this poller accepted long enough ago to be past every
+  // overlap that could list it again, so the memory the page consults below
+  // stays bounded whether or not the drain ever catches up.
+  options.accepted.reconcile(NO_COMMITTED_IDENTITIES, startedAt);
 
   const completed = (
     stoppedBecause?: RetellProductionIngestionResult["stoppedBecause"],
@@ -971,10 +1050,10 @@ async function runTarget(
           leaseFinished = true;
           return completed("lease_lost");
         }
-        // Recorded before the attempt rather than after it: whatever this
-        // becomes — accepted, retried again, dropped — the page below has its
-        // answer already and must not ask the provider a second time.
-        settledHere.add(owed.providerCallId);
+        // Whatever this attempt becomes, the page below already has its answer:
+        // a recovery is remembered in the accepted-identity memory the instant
+        // it is durable, and a reschedule or a drop leaves the transient row the
+        // page's batched lookup reads — so neither asks the provider again.
         const stopped = await stoppedBy(
           await handleCall(
             target,
@@ -1080,6 +1159,10 @@ async function runTarget(
             ),
           );
         }
+        // The probe has answered for this page's identities, so hand the drain's
+        // catch-up back to it: a trace it now reports is one the memory can stop
+        // holding, and the same call re-listed by the overlap ages out here too.
+        options.accepted.reconcile(committed, options.clock());
         const transient = await options.store.transientRetellCallState(
           target.auth,
           {
@@ -1093,19 +1176,17 @@ async function runTarget(
         for (const [index, listedCall] of listed.calls.entries()) {
           if (turnBoundReached()) return yieldBoundedTurn();
           const providerCallId = identities[index] ?? "";
-          // The retry pass above already dealt with this call this turn. Its
-          // row is gone and the drain that would make its evidence visible has
-          // not happened yet, so neither of the two questions below can see the
-          // work — and hydrating again would put a second reading of one
-          // conversation under one immutable identity. Where the provider
-          // reports no timestamps of its own, those two readings differ, and
-          // the drainer would rightly refuse the pair as an integrity defect
+          const traceId = traceIdFor(projectId, providerCallId);
+          // Committed in the store, or accepted by this poller and not yet
+          // drained: either way the page owes it nothing. The memory is what
+          // covers the gap the probe cannot — a call this turn's retry pass just
+          // recovered, whose row is gone, or one an earlier turn accepted across
+          // the accept-to-drain overlap. Hydrating again would put a second
+          // reading of one conversation under one immutable identity, and where
+          // the provider reports no timestamps of its own those readings differ
+          // and the drainer would rightly retain the pair as an integrity defect
           // that nothing outside this loop caused.
-          if (settledHere.has(providerCallId)) {
-            counts.settled += 1;
-            continue;
-          }
-          if (committed.has(traceIdFor(projectId, providerCallId))) {
+          if (committed.has(traceId) || options.accepted.has(traceId)) {
             counts.settled += 1;
             continue;
           }
@@ -1134,7 +1215,6 @@ async function runTarget(
             leaseFinished = true;
             return completed("lease_lost");
           }
-          settledHere.add(providerCallId);
           const stopped = await stoppedBy(
             await handleCall(
               target,
@@ -1237,6 +1317,9 @@ export async function runRetellProductionIngestion(
     provider: input.provider ?? PROVIDER,
     lookup: input.lookup ?? LOOKUP,
     acceptance: input.acceptance ?? ACCEPTANCE,
+    // One turn on its own remembers nothing past itself; the standing loop hands
+    // in a shared memory so a call accepted on one turn is recognised on the next.
+    accepted: input.accepted ?? acceptedIdentities(),
     clock,
     reach: input.reach ?? {},
     requestTimeoutMilliseconds: validPositiveInteger(
@@ -1270,8 +1353,12 @@ export function startRetellProductionIngestion(
       RETELL_PRODUCTION_INGESTION_WAKE_INTERVAL_MILLISECONDS,
     "the Retell production-ingestion cadence",
   );
+  // One memory for the life of the loop, so a call accepted on one turn is not
+  // imported again on the next while its drain is still behind.
+  const accepted = options.accepted ?? acceptedIdentities();
   const ingest =
-    options.ingest ?? (() => runRetellProductionIngestion(options));
+    options.ingest ??
+    (() => runRetellProductionIngestion({ ...options, accepted }));
 
   let running = false;
   let stopping = false;

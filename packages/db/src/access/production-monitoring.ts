@@ -1515,6 +1515,11 @@ export async function recordRetellCallAttempt(
  * hydration success would be a row deleted while the evidence was still only in
  * this process's memory, and a crash in that gap would leave a call nobody is
  * still trying and nobody has stored.
+ *
+ * Scoped to the project-and-call pair the row is unique on, which is the scope
+ * `recordRetellCallAttempt` finds and reassigns it by: two selected agents that
+ * both meet one provider call keep one row and one budget, so whichever agent
+ * makes that call durable is the one that clears it.
  */
 export async function deleteRetellCallRetry(
   auth: AuthContext,
@@ -1528,7 +1533,6 @@ export async function deleteRetellCallRetry(
       .where(
         and(
           withinMonitoringProject(auth, retellCallRetry),
-          eq(retellCallRetry.retellMonitoredAgentId, target.monitoredAgentId),
           eq(retellCallRetry.providerCallId, input.providerCallId),
         ),
       )
