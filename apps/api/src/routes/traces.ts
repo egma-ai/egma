@@ -498,11 +498,6 @@ async function simulatorExport(
     return unavailable(request, reply, encoding, cause);
   }
 
-  // And nothing goes to the grading queue, deliberately: a simulation's
-  // grading work is minted by the transaction that lands it terminal, so the
-  // telemetry path has nothing to add — a queue row from here would be the
-  // second job the landing already guards against.
-  //
   // One truthful answer: the normaliser's rejects plus the records acceptance
   // refused by name, and nothing that landed. The field is one string, and a
   // named field over its bound is the more actionable of the two, so it speaks

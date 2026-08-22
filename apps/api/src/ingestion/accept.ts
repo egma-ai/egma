@@ -332,9 +332,10 @@ async function upload(held: Standing, group: Group): Promise<void> {
       // One identity holding two different sets of bytes, which is this side's
       // defect and never a sender's. The stored object is left exactly as it
       // is, and this attempt's identity is abandoned rather than retried into:
-      // the records are evidence and go back to the front of the queue to be
-      // sealed under an identity of their own, while the seal frame that named
-      // the abandoned one is released because it now describes nothing.
+      // the records are evidence and go back in front of everything still
+      // waiting, to be sealed under an identity of their own, while the seal
+      // frame that named the abandoned one is released because it now
+      // describes nothing.
       held.logger.error(
         { err: cause, segmentId: attempt.segment.segmentId },
         "a sealed segment collided with a different object under its own identity",
@@ -347,8 +348,8 @@ async function upload(held: Standing, group: Group): Promise<void> {
 
     // Anything else is *not yet*: the store was unreachable, slow, or refused
     // the moment rather than the bytes. Nothing is released, the sealed segment
-    // stays at the head of the queue with its identity intact, and every call
-    // waiting on it is told to try again.
+    // stays where it is with its identity intact, and every call waiting on it
+    // is told to try again.
     held.logger.error(
       { err: cause, segmentId: attempt.segment.segmentId },
       "a sealed segment did not reach the ingestion bucket",
@@ -385,6 +386,11 @@ async function upload(held: Standing, group: Group): Promise<void> {
 async function flush(held: Standing): Promise<void> {
   const now = Date.now();
   for (const group of [...held.groups.values()]) {
+    // A stop that arrived mid-pass takes effect at the next group rather than
+    // after all of them, so what a shutdown can wait on is one upload's request
+    // bound and never the whole backlog's. Nothing is lost by stopping here:
+    // every record is framed on the disk and the next start recovers it.
+    if (held.closing) return;
     if (
       group.sealed.length === 0 &&
       shouldSeal(pendingGroup(group.waiting), held.bounds, now)

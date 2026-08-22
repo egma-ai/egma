@@ -95,8 +95,8 @@ export async function pendingSegments(
 }
 
 /**
- * Every pending object turned into rows, and then removed — the drainer's job,
- * stood in for while the drainer itself is a later ticket's.
+ * Every pending object turned into rows, and then removed — what the drainer
+ * does, stood in for until the drainer itself exists.
  *
  * It is here rather than inside a test file because the door stops at
  * durability by design: a suite whose claim is about what a reader sees has to

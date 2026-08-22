@@ -141,6 +141,19 @@ export type TestApiOptions = {
    */
   readonly ingestionFlushMilliseconds?: number;
   /**
+   * How long a request waits for object-store durability before it is answered
+   * retryably. Short here for the suites whose claim *is* the bound, so that
+   * proving it costs a second rather than the deployment's ten.
+   */
+  readonly ingestionRequestTimeoutMilliseconds?: number;
+  /**
+   * Where the local log lives, for the one case that needs two instances to
+   * share one: a stop and a start over staged evidence that outlived the
+   * process. A directory named here belongs to the caller and is left where it
+   * is on close.
+   */
+  readonly ingestionLogDirectory?: string;
+  /**
    * Somewhere to keep the log lines, for a test whose claim is about what is
    * not in them. Off by default: the suite runs silent, and a file that does
    * not read the log has no reason to collect one.
@@ -203,7 +216,8 @@ export async function createApi(
   const ingestionLogDirectory =
     options.ingestStore === undefined
       ? undefined
-      : mkdtempSync(path.join(tmpdir(), `egma-ingestion-${label}-`));
+      : (options.ingestionLogDirectory ??
+        mkdtempSync(path.join(tmpdir(), `egma-ingestion-${label}-`)));
 
   const base = testConfig({
     databaseUrl: database.url,
@@ -226,6 +240,12 @@ export async function createApi(
             store: options.ingestStore,
             logDirectory: ingestionLogDirectory,
             flushMilliseconds: options.ingestionFlushMilliseconds ?? 20,
+            ...(options.ingestionRequestTimeoutMilliseconds === undefined
+              ? {}
+              : {
+                  requestTimeoutMilliseconds:
+                    options.ingestionRequestTimeoutMilliseconds,
+                }),
           },
         };
 
@@ -282,7 +302,10 @@ export async function createApi(
       await app.close();
       await disconnect();
       await database.drop();
-      if (ingestionLogDirectory !== undefined) {
+      if (
+        ingestionLogDirectory !== undefined &&
+        options.ingestionLogDirectory === undefined
+      ) {
         rmSync(ingestionLogDirectory, { recursive: true, force: true });
       }
       if (traceStore !== undefined) {
