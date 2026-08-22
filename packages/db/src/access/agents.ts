@@ -1168,7 +1168,6 @@ function guardProjectScoped(auth: AuthContext, what: string): void {
 export async function archiveAgent(
   auth: AuthContext,
   id: string,
-  options: Record<string, never> = {},
 ): Promise<ArchivedAgent | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
@@ -1616,7 +1615,6 @@ export async function archiveConnection(
   auth: AuthContext,
   agentId: string,
   connectionId: string,
-  options: Record<string, never> = {},
 ): Promise<ArchivedConnection | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
