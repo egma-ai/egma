@@ -70,10 +70,6 @@ The `result` field in the response tells you exactly what happened:
   Display name for the agent. Required unless you want Egma to pick a numbered default. Must be unique within the project.
 </ParamField>
 
-<ParamField body="description" type="string">
-  Optional free-text description.
-</ParamField>
-
 <ParamField query="projectId" type="string">
   Project id or name to write this agent into. Defaults to the project your API key belongs to. In a single-project organization you never need this field.
 </ParamField>
@@ -138,7 +134,11 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="id" type="string">Unique agent identifier (`agt_…`).</ResponseField>
     <ResponseField name="projectId" type="string">The project this agent belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
-    <ResponseField name="description" type="string | null">Free-text description, or `null`.</ResponseField>
+    <ResponseField name="agentPlatform" type="string | null">The platform that runs this agent (`retell` or `livekit_agents`), or `null` while it is unbound.</ResponseField>
+    <ResponseField name="platformAgentId" type="string | null">That platform's own identifier for this agent, or `null`.</ResponseField>
+    <ResponseField name="monitoringKeyPresent" type="boolean">Whether a platform key is stored for pulling this agent's production conversations.</ResponseField>
+    <ResponseField name="monitoringApiKeyHint" type="string | null">Last four characters of that key, or `null`. Egma never returns the key itself.</ResponseField>
+    <ResponseField name="pullProductionCalls" type="boolean">Whether Egma pulls this agent's production conversations from its platform.</ResponseField>
     <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
     <ResponseField name="updatedAt" type="string">ISO 8601 timestamp.</ResponseField>
   </Expandable>
