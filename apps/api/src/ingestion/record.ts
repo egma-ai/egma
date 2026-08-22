@@ -103,6 +103,15 @@ export type IngestionRecord = {
   readonly platform_agent_id: string;
   readonly platform_agent_name: string;
   readonly platform_agent_version: string;
+  /**
+   * The connection's type, under the envelope's own frozen name.
+   *
+   * The TypeScript field became `connectionType` (ADR-0015) and this key did
+   * not follow it. The envelope is versioned by `v` (ADR-0014), so its key
+   * names are a wire contract with objects already written under them —
+   * changing one is a version change with a reader for both spellings behind
+   * it, never a rename.
+   */
   readonly connection_kind: string;
   readonly run_id: string;
   readonly agent_id: string;

@@ -394,6 +394,23 @@ describe("what a span says, as one comparable value", () => {
     expect(spanContentHash(span())).toBe(spanContentHash(span()));
   });
 
+  /**
+   * **The fingerprint of one fixed span, written down.**
+   *
+   * The stored `content_hash` is taken over key names, so renaming one — the
+   * frozen `connection_kind`, say, which no longer matches its TypeScript
+   * field — moves the fingerprint of every span already stored, and the
+   * drainer then reads each replay as a second account of one immutable
+   * identity and refuses the segment. Adding a field to `NewSpan` does the
+   * same. Neither is forbidden; both need somebody to decide it, and this is
+   * the line that makes them ask.
+   */
+  it("is the same fingerprint yesterday's Egma wrote", () => {
+    expect(spanContentHash(span())).toBe(
+      "ba722d17aefacf8e4533c8abbacf6355a26a1fe7aa63fd38411d87f04af4decb",
+    );
+  });
+
   it("moves when any part of the evidence does", () => {
     const original = span();
     for (const changed of [

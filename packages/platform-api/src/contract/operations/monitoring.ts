@@ -236,9 +236,13 @@ export const monitoringOperations = {
    * Stop pulling one agent's production calls.
    *
    * Everything stored stays stored: the transcripts, the agent's binding, its
-   * sealed key, and the notebook whose cursor a later start resumes from. The
-   * switch is what makes an agent due, so turning it off is the whole of
-   * stopping.
+   * sealed key, and its machine row. The switch is what makes an agent due, so
+   * turning it off is the whole of stopping.
+   *
+   * Turning it back on starts a new observation from that moment; it does not
+   * go back for what arrived while the switch was off. No cursor crosses the
+   * gap — the row survives so a later start can bump its generation and set
+   * its floor, not so it can resume a window.
    */
   stopMonitoring: defineOperation({
     operationId: "stopMonitoring",

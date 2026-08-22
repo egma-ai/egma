@@ -320,6 +320,14 @@ function asDateTime64(microseconds: bigint): string {
  * Keys are sorted so that object literal order cannot move a hash, and the two
  * 64-bit counts are written as decimal rather than left to `JSON.stringify`,
  * which refuses a `bigint` outright.
+ *
+ * **`connection_kind` is a frozen name, not a rename somebody missed.** The
+ * TypeScript field became `connectionType` (ADR-0015); this key did not follow
+ * it, because these key names are hashed. Renaming one changes the fingerprint
+ * of every span already stored, so the drainer would meet a stored hash that
+ * no longer matches the evidence it was taken from and refuse the whole
+ * segment as a second account of one immutable identity. Changing it is an
+ * evidence-contract change with a rewrite behind it, never a rename.
  */
 function canonicalEvidence(span: NewSpan): string {
   const evidence: Record<string, string | boolean> = {

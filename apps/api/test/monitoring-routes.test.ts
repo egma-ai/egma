@@ -635,7 +635,9 @@ describe("stopping monitoring", () => {
       },
     });
 
-    // The notebook survives: its cursor is what a later start resumes from.
+    // The notebook survives, for what a later start does to it rather than
+    // for anything it carries: bump the generation, set the floor at that
+    // moment. No cursor crosses the gap.
     const kept = await api.database.sql<{ states: string }>(
       "select count(*) as states from monitoring_state",
     );
