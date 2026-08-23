@@ -2848,7 +2848,7 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.getByRole("button", { name: "Create suite" }).click();
       const dialog = walk.getByRole("dialog", {
-        name: "Create a test suite",
+        name: "Create a suite",
       });
       await dialog.waitFor();
       await dialog.getByLabel("Suite name").fill("Support reception");
@@ -2880,10 +2880,11 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(suiteAddress);
       await walk.getByRole("link", { name: "Write a test" }).first().click();
       await walk.waitForURL(testWriterAddress());
-      await saysWithin(walk, "What should happen");
-      expect(await walk.innerText("main")).toContain(
-        "This test will stay in Support reception.",
-      );
+      // The writer is the side sheet the boards draw, over the suite it writes
+      // into: the block label is what the page says, and the panel's own
+      // sub-line is which suite this test will belong to.
+      await saysWithin(walk, "EXPECTED BEHAVIORS");
+      expect(await walk.innerText("main")).toContain("In suite Support reception");
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -3161,7 +3162,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Write a test",
         address: testWriterAddress(),
-        says: "What should happen",
+        says: "In suite Support reception",
       },
       {
         what: "one test",
@@ -4460,9 +4461,12 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(suiteAddress);
       await saysWithin(walk, "Reschedules a booked appointment");
 
-      await walk.getByRole("button", { name: "Rename suite" }).click();
+      // Renaming and deleting a suite live in the suite's own ⋮ menu now, and
+      // the rename surface is a side sheet named by the suite it is about.
+      await walk.getByRole("button", { name: "Open the suite menu" }).click();
+      await walk.getByRole("menuitem", { name: "Rename suite" }).click();
       const rename = walk.getByRole("dialog", {
-        name: "Rename test suite",
+        name: "Support reception",
       });
       await rename.waitFor();
       await rename.getByLabel("Suite name").fill("Northside Ford");
@@ -4487,13 +4491,17 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.goto(suiteAddress);
       await saysWithin(walk, "Northside Ford");
-      await walk.getByRole("button", { name: "Delete suite" }).click();
+      await walk.getByRole("button", { name: "Open the suite menu" }).click();
+      await walk.getByRole("menuitem", { name: "Delete suite" }).click();
       const deletion = walk.getByRole("dialog", {
-        name: "Delete Northside Ford",
+        name: "Delete Northside Ford?",
       });
       await deletion.waitFor();
       expect(await deletion.innerText()).toContain(
-        "This permanently deletes Northside Ford and every test in it. You cannot restore them.",
+        "This deletes the suite and its tests. Nobody can author or run them after this.",
+      );
+      expect(await deletion.innerText()).toContain(
+        "Runs that already happened keep their results and transcripts.",
       );
 
       const deleteResponse = walk.waitForResponse(
