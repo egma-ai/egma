@@ -2697,34 +2697,18 @@ describe("the complete product, walked in order in a second project", () => {
       const connected = await connectionResponse;
       expect(connected.status(), await connected.text()).toBe(201);
 
-      // The panel closes onto the list the new agent is now a row of, and the
-      // row's own name link is its address — read from the product rather than
-      // reconstructed from a database id.
-      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      /*
+       * **The panel closes onto the agent it just made**, which is the record
+       * the person created rather than the list of everything that holds it.
+       * The address is read from the product — the browser is standing on it —
+       * rather than reconstructed from a database id.
+       */
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/agents/agt_[^/?#]+$`),
+      );
+      agentAddress = walk.url();
       await saysWithin(walk, "The Support line");
-      const named = walk
-        .getByRole("link", { name: "The Support line", exact: true })
-        .first();
-      await named.waitFor();
-      const agentHref = await named.getAttribute("href");
-      expect(
-        agentHref,
-        "the registered agent has a row that opens it",
-      ).toMatch(new RegExp(`^/projects/${second}/agents/agt_[^/]+$`));
-      agentAddress = new URL(agentHref ?? "/", origin).toString();
-
-      // And the way in is named on the row, as a link that opens it over the
-      // list rather than as four facts nobody can press.
       await saysWithin(walk, "Retell staging");
-      const connection = walk
-        .getByRole("link", { name: "Retell staging", exact: true })
-        .first();
-      await connection.waitFor();
-      const connectionHref = await connection.getAttribute("href");
-      expect(
-        connectionHref,
-        "the created connection opens from the row it is on",
-      ).toContain("sheet=connection");
 
       // The selected discovery candidate goes through the generic connection
       // write. The stored connection is only the public phone destination; the
@@ -2752,9 +2736,9 @@ describe("the complete product, walked in order in a second project", () => {
         credentials: null,
       });
       // The connection's own address still exists and still opens the same
-      // panel; the row's link is the query form of it.
-      connectionAddress = `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`;
-      expect(connectionHref).toContain(stored.rows[0]?.id ?? "");
+      // panel; the row's link, read off the list below, is the query form of it.
+      const storedConnectionId = stored.rows[0]?.id ?? "";
+      connectionAddress = `${agentAddress}/connections/${storedConnectionId}`;
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
@@ -2767,7 +2751,6 @@ describe("the complete product, walked in order in a second project", () => {
        * checking them first would pass for the wrong reason — and go on
        * passing after the connections it is meant to guard stopped being drawn.
        */
-      await saysWithin(walk, "Retell staging");
       const agentPage = await walk.innerText("main");
       expect(agentPage).toContain("Connections");
       // The pull switch, which is the only stored monitoring choice in the
@@ -2786,6 +2769,28 @@ describe("the complete product, walked in order in a second project", () => {
        */
       await walk.goto(at("agents"));
       await saysWithin(walk, "The Support line");
+      // The row's own name link is the agent's address, and it is the same one
+      // the panel landed on.
+      const named = walk
+        .getByRole("link", { name: "The Support line", exact: true })
+        .first();
+      await named.waitFor();
+      expect(
+        new URL((await named.getAttribute("href")) ?? "/", origin).toString(),
+        "the registered agent has a row that opens it",
+      ).toBe(agentAddress);
+      // And the way in is named on the row, as a link that opens it over the
+      // list rather than as four facts nobody can press.
+      const connection = walk
+        .getByRole("link", { name: "Retell staging", exact: true })
+        .first();
+      await connection.waitFor();
+      const connectionHref = await connection.getAttribute("href");
+      expect(
+        connectionHref,
+        "the created connection opens from the row it is on",
+      ).toContain("sheet=connection");
+      expect(connectionHref).toContain(storedConnectionId);
       const row = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
         .first();

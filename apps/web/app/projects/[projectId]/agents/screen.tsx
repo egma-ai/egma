@@ -469,8 +469,33 @@ export function AgentsScreen({
           role={role}
           onClose={close}
           onConnected={(result) => {
+            /*
+             * **A create lands on the record it just made.**
+             *
+             * Registering an agent writes two things — the agent and the first
+             * way in to it — and the page that holds both is the agent's own:
+             * its identity, whether egma pulls its production calls, and its
+             * connections. Closing onto the list instead left somebody who had
+             * just made something looking at a list of everything, with the
+             * one row they wanted to see somewhere in it.
+             *
+             * It replaces rather than pushes, because the address behind is
+             * `…/agents/new` — the panel they just finished with. Back should
+             * be the list they opened it from, not the form opening again. The
+             * onboarding forward above keeps its push: that flow began on the
+             * agent's own page and the step behind it is a real one.
+             *
+             * Adding a connection to an agent that already existed is the
+             * other half of this panel and is not a create: that one closes
+             * onto the list it was opened over, which is where the row it
+             * changed is.
+             */
             if (sheet.onboarding === true) {
               router.push(projectPath(projectId, "agents", result.agentId));
+              return;
+            }
+            if (result.created) {
+              router.replace(projectPath(projectId, "agents", result.agentId));
               return;
             }
             router.replace(home);
