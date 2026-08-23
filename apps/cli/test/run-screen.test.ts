@@ -327,7 +327,9 @@ describe("the skill offer and what is left behind", () => {
     // Where they went, in the installer's own words rather than in a path egma
     // guessed at before it ran.
     expect(left).toContain(path.join(".claude", "skills", "egma"));
-    expect(left).toContain("Commit them");
+    expect(left).toContain("Commit all of it");
+    // The second thing a project install puts in the repository is named too.
+    expect(left).toContain("skills-lock.json");
   });
 
   it("writes the skills into the home on [g], leaving the repository alone", async () => {

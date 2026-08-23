@@ -135,19 +135,16 @@ export const GOAL_LINES: Readonly<Record<WizardGoal, string>> = {
 export const GOAL_ASK_LINE = "What should Egma do for this voice agent?";
 
 /**
- * Which egma a walk will use, and how a developer would change it.
+ * Which egma a walk will use.
  *
- * The address alone is not enough for the screen that shows it. An unbound
- * repository changes egma by naming another one on the command; a bound one
- * cannot — a different `--url` is refused, with the whole move under it — and
- * changes egma by editing the file it already commits. Offering the wrong one
- * of those sends somebody to a command egma turns away, so the fact that
- * decides which is carried here rather than guessed at the screen.
+ * Only the address, because only one kind of repository ever reads this screen.
+ * A repository that has committed a platform has an `egma/` folder, and the
+ * wizard refuses one of those before it draws anything — so every walk that
+ * gets here is unbound, and naming another egma on the command really is the
+ * way to change it.
  */
 export type PlatformNotice = {
   readonly url: string;
-  /** True when `egma/config.yaml` names it. */
-  readonly bound: boolean;
 };
 
 export interface WizardUI {
@@ -204,14 +201,6 @@ export interface WizardUI {
   takeLoginPaste(): string | null;
 
   /**
-   * What egma needs handed to it before it can reach the developer's provider,
-   * or `null` once it no longer needs it.
-   *
-   * A write and not a question, exactly as `setLogin` is. The flow says what
-   * is wanted and what happens to it; whether that is drawn in a box with the
-   * characters hidden or printed as two plain lines is the UI's business.
-   */
-  /**
    * The one question about what Egma is here to do, while it is open, or
    * `null` when it is closed.
    *
@@ -220,6 +209,14 @@ export interface WizardUI {
    */
   setGoalAsk(ask: GoalAsk | null): void;
 
+  /**
+   * What egma needs handed to it before it can reach the developer's provider,
+   * or `null` once it no longer needs it.
+   *
+   * A write and not a question, exactly as `setLogin` is. The flow says what
+   * is wanted and what happens to it; whether that is drawn in a box with the
+   * characters hidden or printed as two plain lines is the UI's business.
+   */
   setKeyAsk(ask: KeyAsk | null): void;
 
   /**

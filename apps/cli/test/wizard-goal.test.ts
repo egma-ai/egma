@@ -293,7 +293,13 @@ describe("a repository that has already been through the wizard", () => {
       howManyTests: 1,
     });
 
-    expect(report).toEqual({ kind: "already-onboarded", folder: "egma/" });
+    // The folder holds a config and no suite, which is exactly what a walk
+    // that stopped between binding and registering leaves behind.
+    expect(report).toEqual({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: false,
+    });
     expect(ui.record.phase).toBe("already-onboarded");
 
     // The coding agent was never started, so nothing was asked of it.
@@ -310,5 +316,45 @@ describe("a repository that has already been through the wizard", () => {
     const line = buildExitLine(report);
     expect(line).toContain("already set up");
     expect(line).toContain("Delete or rename egma/");
+    // And it does not send them to a command that would refuse this folder.
+    expect(line).not.toContain("egma push");
+  });
+
+  /**
+   * The same refusal, with the other half of its sentence, for the folder that
+   * really can be pushed and run as it stands.
+   */
+  it("names push and run when the folder already holds a suite", async () => {
+    const paths = folderPathsIn(workspace.dir);
+    await mkdir(path.join(paths.tests, "release"), { recursive: true });
+    await writeFile(paths.config, "project:\n  name: Bookbinding\n", "utf8");
+    await writeFile(
+      path.join(paths.tests, "release", "suite.yaml"),
+      "id: ste_01K7QXV2M8ZB4C6D8E0F2G4H6J\nname: Release\n",
+      "utf8",
+    );
+
+    const script = await workspace.script({ steps: FOUND });
+    const report = await runWizard({
+      ui: new HeadlessUI(),
+      launch: workspace.launch(script),
+      cwd: workspace.dir,
+      signal: new AbortController().signal,
+      platform: selectedPlatform({
+        url: platform.url,
+        credentialsFile: workspace.credentialsFile,
+      }),
+      retell: { url: retell.url },
+      home: path.join(workspace.dir, "pretend-home"),
+    });
+
+    expect(report).toEqual({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: true,
+    });
+    expect(buildExitLine(report)).toContain(
+      "egma push and egma run on the tests that are already there",
+    );
   });
 });

@@ -19,7 +19,7 @@
 
 import { Box, Text, useInput } from "ink";
 
-import type { SkillPlaces } from "../../../skills/install.ts";
+import { SKILLS_LOCK_FILE, type SkillPlaces } from "../../../skills/install.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
 
 export type SkillsOfferScreenProps = {
@@ -62,13 +62,13 @@ export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) 
       <Text bold>Egma</Text>
       <Box height={1} />
       <Text>
-        {`Install ${places.skills.length} Egma skills into ${places.name}, so it can drive Egma on its own next time?`}
+        {`Install ${places.skills.length} Egma ${places.skills.length === 1 ? "skill" : "skills"} into ${places.name}, so it can drive Egma on its own next time?`}
       </Text>
       <Text dimColor>{places.skills.join(", ")}</Text>
       <Box height={1} />
       {/* Said before anything is written, because a tree a developer reads
           afterwards is a tree they were not asked about. */}
-      <Text dimColor>{`[p] writes into ${places.repository}`}</Text>
+      <Text dimColor>{`[p] writes into ${places.repository}, and ${SKILLS_LOCK_FILE} beside it`}</Text>
       <Text dimColor>{`[g] writes into ${places.home}`}</Text>
       <Text dimColor>[s] writes nothing at all</Text>
       <Box height={1} />

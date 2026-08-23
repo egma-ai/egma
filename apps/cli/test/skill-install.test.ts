@@ -42,6 +42,7 @@ import {
   skillsCliEntry,
   skippedLine,
   SKILLS_CLI_PACKAGE,
+  SKILLS_LOCK_FILE,
 } from "../src/skills/install.ts";
 import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
 import { CLI_ENTRY, filesUnder, makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -264,11 +265,40 @@ describe("installing them", () => {
 
     const said = installedLine("project", places, ["./.claude/skills/egma"]);
     expect(said).toContain("./.claude/skills/egma");
-    expect(said).toContain("Commit them");
+    expect(said).toContain("Commit all of it");
+    // The lock file is the one thing a project install writes that is not a
+    // skill, and a developer who finds it in their diff was told about it.
+    expect(said).toContain(SKILLS_LOCK_FILE);
     expect(installedLine("global", places, [])).toContain("Claude Code");
+    // Global scope writes no lock file into the repository, so it names none.
+    expect(installedLine("global", places, [])).not.toContain(SKILLS_LOCK_FILE);
+
+    // Counted from what the installer said it wrote, never from what the offer
+    // said it would: on the day one of them fails those are different numbers,
+    // and the line a developer keeps has to be about what really happened.
+    expect(installedLine("project", places, ["a", "b"])).toContain("2 Egma skills are");
+    expect(installedLine("project", places, ["a"])).toContain("1 Egma skill is");
+    expect(installedLine("project", places, [])).toContain("The Egma skills are");
 
     expect(skippedLine(places.name)).toContain("Nothing was installed");
     expect(skippedLine(places.name)).toContain("egma --help");
+  });
+
+  /**
+   * A project install writes a lock file at the repository root beside the
+   * skills. It is committed with everything else, so it is disclosed with
+   * everything else.
+   */
+  it("really does write the lock file it says it writes", async () => {
+    const places = placesFor("claude");
+    if (places === null) throw new Error("Claude Code has an installer name");
+
+    const installed = await installEgmaSkills({ places, scope: "project" });
+    expect(installed.kind).toBe("installed");
+    if (installed.kind !== "installed") throw new Error(installed.reason);
+
+    expect(await filesUnder(repository.dir)).toContain(SKILLS_LOCK_FILE);
+    expect(installedLine("project", places, installed.landed)).toContain(SKILLS_LOCK_FILE);
   });
 });
 

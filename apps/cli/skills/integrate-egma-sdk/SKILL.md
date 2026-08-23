@@ -19,6 +19,10 @@ on production export, and the monitoring entry never serves a mock tool. Wiring
 one in the hope that it does the other's job is the one mistake this skill
 exists to prevent.
 
+**The SDK is published for Python only today.** A LiveKit worker written against
+the Node package `@livekit/agents` has nothing to add: say so plainly and change
+nothing rather than reaching for an equivalent that does not exist.
+
 ## Install the package
 
 The SDK is published as `egma` for Python. Add it the way this repository

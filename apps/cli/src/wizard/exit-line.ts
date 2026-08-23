@@ -136,8 +136,20 @@ export type ExitReport =
    * v1 of the wizard onboards new repositories. A second run over a folder
    * somebody already committed would half-write another suite into it, so it
    * refuses before it starts anything and says the one thing that redoes setup.
+   *
+   * `hasSuites` is why the refusal is two sentences and not one. A folder
+   * holding tests can be pushed and run as it stands, and saying so is the
+   * useful half of this line. A folder holding only a binding — which is what
+   * an earlier walk that stopped between binding and registering leaves behind
+   * — cannot: `egma push` refuses it for the contract it does not yet have, and
+   * sending somebody to that command would be egma naming a command egma turns
+   * away.
    */
-  | { readonly kind: "already-onboarded"; readonly folder: string }
+  | {
+      readonly kind: "already-onboarded";
+      readonly folder: string;
+      readonly hasSuites: boolean;
+    }
   /**
    * The coding agent stopped the work itself and said why. It is not the same
    * as finding nothing, and saying it was would put words in the agent's mouth.
@@ -275,11 +287,15 @@ export function buildExitLine(report: ExitReport): string {
           : " Run egma again and choose testing whenever you want tests as well.";
       return `${asked} ${where}${again}`;
     }
-    case "already-onboarded":
+    case "already-onboarded": {
+      const redo = `Delete or rename ${report.folder} and run egma again to redo setup`;
       return (
         `Egma is already set up here: ${report.folder} exists, and the wizard only works with new repositories for now. ` +
-        `Delete or rename ${report.folder} and run egma again to redo setup, or use egma push and egma run on what is already there.`
+        (report.hasSuites
+          ? `${redo}, or use egma push and egma run on the tests that are already there.`
+          : `${redo}.`)
       );
+    }
     case "coding-agent-stopped":
       return oneLine(report.reason) === ""
         ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`

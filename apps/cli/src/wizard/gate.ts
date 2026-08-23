@@ -174,7 +174,7 @@ function personaColumn(personas: readonly FilePersona[]): string {
  * what a mock tool may hold is Egma's to decide, and a summary that only knew
  * today's keys would quietly say nothing about tomorrow's.
  */
-export function saysOf(entry: MockToolEntry): string {
+function saysOf(entry: MockToolEntry): string {
   const held = entry.says;
   const delay = typeof held["delay_ms"] === "number" ? `, after ${String(held["delay_ms"])}ms` : "";
   if ("error" in held) {
@@ -187,7 +187,7 @@ export function saysOf(entry: MockToolEntry): string {
 }
 
 /** The mocked world as rows, in the order the file wrote it. */
-export function mocksFrom(entries: readonly MockToolEntry[]): readonly GateMock[] {
+function mocksFrom(entries: readonly MockToolEntry[]): readonly GateMock[] {
   return entries.map((entry) => ({ tool: entry.tool, says: saysOf(entry) }));
 }
 

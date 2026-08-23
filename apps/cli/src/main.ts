@@ -1026,7 +1026,6 @@ export async function main(argv: readonly string[]): Promise<void> {
       const selected = chosen;
       process.exitCode = await theWizard({
         url: selected.url,
-        bound: selected.binding !== null,
         credentialsFile: selected.credentialsFile,
       });
     }

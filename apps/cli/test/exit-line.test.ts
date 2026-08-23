@@ -75,7 +75,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "no-coding-agent" },
   { kind: "monitoring-in-the-web", goal: "monitoring", platformUrl: "https://egma.example" },
   { kind: "monitoring-in-the-web", goal: "both", platformUrl: null },
-  { kind: "already-onboarded", folder: "egma/" },
+  { kind: "already-onboarded", folder: "egma/", hasSuites: true },
+  { kind: "already-onboarded", folder: "egma/", hasSuites: false },
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
@@ -222,13 +223,31 @@ describe("the exit line", () => {
   /**
    * A repository that has been through the wizard is refused politely, and the
    * refusal has to carry the one thing that redoes setup on purpose.
+   *
+   * The second way forward is only a way forward when there is something to
+   * push. A folder holding a binding and no suite — which is what a walk that
+   * stopped between binding and registering leaves behind — is refused by
+   * `egma push` for the contract it does not have yet, so the line does not
+   * send anybody there.
    */
-  it("says how to redo setup in a repository that already has an egma folder", () => {
-    const line = buildExitLine({ kind: "already-onboarded", folder: "egma/" });
+  it("says how to redo setup, and names push and run only when there is a suite", () => {
+    const withTests = buildExitLine({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: true,
+    });
+    expect(withTests).toContain("already set up");
+    expect(withTests).toContain("only works with new repositories");
+    expect(withTests).toContain("Delete or rename egma/");
+    expect(withTests).toContain("egma push and egma run on the tests that are already there");
 
-    expect(line).toContain("already set up");
-    expect(line).toContain("only works with new repositories");
-    expect(line).toContain("Delete or rename egma/");
+    const empty = buildExitLine({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: false,
+    });
+    expect(empty).toContain("Delete or rename egma/ and run egma again to redo setup.");
+    expect(empty).not.toContain("egma push");
   });
 
   it("prints something to copy when the developer has to copy something", () => {
@@ -331,7 +350,7 @@ describe("the exit line", () => {
         },
       }),
     ).toBe(
-      "The 4 Egma skills are beside Claude Code. ~/.agents/skills/egma. Every repository you open Claude Code in has them.",
+      "1 Egma skill is beside Claude Code. ~/.agents/skills/egma. Every repository you open Claude Code in has them.",
     );
 
     // Where they went, in the installer's own words, because that is the only
@@ -350,7 +369,7 @@ describe("the exit line", () => {
         },
       }),
     ).toBe(
-      "The 4 Egma skills are in this repository. ./.claude/skills/egma, ./.claude/skills/write-egma-tests. Commit them, and everybody on this repository has them.",
+      "2 Egma skills are in this repository. ./.claude/skills/egma, ./.claude/skills/write-egma-tests. It also wrote skills-lock.json at the repository root. Commit all of it, and everybody on this repository has these skills.",
     );
 
     // An offer accepted and not kept is never silent either.

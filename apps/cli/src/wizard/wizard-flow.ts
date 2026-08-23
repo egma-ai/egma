@@ -22,7 +22,8 @@
  * a terminal has never stopped one.
  */
 
-import { stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import process from "node:process";
 import path from "node:path";
 
@@ -32,7 +33,11 @@ import {
   type InstalledCodingAgent,
 } from "../acp/coding-agents.ts";
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
-import { FOLDER_NAME, folderPathsIn } from "../folder/egma-folder.ts";
+import {
+  FOLDER_NAME,
+  folderPathsIn,
+  SUITE_MANIFEST_FILE_NAME,
+} from "../folder/egma-folder.ts";
 import type { Registered, RegisterOptions } from "../platform/agents.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
@@ -175,6 +180,7 @@ async function runWizardFlow(
     const report: ExitReport = {
       kind: "already-onboarded",
       folder: `${FOLDER_NAME}/`,
+      hasSuites: await hasASuite(cwd),
     };
     ui.setExit(report);
     return report;
@@ -228,9 +234,7 @@ async function runWizardFlow(
   // platform by default, so where a repository's identifiers are going is the
   // developer's to read first, not to find out afterwards.
   ui.setPlatform(
-    options.platform === undefined
-      ? null
-      : { url: options.platform.url, bound: options.platform.bound },
+    options.platform === undefined ? null : { url: options.platform.url },
   );
 
   await untilAborted(ui.waitForGate("begin"), signal);
@@ -285,6 +289,38 @@ async function hasAnEgmaFolder(cwd: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether that folder holds a suite egma could push and run as it stands.
+ *
+ * Asked because the refusal offers `egma push` and `egma run` as the other way
+ * forward, and those are only the other way forward when there is something to
+ * push. A folder left behind by a walk that stopped between binding and
+ * registering holds a platform line and nothing else, and `egma push` refuses
+ * it. One manifest is the whole question, so it is answered by looking for one
+ * rather than by parsing the repository — a folder egma cannot read is a folder
+ * with nothing to offer either.
+ */
+async function hasASuite(cwd: string): Promise<boolean> {
+  const paths = folderPathsIn(cwd);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(paths.tests, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const found = await stat(
+      path.join(paths.tests, entry.name, SUITE_MANIFEST_FILE_NAME),
+    ).then(
+      (manifest) => manifest.isFile(),
+      () => false,
+    );
+    if (found) return true;
+  }
+  return false;
 }
 
 /**

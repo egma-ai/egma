@@ -52,7 +52,45 @@ import { stopReport } from "./stop.ts";
 import { GenerationTally } from "./test-generation.ts";
 
 /** The fact the coding agent reports the edited worker file under. */
-export const SDK_ENTRY_FACT = "sdk-entry";
+const SDK_ENTRY_FACT = "sdk-entry";
+
+/**
+ * The Node LiveKit package, which discovery reports by its own name.
+ *
+ * `livekit-agents` is the Python package and `@livekit/agents` is the Node one.
+ * Both are LiveKit and only one of them has an Egma SDK to put inside it.
+ */
+const NODE_LIVEKIT = /@livekit\/agents/iu;
+
+/**
+ * Whether the worker this repository runs is the Node one.
+ *
+ * Read off the framework discovery reported rather than guessed at from the
+ * repository: it is the same fact the platform route was chosen by. A LiveKit
+ * repository that named neither flavour is treated as the Python one, which is
+ * the flavour the SDK ships for and the flavour every instruction here is
+ * written in — and a worker whose entrypoint nobody can identify falls back to
+ * printed lines either way.
+ */
+function isNodeLiveKitWorker(facts: Facts): boolean {
+  return NODE_LIVEKIT.test(facts.get("framework") ?? "");
+}
+
+/**
+ * What a Node worker is told instead, since there is nothing to wire into it.
+ *
+ * Said plainly and never fatally. The Egma SDK ships for Python today, so a
+ * Node LiveKit repository gets the run every LiveKit repository got before this
+ * step existed: real tools, no mock tools, no coverage stamp. Writing a mocked
+ * world for it would be writing answers nothing can serve, and wiring a Python
+ * import into a TypeScript worker would be worse than either.
+ */
+function nodeWorkerLines(): readonly string[] {
+  return [
+    "This is a Node LiveKit worker, and the Egma SDK is Python only today, so nothing was wired into it.",
+    "This run serves no mock tools: every tool this agent has runs for real.",
+  ];
+}
 
 /** What this step knows before it dispatches anything. */
 export type MockAuthoringContext = {
@@ -90,7 +128,7 @@ function testsBlock(tests: readonly string[]): readonly string[] {
 }
 
 /** What Egma asks the coding agent to do, on top of the public skill. */
-export function mockAuthoringTask(context: MockAuthoringContext): string {
+function mockAuthoringTask(context: MockAuthoringContext): string {
   return [
     "# Your task",
     "",
@@ -232,8 +270,6 @@ export type MockAuthored = {
   readonly halted: ExitReport | null;
   /** Where the testing entry landed, or `null` when nothing was edited. */
   readonly sdkEntry: string | null;
-  /** The project's mocked world, read back off the disk. */
-  readonly mockTools: readonly MockToolEntry[];
 };
 
 /**
@@ -247,6 +283,13 @@ export async function mockAuthoringStep(
   options: MockAuthoringOptions,
 ): Promise<MockAuthored> {
   const { ui, drivenAgent, signal, log } = options;
+
+  // Nothing to wire and nothing worth authoring, so nothing is dispatched. The
+  // walk carries straight on to the gate with one honest sentence behind it.
+  if (isNodeLiveKitWorker(options.context.facts)) {
+    for (const line of nodeWorkerLines()) ui.pushStatus(line);
+    return { halted: null, sdkEntry: null };
+  }
 
   const tally = new GenerationTally("mocking", 0);
   const markers = new MarkerStream();
@@ -361,5 +404,5 @@ export async function mockAuthoringStep(
     }
   }
 
-  return { halted, sdkEntry, mockTools };
+  return { halted, sdkEntry };
 }

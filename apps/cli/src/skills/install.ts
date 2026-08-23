@@ -53,6 +53,16 @@ export type SkillChoice = SkillScope | "skip";
 export const SKILLS_CLI_PACKAGE = "skills";
 
 /**
+ * The file the installer writes at the repository root at project scope.
+ *
+ * It is the second thing a project install puts in somebody's repository, and
+ * the only one that is not a skill. A developer who is told about four skill
+ * directories and then finds a fifth file in their diff has been told most of
+ * the truth, so both the offer and the line the offer leaves behind name it.
+ */
+export const SKILLS_LOCK_FILE = "skills-lock.json";
+
+/**
  * What the skills CLI calls each coding agent Egma can drive.
  *
  * The two lists are separate vocabularies and this is the whole of the
@@ -303,20 +313,31 @@ export async function installEgmaSkills(
   };
 }
 
-/** What the developer is told once the skills are written. */
+/**
+ * What the developer is told once the skills are written.
+ *
+ * Counted from what the installer said it wrote, never from what the offer said
+ * it would write. The two are the same on an ordinary install and they are not
+ * the same on the day one of them fails, and the line a developer keeps has to
+ * be about what really happened. An installer that said nothing egma could read
+ * gets a sentence with no count in it rather than a count egma invented.
+ */
 export function installedLine(
   scope: SkillScope,
   places: SkillPlaces,
   landed: readonly string[],
 ): string {
-  const count = places.skills.length;
-  const many = `${count} Egma ${count === 1 ? "skill is" : "skills are"}`;
+  const written = landed.length;
+  const many =
+    written === 0
+      ? "The Egma skills are"
+      : `${written} Egma ${written === 1 ? "skill is" : "skills are"}`;
   // Where they went, in the installer's own words, because it is the only
   // account of that which cannot be wrong.
-  const where = landed.length === 0 ? "" : ` ${landed.join(", ")}.`;
+  const where = written === 0 ? "" : ` ${landed.join(", ")}.`;
   return scope === "project"
-    ? `The ${many} in this repository.${where} Commit them, and everybody on this repository has them.`
-    : `The ${many} beside ${places.name}.${where} Every repository you open ${places.name} in has them.`;
+    ? `${many} in this repository.${where} It also wrote ${SKILLS_LOCK_FILE} at the repository root. Commit all of it, and everybody on this repository has these skills.`
+    : `${many} beside ${places.name}.${where} Every repository you open ${places.name} in has them.`;
 }
 
 /** What the developer is told when they skip, so skipping is never silent. */

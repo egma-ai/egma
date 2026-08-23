@@ -15,6 +15,7 @@ import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
 import { liveKitConnectionSetupStep } from "../src/wizard/livekit-connection-setup-step.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
+import { sdkEntryInstructions } from "../src/wizard/mock-authoring-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -74,6 +75,14 @@ const MOCK_TOOLS_FILE = [
 
 /** The one fragment that names the mock-authoring task and nothing else. */
 const MOCK_AUTHORING_TASK = "run isolated from its real";
+
+/** What the scripted agent does when it cannot identify one job entrypoint. */
+function cannotFindTheWorker(): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:none Two workers define an entrypoint and neither is obviously the one.\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
 
 /** What the scripted agent does when Egma sends it the mock-authoring task. */
 function mockingSteps(): FakeStep[] {
@@ -358,28 +367,26 @@ describe("LiveKit in the wizard", () => {
   });
 
   /**
-   * The whole LiveKit testing lane, offline, asserted on what a developer could
-   * check afterwards: which files landed and what they say, what the platform
-   * was sent, and what the last line said.
-   *
-   * The gap this closes is the one the effort exists for. Before it, a
-   * wizard-onboarded LiveKit repository ran its first simulations with no Egma
-   * in the worker, no mocked world, and nothing on screen that said so.
+   * The whole LiveKit testing lane, offline, with the mock-authoring dispatch
+   * scripted however the case at hand needs it.
    */
-  it("wires the SDK, writes the mocked world, and shows both at the gate", async () => {
+  async function liveKitLane(options: {
+    readonly framework: string;
+    readonly mocking: FakeStep[];
+  }) {
     const script = await workspace.script({
       steps: [{ kind: "stop", reason: "end_turn" }],
       stepsByTask: [
         {
           contains: "Find the voice agent in",
           steps: [
-            { kind: "say", text: "egma:found framework livekit-agents\n" },
+            { kind: "say", text: `egma:found framework ${options.framework}\n` },
             { kind: "say", text: "egma:found agent-name front-desk\n" },
             { kind: "say", text: "egma:found tools agent.py (1 definition)\n" },
             { kind: "stop", reason: "end_turn" },
           ],
         },
-        { contains: MOCK_AUTHORING_TASK, steps: mockingSteps() },
+        { contains: MOCK_AUTHORING_TASK, steps: options.mocking },
         { contains: "Write 1 test", steps: writingSteps() },
       ],
     });
@@ -394,9 +401,8 @@ describe("LiveKit in the wizard", () => {
     });
 
     const grading = gradeEveryRun(platform, { atMost: 1 });
-    let report;
     try {
-      report = await runWizard({
+      const report = await runWizard({
         ui,
         launch: { ...workspace.launch(script), id: "codex-acp", name: "Codex" },
         cwd: workspace.dir,
@@ -409,9 +415,26 @@ describe("LiveKit in the wizard", () => {
         howManyTests: 1,
         runPollMs: 20,
       });
+      return { report, ui };
     } finally {
       grading.stop();
     }
+  }
+
+  /**
+   * The whole LiveKit testing lane, offline, asserted on what a developer could
+   * check afterwards: which files landed and what they say, what the platform
+   * was sent, and what the last line said.
+   *
+   * The gap this closes is the one the effort exists for. Before it, a
+   * wizard-onboarded LiveKit repository ran its first simulations with no Egma
+   * in the worker, no mocked world, and nothing on screen that said so.
+   */
+  it("wires the SDK, writes the mocked world, and shows both at the gate", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      mocking: mockingSteps(),
+    });
 
     expect(report.kind).toBe("run-started");
 
@@ -446,6 +469,71 @@ describe("LiveKit in the wizard", () => {
     // And the one edit the wizard made to the developer's own code is named on
     // the same screen: pressing enter runs against a worker Egma just changed.
     expect(ui.record.gate?.changed).toEqual(["agent.py"]);
+  });
+
+  /**
+   * The branch that decides whether a LiveKit walk dies or reaches a run.
+   *
+   * A coding agent that cannot identify one job entrypoint edits nothing and
+   * says so. Egma does not stop: it prints its own lines for the developer to
+   * add by hand, and the walk finishes with the run it came for — which is the
+   * run every LiveKit repository got before this step existed. What it must
+   * never do is claim a seam it did not wire.
+   */
+  it("prints the lines itself when the worker cannot be found, and still runs", async () => {
+    const before = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      mocking: cannotFindTheWorker(),
+    });
+
+    // The walk reached what it came for.
+    expect(report.kind).toBe("run-started");
+    expect(platform.running.runs).toHaveLength(1);
+
+    // Egma's own block, word for word, rather than whatever the agent printed.
+    for (const line of sdkEntryInstructions()) {
+      if (line === "") continue;
+      expect(ui.record.statuses).toContain(line);
+    }
+    // And the agent's own reason for not finding one is shown above it.
+    expect(ui.record.statuses.join("\n")).toContain("Two workers define an entrypoint");
+
+    // No seam was claimed and none was made.
+    expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(false);
+    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(before);
+    expect(ui.record.gate?.changed).toEqual([]);
+    expect(ui.record.gate?.mocks).toEqual([]);
+    expect(platform.mocking.mockTools).toHaveLength(0);
+  });
+
+  /**
+   * A Node LiveKit worker has no Egma SDK to put inside it.
+   *
+   * The SDK ships for Python today. Wiring a Python import into a TypeScript
+   * worker would be worse than doing nothing, and writing a mocked world for a
+   * worker that can never serve it would be writing answers nobody reads. So
+   * the step says which of those it is and the walk carries on.
+   */
+  it("says the SDK is Python only for a Node worker, and dispatches nothing", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "@livekit/agents",
+      mocking: mockingSteps(),
+    });
+
+    expect(report.kind).toBe("run-started");
+    expect(ui.record.statuses.join(" ")).toContain("Egma SDK is Python only today");
+    expect(ui.record.gate?.changed).toEqual([]);
+    expect(ui.record.gate?.mocks).toEqual([]);
+
+    // The mock-authoring task was never sent: there was nothing to ask for.
+    const driven = JSON.parse(
+      await readFile(path.join(workspace.dir, "fake-agent-report.json"), "utf8"),
+    ) as { instructions: string[] };
+    expect(driven.instructions.some((task) => task.includes(MOCK_AUTHORING_TASK))).toBe(
+      false,
+    );
   });
 });
 
