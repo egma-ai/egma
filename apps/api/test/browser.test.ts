@@ -2220,13 +2220,28 @@ describe("pressing Use on a second grader while the first one's form is open", (
  * then switches off.
  */
 describe("changing a running grader and switching it off", () => {
-  /** One running copy's button, from the table rather than the mobile list. */
-  function on(named: string, button: string) {
-    return page
+  /**
+   * One running copy's act, reached the way a person reaches it.
+   *
+   * **Both acts are inside the row's ⋮ now** (ui-refresh 10): the trailing lane
+   * is the same 48px slot on every list in the product, and two buttons drawn
+   * in the cell had pushed this one out to 156px. So the act is opened rather
+   * than pressed — the ⋮ from the table rather than from the mobile list, then
+   * the item in the panel it opens, which the kit draws at the end of the page.
+   */
+  async function act(named: string, item: string): Promise<void> {
+    await page
       .locator("table")
       .getByRole("row")
       .filter({ hasText: named })
-      .getByRole("button", { name: button });
+      .getByRole("button", { name: `Actions for ${named}` })
+      .click();
+    await page.getByRole("menuitem", { name: item, exact: true }).click();
+  }
+
+  /** Whether a copy is still on the list at all. */
+  function rowFor(named: string) {
+    return page.locator("table").getByRole("row").filter({ hasText: named });
   }
 
   /** Every row of the table, the heading row included. */
@@ -2269,7 +2284,7 @@ describe("changing a running grader and switching it off", () => {
       // Blocking, as anything switched on is unless somebody said otherwise.
       await page.waitForSelector("text=Blocks");
 
-      await on("Latency", "Edit").click();
+      await act("Latency", "Edit");
       await page.waitForSelector("text=Edit Latency");
 
       // Filled in from the copy, which is the half a source scan cannot see:
@@ -2292,7 +2307,7 @@ describe("changing a running grader and switching it off", () => {
       // And opening it again shows the saved value rather than the old one —
       // which is the whole round trip: the browser wrote it, the API versioned
       // it, and the list handed it back.
-      await on("Latency", "Edit").click();
+      await act("Latency", "Edit");
       await page.waitForSelector("text=Edit Latency");
       expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
     },
@@ -2305,7 +2320,7 @@ describe("changing a running grader and switching it off", () => {
       await page.goto(await gradersUrl("running"));
       await settlesAt(3);
 
-      await on("Latency", "Switch off").click();
+      await act("Latency", "Switch off");
 
       // The sentence that makes the button pressable: what stops is obvious,
       // and what stays is the thing somebody is actually worried about.
@@ -2320,7 +2335,7 @@ describe("changing a running grader and switching it off", () => {
       // project is created with is still there — only the one that was named
       // stopped judging.
       await settlesAt(2);
-      expect(await on("Latency", "Switch off").count()).toBe(0);
+      expect(await rowFor("Latency").count()).toBe(0);
       await page.waitForSelector("text=Expected behaviors");
     },
     SETTLE,

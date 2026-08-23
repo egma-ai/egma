@@ -70,6 +70,15 @@ export type MenuProps = {
     | "right-end";
   /** `dialog` for a panel with a field in it; `menu` for commands alone. */
   readonly panelRole?: "menu" | "dialog";
+  /**
+   * The trigger element itself, handed to a page that has to reach it later.
+   *
+   * The panel puts focus back on its own trigger when it closes, so this is not
+   * for that. It is for a page whose *item* opens something else — the Running
+   * graders list opens an editor beside the table — and which has to put focus
+   * back on the row a person came from once that editor closes.
+   */
+  readonly onTrigger?: (button: HTMLButtonElement | null) => void;
   readonly panelClassName?: string;
   readonly children: (close: () => void) => ReactNode;
 };
@@ -132,6 +141,7 @@ export function Menu({
   placement = "below-start",
   panelRole = "menu",
   panelClassName,
+  onTrigger,
   children,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
@@ -159,6 +169,22 @@ export function Menu({
    * has focus, and by then this has already put that back on the trigger.
    */
   const returnFocus = useCallback(() => triggerRef.current?.focus(), []);
+
+  /**
+   * Holding the trigger, and holding it **once**.
+   *
+   * The callback has to be the same function on every render or React detaches
+   * and re-attaches the ref each time, which churns the trigger through null on
+   * every keystroke somewhere else on the page. A caller's `onTrigger` is
+   * usually written inline at the call site, so it cannot be a dependency: it
+   * is kept in a ref and read when the element actually arrives.
+   */
+  const report = useRef(onTrigger);
+  report.current = onTrigger;
+  const holdTrigger = useCallback((button: HTMLButtonElement | null) => {
+    triggerRef.current = button;
+    report.current?.(button);
+  }, []);
 
   const close = useCallback(() => {
     returnFocus();
@@ -196,7 +222,7 @@ export function Menu({
             triggerClassName ?? MENU_ITEM,
             open ? (openClassName ?? "") : "",
           )}
-          ref={triggerRef}
+          ref={holdTrigger}
           aria-haspopup={panelRole}
           aria-label={label}
         >

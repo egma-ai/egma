@@ -34,6 +34,7 @@ import { Actions, TOOLBAR_FILTER } from "../../../../ui/section.tsx";
 import { Refused } from "../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
+import { DestructiveItem, RowMenu } from "../../../../ui/row-menu.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
   ListInstant,
@@ -152,38 +153,41 @@ function columnsFor(
        * finished run in a healthy history.
        */
       action: true,
-      width: "100px",
       /*
        * Stopping a run without opening it.
        *
-       * **The button opens a row and does nothing else.** What it opens is one
+       * **The item opens a panel and does nothing else.** What it opens is one
        * panel drawn under the table, where the run name, consequences and retry
        * stay together at every viewport size instead of being squeezed into an
        * action cell.
        *
-       * A finished run has nothing to cancel, so it gets no control at all
-       * rather than a disabled one: a disabled control here would read as a
-       * broken feature on every row of a healthy history.
+       * **It is in the row's ⋮, like every other row control in the product.**
+       * A word drawn in the cell instead needed side padding the 48px lane has
+       * not got, and left the lane the wrong width on this screen: 100px where
+       * a run could be stopped, and nothing at all on a healthy history, where
+       * an empty cell let the column collapse to zero.
+       *
+       * A finished run has nothing to cancel, so it gets no menu at all rather
+       * than a menu holding one dead word: a disabled control here would read
+       * as a broken feature on every row of a healthy history. The lane stays
+       * open under it either way — that is the table's floor, not this cell's.
        */
       cell: (run) =>
         mayControl !== true || (run.status !== "pending" && run.status !== "running")
           ? ""
           : (
-              <Button
-                type="button"
-                variant="secondary"
-                /*
-                 * The trailing lane pays no side padding — it is sized for a
-                 * ⋮, and a control that carries a word instead would sit hard
-                 * against the panel's own edge. The margin is on the control
-                 * rather than the cell, and equal on both sides, so the lane
-                 * widens around it and the button stays centred in it.
-                 */
-                className="mx-4"
-                onClick={() => onCancel(run.id)}
-              >
-                Cancel
-              </Button>
+              <RowMenu label={`Actions for ${run.name ?? suiteLabel(run)}`}>
+                {(close) => (
+                  <DestructiveItem
+                    onClick={() => {
+                      close();
+                      onCancel(run.id);
+                    }}
+                  >
+                    Cancel run
+                  </DestructiveItem>
+                )}
+              </RowMenu>
             ),
     },
   ];

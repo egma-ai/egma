@@ -47,12 +47,11 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 import {
-  ConfirmDialog,
   DestructiveItem,
   MenuReason,
   RowMenu,
-  ToolbarMenu,
-} from "./parts.tsx";
+} from "../../../../ui/row-menu.tsx";
+import { ConfirmDialog, ToolbarMenu } from "./parts.tsx";
 import { RenameSuiteSheet } from "./suite-sheets.tsx";
 import { WriteTestSheet } from "./write-test-sheet.tsx";
 

@@ -33,7 +33,9 @@ import { cn } from "@/lib/utils";
  * labels; rows at least 52px with a hairline between them and none after the
  * last; and a fixed 48px slot at the trailing edge that every row carries, so
  * the ⋮ menus line up in one lane down the table whether or not a given row
- * has one. Read off `6ZM-0`, `71F-0` and `710-0` on 2026-08-23.
+ * has one. Read off `6ZM-0`, `71F-0` and `710-0` on 2026-08-23. The lane is a
+ * floor as well as a width — see `floorOf`, which is what stopped a crowded
+ * table squeezing it.
  *
  * Paging is keyset, so "more" means *carry on from where that page stopped*
  * rather than *skip a number of rows*. The control is here rather than in each
@@ -147,6 +149,23 @@ export function DataTable<Row>({
     return column.width;
   }
   /**
+   * The one width that is a floor rather than a preference.
+   *
+   * **A declared width on a table is a request, and an over-constrained table
+   * refuses it.** The layout is `auto`, so when the columns' own minimums add
+   * up to more than the table has — which every list with a long name in it
+   * reaches — a browser takes the shortfall out of the columns that can give
+   * it, and the trailing lane gives most: its content is one 36px glyph, or on
+   * a row with no control, nothing at all. That is how the same 48px
+   * declaration measured 48 on Agents, 40 on Personas and 0 on Runs.
+   *
+   * `min-width` is what the lane cannot be argued out of. It is written beside
+   * the width, on the header cell alone and for the same reason.
+   */
+  function floorOf(column: Column<Row>): string | undefined {
+    return column.action === true ? "var(--table-action-width)" : undefined;
+  }
+  /**
    * Whether the narrow layout leaves this column out.
    *
    * The primary column can never be omitted: it is the row's name, and a
@@ -190,7 +209,7 @@ export function DataTable<Row>({
                   data-mobile-hidden={mobileHidden(column)}
                   key={column.key}
                   scope="col"
-                  style={{ width: widthOf(column) }}
+                  style={{ width: widthOf(column), minWidth: floorOf(column) }}
                 >
                   {column.action === true ? "" : column.header}
                   {column.action === true ? (

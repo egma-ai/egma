@@ -36,11 +36,11 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 import {
-  ConfirmDialog,
   DestructiveItem,
   MenuReason,
   RowMenu,
-} from "./parts.tsx";
+} from "../../../../ui/row-menu.tsx";
+import { ConfirmDialog } from "./parts.tsx";
 import { CreateSuiteSheet, RenameSuiteSheet } from "./suite-sheets.tsx";
 
 /**
