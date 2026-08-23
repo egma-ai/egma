@@ -3821,6 +3821,8 @@ describe("the complete product, walked in order in a second project", () => {
         const cells: string[] = [];
         const rows: number[] = [];
         const lanes: number[] = [];
+        /** Where the toolbar strip ends and the panel under it begins. */
+        let strip = { ends: 0, panelBegins: 0 };
 
         for (const address of lists) {
           await walk.goto(address);
@@ -3829,11 +3831,44 @@ describe("the complete product, walked in order in a second project", () => {
           headings.push(Math.round(await heightOf(walk, "table thead tr")));
           cells.push(await cellStyle());
           rows.push(Math.round(await heightOf(walk, "table tbody tr")));
+          if (address === lists[0]) {
+            /*
+             * **The toolbar row carries the gap, and the panel starts on the
+             * pixel it ends on.** `71N-0` is a 52px strip — a 36px control with
+             * 16px under it — and `6ZM-0` begins at 132 from the top of the
+             * page, which is the title bar, the page gutter and that strip and
+             * nothing more. Read as a relationship rather than as 132, because
+             * 132 is three other numbers added up and this is the one of them
+             * that was wrong: the body was adding a second gutter under the
+             * strip and putting the panel at 156.
+             */
+            strip = await walk.evaluate(() => {
+              const find = (selector: string) =>
+                (
+                  Reflect.get(globalThis, "document") as {
+                    querySelector(one: string): {
+                      getBoundingClientRect(): {
+                        readonly top: number;
+                        readonly bottom: number;
+                      };
+                    } | null;
+                  }
+                ).querySelector(selector);
+              const toolbar = find('[data-slot="toolbar"]');
+              const panel = find('[data-slot="table-panel"]');
+              return {
+                ends: Math.round(toolbar?.getBoundingClientRect().bottom ?? -1),
+                panelBegins: Math.round(
+                  panel?.getBoundingClientRect().top ?? -2,
+                ),
+              };
+            });
+          }
           /*
-           * Only the lists that offer a row control have a lane. Two of the
-           * five do today; the rest gain one as their screens are rebuilt, and
-           * this measures whichever are there rather than demanding that every
-           * list grow a menu it has no use for.
+           * Only the lists that declare a trailing lane have one to measure.
+           * All five do now — the last two grew a row ⋮ in ui-refresh 10 — and
+           * this still measures whichever are there rather than demanding a
+           * lane of a list that has no row control to put in one.
            */
           const lane = walk.locator('table tbody td[data-action="true"]');
           if ((await lane.count()) > 0) {
@@ -3845,6 +3880,10 @@ describe("the complete product, walked in order in a second project", () => {
           }
         }
 
+        expect(
+          strip.panelBegins,
+          `the toolbar strip ends at ${String(strip.ends)}`,
+        ).toBe(strip.ends);
         expect(new Set(sidebars).size, sidebars.join(", ")).toBe(1);
         expect(new Set(headings).size, headings.join(", ")).toBe(1);
         expect(new Set(cells).size, cells.join(" | ")).toBe(1);

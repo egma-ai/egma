@@ -825,7 +825,12 @@ export function PageHeader({
     label !== undefined;
 
   return (
-    <header className="contents" data-slot="page-header">
+    /*
+     * `peer`, so the body under this header can read whether a toolbar row was
+     * drawn. See `PageBody`: the toolbar row carries the gap to whatever comes
+     * next, and a body that added its own would double it.
+     */
+    <header className="peer contents" data-slot="page-header">
       <div
         data-slot="page-topbar"
         className={cn(
@@ -890,6 +895,15 @@ export function PageHeader({
  * and the inner block is where `--page-content-max` is spent. It is not
  * centred: see `ProductPage`.
  *
+ * **The top gutter goes when a toolbar row was drawn, because that row already
+ * carries it.** `71N-0` is a 52px strip — a 36px control with 16px under it —
+ * and `6ZM-0`, the table, starts at the pixel the strip ends on: 132 from the
+ * top of the page, which is the 56px title bar, the 24px gutter and the 52px
+ * strip and nothing else. A body that added a gutter of its own under that
+ * strip put the panel at 156. A page whose header drew no toolbar row keeps the
+ * 24px, because then there is nothing above to carry it. (Read off `6ZJ-0`,
+ * 2026-08-23.)
+ *
  * `flex-1 min-h-0` on the inner block is what lets a viewport page hand its
  * remaining height to whatever it holds. `SettingsLayout` asks for `h-full`,
  * and a percentage height needs a parent with a settled one.
@@ -899,7 +913,9 @@ export function PageBody({ children }: { readonly children: ReactNode }) {
     <div
       className={cn(
         "flex min-w-0 flex-col px-(--page-gutter) pt-(--page-gutter) pb-10",
+        "peer-has-[[data-slot=toolbar]]:pt-0",
         "max-[900px]:px-4 max-[900px]:pt-4 max-[900px]:pb-8",
+        "max-[900px]:peer-has-[[data-slot=toolbar]]:pt-0",
       )}
       data-slot="page-body"
     >
