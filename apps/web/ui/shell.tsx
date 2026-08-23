@@ -760,18 +760,26 @@ export function ProductPage({
  * half of that row and is new; `action` is the right half and is the prop
  * every page already passes.
  *
- * `lead` rides in the bar beside the title, quiet and truncated. `DESIGN.md`
- * asks a page for "one clear page title and a short purpose statement", and
- * the bar is where the two belong together — the boards leave the right two
- * thirds of it empty. It shrinks first and the title never does, because a
- * title that truncated to make room for its own explanation would have the
- * hierarchy backwards.
+ * **The bar holds the page title and nothing else**, which is what `71V-0`
+ * draws. `lead` is a quiet line at the top of the page's own block — the
+ * purpose statement `DESIGN.md` asks for, kept where somebody reads it rather
+ * than squeezed into a 56px strip beside the title it explains.
  *
- * `eyebrow` is drawn as the first step of the trail rather than as a label
- * over the title: on a 56px bar there is one line, and "Settings / Project"
- * says in that line what two stacked lines used to. A page that supplies real
- * `breadcrumbs` draws those instead, because they are the same trail with
- * addresses on it.
+ * `eyebrow` moved out of the bar with it, and is drawn in the same quiet
+ * block. **It is not decoration on every page**: the transcript screen puts the
+ * trace's source and environment there — "production / default" — which is a
+ * fact about the record and the only place the page states it. On a list page
+ * it says "Project" over a page whose project the sidebar already names twice,
+ * which is noise; delete the prop when you next touch such a page, and the
+ * label goes with it. Real `breadcrumbs` still draw in the bar, as the trail
+ * into the record being read.
+ *
+ * **One `<header>` wraps both rows, and it is `display: contents`.** A page
+ * that walks up from its own title to find its own controls — the persona page
+ * does exactly that, and a test holds it to it — has to find one element
+ * holding both. A header that generates no box gives them that ancestor while
+ * the two rows still lay out as children of `<main>`, so the bar goes on
+ * sticking to the top of the page rather than to the header.
  */
 export function PageHeader({
   eyebrow,
@@ -790,9 +798,21 @@ export function PageHeader({
   /** Parent links and the current page, in that order. */
   readonly breadcrumbs?: PageNavigationItems;
 }) {
+  /*
+   * A page that draws a real trail does not also draw the label above it: the
+   * breadcrumb already says which section this record is in, and saying it
+   * twice is the thing this suppression has always been for.
+   */
+  const label = breadcrumbs === undefined ? eyebrow : undefined;
+  const hasBlock =
+    toolbar !== undefined ||
+    action !== undefined ||
+    lead !== undefined ||
+    label !== undefined;
+
   return (
-    <>
-      <header
+    <header className="contents" data-slot="page-header">
+      <div
         data-slot="page-topbar"
         className={cn(
           "sticky top-0 z-10 flex min-w-0 flex-none items-center gap-3",
@@ -807,48 +827,47 @@ export function PageHeader({
           "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
-        {breadcrumbs === undefined ? (
-          eyebrow === undefined ? null : (
-            <p className="m-0 flex flex-none items-center gap-3 text-base text-faint">
-              <span>{eyebrow}</span>
-              <span aria-hidden="true">/</span>
-            </p>
-          )
-        ) : (
+        {breadcrumbs === undefined ? null : (
           <PageNavigation items={breadcrumbs} />
         )}
         {/* A heading carries no size of its own; the class is the size. */}
         <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
-        {lead === undefined ? null : (
-          <p
-            className={cn(
-              "m-0 min-w-0 flex-1 truncate text-sm text-muted-foreground",
-              /*
-               * On a phone the bar is a stack rather than a line, so the
-               * purpose statement takes its own row and says all of itself.
-               * Truncating it there would leave a sentence that stops.
-               */
-              "max-[900px]:basis-full max-[900px]:overflow-visible",
-              "max-[900px]:text-clip max-[900px]:whitespace-normal",
-            )}
-          >
-            {lead}
-          </p>
-        )}
-      </header>
+      </div>
 
-      {toolbar === undefined && action === undefined ? null : (
+      {hasBlock ? (
         <div
           data-slot="page-toolbar"
           className={cn(
-            "flex-none px-(--page-gutter) pt-(--page-gutter)",
+            "flex flex-none flex-col px-(--page-gutter) pt-(--page-gutter)",
             "max-[900px]:px-4 max-[900px]:pt-4",
           )}
         >
-          <Toolbar action={action}>{toolbar}</Toolbar>
+          {label === undefined ? null : (
+            <p
+              className={cn(
+                "m-0 text-xs tracking-(--tracking-label) text-faint uppercase",
+                lead === undefined ? "" : "mb-1",
+              )}
+            >
+              {label}
+            </p>
+          )}
+          {lead === undefined ? null : (
+            <p className="m-0 w-full max-w-[92ch] text-sm text-muted-foreground">
+              {lead}
+            </p>
+          )}
+          {(lead !== undefined || label !== undefined) &&
+          (toolbar !== undefined || action !== undefined) ? (
+            /* The gap to the toolbar row, when the block holds both. */
+            <div className="h-4" aria-hidden="true" />
+          ) : null}
+          {toolbar === undefined && action === undefined ? null : (
+            <Toolbar action={action}>{toolbar}</Toolbar>
+          )}
         </div>
-      )}
-    </>
+      ) : null}
+    </header>
   );
 }
 

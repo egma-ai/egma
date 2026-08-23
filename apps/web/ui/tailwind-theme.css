@@ -1071,14 +1071,19 @@
   /*
    * A page that drew its own toolbar row does not pay the top gutter twice.
    *
-   * `PageHeader` opens the block under the title bar when a page hands it an
-   * action or a filter, and `PageBody` opens one when the page did not — so
-   * whichever comes first carries the 24px, and the second one starts where
-   * the first left off. It is a sibling rule because that is the question:
-   * *is there already a block above me*, which no class on either element can
-   * answer about the other.
+   * `PageHeader` opens the block under the title bar when a page hands it a
+   * purpose statement, an action or a filter, and `PageBody` opens one when
+   * the page did not — so whichever comes first carries the 24px, and the
+   * second one starts where the first left off. It is a sibling rule because
+   * that is the question: *is there already a block above me*, which no class
+   * on either element can answer about the other.
+   *
+   * The header between them is `display: contents`, which changes what is
+   * drawn and not what is a sibling of what — so the match is on the header
+   * that holds a toolbar rather than on the toolbar itself.
    */
-  [data-slot="page-toolbar"] + [data-slot="page-body"] {
+  [data-slot="page-header"]:has([data-slot="page-toolbar"])
+    + [data-slot="page-body"] {
     padding-top: 0;
   }
 

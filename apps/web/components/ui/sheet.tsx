@@ -104,12 +104,19 @@ function SheetClose(props: ComponentProps<typeof DialogPrimitive.Close>) {
 }
 
 /**
- * The portal, aimed at the page's own host.
+ * The portal, aimed at the page's own host — **and at `<body>` when there is
+ * none.**
  *
- * `container` is left off entirely when there is no host, rather than passed as
- * `null`: Radix reads an explicit `null` as "no container" and falls back to
- * `body`, which is what we want, but saying nothing is what keeps that a
- * fallback rather than a second code path.
+ * The fallback is not a nicety. A component test renders one screen with no
+ * shell around it, so no `SheetHost` is mounted and no container exists; a
+ * portal that insisted on one would mount nothing at all, and every page test
+ * that opens a sheet would fail to find a single control inside it. Radix's own
+ * default for `container` is `document.body`, and `undefined` is how you ask
+ * for it, so the fallback is the library's rather than a second code path
+ * written here.
+ *
+ * A caller may still pass its own `container`; the spread is after this, so it
+ * wins.
  */
 function SheetPortal(props: ComponentProps<typeof DialogPrimitive.Portal>) {
   const root = useContext(SheetRootContext);
@@ -117,7 +124,7 @@ function SheetPortal(props: ComponentProps<typeof DialogPrimitive.Portal>) {
   return (
     <DialogPrimitive.Portal
       data-slot="sheet-portal"
-      {...(root === null ? {} : { container: root })}
+      container={root ?? undefined}
       {...props}
     />
   );
