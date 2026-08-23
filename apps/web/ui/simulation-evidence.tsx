@@ -84,8 +84,15 @@ const SUMMARY_CELL = "flex min-w-0 items-center justify-between gap-3 px-5 py-3"
 const SUMMARY_CELL_NEXT =
   "border-border border-s max-[40rem]:border-s-0 max-[40rem]:border-t";
 
-/** Metrics and counts read straight in the mono face. */
-const SUMMARY_VALUE = "font-mono text-base font-normal text-foreground";
+/**
+ * Metrics and counts read straight in the mono face, on tabular figures.
+ *
+ * `WV-0` writes the three summary values in mono; `DESIGN.md` asks every
+ * metric, date, duration and score for tabular numerals. Both together are
+ * what stops "1m 04s" and "11m 40s" sitting at two widths in one strip.
+ */
+const SUMMARY_VALUE =
+  "font-mono text-base font-normal text-foreground tabular-nums";
 
 /**
  * The name of one fact, quiet, beside its value.
@@ -941,13 +948,19 @@ function graderSummary(
   return parts.join(" · ");
 }
 
-/** The quiet mono kicker over a title: what kind of thing this block is. */
+/**
+ * The quiet mono kicker over a title: what kind of thing this block is.
+ *
+ * `--faint` rather than `--muted-foreground`, which is the recipe's one quiet
+ * label colour: the same step a table's column heading takes, so a kicker over
+ * a panel and a heading over a column are the same weight of voice.
+ */
 const PANE_KIND =
-  "mb-1 block font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase";
+  "mb-1 block font-mono text-sm tracking-(--tracking-label) text-faint uppercase";
 
 /** The name over each half of the expected-against-found comparison. */
 const COMPARISON_LABEL =
-  "m-0 mb-2 font-mono text-sm font-normal tracking-(--tracking-label) text-muted-foreground uppercase";
+  "m-0 mb-2 font-mono text-sm font-normal tracking-(--tracking-label) text-faint uppercase";
 
 /** Sentences inside a check. Judge findings run long, so they break anywhere. */
 const ASSERTION_TEXT = "m-0 min-w-0 text-sm wrap-anywhere text-foreground";
@@ -1002,7 +1015,7 @@ function GraderGroup({
                    * the two have to read as one line.
                    */
                   "[&>span]:font-mono [&>span]:text-sm",
-                  "[&>span]:text-muted-foreground [&>span]:uppercase",
+                  "[&>span]:text-faint [&>span]:uppercase [&>span]:tabular-nums",
                 )}
               >
                 <span>Check {String(at + 1).padStart(2, "0")}</span>
