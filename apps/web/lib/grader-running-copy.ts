@@ -27,7 +27,7 @@
 
 export const RUNNING = {
   title: "Graders",
-  lead: "The graders judging this project now.",
+  /* See `LIBRARY` for why a list screen keeps no purpose sentence. */
   /** What the page says it is waiting for, never merely that it is waiting. */
   loading: "running graders",
   /**

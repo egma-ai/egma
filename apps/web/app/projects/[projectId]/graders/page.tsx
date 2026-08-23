@@ -239,7 +239,13 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
-      <PageHeader eyebrow="Project" title={LIBRARY.title} lead={LIBRARY.lead} />
+      {/*
+        The title, and then the strip. A list screen carries no label over its
+        title and no purpose sentence under it (`71V-0`): the sidebar already
+        says which section and which project this is, and the tab strip under
+        the bar says which of the section's two screens this is.
+      */}
+      <PageHeader title={LIBRARY.title} />
       <PageBody>
         <GraderTabs projectId={projectId} active="library" />
         <div className={VIEW_CONTENT}>

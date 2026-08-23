@@ -362,7 +362,11 @@ export function EditForm({
         </Field>
       </fieldset>
 
+      {/* The answer leads and the way out follows it, which is `7DA-0`. */}
       <FormActions>
+        <Button type="submit" busy={busy}>
+          {busy ? EDIT.submitting : EDIT.submit}
+        </Button>
         <Button
           type="button"
           variant="secondary"
@@ -370,9 +374,6 @@ export function EditForm({
           disabled={busy}
         >
           {EDIT.cancel}
-        </Button>
-        <Button type="submit" busy={busy}>
-          {busy ? EDIT.submitting : EDIT.submit}
         </Button>
       </FormActions>
     </Form>
@@ -444,10 +445,11 @@ export function SwitchOffPanel({
       {theLastOne ? <p>{SWITCH_OFF.theLastOne}</p> : null}
       {refused === null ? null : <Refused message={refused.message} />}
 
+      {/*
+        Inside the confirmation, the destructive act is the filled failure
+        button — the one place in the product that draws one.
+      */}
       <Actions>
-        <Button type="button" variant="secondary" onClick={onCancel}>
-          {SWITCH_OFF.cancel}
-        </Button>
         <Button
           type="button"
           variant="destructive"
@@ -455,6 +457,9 @@ export function SwitchOffPanel({
           onClick={() => void switchOff()}
         >
           {busy ? SWITCH_OFF.confirming : SWITCH_OFF.confirm}
+        </Button>
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          {SWITCH_OFF.cancel}
         </Button>
       </Actions>
     </>

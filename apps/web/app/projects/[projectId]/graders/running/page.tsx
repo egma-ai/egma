@@ -251,9 +251,18 @@ function columnsFor(
           >
             {EDIT.open}
           </Button>{" "}
+          {/*
+            **The one destructive act on this row, as a text action in the
+            failure colour.** `DESIGN.md`: the control that opens a destructive
+            confirmation is text, and the filled failure-coloured button lives
+            inside the confirmation it opens. Two outlined buttons side by side
+            said that switching a grader off and editing it were the same size
+            of decision.
+          */}
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
+            className="text-failure pointer-hover:text-failure"
             disabled={!mayAct || editorBusy}
             {...(mayAct || whyNotSwitchOff === undefined
               ? {}
@@ -474,10 +483,9 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
+      {/* The trail and the title, and the strip under them. See the library. */}
       <PageHeader
-        eyebrow="Project"
         title={RUNNING.title}
-        lead={RUNNING.lead}
         breadcrumbs={[
           {
             label: "Graders",
