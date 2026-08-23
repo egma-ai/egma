@@ -66,3 +66,57 @@ export type ArchiveFilter = "active" | "archived";
  * no label reads as deliberate rather than as a cell that failed to render.
  */
 export const NO_ENVIRONMENT = "Unlabelled";
+
+/**
+ * Which platform an agent is on, as this application can honestly answer it.
+ *
+ * **The agent's own `agentPlatform` is null until Start monitoring binds it.**
+ * `registerAgent` cannot set it — the contract has no field for it — so an
+ * agent registered today and given a Retell connection this afternoon still
+ * reads `null` on itself. Its connections do know: every connection carries the
+ * platform it was written against.
+ *
+ * So the answer is read from the connections first and from the agent second,
+ * and it is `null` when neither has one. That order is the truthful one: a
+ * connection is a fact about a live way in, and the agent's own column is the
+ * monitoring binding, which is a different question that happens to share a
+ * word.
+ */
+export function agentPlatformOf(agent: ListedAgentWithConnections): string | null {
+  for (const connection of agent.connections) {
+    if (connection.agentPlatform !== null) return connection.agentPlatform;
+  }
+  return agent.agentPlatform;
+}
+
+/**
+ * What a cell says when nothing has named a platform.
+ *
+ * An em dash rather than a sentence: the column is one word wide, and "not
+ * bound" would be a claim about monitoring rather than about this agent's
+ * connections.
+ */
+export const NO_PLATFORM = "—";
+
+/**
+ * How many connections a row draws before it counts the rest.
+ *
+ * Two, which is what the board draws (`6ZJ-0`: two links then "+3" on an agent
+ * with five). A row is a line of reading, and a fifth link on it would make the
+ * row taller than every other row for no fact anybody scans for.
+ */
+export const CONNECTIONS_ON_ROW = 2;
+
+/** The connections one row names, and the number it could not fit. */
+export function connectionsOnRow(
+  connections: readonly ListedConnection[],
+  limit: number = CONNECTIONS_ON_ROW,
+): {
+  readonly shown: readonly ListedConnection[];
+  readonly overflow: number;
+} {
+  return {
+    shown: connections.slice(0, limit),
+    overflow: Math.max(0, connections.length - limit),
+  };
+}
