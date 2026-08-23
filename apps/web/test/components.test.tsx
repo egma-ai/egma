@@ -460,6 +460,40 @@ describe("nested page navigation", () => {
     expect(screen.getAllByText("Runs")).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
   });
+
+  /**
+   * The other half of the rule above, and it needs its own case.
+   *
+   * A page with no trail still says which section it is in, and on one screen
+   * that label is a *fact* rather than a repetition: the transcript page puts
+   * the trace's source and environment in it — "production / default" — and
+   * states it nowhere else. Sixty-four call sites pass this prop, so a version
+   * of `PageHeader` that accepted it and quietly drew nothing would take a
+   * line off every one of them and break no test at all. This is that test.
+   *
+   * It is not in the title bar. The bar holds the page title alone, which is
+   * what `71V-0` draws; the label and the purpose statement are the quiet
+   * block under it.
+   */
+  it("draws the eyebrow when a page offers no trail, outside the title bar", () => {
+    render(
+      <PageHeader
+        eyebrow="production / default"
+        title="Nightly smoke"
+        lead="What this run was for."
+      />,
+    );
+
+    const label = screen.getByText("production / default");
+    expect(label).toBeTruthy();
+    expect(label.closest('[data-slot="page-topbar"]')).toBeNull();
+    expect(label.closest('[data-slot="page-toolbar"]')).not.toBeNull();
+
+    const title = screen.getByRole("heading", { name: "Nightly smoke" });
+    expect(title.closest('[data-slot="page-topbar"]')).not.toBeNull();
+    /* One header holds both, which is how a page finds its own controls. */
+    expect(title.closest("header")).toBe(label.closest("header"));
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -1619,7 +1653,18 @@ describe("the role the shell shows", () => {
     expect(sessionReads).toHaveLength(2);
   });
 
-  it("starts the signed-in sidebar with project context, not a repeated logo", () => {
+  /**
+   * The bar starts with the Egma wordmark, and the project context is under it.
+   *
+   * **This assertion was the other way round until 2026-08-23.** `DESIGN.md`
+   * kept the full logo out of the signed-in sidebar and asked for explicit
+   * approval to change that rule; the developer gave it, looking at the Paper
+   * boards — "our logo, not the organization's" — and `DESIGN.md` records the
+   * decision with its date. The organization did not disappear with the change:
+   * it moved into the eyebrow above the project name, which is what the second
+   * half of this case holds.
+   */
+  it("starts the signed-in sidebar with the Egma wordmark, then project context", () => {
     render(
       <AppShell initialMe={meWith("admin")}>
         <p>page</p>
@@ -1627,9 +1672,16 @@ describe("the role the shell shows", () => {
     );
 
     const sidebar = screen.getByRole("complementary");
+    const wordmark = within(sidebar).getByRole("img", { name: /egma/i });
+    expect(wordmark.getAttribute("src")).toBe("/brand/egma-wordmark.svg");
+    expect(
+      within(sidebar).getByRole("link", { name: "Egma home" }).getAttribute("href"),
+    ).toBe("/");
+
     const firstControl = sidebar.querySelector("button");
     expect(firstControl?.getAttribute("aria-label")).toMatch(/^Organization Acme/);
-    expect(within(sidebar).queryByRole("img", { name: /egma/i })).toBeNull();
+    /* The organization is the eyebrow now; the project is the line you press. */
+    expect(within(sidebar).getByText("Acme")).toBeTruthy();
   });
 
   it("keeps navigation icons decorative and every label visible", () => {

@@ -31,7 +31,8 @@
   color-scheme: light;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme="dark"],
+[data-theme="dark"] {
   color-scheme: dark;
 }
 
@@ -94,13 +95,13 @@
 /*
  * Inside a menu the ring turns inward.
  *
- * The panel holds its items on 8px of padding and scrolls, so a ring drawn 3px
+ * The panel holds its items on 4px of padding and scrolls, so a ring drawn 3px
  * *outside* a full-width item is clipped on both sides and reads as two stripes
  * rather than a rectangle. A negative offset puts the whole ring on the item.
  *
  * This is a design call rather than a fact, and it is called out in the pull
  * request for the developer to overrule: -2px, so the ring sits just inside the
- * item's own 6px radius without touching the text.
+ * item's own edge without touching the text.
  */
 :is([role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"]):focus-visible { outline-offset: -2px; }
 

@@ -3,6 +3,15 @@
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TablePanel,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,6 +27,13 @@ import { cn } from "@/lib/utils";
  * **A row is a line of reading, not a card.** The height is a token, cells do
  * not wrap, and the vertical padding is deliberately small: a list of forty
  * agents should be a list of forty agents rather than four screens of scroll.
+ *
+ * **The frame is the kit's `Table`, and the numbers are the boards'.** A Pure
+ * Paper panel inside one hairline with no corner; a 40px header of quiet
+ * labels; rows at least 52px with a hairline between them and none after the
+ * last; and a fixed 48px slot at the trailing edge that every row carries, so
+ * the ⋮ menus line up in one lane down the table whether or not a given row
+ * has one. Read off `6ZM-0`, `71F-0` and `710-0` on 2026-08-23.
  *
  * Paging is keyset, so "more" means *carry on from where that page stopped*
  * rather than *skip a number of rows*. The control is here rather than in each
@@ -97,36 +113,51 @@ export function DataTable<Row>({
 }) {
   const primary = columns.find((column) => column.primary) ?? columns[0];
   const pageLabel = pagination?.pageLabel(pagination.page);
+  /**
+   * How wide a column is, and the one width this component decides for itself.
+   *
+   * A row control's slot is the theme's, not the caller's: it is what makes
+   * the trailing lane straight, and a page choosing its own would bend it. A
+   * caller may still say `width` on any other column.
+   *
+   * It is written on the header cell alone. A column width set there governs
+   * the whole column, and a width on the body cells as well would survive into
+   * the stacked layout — where the cells are no longer a table and a 48px
+   * "column" is a 48px box with a menu falling out of it.
+   */
+  function widthOf(column: Column<Row>): string | undefined {
+    if (column.action === true) return "var(--table-action-width)";
+    return column.width;
+  }
   function mobileHidden(column: Column<Row>): "true" | undefined {
     return column !== primary && column.hideOnMobile === true ? "true" : undefined;
   }
 
   return (
     <div className={stackWhenConstrained ? "@container/data-table" : undefined}>
-      <div
+      <TablePanel
         className={cn(
-          "overflow-x-auto rounded-card border border-border bg-surface",
           /* Stacked rows are not a scrolling region; they are the page. */
           "stacked:overflow-visible",
         )}
       >
-        <table
-          className="w-full border-collapse stacked:block"
-          aria-label={label}
-        >
+        <Table className="stacked:block" aria-label={label}>
           {/*
            * The headers are read out in both layouts and drawn in one. Stacked
            * rows carry their own label on each cell, so a visible header row
            * would be the same word twice.
            */}
-          <thead className="stacked:sr-only">
-            <tr>
+          <TableHeader className="stacked:sr-only">
+            <TableRow>
               {columns.map((column) => (
-                <th
+                <TableHead
                   className={cn(
-                    "border-b border-border px-(--row-padding-x) py-2",
-                    "text-left text-sm font-normal tracking-normal whitespace-nowrap text-faint",
-                    "data-[action=true]:text-right",
+                    /*
+                     * The trailing slot is empty in the header and still
+                     * present: it is what holds the lane open above the first
+                     * ⋮, which is where a person's eye starts down it.
+                     */
+                    "data-[action=true]:px-0",
                     column.hideOnMobile === true &&
                       column !== primary &&
                       "max-[900px]:hidden",
@@ -135,16 +166,19 @@ export function DataTable<Row>({
                   data-mobile-hidden={mobileHidden(column)}
                   key={column.key}
                   scope="col"
-                  style={{ width: column.width }}
+                  style={{ width: widthOf(column) }}
                 >
-                  {column.header}
-                </th>
+                  {column.action === true ? "" : column.header}
+                  {column.action === true ? (
+                    <span className="sr-only">{column.header}</span>
+                  ) : null}
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody className="stacked:block">
+            </TableRow>
+          </TableHeader>
+          <TableBody className="stacked:block">
             {rows.map((row) => (
-              <tr
+              <TableRow
                 className={cn(
                   "[&:first-child>td]:border-t-0",
                   "stacked:flex stacked:flex-col stacked:gap-1",
@@ -158,11 +192,10 @@ export function DataTable<Row>({
                 key={keyOf(row)}
               >
                 {columns.map((column) => (
-                  <td
+                  <TableCell
                     className={cn(
-                      "h-(--row-height) border-t border-border align-middle",
-                      "px-(--row-padding-x) py-(--row-padding-y) text-sm text-muted-foreground",
-                      "data-[action=true]:text-right",
+                      "h-(--row-min-height) text-muted-foreground",
+                      "data-[action=true]:px-0 data-[action=true]:text-center",
                       "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-baseline",
                       "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
                       column === primary
@@ -194,7 +227,13 @@ export function DataTable<Row>({
                     <span
                       className={cn(
                         "block overflow-hidden text-ellipsis whitespace-nowrap",
-                        column === primary && "font-medium text-foreground",
+                        /*
+                         * The name of the row, at the ordinary weight. The
+                         * boards write it in the same 400 as the facts beside
+                         * it and let the underline and the column position say
+                         * which one names the row.
+                         */
+                        column === primary && "text-foreground",
                         column.mono === true && "font-mono text-sm",
                         /*
                          * The action cell's own shape, read off the cell it
@@ -204,7 +243,7 @@ export function DataTable<Row>({
                          * the trailing edge — not a label beside whatever does.
                          */
                         "in-data-[action=true]:flex in-data-[action=true]:items-center",
-                        "in-data-[action=true]:justify-end",
+                        "in-data-[action=true]:justify-center",
                         "in-data-[action=true]:overflow-visible in-data-[action=true]:text-clip",
                         column !== primary &&
                           "stacked:min-w-0 stacked:max-w-[70%] stacked:text-right",
@@ -214,13 +253,13 @@ export function DataTable<Row>({
                     >
                       {column.cell(row)}
                     </span>
-                  </td>
+                  </TableCell>
                 ))}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </TablePanel>
 
       {more === undefined ? null : (
         <div className="mt-4 flex items-center justify-between gap-4 text-xs text-muted-foreground">

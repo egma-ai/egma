@@ -1207,6 +1207,7 @@ function SimulationEvidencePanel({
       {evidenceOpen ? (
         <Dialog
           kind="sheet"
+          size="wide"
           title="Transcript and audio"
           onClose={() => onEvidenceChange(false)}
         >

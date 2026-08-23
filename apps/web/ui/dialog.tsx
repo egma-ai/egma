@@ -63,46 +63,38 @@ const PANEL_SHAPE = {
   drawer: [
     "top-0 left-0 h-full max-h-none",
     "w-[min(340px,calc(100vw-var(--space-7)))] translate-x-0 translate-y-0",
-    "overflow-y-auto rounded-[0_var(--radius-lg)_var(--radius-lg)_0]",
-    "border-y-0 border-l-0",
+    "overflow-y-auto border-y-0 border-l-0",
   ],
+  /*
+   * **One side sheet look, in two sizes.** This is the same panel
+   * `components/ui/sheet.tsx` draws — right-anchored, Pure Paper behind a
+   * hairline on its left edge, no corner, the same travel — and both widths
+   * are the theme's rather than numbers written here.
+   *
+   * The two components are still two, and the difference is behaviour: this
+   * one is a *reading* surface that deliberately leaves the page beside it
+   * usable, and that one is a modal form portaled inside `<main>`.
+   * `size="wide"` is for the reading surface, where the content is a
+   * transcript rather than a form and 440px is not enough of a page.
+   */
   sheet: [
     "top-0 right-0 left-auto h-full max-h-none",
-    "w-[min(640px,100vw)] translate-x-0 translate-y-0",
-    "gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0",
+    "w-[min(var(--sheet-width),100vw)] translate-x-0 translate-y-0",
+    "gap-0 overflow-hidden border-y-0 border-r-0 p-0",
     "max-[40rem]:w-full max-[40rem]:border-l-0",
   ],
 } as const;
 
 /**
- * The travel of the sheet, which is the one edge kind the theme does not move.
+ * The wider panel, for a surface that is read rather than filled in.
  *
- * The drawer's movement is in `tailwind-theme.css`, keyed on `data-kind`, as an
- * animation of its own at the drawer's own tokens — an animation, because Radix
- * removes a panel on `animationend` and so whatever is animating is what holds
- * the panel on screen while it leaves. A sheet has no token pair of its own, so
- * it travels on a transition at the dialog's two, which the theme's `scale`
- * animation is exactly as long as. `@starting-style` is what makes the entrance
- * a movement: without it a panel that mounts already open has nowhere to travel
- * from.
- *
- * **Reduced motion removes the travel from both ends, not just the entrance.**
- * Dropping the transition alone left the exit teleporting: the closed position
- * still applied, so the panel jumped off the edge in one frame with nothing
- * left to say it had gone. So the closed position is put back where the open
- * one is, and the opacity the theme still runs is what says a surface left.
+ * Only the sheet has one. A dialog is a question and a drawer is a list of
+ * places to go; neither gets bigger by holding more.
  */
-const PANEL_TRAVEL = {
+const PANEL_WIDE = {
   dialog: "",
   drawer: "",
-  sheet: [
-    "transition-[translate] duration-(--duration-dialog-in) ease-out",
-    "starting:translate-x-full",
-    "data-[state=closed]:translate-x-full",
-    "data-[state=closed]:duration-(--duration-dialog-out)",
-    "motion-reduce:transition-none",
-    "motion-reduce:data-[state=closed]:translate-x-0!",
-  ],
+  sheet: "w-[min(var(--sheet-width-wide),100vw)]",
 } as const;
 
 /** A sheet's head is a fixed bar over a body that scrolls under it. */
@@ -164,12 +156,18 @@ const TAKES_THE_SCREEN = { dialog: true, drawer: true, sheet: false } as const;
 
 export function Dialog({
   kind = "dialog",
+  size = "default",
   title,
   onClose,
   returnFocusTo,
   children,
 }: {
   readonly kind?: "dialog" | "drawer" | "sheet";
+  /**
+   * How much room the surface needs. `wide` is the reading sheet — evidence
+   * beside a page — and does nothing to the other two kinds.
+   */
+  readonly size?: "default" | "wide";
   readonly title: string;
   readonly onClose: () => void;
   /** A known trigger to restore when the surface closes. */
@@ -250,7 +248,7 @@ export function Dialog({
       }}
     >
       <DialogContent
-        className={cn(PANEL_SHAPE[kind], PANEL_TRAVEL[kind])}
+        className={cn(PANEL_SHAPE[kind], size === "wide" && PANEL_WIDE[kind])}
         data-kind={kind}
         /*
          * Every caller writes its own body, and most bodies are not one

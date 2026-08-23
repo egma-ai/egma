@@ -381,7 +381,18 @@ describe("the grader library, in one project", () => {
     const cell = used.closest("td");
     expect(cell).not.toBeNull();
     expect(cell?.dataset.action).toBe("true");
-    expect(cell?.className).toContain("data-[action=true]:text-right");
+    /*
+     * **The trailing edge is a fixed lane now, not an alignment.** The Paper
+     * boards give every row the same 48px slot at its end — present whether or
+     * not that row has a control in it — so the controls line up in one column
+     * down the table instead of each floating to the right of whatever text
+     * came before it. `--table-action-width` is the lane and the cell centres
+     * its control in it, so the class that says so is `text-center` rather
+     * than the `text-right` this used to read. What the case is about has not
+     * moved: the row's control is at the row's trailing edge.
+     */
+    expect(cell?.className).toContain("data-[action=true]:text-center");
+    expect(cell?.className).toContain("data-[action=true]:px-0");
   });
 
   it("shows a refused Use without clearing the form", async () => {

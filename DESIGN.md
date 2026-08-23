@@ -6,6 +6,8 @@ The orange-red palette and the Egma logo are locked. Change them only with expli
 
 The styling architecture changed on 2026-08-19 with that approval. **Styling architecture** below is the current truth.
 
+The product's shape changed on 2026-08-23 with that approval, from the Paper file "Egma — Design system and product UI". Five rules moved, and each is marked where it is written: **one radius, and it is 0px**; the **Egma wordmark returns to the signed-in sidebar**; the **primary action is the wash button**, not a Deep Ember block; **`system-ui` leads the font stack**; and the **side sheet** is where one record is created, read and edited. The palette did not move. The logo's own treatment rules did not move.
+
 ## Product context
 
 - **What this is:** The product interface for teams that test voice agents and decide whether they trust them in production.
@@ -64,7 +66,9 @@ Rules:
 
 - Keep the canonical geometry, proportions, and black-and-white treatment.
 - Do not recolor, stretch, rotate, outline, shadow, or animate the logo.
-- The signed-in sidebar starts with the organization and project switcher. It does not repeat the full Egma logo.
+- The signed-in sidebar starts with the Egma wordmark, in a 56px bar with a hairline under it. It links to the product root. (Developer decision, 2026-08-23: "our logo, not the organization's". This replaces the earlier rule that kept the full logo out of the signed-in sidebar, which asked for exactly this approval.)
+- 2026-08-23: the sidebar wordmark follows the access pages' existing dark-theme treatment (the black line art is printed white by inversion).
+- The organization is the eyebrow above the project name, under the wordmark bar. The project is the line that opens the switcher.
 - Auth, onboarding, and public brand surfaces may use the full logo.
 - Product icons and status symbols must not imitate the logo.
 
@@ -80,10 +84,10 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 | Carbon | `#000000` | Maximum contrast and rare dark application surfaces |
 | Graphite | `#3c3c3c` | Secondary text and stronger neutral states |
 | Ember | `#ff5229` | Brand accent, focus, active marks, and directional icons |
-| Deep Ember | `#c2410c` | Primary filled actions with white text |
-| Ember Hover | `#a93609` | Pointer hover on primary filled actions |
-| Ember Pressed | `#872b09` | Pointer press on primary filled actions |
-| Ember Wash | `#fff5f2` | Selected, current, open, cited, and active-attention surfaces |
+| Deep Ember | `#c2410c` | The primary action's text, on Ember Wash |
+| Ember Hover | `#a93609` | Pointer hover on the primary action's text |
+| Ember Pressed | `#872b09` | Pointer press on the primary action's text |
+| Ember Wash | `#fff5f2` | The primary action's fill; selected, current, open, cited, and active-attention surfaces |
 
 ### Color rules
 
@@ -91,8 +95,8 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 - Ordinary borders use a neutral mix of Graphite and Pure Paper.
 - Quiet hover, read-only, progress, and supporting surfaces use a neutral Graphite-and-Paper mix.
 - Ember is the main brand signal. Use it for focus, icons, marks, and narrow active edges.
-- Deep Ember is the primary filled action. Its white-text contrast is above 5:1.
-- Ember Wash is for selected, current, open, cited, or active-attention states.
+- Deep Ember is the primary action's text on Ember Wash. Its contrast on that fill is above 7:1. (Developer decision, 2026-08-23: the filled Deep Ember button with white text is retired.)
+- Ember Wash is the primary action's fill, and the surface for selected, current, open, cited, or active-attention states.
 - Carbon is for maximum contrast and dark evidence surfaces.
 - Body text uses Midnight Ink or Graphite.
 - Shadows use restrained orange-brown.
@@ -113,17 +117,20 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 
 ### Dark theme
 
-- Dark theme uses neutral dark surfaces and the same Ember focus and action family.
+- Dark theme uses neutral dark surfaces and the same Ember focus and action family, lightened where a dark surface needs it. The primary action's text is Ember pulled towards paper rather than Deep Ember: Deep Ember on the dark Ember Wash is 2.69:1 and fails AA, and the lighter step is 5.26:1. (Developer decision, 2026-08-23.)
 - Dense evidence may use a dark contained surface in either theme.
 - Every shared component must support light and dark themes.
 - Verify text, borders, focus, status, overlays, and disabled states in both themes.
 
 ## Typography
 
-Use Arial, Helvetica, and the system sans-serif fallback. Product text uses weight 400. Weight 500 is reserved for compact labels, important values, and page, section, state, or dialog titles that need stronger hierarchy.
+Use `system-ui` first, then Helvetica, Arial, and the system sans-serif fallback. Product text uses weight 400. Weight 500 is reserved for compact labels, important values, and page, section, state, or dialog titles that need stronger hierarchy.
+
+`system-ui` leads because the design boards are rendered in it: Arial first would not draw the product that was approved. (Developer decision, 2026-08-23.)
 
 | Role | Size | Line height | Letter spacing |
 | --- | ---: | ---: | ---: |
+| Micro label | 12px | 1.5 | 0.08em |
 | Caption and table text | 14px | 1.43 | -0.35px |
 | UI body | 16px | 1.5 | -0.4px |
 | Lead body | 24px | 1.33 | -0.6px |
@@ -136,6 +143,7 @@ Use Arial, Helvetica, and the system sans-serif fallback. Product text uses weig
 Rules:
 
 - Hierarchy comes from size, space, and restrained use of weight 500.
+- The micro label is for the two letter-spaced uppercase labels the sidebar carries — the organization over the project name, and the role under the account's email. Nothing else uses it. The scale still starts at 14px. (Developer decision, 2026-08-23.)
 - Do not use weights 600 or 700.
 - Product tables, forms, and navigation use the 14px and 16px steps.
 - Headings carry no size of their own. Every heading takes its size from a class, because the browser's own heading sizes are not on this scale.
@@ -160,21 +168,34 @@ Allowed spacing values are `4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 72, 80, 100px`
 
 | Element | Radius |
 | --- | ---: |
-| Button | 6px |
-| Input | 8px |
-| Card, menu, dialog | 12px |
-| Tag, chip, filter | 9999px |
+| Every component | 0px |
 
-Use each radius for its named component type. Do not apply one large radius to every component.
+One radius, and it is none: buttons, inputs, panels, tables, sheets, menus, dialogs, chips, badges. Sharp corners are the product's shape. (Developer decision, 2026-08-23. This replaces the four-step table that named a radius per component type.)
+
+Two round shapes remain, and neither is a component corner:
+
+- The account avatar is a circle. It is an avatar.
+- A radio button is a circle. The shape is what tells it apart from a checkbox in every operating system, and taking it away would make one control claim to be another.
+
+The four radius names stay in the theme — `--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-pill` — because component class lists read them and the name says which component asked. All four are `0px`.
 
 ## Elevation
 
 Most structure comes from contrast and borders.
 
-- Menus and dialogs use the shared short orange-brown shadow.
+- Menus, side sheets, and dialogs use one shared orange-brown shadow: the two-layer stack below. There is no separate shorter menu shadow; the boards draw all three raised surfaces the same way. (Read off the boards, 2026-08-23.)
 - Large showcase panels may use the full orange-brown shadow stack.
-- Tables, sidebars, inputs, and ordinary cards do not float.
+- Tables, sidebars, topbars, inputs, search boxes, and ordinary cards do not float. They carry a hairline and nothing else.
 - Do not use cool gray shadows.
+
+The shared shadow, worn by every menu, sheet, and dialog:
+
+```css
+rgba(122, 49, 23, 0.12) -8px 16px 39px 0,
+rgba(122, 49, 23, 0.1) -33px 64px 72px 0
+```
+
+The full stack, for a showcase panel:
 
 ```css
 rgba(122, 49, 23, 0.12) -8px 16px 39px 0,
@@ -189,27 +210,47 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 
 - Neutral Paper is the application canvas.
 - The sidebar is a quiet paper region separated by a neutral hairline.
-- The organization and project switcher is the topmost sidebar control.
-- The full Egma logo is absent from the signed-in sidebar.
+- The Egma wordmark is the topmost thing in the sidebar, in a bar of its own.
+- The organization and project switcher is the topmost sidebar *control*, under that bar.
 - Navigation uses text and small line icons.
-- The active item uses Ember Wash and a small Ember mark.
+- The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
+- Every page has a title bar of its own, the same height as the wordmark bar, with the page title and its purpose statement in it. Page actions are not in that bar.
+- A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
+- Page content is held to the page maximum and aligned to the left gutter, so the title in the bar and the first column under it are on one line.
+
+The measurements, all of them theme values:
+
+| Part | Value |
+| --- | ---: |
+| Sidebar width | 224px |
+| Sidebar wordmark bar | 56px |
+| Page title bar | 56px |
+| Sidebar gutter, page gutter | 16px, 24px |
+| Navigation row, toolbar control | 36px |
+| Form control, touch target | 44px |
+| Table header row | 40px |
+| Table body row, minimum | 52px |
+| Table row-menu slot | 48px |
+| Toolbar row | 52px |
+| Side sheet | 440px |
 
 ### Organization and project switcher
 
-- Show organization as the primary line and project as the secondary line.
+- Show the organization as the eyebrow and the project as the primary line. The project is what a person changes; the organization is the one thing they cannot. (Developer decision, 2026-08-23.)
 - Support search, keyboard use, Escape, focus return, and unsaved-work protection.
 - Open the menu from its trigger with an origin-aware transition.
 - Do not add fake teams, sample projects, or a second navigation model.
 
 ### Buttons and links
 
-- Primary: Deep Ember fill, white text, and 6px radius.
-- Primary hover and press use the darker Ember steps.
+- Primary: Ember Wash fill, Deep Ember text, a one-pixel neutral hairline, no corner. 36px in a toolbar, 44px in a form. (Developer decision, 2026-08-23. The Deep Ember block with white text is retired; no variant draws it.)
+- Primary hover and press take one more step of Ember into the fill and the darker Ember steps in the text. The hairline does not move, so the control never looks like it changed size.
 - Secondary: transparent with a one-pixel Midnight Ink border.
 - Quiet action: text only, with an optional small Ember arrow.
-- Destructive actions require confirmation and say what will happen.
+- Destructive actions require confirmation and say what will happen. The action that opens the confirmation is a text action in the failure colour, kept at the far end of a footer from the normal save. The button inside the confirmation is a filled failure-colour button.
 - Pointer press feedback uses a subtle scale. Keyboard activation is immediate.
+- A link inside a table cell is underlined in the text colour and turns Ember under a pointer.
 
 ### Forms and Settings
 
@@ -225,12 +266,23 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 ### Tables and lists
 
 - Use one semantic table tree on desktop and mobile.
+- A table is a Pure Paper panel inside one neutral hairline, with its corners clipped.
 - Table text starts at 14px.
-- Neutral hairlines separate rows.
-- Headers are quiet, regular-weight labels.
+- Neutral hairlines separate rows. There is no hairline after the last row.
+- Headers are quiet, regular-weight labels in a 40px row. A body row is at least 52px.
+- Every row ends with the same fixed slot for its row menu, whether or not it has one, so the menus line up in one lane down the table.
 - Selected or active rows use Ember Wash plus a non-color state mark.
 - Mobile may restyle the same DOM as rows. It must not duplicate interactive content.
 - Empty, loading, failed, and filtered-empty are separate states.
+
+### Side sheets
+
+- One record is created, read, and edited in a side sheet anchored to the right edge: agents, connections, personas, and tests. The list stays on screen behind it. (Developer decision, 2026-08-23.)
+- **There are two side sheets, and they are two behaviours.** The **modal** sheet is the create, read, and edit surface named above: it is 440px, sits over a scrim, and makes the page behind it inert. The **wide reading** sheet is the evidence surface — a transcript beside its grader results, a persona's version history — it is 640px, has no scrim, and deliberately leaves the page beside it usable, because that page is what the evidence is being read against. Both widths are theme values. (Developer decision, 2026-08-23.)
+- A side sheet is full height, on Pure Paper behind a hairline on its left edge.
+- Its head is the record's name at the lead step with a close beside it, over a hairline. Its body is the fields and scrolls. Its footer is pinned to the bottom: the answer and the way out at the left, the one destructive action at the right.
+- It travels from the edge it is attached to, on the drawer's durations, and fades in place under reduced motion.
+- It traps focus, makes the page behind it inert, closes with Escape, and restores the exact opener.
 
 ### Menus, popovers, and dialogs
 

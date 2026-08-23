@@ -72,6 +72,34 @@ function SidebarProvider({
 }
 
 /**
+ * The bar the Egma wordmark stands in, at the very top.
+ *
+ * **The wordmark is here because the developer put it here**, on 2026-08-23,
+ * looking at the boards: "our logo, not the organization's". `DESIGN.md` used
+ * to say the signed-in sidebar does not repeat the full logo and asked for
+ * explicit approval to change that; the instruction *is* the approval, and
+ * `DESIGN.md` records it as such.
+ *
+ * 56px tall over a hairline, which is exactly the topbar beside it (`73A-0`
+ * and `71V-0` are both 56). The two bars line up across the whole application
+ * because they read the same two theme values, not because somebody matched
+ * them once.
+ */
+function SidebarBrand({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="sidebar-brand"
+      className={cn(
+        "flex h-(--sidebar-header-height) w-full min-w-0 flex-none items-center",
+        "border-b border-border px-4",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/**
  * The topmost slot, which holds the organization and project switcher.
  *
  * `min-w-0` is the load-bearing part: the switcher names an organization and a
@@ -198,7 +226,12 @@ function SidebarGroupLabel({ className, ...props }: ComponentProps<"h2">) {
       data-slot="sidebar-group-label"
       id={labelId ?? undefined}
       className={cn(
-        "mt-0 mb-1 px-3 text-sm text-faint tracking-(--tracking-label) uppercase",
+        /*
+         * `my-0`: the group's own 4px gap is the space under the label, and a
+         * margin of the label's as well made it 8. The boards put the label
+         * one gap above its first row like every other pair in the column.
+         */
+        "my-0 px-3 text-sm text-faint tracking-(--tracking-label) uppercase",
         className,
       )}
       {...props}
@@ -292,7 +325,13 @@ function SidebarMenuButton({
         "pointer-hover:data-[active=false]:bg-surface-soft pointer-hover:data-[active=false]:text-foreground",
         "data-[active=true]:bg-selected data-[active=true]:text-foreground",
         "data-[active=true]:before:bg-brand",
-        "data-[active=true]:[&_svg]:text-brand",
+        /*
+         * The icon follows the row's own colour rather than turning Ember. The
+         * boards draw the lit row's symbol in ink beside ink text (`72T-0`),
+         * and they are right to: the Ember mark on the left edge is already
+         * the brand signal, and a second one inside the row makes the two
+         * compete for the same job.
+         */
         className,
       )}
       onClick={(event: MouseEvent<HTMLButtonElement>) => {
@@ -305,6 +344,7 @@ function SidebarMenuButton({
 }
 
 export {
+  SidebarBrand,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
