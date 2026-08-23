@@ -1,150 +1,119 @@
 ---
-title: "Configure production monitoring by agent platform"
-sidebarTitle: "Monitoring sources"
-description: "List and configure project monitoring sources for Retell polling and LiveKit Agents OTLP export."
+title: "Pull an agent's production calls"
+sidebarTitle: "Monitoring"
+description: "Bind an agent to its platform, seal a monitoring key on it, and turn per-agent production pull on and off."
 ---
 
-A **monitoring source** tells Egma how to receive production evidence from one
-agent platform. It is project configuration. It is not a simulation connection
-and it does not require an Egma agent.
+Production evidence reaches Egma two ways, and the agent is where the choice is
+made.
+
+**Pull is declared.** An agent may bind to one platform, hold that platform's
+API key, and carry a single switch — **pull production calls**. While it is on,
+Egma polls the platform for that agent's finished conversations.
+
+**Push is observed.** A LiveKit agent sends spans to the Egma OTLP door with the
+project API key from its own process. There is nothing to configure and nothing
+to turn off: the stored evidence is the whole record. See
+[Python SDK](/integrations/python-sdk).
+
+The monitoring key is a **monitoring-only credential**. It is separate from
+anything a connection holds for a simulation, so a customer who chat-tests and
+pull-monitors the same Retell account enters the key twice, once per job. Egma
+seals it exactly as it seals a connection credential and never gives it back.
 
 All routes on this page use the normal Egma authentication rules. Pass the
 project identifier in the `projectId` query parameter. A project-scoped API key
 can omit it when the key already names the project.
 
-## List monitoring sources
-
-**`GET /v1/monitoring`**
-
-Returns the Retell and LiveKit Agents monitoring sources in one project.
-
-<ParamField query="projectId" type="string">
-  Project identifier. Required when the credential does not already select one project.
-</ParamField>
-
-<ResponseField name="monitoringSources" type="array">
-  Zero, one, or two monitoring source objects. There can be one source per supported agent platform in a project.
-</ResponseField>
-
-Each monitoring source has these fields:
-
-| Field | Meaning |
-|---|---|
-| `id` | Monitoring source id. |
-| `projectId` | Project that owns the source. |
-| `agentPlatform` | `retell` or `livekit_agents`. |
-| `strategy` | `retell_api_polling` or `livekit_otlp`. |
-| `credentialsHint` | Last four characters of the sealed Retell key, or `null`. |
-| `health` | Source-wide health and last-received times. |
-| `agents` | Selected Retell voice agents. Empty for LiveKit Agents. |
-
-`health.state` is `healthy`, `invalid_credential`, `rate_limited`, or
-`provider_unavailable`. A healthy source with `lastReceivedAt: null` is still
-waiting for its first production conversation.
-
-Each Retell agent has its platform id and name, an import state, scan progress,
-and last-success and last-conversation times. Its `state` is `importing`,
-`active`, or `degraded`.
-
-```bash
-curl "https://your-egma-host/v1/monitoring?projectId=prj_abc123" \
-  -H "Authorization: Bearer egma_sk_..."
-```
-
 ## Discover Retell voice agents
 
 **`POST /v1/monitoring/retell/discover`**
 
-Checks one Retell API key and returns only voice agents. This request does not
-save the key.
+Validates a Retell API key and lists the account's voice agents, so a person can
+pick the one an Egma agent runs as. Egma stores nothing here.
 
 <ParamField body="apiKey" type="string" required>
-  Retell platform API key with Agent Read permission.
+  A Retell API key with Agent Read permission.
 </ParamField>
 
 <ResponseField name="agents" type="array">
-  Voice-agent choices shaped as `{ id, name }`, sorted by name.
+  Voice-agent identities, each with `id` and `name`, sorted by name.
 </ResponseField>
 
 ```bash
-curl -X POST \
-  "https://your-egma-host/v1/monitoring/retell/discover?projectId=prj_abc123" \
-  -H "Authorization: Bearer egma_sk_..." \
+curl -X POST "https://your-egma-host/v1/monitoring/retell/discover?projectId=prj_abc123" \
+  -H "Authorization: Bearer $EGMA_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{ "apiKey": "key_live_..." }'
+  -d '{"apiKey":"key_live_..."}'
 ```
 
-## Configure a Retell monitoring source
+## Turn pull on
 
-**`PUT /v1/monitoring/retell`**
+**`PUT /v1/agents/{agentId}/production-pull`**
 
-Checks Agent Read and call-history access, seals the key once, and saves the
-selected Retell voice agents. The key needs Retell Monitor or History Read
-permission in addition to Agent Read permission.
+Binds the agent to its platform, seals the monitoring key on the agent's own
+row, and opens a 30-day historical import. Sending it again re-arms that import
+from the current instant.
+
+Egma checks the key against both permissions polling needs — reading the
+account's agents and reading its call history — **before** anything is sealed, so
+a key that can do only one of them is refused with the permission it is missing.
+
+<ParamField body="agentPlatform" type="string" required>
+  `retell`. Egma pulls from Retell today; a LiveKit agent pushes instead.
+</ParamField>
+
+<ParamField body="platformAgentId" type="string" required>
+  The agent's own identifier on its platform, from the discovery route above.
+</ParamField>
 
 <ParamField body="apiKey" type="string" required>
-  Retell platform API key. Egma never returns it after this request.
+  The platform API key Egma pulls this agent's production calls with.
 </ParamField>
 
-<ParamField body="agents" type="object[]" required>
-  At least one choice shaped as `{ id, name }`. Egma checks each id against Retell and stores Retell's current name rather than trusting a client-supplied rename.
-</ParamField>
-
-<ResponseField name="monitoringSource" type="object">
-  The saved source in the same shape returned by `GET /v1/monitoring`.
+<ResponseField name="pullSwitch" type="object">
+  `agentId`, `agentPlatform`, `platformAgentId`, `monitoringKeyHint`, and
+  `pullProductionCalls`. The key itself is never in a response.
 </ResponseField>
 
-A new selected agent starts a fixed 30-day import. Changing the key keeps
-existing progress. Removing an agent from the selection stops its polling and
-keeps its imported production conversations. Polling checks for new terminal
-conversations about every 30 seconds after the first import finishes.
+At most one agent in a project may pull for a given platform agent. A second
+agent naming the same `platformAgentId` while the first is switched on is
+refused with `422`, so two Egma agents can never poll one platform agent twice.
 
 ```bash
-curl -X PUT \
-  "https://your-egma-host/v1/monitoring/retell?projectId=prj_abc123" \
-  -H "Authorization: Bearer egma_sk_..." \
+curl -X PUT "https://your-egma-host/v1/agents/agt_abc123/production-pull?projectId=prj_abc123" \
+  -H "Authorization: Bearer $EGMA_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "apiKey": "key_live_...",
-    "agents": [{ "id": "agent_abc123", "name": "Front desk" }]
-  }'
+  -d '{"agentPlatform":"retell","platformAgentId":"agent_abc","apiKey":"key_live_..."}'
 ```
 
-## Record a LiveKit Agents monitoring source
+## Turn pull off
 
-**`PUT /v1/monitoring/livekit-agents`**
+**`DELETE /v1/agents/{agentId}/production-pull`**
 
-Creates the project monitoring source used to show waiting and last-received state.
-The request has no body and does not configure a LiveKit worker. Install the
-Egma Python SDK, add `EGMA_URL` and a project-scoped `EGMA_API_KEY` to the
-worker, and call `monitor_livekit(ctx)` before `AgentSession.start`.
+Stops the polling. Everything already stored stays where it is, and so does the
+agent's binding, its sealed key, and the cursor its reading had reached — so
+turning it back on resumes rather than re-reading history Egma already holds.
 
-<ResponseField name="monitoringSource" type="object">
-  A `livekit_agents` source with `strategy: "livekit_otlp"` and no selected-agent rows.
+<ResponseField name="pullSwitch" type="object">
+  The same object as above, with `pullProductionCalls: false`.
 </ResponseField>
 
 ```bash
-curl -X PUT \
-  "https://your-egma-host/v1/monitoring/livekit-agents?projectId=prj_abc123" \
-  -H "Authorization: Bearer egma_sk_..."
+curl -X DELETE "https://your-egma-host/v1/agents/agt_abc123/production-pull?projectId=prj_abc123" \
+  -H "Authorization: Bearer $EGMA_API_KEY"
 ```
 
-See [Egma Python SDK](/integrations/python-sdk) for the worker setup.
+## Refusals
 
-## Remove a monitoring source
+| Status | When |
+|---|---|
+| `403` | The role cannot change monitoring. Checked before any request to the platform. |
+| `404` | No active agent with that id in this project. |
+| `422` | The key is rejected, lacks call-history permission, names an agent the account does not run, or another agent is already pulling for that platform agent. |
+| `503` | The platform did not answer the setup check. |
 
-**`DELETE /v1/monitoring/:platform`**
+## Reading what arrived
 
-Use `retell` or `livekit-agents` for `platform`. A successful delete returns
-`204 No Content` and keeps production conversations already stored.
-
-Deleting a Retell source stops its polling. Deleting a LiveKit Agents source
-removes Egma's source-status record; it does not change code or secrets in a
-deployed worker. Remove `monitor_livekit` or its Egma credentials in that
-deployment when you also want the worker to stop exporting.
-
-```bash
-curl -X DELETE \
-  "https://your-egma-host/v1/monitoring/retell?projectId=prj_abc123" \
-  -H "Authorization: Bearer egma_sk_..."
-```
+Production conversations are read through the trace routes, not here. See
+[Traces](/api/traces).

@@ -4,7 +4,7 @@ sidebarTitle: "Retell"
 description: "Connect Retell chat and voice agents for simulations, then set up production voice monitoring with Retell API polling."
 ---
 
-Retell is an **agent platform**. It is not one connection kind. Egma supports
+Retell is an **agent platform**. It is not one connection type. Egma supports
 two Retell simulation paths and one separate production Monitoring strategy:
 
 | Purpose | Retell agent | Egma path |
@@ -111,7 +111,7 @@ does not block the connection.
 
 ## Set up Retell production Monitoring
 
-Simulation setup and a monitoring source are separate. A simulation connection
+Simulation setup and production monitoring are separate. A simulation connection
 tells Egma how to contact an agent during a test. Retell Monitoring tells Egma
 which real production calls to import after they finish.
 
@@ -181,5 +181,5 @@ Monitoring UI does not expose a production recording player.
 The same trace store reconstructs the transcript, tool calls, supported
 measures, and production grader work for Retell and LiveKit Agents traffic.
 
-See [Monitoring API](/api/monitoring) for the monitoring source request
+See [Monitoring API](/api/monitoring) for the pull-switch request
 shapes.

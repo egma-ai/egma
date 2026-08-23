@@ -4,10 +4,11 @@ sidebarTitle: "Telemetry"
 description: "Set up platform-specific production monitoring, then read real conversations as transcripts, measures, and grader verdicts."
 ---
 
-Egma receives real production conversations through a platform-specific
-**monitoring source**. Retell uses API polling after a voice conversation
-finishes. LiveKit Agents uses OpenTelemetry from the running Python agent
-process.
+Egma receives real production conversations two ways, and both hang off the
+agent. **Pull** is declared: an agent binds to Retell, holds a Retell API key of
+its own, and carries one switch. **Push** is observed: a LiveKit agent sends
+OpenTelemetry from its own running process, with no switch and nothing to set
+up.
 
 Both paths produce the same Egma conversation record. Egma shows a structured
 transcript, tool evidence, supported measures, and production grader work when
@@ -17,7 +18,8 @@ The same grading engine that evaluates simulations can also evaluate production 
 
 ## How it works
 
-Open **Monitoring → Set up monitoring** and choose the agent platform.
+Open the agent you want to watch and turn **pull production calls** on, or —
+for a LiveKit agent — follow the push instructions below.
 
 - **Retell:** enter one platform API key and select the Retell voice agents to
   monitor. Egma imports 30 days of call history and then polls about every 30
@@ -95,7 +97,7 @@ The same helper works for customer-hosted and LiveKit Cloud-hosted Python agents
 
 The API key you use for customer OTLP production export must be **project-scoped**. Egma rejects an organization-wide key before it decodes or stores the request body. Organization-wide keys can still use the trace read APIs to query across the organization.
 
-To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If nothing is appearing under **Monitoring**, first check the monitoring source state and then widen the transcript time window.
+To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If nothing is appearing under **Monitoring**, first check that the agent's pull switch is on, or that the pushing process is running, and then widen the transcript time window.
 
 ## Querying traces
 

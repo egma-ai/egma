@@ -1,7 +1,7 @@
 ---
 title: "Agents and Connections: How Egma Reaches Your Agent"
 sidebarTitle: "Agents & Connections"
-description: "Understand the separate platform, connection kind, access variant, modality, and product label used for simulations."
+description: "Understand the separate platform, connection type, access variant, modality, and product label used for simulations."
 ---
 
 An **agent** is Egma's stable record of the agent you test. A **connection** is
@@ -19,12 +19,12 @@ Every connection states five separate facts:
 | Fact | Meaning | Example |
 |---|---|---|
 | **Agent platform** | The product or framework the customer uses | Retell, LiveKit Agents, or unknown |
-| **Connection kind** | The path the simulator uses to reach the agent | `retell_chat_api`, `phone_number`, `livekit_room` |
+| **Connection type** | The path the simulator uses to reach the agent | `retell_chat_api`, `phone_number`, `livekit_room` |
 | **Access variant** | How Egma gets access to that path | API key, public E.164 number, project credentials, token endpoint |
 | **Modality** | The conversation form | `chat` or `voice` |
 | **Product label** | Display text derived by Egma | Retell chat, Retell phone, LiveKit token endpoint |
 
-These facts do different jobs. The connection kind selects simulator code. The
+These facts do different jobs. The connection type selects simulator code. The
 access variant selects the configuration and credential rules inside that
 adapter. Modality selects chat or voice behavior. Agent platform records where
 the agent runs; it does not select the adapter. Product label is display text
@@ -32,7 +32,7 @@ and never selects code.
 
 The supported combinations are:
 
-| Agent platform | Connection kind | Access variant | Modality | Product label |
+| Agent platform | Connection type | Access variant | Modality | Product label |
 |---|---|---|---|---|
 | Retell | `retell_chat_api` | `retell_chat_api.api_key` | chat | Retell chat |
 | Retell | `phone_number` | `phone_number.public_e164` | voice | Retell phone |
@@ -41,12 +41,12 @@ The supported combinations are:
 | LiveKit Agents | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 | Any or unknown | `phone_number` | `phone_number.public_e164` | voice | Phone number |
 
-## Platform and connection kind are independent
+## Platform and connection type are independent
 
 A LiveKit Agents worker can answer a public phone number. In that case:
 
 - agent platform is LiveKit Agents;
-- connection kind is `phone_number`;
+- connection type is `phone_number`;
 - access variant is `phone_number.public_e164`;
 - modality is voice.
 
@@ -57,10 +57,10 @@ The same agent can also have a `livekit_room` connection. That connection joins
 the customer's LiveKit room directly and does not place a phone call.
 
 This model can add future paths without changing what an agent platform means.
-For example, a WebSocket or WebRTC adapter can become a new connection kind
+For example, a WebSocket or WebRTC adapter can become a new connection type
 with its own access variants and supported modalities.
 
-## Current connection kinds
+## Current connection types
 
 ### Retell chat API
 
@@ -68,7 +68,7 @@ with its own access variants and supported modalities.
 `retell_chat_api.api_key` variant stores a sealed Retell API key and the Retell
 chat agent ID.
 
-This connection kind does not stand for every way to reach a Retell agent. A
+This connection type does not stand for every way to reach a Retell agent. A
 Retell voice agent is reached through a `phone_number` connection today.
 
 ### Phone number
@@ -89,7 +89,7 @@ voice-only and has two access variants:
   pair and exposes a public HTTPS endpoint that returns a room token. Egma
   stores only the endpoint authentication headers sealed.
 
-These variants control the same connection kind. They are not different agent
+These variants control the same connection type. They are not different agent
 platforms.
 
 ## Create a connection through the API
@@ -101,7 +101,7 @@ Create an agent with an inline Retell chat connection:
   "name": "order-line",
   "connection": {
     "agentPlatform": "retell",
-    "connectionKind": "retell_chat_api",
+    "connectionType": "retell_chat_api",
     "accessVariant": "retell_chat_api.api_key",
     "modality": "chat",
     "config": { "retellAgentId": "agent_abc123" },
@@ -115,7 +115,7 @@ Attach a generic phone connection to an existing agent:
 ```json
 {
   "agentPlatform": null,
-  "connectionKind": "phone_number",
+  "connectionType": "phone_number",
   "accessVariant": "phone_number.public_e164",
   "modality": "voice",
   "config": { "phoneNumber": "+15551234567" }
@@ -154,12 +154,14 @@ agent: order-line (agt_01K...)
 Each run names one `connectionId`. The run freezes that connection's facts so
 later edits do not rewrite history.
 
-## Monitoring sources are separate
+## Monitoring is the agent's, not the connection's
 
-A simulation connection tells Egma how to contact an agent during a test. A
-**monitoring source** tells Egma how to receive evidence from real production
-conversations.
+A simulation connection tells Egma how to **reach** an agent during a test. How
+Egma **hears about** that agent's production traffic is the agent's own fact: it
+may bind to a platform, hold a monitoring-only API key on its own row, and carry
+one switch that turns Retell polling on. A LiveKit agent pushes instead and
+needs no switch at all.
 
-Retell Monitoring uses API polling. LiveKit Agents Monitoring uses OTLP from the
-running agent process. Neither source creates or changes a simulation
-connection. See [Production telemetry](/concepts/telemetry).
+The two custodies never entangle. A customer who chat-tests and pull-monitors
+one Retell account enters the key twice, once per job, and neither key can be
+used for the other. See [Production telemetry](/concepts/telemetry).

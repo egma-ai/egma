@@ -8,11 +8,13 @@ An agent is Egma's stable record of the agent you test. A **connection** is a
 separate record that tells the simulator how to reach it. One agent can have
 several connections, and each connection links back through `agentId`.
 
-A connection states its agent platform, connection kind, access variant, and
-modality. Egma derives its product label and topology from those facts. The
-agent platform says where the agent runs; the connection kind selects the
-simulator adapter. For example, a Retell or LiveKit Agents worker can use the
-same platform-independent `phone_number` connection kind.
+A connection states its connection type, access variant, and modality. Egma
+derives its product label, topology, and agent platform from those facts. The
+connection type selects the simulator adapter, and it answers which platform the
+connection reaches wherever the type pins one — a `retell_chat_api` connection is
+Retell's, a `livekit_room` connection is LiveKit's. A `phone_number` connection
+pins none, because a number is where Egma dials rather than who answers, and its
+platform is the agent's own binding.
 
 Registering with an inline connection is retry-safe. The `result` field says
 whether Egma created an agent, reused it, or added another connection.
@@ -26,13 +28,12 @@ response cannot expose the stored secret.
 `GET /v1/connection-options`
 
 Read this catalog before drawing a connection form. The server returns each
-supported combination of agent platform, connection kind, access variant, and
-modality. It also returns the derived product label, required configuration
+supported combination of connection type, access variant, and modality. It also returns the derived product label, required configuration
 fields, credential rule, and whether this deployment has a simulator adapter.
 
 <ResponseField name="items" type="array">
   Supported simulation connection options. Each item includes
-  `agentPlatform`, `agentPlatformLabel`, `connectionKind`,
+  `agentPlatform`, `agentPlatformLabel`, `connectionType`,
   `accessVariant`, `accessVariantLabel`, `modality`, `productLabel`,
   `topology`, `simulatorAdapter`, `fields`,
   `credentialRule`, `credentialHelp`, and `credentialFields`.
@@ -70,10 +71,6 @@ The `result` field in the response tells you exactly what happened:
   Display name for the agent. Required unless you want Egma to pick a numbered default. Must be unique within the project.
 </ParamField>
 
-<ParamField body="description" type="string">
-  Optional free-text description.
-</ParamField>
-
 <ParamField query="projectId" type="string">
   Project id or name to write this agent into. Defaults to the project your API key belongs to. In a single-project organization you never need this field.
 </ParamField>
@@ -82,24 +79,19 @@ The `result` field in the response tells you exactly what happened:
   The first connection to attach. Leave this out to register a bare agent and add connections later with `POST /v1/agents/:agentId/connections`.
 
   <Expandable title="connection fields">
-    <ParamField body="agentPlatform" type="string | null" required>
-      Where the agent runs. Current values are `retell`, `livekit_agents`, or
-      `null` when the platform is unknown or does not matter to this path.
-    </ParamField>
-
-    <ParamField body="connectionKind" type="string" required>
+    <ParamField body="connectionType" type="string" required>
       How the simulator reaches the agent. Current values are
       `retell_chat_api`, `phone_number`, and `livekit_room`.
     </ParamField>
 
     <ParamField body="accessVariant" type="string" required>
-      How Egma gets access to that connection kind. Use
+      How Egma gets access to that connection type. Use
       `GET /v1/connection-options` for the current supported combinations and
       their fields.
     </ParamField>
 
     <ParamField body="modality" type="string" required>
-      `chat` or `voice`, as required by the selected connection kind.
+      `chat` or `voice`, as required by the selected connection type.
     </ParamField>
 
     <ParamField body="name" type="string">
@@ -138,7 +130,10 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="id" type="string">Unique agent identifier (`agt_…`).</ResponseField>
     <ResponseField name="projectId" type="string">The project this agent belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
-    <ResponseField name="description" type="string | null">Free-text description, or `null`.</ResponseField>
+    <ResponseField name="agentPlatform" type="string | null">The platform this agent runs on, or `null` while nothing has bound it.</ResponseField>
+    <ResponseField name="platformAgentId" type="string | null">The agent's own identifier on that platform, or `null`.</ResponseField>
+    <ResponseField name="monitoringKeyHint" type="string | null">Last four characters of the sealed monitoring key, or `null`.</ResponseField>
+    <ResponseField name="pullProductionCalls" type="boolean">Whether Egma polls this agent's platform for its production calls.</ResponseField>
     <ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>
     <ResponseField name="updatedAt" type="string">ISO 8601 timestamp.</ResponseField>
   </Expandable>
@@ -152,8 +147,8 @@ The `result` field in the response tells you exactly what happened:
     <ResponseField name="agentId" type="string">The agent this connection belongs to.</ResponseField>
     <ResponseField name="projectId" type="string">The project this connection belongs to.</ResponseField>
     <ResponseField name="name" type="string">Display name.</ResponseField>
-    <ResponseField name="agentPlatform" type="string | null">The agent platform recorded for this connection.</ResponseField>
-    <ResponseField name="connectionKind" type="string">The path the simulator uses.</ResponseField>
+    <ResponseField name="agentPlatform" type="string | null">The platform this connection reaches, answered by the connection type or by the agent.</ResponseField>
+    <ResponseField name="connectionType" type="string">The path the simulator uses.</ResponseField>
     <ResponseField name="accessVariant" type="string">How Egma gets access to that path.</ResponseField>
     <ResponseField name="modality" type="string">`chat` or `voice`.</ResponseField>
     <ResponseField name="productLabel" type="string">Display text derived from the supported combination.</ResponseField>
@@ -177,7 +172,7 @@ curl -X POST https://your-egma-host/v1/agents \
     "name": "front-desk",
     "connection": {
       "agentPlatform": "retell",
-      "connectionKind": "retell_chat_api",
+      "connectionType": "retell_chat_api",
       "accessVariant": "retell_chat_api.api_key",
       "modality": "chat",
       "config": { "retellAgentId": "retell_agent_abc123" },
@@ -196,7 +191,7 @@ curl -X POST https://your-egma-host/v1/agents \
     "name": "support-bot",
     "connection": {
       "agentPlatform": "livekit_agents",
-      "connectionKind": "livekit_room",
+      "connectionType": "livekit_room",
       "accessVariant": "livekit_room.project_credentials",
       "modality": "voice",
       "config": {
@@ -300,7 +295,7 @@ Attach another simulation connection to an existing agent. The request body is i
 ### Request body
 
 Same fields as the `connection` object on `POST /v1/agents`. The agent
-platform, connection kind, access variant, and modality must name one supported
+platform, connection type, access variant, and modality must name one supported
 combination from `GET /v1/connection-options`.
 
 ### Response fields
@@ -317,7 +312,7 @@ curl -X POST "https://your-egma-host/v1/agents/agt_01abc/connections" \
   -H "Content-Type: application/json" \
   -d '{
     "agentPlatform": "retell",
-    "connectionKind": "phone_number",
+    "connectionType": "phone_number",
     "accessVariant": "phone_number.public_e164",
     "modality": "voice",
     "environment": "staging",
