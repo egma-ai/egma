@@ -196,6 +196,8 @@ function AgentDetailView({
   }, [answer]);
 
   const home = projectPath(projectId, "agents", agentId);
+  /** Where the trail's first crumb goes back to. */
+  const agents = projectPath(projectId, "agents");
 
   /**
    * Which panel this page has open, read from the address and nowhere else.
@@ -214,6 +216,10 @@ function AgentDetailView({
       <ProductPage>
         <PageHeader
           title="Agent"
+          breadcrumbs={[
+            { label: "Agents", href: agents },
+            { label: "Agent" },
+          ]}
         />
         <PageBody>
           <Loading what="this agent" />
@@ -227,6 +233,10 @@ function AgentDetailView({
       <ProductPage>
         <PageHeader
           title="Agent"
+          breadcrumbs={[
+            { label: "Agents", href: agents },
+            { label: "Agent" },
+          ]}
         />
         <PageBody>
           <NotFound message={answer.refusal.message} />
@@ -240,6 +250,10 @@ function AgentDetailView({
       <ProductPage>
         <PageHeader
           title="Agent"
+          breadcrumbs={[
+            { label: "Agents", href: agents },
+            { label: "Agent" },
+          ]}
         />
         <PageBody>
           <Failure message={answer.refusal.message} onRetry={reload} />
@@ -258,14 +272,23 @@ function AgentDetailView({
   return (
     <ProductPage>
       {/*
-       * **The bar holds the title alone**, which is `71V-0` and which ticket
-       * 01 ruled for every page. The trail that used to be here ended with the
-       * agent's own name and the heading beside it said the same name again —
-       * twice in a 56px line, which is the one line with no room to spare. The
-       * way back is the sidebar, where Agents is the lit row.
+       * **The trail is back in the bar.** Every other record page in the
+       * product draws one there, and this page had none: the only way back
+       * into the section was the sidebar.
+       *
+       * **Its last crumb is the word rather than this agent's name.** The bar
+       * draws the trail and the title on one 56px line, so a trail ending in
+       * the name says the name twice, a slash apart — which is what took the
+       * trail out in the first place. The trail names the section and the kind
+       * of record; the title beside it names *this* record. The run page and
+       * this route's own `loading.tsx` draw the same shape.
        */}
       <PageHeader
         title={agent.name}
+        breadcrumbs={[
+          { label: "Agents", href: agents },
+          { label: "Agent" },
+        ]}
         action={
           role === null ? undefined : (
             <Actions>
