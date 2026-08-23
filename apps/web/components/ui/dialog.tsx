@@ -114,11 +114,27 @@ function DialogContent({
   );
 }
 
+/**
+ * The head of a dialog, and the hairline the boards draw under it.
+ *
+ * `BK0-0` measures 16px of padding under the title and a 1px `--border` rule
+ * across the panel's inner width — the same on `BEM-0`, `BMT-0` and `C8F-0`.
+ * Nothing here drew it, and no caller could add it (`ui/dialog.tsx` takes no
+ * class for its head), so one screen reached for a `Separator` as the panel's
+ * first child instead. It belongs on the head, once.
+ *
+ * A column rather than the board's row: the close control is placed by
+ * `DialogContent`, against the panel, so that a head with two lines in it does
+ * not move the ✕ down the corner.
+ */
 function DialogHeader({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      className={cn(
+        "flex flex-col gap-2 border-b border-border pb-4",
+        className,
+      )}
       {...props}
     />
   );

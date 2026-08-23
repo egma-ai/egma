@@ -97,11 +97,18 @@ const PANEL_WIDE = {
   sheet: "w-[min(var(--sheet-width-wide),100vw)]",
 } as const;
 
-/** A sheet's head is a fixed bar over a body that scrolls under it. */
+/**
+ * A sheet's head is a fixed bar over a body that scrolls under it.
+ *
+ * The hairline is not here any more: `DialogHeader` carries it for every kind,
+ * because the boards draw one under a confirmation's title too. What is left is
+ * the sheet's own bar — it does not shrink, and its padding is even rather than
+ * the dialog head's "under the title only".
+ */
 const HEAD_SHAPE = {
   dialog: "",
   drawer: "",
-  sheet: "flex-none border-b border-border p-5",
+  sheet: "flex-none p-5",
 } as const;
 
 /**
