@@ -129,8 +129,17 @@ export function DataTable<Row>({
     if (column.action === true) return "var(--table-action-width)";
     return column.width;
   }
+  /**
+   * Whether the narrow layout leaves this column out.
+   *
+   * The primary column can never be omitted: it is the row's name, and a
+   * stacked row without one is a row nobody can read.
+   */
+  function hiddenWhenStacked(column: Column<Row>): boolean {
+    return column !== primary && column.hideOnMobile === true;
+  }
   function mobileHidden(column: Column<Row>): "true" | undefined {
-    return column !== primary && column.hideOnMobile === true ? "true" : undefined;
+    return hiddenWhenStacked(column) ? "true" : undefined;
   }
 
   return (
@@ -158,9 +167,7 @@ export function DataTable<Row>({
                      * ⋮, which is where a person's eye starts down it.
                      */
                     "data-[action=true]:px-0",
-                    column.hideOnMobile === true &&
-                      column !== primary &&
-                      "max-[900px]:hidden",
+                    hiddenWhenStacked(column) && "stacked:hidden",
                   )}
                   data-action={column.action === true ? "true" : undefined}
                   data-mobile-hidden={mobileHidden(column)}
@@ -196,8 +203,30 @@ export function DataTable<Row>({
                     className={cn(
                       "h-(--row-min-height) text-muted-foreground",
                       "data-[action=true]:px-0 data-[action=true]:text-center",
-                      "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-baseline",
-                      "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
+                      /*
+                       * **A column the narrow layout omits takes the stacked
+                       * layout's `display` and nothing else.** Writing the two
+                       * as separate rules — `stacked:flex` for every cell and
+                       * `max-[900px]:hidden` for this one — put two `display`
+                       * declarations of equal weight under one query, and the
+                       * one Tailwind happened to emit last won. It was `flex`,
+                       * so `hideOnMobile` hid nothing on a phone: the personas
+                       * list still drew Description and Version, and the
+                       * agents list still drew Created.
+                       *
+                       * There is no rule to outrank now, and the second half
+                       * is the same fix: the omission follows `stacked`, so a
+                       * table that stacks because its own container is narrow
+                       * omits the same columns a phone does. `hideOnMobile`
+                       * has always meant "the narrow layout may leave this
+                       * out", and `stacked` is what "narrow layout" means.
+                       */
+                      hiddenWhenStacked(column)
+                        ? "stacked:hidden"
+                        : [
+                            "stacked:flex stacked:h-auto stacked:min-h-0 stacked:items-baseline",
+                            "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
+                          ],
                       column === primary
                         ? "stacked:mb-1"
                         : column.action === true
@@ -225,9 +254,6 @@ export function DataTable<Row>({
                         "@max-[60rem]/data-table:justify-end",
                         "@max-[60rem]/data-table:has-[[data-slot=cell]:empty]:hidden",
                       ],
-                      column.hideOnMobile === true &&
-                        column !== primary &&
-                        "max-[900px]:hidden",
                     )}
                     data-action={column.action === true ? "true" : undefined}
                     data-label={column.header}
