@@ -580,6 +580,29 @@
   --color-primary-wash-hover: var(--action-wash-hover);
   --color-primary-wash-pressed: var(--action-wash-pressed);
 
+  /*
+   * The same seven declarations under the product's own word.
+   *
+   * **`primary` is shadcn's name for this and `action` is egma's, and a class
+   * that names a key the theme does not publish fails in silence.** `DESIGN.md`
+   * and the spec both say `--action`; the theme published only `--color-primary`,
+   * so `text-action` compiled to nothing at all, drew the inherited body colour,
+   * and looked exactly like somebody's decision. That is how "+ Add a behavior"
+   * shipped as ordinary text until a screenshot caught it.
+   *
+   * Both words now read one declaration. `primary` stays because a component
+   * pasted from the registry arrives asking for it; `action` is what the rest
+   * of the product writes. The two feedback fills are aliased as well, on
+   * purpose: publishing `action-wash` but not `action-wash-hover` would put
+   * the same silent hole back one name along.
+   */
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-action-pressed: var(--action-pressed);
+  --color-action-wash: var(--action-wash);
+  --color-action-wash-hover: var(--action-wash-hover);
+  --color-action-wash-pressed: var(--action-wash-pressed);
+
   /* Destructive, which is the failure colour and never the brand colour. */
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-text);

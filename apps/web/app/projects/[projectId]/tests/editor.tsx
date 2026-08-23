@@ -155,15 +155,16 @@ function AddRow({
         "inline-flex w-fit min-h-(--control-md) items-center gap-1 px-0",
         "cursor-pointer rounded-button border-0 bg-transparent",
         /*
-         * `text-primary` is the Ember-ink key: the theme maps
-         * `--color-primary` onto `--action`, and there is no `--color-action`
-         * for a `text-action` to read. A class that reads nothing draws the
-         * inherited colour, which is how this arrived as ordinary body text.
+         * The product's own word for the Ember ink. It drew as ordinary body
+         * text until ticket 09, because the theme published this family only
+         * under shadcn's name — `--color-primary` — and a class naming a key
+         * the theme does not have compiles to nothing and inherits. Both words
+         * read one declaration now; this is the one `DESIGN.md` uses.
          */
-        "text-sm text-primary",
+        "text-sm text-action",
         "transition-[color] duration-(--duration-hover) ease-out",
         "pointer-coarse:min-h-(--tap-target)",
-        "pointer-hover:not-disabled:text-primary-hover",
+        "pointer-hover:not-disabled:text-action-hover",
         "disabled:cursor-not-allowed disabled:opacity-55",
         "motion-reduce:transition-none",
       )}
