@@ -286,9 +286,15 @@ function AgentDetailView({
        */}
       <PageHeader
         title={agent.name}
+        /*
+          The real trail: Agents, then this agent. `PageHeader` takes the last
+          step off, because the heading beside it is that step. Before that
+          rule this page named the *kind* here — "Agents / Agent   Ada" — to
+          keep the record's own name out of the bar twice.
+        */
         breadcrumbs={[
           { label: "Agents", href: agents },
-          { label: "Agent" },
+          { label: agent.name },
         ]}
         action={
           role === null ? undefined : (

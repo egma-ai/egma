@@ -21,6 +21,40 @@ export type PageNavigationItems = readonly [
   CurrentNavigationItem,
 ];
 
+/** One step of a trail, whichever kind it is. */
+export type PageNavigationItem = ParentNavigationItem | CurrentNavigationItem;
+
+/** A trail with at least one step left in it. */
+export type DrawnTrail = readonly [PageNavigationItem, ...PageNavigationItem[]];
+
+/**
+ * The trail a page draws, with the page's own name taken off the end.
+ *
+ * **A trail never repeats the title beside it.** `PageHeader` draws the trail
+ * and the `<h1>` side by side in one 56px bar, and a trail's last step *is* the
+ * current page — so every record page in the product read its own name twice,
+ * a slash apart: "Tests / Default   Default". Two tickets worked around it
+ * locally, one by ending the trail with an empty step (which left a dangling
+ * "/" wherever the bar wrapped) and one by putting the kind of record there
+ * instead of the record ("Runs / Run   Pre-release check").
+ *
+ * So the rule is here, once: a page passes its real trail, ending with its own
+ * name, and this takes that step off. The separator goes with it, because the
+ * step it belonged to is gone. What is left says which section the record is
+ * in, and the heading beside it says which record.
+ */
+export function trailWithoutTitle(
+  items: PageNavigationItems | undefined,
+  title: string,
+): DrawnTrail | undefined {
+  if (items === undefined) return undefined;
+  if (items[items.length - 1]?.label !== title) return items;
+
+  const [first, ...rest] = items.slice(0, -1);
+  /* A trail that was only the page's own name has nothing left to draw. */
+  return first === undefined ? undefined : [first, ...rest];
+}
+
 /**
  * The one navigation model for a page below a product section.
  *
@@ -45,11 +79,7 @@ export type PageNavigationItems = readonly [
  * pointer target — and carries no motion, which is what `DESIGN.md` asks of a
  * navigation row. Rewriting it would have been churn with a diff attached.
  */
-export function PageNavigation({
-  items,
-}: {
-  readonly items: PageNavigationItems;
-}) {
+export function PageNavigation({ items }: { readonly items: DrawnTrail }) {
   return (
     <nav
       className="mb-3 min-w-0"

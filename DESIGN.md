@@ -216,6 +216,7 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
 - Every page has a title bar of its own, the same height as the wordmark bar, with the page title and its purpose statement in it. Page actions are not in that bar.
+- A page below a section carries the trail into its record in that bar, and **the trail never repeats the title beside it**. A page passes the real trail, ending with the record's own name; the bar draws every step but the last, because the heading beside it is that last step. There is no separator after the step that is left. (Read off the boards, 2026-08-23.)
 - A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
 - Page content is held to the page maximum and aligned to the left gutter, so the title in the bar and the first column under it are on one line.
 

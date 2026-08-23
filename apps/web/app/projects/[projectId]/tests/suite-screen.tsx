@@ -25,7 +25,6 @@ import {
   runSuitePath,
   suitePagePath,
   testsPagePath,
-  trailInto,
   type TestSuite,
 } from "../../../../lib/test-suites.ts";
 import {
@@ -434,7 +433,10 @@ export function SuiteScreen({
     <ProductPage>
       <PageHeader
         title={title}
-        breadcrumbs={trailInto({ label: "Tests", href: testsPagePath(projectId) })}
+        breadcrumbs={[
+          { label: "Tests", href: testsPagePath(projectId) },
+          { label: title },
+        ]}
         toolbar={
           <SearchField
             aria-label="Search tests"

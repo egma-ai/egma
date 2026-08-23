@@ -52,31 +52,3 @@ export function matchesSearch(name: string, search: string): boolean {
   const wanted = search.trim().toLocaleLowerCase();
   return wanted === "" || name.toLocaleLowerCase().includes(wanted);
 }
-
-/**
- * The trail into a record, for a page whose `<h1>` is that record's own name.
- *
- * `PageHeader` draws the trail and the page title side by side in one 56px bar,
- * so a trail that ended with the record would say its name twice — "Tests /
- * Default   Default" — which is not what `9VT-0` and `B9M-0` draw. They draw
- * one line, and its last step is the heading. So the trail carries the
- * ancestors and stops, and the `<h1>` beside it is the current page: one name,
- * in the element that means "this page", with the separator still between it
- * and its parent.
- *
- * **This belongs in the shell rather than here**, and it is written here only
- * because `apps/web/ui/` is another ticket's during this effort. The one-line
- * fix is for `PageHeader` to stop drawing the trail's last step; when that
- * lands, every caller of this can pass its own trail again and this goes.
- */
-export function trailInto(
-  ...ancestors: readonly { readonly label: string; readonly href: string }[]
-): readonly [
-  { readonly label: string; readonly href: string },
-  ...{ readonly label: string; readonly href: string }[],
-  { readonly label: string; readonly href?: never },
-] {
-  const [first, ...rest] = ancestors;
-  if (first === undefined) throw new Error("a trail needs at least one parent");
-  return [first, ...rest, { label: "" }];
-}

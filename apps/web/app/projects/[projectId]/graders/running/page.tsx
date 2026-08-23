@@ -34,10 +34,7 @@ import {
   platformAnswer,
   platformClient,
 } from "../../../../../lib/platform-client.ts";
-import {
-  graderDisplayName,
-  GRADER_VIEW_LABELS,
-} from "../../../../../lib/presentation.ts";
+import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
   projectLanding,
   projectPath,
@@ -487,12 +484,19 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
       {/* The trail and the title, and the strip under them. See the library. */}
       <PageHeader
         title={RUNNING.title}
+        /*
+          The trail ends with this screen's own name, and `PageHeader` takes
+          that step off. What is left is the section; the title beside it says
+          what the screen holds. Before that rule the bar read "Graders /
+          Running   Running graders" — the word "Running" twice, once as a tab
+          label and once inside the title.
+        */
         breadcrumbs={[
           {
             label: "Graders",
             href: projectPath(projectId, GRADERS_SECTION),
           },
-          { label: GRADER_VIEW_LABELS.running },
+          { label: RUNNING.title },
         ]}
       />
       <PageBody>
