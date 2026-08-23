@@ -1,8 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { SearchIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 /**
@@ -87,13 +89,57 @@ export function Toolbar({
   readonly action?: ReactNode;
 }) {
   return (
-    <div className="mb-4 flex items-center justify-between gap-3 max-[900px]:flex-wrap">
+    /*
+     * 52px: a 36px control with the boards' 16px under it (`71N-0`). The gap
+     * is 20px because that is the gap the board leaves between the filters and
+     * the action, and the whole strip is held to the page's content maximum so
+     * the action lands over the last column of the table below it.
+     */
+    <div
+      data-slot="toolbar"
+      className={cn(
+        "flex w-full max-w-(--page-content-max) items-center justify-between gap-5 pb-4",
+        "max-[900px]:flex-wrap",
+      )}
+    >
       <div className="flex min-w-0 flex-wrap items-center gap-3">{children}</div>
       {action === undefined ? null : (
         <div className="flex flex-none flex-wrap items-center justify-end gap-3">
           {action}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The search box every list is filtered with: 300 by 36, with a magnifier.
+ *
+ * **One box, one size, on every list page.** `71Q-0` is 300px wide and 36px
+ * tall with 12px of side padding and an 8px gap to the icon, and it is that on
+ * the agents board, the personas board and the tests board alike — which is the
+ * point of drawing it once here. A page that reached for a bare `Input` got a
+ * 44px form control that ran to whatever width was left.
+ *
+ * The icon is decoration: the field carries its own `aria-label`, and a
+ * magnifier read out as "search" beside a field already called "Search agents
+ * by name" is the word twice.
+ *
+ * `TOOLBAR_SEARCH` below is the same shape as a class list, for the pages that
+ * have not moved onto this component yet.
+ */
+export function SearchField({
+  className,
+  ...props
+}: ComponentProps<typeof Input>) {
+  return (
+    <div className={cn("relative flex-none", className)} data-slot="search-field">
+      <SearchIcon
+        className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint"
+        aria-hidden="true"
+        strokeWidth={1.75}
+      />
+      <Input type="search" className={cn(TOOLBAR_SEARCH, "pl-9")} {...props} />
     </div>
   );
 }
@@ -117,10 +163,15 @@ export function Toolbar({
  * which wins the main axis back from `width`: the box grows into whatever the
  * filters leave and stops at its maximum.
  */
-export const TOOLBAR_SEARCH = "min-w-[180px] w-full max-w-[380px] flex-1";
+export const TOOLBAR_SEARCH = [
+  "w-[300px] max-w-full min-h-(--control-md) text-sm",
+  /* One column on a phone, where 300px is most of the screen. */
+  "max-[900px]:w-full",
+].join(" ");
 
 /** A filter that chooses one value, held narrower than the search beside it. */
-export const TOOLBAR_FILTER = "w-auto max-w-[240px] min-w-[160px]";
+export const TOOLBAR_FILTER =
+  "w-auto max-w-[240px] min-w-[160px] min-h-(--control-md) text-sm";
 
 /** A group of controls that act on the thing the page is about. */
 export function Actions({ children }: { readonly children: ReactNode }) {

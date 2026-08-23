@@ -2,7 +2,13 @@
 
 import { XIcon } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import type { ComponentProps, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -40,7 +46,50 @@ import { cn } from "@/lib/utils";
  * behind it usable — the transcript beside its grader results. This one is a
  * modal form. Both are kept, and a caller choosing between them is choosing
  * whether the page behind stays reachable.
+ *
+ * **The panel is portaled inside `<main>`, not to `<body>`, and that is a
+ * decision with a test behind it.** The browser walk reads whole screens as
+ * `page.innerText("main")`, and the create, edit and read flows for agents,
+ * connections, personas and tests are all moving into this panel. A panel
+ * portaled to `body` is outside `main`, so every one of those reads would come
+ * back without the thing the person is actually looking at — and the
+ * expectation would be quietly false rather than loudly broken.
+ *
+ * `SheetHost` is what makes that possible: `ui/shell.tsx` renders one at the
+ * end of every product page, and this file's portal aims at it. The panel is
+ * still `position: fixed`, so the scrim covers the whole viewport including
+ * the sidebar, which is outside `main` — the DOM position changes what a text
+ * read finds, not where anything is drawn. With no host in the tree (a
+ * component test rendering a sheet on its own) Radix falls back to `body`,
+ * which is the behaviour that was there before.
  */
+
+/**
+ * Where a sheet's panel is put, published by the product page that owns it.
+ *
+ * It is state rather than a ref because a portal target has to exist *before*
+ * the portal renders into it, and a ref does not tell React that it now does.
+ * The callback ref below sets state, the host renders a second time, and the
+ * value the context carries on that pass is a real element.
+ */
+const SheetRootContext = createContext<HTMLElement | null>(null);
+
+/**
+ * One product page's sheet container, drawn last inside its `<main>`.
+ *
+ * It draws nothing: no size, no padding, nothing that could take a line of the
+ * page's own layout. What it is, is an address.
+ */
+function SheetHost({ children }: { readonly children: ReactNode }) {
+  const [root, setRoot] = useState<HTMLElement | null>(null);
+
+  return (
+    <SheetRootContext.Provider value={root}>
+      {children}
+      <div data-slot="sheet-root" ref={setRoot} />
+    </SheetRootContext.Provider>
+  );
+}
 
 function Sheet(props: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="sheet" {...props} />;
@@ -54,8 +103,24 @@ function SheetClose(props: ComponentProps<typeof DialogPrimitive.Close>) {
   return <DialogPrimitive.Close data-slot="sheet-close" {...props} />;
 }
 
+/**
+ * The portal, aimed at the page's own host.
+ *
+ * `container` is left off entirely when there is no host, rather than passed as
+ * `null`: Radix reads an explicit `null` as "no container" and falls back to
+ * `body`, which is what we want, but saying nothing is what keeps that a
+ * fallback rather than a second code path.
+ */
 function SheetPortal(props: ComponentProps<typeof DialogPrimitive.Portal>) {
-  return <DialogPrimitive.Portal data-slot="sheet-portal" {...props} />;
+  const root = useContext(SheetRootContext);
+
+  return (
+    <DialogPrimitive.Portal
+      data-slot="sheet-portal"
+      {...(root === null ? {} : { container: root })}
+      {...props}
+    />
+  );
 }
 
 function SheetOverlay({
@@ -90,7 +155,7 @@ function SheetContent({
       <DialogPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "fixed inset-y-0 right-0 z-30 flex w-[min(440px,100vw)] flex-col gap-5",
+          "fixed inset-y-0 right-0 z-30 flex w-[min(var(--sheet-width),100vw)] flex-col gap-5",
           "border-l border-border bg-surface p-6 text-foreground shadow-modal",
           "outline-none",
           className,
@@ -250,6 +315,7 @@ export {
   SheetDescription,
   SheetFooter,
   SheetHeader,
+  SheetHost,
   SheetOverlay,
   SheetPortal,
   SheetTitle,

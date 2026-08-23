@@ -302,6 +302,18 @@
    */
   --table-action-width: 48px;
 
+  /*
+   * How wide a side sheet is — the one the boards draw, and the reading
+   * surface `ui/dialog.tsx` opens beside a page.
+   *
+   * They were 440 and 640 and there is no reason for a product to have two
+   * side sheets of two widths: a person meets both and sees one control that
+   * cannot make up its mind. `77F-0` says 440, so 440 is the width, and it is
+   * one declaration so that widening the reading surface later is one edit
+   * rather than a hunt through two components.
+   */
+  --sheet-width: 440px;
+
   /* Product shell measurements. */
   --sidebar-width: 224px;
   --sidebar-header-height: 56px;
@@ -955,11 +967,13 @@
     animation: egma-fade-out var(--duration-drawer-out) var(--ease-drawer);
   }
 
-  [data-slot="sheet-content"][data-state="open"] {
+  [data-slot="sheet-content"][data-state="open"],
+  [data-slot="dialog-content"][data-kind="sheet"][data-state="open"] {
     animation: egma-sheet-in var(--duration-drawer-in) var(--ease-drawer);
   }
 
-  [data-slot="sheet-content"][data-state="closed"] {
+  [data-slot="sheet-content"][data-state="closed"],
+  [data-slot="dialog-content"][data-kind="sheet"][data-state="closed"] {
     animation: egma-sheet-out var(--duration-drawer-out) var(--ease-drawer);
   }
 
@@ -1041,6 +1055,41 @@
   [data-preview="reduced-motion"]
     [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
     animation: egma-fade-out var(--duration-hover) linear;
+  }
+
+  /*
+   * A link inside a table cell.
+   *
+   * The boards underline it in the text colour and turn it Ember under the
+   * pointer (`71C-0`): an underline is what says "this is a link" without
+   * spending the brand colour on every row of a list, and the colour arrives
+   * when somebody is actually pointing at one. It is here rather than in
+   * `ui/data-table.tsx` because the cell's contents are written by the page —
+   * the component never sees the link — and because every list in the product
+   * has to answer this the same way.
+   *
+   * Underline offset and thickness are the board's. Both are properties of the
+   * text rather than values a component chose, and neither has a token because
+   * `DESIGN.md` names no scale for them.
+   */
+  [data-slot="table-cell"] a {
+    color: inherit;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: color var(--duration-hover) var(--ease-out);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    [data-slot="table-cell"] a:hover {
+      color: var(--accent);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="table-cell"] a {
+      transition: none;
+    }
   }
 
   /*
@@ -1128,6 +1177,7 @@
     [data-slot="dialog-content"][data-state="open"],
     [data-slot="dialog-content"][data-kind="drawer"][data-state="open"],
     [data-slot="dialog-overlay"][data-state="open"],
+    [data-slot="dialog-content"][data-kind="sheet"][data-state="open"],
     [data-slot="sheet-content"][data-state="open"],
     [data-slot="sheet-overlay"][data-state="open"] {
       animation: egma-fade-in var(--duration-hover) linear;
@@ -1139,6 +1189,7 @@
     [data-slot="dialog-content"][data-state="closed"],
     [data-slot="dialog-content"][data-kind="drawer"][data-state="closed"],
     [data-slot="dialog-overlay"][data-state="closed"],
+    [data-slot="dialog-content"][data-kind="sheet"][data-state="closed"],
     [data-slot="sheet-content"][data-state="closed"],
     [data-slot="sheet-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;

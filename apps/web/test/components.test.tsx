@@ -1619,7 +1619,18 @@ describe("the role the shell shows", () => {
     expect(sessionReads).toHaveLength(2);
   });
 
-  it("starts the signed-in sidebar with project context, not a repeated logo", () => {
+  /**
+   * The bar starts with the Egma wordmark, and the project context is under it.
+   *
+   * **This assertion was the other way round until 2026-08-23.** `DESIGN.md`
+   * kept the full logo out of the signed-in sidebar and asked for explicit
+   * approval to change that rule; the developer gave it, looking at the Paper
+   * boards — "our logo, not the organization's" — and `DESIGN.md` records the
+   * decision with its date. The organization did not disappear with the change:
+   * it moved into the eyebrow above the project name, which is what the second
+   * half of this case holds.
+   */
+  it("starts the signed-in sidebar with the Egma wordmark, then project context", () => {
     render(
       <AppShell initialMe={meWith("admin")}>
         <p>page</p>
@@ -1627,9 +1638,16 @@ describe("the role the shell shows", () => {
     );
 
     const sidebar = screen.getByRole("complementary");
+    const wordmark = within(sidebar).getByRole("img", { name: /egma/i });
+    expect(wordmark.getAttribute("src")).toBe("/brand/egma-wordmark.svg");
+    expect(
+      within(sidebar).getByRole("link", { name: "Egma home" }).getAttribute("href"),
+    ).toBe("/");
+
     const firstControl = sidebar.querySelector("button");
     expect(firstControl?.getAttribute("aria-label")).toMatch(/^Organization Acme/);
-    expect(within(sidebar).queryByRole("img", { name: /egma/i })).toBeNull();
+    /* The organization is the eyebrow now; the project is the line you press. */
+    expect(within(sidebar).getByText("Acme")).toBeTruthy();
   });
 
   it("keeps navigation icons decorative and every label visible", () => {

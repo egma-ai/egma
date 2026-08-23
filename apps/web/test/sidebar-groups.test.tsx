@@ -344,12 +344,18 @@ describe("the grouped sidebar", () => {
   });
 
   /**
-   * The switcher stays topmost and the account control stays at the bottom.
-   * Both keep the implementations they shipped with; what this asserts is that
-   * the groups landed *between* them rather than around them — which is also
-   * the order a keyboard walks the bar in.
+   * The wordmark leads the bar, the switcher follows it, and the account
+   * control stays at the bottom. What this asserts is that the groups landed
+   * *between* them rather than around them — which is also the order a
+   * keyboard walks the bar in.
+   *
+   * **The wordmark is first, and that is the 2026-08-23 ruling.** The
+   * developer put the Egma logo back at the top of the signed-in sidebar
+   * — "our logo, not the organization's" — so the first thing a keyboard
+   * reaches in the bar is a link home, and the organization moved into the
+   * eyebrow above the project name where the switcher now stands.
    */
-  it("keeps the switcher above the groups and the account control below them", () => {
+  it("leads with the wordmark, then the switcher, and ends with the account", () => {
     drawShell();
 
     const bar = sidebarNavigation().closest("aside");
@@ -361,12 +367,15 @@ describe("the grouped sidebar", () => {
     const at = (node: HTMLElement | null) =>
       node === null ? -1 : order.indexOf(node);
 
+    const wordmark = within(bar!).getByRole("link", { name: "Egma home" });
     const switcher = within(bar!).getByRole("button", { name: /^Organization Acme/ });
     const account = within(bar!).getByRole("button", { name: /account menu$/ });
     const agents = within(bar!).getByRole("link", { name: "Agents" });
     const transcripts = within(bar!).getByRole("link", { name: "Transcripts" });
 
-    expect(at(switcher)).toBe(0);
+    expect(at(wordmark)).toBe(0);
+    expect(wordmark.getAttribute("href")).toBe("/");
+    expect(at(switcher)).toBe(1);
     expect(at(switcher)).toBeLessThan(at(agents));
     expect(at(agents)).toBeLessThan(at(transcripts));
     expect(at(transcripts)).toBeLessThan(at(account));

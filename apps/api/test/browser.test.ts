@@ -3753,11 +3753,16 @@ describe("the complete product, walked in order in a second project", () => {
          * **A row is measured as a floor rather than as an equality**, and the
          * distinction is the honest one.
          *
-         * `--row-height` is a `height` on a table cell, which a browser treats
-         * as a minimum: a row carrying controls can be taller than a row
+         * `--row-min-height` is a `height` on a table cell, which a browser
+         * treats as a minimum: a row carrying controls can be taller than a row
          * carrying a sentence, on the same table, from the same definition. A
          * test demanding one number would be a test demanding that no list ever
          * hold a button.
+         *
+         * It is the *body* row's token. `--row-height` is the header's, and
+         * the header is held to an equality above because it holds no
+         * controls. The two parted company on 2026-08-23, when the boards gave
+         * a 40px header row and a 52px body row.
          *
          * What a copied implementation would break is the three above — the
          * shell, the heading row that holds no controls, and the cell's own
@@ -3778,7 +3783,10 @@ describe("the complete product, walked in order in a second project", () => {
               read.getPropertyValue("--sidebar-width"),
               10,
             ),
-            row: Number.parseInt(read.getPropertyValue("--row-height"), 10),
+            row: Number.parseInt(
+              read.getPropertyValue("--row-min-height"),
+              10,
+            ),
             control: Number.parseInt(read.getPropertyValue("--control-lg"), 10),
           };
         });
@@ -3863,7 +3871,7 @@ describe("the complete product, walked in order in a second project", () => {
             sidebar: Math.round(await widthOf(walk, "aside")),
             row: Math.round(await heightOf(walk, "table tbody tr")),
             sidebarToken: await pixelToken(walk, "--sidebar-width"),
-            rowToken: await pixelToken(walk, "--row-height"),
+            rowToken: await pixelToken(walk, "--row-min-height"),
           };
           const nextSidebar = before.sidebarToken + 36;
           // A table row may already sit above its token because a control plus
@@ -3878,7 +3886,7 @@ describe("the complete product, walked in order in a second project", () => {
           );
           const putBackRow = await retuned(
             walk,
-            "--row-height",
+            "--row-min-height",
             `${nextRow}px`,
           );
 
@@ -3936,7 +3944,7 @@ describe("the complete product, walked in order in a second project", () => {
 
         const tokens = {
           sidebar: await pixelToken(walk, "--sidebar-width"),
-          row: await pixelToken(walk, "--row-height"),
+          row: await pixelToken(walk, "--row-min-height"),
           control: await pixelToken(walk, "--control-lg"),
         };
 

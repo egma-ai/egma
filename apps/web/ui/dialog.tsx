@@ -63,46 +63,46 @@ const PANEL_SHAPE = {
   drawer: [
     "top-0 left-0 h-full max-h-none",
     "w-[min(340px,calc(100vw-var(--space-7)))] translate-x-0 translate-y-0",
-    "overflow-y-auto rounded-[0_var(--radius-lg)_var(--radius-lg)_0]",
-    "border-y-0 border-l-0",
+    "overflow-y-auto border-y-0 border-l-0",
   ],
+  /*
+   * **One side sheet look, at one width.** This is the same panel
+   * `components/ui/sheet.tsx` draws — right-anchored, `--sheet-width` wide,
+   * Pure Paper behind a hairline on its left edge, no corner — and the width
+   * is the theme's rather than a second number here. The two components are
+   * still two: this one is a *reading* surface that deliberately leaves the
+   * page beside it usable, and that one is a modal form portaled inside
+   * `<main>`. They differ in what they do and no longer in what they look
+   * like.
+   */
   sheet: [
     "top-0 right-0 left-auto h-full max-h-none",
-    "w-[min(640px,100vw)] translate-x-0 translate-y-0",
-    "gap-0 overflow-hidden rounded-none border-y-0 border-r-0 p-0",
+    "w-[min(var(--sheet-width),100vw)] translate-x-0 translate-y-0",
+    "gap-0 overflow-hidden border-y-0 border-r-0 p-0",
     "max-[40rem]:w-full max-[40rem]:border-l-0",
   ],
 } as const;
 
 /**
- * The travel of the sheet, which is the one edge kind the theme does not move.
+ * The travel of each edge kind — and there is none left to write here.
  *
- * The drawer's movement is in `tailwind-theme.css`, keyed on `data-kind`, as an
- * animation of its own at the drawer's own tokens — an animation, because Radix
- * removes a panel on `animationend` and so whatever is animating is what holds
- * the panel on screen while it leaves. A sheet has no token pair of its own, so
- * it travels on a transition at the dialog's two, which the theme's `scale`
- * animation is exactly as long as. `@starting-style` is what makes the entrance
- * a movement: without it a panel that mounts already open has nowhere to travel
- * from.
+ * Both movements are in `tailwind-theme.css` now, keyed on `data-kind`, as
+ * animations of their own at the drawer's tokens. An animation rather than a
+ * transition, because Radix removes a panel on `animationend`: whatever is
+ * animating is what holds the panel on screen while it leaves, and a
+ * transition racing the centred dialog's `scale` is what used to cut the sheet
+ * off at its own edge.
  *
- * **Reduced motion removes the travel from both ends, not just the entrance.**
- * Dropping the transition alone left the exit teleporting: the closed position
- * still applied, so the panel jumped off the edge in one frame with nothing
- * left to say it had gone. So the closed position is put back where the open
- * one is, and the opacity the theme still runs is what says a surface left.
+ * The sheet used to travel on a transition at the *dialog's* tokens, with a
+ * `@starting-style` to give the entrance somewhere to come from and four more
+ * rules to give reduced motion a form. It shares the drawer's rule now, so it
+ * shares the drawer's reduced-motion form as well: nothing travels, and the
+ * opacity says a surface arrived and left.
  */
 const PANEL_TRAVEL = {
   dialog: "",
   drawer: "",
-  sheet: [
-    "transition-[translate] duration-(--duration-dialog-in) ease-out",
-    "starting:translate-x-full",
-    "data-[state=closed]:translate-x-full",
-    "data-[state=closed]:duration-(--duration-dialog-out)",
-    "motion-reduce:transition-none",
-    "motion-reduce:data-[state=closed]:translate-x-0!",
-  ],
+  sheet: "",
 } as const;
 
 /** A sheet's head is a fixed bar over a body that scrolls under it. */
