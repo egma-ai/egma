@@ -25,6 +25,8 @@ import {
 } from "../../../../../lib/settings.ts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
@@ -81,6 +83,40 @@ import {
  */
 
 type Tab = "people" | "invitations";
+
+/**
+ * The lane a row's own controls stand in.
+ *
+ * The shared table draws the trailing cell as the boards do — a fixed 48px slot
+ * with no side padding, so every ⋮ in the product lines up in one column down
+ * the table (`78X-0`). This row keeps named buttons rather than a ⋮ (the
+ * browser walk measures three controls in it), so the cell is wider than the
+ * slot and needs the row's own padding back inside it, or the last button sits
+ * against the panel's hairline.
+ *
+ * **The reason under a disabled control is given its own line.** `Button`
+ * writes `why` as a `<span>` beside the control it explains, so with two
+ * buttons in one cell the sentence would otherwise land between them. `order`
+ * moves it visually and leaves the reading order alone, which is what
+ * `aria-describedby` follows.
+ */
+const ROW_ACTIONS = [
+  "flex flex-wrap items-center justify-end gap-2 px-4",
+  "[&>span]:order-last [&>span]:basis-full [&>span]:text-left",
+].join(" ");
+
+/**
+ * A control inside a row, at the row's height.
+ *
+ * A form control is 44px and a row is 52, so a `Select` at its natural size
+ * makes every row of this table 60px tall and stands a head above the buttons
+ * beside it. 36px is the dense control the toolbar and the navigation row
+ * already use, and it is what leaves the row at the 52px the boards draw. The
+ * 44px coarse-pointer target is not traded away for it: `pointer-coarse` puts
+ * it straight back, the same trade `Button` and the sidebar row make.
+ */
+const ROW_CONTROL =
+  "w-auto min-h-(--control-md) pointer-coarse:min-h-(--tap-target) text-sm";
 
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -252,8 +288,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     return (
       <ProductPage viewport>
         <PageHeader
-          eyebrow="Settings"
-          title="People"
+            title="People"
           breadcrumbs={[
             { label: "Settings", href: settingsPath(projectId) },
             { label: "People" },
@@ -272,8 +307,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     return (
       <ProductPage viewport>
         <PageHeader
-          eyebrow="Settings"
-          title="People"
+            title="People"
           breadcrumbs={[
             { label: "Settings", href: settingsPath(projectId) },
             { label: "People" },
@@ -310,6 +344,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       cell: (member) =>
         mayManage ? (
           <Select
+            className={ROW_CONTROL}
             id={`role-${member.userId}`}
             aria-label={`${member.email} role`}
             value={member.role}
@@ -358,7 +393,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
        */
       action: true,
       cell: (member) => (
-        <>
+        <div className={ROW_ACTIONS}>
           <Button
             type="button"
             variant="secondary"
@@ -368,7 +403,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
             onClick={() => setConfirming({ action: "deactivate", member })}
           >
             Deactivate
-          </Button>{" "}
+          </Button>
           <Button
             type="button"
             variant="secondary"
@@ -377,7 +412,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           >
             Remove
           </Button>
-        </>
+        </div>
       ),
     },
   ];
@@ -385,7 +420,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage viewport>
       <PageHeader
-        eyebrow="Settings"
         title="People"
         breadcrumbs={[
           { label: "Settings", href: settingsPath(projectId) },
@@ -459,27 +493,31 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
         >
           {(dismiss) => (
             <>
-              <p>
+              <p className="m-0 max-w-[62ch] text-sm text-muted-foreground">
                 {confirming.member.email}{" "}
                 {confirming.action === "remove"
                   ? "will lose membership in this organization. Everything they authored stays where it is, with their name on it."
                   : "will no longer be able to use this organization, and every key they minted stops working on the next request."}
               </p>
-              <Button type="button" variant="secondary" onClick={dismiss}>
-                Cancel
-              </Button>{" "}
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={busy}
-                onClick={() => {
-                  const chosen = confirming;
-                  setConfirming(null);
-                  void act(chosen.action, chosen.member);
-                }}
-              >
-                {confirming.action === "remove" ? "Remove" : "Deactivate"}
-              </Button>
+              {/* The answer leads and the way out follows it (`BK9-0`). */}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => {
+                    const chosen = confirming;
+                    setConfirming(null);
+                    void act(chosen.action, chosen.member);
+                  }}
+                >
+                  {confirming.action === "remove" ? "Remove" : "Deactivate"}
+                </Button>
+                <Button type="button" size="lg" variant="secondary" onClick={dismiss}>
+                  Cancel
+                </Button>
+              </DialogFooter>
             </>
           )}
         </Dialog>
@@ -612,14 +650,16 @@ function Invitations({
       // cannot be waited on, so the one thing left to do about it is here.
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => void send(invitation.email, invitation.role)}
-          >
-            Send again
-          </Button>
+          <div className={ROW_ACTIONS}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void send(invitation.email, invitation.role)}
+            >
+              Send again
+            </Button>
+          </div>
         ) : null,
     },
   ];
@@ -635,11 +675,26 @@ function Invitations({
         lead="If no mail transport is configured, Egma gives you a one-time link to send yourself."
       >
         {note === null ? null : <Help>{note}</Help>}
+        {/*
+         * The link, on the same contained surface a new API key gets, and
+         * still plain text inside `main`. It is the whole promise of this page
+         * on an install with no mail transport: the person who created the
+         * invitation is the one who has to deliver it, so it has to be
+         * readable and selectable rather than tucked into a sentence and
+         * clipped by the width of one.
+         */}
         {link === null ? null : (
-          <p>
-            <strong>Here is the link.</strong> It works once, for the person named
-            above. {link}
-          </p>
+          <Card className="gap-3">
+            <p className="m-0 max-w-[72ch] text-sm text-muted-foreground">
+              <strong className="font-medium text-foreground">
+                Here is the link.
+              </strong>{" "}
+              It works once, for the person named above.
+            </p>
+            <code className="block rounded-input border border-border bg-surface-soft p-3 font-mono text-sm break-all text-foreground">
+              {link}
+            </code>
+          </Card>
         )}
 
         <Form onSubmit={() => void invite()}>
