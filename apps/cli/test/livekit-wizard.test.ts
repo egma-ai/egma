@@ -76,6 +76,52 @@ const MOCK_TOOLS_FILE = [
 /** The one fragment that names the mock-authoring task and nothing else. */
 const MOCK_AUTHORING_TASK = "run isolated from its real";
 
+/**
+ * A scripted agent that reports the edit and does not make it.
+ *
+ * The path it names is real and the file is really there — it is the worker
+ * this workspace was given — so nothing but reading the file can tell this
+ * apart from the honest case.
+ */
+function claimsWithoutEditing(): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
+    { kind: "write-file", path: "egma/mock-tools.md", content: MOCK_TOOLS_FILE },
+    { kind: "say", text: "egma:wrote check_availability\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/**
+ * A scripted agent that writes the line and leaves it commented out.
+ *
+ * The file really changes and really holds the words, which is what makes this
+ * the one a check on the text alone would wave through.
+ */
+const WORKER_COMMENTED = WORKER_BEFORE.replace(
+  "    await session.start(agent=agent, room=ctx.room)",
+  [
+    "    # await mockable(agent, ctx, session)",
+    "    await session.start(agent=agent, room=ctx.room)",
+  ].join("\n"),
+);
+
+function claimsACommentedOutCall(): FakeStep[] {
+  return [
+    { kind: "write-file", path: "agent.py", content: WORKER_COMMENTED },
+    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/** A scripted agent that names a file outside the repository altogether. */
+function claimsAPathOutsideTheRepository(): FakeStep[] {
+  return [
+    { kind: "say", text: "egma:found sdk-entry ../../etc/passwd\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
 /** What the scripted agent does when it cannot identify one job entrypoint. */
 function cannotFindTheWorker(): FakeStep[] {
   return [
@@ -506,6 +552,96 @@ describe("LiveKit in the wizard", () => {
     expect(ui.record.gate?.changed).toEqual([]);
     expect(ui.record.gate?.mocks).toEqual([]);
     expect(platform.mocking.mockTools).toHaveLength(0);
+  });
+
+  /**
+   * A marker is a claim, and this is the claim that costs money to believe.
+   *
+   * A coding agent that reports the edit and does not make it would otherwise
+   * have Egma tell the developer their worker is wired, name it at the gate,
+   * and swallow the instruction block — and then run the whole suite against
+   * their real backend with every screen saying it was isolated. So the file is
+   * opened and the awaited line looked for, and a claim Egma cannot find takes
+   * the same path as an agent that admitted it found nothing.
+   */
+  it("does not believe a reported edit it cannot find in the file", async () => {
+    const before = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
+
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      mocking: claimsWithoutEditing(),
+    });
+
+    expect(report.kind).toBe("run-started");
+
+    // Nothing was claimed: not on screen, not at the gate.
+    expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(
+      false,
+    );
+    expect(ui.record.gate?.changed).toEqual([]);
+
+    // The developer is told what Egma looked for and where, and given the lines.
+    expect(ui.record.statuses.join("\n")).toContain(
+      "Egma read agent.py and found no awaited mockable() in it.",
+    );
+    for (const line of sdkEntryInstructions()) {
+      if (line === "") continue;
+      expect(ui.record.statuses).toContain(line);
+    }
+
+    // And the worker really is untouched, which is the fact behind all of it.
+    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toBe(before);
+  });
+
+  /**
+   * A call that is commented out is not a call.
+   *
+   * The words are in the file, so anything that only looked for them would say
+   * the worker was wired. What matters is whether the line runs, and a line
+   * behind a `#` does not.
+   */
+  it("does not believe a call that was left commented out", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      mocking: claimsACommentedOutCall(),
+    });
+
+    expect(report.kind).toBe("run-started");
+    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toContain(
+      "# await mockable(",
+    );
+    expect(ui.record.statuses.join("\n")).toContain(
+      "Egma read agent.py and found no awaited mockable() in it.",
+    );
+    expect(ui.record.gate?.changed).toEqual([]);
+  });
+
+  /**
+   * A path that leaves the repository is not read at all.
+   *
+   * The reported file is the developer's own worker or it is nothing. Reading
+   * whatever a driven coding agent points at — up through the tree, or through
+   * a link — is not a thing Egma does, and a claim about a file outside the
+   * repository is refused before it is opened rather than after.
+   */
+  it("refuses a reported edit outside the repository without reading it", async () => {
+    const { report, ui } = await liveKitLane({
+      framework: "livekit-agents",
+      mocking: claimsAPathOutsideTheRepository(),
+    });
+
+    expect(report.kind).toBe("run-started");
+    expect(ui.record.statuses.join("\n")).toContain(
+      "../../etc/passwd is outside this repository, so Egma did not read it.",
+    );
+    expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(
+      false,
+    );
+    expect(ui.record.gate?.changed).toEqual([]);
+    for (const line of sdkEntryInstructions()) {
+      if (line === "") continue;
+      expect(ui.record.statuses).toContain(line);
+    }
   });
 
   /**

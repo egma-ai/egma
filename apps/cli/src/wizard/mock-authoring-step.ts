@@ -24,13 +24,21 @@
  *
  * **What is on disk is the truth.** The world this step reports is read back
  * out of the folder, never taken from what the agent said about it, and the
- * gate shows what was read.
+ * gate shows what was read. The seam is held to the same rule: a coding agent
+ * that reports the edit is not taken at its word — Egma opens the file it named
+ * and looks for the awaited call. An agent that says it wired the worker and
+ * did not would otherwise send a developer into a run against their real
+ * backend with every screen saying it was isolated, which is the one lie in
+ * this walk that costs somebody real money.
  *
  * Nothing here is fatal. A worker whose entrypoint nobody can identify is a
  * repository that gets the lines printed and a run without a coverage stamp —
  * which is exactly the run every LiveKit repository got before this step, and
  * an honest sentence about it beats ending a walk that has tests to run.
  */
+
+import { readFile, realpath, stat } from "node:fs/promises";
+import path from "node:path";
 
 import type { DrivenAgent } from "../acp/driven-agent.ts";
 import {
@@ -53,6 +61,122 @@ import { GenerationTally } from "./test-generation.ts";
 
 /** The fact the coding agent reports the edited worker file under. */
 const SDK_ENTRY_FACT = "sdk-entry";
+
+/**
+ * The awaited call the skill teaches, in the shapes it is really written in.
+ *
+ * The wait is the load-bearing half — a tool list that has not reached Egma
+ * before the model reaches for its first tool serves nothing — so the `await`
+ * is required rather than assumed. What is allowed to vary is what a person or
+ * a model varies: the whitespace, a line break after `await`, and a module
+ * prefix on the name for a worker that imported the package rather than the
+ * function.
+ */
+const AWAITED_MOCKABLE = /\bawait\s+(?:[A-Za-z_]\w*\s*\.\s*)*mockable\s*\(/u;
+
+/** A line that is only a comment, in either language a worker is written in. */
+const COMMENT_LINE = /^\s*(?:#|\/\/)/u;
+
+/**
+ * The file with its commented-out lines blanked, so the check reads code.
+ *
+ * The realistic accident is the line left commented out — a model that pasted
+ * the skill's example above the place it meant to put it, or wrote the call and
+ * then commented it while it worked something else out. Blanked rather than
+ * removed, so a call spread over several lines still reads as one thing.
+ *
+ * This is a check and not a parser, and it does not pretend otherwise: a call
+ * inside a docstring would still read as code here. What it is for is telling
+ * an edit that happened from one that did not, and for that the whole-line
+ * comment is the case that really comes up.
+ */
+function withoutComments(source: string): string {
+  return source
+    .split("\n")
+    .map((line) => (COMMENT_LINE.test(line) ? "" : line))
+    .join("\n");
+}
+
+/**
+ * What the coding agent said it did, once Egma has looked for itself.
+ *
+ * A marker is a claim. Everywhere else in this walk a claim is checked against
+ * the disk before it is acted on — the gate is built from the folder rather
+ * than from what an agent said it wrote — and this claim carries more than
+ * most: it decides whether the developer is told their worker is wired, whether
+ * the gate names an edit, and whether the instruction block for doing it by
+ * hand is printed at all. An agent that reports the marker and edits nothing
+ * would send somebody into a run against their real backend with Egma saying
+ * everything was isolated.
+ */
+type ReportedEntry =
+  | { readonly kind: "verified"; readonly file: string }
+  | { readonly kind: "unverified"; readonly reason: string };
+
+/**
+ * Whether a path the coding agent named is really inside this repository.
+ *
+ * Twice over, because there are two ways out of a folder. The lexical check
+ * catches `../../etc/passwd`, and the resolved check catches a link inside the
+ * repository pointing somewhere else — and the root is resolved too, because a
+ * repository reached through a link is an ordinary thing on a Mac.
+ */
+async function insideRepository(repository: string, file: string): Promise<boolean> {
+  const held = (root: string, candidate: string): boolean => {
+    const below = path.relative(root, candidate);
+    return below !== "" && !below.startsWith("..") && !path.isAbsolute(below);
+  };
+  if (!held(path.resolve(repository), path.resolve(repository, file))) return false;
+  try {
+    return held(await realpath(repository), await realpath(path.resolve(repository, file)));
+  } catch {
+    // Nothing there to resolve, which the read below reports in its own words.
+    return true;
+  }
+}
+
+/**
+ * The reported worker file, read and held to what the skill teaches.
+ *
+ * Three ways to fail and each is said plainly, because each sends the developer
+ * somewhere different: a path that is not in their repository at all, a file
+ * that is not there, and a file that is there without the line in it.
+ */
+async function reportedEntry(
+  repository: string,
+  claimed: string,
+): Promise<ReportedEntry> {
+  const shown = claimed.trim();
+  if (shown === "") {
+    return { kind: "unverified", reason: "No file was named for Egma's testing entry." };
+  }
+  if (!(await insideRepository(repository, shown))) {
+    return {
+      kind: "unverified",
+      reason: `${shown} is outside this repository, so Egma did not read it.`,
+    };
+  }
+
+  const file = path.resolve(repository, shown);
+  let source: string;
+  try {
+    if (!(await stat(file)).isFile()) throw new Error("not a file");
+    source = await readFile(file, "utf8");
+  } catch {
+    return {
+      kind: "unverified",
+      reason: `Egma looked for its testing entry in ${shown}, and there is no such file here.`,
+    };
+  }
+
+  if (!AWAITED_MOCKABLE.test(withoutComments(source))) {
+    return {
+      kind: "unverified",
+      reason: `Egma read ${shown} and found no awaited mockable() in it.`,
+    };
+  }
+  return { kind: "verified", file: shown };
+}
 
 /**
  * The Node LiveKit package, which discovery reports by its own name.
@@ -283,6 +407,7 @@ export async function mockAuthoringStep(
   options: MockAuthoringOptions,
 ): Promise<MockAuthored> {
   const { ui, drivenAgent, signal, log } = options;
+  const cwd = options.context.cwd;
 
   // Nothing to wire and nothing worth authoring, so nothing is dispatched. The
   // walk carries straight on to the gate with one honest sentence behind it.
@@ -295,7 +420,8 @@ export async function mockAuthoringStep(
   const markers = new MarkerStream();
   ui.setGeneration(tally.progress);
 
-  let sdkEntry: string | null = null;
+  /** What the agent said it edited. Nothing is claimed from it until it is read. */
+  let claimedEntry: string | null = null;
   let couldNotFindEntry = "";
 
   const take = (lines: readonly ParsedLine[]): string | null => {
@@ -325,10 +451,10 @@ export async function mockAuthoringStep(
           ui.pushStatus(`${ACTION_MARK} ${marker.text}`);
           break;
         case "found":
-          if (marker.field === SDK_ENTRY_FACT) {
-            sdkEntry = marker.value;
-            ui.pushStatus(`${ACTION_MARK} Egma's testing entry is in ${marker.value}`);
-          }
+          // Kept, not believed, and not said on screen yet: the file is read
+          // once the agent has stopped writing, and what it says decides
+          // whether there is anything to tell the developer about.
+          if (marker.field === SDK_ENTRY_FACT) claimedEntry = marker.value;
           break;
         case "none":
           couldNotFindEntry = marker.reason;
@@ -381,17 +507,25 @@ export async function mockAuthoringStep(
     }
   })();
 
-  // What is on disk is the truth, whatever the agent said about it.
+  // What is on disk is the truth, whatever the agent said about it. That holds
+  // for the seam exactly as it holds for the mocked world: a reported edit is
+  // read back before anything is said about it, and a claim Egma cannot find in
+  // the file is not an edit — it is the fallback, and it takes the same path a
+  // coding agent that admitted it found no entrypoint takes.
+  const reported = claimedEntry === null ? null : await reportedEntry(cwd, claimedEntry);
+  const sdkEntry = reported?.kind === "verified" ? reported.file : null;
   const mockTools = await readMockToolsFile(options.paths.mockTools).catch(
     () => [] as readonly MockToolEntry[],
   );
 
   if (halted === null) {
     if (sdkEntry === null) {
-      if (couldNotFindEntry.trim() !== "") {
-        ui.pushStatus(`${DETAIL_MARK} ${couldNotFindEntry}`);
-      }
+      const why =
+        reported?.kind === "unverified" ? reported.reason : couldNotFindEntry;
+      if (why.trim() !== "") ui.pushStatus(`${DETAIL_MARK} ${why}`);
       for (const line of sdkEntryInstructions()) ui.pushStatus(line);
+    } else {
+      ui.pushStatus(`${ACTION_MARK} Egma's testing entry is in ${sdkEntry}`);
     }
     if (mockTools.length === 0) {
       ui.pushStatus(
