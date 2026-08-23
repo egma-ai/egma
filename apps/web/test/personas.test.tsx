@@ -1245,6 +1245,64 @@ describe("one persona's sheet", () => {
     ).toBe(false);
   });
 
+  /**
+   * **A usage read that fails does not take Archive out of the product**, and
+   * it must not leave the panel silent either. The server refuses a persona an
+   * active test names whatever a browser managed to read first, so the button
+   * stays offered — but nothing here may look like an all-clear.
+   */
+  it("says so when the confirmation could not read which tests name them", async () => {
+    apiAnswers({
+      ...reads(),
+      /*
+       * Three reads of the same address, in the order they happen: the panel
+       * behind the confirmation, the confirmation's own read, and the
+       * deliberate second attempt at it.
+       */
+      "GET /v1/personas/prs_1/usage": [
+        { status: 200, body: { tests: [] } },
+        {
+          status: 503,
+          body: {
+            error: "unavailable",
+            message: "Egma could not reach the tests store.",
+          },
+        },
+        { status: 200, body: { tests: [] } },
+      ],
+    });
+    render(<PersonaPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Archive Impatient Rita?",
+    });
+
+    expect(
+      await within(dialog).findByText(/could not read which tests name them/),
+    ).toBeDefined();
+    expect(
+      within(dialog).queryByText(
+        "No active test names them. Nothing else changes.",
+      ),
+    ).toBeNull();
+    // The decision is still the server's, so the press is still offered.
+    expect(
+      (
+        within(dialog).getByRole("button", {
+          name: "Archive persona",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+    expect(
+      await within(dialog).findByText(
+        "No active test names them. Nothing else changes.",
+      ),
+    ).toBeDefined();
+  });
+
   it("makes any active available persona the project default", async () => {
     const selected = { ...RITA, isDefault: true };
     const { asked } = apiAnswers({
@@ -1470,6 +1528,53 @@ describe("one persona's sheet", () => {
     fireEvent.click(within(said).getByRole("button", { name: "Try again" }));
     expect(
       await screen.findByRole("dialog", { name: "Impatient Rita" }),
+    ).toBeDefined();
+  });
+
+  /**
+   * **"No active test names them" is a claim, and a read still in flight
+   * cannot make it.** That line is what somebody reads before they archive, so
+   * a usage read that has not answered says it has not answered.
+   */
+  it("says the usage read is still running rather than claiming nobody names them", async () => {
+    apiAnswers({ ...reads(), "GET /v1/personas/prs_1/usage": "never" });
+    render(<PersonaPage />);
+
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    expect(
+      await within(panel).findByText("Reading which tests name them…"),
+    ).toBeDefined();
+    expect(within(panel).queryByText("No active test names them.")).toBeNull();
+  });
+
+  /** A read egma refused is not an empty list either, and it can be asked again. */
+  it("says a failed usage read failed, and names the tests once it is asked again", async () => {
+    apiAnswers({
+      ...reads(),
+      "GET /v1/personas/prs_1/usage": [
+        {
+          status: 503,
+          body: {
+            error: "unavailable",
+            message: "Egma could not reach the tests store.",
+          },
+        },
+        {
+          status: 200,
+          body: { tests: [{ id: "tst_1", name: "Reschedule a visit" }] },
+        },
+      ],
+    });
+    render(<PersonaPage />);
+
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    const said = await within(panel).findByRole("alert");
+    expect(said.textContent).toContain("Egma could not reach the tests store.");
+    expect(within(panel).queryByText("No active test names them.")).toBeNull();
+
+    fireEvent.click(within(said).getByRole("button", { name: "Try again" }));
+    expect(
+      await within(panel).findByRole("link", { name: "Reschedule a visit" }),
     ).toBeDefined();
   });
 });

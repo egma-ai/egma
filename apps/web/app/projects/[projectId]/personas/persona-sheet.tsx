@@ -324,7 +324,7 @@ export function PersonaSheet({
    * something are here and the archive confirmation, and both are one persona
    * at a time.
    */
-  const { answer: usage } = useProjectRead<PersonaUsage>(
+  const { answer: usage, reload: reloadUsage } = useProjectRead<PersonaUsage>(
     (project) =>
       platformAnswer(
         getPersonaUsage(
@@ -600,7 +600,6 @@ export function PersonaSheet({
   }
 
   const versions = history?.status === "ready" ? history.value.versions : [];
-  const usedBy = usage?.status === "ready" ? usage.value.tests : [];
   const archivedAt = persona?.archivedAt ?? null;
   const archived = archivedAt !== null;
   const egmaProvided = persona?.owner === "egma";
@@ -643,27 +642,60 @@ export function PersonaSheet({
     }));
   }
 
+  /**
+   * Which tests name this persona, in whichever state that read is in.
+   *
+   * **A read still in flight and a read that failed are not an empty list.**
+   * "No active test names them" is the sentence somebody checks before they
+   * archive, so printing it over an unanswered read would be a false all-clear
+   * about the one thing this section exists to say. Only a ready answer with
+   * nothing in it is allowed to say it; the other two say what happened, and
+   * the failed one offers the read again.
+   *
+   * A signed-out answer is drawn as the wait it is. The panel is already
+   * sending the browser to the sign-in page, and a failure box on the way out
+   * would blame this read for an expired session.
+   */
   function usedBySection() {
+    return <SheetSection label="Used by">{usedByBody()}</SheetSection>;
+  }
+
+  function usedByBody() {
+    if (usage === null || usage.status === "signed-out") {
+      return (
+        <p className="m-0 text-sm text-faint">Reading which tests name them…</p>
+      );
+    }
+    if (usage.status !== "ready") {
+      return (
+        <Failure
+          title="Egma could not read which tests name them."
+          message={usage.refusal.message}
+          onRetry={reloadUsage}
+        />
+      );
+    }
+
+    const usedBy = usage.value.tests;
+    if (usedBy.length === 0) {
+      return (
+        <p className="m-0 text-sm text-muted-foreground">
+          No active test names them.
+        </p>
+      );
+    }
     return (
-      <SheetSection label="Used by">
-        {usedBy.length === 0 ? (
-          <p className="m-0 text-sm text-muted-foreground">
-            No active test names them.
-          </p>
-        ) : (
-          <p className="m-0 flex flex-wrap gap-x-5 gap-y-2">
-            {usedBy.map((test) => (
-              <a
-                className="text-sm text-foreground underline underline-offset-[3px] pointer-hover:text-primary"
-                href={projectPath(projectId, "tests", test.id)}
-                key={test.id}
-              >
-                {test.name}
-              </a>
-            ))}
-          </p>
-        )}
-      </SheetSection>
+      <p className="m-0 flex flex-wrap gap-x-5 gap-y-2">
+        {usedBy.map((test) => (
+          <a
+            className="text-sm text-foreground underline underline-offset-[3px] pointer-hover:text-primary"
+            href={projectPath(projectId, "tests", test.id)}
+            key={test.id}
+          >
+            {test.name}
+          </a>
+        ))}
+      </p>
     );
   }
 

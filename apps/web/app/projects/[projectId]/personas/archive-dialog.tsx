@@ -72,6 +72,8 @@ export function ArchiveDialog({
   const [attempt, setAttempt] = useState(0);
   /** Which tests name them: `null` until the read answers or gives up. */
   const [usage, setUsage] = useState<PersonaUsage | "unknown" | null>(null);
+  /** A deliberate second attempt at that read, after it gave up. */
+  const [usageAttempt, setUsageAttempt] = useState(0);
 
   useEffect(() => {
     if (!persona.isDefault) return undefined;
@@ -129,7 +131,7 @@ export function ArchiveDialog({
     return () => {
       current = false;
     };
-  }, [persona.id, projectId]);
+  }, [persona.id, projectId, usageAttempt]);
 
   const inUse =
     usage !== null && usage !== "unknown" && usage.tests.length > 0
@@ -224,7 +226,34 @@ export function ArchiveDialog({
                 persona on those tests first. Until then, Archive is refused.
               </span>
             </p>
-          ) : usage === "unknown" ? null : (
+          ) : usage === "unknown" ? (
+            /*
+             * Saying nothing here would leave the reader to decide for
+             * themselves whether silence meant "nobody names them". It does
+             * not, so the line says what happened, says the Archive is still
+             * checked where it counts, and offers the read again.
+             */
+            <p className="m-0 flex flex-wrap items-center gap-2 text-sm text-warning">
+              <TriangleAlertIcon
+                aria-hidden="true"
+                className="size-3.5 flex-none"
+                strokeWidth={1.5}
+              />
+              <span>
+                Egma could not read which tests name them. Archive is still
+                safe to press: the server refuses a persona an active test
+                names.
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setUsageAttempt((one) => one + 1)}
+              >
+                Try again
+              </Button>
+            </p>
+          ) : (
             <p className="m-0 flex items-start gap-2 text-sm text-success">
               <CheckIcon
                 aria-hidden="true"
