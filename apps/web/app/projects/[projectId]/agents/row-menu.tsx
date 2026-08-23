@@ -73,7 +73,15 @@ export function RowMenu({
   );
 }
 
-/** A place to go, drawn as a menu item so the panel reads as one list. */
+/**
+ * A place to go, drawn as a menu item so the panel reads as one list.
+ *
+ * **It is not underlined.** `globals.css` underlines a bare link, which is
+ * right in a sentence and wrong in a menu: the row *is* the control, and an
+ * underline under two of four items would say those two are a different kind
+ * of thing. The shell's own `MENU_ITEM` says `no-underline` for the same
+ * reason; the kit's dropdown item does not, so it is said here.
+ */
 export function RowMenuLink({
   href,
   children,
@@ -83,7 +91,9 @@ export function RowMenuLink({
 }) {
   return (
     <DropdownMenuItem asChild>
-      <Link href={href}>{children}</Link>
+      <Link className="no-underline" href={href}>
+        {children}
+      </Link>
     </DropdownMenuItem>
   );
 }
