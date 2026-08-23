@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import {
   archiveConnection,
   getConnection,
@@ -124,6 +124,17 @@ export function ConnectionSheet({
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
+  /**
+   * Where the reason a footer control is not available is written.
+   *
+   * **It is a line of the panel, not a line of the footer.** `Button`'s own
+   * `why` draws the sentence beside the control, which is right in a toolbar
+   * and wrong in a 440px footer: two disabled controls would put two long
+   * sentences between Edit and Archive. The controls still name it, and still
+   * carry it as a `title`, so a pointer, a keyboard and a screen reader all
+   * reach it.
+   */
+  const whySaid = useId();
 
   useEffect(() => {
     let current = true;
@@ -372,6 +383,11 @@ export function ConnectionSheet({
             }
           />
           {refused === null ? null : <Problem>{refused.message}</Problem>}
+          {liveKitForm.ready ? null : (
+            <Help id={whySaid}>
+              Enter the exact LiveKit agent name, or choose automatic dispatch.
+            </Help>
+          )}
         </>
       );
     }
@@ -386,6 +402,7 @@ export function ConnectionSheet({
           />
         )}
         <ReadConnection connection={connection} option={option} />
+        {whyNotRead === undefined ? null : <Help id={whySaid}>{whyNotRead}</Help>}
       </>
     );
   }
@@ -399,6 +416,13 @@ export function ConnectionSheet({
     role === null
       ? undefined
       : `Your ${role} role cannot change connections. Ask an organization admin to change your role.`;
+  /** Why the read view offers no Edit, when it does not. */
+  const whyNotRead =
+    option === undefined && connection !== null
+      ? "Egma could not describe this connection's fields."
+      : mayAuthor
+        ? undefined
+        : whyNotMine;
 
   return (
     <>
@@ -432,7 +456,8 @@ export function ConnectionSheet({
                     size="lg"
                     type="button"
                     variant="ghost"
-                    why={mayAuthor ? undefined : whyNotMine}
+                    title={mayAuthor ? undefined : whyNotMine}
+                    aria-describedby={mayAuthor ? undefined : whySaid}
                   >
                     Archive
                   </Button>
@@ -445,13 +470,8 @@ export function ConnectionSheet({
                     size="lg"
                     type="button"
                     variant="secondary"
-                    why={
-                      option === undefined
-                        ? "Egma could not describe this connection's fields."
-                        : mayAuthor
-                          ? undefined
-                          : whyNotMine
-                    }
+                    title={whyNotRead}
+                    aria-describedby={whyNotRead === undefined ? undefined : whySaid}
                   >
                     Edit
                   </Button>
@@ -461,11 +481,12 @@ export function ConnectionSheet({
                       disabled={saving || !changed || !liveKitForm.ready}
                       size="lg"
                       type="submit"
-                      why={
+                      title={
                         liveKitForm.ready
                           ? undefined
                           : "Enter the exact LiveKit agent name, or choose automatic dispatch."
                       }
+                      aria-describedby={liveKitForm.ready ? undefined : whySaid}
                     >
                       {saving ? "Saving…" : "Save"}
                     </Button>

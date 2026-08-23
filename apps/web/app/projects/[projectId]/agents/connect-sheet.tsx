@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import {
   addConnection,
   discoverAgents,
@@ -165,6 +165,17 @@ export function ConnectAgentSheet({
 
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+  /**
+   * Where the reason a submit is not ready is written.
+   *
+   * **It is a line of the panel, not a line of the footer.** `Button`'s own
+   * `why` draws the sentence beside the control, which is right in a toolbar
+   * and wrong in a 440px footer: the sentence takes the whole row and pushes
+   * the way out onto a third line. Here it belongs under the fields it is
+   * about anyway. The control still names it, and still carries it as a
+   * `title`, so a pointer, a keyboard and a screen reader all reach it.
+   */
+  const whySaid = useId();
 
   /**
    * The chosen agent, read from the server rather than from the page behind.
@@ -708,6 +719,7 @@ export function ConnectAgentSheet({
         </SheetGroup>
 
         {refused === null ? null : <Problem>{refused.message}</Problem>}
+        {submitWhy === undefined ? null : <Help id={whySaid}>{submitWhy}</Help>}
         {onboarding ? (
           <Help>
             Without a connection, Egma cannot run a simulation against this
@@ -774,7 +786,8 @@ export function ConnectAgentSheet({
                 type="submit"
                 size="lg"
                 disabled={saving || !canSubmit || catalog === null}
-                why={submitWhy}
+                title={submitWhy}
+                aria-describedby={submitWhy === undefined ? undefined : whySaid}
               >
                 {saving ? "Connecting…" : "Connect agent"}
               </Button>

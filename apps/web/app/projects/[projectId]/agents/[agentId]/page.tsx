@@ -121,6 +121,7 @@ function connectionColumns({
       key: "name",
       header: "Name",
       primary: true,
+      width: "260px",
       cell: (one) => <Link href={opens(one)}>{one.name}</Link>,
     },
     {
@@ -143,10 +144,10 @@ function connectionColumns({
       cell: (one) => modalityLabel(one.modality),
     },
     {
+      /* The lane that takes the slack, exactly as it does on the list. */
       key: "created",
       header: "Created",
       hideOnMobile: true,
-      width: "140px",
       cell: (one) => asDay(one.createdAt),
     },
     {
@@ -194,7 +195,6 @@ function AgentDetailView({
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
-  const agents = projectPath(projectId, "agents");
   const home = projectPath(projectId, "agents", agentId);
 
   /**
@@ -214,10 +214,6 @@ function AgentDetailView({
       <ProductPage>
         <PageHeader
           title="Agent"
-          breadcrumbs={[
-            { label: "Agents", href: agents },
-            { label: "Agent" },
-          ]}
         />
         <PageBody>
           <Loading what="this agent" />
@@ -231,10 +227,6 @@ function AgentDetailView({
       <ProductPage>
         <PageHeader
           title="Agent"
-          breadcrumbs={[
-            { label: "Agents", href: agents },
-            { label: "Agent" },
-          ]}
         />
         <PageBody>
           <NotFound message={answer.refusal.message} />
@@ -248,10 +240,6 @@ function AgentDetailView({
       <ProductPage>
         <PageHeader
           title="Agent"
-          breadcrumbs={[
-            { label: "Agents", href: agents },
-            { label: "Agent" },
-          ]}
         />
         <PageBody>
           <Failure message={answer.refusal.message} onRetry={reload} />
@@ -269,12 +257,15 @@ function AgentDetailView({
 
   return (
     <ProductPage>
+      {/*
+       * **The bar holds the title alone**, which is `71V-0` and which ticket
+       * 01 ruled for every page. The trail that used to be here ended with the
+       * agent's own name and the heading beside it said the same name again —
+       * twice in a 56px line, which is the one line with no room to spare. The
+       * way back is the sidebar, where Agents is the lit row.
+       */}
       <PageHeader
         title={agent.name}
-        breadcrumbs={[
-          { label: "Agents", href: agents },
-          { label: agent.name },
-        ]}
         action={
           role === null ? undefined : (
             <Actions>
@@ -309,23 +300,23 @@ function AgentDetailView({
       />
       <PageBody>
         {/*
-         * What egma owns about this agent, in one panel above the way in.
+         * What only this page holds, in the line the connection panel writes
+         * its own dates on.
          *
          * **The platform is deliberately not here.** Production calls below
          * already states it, and that one is the monitoring *binding* — the
          * platform egma asks for finished calls — while the list's Platform
          * column is read from the connections. Two facts that share a word, on
          * one page, would leave a person unable to tell which they were
-         * reading. Here the page states what only it holds: when the agent
-         * joined egma, and when its identity last moved.
+         * reading.
+         *
+         * **And two dates are a line rather than a panel.** A card holding one
+         * short fact per row is a card made mostly of empty space; this is the same
+         * sentence the connection panel ends with, in the same words.
          */}
-        <Facts
-          layout="panel"
-          facts={[
-            { label: "Created", value: asDay(agent.createdAt) },
-            { label: "Last changed", value: asDay(agent.updatedAt) },
-          ]}
-        />
+        <p className="mt-0 mb-6 text-sm text-faint">
+          {`Created ${asDay(agent.createdAt)} · Last changed ${asDay(agent.updatedAt)}`}
+        </p>
         <ProductionCalls
           projectId={projectId}
           agent={agent}

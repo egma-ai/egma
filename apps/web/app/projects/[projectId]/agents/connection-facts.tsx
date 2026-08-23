@@ -100,7 +100,14 @@ export function ConnectionsOnRow({
          * read.
          */
         <Badge asChild shape="count">
-          <Link href={agentHref}>
+          {/*
+           * **The chip is not underlined, and the links beside it are.** A cell
+           * link in this product wears an underline (`DESIGN.md`), and a chip
+           * is a chip: the board draws it as a bordered count on the quiet
+           * surface, and an underline inside that border reads as a second,
+           * broken link rather than as one control.
+           */}
+          <Link className="no-underline" href={agentHref}>
             <span aria-hidden="true">{`+${String(overflow)}`}</span>
             <span className="sr-only">{`${String(overflow)} more connections`}</span>
           </Link>
