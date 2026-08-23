@@ -61,6 +61,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { Notice } from "../../../../ui.tsx";
 import { GraderTabs, VIEW_CONTENT } from "../tabs.tsx";
 import { EditForm, SwitchOffPanel } from "./edit-form.tsx";
 
@@ -528,7 +529,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
             somebody has after saving a tighter bound or switching a grader off is
             always about the runs they have already read.
           */}
-          {said === null ? null : <p role="status">{said}</p>}
+          {said === null ? null : <Notice tone="success">{said}</Notice>}
 
           {/*
             One column while nothing is open, two while an editor is.

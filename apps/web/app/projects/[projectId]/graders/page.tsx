@@ -41,6 +41,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
+import { Notice } from "../../../ui.tsx";
 import { GraderTabs, VIEW_CONTENT } from "./tabs.tsx";
 import { UseForm } from "./use-form.tsx";
 
@@ -255,7 +256,7 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
             points at the screen where it now appears.
           */}
           {started === null ? null : (
-            <p role="status">
+            <Notice tone="success">
               {USE.started(started)}{" "}
               <Link
                 href={projectPath(
@@ -266,7 +267,7 @@ function GraderLibrary({ projectId }: { readonly projectId: string }) {
               >
                 {USE.seeRunning}
               </Link>
-            </p>
+            </Notice>
           )}
 
           {/*
