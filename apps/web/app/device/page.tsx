@@ -69,7 +69,9 @@ export default function DeviceCodePage() {
           />
         </Field>
 
-        <Button type="submit">Continue</Button>
+        <Button type="submit" size="lg">
+          Continue
+        </Button>
       </AuthForm>
     </AuthShell>
   );

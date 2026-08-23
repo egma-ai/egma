@@ -140,13 +140,25 @@ export default function InvitePage() {
     }
   }
 
-  if (state.status === "loading") return <StatePage title="Loading invitation" lead="Checking the invitation link." />;
+  if (state.status === "loading") {
+    return (
+      <StatePage
+        title="Loading invitation"
+        lead="Checking the invitation link."
+      />
+    );
+  }
 
   if (state.status === "failed") {
     return (
-      <StatePage title="The invitation could not be checked" lead="Egma could not reach the invitation service right now.">
+      <StatePage
+        title="The invitation could not be checked"
+        lead="Egma could not reach the invitation service right now."
+      >
         <Button
+          className="w-full"
           type="button"
+          size="lg"
           onClick={() => {
             setState({ status: "loading" });
             setAttempt((value) => value + 1);
@@ -223,7 +235,9 @@ export default function InvitePage() {
       >
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
         <Button
+          className="w-full"
           type="button"
+          size="lg"
           disabled={submitting}
           onClick={() => {
             void post("/api/invitations/accept", { token });
@@ -284,7 +298,7 @@ export default function InvitePage() {
           />
         </Field>
 
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" size="lg" disabled={submitting}>
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
         </Button>
       </AuthForm>
