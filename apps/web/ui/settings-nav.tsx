@@ -73,10 +73,17 @@ export function settingsPath(
  * The current one is Ember Wash plus a narrow Ember mark down its leading edge,
  * because state is never colour alone — the mark is the half of it somebody
  * reading in greyscale still gets.
+ *
+ * **It is the sidebar's row, down to the last value** — 36px on a fine pointer
+ * and 44px on a coarse one, 12px of side padding, the 14px step, and the 2px
+ * mark inset 8px from either end (`72Y-0`, `72Z-0`). Settings navigation is
+ * navigation: a rail that drew its rows at a different height beside the bar
+ * that drew them at the board's would read as a second product, and a person
+ * moving between the two would feel the change without being able to name it.
  */
 const NAV_ITEM = [
-  "relative flex w-full min-h-(--control-lg) items-center px-3",
-  "rounded-button text-base whitespace-nowrap text-muted-foreground no-underline",
+  "relative flex w-full min-h-(--control-md) items-center px-3",
+  "rounded-button text-sm whitespace-nowrap text-muted-foreground no-underline",
   /*
    * **Colour, and nothing that moves.** `DESIGN.md`: "Navigation row — support
    * routine navigation — colour feedback only." These rows used to answer a
@@ -116,7 +123,7 @@ const NAV_ITEM_QUIET = [
 
 const NAV_ITEM_CURRENT = [
   "bg-selected text-foreground",
-  "before:absolute before:top-3 before:bottom-3 before:left-0 before:w-0.5",
+  "before:absolute before:inset-y-2 before:left-0 before:w-0.5",
   "before:rounded-chip before:bg-brand before:content-['']",
 ];
 
@@ -133,19 +140,20 @@ export function SettingsNav({
     return (
       <div
         className={cn(
-          "flex min-w-0 flex-col gap-2",
+          "flex min-w-0 flex-col gap-1",
           /*
            * The second group is separated from the first — by a line above it
            * in a column, and by a line beside it once the two sit side by side.
            */
-          "not-first:border-t not-first:border-border not-first:pt-5",
-          "max-[900px]:flex-none",
+          "not-first:mt-1 not-first:border-t not-first:border-border not-first:pt-3",
+          "max-[900px]:flex-none max-[900px]:not-first:mt-0",
           "max-[900px]:not-first:border-t-0 max-[900px]:not-first:border-l",
           "max-[900px]:not-first:border-border max-[900px]:not-first:pt-0",
-          "max-[900px]:not-first:pl-6",
+          "max-[900px]:not-first:pl-4",
           "max-[640px]:w-full",
-          "max-[640px]:not-first:border-t max-[640px]:not-first:border-l-0",
-          "max-[640px]:not-first:pt-4 max-[640px]:not-first:pl-0",
+          "max-[640px]:not-first:mt-1 max-[640px]:not-first:border-t",
+          "max-[640px]:not-first:border-l-0",
+          "max-[640px]:not-first:pt-3 max-[640px]:not-first:pl-0",
         )}
         role="group"
         aria-labelledby={labelId}
@@ -161,7 +169,10 @@ export function SettingsNav({
          * somebody would eventually believe it.
          */}
         <p
-          className="m-0 px-2 text-xs tracking-(--tracking-label) text-faint uppercase"
+          className={cn(
+            "m-0 flex h-5 items-center px-3",
+            "text-sm tracking-(--tracking-label) text-faint uppercase",
+          )}
           id={labelId}
         >
           {label}
@@ -170,7 +181,7 @@ export function SettingsNav({
           className={cn(
             "flex flex-col gap-1",
             "max-[900px]:grid max-[900px]:grid-cols-[repeat(auto-fit,minmax(112px,1fr))]",
-            "max-[640px]:grid-cols-2",
+            "max-[640px]:grid-cols-1",
           )}
         >
           {items.map((item) => (
@@ -194,18 +205,24 @@ export function SettingsNav({
   return (
     <nav
       className={cn(
-        "flex flex-col items-stretch gap-5 border-r border-border pr-5",
         /*
-         * Narrow, the navigation stops being a column beside the page and
+         * **A rail, and a rail is a panel.** The scene board draws the settings
+         * navigation as a bordered Pure Paper card beside the page (`2AO-0`)
+         * rather than as a column hanging off a divider, which is what this
+         * was: a hairline on the right and nothing else made the links read as
+         * part of the page's own left margin. The card says they are a place
+         * you are in. No corner and no shadow — a rail does not float.
+         */
+        "flex flex-col items-stretch gap-2",
+        "rounded-card border border-border bg-surface p-2",
+        /*
+         * Narrow, the same card stops being a column beside the page and
          * becomes a card above it — two scopes side by side, still labelled,
          * still not a second horizontal scroll area.
          */
-        "max-[900px]:static max-[900px]:grid max-[900px]:overflow-visible",
-        "max-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] max-[900px]:items-start",
-        "max-[900px]:gap-5 max-[900px]:rounded-card max-[900px]:border",
-        "max-[900px]:border-border max-[900px]:bg-surface max-[900px]:p-3",
-        "max-[640px]:grid-cols-[minmax(0,1fr)] max-[640px]:gap-4",
-        "max-[640px]:overflow-x-visible",
+        "max-[900px]:grid max-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]",
+        "max-[900px]:items-start max-[900px]:gap-4 max-[900px]:p-3",
+        "max-[640px]:grid-cols-[minmax(0,1fr)] max-[640px]:gap-2",
       )}
       aria-label="Settings"
     >
@@ -282,10 +299,11 @@ export function SettingsTabs<Value extends string>({
  * The stable frame every Settings state uses.
  *
  * Settings navigation is local to this area, so it stays beside the page on a
- * wide screen instead of becoming a large card above every form. On a narrow
- * screen the same links wrap into a compact grid without creating a second
- * horizontal scroll area. Loading and failure states use this frame too,
- * which stops the page from moving when its data arrives.
+ * wide screen instead of running across the top of every form. On a narrow
+ * screen the same card moves above the page and its links wrap into a compact
+ * grid, without creating a second horizontal scroll area. Loading and failure
+ * states use this frame too, which stops the page from moving when its data
+ * arrives.
  *
  * The rules for `section`, `region` and `tabpanel` reach into whatever the page
  * puts here, because the page supplies its own states and this frame is what
@@ -303,7 +321,12 @@ export function SettingsLayout({
   return (
     <div
       className={cn(
-        "grid h-full min-h-0 items-start gap-10",
+        /*
+         * 24px between the rail and the page, which is the page's own gutter:
+         * the rail is a panel now, and the 40px it used to be was the space a
+         * bare column of links needed to stop reading as part of the form.
+         */
+        "grid h-full min-h-0 items-start gap-6",
         "grid-cols-[minmax(176px,220px)_minmax(0,1fr)]",
         "max-[900px]:grid-cols-[minmax(0,1fr)]",
         "max-[900px]:grid-rows-[auto_minmax(0,1fr)] max-[900px]:gap-5",
