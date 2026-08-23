@@ -14,12 +14,6 @@ vi.mock("next/image", () => ({
   default: ({ alt }: { readonly alt: string }) => <img alt={alt} />,
 }));
 
-// The canvas explains the sign-in and sign-up brand surfaces. These tests concern the form
-// controls, and jsdom does not draw or resize a canvas.
-vi.mock("../app/trust-gate.tsx", () => ({
-  TrustGate: () => <canvas aria-hidden="true" />,
-}));
-
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -69,9 +63,11 @@ describe("the shared controls on access pages", () => {
     expect(screen.getByRole("link", { name: "Sign up" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeTruthy();
     expect(screen.queryByText("Trust starts with what happened.")).toBeNull();
+    // The statement outlived the split screen it used to fill: one quiet line
+    // under the wordmark, above the panel. The canvas behind it did not.
     expect(screen.getByText("Trust the voice agents you ship in production.")).toBeTruthy();
     expect(screen.queryByText("Voice agent reliability")).toBeNull();
-    expect(document.querySelector("canvas")).toBeTruthy();
+    expect(document.querySelector("canvas")).toBeNull();
   });
 
   it("keeps first setup as one labelled form with a described organization default", async () => {
@@ -90,7 +86,7 @@ describe("the shared controls on access pages", () => {
       screen.getByRole("button", { name: "Create my Egma instance" }),
     ).toBeTruthy();
     expect(screen.getByText("Trust the voice agents you ship in production.")).toBeTruthy();
-    expect(document.querySelector("canvas")).toBeTruthy();
+    expect(document.querySelector("canvas")).toBeNull();
   });
 
   it("keeps a claimed instance invitation clear and does not repeat the heading", async () => {
@@ -117,7 +113,7 @@ describe("the shared controls on access pages", () => {
         "this Egma instance has been claimed. Ask an admin for an invitation.",
       ),
     ).toBeNull();
-    expect(document.querySelector("canvas")).toBeTruthy();
+    expect(document.querySelector("canvas")).toBeNull();
   });
 
   it("keeps invitation identity fixed and the new password writable", async () => {

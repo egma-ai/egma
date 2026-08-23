@@ -6,7 +6,6 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 import { useTheme } from "../ui/theme.tsx";
-import { TrustGate } from "./trust-gate.tsx";
 
 /**
  * The access pages' own shell, and nothing else.
@@ -14,8 +13,14 @@ import { TrustGate } from "./trust-gate.tsx";
  * Signing in, signing up, accepting an invitation and authorizing a terminal
  * are not product pages: nobody has a project yet, there is nothing to navigate
  * between, and the page is the whole of what somebody is doing. They keep the
- * wide, unhurried composition here, and the large type `DESIGN.md` reserves for
- * auth, onboarding and public pages.
+ * large type `DESIGN.md` reserves for auth, onboarding and public pages.
+ *
+ * **One column, centred, and nothing beside it.** The surface used to be a
+ * split screen — a brand panel on the left with a canvas of drifting dots
+ * behind it, the work on the right. The 2026-08-23 look is the opposite of
+ * that: Neutral Paper, one Pure Paper panel inside a hairline with no corner
+ * and no shadow, the wordmark and one quiet sentence above it, and a single
+ * entrance. Nothing else on the page moves.
  *
  * **Everything a signed-in product page is drawn inside lives in `ui/`** — the
  * compact shell, the selector, the navigation, the page states, the lists and
@@ -24,7 +29,7 @@ import { TrustGate } from "./trust-gate.tsx";
  *
  * **The controls here are the product's controls.** This surface once carried
  * its own `Button`, `TextInput` and `Field`; they are gone, and what is left is
- * composition — a shell, a card, a notice and a line of links. There is one
+ * composition — a shell, a panel, a notice and a line of links. There is one
  * control vocabulary in this product and it is the shadcn base.
  */
 export {
@@ -35,8 +40,16 @@ export {
   ProductStatePage,
 } from "../ui/shell.tsx";
 
+/** The sentence the access surface says, and the only warm line on the page. */
+const STATEMENT = "Trust the voice agents you ship in production.";
+
 /**
- * The full Egma logo, which belongs here and not in the signed-in sidebar.
+ * The full Egma logo, which belongs here and in the signed-in sidebar.
+ *
+ * 32px tall, on the wordmark's own 150.6 × 41 proportion, so 118 wide. It is
+ * left-aligned to the panel's edge and is deliberately **not a link**: signed
+ * out, `/` sends everybody straight back to `/sign-in`, so a link here would be
+ * a control that reloads the page somebody is already on.
  *
  * The dark-theme treatment is an arbitrary variant rather than a `dark:` one
  * because this product has no `dark:` variant: every other surface changes with
@@ -46,11 +59,11 @@ export {
 export function Brand() {
   return (
     <Image
-      className="block h-auto w-[151px] [[data-theme=dark]_&]:invert"
+      className="block h-8 w-[118px] [[data-theme=dark]_&]:invert"
       src="/brand/egma-wordmark.svg"
       alt="Egma"
-      width={151}
-      height={41}
+      width={118}
+      height={32}
       priority
     />
   );
@@ -63,15 +76,22 @@ export function ThemeToggle() {
     <button
       className={cn(
         "grid size-(--tap-target) shrink-0 cursor-pointer place-items-center p-0",
-        "rounded-button border border-foreground bg-surface",
+        "rounded-button border border-border-strong bg-surface",
         /*
          * Named properties, never `all`, and never `outline-color`: the focus
          * ring is drawn from outside every layer and must not fade in on a Tab
-         * step. One duration for both, and `DESIGN.md` says to take the shorter
-         * of two that would each explain the change.
+         * step. One duration for all three, and `DESIGN.md` says to take the
+         * shorter of two that would each explain the change.
          */
-        "transition-[transform,background-color] duration-(--duration-press) ease-out",
-        "pointer-hover:bg-surface-soft",
+        "transition-[transform,background-color,border-color] duration-(--duration-press) ease-out",
+        /*
+         * The edge answers a hover as well as the fill, which is what the
+         * secondary button does and for the same reason: in dark theme
+         * `--border-strong` and `--foreground` part company, and a control
+         * whose edge stayed put would answer a pointer with a faint wash and
+         * nothing else.
+         */
+        "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
         "[&:active:not(:focus-visible)]:scale-97",
         /*
          * Reduced motion takes the movement away and leaves the colour. The
@@ -92,7 +112,7 @@ export function ThemeToggle() {
 }
 
 /**
- * A quiet line of links under an access card: the way to sign up, the way back
+ * A quiet line of links under an access panel: the way to sign up, the way back
  * to signing in, the way to ask for another link.
  *
  * It is a component rather than a class list repeated eleven times because the
@@ -140,6 +160,12 @@ export function LinkLine({ children }: { readonly children: ReactNode }) {
  *
  * So the access surface composes its own form. What is left after the undoing
  * was a flex column and one gap, and that is what this is.
+ *
+ * **A notice inside it pays the gap once.** `Notice` carries its own bottom
+ * margin, because on two access pages it stands over a fact list or a lone
+ * button rather than over a form. Inside this column that margin lands on top
+ * of the flex gap and opens 40px where the rhythm says 20, so the form — the
+ * one element that can see it is a row among rows — takes it back.
  */
 export function AuthForm({
   onSubmit,
@@ -150,7 +176,7 @@ export function AuthForm({
 }) {
   return (
     <form
-      className="flex flex-col gap-5"
+      className="flex flex-col gap-5 [&>[data-slot=notice]]:mb-0"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit?.();
@@ -162,123 +188,103 @@ export function AuthForm({
 }
 
 /**
- * The access composition: a brand panel, and the card that holds the work.
+ * The access composition: the wordmark, one sentence, and the panel that holds
+ * the work — one centred column on Neutral Paper.
  *
- * `animated` is what the sign-in and sign-up pages ask for — the trust field
- * drawn behind the brand. A state page does not animate, and on a narrow screen
- * it also gives up the statement and most of the panel, because a person who is
- * being told one sentence should not scroll past a picture to reach it.
+ * **The whole column enters once and nothing else ever moves.** Opacity and 8px
+ * of travel on the dialog's own duration, drawn by `@starting-style` rather
+ * than by a script, so nothing decides at runtime whether this page is visible:
+ * a browser without it draws the column already arrived, which is the only
+ * failure a sign-in page is allowed to have. Reduced motion keeps the fade and
+ * drops the travel.
+ *
+ * The panel is `--surface` inside a 1px hairline with **no corner and no
+ * shadow**. `DESIGN.md` gives the shared shadow to menus, sheets and dialogs —
+ * surfaces that sit *over* something. This one floats over nothing.
  */
 export function AuthShell({
   eyebrow,
   title,
   lead,
-  animated = false,
   children,
 }: {
   eyebrow?: string;
   title: string;
   lead?: ReactNode;
-  animated?: boolean;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <main
       className={cn(
-        "grid min-h-[100svh] bg-background",
-        "grid-cols-[minmax(340px,0.92fr)_minmax(520px,1.08fr)]",
-        "max-[900px]:block",
+        "relative grid min-h-[100svh] place-items-center bg-background",
+        "px-6 py-16",
+        "max-[620px]:py-12 max-[400px]:px-4",
       )}
     >
-      <aside
+      <div className="absolute top-6 right-6 max-[620px]:top-3 max-[620px]:right-4">
+        <ThemeToggle />
+      </div>
+
+      <div
+        data-slot="auth-column"
         className={cn(
-          "relative min-w-0 overflow-hidden border-r border-border bg-surface-soft",
-          /* The small Ember square in the corner, which is the panel's only mark. */
-          "after:absolute after:right-6 after:bottom-6 after:size-4",
-          "after:bg-brand after:content-['']",
-          "max-[900px]:min-h-[220px] max-[900px]:border-r-0 max-[900px]:border-b",
-          "max-[620px]:min-h-[144px]",
-          !animated && "max-[900px]:min-h-[144px]",
+          "flex w-full max-w-[440px] flex-col items-stretch",
+          /*
+           * The one entrance. `translate` rather than `transform`, so what the
+           * movement writes is a property nothing else on this column writes —
+           * the same separation the drawer and the side sheet already keep.
+           */
+          "transition-[opacity,translate] duration-(--duration-dialog-in) ease-out",
+          "starting:opacity-0 motion-safe:starting:translate-y-2",
         )}
       >
-        {animated ? <TrustGate /> : null}
+        <Brand />
+
+        {/*
+         * The statement, which used to be the whole left half of a split
+         * screen and is now one quiet line. It is product copy and the only
+         * warm sentence on the page, so it outlived the panel it was written
+         * inside.
+         */}
+        <p className="mt-3 mb-8 text-base text-muted-foreground">{STATEMENT}</p>
+
         <div
+          data-slot="auth-panel"
           className={cn(
-            "pointer-events-none absolute inset-0 z-[1] flex flex-col justify-between",
-            "p-[clamp(var(--space-7),5vw,var(--space-10))]",
-            "max-[900px]:p-8 max-[620px]:p-6",
+            "rounded-card border border-border bg-surface p-8",
+            "max-[620px]:p-6",
           )}
         >
-          <Brand />
-          <div
-            className={cn(
-              "max-w-[520px] max-[620px]:hidden",
-              !animated && "max-[900px]:hidden",
-            )}
-          >
-            <p
-              className={cn(
-                "m-0 max-w-[480px] tracking-(--tracking-heading-sm)",
-                "text-[clamp(var(--text-lead),2.8vw,var(--text-heading-sm))]",
-                /* After the font size, never before it: tailwind-merge counts a
-                   font size as conflicting with a line height, so a `leading-`
-                   ahead of a `text-` is dropped and the heading silently takes
-                   the body's 1.5. */
-                "leading-[1.08]",
-              )}
-            >
-              Trust the voice agents you ship in production.
-            </p>
-          </div>
-        </div>
-      </aside>
-      <section
-        className={cn(
-          "relative grid min-h-[100svh] place-items-center px-16 py-20",
-          "max-[900px]:min-h-auto max-[900px]:px-6 max-[900px]:pt-16 max-[900px]:pb-20",
-          "max-[620px]:px-4 max-[620px]:pt-18 max-[620px]:pb-10",
-        )}
-      >
-        <div className="absolute top-6 right-6 max-[620px]:top-3 max-[620px]:right-4">
-          <ThemeToggle />
-        </div>
-        <div
-          data-slot="auth-card"
-          className={cn(
-            "w-full max-w-[520px] rounded-card border border-border bg-surface p-10",
-            "shadow-popover",
-            "max-[620px]:p-6 max-[620px]:shadow-none",
-          )}
-        >
-          {eyebrow === undefined ? null : (
-            <p className="m-0 mb-3 font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase">
-              {eyebrow}
-            </p>
-          )}
           {/*
-           * "Headings carry no size of their own." This one takes the large
-           * steps `DESIGN.md` reserves for auth: Small heading up to Heading,
-           * and Small heading alone once the card is the whole screen.
+           * The eyebrow, the title and the lead are one block with one rhythm,
+           * so a page with no eyebrow or no lead is spaced by what it has
+           * rather than by a margin written for the page that has both.
+           *
+           * The 32px under the block is a relationship rather than a property:
+           * it is paid only when there is something below to pay it to, which
+           * is what keeps a bare loading state from ending in a band of
+           * nothing.
            */}
-          <h1
-            className={cn(
-              "m-0 max-w-[440px] tracking-(--tracking-heading)",
-              "text-[clamp(var(--text-heading-sm),3.4vw,var(--text-heading))]",
-              /* See the statement above: the line height follows the size. */
-              "leading-(--line-heading)",
-              "max-[620px]:text-2xl",
+          <div className="flex flex-col gap-3 [&:not(:last-child)]:mb-8">
+            {eyebrow === undefined ? null : (
+              <p className="m-0 text-sm tracking-(--tracking-label) text-faint uppercase">
+                {eyebrow}
+              </p>
             )}
-          >
-            {title}
-          </h1>
-          {lead === undefined ? null : (
-            <div className="mt-3 mb-8 max-w-[440px] text-base text-muted-foreground">
-              {lead}
-            </div>
-          )}
+            {/*
+             * "Headings carry no size of their own." This one takes the 32px
+             * Subheading step at weight 500, and one size at every width: a
+             * title that shrank on a phone would be the only thing on this
+             * page that changes with the viewport.
+             */}
+            <h1 className="m-0 text-xl font-medium text-foreground">{title}</h1>
+            {lead === undefined ? null : (
+              <div className="text-base text-muted-foreground">{lead}</div>
+            )}
+          </div>
           {children}
         </div>
-      </section>
+      </div>
     </main>
   );
 }
@@ -286,16 +292,14 @@ export function AuthShell({
 export function StatePage({
   title,
   lead,
-  animated = false,
   children,
 }: {
   title: string;
   lead?: ReactNode;
-  animated?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <AuthShell title={title} lead={lead} animated={animated}>
+    <AuthShell title={title} lead={lead}>
       {children}
     </AuthShell>
   );
@@ -311,7 +315,8 @@ export function StatePage({
  *
  * `data-slot` is on it because the transcript pages space themselves against a
  * notice from their own stylesheet, and a class name they cannot see is not
- * something they can point at.
+ * something they can point at. `AuthForm` uses the same handle to take the
+ * bottom margin back inside a gapped column.
  */
 export function Notice({
   tone = "neutral",
