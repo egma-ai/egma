@@ -212,8 +212,22 @@ export function AgentsScreen({
         header: "Name",
         primary: true,
         width: "260px",
+        /*
+         * **The agent's name is plain text until a pointer is on it**, which
+         * is what `6ZJ-0` draws: only the connections are underlined, because
+         * the row itself is the way into the agent and the underline is what
+         * tells the two apart. The shared table underlines every cell link, so
+         * this is said here rather than there — the connection links in the
+         * next column keep it, and so do the connection names on the agent
+         * page.
+         */
         cell: (agent) => (
-          <Link href={projectPath(projectId, "agents", agent.id)}>{agent.name}</Link>
+          <Link
+            className="text-foreground no-underline pointer-hover:underline"
+            href={projectPath(projectId, "agents", agent.id)}
+          >
+            {agent.name}
+          </Link>
         ),
       },
       {
