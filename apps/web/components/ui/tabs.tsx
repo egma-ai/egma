@@ -49,8 +49,9 @@ function Tabs({
  *   the current one raised out of it on Ember Wash. It is for a small closed
  *   set that belongs inside a row of other controls.
  * - `line` is the rail: the choices sit on a hairline and the current one is
- *   marked on it. It is for the top of a page or a panel, where the strip is
- *   what a whole region is switched by.
+ *   marked on it — the mark alone, with no fill behind the label. It is for the
+ *   top of a page or a panel, where the strip is what a whole region is
+ *   switched by.
  *
  * The track's 8px input radius holds 6px button radii on 4px of padding, which
  * is the nesting the eye reads as one control rather than two.
@@ -93,10 +94,11 @@ function TabsList({
 /**
  * One choice in the strip.
  *
- * The current one is Ember Wash **and** a mark that survives a greyscale
- * screenshot: the rail's 2px Ember rule under the `line` tab, and the raised
- * bordered plate around the `default` one. `DESIGN.md`: "State is not
- * communicated by colour alone."
+ * The current one always carries a mark that survives a greyscale screenshot:
+ * the rail's 2px Ember rule under the `line` tab, and the raised bordered plate
+ * around the `default` one. `DESIGN.md`: "State is not communicated by colour
+ * alone." Only the segmented plate is filled with Ember Wash — a rail tab is
+ * its mark, which is what `2B1-0` draws.
  *
  * There is no `focus-visible` rule here on purpose. `globals.css` draws the
  * product's Ember focus ring for everything a keyboard reaches, `[role="tab"]`
@@ -141,12 +143,29 @@ function TabsTrigger({
           "pointer-hover:data-[state=inactive]:bg-surface-soft",
           "pointer-hover:text-foreground",
           "disabled:cursor-not-allowed disabled:opacity-55",
-          "data-[state=active]:bg-selected data-[state=active]:text-foreground",
+          /*
+           * The current tab's label darkens in both shapes. The *fill* does
+           * not: see the two variant blocks below.
+           */
+          "data-[state=active]:text-foreground",
           "[&_svg]:pointer-events-none [&_svg]:shrink-0",
           "[&_svg:not([class*='size-'])]:size-4",
         ],
         [
-          /* The segmented plate: raised out of the track on a narrow Ember edge. */
+          /*
+           * The segmented plate: raised out of the track on Ember Wash behind
+           * a narrow Ember edge. **The wash is the plate's, not every tab's.**
+           * It was written unscoped, so the rail tab drew it as well — a block
+           * of wash that stops at the label's box, under a rail whose own mark
+           * is the 2px Ember rule. `2B1-0` draws the mark and nothing else, and
+           * on a dark surface the extra fill read as a second control.
+           *
+           * Scoped here rather than undone in the `line` block, for the reason
+           * the shared table learned the same week: two `background-color`
+           * rules of equal weight under one selector are decided by whichever
+           * Tailwind emits last, and that is not a decision.
+           */
+          "group-data-[variant=default]/tabs-list:data-[state=active]:bg-selected",
           "group-data-[variant=default]/tabs-list:data-[state=active]:border-brand",
         ],
         [

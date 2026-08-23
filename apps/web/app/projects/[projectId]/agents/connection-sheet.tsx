@@ -26,7 +26,7 @@ import {
   type ConnectionOption,
   type ConnectionOptionCatalog,
 } from "@/lib/connection-options.ts";
-import { asDay } from "@/lib/instants.ts";
+import { asListInstant } from "@/lib/instants.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { agentPlatformLabel } from "@/lib/transcripts.ts";
 import { Field, Help, Problem } from "@/ui/form.tsx";
@@ -603,7 +603,7 @@ function ReadConnection({
         </pre>
       </div>
       <p className="m-0 text-sm text-faint">
-        {`Created ${asDay(connection.createdAt)} · Updated ${asDay(connection.updatedAt)}`}
+        {`Created ${asListInstant(connection.createdAt)} · Updated ${asListInstant(connection.updatedAt)}`}
       </p>
     </>
   );

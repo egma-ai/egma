@@ -48,8 +48,7 @@ import { Select } from "@/components/ui/select";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
-  RelativeInstant,
-  useMinuteClock,
+  ListInstant,
 } from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
 import { TOOLBAR_FILTER } from "../../../../../ui/section.tsx";
@@ -127,7 +126,6 @@ export default function MonitoringTranscriptsPage() {
 }
 
 function Transcripts({ projectId }: { readonly projectId: string }) {
-  const now = useMinuteClock();
   /**
    * Which window this page is on, read out of the address.
    *
@@ -546,7 +544,7 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
             )}
             <DataTable
               label={LIST.tableLabel}
-              columns={columnsFor(projectId, now)}
+              columns={columnsFor(projectId)}
               rows={shownRows}
               keyOf={(row) => row.traceId}
               stretchPrimaryLink
@@ -605,17 +603,13 @@ function Nothing() {
  * endpoint under it requires both, and this row already knows the answers, so
  * nobody has to.
  */
-function columnsFor(projectId: string, now: number): readonly Column<Listed>[] {
+function columnsFor(projectId: string): readonly Column<Listed>[] {
   const order: readonly (readonly [string, (row: Listed) => ReactNode])[] = [
     [
       COLUMNS.started,
       (row) => (
         <Link href={transcriptPath(projectId, row)}>
-          <RelativeInstant
-            instant={row.startedAt}
-            now={now}
-            precision="second"
-          />
+          <ListInstant instant={row.startedAt} precision="second" />
         </Link>
       ),
     ],

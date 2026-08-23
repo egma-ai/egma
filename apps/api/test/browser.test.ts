@@ -2,7 +2,7 @@ import { newId } from "@egma/ids";
 import type { Browser, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { asSecond } from "../../web/lib/instants.ts";
+import { asListInstant, asSecond } from "../../web/lib/instants.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
   capturedRequests,
@@ -1140,7 +1140,17 @@ describe("what a project recorded in production", () => {
 
       // The facts the list endpoint returns, as columns.
       const started = page.locator("tbody time").first();
-      expect(await started.innerText()).toBe("2 hours ago");
+      /*
+       * **A list's date column is an absolute short date, never a changing
+       * age.** The boards print `Aug 16, 2026` in every list column that holds
+       * a time, and a column of ages cannot be scanned — two exchanges a
+       * minute apart read the same for the whole of the first hour. This
+       * column names the exchange itself, so it keeps the precision it has
+       * always had and takes that shape (ui-refresh ticket 09, item a).
+       */
+      expect(await started.innerText()).toBe(
+        asListInstant(FIXTURE_TRACE.started_at, "second"),
+      );
       expect(await started.getAttribute("title")).toBe(
         asSecond(FIXTURE_TRACE.started_at),
       );

@@ -52,7 +52,11 @@ function PageState({
         "flex flex-col items-start gap-3 text-left",
         "rounded-card border border-border bg-surface px-8 py-10",
         "max-[900px]:px-5 max-[900px]:py-8",
-        /* Quiet is an outline around an absence: nothing is raised off the page. */
+        /*
+         * Quiet is an outline around an absence that is about to be filled:
+         * nothing is raised off the page. `Loading` is its only caller — an
+         * empty list is not an absence egma caused, and it draws its own card.
+         */
         tone === "quiet" && "border-dashed bg-transparent",
       )}
       role={tone === "bad" ? "alert" : "status"}
@@ -110,7 +114,26 @@ export function Loading({ what }: { readonly what: string }) {
   );
 }
 
-/** There is nothing here, and that is a fact about the project, not a fault. */
+/**
+ * There is nothing here, and that is a fact about the project, not a fault.
+ *
+ * **It is drawn here rather than through `PageState`, and the reason is what
+ * the four states are about.** Loading, failed and not-available are about
+ * *egma* — a wait, a refusal, an address that leads nowhere. They interrupt,
+ * so they are set apart from the page. An empty list is about the *project*:
+ * it is the ordinary first day of a list nobody has written to yet, it belongs
+ * on the page, and it is the one state that offers an action.
+ *
+ * `AN8-0` (page `B-0`) draws exactly that and it is what this matches, value
+ * for value: a solid `--surface` card inside one `--border` hairline with no
+ * corner, 40px of padding, a 16px weight-500 title over one 14px sentence at
+ * the board's measure, and the primary action under them as the wash button.
+ * The dashed outline and 24px heading it wore before said "something has gone
+ * wrong here", which is the one thing an empty list has not done.
+ *
+ * The gap inside the head block is the board's 6px rounded to the 4px grid,
+ * the same rounding ticket 01 made for the sheet's padding.
+ */
 export function Empty({
   title,
   lead,
@@ -120,7 +143,28 @@ export function Empty({
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
 }) {
-  return <PageState tone="quiet" title={title} lead={lead} action={action} />;
+  return (
+    <section
+      data-slot="page-state"
+      data-tone="empty"
+      className={cn(
+        "flex w-full flex-col items-start gap-4 text-left",
+        "rounded-card border border-border bg-surface p-10",
+        "max-[900px]:p-5",
+      )}
+      role="status"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 className="m-0 text-base font-medium">{title}</h2>
+        {lead === undefined ? null : (
+          <p className="m-0 max-w-(--state-lead-width) text-sm text-muted-foreground">
+            {lead}
+          </p>
+        )}
+      </div>
+      {action}
+    </section>
+  );
 }
 
 /**

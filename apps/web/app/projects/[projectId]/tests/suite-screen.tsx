@@ -25,7 +25,6 @@ import {
   runSuitePath,
   suitePagePath,
   testsPagePath,
-  trailInto,
   type TestSuite,
 } from "../../../../lib/test-suites.ts";
 import {
@@ -38,7 +37,7 @@ import {
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { MenuDivider, MenuItem } from "../../../../ui/menu.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { RelativeInstant, useMinuteClock } from "../../../../ui/relative-time.tsx";
+import { ListInstant } from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { SearchField } from "../../../../ui/section.tsx";
 import {
@@ -80,7 +79,6 @@ export function SuiteScreen({
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const mayAuthor = role !== null && canAuthor(role);
-  const now = useMinuteClock();
   const { answer: suite, reload: reloadSuite } = useProjectRead<TestSuite>(
     (projectId) =>
       platformAnswer(
@@ -282,7 +280,7 @@ export function SuiteScreen({
     {
       key: "changed",
       header: "Changed",
-      cell: (test) => <RelativeInstant instant={test.updatedAt} now={now} />,
+      cell: (test) => <ListInstant instant={test.updatedAt} />,
     },
     {
       key: "menu",
@@ -435,7 +433,10 @@ export function SuiteScreen({
     <ProductPage>
       <PageHeader
         title={title}
-        breadcrumbs={trailInto({ label: "Tests", href: testsPagePath(projectId) })}
+        breadcrumbs={[
+          { label: "Tests", href: testsPagePath(projectId) },
+          { label: title },
+        ]}
         toolbar={
           <SearchField
             aria-label="Search tests"

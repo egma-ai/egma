@@ -22,7 +22,6 @@ import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   suitePagePath,
   testsPagePath,
-  trailInto,
   type TestSuite,
 } from "../../../../../lib/test-suites.ts";
 import {
@@ -366,15 +365,21 @@ function TestDetail({
     );
   }
 
-  const basicBreadcrumbs = trailInto({
-    label: "Tests",
-    href: testsPagePath(projectId),
-  });
+  /*
+    The trail into this test. It ends with whatever this page is currently
+    calling itself, because that is the page — `PageHeader` takes the last step
+    off and draws it as the heading beside the rest.
+  */
+  const trailTo = (name: string) =>
+    [
+      { label: "Tests", href: testsPagePath(projectId) },
+      { label: name },
+    ] as const;
 
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader title="Test" breadcrumbs={basicBreadcrumbs} />
+        <PageHeader title="Test" breadcrumbs={trailTo("Test")} />
         <PageBody><Loading what="this test" /></PageBody>
       </ProductPage>
     );
@@ -382,7 +387,7 @@ function TestDetail({
   if (answer.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader title="Test" breadcrumbs={basicBreadcrumbs} />
+        <PageHeader title="Test" breadcrumbs={trailTo("Test")} />
         <PageBody><NotFound message={answer.refusal.message} /></PageBody>
       </ProductPage>
     );
@@ -390,7 +395,7 @@ function TestDetail({
   if (answer.status === "failed") {
     return (
       <ProductPage>
-        <PageHeader title="Test" breadcrumbs={basicBreadcrumbs} />
+        <PageHeader title="Test" breadcrumbs={trailTo("Test")} />
         <PageBody><Failure message={answer.refusal.message} onRetry={reload} /></PageBody>
       </ProductPage>
     );
@@ -398,7 +403,10 @@ function TestDetail({
   if (test === null || editing === null || suite === null || suite.status === "signed-out") {
     return (
       <ProductPage>
-        <PageHeader title={answer.value.name} breadcrumbs={basicBreadcrumbs} />
+        <PageHeader
+          title={answer.value.name}
+          breadcrumbs={trailTo(answer.value.name)}
+        />
         <PageBody><Loading what="this test's suite" /></PageBody>
       </ProductPage>
     );
@@ -406,7 +414,7 @@ function TestDetail({
   if (suite.status === "missing") {
     return (
       <ProductPage>
-        <PageHeader title={test.name} breadcrumbs={basicBreadcrumbs} />
+        <PageHeader title={test.name} breadcrumbs={trailTo(test.name)} />
         <PageBody><NotFound message={suite.refusal.message} /></PageBody>
       </ProductPage>
     );
@@ -414,7 +422,7 @@ function TestDetail({
   if (suite.status === "failed") {
     return (
       <ProductPage>
-        <PageHeader title={test.name} breadcrumbs={basicBreadcrumbs} />
+        <PageHeader title={test.name} breadcrumbs={trailTo(test.name)} />
         <PageBody><Failure message={suite.refusal.message} onRetry={reloadSuite} /></PageBody>
       </ProductPage>
     );
@@ -430,13 +438,14 @@ function TestDetail({
     <ProductPage>
       <PageHeader
         title={test.name}
-        breadcrumbs={trailInto(
+        breadcrumbs={[
           { label: "Tests", href: testsPagePath(projectId) },
           {
             label: suite.value.name,
             href: suitePagePath(projectId, suite.value.id),
           },
-        )}
+          { label: test.name },
+        ]}
         toolbar={
           <p className="m-0 text-sm text-muted-foreground">
             changed <RelativeInstant instant={test.updatedAt} now={now} /> ·{" "}

@@ -509,8 +509,18 @@ describe("the running graders of one project", () => {
         .getByRole("link", { name: "Graders" })
         .getAttribute("href"),
     ).toBe("/projects/prj_1/graders");
-    expect(within(breadcrumb).getByText("Running").getAttribute("aria-current"))
-      .toBe("page");
+    /*
+     * **And nothing after it.** A trail's last step is the page it is on, and
+     * `PageHeader` draws the trail and the heading in one 56px bar — so the
+     * shell takes that step off and the heading beside it is what says where
+     * somebody is (ui-refresh ticket 09, item c). Before the rule this bar
+     * read "Graders / Running   Running graders".
+     */
+    expect(within(breadcrumb).queryByText(runningCopy.RUNNING.title)).toBeNull();
+    expect(within(breadcrumb).queryByText("Running")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: runningCopy.RUNNING.title }),
+    ).toBeTruthy();
 
     // What `required` decides, rather than the flag's own value.
     expect(screen.getAllByText("Blocks")).not.toHaveLength(0);

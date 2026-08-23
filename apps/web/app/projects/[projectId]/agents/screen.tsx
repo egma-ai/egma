@@ -13,13 +13,13 @@ import {
   type AgentPage,
   type ListedAgentWithConnections,
 } from "@/lib/agents.ts";
-import { asDay } from "@/lib/instants.ts";
 import { firstProjectOf, roleOf } from "@/lib/me.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { projectLanding, projectPath } from "@/lib/project-context.ts";
 import { canAuthor } from "@/lib/roles.ts";
 import { DataTable, type Column } from "@/ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
+import { ListInstant } from "@/ui/relative-time.tsx";
 import { useProjectRead } from "@/ui/resource.ts";
 import { SearchField } from "@/ui/section.tsx";
 import { PageBody, PageHeader, ProductPage, useShellSession } from "@/ui/shell.tsx";
@@ -263,7 +263,7 @@ export function AgentsScreen({
         key: "created",
         header: "Created",
         hideOnMobile: true,
-        cell: (agent) => asDay(agent.createdAt),
+        cell: (agent) => <ListInstant instant={agent.createdAt} />,
       },
       {
         key: "menu",

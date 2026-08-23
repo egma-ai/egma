@@ -44,6 +44,14 @@ const buttonVariants = cva(
     // 140ms on every Tab step — motion on keyboard navigation, which
     // `DESIGN.md` forbids outright.
     "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
+    /*
+     * **A control that cannot be pressed does not answer a pointer.** Every
+     * variant's hover state is behind `not-disabled:`, because the wash
+     * primary's was not: a disabled Save repainted as an available one the
+     * moment somebody's pointer rested on it, which is the opposite of what a
+     * disabled control is for. `active:` needs no guard — a browser does not
+     * fire it on a disabled element.
+     */
     "disabled:cursor-not-allowed disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   ],
@@ -59,7 +67,8 @@ const buttonVariants = cva(
          */
         default: [
           "border border-border bg-primary-wash text-primary",
-          "pointer-hover:bg-primary-wash-hover pointer-hover:text-primary-hover",
+          "pointer-hover:not-disabled:bg-primary-wash-hover",
+          "pointer-hover:not-disabled:text-primary-hover",
           "active:bg-primary-wash-pressed active:text-primary-pressed",
         ],
         /*
@@ -75,20 +84,28 @@ const buttonVariants = cva(
          */
         secondary: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
+          "pointer-hover:not-disabled:border-foreground",
+          "pointer-hover:not-disabled:bg-surface-soft",
         ],
         outline: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
+          "pointer-hover:not-disabled:border-foreground",
+          "pointer-hover:not-disabled:bg-surface-soft",
         ],
         /* Quiet action: text only. */
-        ghost:
-          "border border-transparent bg-transparent text-foreground pointer-hover:bg-surface-soft",
-        link: "border border-transparent bg-transparent text-foreground underline-offset-4 pointer-hover:underline",
+        ghost: [
+          "border border-transparent bg-transparent text-foreground",
+          "pointer-hover:not-disabled:bg-surface-soft",
+        ],
+        link: [
+          "border border-transparent bg-transparent text-foreground underline-offset-4",
+          "pointer-hover:not-disabled:underline",
+        ],
         /* Destructive: the failure colour, and never the brand colour. */
         destructive: [
           "border border-destructive bg-destructive text-destructive-foreground",
-          "pointer-hover:bg-destructive-hover pointer-hover:border-destructive-hover",
+          "pointer-hover:not-disabled:bg-destructive-hover",
+          "pointer-hover:not-disabled:border-destructive-hover",
           "active:bg-destructive-pressed active:border-destructive-pressed",
         ],
       },

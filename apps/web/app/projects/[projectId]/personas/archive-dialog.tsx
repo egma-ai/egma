@@ -6,7 +6,6 @@ import { getPersonaUsage, listPersonas } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import type { Refusal } from "../../../../lib/api.ts";
 import {
   ownerSaid,
@@ -149,14 +148,6 @@ export function ArchiveDialog({
     <Dialog title={`Archive ${persona.name}?`} onClose={onClose}>
       {(dismiss) => (
         <>
-          {/*
-           * The hairline the boards draw under a confirmation's title
-           * (`BJZ-0`). It is here rather than on the shared `DialogHeader`
-           * because a route ticket does not restyle a shared component; the
-           * wish is recorded on the ticket instead.
-           */}
-          <Separator />
-
           <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
             They leave the list your team authors from. Every version stays
             where it is, and every run that used one stays readable. Restore is

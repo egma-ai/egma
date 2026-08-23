@@ -216,6 +216,7 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 - The active item uses Ember Wash and a small Ember mark on its leading edge. Its icon follows the row's text colour; the mark is the brand signal and there is only one.
 - The account control stays at the bottom.
 - Every page has a title bar of its own, the same height as the wordmark bar, with the page title and its purpose statement in it. Page actions are not in that bar.
+- A page below a section carries the trail into its record in that bar, and **the trail never repeats the title beside it**. A page passes the real trail, ending with the record's own name; the bar draws every step but the last, because the heading beside it is that last step. There is no separator after the step that is left. (Read off the boards, 2026-08-23.)
 - A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
 - Page content is held to the page maximum and aligned to the left gutter, so the title in the bar and the first column under it are on one line.
 
@@ -274,6 +275,8 @@ The measurements, all of them theme values:
 - Selected or active rows use Ember Wash plus a non-color state mark.
 - Mobile may restyle the same DOM as rows. It must not duplicate interactive content.
 - Empty, loading, failed, and filtered-empty are separate states.
+- The empty state is a solid Pure Paper card inside one hairline, with 40px of padding, a 16px weight-500 title, one 14px supporting sentence, and the page's action under them as the wash button. It is a fact about the project rather than about egma, so it sits on the page like anything else. Loading, failed, and not-available are interruptions and stay set apart from it. (Read off `AN8-0`, 2026-08-23.)
+- A list's date column is the absolute short date — `Aug 16, 2026` — in tabular numerals, with the exact instant kept on the element. A relative age belongs in a sentence ("started just now", "last received 2 min ago") and never in a column: a column of ages cannot be scanned, and two rows a minute apart read the same for the whole of the first hour. One column names a moment rather than a day, and it keeps its precision in the same shape. (Read off `6ZJ-0`, `8TQ-0` and `8P4-0`, 2026-08-23.)
 
 ### Side sheets
 

@@ -3,7 +3,6 @@
 import { useParams } from "next/navigation";
 
 import { projectPath } from "../../../../../lib/project-context.ts";
-import { trailInto } from "../../../../../lib/test-suites.ts";
 import { Loading } from "../../../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../../../ui/shell.tsx";
 
@@ -26,10 +25,10 @@ export default function NewTestLoading() {
     <div data-slot="route-loading">
       <ProductStatePage
         title="Test suite"
-        breadcrumbs={trailInto({
-          label: "Tests",
-          href: projectPath(projectId, "tests"),
-        })}
+        breadcrumbs={[
+          { label: "Tests", href: projectPath(projectId, "tests") },
+          { label: "Test suite" },
+        ]}
       >
         <Loading what="the test form" />
       </ProductStatePage>

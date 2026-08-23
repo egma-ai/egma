@@ -35,8 +35,7 @@ import {
 } from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
-  RelativeInstant,
-  useMinuteClock,
+  ListInstant,
 } from "../../../../../ui/relative-time.tsx";
 import { Section } from "../../../../../ui/section.tsx";
 import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
@@ -179,7 +178,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const projects: readonly Project[] = me?.projects ?? [];
-  const now = useMinuteClock();
 
   const { answer, reload } = useOrganizationRead<ApiKeyList>(() =>
     platformAnswer(listApiKeys({ client: platformClient })),
@@ -269,11 +267,11 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         key: "used",
         header: "Last used",
         cell: (key) =>
-          key.lastUsedAt === null
-            ? "Never"
-            : (
-                <RelativeInstant instant={key.lastUsedAt} now={now} />
-              ),
+          key.lastUsedAt === null ? (
+            "Never"
+          ) : (
+            <ListInstant instant={key.lastUsedAt} />
+          ),
       },
       {
         key: "actions",
