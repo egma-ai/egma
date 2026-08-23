@@ -33,10 +33,16 @@ import {
   type TestSuitePage,
 } from "../../../../../lib/test-suites.ts";
 import type { TestPage } from "../../../../../lib/tests.ts";
-import { Field, Help, Refused } from "../../../../../ui/form.tsx";
+import {
+  Field,
+  Form,
+  FormActions,
+  Help,
+  Refused,
+} from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import { Actions, Section } from "../../../../../ui/section.tsx";
+import { Section } from "../../../../../ui/section.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
@@ -85,6 +91,8 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
   );
 
   const [suiteId, setSuiteId] = useState("");
+  /** The suite the address asked for, until the loaded list confirms it. */
+  const [wantedSuite, setWantedSuite] = useState("");
   const [agentId, setAgentId] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [name, setName] = useState("");
@@ -128,9 +136,21 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
     setRefused(null);
   }
 
+  /**
+   * The two records this page can be opened *about*, read out of the address.
+   *
+   * A suite page's "Run suite" and an agent page's "Run this agent" both land
+   * here, and both name what they came from. Neither is trusted: the value is
+   * matched against what this project can actually see, further down, and a
+   * parameter naming something else simply selects nothing — which is how the
+   * agent parameter has always behaved and is the only safe reading of an
+   * identifier somebody can type into a URL bar.
+   */
   useEffect(() => {
     showing.current = projectId;
-    const selected = new URLSearchParams(window.location.search).get("agent")?.trim() ?? "";
+    const address = new URLSearchParams(window.location.search);
+    const selected = address.get("agent")?.trim() ?? "";
+    setWantedSuite(address.get("suite")?.trim() ?? "");
     setSuiteId("");
     setAgentId(selected);
     setConnectionId("");
@@ -149,6 +169,28 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
       setSuiteCursor(suitePage.value.nextPageToken);
     }
   }, [suitePage]);
+
+  /**
+   * The suite the address asked for, selected once this project has confirmed
+   * it exists — and never otherwise.
+   *
+   * The check is against the suites already loaded rather than a read of its
+   * own, so an identifier belonging to another project, or to nothing, leaves
+   * the field on "Choose a test suite" instead of putting a name on screen
+   * that the person cannot open. A suite that has not been paged to yet is
+   * picked up the moment "Load more suites" brings it in, because the ask is
+   * held until it is answered.
+   */
+  useEffect(() => {
+    if (wantedSuite === "" || suitePage?.status !== "ready") return;
+    const known = [...suitePage.value.testSuites, ...moreSuites].some(
+      (suite) => suite.id === wantedSuite,
+    );
+    if (!known) return;
+    setSuiteId(wantedSuite);
+    setWantedSuite("");
+    setIdempotencyKey(newRunIntentKey());
+  }, [wantedSuite, suitePage, moreSuites]);
 
   useEffect(() => {
     if (agentPage?.status === "ready") {
@@ -326,14 +368,17 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
           { label: "New run" },
         ]}
         lead="Run every current test in one suite against one agent and one connection."
-        action={
-          <Button asChild variant="secondary">
-            <Link href={`/projects/${encodeURIComponent(projectId)}/runs`}>Cancel</Link>
-          </Button>
-        }
       />
       <PageBody>
-        <div className="flex flex-col gap-8">
+        {/*
+          **One form on one Pure Paper surface**, which is what `DESIGN.md`
+          asks of a page that groups fields — and what the shared `Form`
+          already draws, first group flush with its top edge. The page used to
+          stack four bare sections straight onto the canvas, each paying its
+          own top margin over a wrapper's gap, so the groups sat 64px apart on
+          no surface at all.
+        */}
+        <Form onSubmit={() => void start()}>
           {suites.length === 0 ? (
             <Empty
               title="This project has no test suite"
@@ -471,18 +516,28 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
 
           {moreRefused === null ? null : <Refused message={moreRefused.message} />}
           {refused === null ? null : <Refused message={refused.message} />}
-          <Actions>
+          {/*
+            The answer and the way out, together at the leading edge — the
+            footer shape `7DA-0` draws on every panel in this product. `Start
+            run` is the wash primary and a real submit, so the return key in
+            the name field starts the run rather than doing nothing.
+          */}
+          <FormActions>
             <Button
-              type="button"
+              type="submit"
               disabled={!mayStart || !ready}
               busy={starting}
               why={whyNot}
-              onClick={() => void start()}
             >
               {starting ? "Starting…" : "Start run"}
             </Button>
-          </Actions>
-        </div>
+            <Button asChild variant="secondary">
+              <Link href={`/projects/${encodeURIComponent(projectId)}/runs`}>
+                Cancel
+              </Link>
+            </Button>
+          </FormActions>
+        </Form>
       </PageBody>
     </ProductPage>
   );

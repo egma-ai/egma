@@ -30,11 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import {
-  Actions,
-  Toolbar,
-  TOOLBAR_FILTER,
-} from "../../../../ui/section.tsx";
+import { Actions, TOOLBAR_FILTER } from "../../../../ui/section.tsx";
 import { Refused } from "../../../../ui/form.tsx";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
@@ -605,102 +601,109 @@ function Runs({ projectId }: { readonly projectId: string }) {
     }
   }
 
+  /**
+   * What this list is narrowed by, in the order somebody narrows.
+   *
+   * It is handed to the page header rather than drawn in the body, because the
+   * recipe gives every list in this product one strip under the title bar: the
+   * filters at the left and the one action at the right (`71N-0`). Drawing them
+   * in the body put the action on one row and the filters on the row under it,
+   * which is two strips doing one job.
+   */
+  const filters = (
+    <>
+      <Select
+        id="runs-agent"
+        className={TOOLBAR_FILTER}
+        value={agent}
+        aria-label="Show only runs against one agent"
+        onChange={(event) => setAgent(event.target.value)}
+      >
+        <option value="">Any agent</option>
+        {agentRows.map((one) => (
+          <option key={one.id} value={one.id}>
+            {one.name}
+          </option>
+        ))}
+      </Select>
+      <Select
+        id="runs-connection"
+        className={TOOLBAR_FILTER}
+        value={connection}
+        aria-label="Show only runs over one connection"
+        onChange={(event) => setConnection(event.target.value)}
+      >
+        <option value="">Any connection</option>
+        {[...connections].map(([id, label]) => (
+          <option key={id} value={id}>
+            {label}
+          </option>
+        ))}
+      </Select>
+      <Select
+        id="runs-status"
+        className={TOOLBAR_FILTER}
+        value={status}
+        aria-label="Show only runs whose machinery is in one state"
+        onChange={(event) =>
+          setStatus(event.target.value as "" | RunStatusWord)
+        }
+      >
+        <option value="">Any run state</option>
+        {RUN_STATUS_WORDS.map((one) => (
+          <option key={one} value={one}>
+            {one}
+          </option>
+        ))}
+      </Select>
+      <Select
+        id="runs-verdict"
+        className={TOOLBAR_FILTER}
+        value={verdict}
+        aria-label="Show only runs with one verdict"
+        onChange={(event) =>
+          setVerdict(event.target.value as "" | VerdictWord)
+        }
+      >
+        <option value="">Any verdict</option>
+        {VERDICT_WORDS.map((one) => (
+          <option key={one} value={one}>
+            {one}
+          </option>
+        ))}
+      </Select>
+      {/*
+        The field carries its own name rather than a visible label, the
+        same way the four filters beside it do. `autoComplete` is said out
+        loud because the control set this replaces defaulted it to `off`,
+        and a browser offering to remember a date filter is a menu over
+        the toolbar every time somebody focuses it.
+      */}
+      <Input
+        id="runs-since"
+        className={TOOLBAR_FILTER}
+        type="text"
+        value={typedSince}
+        aria-label="Show only runs started on or after a day"
+        placeholder="YYYY-MM-DD"
+        autoComplete="off"
+        spellCheck={false}
+        onChange={(event) => setTypedSince(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") setSince(typedSince);
+          if (event.key === "Escape") {
+            setTypedSince("");
+            setSince("");
+          }
+        }}
+      />
+    </>
+  );
+
   return (
     <ProductPage>
-      <PageHeader
-        title="Simulation runs"
-        action={plan()}
-      />
-      <PageBody>
-        <Toolbar>
-          <Select
-            id="runs-agent"
-            className={TOOLBAR_FILTER}
-            value={agent}
-            aria-label="Show only runs against one agent"
-            onChange={(event) => setAgent(event.target.value)}
-          >
-            <option value="">Any agent</option>
-            {agentRows.map((one) => (
-              <option key={one.id} value={one.id}>
-                {one.name}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="runs-connection"
-            className={TOOLBAR_FILTER}
-            value={connection}
-            aria-label="Show only runs over one connection"
-            onChange={(event) => setConnection(event.target.value)}
-          >
-            <option value="">Any connection</option>
-            {[...connections].map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="runs-status"
-            className={TOOLBAR_FILTER}
-            value={status}
-            aria-label="Show only runs whose machinery is in one state"
-            onChange={(event) =>
-              setStatus(event.target.value as "" | RunStatusWord)
-            }
-          >
-            <option value="">Any run state</option>
-            {RUN_STATUS_WORDS.map((one) => (
-              <option key={one} value={one}>
-                {one}
-              </option>
-            ))}
-          </Select>
-          <Select
-            id="runs-verdict"
-            className={TOOLBAR_FILTER}
-            value={verdict}
-            aria-label="Show only runs with one verdict"
-            onChange={(event) =>
-              setVerdict(event.target.value as "" | VerdictWord)
-            }
-          >
-            <option value="">Any verdict</option>
-            {VERDICT_WORDS.map((one) => (
-              <option key={one} value={one}>
-                {one}
-              </option>
-            ))}
-          </Select>
-          {/*
-            The field carries its own name rather than a visible label, the
-            same way the four filters beside it do. `autoComplete` is said out
-            loud because the control set this replaces defaulted it to `off`,
-            and a browser offering to remember a date filter is a menu over
-            the toolbar every time somebody focuses it.
-          */}
-          <Input
-            id="runs-since"
-            className={TOOLBAR_FILTER}
-            type="text"
-            value={typedSince}
-            aria-label="Show only runs started on or after a day"
-            placeholder="YYYY-MM-DD"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setTypedSince(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") setSince(typedSince);
-              if (event.key === "Escape") {
-                setTypedSince("");
-                setSince("");
-              }
-            }}
-          />
-        </Toolbar>
-        {body()}
-      </PageBody>
+      <PageHeader title="Simulation runs" toolbar={filters} action={plan()} />
+      <PageBody>{body()}</PageBody>
     </ProductPage>
   );
 }
