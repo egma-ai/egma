@@ -1,8 +1,3 @@
-"use client";
-
-import { useParams } from "next/navigation";
-
-import { projectPath } from "../../../../../lib/project-context.ts";
 import { Loading } from "../../../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../../../ui/shell.tsx";
 
@@ -10,27 +5,18 @@ import { ProductStatePage } from "../../../../../ui/shell.tsx";
  * What the router draws between the press and
  * `/projects/:projectId/personas/new` arriving.
  *
- * The form cannot be drawn until egma says which models a persona may speak
- * with, so that read is what it names.
+ * **It names the list rather than the form**, because the list is what this
+ * address draws first: the New sheet opens over it. A fallback titled "New
+ * persona" would put a second page title on screen for a moment and then take
+ * it away again.
  *
- * Its header is the page's own down to its shape — the same eyebrow or the
- * same crumbs, never one standing in for the other — so nothing is redrawn a
- * second way when the page arrives. `agents/loading.tsx` carries the
- * reasoning every one of these shares.
+ * `agents/loading.tsx` carries the reasoning every one of these shares.
  */
 export default function NewPersonaLoading() {
-  const { projectId } = useParams<{ projectId: string }>();
-
   return (
     <div data-slot="route-loading">
-      <ProductStatePage
-        title="New persona"
-        breadcrumbs={[
-          { label: "Personas", href: projectPath(projectId, "personas") },
-          { label: "New persona" },
-        ]}
-      >
-        <Loading what="the supported persona models" />
+      <ProductStatePage title="Personas">
+        <Loading what="personas" />
       </ProductStatePage>
     </div>
   );
