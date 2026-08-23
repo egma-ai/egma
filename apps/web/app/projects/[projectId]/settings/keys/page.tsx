@@ -39,10 +39,7 @@ import {
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
 import { Section } from "../../../../../ui/section.tsx";
-import {
-  SettingsLayout,
-  settingsPath,
-} from "../../../../../ui/settings-nav.tsx";
+import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,

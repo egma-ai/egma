@@ -50,7 +50,6 @@ import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   SettingsTabs,
-  settingsPath,
 } from "../../../../../ui/settings-nav.tsx";
 import {
   currentDraftState,
@@ -305,9 +304,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   if (answer === null) {
     return (
       <ProductPage viewport>
-        <PageHeader
-            title="People"
-        />
+        <PageHeader title="People" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="people">
             <Loading what="this organization's people" />
@@ -320,9 +317,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   if (answer.status !== "ready") {
     return (
       <ProductPage viewport>
-        <PageHeader
-            title="People"
-        />
+        <PageHeader title="People" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="people">
             <Failure

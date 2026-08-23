@@ -20,10 +20,7 @@ import {
   Refused,
 } from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
-import {
-  SettingsLayout,
-  settingsPath,
-} from "../../../../../ui/settings-nav.tsx";
+import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -121,9 +118,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   if (answer === null) {
     return (
       <ProductPage viewport>
-        <PageHeader
-            title="Organization"
-        />
+        <PageHeader title="Organization" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
             <Loading what="this organization" />
@@ -136,9 +131,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   if (answer.status !== "ready") {
     return (
       <ProductPage viewport>
-        <PageHeader
-            title="Organization"
-        />
+        <PageHeader title="Organization" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
             <Failure

@@ -181,7 +181,7 @@ export function SettingsNav({
           className={cn(
             "flex flex-col gap-1",
             "max-[900px]:grid max-[900px]:grid-cols-[repeat(auto-fit,minmax(112px,1fr))]",
-            "max-[640px]:grid-cols-2",
+            "max-[640px]:grid-cols-1",
           )}
         >
           {items.map((item) => (
