@@ -469,7 +469,13 @@ function Fact({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-2 px-5 py-4">
-      <span className="text-sm text-muted-foreground">{label}</span>
+      {/*
+       * The quiet label the boards write over every fact: 14px in `--faint`,
+       * the same step and the same colour as a table's own column headings, so
+       * a strip of facts and the table under it read as one product rather
+       * than two densities.
+       */}
+      <span className="text-sm text-faint">{label}</span>
       <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
         {children}
       </span>

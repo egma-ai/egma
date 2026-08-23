@@ -151,11 +151,34 @@ export function Transcript({
     );
   }
 
+  const spoken = howLong(
+    transcript.turns.reduce((total, turn) => total + turn.durationNs, 0),
+  );
+
   return (
     <div
       className="flex flex-col overflow-hidden rounded-card border border-border bg-surface"
       data-slot="transcript"
     >
+      {/*
+       * The head the board draws over a transcript (`WU-0`): what this panel
+       * is at the leading edge, and how much of it there is at the other. The
+       * count and the clock are the mono tabular pair every figure in this
+       * product wears, so two transcripts side by side line up.
+       */}
+      <div
+        className={cn(
+          "flex min-h-(--row-height) flex-none items-center justify-between gap-3",
+          "border-b border-border bg-surface-soft px-5 py-2",
+        )}
+      >
+        <strong className="text-sm font-medium text-foreground">Transcript</strong>
+        <span className="font-mono text-sm text-faint tabular-nums">
+          {transcript.turns.length} turn{transcript.turns.length === 1 ? "" : "s"}
+          {" · "}
+          {spoken}
+        </span>
+      </div>
       {transcript.turns.map((turn, at) => {
         const inside = everyStep(turn.spans);
         const failed = inside.some((step) => step.status === "error");
@@ -169,7 +192,8 @@ export function Transcript({
               /* The leading edge is always there and usually invisible, so a
                  cited turn colours it rather than moving the text along. */
               "border-s-[3px] border-s-transparent",
-              "not-first:border-t not-first:border-t-border",
+              /* The head above supplies the first line, so every turn takes one. */
+              "border-t border-t-border",
               /* A verdict points here. */
               cited && "border-s-brand bg-selected",
               /* Somebody followed a `Cites turn 3` link to this turn. The
