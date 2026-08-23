@@ -77,7 +77,6 @@ function columnsFor({
       key: "name",
       header: "Name",
       primary: true,
-      width: "360px",
       cell: (suite) => (
         <span className="flex min-w-0 items-baseline gap-2">
           <Link href={suitePagePath(projectId, suite.id)}>{suite.name}</Link>
@@ -90,8 +89,19 @@ function columnsFor({
       ),
     },
     {
+      /*
+       * The date sits beside the ⋮ rather than beside the name.
+       *
+       * `8P4-0` gives the name 360px and lets Changed take the rest, because
+       * on the board two more columns — a test count and a last-run verdict —
+       * stand between them. Neither exists in any response, so both are left
+       * out, and an elastic date column would leave 700px of nothing in the
+       * middle of every row. The name takes the room instead, which is what
+       * the board's own proportions do once the two columns are gone.
+       */
       key: "changed",
       header: "Changed",
+      width: "200px",
       cell: (suite) => <RelativeInstant instant={suite.updatedAt} now={now} />,
     },
     {

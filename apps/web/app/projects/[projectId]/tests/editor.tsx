@@ -154,10 +154,16 @@ function AddRow({
       className={cn(
         "inline-flex w-fit min-h-(--control-md) items-center gap-1 px-0",
         "cursor-pointer rounded-button border-0 bg-transparent",
-        "text-sm text-action",
+        /*
+         * `text-primary` is the Ember-ink key: the theme maps
+         * `--color-primary` onto `--action`, and there is no `--color-action`
+         * for a `text-action` to read. A class that reads nothing draws the
+         * inherited colour, which is how this arrived as ordinary body text.
+         */
+        "text-sm text-primary",
         "transition-[color] duration-(--duration-hover) ease-out",
         "pointer-coarse:min-h-(--tap-target)",
-        "pointer-hover:not-disabled:text-action-hover",
+        "pointer-hover:not-disabled:text-primary-hover",
         "disabled:cursor-not-allowed disabled:opacity-55",
         "motion-reduce:transition-none",
       )}
@@ -438,12 +444,22 @@ export function NamedSelector({
         named.current.get(id)?.name,
     )
     .filter((one): one is string => one !== undefined);
+  /*
+   * What the closed control says.
+   *
+   * A `placeholder` wins over the names, and that is the point of it: the
+   * boards draw the chosen personas as numbered rows *above* this control, so
+   * a trigger that also listed them would say the same thing twice and the row
+   * would stop reading as "add another one".
+   */
   const summary =
-    names.length === 0
-      ? (placeholder ?? `Select ${label.toLocaleLowerCase()}`)
-      : names.length <= 2
-        ? names.join(", ")
-        : `${String(names.length)} selected`;
+    placeholder !== undefined
+      ? placeholder
+      : names.length === 0
+        ? `Select ${label.toLocaleLowerCase()}`
+        : names.length <= 2
+          ? names.join(", ")
+          : `${String(names.length)} selected`;
 
   async function showNext(): Promise<void> {
     if (current === undefined || current.nextCursor === null || loading) return;
@@ -520,7 +536,9 @@ export function NamedSelector({
           <span
             className={cn(
               "overflow-hidden text-ellipsis whitespace-nowrap",
-              names.length === 0 ? SELECTOR_QUIET : "",
+              names.length === 0 || placeholder !== undefined
+                ? SELECTOR_QUIET
+                : "",
             )}
           >
             {summary}
@@ -977,7 +995,7 @@ export function SaveAction({
            */
           className={
             disabled || !changed
-              ? "border-border bg-surface text-faint disabled:opacity-100"
+              ? "border-border bg-surface text-faint disabled:opacity-100 pointer-hover:bg-surface pointer-hover:text-faint"
               : undefined
           }
           {...(why === undefined ? {} : { why })}

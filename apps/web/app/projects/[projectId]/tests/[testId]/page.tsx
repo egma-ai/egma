@@ -22,6 +22,7 @@ import { canAuthor } from "../../../../../lib/roles.ts";
 import {
   suitePagePath,
   testsPagePath,
+  trailInto,
   type TestSuite,
 } from "../../../../../lib/test-suites.ts";
 import {
@@ -136,7 +137,7 @@ function ConflictBanner({
       )}
       role="alert"
     >
-      <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-1 basis-[24rem] flex-col gap-0.5">
         <p className="m-0 text-sm font-medium text-foreground">
           This test moved on while you were editing.
         </p>
@@ -365,10 +366,10 @@ function TestDetail({
     );
   }
 
-  const basicBreadcrumbs = [
-    { label: "Tests", href: testsPagePath(projectId) },
-    { label: "Test" },
-  ] as const;
+  const basicBreadcrumbs = trailInto({
+    label: "Tests",
+    href: testsPagePath(projectId),
+  });
 
   if (answer === null || answer.status === "signed-out") {
     return (
@@ -429,11 +430,13 @@ function TestDetail({
     <ProductPage>
       <PageHeader
         title={test.name}
-        breadcrumbs={[
+        breadcrumbs={trailInto(
           { label: "Tests", href: testsPagePath(projectId) },
-          { label: suite.value.name, href: suitePagePath(projectId, suite.value.id) },
-          { label: test.name },
-        ]}
+          {
+            label: suite.value.name,
+            href: suitePagePath(projectId, suite.value.id),
+          },
+        )}
         toolbar={
           <p className="m-0 text-sm text-muted-foreground">
             changed <RelativeInstant instant={test.updatedAt} now={now} /> ·{" "}
