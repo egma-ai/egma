@@ -907,7 +907,23 @@ describe("what a project recorded in production", () => {
           .getByRole("link", { name: "Simulation runs", exact: true })
           .count(),
       ).toBe(0);
-      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
+      /*
+       * **There is a way home in this bar, and it is the wordmark.**
+       *
+       * This line used to say there was none, from the time the bar held six
+       * navigation rows and nothing else. The developer put the Egma wordmark
+       * at the top of the sidebar on 2026-08-23 — "our logo, not the
+       * organization's" — and it links to the product root, so the assertion is
+       * now about what that link is rather than that it is absent. What must
+       * stay absent is a *navigation row* called Home: the bar names areas, and
+       * a row pointing at the root would be a seventh area that is not one.
+       */
+      expect(
+        await sidebar.getByRole("link", { name: "Egma home", exact: true }).getAttribute("href"),
+      ).toBe("/");
+      expect(
+        await sidebar.getByRole("link", { name: "Home", exact: true }).count(),
+      ).toBe(0);
       expect(
         await sidebar.getByRole("link", { name: "Simulations" }).count(),
       ).toBe(0);
@@ -3496,8 +3512,19 @@ describe("the complete product, walked in order in a second project", () => {
                * whole of `NAVIGATION_GROUPS` — Agents, Graders, Tests,
                * Personas, Runs, Transcripts — and a row added or dropped
                * should be a decision somebody takes here on purpose.
+               *
+               * **Seven links, and the seventh is not a row.** The Egma
+               * wordmark at the top of the bar is a link to the product root
+               * (`/`), added on 2026-08-23 by the developer's ruling. It is
+               * separated out rather than counted in, so this stays a count of
+               * the navigation and the brand link stays named.
                */
-              expect(addresses.length).toBe(6);
+              const home = addresses.filter((one) => one === "/");
+              expect(home, addresses.join(", ")).toHaveLength(1);
+              expect(
+                addresses.filter((one) => one !== "/").length,
+                addresses.join(", "),
+              ).toBe(6);
               for (const address of addresses) {
                 expect(address, address).not.toContain("simulations");
               }
@@ -4259,6 +4286,14 @@ describe("the complete product, walked in order in a second project", () => {
         // No click first: a fresh document starts with the focus on nothing, so
         // the first Tab is the first focusable thing on the page. Clicking a
         // corner would make the answer depend on what is drawn there.
+        //
+        // **The wordmark is the first stop, and the switcher is the second.**
+        // The bar's topmost thing is the Egma wordmark in a bar of its own,
+        // linking to the product root (`DESIGN.md`, Shell; the developer's
+        // ruling of 2026-08-23). The topmost *control* is still the switcher,
+        // which is the line under it.
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toBe("Egma home");
         await walk.keyboard.press("Tab");
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");
