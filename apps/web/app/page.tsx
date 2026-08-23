@@ -9,6 +9,7 @@ import { readJson, type Answer } from "../lib/api.ts";
 import { firstProjectOf, roleOf, type Me } from "../lib/me.ts";
 import { projectLanding } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
+import { Actions } from "../ui/section.tsx";
 import { ProductStatePage } from "../ui/shell.tsx";
 
 /**
@@ -83,6 +84,13 @@ export default function RootPage() {
         lead="Agents, tests, personas, graders and runs all live in a project. Making one is the first step, and it takes a name."
       >
         {/*
+          * The control is wrapped, and a screenshot is what asked for it.
+          * `ProductStatePage` puts whatever it is given straight into the
+          * page body, which is a column — so a lone button stretched to the
+          * full width of the page and stopped looking like a button at all.
+          * `Actions` is the shared group a page's controls stand in.
+          */}
+        {/*
           * A way forward rather than a dead end. Signup provisions a project, so
           * an organization reaching this state is rare — and the person looking
           * at it is standing in front of a product shell with nothing in it,
@@ -97,19 +105,21 @@ export default function RootPage() {
           * which carries the reason where a keyboard and a screen reader can
           * reach it.
           */}
-        {role === "admin" ? (
-          <Button asChild>
-            <Link href={NEW_PROJECT_PATH}>Create the first project</Link>
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            disabled
-            why={`Your ${role} role cannot create a project. Ask an organization admin to make the first one.`}
-          >
-            Create the first project
-          </Button>
-        )}
+        <Actions>
+          {role === "admin" ? (
+            <Button asChild>
+              <Link href={NEW_PROJECT_PATH}>Create the first project</Link>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              disabled
+              why={`Your ${role} role cannot create a project. Ask an organization admin to make the first one.`}
+            >
+              Create the first project
+            </Button>
+          )}
+        </Actions>
       </ProductStatePage>
     );
   }
@@ -119,13 +129,15 @@ export default function RootPage() {
       title="Egma could not be reached."
       lead={answer.refusal.message}
     >
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={() => setAttempt((one) => one + 1)}
-      >
-        Try again
-      </Button>
+      <Actions>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setAttempt((one) => one + 1)}
+        >
+          Try again
+        </Button>
+      </Actions>
     </ProductStatePage>
   );
 }

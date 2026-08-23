@@ -104,10 +104,20 @@ type Tab = "people" | "invitations";
  * and the sentence is placed on a second row spanning both — so the buttons sit
  * side by side whether or not there is a reason under them. The reading order
  * does not move, which is what `aria-describedby` follows.
+ *
+ * `w-0 min-w-full` on the sentence is the second half of that, and the first
+ * screenshot is what found it: an item spanning two `max-content` tracks hands
+ * its own width to them, so a 600px sentence made two 300px buttons. A width of
+ * zero is what the tracks are measured against; the minimum is a percentage,
+ * which is indefinite while they are being measured and resolves to the whole
+ * pair afterwards. The sentence also has to be told it may wrap: the shared
+ * cell keeps every other fact on one line, and a row control's cell inherits
+ * that.
  */
 const ROW_ACTIONS = [
   "grid grid-cols-[max-content_max-content] items-center gap-2 px-4",
   "[&>span]:col-span-2 [&>span]:row-start-2 [&>span]:text-left",
+  "[&>span]:w-0 [&>span]:min-w-full [&>span]:whitespace-normal",
 ].join(" ");
 
 /** The same lane, for a row that offers one control and no reason. */
