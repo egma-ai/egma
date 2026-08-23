@@ -1069,6 +1069,20 @@
   }
 
   /*
+   * A page that drew its own toolbar row does not pay the top gutter twice.
+   *
+   * `PageHeader` opens the block under the title bar when a page hands it an
+   * action or a filter, and `PageBody` opens one when the page did not — so
+   * whichever comes first carries the 24px, and the second one starts where
+   * the first left off. It is a sibling rule because that is the question:
+   * *is there already a block above me*, which no class on either element can
+   * answer about the other.
+   */
+  [data-slot="page-toolbar"] + [data-slot="page-body"] {
+    padding-top: 0;
+  }
+
+  /*
    * A link inside a table cell.
    *
    * The boards underline it in the text colour and turn it Ember under the

@@ -820,7 +820,18 @@ export function PageHeader({
         {/* A heading carries no size of its own; the class is the size. */}
         <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
         {lead === undefined ? null : (
-          <p className="m-0 min-w-0 flex-1 truncate text-sm text-muted-foreground">
+          <p
+            className={cn(
+              "m-0 min-w-0 flex-1 truncate text-sm text-muted-foreground",
+              /*
+               * On a phone the bar is a stack rather than a line, so the
+               * purpose statement takes its own row and says all of itself.
+               * Truncating it there would leave a sentence that stops.
+               */
+              "max-[900px]:basis-full max-[900px]:overflow-visible",
+              "max-[900px]:text-clip max-[900px]:whitespace-normal",
+            )}
+          >
             {lead}
           </p>
         )}
