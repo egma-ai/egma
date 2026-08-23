@@ -74,6 +74,12 @@ const routed = vi.hoisted(() => {
     back,
     router: { push, replace, back },
     pathname: "/projects/prj_1/agents",
+    /*
+     * Which side sheet the agents screen has open is in the address and
+     * nowhere else, so a page rendered here needs the query as well as the
+     * path. Empty is the plain list with no panel over it.
+     */
+    search: "",
     projectId: "prj_1" as string | undefined,
   };
 });
@@ -81,6 +87,7 @@ const routed = vi.hoisted(() => {
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useRouter: () => routed.router,
+  useSearchParams: () => new URLSearchParams(routed.search),
   useParams: () => ({ projectId: routed.projectId }),
 }));
 
@@ -1957,6 +1964,10 @@ describe("the Agents page", () => {
     projectId: "prj_1",
     name: "Front desk",
     description: "Answers the main line.",
+    // Every field the contract makes required is here, `agentPlatform`
+    // included: the row reads it to say which platform an agent is on, and a
+    // fixture that left it out would be a shape the API cannot answer with.
+    agentPlatform: null,
     // The list read carries every agent's connections, so a row in this
     // fixture carries the field. An agent with none is one of the states the
     // page draws, and it is drawn from an empty list rather than a missing one.
@@ -2027,7 +2038,7 @@ describe("the Agents page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
 
     // No project here to connect an agent to, so nothing offers to.
-    for (const control of screen.getAllByRole("button", { name: "Connect agent" })) {
+    for (const control of screen.getAllByRole("button", { name: "Connect an agent" })) {
       expect((control as HTMLButtonElement).disabled).toBe(true);
     }
   });
@@ -2148,7 +2159,7 @@ describe("the Agents page", () => {
       },
     });
     const { unmount } = render(<AgentsPage />);
-    expect(await screen.findByRole("link", { name: "Connect agent" })).toBeDefined();
+    expect(await screen.findByRole("link", { name: "Connect an agent" })).toBeDefined();
     unmount();
 
     apiAnswers({
@@ -2160,9 +2171,9 @@ describe("the Agents page", () => {
     });
     render(<AgentsPage />);
 
-    const refused = await screen.findByRole("button", { name: "Connect agent" });
+    const refused = await screen.findByRole("button", { name: "Connect an agent" });
     expect((refused as HTMLButtonElement).disabled).toBe(true);
     expect(refused.getAttribute("title")).toContain("viewer role cannot");
-    expect(screen.queryByRole("link", { name: "Connect agent" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Connect an agent" })).toBeNull();
   });
 });

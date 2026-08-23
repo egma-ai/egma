@@ -359,7 +359,7 @@ describe("adding a colleague, with no mail configured", () => {
       // forced click goes nowhere. A control that looked disabled and still
       // fired would promise a refusal it does not deliver — and the refusal
       // that does hold is the server's, proved in `agents.test.ts`.
-      const connect = bob.getByRole("button", { name: "Connect agent" });
+      const connect = bob.getByRole("button", { name: "Connect an agent" });
       await connect.first().waitFor();
       expect(
         await connect.evaluateAll((controls) =>
@@ -367,7 +367,7 @@ describe("adding a colleague, with no mail configured", () => {
         ),
       ).not.toContain(false);
       expect(
-        await bob.getByRole("link", { name: "Connect agent" }).count(),
+        await bob.getByRole("link", { name: "Connect an agent" }).count(),
       ).toBe(0);
       const before = bob.url();
       await connect.first().click({ force: true }).catch(() => undefined);
@@ -2598,32 +2598,32 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("agents"));
       await saysWithin(walk, "No agents in this project yet");
 
-      await walk.getByRole("link", { name: "Connect agent" }).first().click();
+      /*
+       * **One panel does both halves.** The agent and its first way in used to
+       * be two pages with a forward between them, and an agent that never
+       * reached the second one sat in the list unreachable. `/agents/new` is
+       * still the address — the CLI and the documentation print it — and what
+       * it opens is the side sheet over this list.
+       */
+      await walk.getByRole("link", { name: "Connect an agent" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
       await reactHasTakenOver(walk, "form");
 
-      // One field, and the shortness is the product's decision: an agent's
-      // prompt, model and tools live where the customer configures them, and
-      // the description column went with them (ADR-0015).
+      // One field for the agent, and the shortness is the product's decision:
+      // an agent's prompt, model and tools live where the customer configures
+      // them, and the description column went with them (ADR-0015).
       await walk.fill("#agent-name", "The Support line");
-      await walk.getByRole("button", { name: "Register agent" }).click();
 
-      await walk.waitForURL(/\/agents\/agt_[^/]+\/connections\/new\?onboarding=connection$/);
-      agentAddress = walk
-        .url()
-        .replace(/\/connections\/new\?onboarding=connection$/u, "");
-      expect(
-        agentAddress,
-        "registering the agent left its detail address",
-      ).toMatch(new RegExp(`/projects/${second}/agents/agt_[^/]+$`));
-      // The form is drawn from the registry rather than from a list in the
-      // browser, so waiting for the first field is waiting for that read.
+      // The panel is drawn from the registry rather than from a list in the
+      // browser, so waiting for the platform field is waiting for that read.
       await walk.waitForSelector("#agent-platform");
-
       await walk.getByLabel("Platform").selectOption("retell");
-      await walk
-        .getByLabel("Access")
-        .selectOption("phone_number.public_e164");
+      /*
+       * **Modality is the access choice on Retell.** Retell offers a chat
+       * connection and a voice one and nothing else, so the board's segmented
+       * control chooses between them and there is no Access select beside it.
+       */
+      await walk.getByRole("radio", { name: "Voice" }).click();
       await walk.fill("#connection-name", "Retell staging");
       await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
       const discoveryResponse = walk.waitForResponse(
@@ -2643,21 +2643,37 @@ describe("the complete product, walked in order in a second project", () => {
           .locator("#discovered-connection option:checked")
           .textContent(),
       ).toContain(BROWSER_RETELL_NUMBER);
+      /*
+       * **One write, both halves.** `registerAgent` carries the connection, so
+       * there is no window in which the agent exists and nothing can reach it.
+       */
       const connectionResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
-          /^\/v1\/agents\/agt_[^/]+\/connections$/u.test(
-            new URL(response.url()).pathname,
-          ),
+          new URL(response.url()).pathname === "/v1/agents",
       );
-      await walk.getByRole("button", { name: "Add connection" }).click();
+      await walk.getByRole("button", { name: "Connect agent" }).click();
       const connected = await connectionResponse;
       expect(connected.status(), await connected.text()).toBe(201);
 
-      // Onboarding ends on the agent itself. The connection row there is the
-      // product's route to the detail page; keep that address for the direct
-      // route proof below instead of reconstructing it from a database id.
-      await walk.waitForURL(agentAddress);
+      // The panel closes onto the list the new agent is now a row of, and the
+      // row's own name link is its address — read from the product rather than
+      // reconstructed from a database id.
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      await saysWithin(walk, "The Support line");
+      const named = walk
+        .getByRole("link", { name: "The Support line", exact: true })
+        .first();
+      await named.waitFor();
+      const agentHref = await named.getAttribute("href");
+      expect(
+        agentHref,
+        "the registered agent has a row that opens it",
+      ).toMatch(new RegExp(`^/projects/${second}/agents/agt_[^/]+$`));
+      agentAddress = new URL(agentHref ?? "/", origin).toString();
+
+      // And the way in is named on the row, as a link that opens it over the
+      // list rather than as four facts nobody can press.
       await saysWithin(walk, "Retell staging");
       const connection = walk
         .getByRole("link", { name: "Retell staging", exact: true })
@@ -2666,13 +2682,8 @@ describe("the complete product, walked in order in a second project", () => {
       const connectionHref = await connection.getAttribute("href");
       expect(
         connectionHref,
-        "the created connection has a detail link",
-      ).toMatch(
-        new RegExp(
-          `^/projects/${second}/agents/agt_[^/]+/connections/con_[^/]+$`,
-        ),
-      );
-      connectionAddress = new URL(connectionHref ?? "/", origin).toString();
+        "the created connection opens from the row it is on",
+      ).toContain("sheet=connection");
 
       // The selected discovery candidate goes through the generic connection
       // write. The stored connection is only the public phone destination; the
@@ -2699,9 +2710,10 @@ describe("the complete product, walked in order in a second project", () => {
         config: { phoneNumber: BROWSER_RETELL_NUMBER },
         credentials: null,
       });
-      expect(connectionAddress).toBe(
-        `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`,
-      );
+      // The connection's own address still exists and still opens the same
+      // panel; the row's link is the query form of it.
+      connectionAddress = `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`;
+      expect(connectionHref).toContain(stored.rows[0]?.id ?? "");
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
@@ -2736,21 +2748,21 @@ describe("the complete product, walked in order in a second project", () => {
       const row = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
         .first();
-      /*
-       * **Phone number**, not **Retell phone**, and that is ticket 01's rule
-       * showing through rather than a lost fact. A `phone_number` connection
-       * spans platforms, so it answers the platform question through its
-       * agent — and this agent is unbound, because binding an agent to its
-       * platform is Start monitoring's job and never Register agent's. The two
-       * custodies are separate on purpose (ADR-0015).
-       */
+      // The way in, by the name somebody gave it.
       await expect
         .poll(() => row.innerText(), { timeout: 30_000 })
-        .toContain("Phone number · Voice");
+        .toContain("Retell staging");
       const said = await row.innerText();
-      expect(said).toContain("Unlabelled");
+      /*
+       * **An em dash under Platform, and that is a fact rather than a gap.**
+       * A `phone_number` connection spans platforms, so it answers the platform
+       * question through its agent — and this agent is unbound, because binding
+       * an agent to its platform is Start monitoring's job and never Register
+       * agent's. The two custodies are separate on purpose (ADR-0015).
+       */
+      expect(said).toContain("—");
       expect(said.toLowerCase()).not.toContain("not checked");
-      expect(said.toLowerCase()).not.toContain("no connections");
+      expect(said.toLowerCase()).not.toContain("no connections yet");
     },
     SETTLE,
   );
