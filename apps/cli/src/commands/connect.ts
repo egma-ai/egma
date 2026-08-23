@@ -352,7 +352,7 @@ export async function runConnectCommand(options: ConnectCommandOptions): Promise
       options.out(`connection_id: ${registered.connection.id}`);
       options.out(`connection_name: ${registered.connection.name}`);
       options.out(`agent_platform: ${registered.connection.agentPlatform ?? "unknown"}`);
-      options.out(`connection_kind: ${registered.connection.connectionKind}`);
+      options.out(`connection_type: ${registered.connection.connectionType}`);
       options.out(`access_variant: ${registered.connection.accessVariant}`);
       options.out(`product_label: ${registered.connection.productLabel}`);
       options.out(`connection_modality: ${registered.connection.modality}`);

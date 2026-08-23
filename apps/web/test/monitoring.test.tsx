@@ -73,7 +73,7 @@ const FACTS: Facts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connectionKind: "",
+  connectionType: "",
   providerCallId: "egma-fixture-capture-1",
   agentPlatform: "livekit_agents",
   platformAgentId: "",
@@ -505,11 +505,13 @@ describe("what a quiet Monitoring page says", () => {
     expect(guidance()).toEqual(["set-up-capture"]);
     expect(probed(asked)).toHaveLength(1);
 
+    // The one action this page offers leads to the start-monitoring flow.
+    // There is no monitoring setup object to open any more (ADR-0015).
     expect(
       screen
-        .getByRole("link", { name: QUIET.setUp.action })
+        .getByRole("link", { name: LIST.startMonitoring })
         .getAttribute("href"),
-    ).toBe("/projects/prj_2/monitoring/setup");
+    ).toBe("/projects/prj_2/monitoring/start");
   });
 
   /**

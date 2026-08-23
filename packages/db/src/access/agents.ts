@@ -4,6 +4,7 @@ import {
   asc,
   desc,
   eq,
+  getTableName,
   ilike,
   inArray,
   isNotNull,
@@ -19,14 +20,16 @@ import {
   connection,
   type AccessVariant,
   type AgentPlatform,
-  type ConnectionKind,
+  type ConnectionType,
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
+import { monitoringState } from "../schema/production.ts";
 import { sealCredentials } from "../sealing.ts";
 import {
   credentialRuleOf,
   descriptorOf,
+  platformOfConnectionType,
   productLabelOf,
   validConfig,
   validCredentials,
@@ -79,7 +82,7 @@ export type NewConnection = {
   /** Defaults from the product label, so onboarding never stalls. */
   readonly name?: string | undefined;
   readonly agentPlatform: AgentPlatform | null;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   /** A label (`staging`, `production`), never a level in the hierarchy. */
@@ -95,11 +98,15 @@ export type Connection = {
   readonly agentId: string;
   readonly projectId: string;
   readonly name: string;
+  /**
+   * Derived, never stored: the platform the connection type pins, else the
+   * agent's own binding, else null. See ADR-0015.
+   */
   readonly agentPlatform: AgentPlatform | null;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
-  /** Derived from the connection kind, never caller-supplied. */
+  /** Derived from the connection type, never caller-supplied. */
   readonly topology: Topology;
   /** Human display text derived from the stable technical axes. */
   readonly productLabel: string;
@@ -107,8 +114,6 @@ export type Connection = {
   readonly config: Readonly<Record<string, string>>;
   /** The last characters of the sealed secret, or null where none belongs. */
   readonly credentialsHint: string | null;
-  /** What an edit says it was written against. New after every change. */
-  readonly revision: string;
   /** When it stopped being reachable for new work, or null while it is. */
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -127,8 +132,6 @@ export type ConnectionChanges = {
   readonly environment?: string | null | undefined;
   readonly config?: Readonly<Record<string, unknown>> | undefined;
   readonly credentials?: Readonly<Record<string, unknown>> | undefined;
-  /** The revision this edit was written against. See `AgentChanges`. */
-  readonly expectedRevision?: string | undefined;
 };
 
 /** What a connection Archive answers: the row, and the work it stopped. */
@@ -154,7 +157,6 @@ export type RestoreCredential =
 
 export type NewAgent = {
   readonly name: string;
-  readonly description?: string | undefined;
   /**
    * The optional first connection, written in the same transaction — the
    * happy onboarding path never produces an unreachable agent, and a bad
@@ -167,9 +169,24 @@ export type Agent = {
   readonly id: string;
   readonly projectId: string;
   readonly name: string;
-  readonly description: string | null;
-  /** What an edit says it was written against. New after every change. */
-  readonly revision: string;
+  /** Which platform runs this agent, or null while nobody has bound it. */
+  readonly agentPlatform: AgentPlatform | null;
+  /** That platform's own id for it, or null. */
+  readonly platformAgentId: string | null;
+  /** The last characters of the sealed monitoring key, or null. */
+  readonly monitoringApiKeyHint: string | null;
+  /** The declared pull switch. Off until somebody turns it on. */
+  readonly pullProductionCalls: boolean;
+  /**
+   * When a production call last arrived for this agent, or null while none
+   * has. Read from the machine notebook, which is where the drainer stamps it.
+   *
+   * It travels with the agent because the agent is where a person reads it:
+   * whether it pulls and when it last received are the two facts the agent
+   * shows about monitoring, and there is no condition word beside them
+   * (ADR-0015, ruling 6).
+   */
+  readonly lastReceivedAt: Date | null;
   /** When it stopped being available for new work, or null while it is. */
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
@@ -182,20 +199,15 @@ export type CreatedAgent = Agent & {
 };
 
 /**
- * What an edit may touch: the two identity fields, in place. There is no
- * version to move — the agent is deliberately unversioned, because its real
- * content lives on the provider's side where egma cannot freeze it. Absent
- * means keep; a null description clears it.
+ * What an edit may touch: the name, in place. There is no version to move —
+ * the agent is deliberately unversioned, because its real content lives on the
+ * provider's side where egma cannot freeze it. Absent means keep.
+ *
+ * There is no revision either: two people editing one agent from two browsers
+ * is silent last-writer-wins, accepted pre-launch (ADR-0015).
  */
 export type AgentChanges = {
   readonly name?: string | undefined;
-  readonly description?: string | null | undefined;
-  /**
-   * The revision this edit was written against. Left out, the edit is written
-   * blind and the last writer wins — which is right for a terminal and wrong
-   * for a browser, so the API is where it becomes compulsory.
-   */
-  readonly expectedRevision?: string | undefined;
 };
 
 /**
@@ -233,16 +245,64 @@ export type ArchivedAgent = {
   readonly canceledRunCount: number;
 };
 
+type AgentRow = {
+  readonly id: string;
+  readonly projectId: string;
+  readonly name: string;
+  readonly agentPlatform: string | null;
+  readonly platformAgentId: string | null;
+  readonly monitoringApiKeyHint: string | null;
+  readonly pullProductionCalls: boolean;
+  readonly lastReceivedAt: Date | null;
+  readonly archivedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+};
+
+/** The platform column is narrowed by assertion; its CHECK already refuses the rest. */
+function agentFromRow(row: AgentRow): Agent {
+  return { ...row, agentPlatform: row.agentPlatform as AgentPlatform | null };
+}
+
 const notArchived: SQL = isNull(agent.archivedAt);
 const connectionNotArchived: SQL = isNull(connection.archivedAt);
+
+/**
+ * The one fact an answer carries that is not on the agent's row.
+ *
+ * It is stamped on the machine notebook as pulled calls arrive, and it is read
+ * as a scalar subquery rather than a join so that *every* path answering an
+ * agent carries it — the writes that answer with `returning`, where a join
+ * cannot go, as much as the reads. `monitoring_state` is unique on `agent_id`,
+ * so it is one index lookup and it can never multiply a row.
+ *
+ * **The outer reference is spelled out because Drizzle will not spell it.** A
+ * select over one table emits its columns bare, inside a nested fragment as
+ * well as outside it, so `${agent.id}` here would render as `"id"` — which the
+ * subquery's own scope resolves to `monitoring_state.id`. That correlates a row
+ * to itself, matches nothing, and answers `null` for every agent without ever
+ * failing.
+ *
+ * `mapWith` hands the answer back to the column's own decoder, so this reads as
+ * the instant every other timestamp on an agent reads as rather than as the
+ * driver's text.
+ */
+const LAST_RECEIVED_AT = sql`(
+  select ${monitoringState.lastReceivedAt} from ${monitoringState}
+   where ${monitoringState.agentId}
+       = ${sql.identifier(getTableName(agent))}.${sql.identifier(agent.id.name)}
+)`.mapWith(monitoringState.lastReceivedAt);
 
 /** An answer's columns, and no more — the tenant-free view. */
 const COLUMNS = {
   id: agent.id,
   projectId: agent.projectId,
   name: agent.name,
-  description: agent.description,
-  revision: agent.revision,
+  agentPlatform: agent.agentPlatform,
+  platformAgentId: agent.platformAgentId,
+  monitoringApiKeyHint: agent.monitoringApiKeyHint,
+  pullProductionCalls: agent.pullProductionCalls,
+  lastReceivedAt: LAST_RECEIVED_AT,
   archivedAt: agent.archivedAt,
   createdAt: agent.createdAt,
   updatedAt: agent.updatedAt,
@@ -254,15 +314,13 @@ const CONNECTION_COLUMNS = {
   agentId: connection.agentId,
   projectId: connection.projectId,
   name: connection.name,
-  agentPlatform: connection.agentPlatform,
-  connectionKind: connection.connectionKind,
+  connectionType: connection.connectionType,
   accessVariant: connection.accessVariant,
   modality: connection.modality,
   topology: connection.topology,
   environment: connection.environment,
   config: connection.config,
   credentialsHint: connection.credentialsHint,
-  revision: connection.revision,
   archivedAt: connection.archivedAt,
   createdAt: connection.createdAt,
   updatedAt: connection.updatedAt,
@@ -362,18 +420,30 @@ async function visibleAgent(
   auth: AuthContext,
   agentId: string,
 ): Promise<
-  { id: string; projectId: string; archivedAt: Date | null } | undefined
+  | {
+      id: string;
+      projectId: string;
+      agentPlatform: AgentPlatform | null;
+      archivedAt: Date | null;
+    }
+  | undefined
 > {
   const [row] = await db()
     .select({
       id: agent.id,
       projectId: agent.projectId,
+      // Every connection read under this agent derives its platform through
+      // here when its own type does not pin one, so the read that proves the
+      // agent is visible is the read that answers it.
+      agentPlatform: agent.agentPlatform,
       archivedAt: agent.archivedAt,
     })
     .from(agent)
     .where(theAgentEvenArchived(auth, agentId))
     .limit(1);
-  return row;
+  return row === undefined
+    ? undefined
+    : { ...row, agentPlatform: row.agentPlatform as AgentPlatform | null };
 }
 
 /**
@@ -422,15 +492,13 @@ type ConnectionRow = {
   readonly agentId: string;
   readonly projectId: string;
   readonly name: string;
-  readonly agentPlatform: string | null;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly accessVariant: string;
   readonly modality: string;
   readonly topology: string;
   readonly environment: string | null;
   readonly config: unknown;
   readonly credentialsHint: string | null;
-  readonly revision: string;
   readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -442,21 +510,33 @@ type ConnectionRow = {
  * anything outside the lists — a value the assertion would get wrong cannot be
  * in the table.
  */
-function connectionFromRow(row: ConnectionRow): Connection {
-  const agentPlatform = row.agentPlatform as AgentPlatform | null;
-  const connectionKind = row.connectionKind as ConnectionKind;
+function connectionFromRow(
+  row: ConnectionRow,
+  /**
+   * The platform its agent is bound to, or null. **Required, with no default**:
+   * a default would silently drop the second half of the rule and let a
+   * `phone_number` connection on a Retell agent read back as belonging to no
+   * platform — and read back differently from the way it was written.
+   */
+  agentPlatformOfAgent: AgentPlatform | null,
+): Connection {
+  const connectionType = row.connectionType as ConnectionType;
+  // The type answers where it pins one platform; otherwise the agent answers,
+  // and where the agent is unbound nobody does. See ADR-0015.
+  const agentPlatform =
+    platformOfConnectionType(connectionType) ?? agentPlatformOfAgent;
   const accessVariant = row.accessVariant as AccessVariant;
   const modality = row.modality as Modality;
   return {
     ...row,
     agentPlatform,
-    connectionKind,
+    connectionType,
     accessVariant,
     modality,
     topology: row.topology as Topology,
     productLabel: productLabelOf(
       agentPlatform,
-      connectionKind,
+      connectionType,
       accessVariant,
       modality,
     ),
@@ -473,8 +553,13 @@ function connectionFromRow(row: ConnectionRow): Connection {
  */
 type AdmittedConnection = {
   readonly name: string | undefined;
+  /**
+   * The platform the payload named. It selects the product label the write is
+   * held to; it is not stored, because the connection row has no platform
+   * column any more.
+   */
   readonly agentPlatform: AgentPlatform | null;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly topology: Topology;
@@ -489,23 +574,30 @@ type AdmittedConnection = {
  * before anything is written, wherever the caller is in a transaction.
  */
 function admitConnection(input: NewConnection): AdmittedConnection {
-  const descriptor = descriptorOf(input.connectionKind);
-  const modality = validModality(input.connectionKind, input.modality);
-  // This validates the complete supported tuple. The label is deliberately
-  // discarded here because it is derived again on reads.
+  const descriptor = descriptorOf(input.connectionType);
+  const modality = validModality(input.connectionType, input.modality);
+  // The payload's own tuple has to be one egma supports — this is what turns
+  // away a combination nobody can reach, before any database work.
+  //
+  // **It is not the last word on the platform.** Where the connection type
+  // does not pin one, the agent answers, so `insertConnection` checks the
+  // tuple again against the platform this connection will actually be
+  // represented under. Validating only here would let the door admit one
+  // tuple and the row read back as another. The label is discarded both
+  // times, because it is derived on every read.
   productLabelOf(
     input.agentPlatform,
-    input.connectionKind,
+    input.connectionType,
     input.accessVariant,
     modality,
   );
   const config = validConfig(
-    input.connectionKind,
+    input.connectionType,
     input.accessVariant,
     input.config,
   );
   const sealed = validCredentials(
-    input.connectionKind,
+    input.connectionType,
     input.accessVariant,
     input.credentials,
   );
@@ -516,7 +608,7 @@ function admitConnection(input: NewConnection): AdmittedConnection {
         ? undefined
         : validName(input.name, "a connection"),
     agentPlatform: input.agentPlatform,
-    connectionKind: input.connectionKind,
+    connectionType: input.connectionType,
     accessVariant: input.accessVariant,
     modality,
     topology: descriptor.topology,
@@ -535,7 +627,7 @@ function admitConnection(input: NewConnection): AdmittedConnection {
 async function freeDefaultName(
   on: Queryable,
   agentId: string,
-  connectionKind: ConnectionKind,
+  connectionType: ConnectionType,
 ): Promise<string> {
   const taken = new Set(
     (
@@ -547,7 +639,7 @@ async function freeDefaultName(
   );
 
   for (let n = 1; ; n += 1) {
-    const candidate = `${connectionKind}-${n}`;
+    const candidate = `${connectionType}-${n}`;
     if (!taken.has(candidate)) return candidate;
   }
 }
@@ -590,15 +682,74 @@ function refusingHeldConnectionName(name: string): (error: unknown) => never {
  * name default and the friendly refusal when a living connection holds the
  * name already.
  */
+/**
+ * The platform this connection will be represented under, checked against the
+ * platform the payload named.
+ *
+ * Where the connection type pins a platform, it decides and the agent is not
+ * consulted. Where it does not — `phone_number` spans platforms — the agent
+ * decides, and a payload naming a different one is refused rather than quietly
+ * relabelled: accepting `livekit_agents` and then representing the connection
+ * as Retell's is wrong attribution, and the product label a person reads would
+ * not be the one they chose.
+ *
+ * A payload that names no platform contradicts nothing. It is the ordinary way
+ * to say "whatever this agent is on".
+ */
+function representedPlatform(
+  admitted: AdmittedConnection,
+  agentPlatformOfAgent: AgentPlatform | null,
+): AgentPlatform | null {
+  const pinned = platformOfConnectionType(admitted.connectionType);
+  if (pinned !== null) return pinned;
+
+  if (
+    agentPlatformOfAgent !== null &&
+    admitted.agentPlatform !== null &&
+    admitted.agentPlatform !== agentPlatformOfAgent
+  ) {
+    throw new AgentWriteRefusedError(
+      "platform_contradicts_agent",
+      `This connection names ${admitted.agentPlatform} and its agent is on ` +
+        `${agentPlatformOfAgent}. A ${admitted.connectionType} connection ` +
+        `reaches whichever platform its agent is on, so it cannot name ` +
+        `another one. Send ${agentPlatformOfAgent}, or leave the platform ` +
+        `out and the agent will answer.`,
+    );
+  }
+
+  // What the row will be represented as has to be a supported tuple in its own
+  // right, not only the tuple the payload happened to name.
+  productLabelOf(
+    agentPlatformOfAgent,
+    admitted.connectionType,
+    admitted.accessVariant,
+    admitted.modality,
+  );
+  return agentPlatformOfAgent;
+}
+
 async function insertConnection(
   on: Queryable,
   auth: AuthContext,
-  home: { readonly id: string; readonly projectId: string },
+  home: {
+    readonly id: string;
+    readonly projectId: string;
+    /**
+     * The agent's own binding. What comes back is derived from this and never
+     * from the payload's `agentPlatform`, so the product label a create
+     * answers is the one the next read answers.
+     */
+    readonly agentPlatform: AgentPlatform | null;
+  },
   admitted: AdmittedConnection,
 ): Promise<Connection> {
+  // Before the write, and here rather than at the door, because this is the
+  // first point that knows which agent the connection lands under.
+  const agentPlatform = representedPlatform(admitted, home.agentPlatform);
   const name =
     admitted.name ??
-    (await freeDefaultName(on, home.id, admitted.connectionKind));
+    (await freeDefaultName(on, home.id, admitted.connectionType));
 
   const [inserted] = await on
     .insert(connection)
@@ -608,12 +759,10 @@ async function insertConnection(
       projectId: home.projectId,
       agentId: home.id,
       name,
-      agentPlatform: admitted.agentPlatform,
-      connectionKind: admitted.connectionKind,
+      connectionType: admitted.connectionType,
       accessVariant: admitted.accessVariant,
       modality: admitted.modality,
       topology: admitted.topology,
-      revision: newId("rev"),
       environment: admitted.environment,
       config: admitted.config,
       credentials: admitted.credentials,
@@ -624,7 +773,7 @@ async function insertConnection(
     .catch(refusingHeldConnectionName(name));
 
   if (inserted === undefined) throw new Error("the connection was not written");
-  return connectionFromRow(inserted);
+  return connectionFromRow(inserted, agentPlatform);
 }
 
 /**
@@ -632,11 +781,20 @@ async function insertConnection(
  * transaction. It owns the friendly refusal for the moment a living agent in
  * the project already holds the name.
  */
-async function insertAgent(
+/**
+ * Write one agent row, on whatever connection or transaction is handed in.
+ *
+ * **Exported to the module, not from the package.** Production monitoring
+ * needs the very same insert inside its own transaction — registering an
+ * unregistered platform agent and flipping its switch have to be one atomic
+ * act — and a second copy of this insert there would be a second place the
+ * agent's identity, its tenancy stamp and its held-name refusal are decided.
+ */
+export async function insertAgentWithin(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
-  identity: { readonly name: string; readonly description: string | null },
+  identity: { readonly name: string },
 ): Promise<Agent> {
   const [inserted] = await on
     .insert(agent)
@@ -645,21 +803,19 @@ async function insertAgent(
       organizationId: auth.organizationId,
       projectId,
       name: identity.name,
-      description: identity.description,
-      revision: newId("rev"),
       createdBy: auth.userId,
     })
     .returning(COLUMNS)
     .catch(refusingHeldAgentName(identity.name));
 
   if (inserted === undefined) throw new Error("the agent was not written");
-  return inserted;
+  return agentFromRow(inserted);
 }
 
 /**
  * Everything a write to this factory settles before it touches the database:
  * where the rows land, what the agent is called, and the inline connection
- * once its connection-kind registry entry has had its say.
+ * once its connection-type registry entry has had its say.
  *
  * Pulled out because both write paths do it in the same order and the order is
  * the point — a bad inline connection dies before there is an agent to orphan,
@@ -671,7 +827,6 @@ async function settled(
 ): Promise<{
   readonly projectId: string;
   readonly name: string;
-  readonly description: string | null;
   readonly inline: AdmittedConnection | undefined;
 }> {
   const { projectId } = auth;
@@ -691,7 +846,7 @@ async function settled(
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  return { projectId, name, description: input.description ?? null, inline };
+  return { projectId, name, inline };
 }
 
 export async function createAgent(
@@ -700,21 +855,21 @@ export async function createAgent(
 ): Promise<CreatedAgent> {
   authorize(auth, "configure_agents", here(auth));
 
-  const { projectId, name, description, inline } = await settled(auth, input);
-  const identity = { name, description };
+  const { projectId, name, inline } = await settled(auth, input);
+  const identity = { name };
 
   if (inline === undefined) {
-    return insertAgent(db(), auth, projectId, identity);
+    return insertAgentWithin(db(), auth, projectId, identity);
   }
 
   // Both rows or neither: the transaction is what makes the happy onboarding
   // path unable to produce an agent its own connection failed to reach.
   return db().transaction(async (tx) => {
-    const written = await insertAgent(tx, auth, projectId, identity);
+    const written = await insertAgentWithin(tx, auth, projectId, identity);
     const wired = await insertConnection(
       tx,
       auth,
-      { id: written.id, projectId },
+      { id: written.id, projectId, agentPlatform: written.agentPlatform },
       inline,
     );
     return { ...written, connection: wired };
@@ -741,7 +896,7 @@ export type Registration = {
  * failure. Minting a second identity for one vendor agent splits a team's
  * results history in half, which is the one thing that must not happen quietly.
  *
- * So the connection kind's reuse key decides (`connection-registry.ts`), and a living
+ * So the connection type's reuse key decides (`connection-registry.ts`), and a living
  * connection in the project naming the same vendor agent decides the outcome:
  *
  * - **same modality** → that agent and that connection answer, with the
@@ -755,7 +910,7 @@ export type Registration = {
  *   `createAgent` writes them. `created`.
  *
  * The reused and extended paths answer the agent as it stands and leave its
- * name and description alone: the registration named an identity that already
+ * name alone: the registration named an identity that already
  * exists, and quietly renaming somebody's agent because a second machine typed
  * it differently would be a change nobody asked for.
  *
@@ -771,29 +926,29 @@ export async function registerAgent(
 ): Promise<Registration> {
   authorize(auth, "configure_agents", here(auth));
 
-  const { projectId, name, description, inline } = await settled(auth, input);
-  const identity = { name, description };
+  const { projectId, name, inline } = await settled(auth, input);
+  const identity = { name };
 
   if (inline === undefined) {
     return {
       result: "created",
-      agent: await insertAgent(db(), auth, projectId, identity),
+      agent: await insertAgentWithin(db(), auth, projectId, identity),
     };
   }
 
-  const reuseKey = descriptorOf(inline.connectionKind).reuseKey;
+  const reuseKey = descriptorOf(inline.connectionType).reuseKey;
   const vendorAgent =
     reuseKey === undefined ? undefined : inline.config[reuseKey];
 
   const bothRows = async (tx: Queryable): Promise<Registration> => {
-    const written = await insertAgent(tx, auth, projectId, identity);
+    const written = await insertAgentWithin(tx, auth, projectId, identity);
     return {
       result: "created",
       agent: written,
       connection: await insertConnection(
         tx,
         auth,
-        { id: written.id, projectId },
+        { id: written.id, projectId, agentPlatform: written.agentPlatform },
         inline,
       ),
     };
@@ -807,7 +962,7 @@ export async function registerAgent(
 
   // What the lock is taken on: this one vendor agent, in this one project, of
   // this one customer. Nothing else waits behind it.
-  const racing = `${auth.organizationId}:${projectId}:${inline.connectionKind}:${vendorAgent}`;
+  const racing = `${auth.organizationId}:${projectId}:${inline.connectionType}:${vendorAgent}`;
 
   return db().transaction(async (tx): Promise<Registration> => {
     // Taken before anything is read, and let go when the transaction ends.
@@ -828,10 +983,7 @@ export async function registerAgent(
           connection,
           and(
             eq(connection.projectId, projectId),
-            inline.agentPlatform === null
-              ? isNull(connection.agentPlatform)
-              : eq(connection.agentPlatform, inline.agentPlatform),
-            eq(connection.connectionKind, inline.connectionKind),
+            eq(connection.connectionType, inline.connectionType),
             eq(connection.accessVariant, inline.accessVariant),
             sql`${connection.config}->>${reuseKey} = ${vendorAgent}`,
             connectionNotArchived,
@@ -854,14 +1006,6 @@ export async function registerAgent(
           // what the row's own CHECK demands.
           credentials: inline.credentials,
           credentialsHint: inline.credentialsHint,
-          // This row moved, so anybody holding the revision it was on has to
-          // read it again before writing. A registration is the one writer
-          // that reaches a connection from outside the browser — a deploy
-          // re-running `register` while somebody has the connection open — and
-          // leaving the revision standing would let that open page archive or
-          // rename a connection whose credential is no longer the one it is
-          // showing. Every other writer here advances it; so does this one.
-          revision: newId("rev"),
           updatedAt: new Date(),
         })
         .where(eq(connection.id, sameModality.reached.id))
@@ -872,8 +1016,11 @@ export async function registerAgent(
       }
       return {
         result: "reused",
-        agent: sameModality.identity,
-        connection: connectionFromRow(rotated),
+        agent: agentFromRow(sameModality.identity),
+        connection: connectionFromRow(
+          rotated,
+          sameModality.identity.agentPlatform as AgentPlatform | null,
+        ),
       };
     }
 
@@ -881,13 +1028,14 @@ export async function registerAgent(
     // agent gains the connection is the same answer every time.
     const known = living[0];
     if (known !== undefined) {
+      const home = agentFromRow(known.identity);
       return {
         result: "connection_added",
-        agent: known.identity,
+        agent: home,
         connection: await insertConnection(
           tx,
           auth,
-          { id: known.identity.id, projectId },
+          { id: home.id, projectId, agentPlatform: home.agentPlatform },
           inline,
         ),
       };
@@ -917,7 +1065,7 @@ export async function getAgent(
     .from(agent)
     .where(theAgentEvenArchived(auth, id))
     .limit(1);
-  return row;
+  return row === undefined ? undefined : agentFromRow(row);
 }
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -962,9 +1110,12 @@ async function connectionsOf(
     )
     .orderBy(asc(connection.id));
 
+  const platformOf = new Map(
+    agents.map((one) => [one.id, one.agentPlatform] as const),
+  );
   const held = new Map<string, Connection[]>();
   for (const row of rows) {
-    const one = connectionFromRow(row);
+    const one = connectionFromRow(row, platformOf.get(row.agentId) ?? null);
     const already = held.get(one.agentId);
     if (already === undefined) held.set(one.agentId, [one]);
     else already.push(one);
@@ -1052,7 +1203,7 @@ export async function listAgents(
     .orderBy(desc(agent.id))
     .limit(limit + 1);
 
-  const items = rows.slice(0, limit);
+  const items = rows.slice(0, limit).map(agentFromRow);
   return {
     items: await connectionsOf(auth, items),
     // Read off the agent rows rather than off the widened items: the cursor is
@@ -1062,26 +1213,20 @@ export async function listAgents(
 }
 
 /**
- * Name and description, in place, against the revision the editor was written
- * from.
+ * The name, in place.
  *
  * There is no content version to move — the agent is deliberately unversioned,
  * because its real content lives at the provider where egma cannot freeze it —
  * so a rename is just a rename and the run history stays the change record.
- * What the revision buys is the other half: two people editing one agent from
- * two browsers is the ordinary case, and without a revision the second save
- * silently erases the first and neither of them is told.
  *
- * **The revision is checked in the same statement that writes.** Reading it
- * first and comparing in TypeScript would leave a window between the read and
- * the write in which a third save could land, which is the race the check
- * exists to close. So the expected revision is part of the `where`, and a
- * mismatch simply updates no row — at which point the row is read again to
- * tell "somebody moved it" apart from "it was never yours to edit".
+ * There is no revision either: the column was dropped pre-launch (ADR-0015),
+ * so two people editing one agent from two browsers is silent
+ * last-writer-wins. Accepted with eyes open — it is the exact failure the
+ * column existed to stop.
  *
  * A change that changes nothing is still not an edit: nothing is written, not
- * even `updated_at`, and the revision stays where it is. Editing what the
- * caller cannot see returns what reading it would have: `undefined`.
+ * even `updated_at`. Editing what the caller cannot see returns what reading it
+ * would have: `undefined`.
  */
 export async function updateAgent(
   auth: AuthContext,
@@ -1095,92 +1240,19 @@ export async function updateAgent(
       ? undefined
       : validName(changes.name, "an agent");
 
-  if (name === undefined && changes.description === undefined) {
+  if (name === undefined) {
     return getAgent(auth, id);
   }
 
   const [updated] = await db()
     .update(agent)
-    .set({
-      ...(name === undefined ? {} : { name }),
-      ...(changes.description === undefined
-        ? {}
-        : { description: changes.description }),
-      revision: newId("rev"),
-      updatedAt: new Date(),
-    })
-    .where(and(theAgent(auth, id), writtenAgainst(agent, changes.expectedRevision)))
+    .set({ name, updatedAt: new Date() })
+    .where(theAgent(auth, id))
     .returning(COLUMNS)
-    .catch(
-      // Only a name change can lose to the name constraint.
-      name === undefined
-        ? (error: unknown) => {
-            throw error;
-          }
-        : refusingHeldAgentName(name),
-    );
+    .catch(refusingHeldAgentName(name));
 
-  if (updated !== undefined) return updated;
-  return refuseOrVanish(auth, id, changes.expectedRevision, "agent");
-}
-
-/**
- * The revision predicate, or nothing when the caller named none.
- *
- * Naming none is allowed on purpose and is not a hole in the rule: the CLI and
- * a coding agent write from a terminal where there is no editor to have grown
- * stale, and demanding a revision there would make every scripted rename a
- * two-request dance. The browser always sends one, and the API is where that
- * is required — this layer's job is to make the check impossible to get wrong,
- * not to decide who has to make it.
- */
-function writtenAgainst(
-  table: typeof agent | typeof connection,
-  expected: string | undefined,
-): SQL | undefined {
-  return expected === undefined ? undefined : eq(table.revision, expected);
-}
-
-/**
- * What an update that matched no row actually was.
- *
- * Two very different things look identical from a statement that changed
- * nothing: the row moved on since the editor opened it, and the row was never
- * this caller's to touch. Telling them apart takes one more read, and it is
- * worth it — one of them is answered with the revision to retry against, and
- * the other must never confirm that the row exists at all.
- */
-async function refuseOrVanish(
-  auth: AuthContext,
-  id: string,
-  expected: string | undefined,
-  resource: "agent" | "connection",
-  agentId?: string,
-): Promise<undefined> {
-  if (expected === undefined) return undefined;
-
-  const current =
-    resource === "agent"
-      ? (
-          await db()
-            .select({ revision: agent.revision })
-            .from(agent)
-            .where(theAgentEvenArchived(auth, id))
-            .limit(1)
-        )[0]
-      : (
-          await db()
-            .select({ revision: connection.revision })
-            .from(connection)
-            .where(theConnection(auth, agentId ?? "", id))
-            .limit(1)
-        )[0];
-
-  if (current === undefined) return undefined;
-  throw new IdentityConflictError(resource, id, {
-    expected,
-    current: current.revision,
-  });
+  if (updated !== undefined) return agentFromRow(updated);
+  return undefined;
 }
 
 /**
@@ -1235,7 +1307,6 @@ function guardProjectScoped(auth: AuthContext, what: string): void {
 export async function archiveAgent(
   auth: AuthContext,
   id: string,
-  options: { readonly expectedRevision?: string | undefined } = {},
 ): Promise<ArchivedAgent | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
@@ -1243,12 +1314,12 @@ export async function archiveAgent(
 
   const now = new Date();
 
-  return db().transaction(async (tx) => {
+  return db().transaction(async (tx): Promise<ArchivedAgent | undefined> => {
     const [archived] = await tx
       .update(agent)
-      .set({ archivedAt: now, revision: newId("rev"), updatedAt: now })
+      .set({ archivedAt: now, updatedAt: now })
       .where(
-        and(theAgent(auth, id), writtenAgainst(agent, options.expectedRevision)),
+        theAgent(auth, id),
       )
       .returning(COLUMNS);
 
@@ -1263,14 +1334,18 @@ export async function archiveAgent(
         .limit(1);
       if (standing === undefined) return undefined;
       if (standing.archivedAt !== null) {
-        return { agent: standing, connections: [], canceledRunCount: 0 };
+        return {
+          agent: agentFromRow(standing),
+          connections: [],
+          canceledRunCount: 0,
+        };
       }
-      return refuseOrVanish(auth, id, options.expectedRevision, "agent");
+      return undefined;
     }
 
     const children = await tx
       .update(connection)
-      .set({ archivedAt: now, revision: newId("rev"), updatedAt: now })
+      .set({ archivedAt: now, updatedAt: now })
       .where(
         within(
           auth,
@@ -1288,7 +1363,7 @@ export async function archiveAgent(
     );
 
     return {
-      agent: archived,
+      agent: agentFromRow(archived),
       connections: children.map((row) => row.id),
       canceledRunCount,
     };
@@ -1314,7 +1389,6 @@ export async function restoreAgent(
   auth: AuthContext,
   id: string,
   options: {
-    readonly expectedRevision?: string | undefined;
     /** A different name, when the old one has been taken. */
     readonly name?: string | undefined;
   } = {},
@@ -1346,14 +1420,12 @@ export async function restoreAgent(
     .set({
       archivedAt: null,
       ...(name === undefined ? {} : { name }),
-      revision: newId("rev"),
       updatedAt: now,
     })
     .where(
       and(
         theAgentEvenArchived(auth, id),
         isNotNull(agent.archivedAt),
-        writtenAgainst(agent, options.expectedRevision),
       ),
     )
     .returning(COLUMNS)
@@ -1369,7 +1441,7 @@ export async function restoreAgent(
       throw error;
     });
 
-  if (restored !== undefined) return restored;
+  if (restored !== undefined) return agentFromRow(restored);
 
   const [standing] = await db()
     .select(COLUMNS)
@@ -1379,8 +1451,8 @@ export async function restoreAgent(
   if (standing === undefined) return undefined;
   // Restoring an active agent is nothing to do, exactly as archiving an
   // archived one is.
-  if (standing.archivedAt === null) return standing;
-  return refuseOrVanish(auth, id, options.expectedRevision, "agent");
+  if (standing.archivedAt === null) return agentFromRow(standing);
+  return undefined;
 }
 
 /**
@@ -1446,7 +1518,7 @@ export async function addConnection(
  * `getConnection` would mean the caller first guessing an agent id it was never
  * given.
  *
- * It answers a connection kind and nothing else, deliberately. A gate needs to know what
+ * It answers a connection type and nothing else, deliberately. A gate needs to know what
  * kind of thing this is; it has no business with the config, and a shape that
  * cannot carry a credential cannot leak one.
  *
@@ -1457,10 +1529,10 @@ export async function addConnection(
  * naming somebody else's connection is a leak, and a gate that skipped
  * because it looked in the wrong project is no gate.
  */
-export async function connectionKindOf(
+export async function connectionTypeOf(
   auth: AuthContext,
   connectionId: string,
-): Promise<ConnectionKind | undefined> {
+): Promise<ConnectionType | undefined> {
   authorize(auth, "read", here(auth));
 
   // A run happens inside a project, so a credential acting in none is one
@@ -1471,7 +1543,7 @@ export async function connectionKindOf(
   if (!isId("con", connectionId)) return undefined;
 
   const [row] = await db()
-    .select({ connectionKind: connection.connectionKind })
+    .select({ connectionType: connection.connectionType })
     .from(connection)
     .innerJoin(agent, eq(connection.agentId, agent.id))
     .where(
@@ -1489,11 +1561,11 @@ export async function connectionKindOf(
     .limit(1);
 
   // The column is text, as every enum-shaped column in this schema is, and the
-  // registry is what decides which strings are connection kinds. The cast is the same one
+  // registry is what decides which strings are connection types. The cast is the same one
   // `connectionFromRow` makes for the same reason, in the same file.
   return row === undefined
     ? undefined
-    : (row.connectionKind as ConnectionKind);
+    : (row.connectionType as ConnectionType);
 }
 
 export async function getConnection(
@@ -1503,7 +1575,8 @@ export async function getConnection(
 ): Promise<Connection | undefined> {
   authorize(auth, "read", here(auth));
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const [row] = await db()
     .select(CONNECTION_COLUMNS)
@@ -1511,7 +1584,9 @@ export async function getConnection(
     .where(theConnection(auth, agentId, connectionId))
     .limit(1);
 
-  return row === undefined ? undefined : connectionFromRow(row);
+  return row === undefined
+    ? undefined
+    : connectionFromRow(row, home.agentPlatform);
 }
 
 /**
@@ -1532,7 +1607,8 @@ export async function listConnections(
 ): Promise<readonly Connection[] | undefined> {
   authorize(auth, "read", here(auth));
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const half =
     options.archived === true
@@ -1547,7 +1623,7 @@ export async function listConnections(
     )
     .orderBy(asc(connection.id));
 
-  return rows.map(connectionFromRow);
+  return rows.map((row) => connectionFromRow(row, home.agentPlatform));
 }
 
 /**
@@ -1557,7 +1633,7 @@ export async function listConnections(
  * the hint moved along. Editing what the caller cannot see returns what
  * reading it would have: `undefined`, with nothing disturbed.
  *
- * **Agent platform, connection kind, access variant, and modality are
+ * **Agent platform, connection type, access variant, and modality are
  * immutable.** Changing any axis creates a new connection. Config is validated
  * against the stored access variant and never selects another one.
  */
@@ -1574,7 +1650,7 @@ export async function updateConnection(
   // an edit quietly drop half its payload.
   for (const immutable of [
     "agentPlatform",
-    "connectionKind",
+    "connectionType",
     "accessVariant",
     "modality",
     "topology",
@@ -1592,12 +1668,13 @@ export async function updateConnection(
       ? undefined
       : validName(changes.name, "a connection");
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const [current] = await db()
     .select({
       id: connection.id,
-      connectionKind: connection.connectionKind,
+      connectionType: connection.connectionType,
       accessVariant: connection.accessVariant,
       config: connection.config,
       archivedAt: connection.archivedAt,
@@ -1609,13 +1686,13 @@ export async function updateConnection(
 
   // The registry rules are the row's own access variant's — which cannot have changed
   // since the read above, because nothing can change it at all.
-  const connectionKind = current.connectionKind as ConnectionKind;
+  const connectionType = current.connectionType as ConnectionType;
   const accessVariant = current.accessVariant as AccessVariant;
 
   const config =
     changes.config === undefined
       ? undefined
-      : validConfig(connectionKind, accessVariant, changes.config);
+      : validConfig(connectionType, accessVariant, changes.config);
 
   // The stored access variant owns the credential rule. An edit can replace
   // the credential, but cannot turn this connection into another variant.
@@ -1623,7 +1700,7 @@ export async function updateConnection(
     changes.credentials === undefined
       ? undefined
       : validCredentials(
-          connectionKind,
+          connectionType,
           accessVariant,
           changes.credentials,
         );
@@ -1642,13 +1719,11 @@ export async function updateConnection(
             credentials: sealCredentials(sealed.sealed),
             credentialsHint: sealed.hint,
           }),
-      revision: newId("rev"),
       updatedAt: new Date(),
     })
     .where(
       and(
         theConnection(auth, agentId, connectionId),
-        writtenAgainst(connection, changes.expectedRevision),
       ),
     )
     .returning(CONNECTION_COLUMNS)
@@ -1661,14 +1736,9 @@ export async function updateConnection(
         : refusingHeldConnectionName(name),
     );
 
-  if (updated !== undefined) return connectionFromRow(updated);
-  return refuseOrVanish(
-    auth,
-    connectionId,
-    changes.expectedRevision,
-    "connection",
-    agentId,
-  );
+  return updated === undefined
+    ? undefined
+    : connectionFromRow(updated, home.agentPlatform);
 }
 
 /**
@@ -1691,23 +1761,22 @@ export async function archiveConnection(
   auth: AuthContext,
   agentId: string,
   connectionId: string,
-  options: { readonly expectedRevision?: string | undefined } = {},
 ): Promise<ArchivedConnection | undefined> {
   authorize(auth, "configure_agents", here(auth));
 
-  if ((await visibleAgent(auth, agentId)) === undefined) return undefined;
+  const home = await visibleAgent(auth, agentId);
+  if (home === undefined) return undefined;
 
   const now = new Date();
 
   return db().transaction(async (tx) => {
     const [archived] = await tx
       .update(connection)
-      .set({ archivedAt: now, revision: newId("rev"), updatedAt: now })
+      .set({ archivedAt: now, updatedAt: now })
       .where(
         and(
           theConnection(auth, agentId, connectionId),
           connectionNotArchived,
-          writtenAgainst(connection, options.expectedRevision),
         ),
       )
       .returning(CONNECTION_COLUMNS);
@@ -1720,15 +1789,12 @@ export async function archiveConnection(
         .limit(1);
       if (standing === undefined) return undefined;
       if (standing.archivedAt !== null) {
-        return { connection: connectionFromRow(standing), canceledRunCount: 0 };
+        return {
+          connection: connectionFromRow(standing, home.agentPlatform),
+          canceledRunCount: 0,
+        };
       }
-      return refuseOrVanish(
-        auth,
-        connectionId,
-        options.expectedRevision,
-        "connection",
-        agentId,
-      );
+      return undefined;
     }
 
     const canceledRunCount = await stopWorkOverConnections(
@@ -1738,7 +1804,10 @@ export async function archiveConnection(
       now,
     );
 
-    return { connection: connectionFromRow(archived), canceledRunCount };
+    return {
+      connection: connectionFromRow(archived, home.agentPlatform),
+      canceledRunCount,
+    };
   });
 }
 
@@ -1765,7 +1834,6 @@ export async function restoreConnection(
   agentId: string,
   connectionId: string,
   options: {
-    readonly expectedRevision?: string | undefined;
     readonly name?: string | undefined;
     readonly credential?: RestoreCredential | undefined;
   } = {},
@@ -1779,11 +1847,10 @@ export async function restoreConnection(
     .select({
       id: connection.id,
       name: connection.name,
-      connectionKind: connection.connectionKind,
+      connectionType: connection.connectionType,
       accessVariant: connection.accessVariant,
       config: connection.config,
       archivedAt: connection.archivedAt,
-      revision: connection.revision,
     })
     .from(connection)
     .where(theConnection(auth, agentId, connectionId))
@@ -1805,42 +1872,42 @@ export async function restoreConnection(
     );
   }
 
-  const connectionKind = current.connectionKind as ConnectionKind;
+  const connectionType = current.connectionType as ConnectionType;
   const accessVariant = current.accessVariant as AccessVariant;
-  const variant = accessVariantById(connectionKind, accessVariant);
+  const variant = accessVariantById(connectionType, accessVariant);
   const rule = credentialRuleOf(variant);
   const supplied = options.credential;
 
   if (rule === "required" && supplied?.choice !== "replace") {
     throw new ConnectionRestoreRefusedError(
       "credential_required",
-      `Connection ${connectionId} uses ${connectionKind}, which requires a new ` +
+      `Connection ${connectionId} uses ${connectionType}, which requires a new ` +
         `credential after Archive. Enter a new credential and restore it again.`,
-      { connectionId, connectionKind },
+      { connectionId, connectionType },
     );
   }
   if (rule === "forbidden" && supplied?.choice === "replace") {
     throw new ConnectionRestoreRefusedError(
       "credential_forbidden",
-      `Connection ${connectionId} uses ${connectionKind}, which does not accept ` +
+      `Connection ${connectionId} uses ${connectionType}, which does not accept ` +
         `customer credentials. Remove the credential and restore it again.`,
-      { connectionId, connectionKind },
+      { connectionId, connectionType },
     );
   }
   if (rule === "optional" && supplied === undefined) {
     throw new ConnectionRestoreRefusedError(
       "credential_choice_required",
-      `Connection ${connectionId} uses ${connectionKind}, which has an optional ` +
+      `Connection ${connectionId} uses ${connectionType}, which has an optional ` +
         `credential. Choose Replace and enter a new credential, or choose ` +
         `Clear, then restore it again.`,
-      { connectionId, connectionKind },
+      { connectionId, connectionType },
     );
   }
 
   const sealed =
     supplied?.choice === "replace"
       ? validCredentials(
-          connectionKind,
+          connectionType,
           accessVariant,
           supplied.credentials,
         )
@@ -1861,14 +1928,12 @@ export async function restoreConnection(
       // archived credential can ever become live again.
       credentials: sealed === null ? null : sealCredentials(sealed.sealed),
       credentialsHint: sealed === null ? null : sealed.hint,
-      revision: newId("rev"),
       updatedAt: now,
     })
     .where(
       and(
         theConnection(auth, agentId, connectionId),
         isNotNull(connection.archivedAt),
-        writtenAgainst(connection, options.expectedRevision),
       ),
     )
     .returning(CONNECTION_COLUMNS)
@@ -1884,12 +1949,7 @@ export async function restoreConnection(
       throw error;
     });
 
-  if (restored !== undefined) return connectionFromRow(restored);
-  return refuseOrVanish(
-    auth,
-    connectionId,
-    options.expectedRevision,
-    "connection",
-    agentId,
-  );
+  return restored === undefined
+    ? undefined
+    : connectionFromRow(restored, home.agentPlatform);
 }

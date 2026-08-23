@@ -64,7 +64,7 @@ def mocked_spec(
     mock_tools: list[dict] | None = None,
     scenario: str = "First point. Second point.",
     simulation_id: str = A_SIMULATION,
-    connection_kind: str = "livekit_room",
+    connection_type: str = "livekit_room",
     modality: str = "voice",
 ) -> dict:
     """One spec whose connection names a room and whose run mocks tools."""
@@ -73,13 +73,13 @@ def mocked_spec(
         modality=modality,
         connection={
             "agent_platform": (
-                "livekit_agents" if connection_kind == "livekit_room" else None
+                "livekit_agents" if connection_type == "livekit_room" else None
             ),
-            "connection_kind": connection_kind,
+            "connection_type": connection_type,
             "access_variant": (
                 "livekit_room.project_credentials"
-                if connection_kind == "livekit_room"
-                else f"{connection_kind}.test"
+                if connection_type == "livekit_room"
+                else f"{connection_type}.test"
             ),
             "config": {"url": A_URL, "agentName": "front-desk"},
             "credentials": {"apiKey": A_KEY, "apiSecret": A_SECRET},
@@ -388,7 +388,7 @@ async def test_a_connection_egma_stands_outside_claims_nothing_about_tools(
         A_SIMULATION,
         connection={
             "agent_platform": None,
-            "connection_kind": "scripted",
+            "connection_type": "scripted",
             "access_variant": "scripted.in_memory",
             "config": {"turn_seconds": 0.0},
             "credentials": None,

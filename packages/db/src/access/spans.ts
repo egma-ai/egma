@@ -117,7 +117,7 @@ export type NewSpan = {
   readonly platformAgentId: string;
   readonly platformAgentName: string;
   readonly platformAgentVersion: string;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly runId: string;
   readonly agentId: string;
   readonly agentVersionId: string;
@@ -210,7 +210,7 @@ const FIELD_BOUNDS = {
   platformAgentId: 512,
   platformAgentName: 512,
   platformAgentVersion: 128,
-  connectionKind: 64,
+  connectionType: 64,
   environment: 128,
 } as const satisfies Readonly<Record<string, number>>;
 
@@ -320,6 +320,14 @@ function asDateTime64(microseconds: bigint): string {
  * Keys are sorted so that object literal order cannot move a hash, and the two
  * 64-bit counts are written as decimal rather than left to `JSON.stringify`,
  * which refuses a `bigint` outright.
+ *
+ * **`connection_kind` is a frozen name, not a rename somebody missed.** The
+ * TypeScript field became `connectionType` (ADR-0015); this key did not follow
+ * it, because these key names are hashed. Renaming one changes the fingerprint
+ * of every span already stored, so the drainer would meet a stored hash that
+ * no longer matches the evidence it was taken from and refuse the whole
+ * segment as a second account of one immutable identity. Changing it is an
+ * evidence-contract change with a rewrite behind it, never a rename.
  */
 function canonicalEvidence(span: NewSpan): string {
   const evidence: Record<string, string | boolean> = {
@@ -327,7 +335,7 @@ function canonicalEvidence(span: NewSpan): string {
     agent_platform: span.agentPlatform,
     agent_version_id: span.agentVersionId,
     audio_url: span.audioUrl,
-    connection_kind: span.connectionKind,
+    connection_kind: span.connectionType,
     duration_nanoseconds: span.durationNanoseconds.toString(),
     emitter: span.emitter,
     ends_trace: span.endsTrace,
@@ -408,7 +416,7 @@ function rowFor(auth: AuthContext, span: NewSpan): Record<string, unknown> {
     platform_agent_id: span.platformAgentId,
     platform_agent_name: span.platformAgentName,
     platform_agent_version: span.platformAgentVersion,
-    connection_type: span.connectionKind,
+    connection_type: span.connectionType,
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,

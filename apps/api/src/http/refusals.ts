@@ -336,7 +336,7 @@ export function narrowerGradingInFlight(
 }
 
 /**
- * A run over a connection kind whose simulator adapter has not shipped.
+ * A run over a connection type whose simulator adapter has not shipped.
  *
  * Its own code rather than an `unprocessable`, because the caller's next move
  * is different in kind: nothing about the request can be fixed, and the answer

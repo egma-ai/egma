@@ -698,7 +698,7 @@ def scripted_spec(
         simulation_id,
         connection={
             "agent_platform": None,
-            "connection_kind": "scripted",
+            "connection_type": "scripted",
             "access_variant": "scripted.in_memory",
             "config": config,
             "credentials": credentials,
@@ -735,7 +735,7 @@ def retell_spec(
         simulation_id,
         connection={
             "agent_platform": "retell",
-            "connection_kind": "retell_chat_api",
+            "connection_type": "retell_chat_api",
             "access_variant": "retell_chat_api.api_key",
             "config": {"retellAgentId": agent_id, "baseUrl": base_url},
             "credentials": {"apiKey": api_key},
@@ -795,7 +795,7 @@ def loopback_spec(
     """One voice spec against the loopback counterpart.
 
     Deliberately the same shape as :func:`scripted_spec`: the two differ by
-    modality and connection kind and by nothing else, which is what makes
+    modality and connection type and by nothing else, which is what makes
     "the same test over chat and over voice" a comparison rather than two
     unrelated stories.
     """
@@ -815,7 +815,7 @@ def loopback_spec(
         modality="voice",
         connection={
             "agent_platform": None,
-            "connection_kind": "loopback",
+            "connection_type": "loopback",
             "access_variant": "loopback.in_process",
             "config": config,
             "credentials": credentials,
@@ -882,7 +882,7 @@ def phone_spec(
         modality="voice",
         connection={
             "agent_platform": None,
-            "connection_kind": "phone_number",
+            "connection_type": "phone_number",
             "access_variant": "phone_number.public_e164",
             "config": config,
             "credentials": credentials,

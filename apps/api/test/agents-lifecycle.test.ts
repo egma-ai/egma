@@ -1,5 +1,5 @@
 import { newId } from "@egma/ids";
-import { getSimulation } from "@egma/db";
+import { enablePullProductionCalls, getSimulation } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -73,7 +73,7 @@ type ConnectionBody = {
   readonly id: string;
   readonly name: string;
   readonly agentPlatform: string | null;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly accessVariant: string;
   readonly productLabel: string;
   readonly revision: string;
@@ -102,7 +102,7 @@ async function aConnection(
     who,
     {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
@@ -186,81 +186,94 @@ describe("the agent list a browser reads", () => {
 });
 
 describe("the Egma-owned half of an agent", () => {
-  it("is a name and a description, and never the provider's configuration", async () => {
+  it("is a name and a platform binding, never the provider's configuration", async () => {
     api = await createApi("agents_browser_identity");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
     const edited = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      name: "Front desk",
-      description: "Answers the main line",
-      expectedRevision: agent.revision,
+      name: "Front desk, renamed",
     });
     expect(edited.status).toBe(200);
-    expect(held<AgentBody>(edited, "agent").description).toBe(
-      "Answers the main line",
-    );
+    expect(held<AgentBody>(edited, "agent").name).toBe("Front desk, renamed");
 
     // No prompt, no model, no tools: those live at the provider, and a read
-    // carrying a copy would be a copy going stale.
+    // carrying a copy would be a copy going stale. No description either — it
+    // was dropped pre-launch (ADR-0015).
     const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
     const shape = held<Record<string, unknown>>(read, "agent");
     for (const provider of ["prompt", "model", "tools", "voice", "pulled"]) {
       expect(Object.keys(shape)).not.toContain(provider);
     }
+    expect(Object.keys(shape)).not.toContain("description");
+    expect(Object.keys(shape)).not.toContain("revision");
 
-    // And an edit that tried to set one is refused by name rather than having
-    // the key quietly dropped.
+    // What it does carry: where the agent lives, whether egma pulls its
+    // production calls, and when one last arrived. Unbound and off until
+    // somebody says otherwise, and nothing has arrived — which is a fact and
+    // not a condition, so no word beside it says how the agent is doing.
+    expect(shape).toMatchObject({
+      agentPlatform: null,
+      platformAgentId: null,
+      monitoringKeyPresent: false,
+      pullProductionCalls: false,
+      lastReceivedAt: null,
+    });
+    expect(Object.keys(shape)).toContain("lastReceivedAt");
+
+    // And an edit that tried to set the provider's own configuration is
+    // refused by name rather than having the key quietly dropped.
     const tried = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       prompt: "You are a helpful agent",
-      expectedRevision: held<AgentBody>(edited, "agent").revision,
     });
     expect(tried.status).toBe(400);
     expect(String(tried.body.message)).toContain("prompt");
   });
 
-  it("refuses an edit written against a revision the agent has moved past", async () => {
-    api = await createApi("agents_browser_stale_edit");
+  it("takes the last write, because there is no revision to be stale against", async () => {
+    // The column was dropped pre-launch (ADR-0015). Two editors on one agent
+    // is a silent overwrite now — the exact failure the revision existed to
+    // stop, accepted with eyes open — and a browser that still sent one is
+    // refused by name rather than having it quietly ignored.
+    api = await createApi("agents_browser_last_writer_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
     const agent = await anAgent(ada, "Front desk");
 
-    // Two editors open the same agent. The first saves.
     const first = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      description: "Edited first",
-      expectedRevision: agent.revision,
+      name: "Edited first",
     });
     expect(first.status).toBe(200);
 
-    // The second saves against what it read, and is told rather than winning.
     const second = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      description: "Edited second",
-      expectedRevision: agent.revision,
+      name: "Edited second",
     });
-    expect(second.status).toBe(409);
-    expect(second.body.error).toBe("identity_conflict");
-    expect(second.body.message).toBe(
-      `agent ${agent.id} changed after you opened it. Read it again, keep or ` +
-        `reapply your edits, and send the update with expectedRevision set ` +
-        `to its new revision.`,
-    );
+    expect(second.status).toBe(200);
 
-    // And the first editor's work is exactly where they left it.
     const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(read, "agent").description).toBe("Edited first");
-  });
+    expect(held<AgentBody>(read, "agent").name).toBe("Edited second");
 
-  it("makes a browser say which revision it was written against", async () => {
-    api = await createApi("agents_browser_revision_required");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const agent = await anAgent(ada, "Front desk");
-
-    const blind = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
-      description: "No revision named",
+    const stale = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
+      name: "Edited third",
+      expectedRevision: "rev_00000000000000000000000001",
     });
-    expect(blind.status).toBe(422);
-    expect(blind.body.error).toBe("unprocessable");
+    expect(stale.status).toBe(400);
+    expect(String(stale.body.message)).toContain("expectedRevision");
+
+    // A connection lost the same column and answers the same way. It used to
+    // list the key as one it accepts and then drop it, so a browser holding on
+    // to optimistic locking was told its edit was safe when nothing checked.
+    const wiring = await aConnection(ada, agent.id, { name: "staging" });
+    const staleWiring = await browser(
+      "PATCH",
+      `/v1/agents/${agent.id}/connections/${wiring.id}`,
+      ada,
+      { name: "renamed", expectedRevision: "rev_00000000000000000000000001" },
+    );
+    expect(staleWiring.status).toBe(400);
+    expect(String(staleWiring.body.message)).toContain("expectedRevision");
   });
+
+
 });
 
 describe("archiving an agent", () => {
@@ -359,80 +372,53 @@ function movedOn(resource: "agent" | "connection", id: string): string {
 }
 
 /**
- * Archive and Restore are identity writes, and they are guarded exactly as an
- * edit is.
+ * Archive and Restore are identity writes, and nothing guards them any more.
  *
- * **Every other Archive and Restore in this file sends the revision it read a
- * line earlier**, so a handler that took `expectedRevision` and dropped it
- * would leave all of them green. What that would let through is the race the
- * guard exists for: one tab archives an agent while another, holding a page
- * from before a rename, restores it — and neither person is ever told that
- * they were looking at different things.
- *
- * These are the twins of "refuses an edit written against a revision the agent
- * has moved past", and they are written so Agents read the way Personas
- * already do.
+ * The revision column was dropped from `agent` and `connection` pre-launch
+ * (ADR-0015), so the race this block used to prove — one tab archiving while
+ * another, holding a page from before a rename, restores — now resolves
+ * silently in favour of whoever wrote last. That is the accepted consequence,
+ * written down here so that a reader meets it rather than assuming a guard
+ * that is gone.
  */
-describe("the revision an Archive or a Restore is written against", () => {
-  it("guards Archive and Restore on the same terms, for an agent", async () => {
-    api = await createApi("agents_browser_archive_stale_revision");
+describe("what an Archive or a Restore is written against", () => {
+  it("is nothing: a stale tab's Archive simply lands", async () => {
+    api = await createApi("agents_browser_archive_last_writer_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
 
-    // Two tabs on the same agent. The first renames it, which moves the
-    // revision the second is still holding.
+    // Two tabs on the same agent. The first renames it; the second is still
+    // holding the page from before, and is told nothing about that.
     const renamed = await browser("PATCH", `/v1/agents/${agent.id}`, ada, {
       name: "Front desk, renamed",
-      expectedRevision: agent.revision,
     });
     expect(renamed.status).toBe(200);
-    const current = held<AgentBody>(renamed, "agent").revision;
-
-    const stale = await browser("POST", `/v1/agents/${agent.id}/archive`, ada, {
-      expectedRevision: agent.revision,
-    });
-    expect(stale.status).toBe(409);
-    expect(stale.body.error).toBe("identity_conflict");
-    expect(stale.body.message).toBe(movedOn("agent", agent.id));
-
-    // Refused means nothing written: the agent is still in new work.
-    const standing = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(standing, "agent").archived).toBe(false);
 
     const archived = await browser(
       "POST",
       `/v1/agents/${agent.id}/archive`,
       ada,
-      { expectedRevision: current },
+      {},
     );
     expect(archived.status).toBe(200);
-    const afterArchive = held<AgentBody>(archived, "agent").revision;
+    expect(held<AgentBody>(archived, "agent").archived).toBe(true);
+    // The rename survives the Archive: last-writer-wins is per write, not a
+    // rollback of what somebody else already landed.
+    expect(held<AgentBody>(archived, "agent").name).toBe("Front desk, renamed");
 
-    // The revision the Archive replaced is exactly what a page opened before it
-    // is holding, and Restore refuses it for the same reason.
-    const staleRestore = await browser(
+    const back = await browser(
       "POST",
       `/v1/agents/${agent.id}/restore`,
       ada,
-      { expectedRevision: current },
+      {},
     );
-    expect(staleRestore.status).toBe(409);
-    expect(staleRestore.body.error).toBe("identity_conflict");
-    expect(staleRestore.body.message).toBe(movedOn("agent", agent.id));
-
-    const filed = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(filed, "agent").archived).toBe(true);
-
-    const back = await browser("POST", `/v1/agents/${agent.id}/restore`, ada, {
-      expectedRevision: afterArchive,
-    });
     expect(back.status).toBe(200);
     expect(held<AgentBody>(back, "agent").archived).toBe(false);
   });
 
-  it("guards Archive and Restore on the same terms, for a connection", async () => {
-    api = await createApi("agents_browser_connection_stale_revision");
+  it("is nothing for a connection either", async () => {
+    api = await createApi("agents_browser_connection_last_writer_wins");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const agent = await anAgent(ada, "Front desk");
@@ -441,50 +427,21 @@ describe("the revision an Archive or a Restore is written against", () => {
 
     const renamed = await browser("PATCH", at, ada, {
       name: "staging, renamed",
-      expectedRevision: wiring.revision,
     });
     expect(renamed.status).toBe(200);
-    const current = held<ConnectionBody>(renamed, "connection").revision;
 
-    const stale = await browser("POST", `${at}/archive`, ada, {
-      expectedRevision: wiring.revision,
-    });
-    expect(stale.status).toBe(409);
-    expect(stale.body.error).toBe("identity_conflict");
-    expect(stale.body.message).toBe(movedOn("connection", wiring.id));
-
-    // Nothing written, so the target is still reachable — which matters more
-    // here than on the agent: an Archive that landed would have settled the
-    // work going over it.
-    const standing = await browser("GET", at, ada);
-    expect(held<ConnectionBody>(standing, "connection").archived).toBe(false);
-
-    const archived = await browser("POST", `${at}/archive`, ada, {
-      expectedRevision: current,
-    });
+    const archived = await browser("POST", `${at}/archive`, ada, {});
     expect(archived.status).toBe(200);
-    const afterArchive = held<ConnectionBody>(archived, "connection").revision;
+    expect(held<ConnectionBody>(archived, "connection").archived).toBe(true);
 
-    // The Restore carries the credential `retell` requires, so the revision is
-    // the only thing left that can refuse it.
-    const credential = {
-      choice: "replace",
-      credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
-    };
-    const staleRestore = await browser("POST", `${at}/restore`, ada, {
-      expectedRevision: current,
-      credential,
-    });
-    expect(staleRestore.status).toBe(409);
-    expect(staleRestore.body.error).toBe("identity_conflict");
-    expect(staleRestore.body.message).toBe(movedOn("connection", wiring.id));
-
-    const filed = await browser("GET", at, ada);
-    expect(held<ConnectionBody>(filed, "connection").archived).toBe(true);
-
+    // A Retell chat connection's credential does not come back with it, so a
+    // Restore still has to bring one. That rule is the access variant's, not
+    // the revision's, and it is untouched by this pass.
     const back = await browser("POST", `${at}/restore`, ada, {
-      expectedRevision: afterArchive,
-      credential,
+      credential: {
+        choice: "replace",
+        credentials: { apiKey: "retell-secret-NEW1NEW2ABCD" },
+      },
     });
     expect(back.status).toBe(200);
     expect(held<ConnectionBody>(back, "connection").archived).toBe(false);
@@ -537,7 +494,7 @@ describe("a connection's stored credential", () => {
     const items = held<
       readonly {
         readonly agentPlatform: string | null;
-        readonly connectionKind: string;
+        readonly connectionType: string;
         readonly accessVariant: string;
         readonly simulatorAdapter: boolean;
         readonly credentialRule: string;
@@ -549,7 +506,7 @@ describe("a connection's stored credential", () => {
     const livekit = items.filter(
       (one) =>
         one.agentPlatform === "livekit_agents" &&
-        one.connectionKind === "livekit_room",
+        one.connectionType === "livekit_room",
     );
     expect(livekit.map((one) => one.accessVariant)).toEqual([
       "livekit_room.project_credentials",
@@ -559,14 +516,14 @@ describe("a connection's stored credential", () => {
     // The three credential rules the product's Restore is written against,
     // each named on the shape that has it.
     expect(
-      items.find((one) => one.connectionKind === "retell_chat_api")
+      items.find((one) => one.connectionType === "retell_chat_api")
         ?.credentialRule,
     ).toBe("required");
     expect(
       items.find(
         (one) =>
           one.agentPlatform === null &&
-          one.connectionKind === "phone_number",
+          one.connectionType === "phone_number",
       )?.credentialRule,
     ).toBe("forbidden");
     expect(
@@ -586,6 +543,62 @@ describe("a connection's stored credential", () => {
   });
 });
 
+describe("which platform a connection is stored under", () => {
+  it("refuses a phone payload that contradicts its bound agent, and says both", async () => {
+    api = await createApi("agents_browser_platform_contradiction");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const agent = await anAgent(ada, "Front desk");
+
+    // Bind the agent to Retell the way the product does: turn its pull switch
+    // on with a Retell key.
+    await enablePullProductionCalls(
+      {
+        userId: ada.userId,
+        organizationId: ada.organizationId,
+        projectId: ada.projectId,
+        role: "admin",
+        via: "session",
+      },
+      {
+        agentId: agent.id,
+        agentPlatform: "retell",
+        platformAgentId: "agent_voice_1",
+        apiKey: "key_live_retell_monitoring_secret_QRST",
+      },
+    );
+
+    // `phone_number` reaches any platform, so this connection would be stored
+    // as Retell's whatever the payload claims.
+    const refused = await browser(
+      "POST",
+      `/v1/agents/${agent.id}/connections`,
+      ada,
+      {
+        name: "hotline",
+        agentPlatform: "livekit_agents",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551234567" },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toBe("unprocessable");
+    expect(String(refused.body.message)).toContain("livekit_agents");
+    expect(String(refused.body.message)).toContain("retell");
+
+    // Nothing was written, so the agent is exactly as it was.
+    const read = await browser("GET", `/v1/agents/${agent.id}`, ada);
+    expect(read.body.connections).toEqual([]);
+  });
+
+  // The two admitted paths — a payload that agrees with its agent, and one on
+  // an unbound agent — are proven where they belong: at the access layer in
+  // `connections.test.ts`, and through the door in `agents.test.ts`, which
+  // already carries the Retell confirmation a phone connection needs.
+});
+
 describe("a connection's shape", () => {
   it("is stored at create and cannot be edited into the other one", async () => {
     api = await createApi("agents_browser_variant_immutable");
@@ -594,7 +607,7 @@ describe("a connection's shape", () => {
     const agent = await anAgent(ada, "Front desk");
     const wiring = await aConnection(ada, agent.id, {
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       config: { url: "wss://acme.livekit.cloud" },
@@ -695,7 +708,7 @@ describe("restoring a connection", () => {
     const phone = await aConnection(ada, agent.id, {
       name: "hotline",
       agentPlatform: null,
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       config: { phoneNumber: "+15551234567" },
@@ -733,7 +746,7 @@ describe("restoring a connection", () => {
     const endpoint = await aConnection(ada, agent.id, {
       name: "endpoint",
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.customer_token_endpoint",
       modality: "voice",
       config: {

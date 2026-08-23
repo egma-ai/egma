@@ -663,7 +663,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           name: "Front desk",
           connection: {
             agentPlatform: "retell",
-            connectionKind: "retell_chat_api",
+            connectionType: "retell_chat_api",
             accessVariant: "retell_chat_api.api_key",
             modality: "chat",
             config: { retellAgentId: "agent_under_walk" },
@@ -679,7 +679,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         key,
         body: {
           agentPlatform: "retell",
-          connectionKind: "retell_chat_api",
+          connectionType: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_under_walk" },

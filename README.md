@@ -804,9 +804,11 @@ product to most of an instance.
 Production Monitoring starts with the agent platform. It is separate from the
 connections the simulator uses.
 
-- For Retell, open **Monitoring → Set up monitoring**, enter one Retell API
-  key, and select the voice agents to monitor. Egma imports the previous 30
-  days and then polls for completed conversations about every 30 seconds.
+- For Retell, open **Monitoring → Start monitoring**, enter one Retell API key,
+  and choose which Retell agent your Egma agent is. Egma seals the key on that
+  agent, turns on its **pull production calls** switch, imports the previous 30
+  days, and then polls for completed conversations about every 30 seconds. The
+  switch is on the agent, so each agent is started and stopped on its own.
 - For LiveKit Agents, install the Egma Python SDK and call
   `monitor_livekit(ctx)` before `AgentSession.start`. The same helper works in a
   customer-hosted worker and a LiveKit Cloud-hosted Python agent.
@@ -837,7 +839,7 @@ whole variable, and the failure looks like an agent that exports nothing.
 Prefer the API address for an exporter. On a self-host that is the API's own
 port — `http://localhost:3100` above, or whatever address you publish it on. The
 web address also works because Egma forwards `/v1/traces` to the API; it only
-adds one hop. This lets the monitoring source page show its own reachable origin
+adds one hop. This lets the start-monitoring page show its own reachable origin
 without making that origin a second telemetry contract.
 
 `POST /v1/traces` accepts OTLP/HTTP in both encodings the specification defines

@@ -403,7 +403,7 @@ function EditConnection({
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
   const liveKitForm = liveKitDispatchForm({
-    connectionKind: connection.connectionKind,
+    connectionType: connection.connectionType,
     option,
     config: draft.config,
     mode: livekitDispatch,
@@ -455,7 +455,6 @@ function EditConnection({
           projectId,
           name: wantedName,
           config,
-          expectedRevision: connection.revision,
         },
         { client: platformClient },
       ),

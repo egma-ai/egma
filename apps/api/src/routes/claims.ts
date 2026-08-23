@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
-  connectionKindUsesPlatformCarrier,
+  connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
   getRun,
@@ -356,7 +356,7 @@ async function assembledSpec(
     };
   }
 
-  if (connection.connectionKind === "retell_chat_api") {
+  if (connection.connectionType === "retell_chat_api") {
     const apiKey = connection.credentials?.["apiKey"] ?? "";
     const agentId = connection.config["retellAgentId"] ?? "";
     let checked = retellTargets.get(connection.connectionId);
@@ -381,7 +381,7 @@ async function assembledSpec(
   // Read the live carrier route only for `phone_number`. A Retell chat or
   // LiveKit room claim must not carry a SIP password it cannot use.
   const platform =
-    connectionKindUsesPlatformCarrier(connection.connectionKind)
+    connectionTypeUsesPlatformCarrier(connection.connectionType)
       ? platformBlock(await resolvePlatformSettings(claim.auth))
       : undefined;
 
@@ -436,7 +436,7 @@ async function assembledSpec(
     modality: claim.modality,
     connection: {
       agent_platform: connection.agentPlatform,
-      connection_kind: connection.connectionKind,
+      connection_type: connection.connectionType,
       access_variant: connection.accessVariant,
       config: connection.config,
       credentials: connection.credentials,

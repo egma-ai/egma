@@ -179,7 +179,7 @@ const WORK_DISPATCHING = [
   // cannot name a project or agent; the returned target carries the narrowed
   // `AuthContext` that every provider read and store write after the claim must
   // use.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringPull",
   // Which process, out of however many are running, drains the pending prefix.
   // Added on 2026-08-22 with the ingestion roles, deliberately and after the
   // rule stopped the build. It is the same shape as the claims above turned one

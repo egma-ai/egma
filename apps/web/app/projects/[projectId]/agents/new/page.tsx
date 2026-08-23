@@ -7,7 +7,6 @@ import { registerAgent } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import type { Refusal } from "../../../../../lib/api.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
@@ -56,13 +55,12 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
   const role = me === null ? null : roleOf(me);
 
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   /** What egma said, or what this form worked out before asking egma. */
   const [refused, setRefused] = useState<Refusal | null>(null);
   const [nameProblem, setNameProblem] = useState<string | null>(null);
 
-  useUnsavedChanges((name !== "" || description !== "") && !saving, saving);
+  useUnsavedChanges(name !== "" && !saving, saving);
 
   const back = projectPath(projectId, "agents");
 
@@ -101,9 +99,6 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
         {
           projectId,
           name: wanted,
-          ...(description.trim() === ""
-            ? {}
-            : { description: description.trim() }),
         },
         { client: platformClient },
       ),
@@ -164,7 +159,7 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
           { label: "Agents", href: back },
           { label: "New agent" },
         ]}
-        lead="Its name and description in Egma. Its prompt, model and tools stay where you configure them."
+        lead="Its name in Egma. Its prompt, model and tools stay where you configure them."
       />
       <PageBody>
         <AgentOnboardingProgress current="agent" />
@@ -188,16 +183,6 @@ function RegisterAgent({ projectId }: { readonly projectId: string }) {
             {nameProblem === null ? null : (
               <Problem id="agent-name-problem">{nameProblem}</Problem>
             )}
-          </Field>
-
-          <Field label="Description" htmlFor="agent-description">
-            <Textarea
-              id="agent-description"
-              value={description}
-              rows={3}
-              placeholder="What this agent is for, so a teammate opening the list knows."
-              onChange={(event) => setDescription(event.target.value)}
-            />
           </Field>
 
           {refused === null ? null : <Problem>{refused.message}</Problem>}

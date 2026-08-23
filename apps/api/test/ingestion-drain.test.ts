@@ -1,11 +1,9 @@
 import {
   appendSpans,
   committedSpans,
-  configureLiveKitMonitoring,
   connectClickHouse,
   disconnectClickHouse,
   DRAIN_ADVISORY_LOCK,
-  listMonitoringSetups,
   openDrainOwnership,
   type AuthContext,
 } from "@egma/db";
@@ -242,7 +240,6 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       role: "admin",
       via: "session",
     };
-    await configureLiveKitMonitoring(auth);
 
     bucket = pendingObjectStore(running.ingestStore);
     drainer = startDrainer({
@@ -286,12 +283,6 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     expect(await gradingJobsFor(traceId)).toEqual([
       { root_closed_at: expect.any(Date), last_seen_at: expect.any(Date) },
     ]);
-    expect(
-      (await listMonitoringSetups(auth)).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeInstanceOf(Date);
-
     // And only then is the object gone.
     expect((await pending()).map((object) => object.key)).not.toContain(key);
   });

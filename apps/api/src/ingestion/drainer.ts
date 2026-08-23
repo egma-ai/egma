@@ -1,13 +1,13 @@
 import {
   appendSpans,
   committedSpans,
-  MONITORING_PLATFORMS,
+  AGENT_PLATFORMS,
   projectOfOrganizationState,
-  recordProductionEvidenceReceived,
+  recordPulledCallReceived,
   recordProductionTraces,
   TraceStoreRefusedError,
   type AuthContext,
-  type MonitoringPlatform,
+  type AgentPlatform,
   type NewSpan,
 } from "@egma/db";
 import { mintedAt } from "@egma/ids";
@@ -396,14 +396,14 @@ export class ProjectDeletedAfterAcceptanceError extends Error {
  * happened at.
  */
 type MonitoringFact = {
-  readonly agentPlatform: MonitoringPlatform;
+  readonly agentPlatform: AgentPlatform;
   readonly platformAgentId: string;
   readonly receivedAt: Date;
 };
 
-/** Whether this word is a platform Monitoring keeps a setup for. */
-function monitored(platform: string): platform is MonitoringPlatform {
-  return (MONITORING_PLATFORMS as readonly string[]).includes(platform);
+/** Whether this word is a platform Egma knows how to attribute to. */
+function monitored(platform: string): platform is AgentPlatform {
+  return (AGENT_PLATFORMS as readonly string[]).includes(platform);
 }
 
 function monitoringFactsIn(
@@ -411,7 +411,7 @@ function monitoringFactsIn(
 ): readonly MonitoringFact[] {
   const latest = new Map<
     string,
-    { platform: MonitoringPlatform; agent: string; at: bigint }
+    { platform: AgentPlatform; agent: string; at: bigint }
   >();
   for (const record of records) {
     if (record.source !== "production") continue;
@@ -578,7 +578,7 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
 
   try {
     for (const fact of monitoringFactsIn(segment.records)) {
-      await recordProductionEvidenceReceived(auth, fact);
+      await recordPulledCallReceived(auth, fact);
     }
     // Says only that this trace's evidence is readable. Every span goes in,
     // because which of them count is a question this seam already answers —

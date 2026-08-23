@@ -697,7 +697,7 @@ async function assertWhatLanded(options: {
     check(
       connections.length === 1 &&
         connection?.agentPlatform === "retell" &&
-        connection?.connectionKind === "phone_number" &&
+        connection?.connectionType === "phone_number" &&
         connection?.accessVariant === "phone_number.public_e164",
       `the walk created exactly one connection and it is the phone one (${connections
         .map((one) => String(one.productLabel))
@@ -733,7 +733,7 @@ async function assertWhatLanded(options: {
     check(
       connections.length === 1 &&
         connection?.agent_platform === "retell" &&
-        connection?.connection_kind === "retell_chat_api" &&
+        connection?.connection_type === "retell_chat_api" &&
         connection?.access_variant === "retell_chat_api.api_key",
       `the walk created exactly one connection and it is the retell one (${connections
         .map((one) => String(one.product_label))

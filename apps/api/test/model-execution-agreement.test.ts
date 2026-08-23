@@ -6,7 +6,7 @@ import {
   RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
   SPEED_RANGE,
-  connectionKindUsesPlatformCarrier,
+  connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   validPersonaModels,
   type ModelJob,
@@ -195,10 +195,10 @@ describe("one executable model catalog", () => {
     });
   });
 
-  it("agrees about which connection kinds receive the platform carrier", () => {
+  it("agrees about which connection types receive the platform carrier", () => {
     const carrierSpec = validSpecs.find((document) => {
       const connection = object(document.connection, "fixture connection");
-      return connection.connection_kind === "phone_number";
+      return connection.connection_type === "phone_number";
     });
     const carrier = carrierSpec?.platform;
     if (carrier === undefined || carrier === null) {
@@ -210,13 +210,13 @@ describe("one executable model catalog", () => {
 
     for (const document of validSpecs) {
       const connection = object(document.connection, "fixture connection");
-      if (typeof connection.connection_kind !== "string") {
+      if (typeof connection.connection_type !== "string") {
         throw new Error("the fixture connection has no kind");
       }
-      fixtureKinds.add(connection.connection_kind);
+      fixtureKinds.add(connection.connection_type);
       const carriesPlatform =
         document.platform !== undefined && document.platform !== null;
-      if (carriesPlatform) schemaCarrierKinds.add(connection.connection_kind);
+      if (carriesPlatform) schemaCarrierKinds.add(connection.connection_type);
       expect(specComplaints(document)).toEqual([]);
 
       const wrong = structuredClone(document);
@@ -227,19 +227,19 @@ describe("one executable model catalog", () => {
 
     const productOptions = connectionOptionMetadata();
     expect(
-      productOptions.every((entry) => fixtureKinds.has(entry.connectionKind)),
+      productOptions.every((entry) => fixtureKinds.has(entry.connectionType)),
     ).toBe(true);
     expect(
       [
         ...new Set(
           productOptions
             .filter((entry) => entry.usesPlatformCarrier)
-            .map((entry) => entry.connectionKind),
+            .map((entry) => entry.connectionType),
         ),
       ].sort(),
     ).toEqual([...schemaCarrierKinds].sort());
     for (const entry of productOptions) {
-      expect(connectionKindUsesPlatformCarrier(entry.connectionKind)).toBe(
+      expect(connectionTypeUsesPlatformCarrier(entry.connectionType)).toBe(
         entry.usesPlatformCarrier,
       );
     }
