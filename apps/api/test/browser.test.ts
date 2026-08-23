@@ -1119,10 +1119,19 @@ describe("what a project recorded in production", () => {
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
 
-      // The heading is the product's word for this area, and the page says what
-      // it holds before a single row is read.
+      // The heading is the product's word for this area.
+      //
+      // **And it is the whole of what stands above the list now.** The boards
+      // draw a list screen as a title bar, one strip of controls and the table
+      // (`71V-0`, `71N-0`) — no label over the title and no purpose sentence
+      // under it. The sidebar already says which section this is and which
+      // project it belongs to, and the table says what it holds; the sentence
+      // that used to sit here is kept for the screens that ask somebody to
+      // fill something in. Updated with the ui-refresh restyle of this screen.
       expect(shown).toContain("Monitoring");
-      expect(shown).toContain("What your agents did in production, newest first.");
+      expect(shown).not.toContain(
+        "What your agents did in production, newest first.",
+      );
 
       // The window control is on the default nobody chose, and the capture is
       // inside it — the browser's clock is pinned to the evening of the day the

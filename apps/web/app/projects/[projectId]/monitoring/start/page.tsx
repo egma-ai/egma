@@ -174,7 +174,6 @@ function StartMonitoring({ projectId }: { readonly projectId: string }) {
   const monitoring = projectPath(projectId, "monitoring");
   const header = (
     <PageHeader
-      eyebrow={COPY.eyebrow}
       title={COPY.title}
       lead={COPY.lead}
       breadcrumbs={[

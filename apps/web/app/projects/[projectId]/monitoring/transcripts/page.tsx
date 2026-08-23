@@ -52,7 +52,7 @@ import {
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import { Toolbar, TOOLBAR_FILTER } from "../../../../../ui/section.tsx";
+import { TOOLBAR_FILTER } from "../../../../../ui/section.tsx";
 import { settingsPath } from "../../../../../ui/settings-nav.tsx";
 import { useOrganizationRead } from "../../../../../ui/settings-read.ts";
 import {
@@ -450,12 +450,40 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
           ),
         });
 
+  /*
+   * The window is a filter, so it sits where every list page in this product
+   * keeps its filters: the left of the one strip under the title bar, opposite
+   * the one action. A person moving between Runs and Monitoring should not
+   * have to look in two places for the same kind of control.
+   */
+  const filters = (
+    <Select
+      id="window"
+      className={TOOLBAR_FILTER}
+      value={choice ?? DEFAULT_WINDOW}
+      aria-label={LIST.window}
+      onChange={(event) => choose(event.target.value as WindowChoice)}
+    >
+      {WINDOWS.map((one) => (
+        <option key={one.id} value={one.id}>
+          {one.label}
+        </option>
+      ))}
+    </Select>
+  );
+
   return (
     <ProductPage wide>
+      {/*
+        The title, the filter and the action, and nothing else above the list.
+        The boards draw no label and no purpose sentence over a list screen
+        (`71V-0`, `71N-0`): the sidebar already says which section this is and
+        which project it belongs to, and the table under it says what it holds.
+        The purpose sentence stays where a form needs one.
+      */}
       <PageHeader
-        eyebrow={LIST.eyebrow}
         title={LIST.title}
-        lead={LIST.lead}
+        toolbar={filters}
         action={
           <Button asChild>
             <Link href={startMonitoringPath(projectId)}>{LIST.startMonitoring}</Link>
@@ -463,27 +491,6 @@ function Transcripts({ projectId }: { readonly projectId: string }) {
         }
       />
       <PageBody>
-        {/*
-          The window is a filter, so it sits where every list page in this
-          product now keeps its filters: the left of the strip above the list.
-          A person moving between Runs and Monitoring should not have to look
-          in two places for the same kind of control.
-        */}
-        <Toolbar>
-          <Select
-            id="window"
-            className={TOOLBAR_FILTER}
-            value={choice ?? DEFAULT_WINDOW}
-            aria-label={LIST.window}
-            onChange={(event) => choose(event.target.value as WindowChoice)}
-          >
-            {WINDOWS.map((one) => (
-              <option key={one.id} value={one.id}>
-                {one.label}
-              </option>
-            ))}
-          </Select>
-        </Toolbar>
         {state.status === "failed" ? (
           <Failure
             message={state.why}

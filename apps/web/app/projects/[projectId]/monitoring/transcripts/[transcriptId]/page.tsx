@@ -55,7 +55,6 @@ import { SPEAKERS } from "../../../../../../ui/evidence.tsx";
 import { shownScore } from "../../../../../../ui/run-status.tsx";
 import { JudgmentCard } from "../../../../../judgment-card.tsx";
 import { RecordingPlayer } from "../../../../../recording-player.tsx";
-import { PageNavigation } from "../../../../../../ui/page-navigation.tsx";
 import { Loading } from "../../../../../../ui/page-state.tsx";
 import {
   RelativeInstant,
@@ -65,6 +64,7 @@ import {
   AppShell,
   LinkLine,
   Notice,
+  PageBody,
   PageHeader,
   ProductPage,
   ProductStatePage,
@@ -85,12 +85,24 @@ import {
  * four rules out of five would look right.
  * ------------------------------------------------------------------------ */
 
-/** The word above one fact: the compact uppercase caption, in the mono face. */
+/**
+ * The word above one fact: the compact uppercase caption, in the mono face.
+ *
+ * `--faint` is the recipe's one quiet-label colour, and it is the colour a
+ * table's column heading takes two blocks further down this same page. Two
+ * greys for one job is what makes a screen look assembled rather than drawn.
+ */
 const FACT_LABEL =
-  "font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase";
+  "font-mono text-sm tracking-(--tracking-label) text-faint uppercase";
 
-/** The figure under it, which is a value rather than a heading. */
-const FACT_VALUE = "text-sm font-normal [overflow-wrap:anywhere]";
+/**
+ * The figure under it, which is a value rather than a heading.
+ *
+ * "Metrics, dates, durations, and scores use tabular numerals." Every one of
+ * these strips is a row of figures somebody reads across, and a proportional
+ * face puts each of them at its own width.
+ */
+const FACT_VALUE = "text-sm font-normal tabular-nums [overflow-wrap:anywhere]";
 
 /**
  * One fact inside a strip: a label over a figure, with the hairline that
@@ -380,12 +392,6 @@ export default function TranscriptPage({
   return (
     <AppShell>
       <ProductPage wide>
-        <PageNavigation
-          items={[
-            { label: LIST.title, href: transcriptsPath(projectId) },
-            { label: DETAIL.title },
-          ]}
-        />
         {/*
           The product's own page header, rather than one this page drew for
           itself. It used to carry a heading that grew to 56px — type
@@ -393,12 +399,31 @@ export default function TranscriptPage({
           settled transcript did not even match its own loading state, which
           has always been drawn by the shared header underneath
           `ProductStatePage`.
+
+          **The trail moved into the title bar with it.** It used to be drawn
+          above the bar as a sibling of `<main>`, where it had none of the
+          page's gutters and sat over the bar rather than in it; `breadcrumbs`
+          is where the shared header keeps a trail, and it is what every other
+          record page in this product hands it.
+
+          Where the trace came from goes into the lead, because a page with a
+          real trail draws no label above its title — and this is the only
+          place the page states which source and which environment this
+          exchange belongs to. It is a fact about the record, the same kind as
+          the two beside it.
         */}
         <PageHeader
-          eyebrow={`${detail.trace.source} / ${detail.trace.environment}`}
           title={DETAIL.title}
+          breadcrumbs={[
+            { label: LIST.title, href: transcriptsPath(projectId) },
+            { label: DETAIL.title },
+          ]}
           lead={
             <>
+              <span>
+                {detail.trace.source} / {detail.trace.environment}
+              </span>
+              {" · "}
               <RelativeInstant instant={openedAt} now={now} precision="second" />
               {" · "}
               {howLong(detail.trace.durationNs)}
@@ -421,6 +446,7 @@ export default function TranscriptPage({
           }
         />
 
+        <PageBody>
         <Summary facts={detail.trace} />
         <Measures measured={detail.measures ?? []} />
         {detail.outcome ? (
@@ -570,6 +596,7 @@ export default function TranscriptPage({
           </section>
           <Inspector selected={selected} facts={detail.trace} openedAt={openedAt} />
         </div>
+        </PageBody>
       </ProductPage>
     </AppShell>
   );
