@@ -62,7 +62,6 @@ function registration(name: string, project: string): Record<string, unknown> {
     name,
     projectId: project,
     connection: {
-      agentPlatform: "retell",
       connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
@@ -74,7 +73,6 @@ function registration(name: string, project: string): Record<string, unknown> {
 
 /** A voice connection that starts without carrier configuration in this API. */
 const LIVEKIT_VOICE = {
-  agentPlatform: "livekit_agents",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
@@ -324,7 +322,6 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        agentPlatform: "retell",
         connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
@@ -534,7 +531,6 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
       name: "Outbound desk",
       connection: {
-        agentPlatform: "retell",
         connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
@@ -616,7 +612,6 @@ describe("a browser working in a project that is not the first", () => {
     const registered = await asBrowser("POST", `/v1/agents?projectId=${outbound}`, {
       name: "Outbound desk",
       connection: {
-        agentPlatform: "retell",
         connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
@@ -809,7 +804,6 @@ describe("a key for the whole organization, where the organization holds two pro
         modality === "voice"
           ? LIVEKIT_VOICE
           : {
-              agentPlatform: "retell",
               connectionType: "retell_chat_api",
               accessVariant: "retell_chat_api.api_key",
               modality: "chat",

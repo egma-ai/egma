@@ -86,7 +86,6 @@ async function aJudgedRun(label: string): Promise<{
   const registered = await request("POST", "/v1/agents", key, {
     name: "Front desk",
     connection: {
-      agentPlatform: "retell",
       connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",

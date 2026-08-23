@@ -662,7 +662,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         body: {
           name: "Front desk",
           connection: {
-            agentPlatform: "retell",
             connectionType: "retell_chat_api",
             accessVariant: "retell_chat_api.api_key",
             modality: "chat",
@@ -678,7 +677,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const attached = await call("POST", `/v1/agents/${agentId}/connections`, {
         key,
         body: {
-          agentPlatform: "retell",
           connectionType: "retell_chat_api",
           accessVariant: "retell_chat_api.api_key",
           modality: "chat",

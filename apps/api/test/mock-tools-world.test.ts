@@ -63,7 +63,6 @@ const RESCHEDULING = {
  */
 function retellFor(name: string): Record<string, unknown> {
   return {
-    agentPlatform: "retell",
     connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",

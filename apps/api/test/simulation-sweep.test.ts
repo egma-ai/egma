@@ -72,7 +72,6 @@ async function anOrphan(
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
     name: "Front desk",
     connection: {
-      agentPlatform: "retell",
       connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",

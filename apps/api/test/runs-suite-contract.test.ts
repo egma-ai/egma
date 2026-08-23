@@ -31,7 +31,6 @@ afterEach(async () => {
 });
 
 const RETELL = {
-  agentPlatform: "retell",
   connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
@@ -40,7 +39,6 @@ const RETELL = {
 } as const;
 
 const PHONE = {
-  agentPlatform: null,
   connectionType: "phone_number",
   accessVariant: "phone_number.public_e164",
   modality: "voice",

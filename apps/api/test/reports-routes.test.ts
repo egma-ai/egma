@@ -47,7 +47,6 @@ const RESCHEDULING = {
 } as const;
 
 const RETELL = {
-  agentPlatform: "retell",
   connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
@@ -493,7 +492,6 @@ describe("the lifecycle lands", () => {
       { platformSettings: PHONE_IS_SET_UP },
     );
     const attached = await ask(api.app, "POST", `/v1/agents/${agentId}/connections`, key, {
-      agentPlatform: null,
       connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",

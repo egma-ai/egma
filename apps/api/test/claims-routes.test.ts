@@ -56,7 +56,6 @@ const RESCHEDULING = {
 } as const;
 
 const RETELL = {
-  agentPlatform: "retell",
   connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
@@ -65,7 +64,6 @@ const RETELL = {
 } as const;
 
 const LIVEKIT = {
-  agentPlatform: "livekit_agents",
   connectionType: "livekit_room",
   accessVariant: "livekit_room.project_credentials",
   modality: "voice",
@@ -77,7 +75,6 @@ const LIVEKIT = {
 } as const;
 
 const PHONE = {
-  agentPlatform: null,
   connectionType: "phone_number",
   accessVariant: "phone_number.public_e164",
   modality: "voice",
