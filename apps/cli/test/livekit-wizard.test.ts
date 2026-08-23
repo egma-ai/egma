@@ -93,22 +93,61 @@ function claimsWithoutEditing(): FakeStep[] {
 }
 
 /**
- * A scripted agent that writes the line and leaves it commented out.
+ * The awaited call, exactly as the skill publishes it.
  *
- * The file really changes and really holds the words, which is what makes this
- * the one a check on the text alone would wave through.
+ * Held in one constant because every shape below writes these same words: what
+ * separates them is only whether the file makes them run.
  */
-const WORKER_COMMENTED = WORKER_BEFORE.replace(
-  "    await session.start(agent=agent, room=ctx.room)",
-  [
-    "    # await mockable(agent, ctx, session)",
-    "    await session.start(agent=agent, room=ctx.room)",
-  ].join("\n"),
-);
+const CALL = "await mockable(agent, ctx, session)";
 
-function claimsACommentedOutCall(): FakeStep[] {
+/** The worker with `lines` put in above where the session starts. */
+function workerWith(...lines: readonly string[]): string {
+  return WORKER_BEFORE.replace(
+    "    await session.start(agent=agent, room=ctx.room)",
+    [...lines, "    await session.start(agent=agent, room=ctx.room)"].join("\n"),
+  );
+}
+
+/**
+ * The four ways the words end up in the file without the call ever running.
+ *
+ * Every one of them really changes the file and really holds the exact line the
+ * skill teaches, which is what makes them the shapes a check on the text alone
+ * would wave through — and it is exactly the shape a model reaches for when it
+ * has been asked to add one line and is explaining itself while it does.
+ */
+const MENTIONED_NOT_CALLED = [
+  { what: "a whole-line comment", lines: [`    # ${CALL}`] },
+  { what: "a docstring", lines: ["    \"\"\"Egma is wired below:", `    ${CALL}`, '    """'] },
+  { what: "a string literal", lines: [`    _wired = "${CALL}"`] },
+  { what: "an inline trailing comment", lines: [`    agent = agent  # ${CALL}`] },
+] as const;
+
+/** A scripted agent that writes one of those and reports the edit anyway. */
+function claimsAMentionOnly(lines: readonly string[]): FakeStep[] {
   return [
-    { kind: "write-file", path: "agent.py", content: WORKER_COMMENTED },
+    { kind: "write-file", path: "agent.py", content: workerWith(...lines) },
+    { kind: "say", text: "egma:found sdk-entry agent.py\n" },
+    { kind: "stop", reason: "end_turn" },
+  ];
+}
+
+/**
+ * The control: a worker that explains itself in a docstring *and* runs the
+ * call.
+ *
+ * Refusing this would be the check overshooting — the mention is how people
+ * write code, and the line underneath it is a real edit.
+ */
+function claimsARealCallBesideAMention(): FakeStep[] {
+  const wired = workerWith(
+    '    """Egma answers this agent\'s tools from here:',
+    `    ${CALL}`,
+    '    """',
+    `    ${CALL}`,
+  ).replace("from livekit import agents", "from egma import mockable\nfrom livekit import agents");
+  return [
+    { kind: "write-file", path: "agent.py", content: wired },
     { kind: "say", text: "egma:found sdk-entry agent.py\n" },
     { kind: "stop", reason: "end_turn" },
   ];
@@ -594,26 +633,49 @@ describe("LiveKit in the wizard", () => {
   });
 
   /**
-   * A call that is commented out is not a call.
+   * Words in a file are not a call.
    *
-   * The words are in the file, so anything that only looked for them would say
-   * the worker was wired. What matters is whether the line runs, and a line
-   * behind a `#` does not.
+   * Each of these really writes the exact line the skill teaches, and in none of
+   * them does it run. Anything that searched the text would say the worker was
+   * wired; what decides is whether the file makes it code.
    */
-  it("does not believe a call that was left commented out", async () => {
+  it.each(MENTIONED_NOT_CALLED)(
+    "does not believe the call when it is only in $what",
+    async ({ lines }) => {
+      const { report, ui } = await liveKitLane({
+        framework: "livekit-agents",
+        mocking: claimsAMentionOnly(lines),
+      });
+
+      expect(report.kind).toBe("run-started");
+      // The words really are in the file, which is the whole point of the case.
+      expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toContain(CALL);
+      expect(ui.record.statuses.join("\n")).toContain(
+        "Egma read agent.py and found no awaited mockable() in it.",
+      );
+      expect(ui.record.gate?.changed).toEqual([]);
+      expect(ui.record.statuses.some((line) => line.includes("testing entry is in"))).toBe(
+        false,
+      );
+    },
+  );
+
+  /**
+   * And the control, so the check is known to be reading code rather than
+   * refusing everything that mentions the line.
+   *
+   * A worker that explains itself in a docstring and runs the call underneath
+   * is an ordinary worker, and Egma believes it.
+   */
+  it("believes a real call that sits under a docstring mentioning it", async () => {
     const { report, ui } = await liveKitLane({
       framework: "livekit-agents",
-      mocking: claimsACommentedOutCall(),
+      mocking: claimsARealCallBesideAMention(),
     });
 
     expect(report.kind).toBe("run-started");
-    expect(await readFile(path.join(workspace.dir, "agent.py"), "utf8")).toContain(
-      "# await mockable(",
-    );
-    expect(ui.record.statuses.join("\n")).toContain(
-      "Egma read agent.py and found no awaited mockable() in it.",
-    );
-    expect(ui.record.gate?.changed).toEqual([]);
+    expect(ui.record.statuses).toContain("◆ Egma's testing entry is in agent.py");
+    expect(ui.record.gate?.changed).toEqual(["agent.py"]);
   });
 
   /**

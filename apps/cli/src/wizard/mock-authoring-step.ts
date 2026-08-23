@@ -71,29 +71,131 @@ const SDK_ENTRY_FACT = "sdk-entry";
  * a model varies: the whitespace, a line break after `await`, and a module
  * prefix on the name for a worker that imported the package rather than the
  * function.
+ *
+ * **Where this check stops, on purpose.** It reads the file's code, so an
+ * awaited call that is only mentioned — in a comment, a docstring, a string —
+ * does not count. It cannot tell whether the code it found is on the path the
+ * worker really takes: a real call in a function nothing dispatches would pass
+ * here. Proving that is a call graph, which is not something deterministic CLI
+ * code has any business doing to somebody's repository, and it is answered for
+ * real one step later — the mock-tool coverage stamp on the first simulation is
+ * written by the SDK when it actually runs, and it is the verifier that cannot
+ * be talked into anything. This check exists to tell an edit that happened from
+ * one that did not, which is the failure that really comes up.
  */
 const AWAITED_MOCKABLE = /\bawait\s+(?:[A-Za-z_]\w*\s*\.\s*)*mockable\s*\(/u;
 
-/** A line that is only a comment, in either language a worker is written in. */
-const COMMENT_LINE = /^\s*(?:#|\/\/)/u;
+/** The two ways a Python string opens and the text it runs to. */
+const TRIPLE_QUOTES = ['"""', "'''"] as const;
 
 /**
- * The file with its commented-out lines blanked, so the check reads code.
+ * A line that is only a `//` comment, which is not Python at all.
  *
- * The realistic accident is the line left commented out — a model that pasted
- * the skill's example above the place it meant to put it, or wrote the call and
- * then commented it while it worked something else out. Blanked rather than
- * removed, so a call spread over several lines still reads as one thing.
- *
- * This is a check and not a parser, and it does not pretend otherwise: a call
- * inside a docstring would still read as code here. What it is for is telling
- * an edit that happened from one that did not, and for that the whole-line
- * comment is the case that really comes up.
+ * Kept as a second pass rather than taught to the scanner, because `//` inside
+ * Python is floor division and blanking from it to the end of the line would
+ * take real code with it. A line that *starts* with it is another language's
+ * comment in a file somebody named by mistake, and blanking that costs nothing.
  */
-function withoutComments(source: string): string {
-  return source
+const FOREIGN_COMMENT_LINE = /^\s*\/\//u;
+
+/**
+ * The file with everything that is not Python code blanked out.
+ *
+ * A model that has been asked to add one line writes it in more places than the
+ * one that runs: pasted above the call site as a comment, quoted in the
+ * docstring it wrote to explain itself, left in a string while it worked
+ * something else out. Every one of those puts the exact words in the file, so
+ * anything that only searched the text would say the worker was wired when it
+ * is not — and the developer would run a whole suite against their real backend
+ * with every screen telling them it was isolated.
+ *
+ * So the file is read character by character first, tracking one piece of state
+ * — what, if anything, is being read through to its end — and comments and
+ * string bodies are replaced by spaces. Newlines survive, so a line number is
+ * still a line number and a call written across two lines still reads as one
+ * thing.
+ *
+ * This is a scanner and not a parser, and the difference is deliberate: it
+ * knows quotes, escapes and `#`, and it knows nothing about what any of it
+ * means. A quote that never closes on its own line hands reading back to code
+ * at the newline rather than swallowing the rest of the file, which is what
+ * keeps a file that is not Python at all from turning into one long string.
+ */
+function pythonCode(source: string): string {
+  const out: string[] = new Array<string>(source.length);
+  /** What is being read through to its end, or `null` while reading code. */
+  let closes: string | null = null;
+  let inComment = false;
+  let at = 0;
+
+  const keep = (): void => {
+    out[at] = source[at] as string;
+    at += 1;
+  };
+  const blank = (howMany: number): void => {
+    for (let taken = 0; taken < howMany && at < source.length; taken += 1) {
+      out[at] = source[at] === "\n" ? "\n" : " ";
+      at += 1;
+    }
+  };
+
+  while (at < source.length) {
+    const here = source[at] as string;
+
+    if (inComment) {
+      if (here === "\n") {
+        inComment = false;
+        keep();
+      } else blank(1);
+      continue;
+    }
+
+    if (closes !== null) {
+      // An escape takes the character after it with it, whatever that is — a
+      // quote that does not close the string, or the newline of a continuation.
+      if (here === "\\") {
+        blank(2);
+        continue;
+      }
+      if (source.startsWith(closes, at)) {
+        blank(closes.length);
+        closes = null;
+        continue;
+      }
+      if (here === "\n" && closes.length === 1) {
+        closes = null;
+        keep();
+        continue;
+      }
+      blank(1);
+      continue;
+    }
+
+    if (here === "#") {
+      inComment = true;
+      blank(1);
+      continue;
+    }
+    // Tried before the single quotes, so `"""` opens a docstring rather than an
+    // empty string followed by one.
+    const triple = TRIPLE_QUOTES.find((quotes) => source.startsWith(quotes, at));
+    if (triple !== undefined) {
+      closes = triple;
+      blank(triple.length);
+      continue;
+    }
+    if (here === '"' || here === "'") {
+      closes = here;
+      blank(1);
+      continue;
+    }
+    keep();
+  }
+
+  return out
+    .join("")
     .split("\n")
-    .map((line) => (COMMENT_LINE.test(line) ? "" : line))
+    .map((line) => (FOREIGN_COMMENT_LINE.test(line) ? "" : line))
     .join("\n");
 }
 
@@ -169,7 +271,7 @@ async function reportedEntry(
     };
   }
 
-  if (!AWAITED_MOCKABLE.test(withoutComments(source))) {
+  if (!AWAITED_MOCKABLE.test(pythonCode(source))) {
     return {
       kind: "unverified",
       reason: `Egma read ${shown} and found no awaited mockable() in it.`,
