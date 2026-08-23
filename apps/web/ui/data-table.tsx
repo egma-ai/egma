@@ -200,13 +200,24 @@ export function DataTable<Row>({
                       "stacked:justify-between stacked:gap-3 stacked:border-0 stacked:p-0",
                       column === primary
                         ? "stacked:mb-1"
-                        : [
-                            /* The header is the label, said again beside the fact. */
-                            "stacked:before:flex-none stacked:before:text-xs",
-                            "stacked:before:tracking-(--tracking-label) stacked:before:text-faint",
-                            "stacked:before:uppercase",
-                            "stacked:before:content-[attr(data-label)]",
-                          ],
+                        : column.action === true
+                          ? /*
+                             * **The lane carries no label, in either layout.**
+                             * The header cell is empty by the boards' own
+                             * drawing and the control inside names itself, so
+                             * a stacked row that wrote "ACTIONS" above a ⋮
+                             * would be saying the same word twice — once in
+                             * capitals. What is left is the control alone, at
+                             * the trailing edge, which is the lane.
+                             */
+                            "stacked:justify-end"
+                          : [
+                              /* The header is the label, said again beside the fact. */
+                              "stacked:before:flex-none stacked:before:text-xs",
+                              "stacked:before:tracking-(--tracking-label) stacked:before:text-faint",
+                              "stacked:before:uppercase",
+                              "stacked:before:content-[attr(data-label)]",
+                            ],
                       "data-[action=true]:stacked:mt-2 data-[action=true]:stacked:items-center",
                       /* A row control that drew nothing leaves no empty line. */
                       "data-[action=true]:max-[900px]:has-[[data-slot=cell]:empty]:hidden",

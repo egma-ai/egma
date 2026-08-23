@@ -286,6 +286,7 @@ export function PersonaSheet({
 }) {
   const now = useMinuteClock();
   const nameField = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const {
     answer,
@@ -411,6 +412,19 @@ export function PersonaSheet({
    * fork under. Selecting the field is what makes renaming the next keystroke
    * rather than a thing somebody has to notice.
    */
+  /**
+   * A panel that starts showing something else starts at the top of it.
+   *
+   * The body is one scrolling column and the three modes are the same column
+   * with other content in it, so without this, pressing *Read* on a version
+   * somebody had to scroll down to reach leaves them looking at the middle of
+   * the frozen version they asked for.
+   */
+  useEffect(() => {
+    const scroller = bodyRef.current;
+    if (scroller !== null) scroller.scrollTop = 0;
+  }, [reading, editing, personaId]);
+
   const filled = held !== null;
   useEffect(() => {
     if (!focusName || !editing || !filled) return;
@@ -954,21 +968,21 @@ export function PersonaSheet({
   function body() {
     if (answer === null || answer.status === "signed-out") {
       return (
-        <SheetBody>
+        <SheetBody ref={bodyRef}>
           <Loading what="this persona" />
         </SheetBody>
       );
     }
     if (answer.status === "missing") {
       return (
-        <SheetBody>
+        <SheetBody ref={bodyRef}>
           <NotFound message={answer.refusal.message} />
         </SheetBody>
       );
     }
     if (answer.status === "failed") {
       return (
-        <SheetBody>
+        <SheetBody ref={bodyRef}>
           <Failure message={answer.refusal.message} onRetry={reload} />
         </SheetBody>
       );
@@ -980,7 +994,7 @@ export function PersonaSheet({
     // persona that is not there says so rather than loading forever.
     if (held === null) {
       return (
-        <SheetBody>
+        <SheetBody ref={bodyRef}>
           <Loading what="this persona" />
         </SheetBody>
       );
@@ -994,7 +1008,7 @@ export function PersonaSheet({
       form === null
     ) {
       return (
-        <SheetBody>
+        <SheetBody ref={bodyRef}>
           <Loading what="the supported persona models" />
         </SheetBody>
       );
@@ -1008,7 +1022,7 @@ export function PersonaSheet({
           void saveChanges();
         }}
       >
-        <SheetBody>
+        <SheetBody ref={bodyRef}>
           {refusal === null ? null : (
             <Refused
               message={refusal.message}
