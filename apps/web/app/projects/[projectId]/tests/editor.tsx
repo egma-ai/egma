@@ -996,7 +996,7 @@ export function SaveAction({
            */
           className={
             disabled || !changed
-              ? "border-border bg-surface text-faint disabled:opacity-100 pointer-hover:bg-surface pointer-hover:text-faint"
+              ? "border-border bg-surface text-faint disabled:opacity-100"
               : undefined
           }
           {...(why === undefined ? {} : { why })}
