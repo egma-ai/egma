@@ -41,12 +41,19 @@ type State =
  * The facts about what is being approved: a list, a row, the name of a fact,
  * and the fact itself. A row is 56px so that the one row carrying a control
  * has room for a 44px target without the rows around it changing height.
+ *
+ * **The padding is 4px because the row's height is 56px and not the other way
+ * round.** Box-sizing counts padding inside a `min-height`, so the 12px this
+ * row used to pay left 32px for a 44px select and the Project row came out
+ * 68px tall beside a 56px Organization row — the exact thing the sentence
+ * above promises does not happen. Four is what a 44px control leaves, and its
+ * whole job is to keep a wrapped name off the hairline.
  */
 const FACT_LIST = "m-0 border-t border-border";
 const FACT_ROW =
-  "flex min-h-[56px] items-center justify-between gap-5 border-b border-border py-3";
+  "flex min-h-14 items-center justify-between gap-5 border-b border-border py-1";
 const FACT_NAME = "text-sm text-muted-foreground";
-const FACT_VALUE = "m-0 text-right font-normal";
+const FACT_VALUE = "m-0 text-right text-base font-normal text-foreground";
 
 /** Where each ending sends the browser. */
 const ENDING: Record<string, string> = {
@@ -139,7 +146,14 @@ export default function ApproveDevicePage() {
     }
   }
 
-  if (state.at === "loading") return <StatePage title="Loading authorization" lead="Checking the terminal code." />;
+  if (state.at === "loading") {
+    return (
+      <StatePage
+        title="Loading authorization"
+        lead="Checking the terminal code."
+      />
+    );
+  }
 
   if (state.at === "unreachable") {
     return (
@@ -211,12 +225,17 @@ export default function ApproveDevicePage() {
       </dl>
 
       {/* Deny reads first and Approve is the filled one, so the stronger of the
-          two is never the one somebody reaches by habit. Stacked on a narrow
-          screen, Approve stays at the bottom under the thumb. */}
+          two is never the one somebody reaches by habit. On a narrow screen
+          the pair stacks and `flex-col-reverse` puts Approve on top, which is
+          what the class has always drawn — the sentence that used to be here
+          claimed the opposite. Which way round a security screen should stack
+          is a decision rather than a bug, so the drawing is unchanged and the
+          question is in the pull request. */}
       <div className="mt-6 flex gap-3 max-[620px]:flex-col-reverse [&>*]:flex-1">
         <Button
           type="button"
           variant="secondary"
+          size="lg"
           disabled={busy}
           onClick={() => void answer("/api/device/deny")}
         >
@@ -224,6 +243,7 @@ export default function ApproveDevicePage() {
         </Button>
         <Button
           type="button"
+          size="lg"
           disabled={busy}
           onClick={() => void answer("/api/device/approve")}
         >

@@ -318,6 +318,14 @@
    */
   --sheet-width: 440px;
   --sheet-width-wide: 640px;
+  /*
+   * The access panel, which is 440px for a different reason than a side sheet
+   * is. A sheet is that wide because it is a modal panel over a list that
+   * stays on screen; this one floats over nothing and is that wide because it
+   * is the whole of what somebody is doing. One name each, so a later change
+   * to either does not silently move the other.
+   */
+  --access-panel-width: 440px;
   --dialog-width: 480px;
   --search-width: 300px;
   --chip-height: 22px;

@@ -112,7 +112,6 @@ export default function SignUpPage() {
   if (availability === null) {
     return (
       <StatePage
-        animated
         title="Loading Egma"
         lead="Checking whether this instance is ready for setup."
       />
@@ -121,10 +120,7 @@ export default function SignUpPage() {
 
   if (!availability.open) {
     return (
-      <StatePage
-        animated
-        title="Ask an admin for an invitation to this Egma instance."
-      >
+      <StatePage title="Ask an admin for an invitation to this Egma instance.">
         <LinkLine>
           Already have an account?{" "}
           <a
@@ -142,7 +138,6 @@ export default function SignUpPage() {
 
   return (
     <AuthShell
-      animated
       eyebrow="First setup"
       title="Set up Egma"
       lead="One step. Your organization and your first project are created together."
@@ -208,7 +203,7 @@ export default function SignUpPage() {
           />
         </Field>
 
-        <Button type="submit" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Setting up…" : "Create my Egma instance"}
         </Button>
       </AuthForm>
