@@ -1,5 +1,6 @@
 "use client";
 
+import { EyeOffIcon } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createApiKey, listApiKeys, revokeApiKey } from "@egma/platform-api/client";
@@ -17,6 +18,8 @@ import {
   type MintedApiKey,
 } from "../../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
+import { Card, CardFooter } from "@/components/ui/card";
+import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 
@@ -84,6 +87,19 @@ export default function ApiKeysSettingsPage() {
 const WHOLE_ORGANIZATION = "";
 
 /**
+ * The lane a row's own controls stand in.
+ *
+ * The shared table draws the trailing cell as the boards do — a fixed 48px slot
+ * with no side padding, so that every ⋮ in the product lines up in one column
+ * down the table (`78X-0`). A cell holding a named button rather than a ⋮ is
+ * wider than the slot and grows it, and with no padding of its own the button
+ * then sits against the panel's own hairline. This puts the row's padding back
+ * inside the cell, where the width is the caller's problem rather than the
+ * table's.
+ */
+const ROW_ACTIONS = "flex items-center justify-end gap-2 px-4";
+
+/**
  * The only copy of a newly minted secret.
  *
  * This component sits above the key-list read rather than inside it. A refresh
@@ -114,21 +130,51 @@ function ApiKeyReceipt({
   }
 
   return (
-    <Section title="Copy your new key">
-      <p role="status">
-        <strong>Here is your key. Copy it now.</strong> Egma will not show it
-        again, and cannot: only its hash was kept. <code>{keyValue.secret}</code>
-      </p>
-      <Button type="button" onClick={() => void copy()}>
-        Copy key
-      </Button>{" "}
-      <Button type="button" variant="secondary" onClick={onDismiss}>
-        Dismiss
-      </Button>
-      {copyState === "copied" ? <Help>Copied.</Help> : null}
-      {copyState === "failed" ? (
-        <Refused message="Egma could not copy the key. Select it above and copy it before you dismiss this message." />
-      ) : null}
+    <Section
+      title="Copy your new key"
+      /*
+       * That this is the only time, said beside the heading rather than only
+       * inside the paragraph under it — which is what `2BN-0` draws. The word
+       * carries the meaning and the icon carries it again for anybody reading
+       * without colour: "state is not communicated by colour alone".
+       */
+      action={
+        <span className="inline-flex items-center gap-2 text-sm text-(--bad)">
+          <EyeOffIcon aria-hidden="true" className="size-4" strokeWidth={1.75} />
+          Shown once
+        </span>
+      }
+    >
+      <Card className="gap-4">
+        <div className="flex flex-col gap-3">
+          <p className="m-0 max-w-[72ch] text-sm text-muted-foreground" role="status">
+            <strong className="font-medium text-foreground">
+              Here is your key. Copy it now.
+            </strong>{" "}
+            Egma will not show it again, and cannot: only its hash was kept.
+          </p>
+          {/*
+           * The secret on its own contained surface, in the mono face, wrapped
+           * rather than clipped (`7D6-0`). A key that ran off the edge of its
+           * line would be a key somebody copied half of.
+           */}
+          <code className="block rounded-input border border-border bg-surface-soft p-3 font-mono text-sm break-all text-foreground">
+            {keyValue.secret}
+          </code>
+        </div>
+        <CardFooter>
+          <Button type="button" onClick={() => void copy()}>
+            Copy key
+          </Button>
+          <Button type="button" variant="secondary" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </CardFooter>
+        {copyState === "copied" ? <Help>Copied.</Help> : null}
+        {copyState === "failed" ? (
+          <Refused message="Egma could not copy the key. Select it above and copy it before you dismiss this message." />
+        ) : null}
+      </Card>
     </Section>
   );
 }
@@ -249,14 +295,16 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
          */
         action: true,
         cell: (key) => (
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={busy}
-            onClick={() => setConfirmingRevoke(key)}
-          >
-            Revoke
-          </Button>
+          <div className={ROW_ACTIONS}>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setConfirmingRevoke(key)}
+            >
+              Revoke
+            </Button>
+          </div>
         ),
       },
     ];
@@ -285,7 +333,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage viewport>
       <PageHeader
-        eyebrow="Settings"
         title="API keys"
         breadcrumbs={[
           { label: "Settings", href: settingsPath(projectId) },
@@ -417,25 +464,35 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
         >
           {(dismiss) => (
             <>
-              <p>
+              <p className="m-0 max-w-[62ch] text-sm text-muted-foreground">
                 {confirmingRevoke.name ?? "This key"} will stop working on its next
                 request. This action cannot be undone.
               </p>
-              <Button type="button" variant="secondary" onClick={dismiss}>
-                Cancel
-              </Button>{" "}
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={busy}
-                onClick={() => {
-                  const key = confirmingRevoke;
-                  setConfirmingRevoke(null);
-                  void revoke(key);
-                }}
-              >
-                Revoke key
-              </Button>
+              {/*
+               * The answer leads and the way out follows it, both at the left
+               * edge, which is what `BK9-0` draws. Without the footer the two
+               * were flex children of the panel's own column and each ran the
+               * full width of it, stacked — two blocks where the board has one
+               * row.
+               */}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="destructive"
+                  disabled={busy}
+                  onClick={() => {
+                    const key = confirmingRevoke;
+                    setConfirmingRevoke(null);
+                    void revoke(key);
+                  }}
+                >
+                  Revoke key
+                </Button>
+                <Button type="button" size="lg" variant="secondary" onClick={dismiss}>
+                  Cancel
+                </Button>
+              </DialogFooter>
             </>
           )}
         </Dialog>
