@@ -181,6 +181,25 @@ const MEASURED_CONNECTION = {
   credentialsHint: null,
 };
 
+/**
+ * A third way in, on the other platform. An agent reached on Retell and on
+ * LiveKit at the same time is an ordinary state, not a mistake, so a row has to
+ * be able to say both.
+ */
+const LIVEKIT_CONNECTION = {
+  ...CONNECTION,
+  id: "con_3",
+  name: "livekit room",
+  agentPlatform: "livekit_agents",
+  connectionType: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
+  productLabel: "LiveKit project credentials",
+  modality: "voice",
+  topology: "egma-dials-out",
+  environment: "production",
+  config: { url: "wss://egma.livekit.cloud", agentName: "front-desk" },
+};
+
 /** An agent as the *list* answers it: the identity, and every way in. */
 const LISTED_AGENT = {
   ...AGENT,
@@ -530,6 +549,31 @@ describe("reading an agent's reach from the list", () => {
     // are what is asserted rather than the pixels.
     expect(asked().filter((one) => one.startsWith("/v1/agents"))).toHaveLength(1);
     expect(asked().some((one) => one.includes("/v1/agents/"))).toBe(false);
+  });
+
+  /**
+   * **An agent can be reached on two platforms at once.** The cell named
+   * whichever platform the first connection carried, so one agent on Retell
+   * and LiveKit said only one of them — and archiving that connection changed
+   * the answer with nothing about the agent having changed.
+   */
+  it("names every platform an agent's connections are on", async () => {
+    listOf({
+      ...LISTED_AGENT,
+      // The LiveKit way in comes back first, so a cell reading the first
+      // connection would say "LiveKit Agents" and stop there.
+      connections: [LIVEKIT_CONNECTION, CONNECTION, MEASURED_CONNECTION],
+    });
+    render(<AgentsPage />);
+    await screen.findAllByText("Front desk");
+
+    // One cell, both platforms, in the vocabulary's order rather than the
+    // order the connections were made in.
+    expect(screen.getByText("Retell · LiveKit Agents")).toBeDefined();
+    // And one platform on its own is nowhere on the row, which would read as
+    // an agent on one of them.
+    expect(screen.queryByText("Retell")).toBeNull();
+    expect(screen.queryByText("LiveKit Agents")).toBeNull();
   });
 
   it("says plainly when egma has no way into an agent", async () => {

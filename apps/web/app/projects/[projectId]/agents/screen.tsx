@@ -8,7 +8,7 @@ import { archiveAgent, listAgents } from "@egma/platform-api/client";
 import { Button } from "@/components/ui/button";
 import type { Refusal } from "@/lib/api.ts";
 import {
-  agentPlatformOf,
+  agentPlatformText,
   NO_PLATFORM,
   type AgentPage,
   type ListedAgentWithConnections,
@@ -18,7 +18,6 @@ import { firstProjectOf, roleOf } from "@/lib/me.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { projectLanding, projectPath } from "@/lib/project-context.ts";
 import { canAuthor } from "@/lib/roles.ts";
-import { agentPlatformLabel } from "@/lib/transcripts.ts";
 import { DataTable, type Column } from "@/ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { useProjectRead } from "@/ui/resource.ts";
@@ -236,14 +235,15 @@ export function AgentsScreen({
          * is written only when Start monitoring binds it, so an agent with a
          * live Retell connection still says nothing about itself. What a person
          * means by "which platform is this on" is answered by the way in.
+         *
+         * **And by every way in.** An agent reached on Retell and on LiveKit
+         * is on both, so the cell names both rather than whichever connection
+         * was made first.
          */
         key: "platform",
         header: "Platform",
         width: "160px",
-        cell: (agent) => {
-          const platform = agentPlatformOf(agent);
-          return platform === null ? NO_PLATFORM : agentPlatformLabel(platform);
-        },
+        cell: (agent) => agentPlatformText(agent) ?? NO_PLATFORM,
       },
       {
         key: "connections",

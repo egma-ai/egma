@@ -23,7 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Answer, Refusal } from "@/lib/api.ts";
 import type { ListedAgent, ListedAgentWithConnections } from "@/lib/agents.ts";
-import { agentPlatformOf } from "@/lib/agents.ts";
+import { agentPlatformText } from "@/lib/agents.ts";
 import {
   agentPlatformChoices,
   agentsForOption,
@@ -538,7 +538,7 @@ export function ConnectAgentSheet({
   const choices: readonly { readonly id: string; readonly label: string }[] = [
     ...agents.map((one) => ({
       id: one.id,
-      label: labelFor(one.name, agentPlatformOf(one)),
+      label: labelFor(one.name, agentPlatformText(one)),
     })),
     ...(chosenAgent !== NEW_AGENT && !agents.some((one) => one.id === chosenAgent)
       ? [
@@ -547,7 +547,12 @@ export function ConnectAgentSheet({
             label:
               known === null
                 ? "This agent"
-                : labelFor(known.name, known.agentPlatform),
+                : labelFor(
+                    known.name,
+                    known.agentPlatform === null
+                      ? null
+                      : agentPlatformLabel(known.agentPlatform),
+                  ),
           },
         ]
       : []),
@@ -802,9 +807,15 @@ export function ConnectAgentSheet({
   );
 }
 
-/** "remedy phase 1 · Retell", the way the board writes an agent in the picker. */
-function labelFor(name: string, platform: string | null): string {
-  return platform === null ? name : `${name} · ${agentPlatformLabel(platform)}`;
+/**
+ * "remedy phase 1 · Retell", the way the board writes an agent in the picker.
+ *
+ * The platform arrives already in a person's words, because an agent on two
+ * platforms is named with both of them and the list column and this picker
+ * must not word that answer differently.
+ */
+function labelFor(name: string, platforms: string | null): string {
+  return platforms === null ? name : `${name} · ${platforms}`;
 }
 
 /**
