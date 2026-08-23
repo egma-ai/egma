@@ -18,7 +18,9 @@
 -- in this file — a retry budget of minutes, and a marker that expires in
 -- fifteen — so they are emptied rather than carried, and the poller rebuilds
 -- whatever it still needs on its next turn. That statement comes first because
--- the new key is NOT NULL and the new foreign key has to hold.
+-- the new key is NOT NULL and the new foreign key has to hold. One other
+-- statement is hand-placed out of drizzle-kit's order too, and says why where
+-- it stands.
 --
 -- Riding the same pass: `agent.description` is dropped, `connection_kind`
 -- becomes `connection_type` (renamed in place, so rows survive), and
@@ -58,6 +60,10 @@ CREATE TABLE "monitoring_state" (
 	CONSTRAINT "monitoring_state_lease_agrees" CHECK (("monitoring_state"."lease_owner" is null) = ("monitoring_state"."lease_expires_at" is null))
 );
 --> statement-breakpoint
+-- Hoisted above the drops by hand. drizzle-kit emits this with the constraint
+-- drops below, where "DROP TABLE retell_monitored_agent CASCADE" has already
+-- taken it and the statement fails outright. Regenerating this file loses the
+-- fix, and the snapshot diff cannot see it.
 ALTER TABLE "retell_call_retry" DROP CONSTRAINT "retell_call_retry_agent_tenant_fk";--> statement-breakpoint
 ALTER TABLE "monitoring_setup" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "retell_monitored_agent" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
