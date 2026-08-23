@@ -907,7 +907,23 @@ describe("what a project recorded in production", () => {
           .getByRole("link", { name: "Simulation runs", exact: true })
           .count(),
       ).toBe(0);
-      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
+      /*
+       * **There is a way home in this bar, and it is the wordmark.**
+       *
+       * This line used to say there was none, from the time the bar held six
+       * navigation rows and nothing else. The developer put the Egma wordmark
+       * at the top of the sidebar on 2026-08-23 — "our logo, not the
+       * organization's" — and it links to the product root, so the assertion is
+       * now about what that link is rather than that it is absent. What must
+       * stay absent is a *navigation row* called Home: the bar names areas, and
+       * a row pointing at the root would be a seventh area that is not one.
+       */
+      expect(
+        await sidebar.getByRole("link", { name: "Egma home", exact: true }).getAttribute("href"),
+      ).toBe("/");
+      expect(
+        await sidebar.getByRole("link", { name: "Home", exact: true }).count(),
+      ).toBe(0);
       expect(
         await sidebar.getByRole("link", { name: "Simulations" }).count(),
       ).toBe(0);
@@ -2220,13 +2236,28 @@ describe("pressing Use on a second grader while the first one's form is open", (
  * then switches off.
  */
 describe("changing a running grader and switching it off", () => {
-  /** One running copy's button, from the table rather than the mobile list. */
-  function on(named: string, button: string) {
-    return page
+  /**
+   * One running copy's act, reached the way a person reaches it.
+   *
+   * **Both acts are inside the row's ⋮ now** (ui-refresh 10): the trailing lane
+   * is the same 48px slot on every list in the product, and two buttons drawn
+   * in the cell had pushed this one out to 156px. So the act is opened rather
+   * than pressed — the ⋮ from the table rather than from the mobile list, then
+   * the item in the panel it opens, which the kit draws at the end of the page.
+   */
+  async function act(named: string, item: string): Promise<void> {
+    await page
       .locator("table")
       .getByRole("row")
       .filter({ hasText: named })
-      .getByRole("button", { name: button });
+      .getByRole("button", { name: `Actions for ${named}` })
+      .click();
+    await page.getByRole("menuitem", { name: item, exact: true }).click();
+  }
+
+  /** Whether a copy is still on the list at all. */
+  function rowFor(named: string) {
+    return page.locator("table").getByRole("row").filter({ hasText: named });
   }
 
   /** Every row of the table, the heading row included. */
@@ -2269,7 +2300,7 @@ describe("changing a running grader and switching it off", () => {
       // Blocking, as anything switched on is unless somebody said otherwise.
       await page.waitForSelector("text=Blocks");
 
-      await on("Latency", "Edit").click();
+      await act("Latency", "Edit");
       await page.waitForSelector("text=Edit Latency");
 
       // Filled in from the copy, which is the half a source scan cannot see:
@@ -2292,7 +2323,7 @@ describe("changing a running grader and switching it off", () => {
       // And opening it again shows the saved value rather than the old one —
       // which is the whole round trip: the browser wrote it, the API versioned
       // it, and the list handed it back.
-      await on("Latency", "Edit").click();
+      await act("Latency", "Edit");
       await page.waitForSelector("text=Edit Latency");
       expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
     },
@@ -2305,7 +2336,7 @@ describe("changing a running grader and switching it off", () => {
       await page.goto(await gradersUrl("running"));
       await settlesAt(3);
 
-      await on("Latency", "Switch off").click();
+      await act("Latency", "Switch off");
 
       // The sentence that makes the button pressable: what stops is obvious,
       // and what stays is the thing somebody is actually worried about.
@@ -2320,7 +2351,7 @@ describe("changing a running grader and switching it off", () => {
       // project is created with is still there — only the one that was named
       // stopped judging.
       await settlesAt(2);
-      expect(await on("Latency", "Switch off").count()).toBe(0);
+      expect(await rowFor("Latency").count()).toBe(0);
       await page.waitForSelector("text=Expected behaviors");
     },
     SETTLE,
@@ -2666,34 +2697,18 @@ describe("the complete product, walked in order in a second project", () => {
       const connected = await connectionResponse;
       expect(connected.status(), await connected.text()).toBe(201);
 
-      // The panel closes onto the list the new agent is now a row of, and the
-      // row's own name link is its address — read from the product rather than
-      // reconstructed from a database id.
-      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`));
+      /*
+       * **The panel closes onto the agent it just made**, which is the record
+       * the person created rather than the list of everything that holds it.
+       * The address is read from the product — the browser is standing on it —
+       * rather than reconstructed from a database id.
+       */
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/agents/agt_[^/?#]+$`),
+      );
+      agentAddress = walk.url();
       await saysWithin(walk, "The Support line");
-      const named = walk
-        .getByRole("link", { name: "The Support line", exact: true })
-        .first();
-      await named.waitFor();
-      const agentHref = await named.getAttribute("href");
-      expect(
-        agentHref,
-        "the registered agent has a row that opens it",
-      ).toMatch(new RegExp(`^/projects/${second}/agents/agt_[^/]+$`));
-      agentAddress = new URL(agentHref ?? "/", origin).toString();
-
-      // And the way in is named on the row, as a link that opens it over the
-      // list rather than as four facts nobody can press.
       await saysWithin(walk, "Retell staging");
-      const connection = walk
-        .getByRole("link", { name: "Retell staging", exact: true })
-        .first();
-      await connection.waitFor();
-      const connectionHref = await connection.getAttribute("href");
-      expect(
-        connectionHref,
-        "the created connection opens from the row it is on",
-      ).toContain("sheet=connection");
 
       // The selected discovery candidate goes through the generic connection
       // write. The stored connection is only the public phone destination; the
@@ -2721,9 +2736,9 @@ describe("the complete product, walked in order in a second project", () => {
         credentials: null,
       });
       // The connection's own address still exists and still opens the same
-      // panel; the row's link is the query form of it.
-      connectionAddress = `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`;
-      expect(connectionHref).toContain(stored.rows[0]?.id ?? "");
+      // panel; the row's link, read off the list below, is the query form of it.
+      const storedConnectionId = stored.rows[0]?.id ?? "";
+      connectionAddress = `${agentAddress}/connections/${storedConnectionId}`;
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
@@ -2736,7 +2751,6 @@ describe("the complete product, walked in order in a second project", () => {
        * checking them first would pass for the wrong reason — and go on
        * passing after the connections it is meant to guard stopped being drawn.
        */
-      await saysWithin(walk, "Retell staging");
       const agentPage = await walk.innerText("main");
       expect(agentPage).toContain("Connections");
       // The pull switch, which is the only stored monitoring choice in the
@@ -2755,6 +2769,28 @@ describe("the complete product, walked in order in a second project", () => {
        */
       await walk.goto(at("agents"));
       await saysWithin(walk, "The Support line");
+      // The row's own name link is the agent's address, and it is the same one
+      // the panel landed on.
+      const named = walk
+        .getByRole("link", { name: "The Support line", exact: true })
+        .first();
+      await named.waitFor();
+      expect(
+        new URL((await named.getAttribute("href")) ?? "/", origin).toString(),
+        "the registered agent has a row that opens it",
+      ).toBe(agentAddress);
+      // And the way in is named on the row, as a link that opens it over the
+      // list rather than as four facts nobody can press.
+      const connection = walk
+        .getByRole("link", { name: "Retell staging", exact: true })
+        .first();
+      await connection.waitFor();
+      const connectionHref = await connection.getAttribute("href");
+      expect(
+        connectionHref,
+        "the created connection opens from the row it is on",
+      ).toContain("sheet=connection");
+      expect(connectionHref).toContain(storedConnectionId);
       const row = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
         .first();
@@ -3481,8 +3517,19 @@ describe("the complete product, walked in order in a second project", () => {
                * whole of `NAVIGATION_GROUPS` — Agents, Graders, Tests,
                * Personas, Runs, Transcripts — and a row added or dropped
                * should be a decision somebody takes here on purpose.
+               *
+               * **Seven links, and the seventh is not a row.** The Egma
+               * wordmark at the top of the bar is a link to the product root
+               * (`/`), added on 2026-08-23 by the developer's ruling. It is
+               * separated out rather than counted in, so this stays a count of
+               * the navigation and the brand link stays named.
                */
-              expect(addresses.length).toBe(6);
+              const home = addresses.filter((one) => one === "/");
+              expect(home, addresses.join(", ")).toHaveLength(1);
+              expect(
+                addresses.filter((one) => one !== "/").length,
+                addresses.join(", "),
+              ).toBe(6);
               for (const address of addresses) {
                 expect(address, address).not.toContain("simulations");
               }
@@ -3774,6 +3821,8 @@ describe("the complete product, walked in order in a second project", () => {
         const cells: string[] = [];
         const rows: number[] = [];
         const lanes: number[] = [];
+        /** Where the toolbar strip ends and the panel under it begins. */
+        let strip = { ends: 0, panelBegins: 0 };
 
         for (const address of lists) {
           await walk.goto(address);
@@ -3782,11 +3831,44 @@ describe("the complete product, walked in order in a second project", () => {
           headings.push(Math.round(await heightOf(walk, "table thead tr")));
           cells.push(await cellStyle());
           rows.push(Math.round(await heightOf(walk, "table tbody tr")));
+          if (address === lists[0]) {
+            /*
+             * **The toolbar row carries the gap, and the panel starts on the
+             * pixel it ends on.** `71N-0` is a 52px strip — a 36px control with
+             * 16px under it — and `6ZM-0` begins at 132 from the top of the
+             * page, which is the title bar, the page gutter and that strip and
+             * nothing more. Read as a relationship rather than as 132, because
+             * 132 is three other numbers added up and this is the one of them
+             * that was wrong: the body was adding a second gutter under the
+             * strip and putting the panel at 156.
+             */
+            strip = await walk.evaluate(() => {
+              const find = (selector: string) =>
+                (
+                  Reflect.get(globalThis, "document") as {
+                    querySelector(one: string): {
+                      getBoundingClientRect(): {
+                        readonly top: number;
+                        readonly bottom: number;
+                      };
+                    } | null;
+                  }
+                ).querySelector(selector);
+              const toolbar = find('[data-slot="toolbar"]');
+              const panel = find('[data-slot="table-panel"]');
+              return {
+                ends: Math.round(toolbar?.getBoundingClientRect().bottom ?? -1),
+                panelBegins: Math.round(
+                  panel?.getBoundingClientRect().top ?? -2,
+                ),
+              };
+            });
+          }
           /*
-           * Only the lists that offer a row control have a lane. Two of the
-           * five do today; the rest gain one as their screens are rebuilt, and
-           * this measures whichever are there rather than demanding that every
-           * list grow a menu it has no use for.
+           * Only the lists that declare a trailing lane have one to measure.
+           * All five do now — the last two grew a row ⋮ in ui-refresh 10 — and
+           * this still measures whichever are there rather than demanding a
+           * lane of a list that has no row control to put in one.
            */
           const lane = walk.locator('table tbody td[data-action="true"]');
           if ((await lane.count()) > 0) {
@@ -3798,6 +3880,10 @@ describe("the complete product, walked in order in a second project", () => {
           }
         }
 
+        expect(
+          strip.panelBegins,
+          `the toolbar strip ends at ${String(strip.ends)}`,
+        ).toBe(strip.ends);
         expect(new Set(sidebars).size, sidebars.join(", ")).toBe(1);
         expect(new Set(headings).size, headings.join(", ")).toBe(1);
         expect(new Set(cells).size, cells.join(" | ")).toBe(1);
@@ -4244,6 +4330,14 @@ describe("the complete product, walked in order in a second project", () => {
         // No click first: a fresh document starts with the focus on nothing, so
         // the first Tab is the first focusable thing on the page. Clicking a
         // corner would make the answer depend on what is drawn there.
+        //
+        // **The wordmark is the first stop, and the switcher is the second.**
+        // The bar's topmost thing is the Egma wordmark in a bar of its own,
+        // linking to the product root (`DESIGN.md`, Shell; the developer's
+        // ruling of 2026-08-23). The topmost *control* is still the switcher,
+        // which is the line under it.
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toBe("Egma home");
         await walk.keyboard.press("Tab");
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");

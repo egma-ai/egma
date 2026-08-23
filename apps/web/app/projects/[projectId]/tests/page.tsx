@@ -36,11 +36,11 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 import {
-  ConfirmDialog,
   DestructiveItem,
   MenuReason,
   RowMenu,
-} from "./parts.tsx";
+} from "../../../../ui/row-menu.tsx";
+import { ConfirmDialog } from "./parts.tsx";
 import { CreateSuiteSheet, RenameSuiteSheet } from "./suite-sheets.tsx";
 
 /**
@@ -75,9 +75,22 @@ function columnsFor({
       key: "name",
       header: "Name",
       primary: true,
+      /*
+       * **The row's name is plain text until a pointer is on it**, which is
+       * what the boards draw and what the Agents and Personas lists already
+       * do: only the secondary links in a row — a persona, a connection —
+       * carry an underline, because the row itself is the way in and the
+       * underline is what tells the two kinds apart. The shared table
+       * underlines every cell link, so this is said here rather than there.
+       */
       cell: (suite) => (
         <span className="flex min-w-0 items-baseline gap-2">
-          <Link href={suitePagePath(projectId, suite.id)}>{suite.name}</Link>
+          <Link
+            className="text-foreground no-underline pointer-hover:underline"
+            href={suitePagePath(projectId, suite.id)}
+          >
+            {suite.name}
+          </Link>
           {duplicateNames.has(suite.name) ? (
             <span className="flex-none font-mono text-xs text-muted-foreground">
               {shortSuiteId(suite.id)}

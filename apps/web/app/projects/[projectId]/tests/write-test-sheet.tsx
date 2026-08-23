@@ -70,6 +70,16 @@ export function WriteTestSheet({
   const [known, setKnown] = useState<ReadonlyMap<string, Named>>(new Map());
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+  /**
+   * Whether the expected behaviors have been touched yet.
+   *
+   * **A panel that opens red is lying about what somebody did.** An empty draft
+   * genuinely cannot be written, and the sentence saying so is right — but it
+   * is a sentence about a person's own work, so it waits until there is some.
+   * The submit stays disabled from the first frame, which is where "not usable
+   * yet" is said without accusing anybody. (2026-08-23.)
+   */
+  const [behaviorsTouched, setBehaviorsTouched] = useState(false);
 
   const changed =
     name !== "" ||
@@ -87,9 +97,12 @@ export function WriteTestSheet({
     setDescription("");
     setDraft(EMPTY);
     setRefused(null);
+    setBehaviorsTouched(false);
   }, [open, suite.id]);
 
-  const behaviorProblem = whyBehaviorsRefuse(draft.behaviors);
+  const behaviorProblem = behaviorsTouched
+    ? whyBehaviorsRefuse(draft.behaviors)
+    : null;
   const usable =
     name.trim() !== "" &&
     draft.scenario.trim() !== "" &&
@@ -177,6 +190,7 @@ export function WriteTestSheet({
               disabled={!mayAuthor}
               problem={behaviorProblem}
               onChange={(next, named) => {
+                if (next.behaviors !== draft.behaviors) setBehaviorsTouched(true);
                 setDraft(next);
                 if (named !== undefined) setKnown(new Map(named));
               }}

@@ -218,6 +218,7 @@ rgba(122, 49, 23, 0.02) -130px 256px 115px 0
 - Every page has a title bar of its own, the same height as the wordmark bar, holding the page title alone. A purpose statement, where a form or settings page needs one, is the first quiet line of the page body; list screens carry none (read off the boards, 2026-08-23). Page actions are not in that bar.
 - A page below a section carries the trail into its record in that bar, and **the trail never repeats the title beside it**. A page passes the real trail, ending with the record's own name; the bar draws every step but the last, because the heading beside it is that last step. There is no separator after the step that is left. (Read off the boards, 2026-08-23.)
 - A page's actions sit in the toolbar row under the title bar, at the right, opposite whatever the page filters by.
+- The toolbar row is 52px, and the last 16px of it is the gap to whatever it stands over. The page body adds no gutter of its own under a toolbar row, so a list's panel begins 132px down the page: the 56px title bar, the 24px gutter, and the 52px row. A page whose header draws no toolbar row keeps the 24px gutter, because then nothing above it carries one. (Read off `71N-0` and `6ZM-0` on `6ZJ-0`, 2026-08-23; the application had been drawing the panel at 156.)
 - Page content is held to the page maximum and aligned to the left gutter, so the title in the bar and the first column under it are on one line.
 
 The measurements, all of them theme values:

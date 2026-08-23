@@ -47,12 +47,11 @@ import {
   useShellSession,
 } from "../../../../ui/shell.tsx";
 import {
-  ConfirmDialog,
   DestructiveItem,
   MenuReason,
   RowMenu,
-  ToolbarMenu,
-} from "./parts.tsx";
+} from "../../../../ui/row-menu.tsx";
+import { ConfirmDialog, ToolbarMenu } from "./parts.tsx";
 import { RenameSuiteSheet } from "./suite-sheets.tsx";
 import { WriteTestSheet } from "./write-test-sheet.tsx";
 
@@ -239,8 +238,21 @@ export function SuiteScreen({
       header: "Name",
       primary: true,
       width: "480px",
+      /*
+       * **The row's name is plain text until a pointer is on it**, which is
+       * what the boards draw and what the Agents and Personas lists already
+       * do: only the secondary links in a row — a persona, a connection —
+       * carry an underline, because the row itself is the way in and the
+       * underline is what tells the two kinds apart. The shared table
+       * underlines every cell link, so this is said here rather than there.
+       */
       cell: (test) => (
-        <Link href={testPagePath(projectId, test.id)}>{test.name}</Link>
+        <Link
+          className="text-foreground no-underline pointer-hover:underline"
+          href={testPagePath(projectId, test.id)}
+        >
+          {test.name}
+        </Link>
       ),
     },
     {

@@ -7,54 +7,19 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Dialog } from "../../../../ui/dialog.tsx";
 import { Refused } from "../../../../ui/form.tsx";
-import { Menu, MenuItem } from "../../../../ui/menu.tsx";
+import { Menu } from "../../../../ui/menu.tsx";
 
 /**
- * The controls the Tests screens share: the ⋮ that opens a row's menu, the
- * one a page carries for itself, and the confirmation that names what is about
- * to go.
+ * The controls the Tests screens share: the ⋮ a page carries for itself, and
+ * the confirmation that names what is about to go.
  *
  * They are here rather than in the shared set because two screens use them and
- * both are this route's. If a third area grows the same pair, this is what
- * moves to `apps/web/ui/`.
+ * both are this route's — the promise this file made was that the pair moves to
+ * `apps/web/ui/` as soon as a third area grows it. Runs and Running graders did,
+ * so the row's own ⋮ and the two panel parts that go with it left on
+ * 2026-08-23 and are now `ui/row-menu.tsx`. What is left is the toolbar's ⋮,
+ * which no other area draws, and the confirmation these three screens share.
  */
-
-/**
- * The ⋮ at the end of a row.
- *
- * It draws no box. The lane it sits in is the table's — a fixed 48px slot on
- * every row, header included — so the menus line up in one column and a row
- * with no menu still holds the lane open. What the boards give this control is
- * the dots and nothing else (`8YA-0`, `A3H-0`).
- */
-export function RowMenu({
-  label,
-  children,
-}: {
-  readonly label: string;
-  readonly children: (close: () => void) => ReactNode;
-}) {
-  return (
-    <Menu
-      label={label}
-      placement="below-end"
-      triggerClassName={cn(
-        "inline-flex size-(--control-md) items-center justify-center",
-        "cursor-pointer rounded-button border border-transparent bg-transparent text-faint",
-        "transition-[color,background-color] duration-(--duration-hover) ease-out",
-        "pointer-coarse:size-(--tap-target)",
-        "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
-        "motion-reduce:transition-none",
-      )}
-      openClassName="bg-surface-soft text-foreground"
-      trigger={
-        <EllipsisVerticalIcon className="size-3.5" strokeWidth={1.75} aria-hidden="true" />
-      }
-    >
-      {children}
-    </Menu>
-  );
-}
 
 /**
  * The ⋮ a page carries for itself, beside its other toolbar controls.
@@ -89,43 +54,6 @@ export function ToolbarMenu({
     >
       {children}
     </Menu>
-  );
-}
-
-/**
- * The one item in a menu that takes something away.
- *
- * It is the failure colour and it is last, under a divider. The press does not
- * delete anything: it opens the confirmation that names what would go.
- */
-export function DestructiveItem({
-  disabled,
-  onClick,
-  children,
-}: {
-  readonly disabled?: boolean;
-  readonly onClick: () => void;
-  readonly children: ReactNode;
-}) {
-  return (
-    <MenuItem disabled={disabled} onClick={onClick}>
-      <span className="text-failure">{children}</span>
-    </MenuItem>
-  );
-}
-
-/**
- * Why a menu offers nothing this person may press.
- *
- * A disabled item cannot take focus, so a `title` on it is a reason only a
- * pointer reaches. The sentence is drawn in the panel instead, where a keyboard
- * lands on it and a screen reader reads it with the items above.
- */
-export function MenuReason({ children }: { readonly children: ReactNode }) {
-  return (
-    <p className="m-0 max-w-[36ch] px-3 py-2 text-sm text-muted-foreground">
-      {children}
-    </p>
   );
 }
 

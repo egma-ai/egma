@@ -751,9 +751,11 @@ describe("registering an agent", () => {
     for (const provider of ["prompt", "model", "tools"]) {
       expect(Object.keys(sent[0]?.body ?? {})).not.toContain(provider);
     }
-    // And the panel closes onto the list the new agent is now a row of.
+    // And the panel closes onto the agent it just made — the record with this
+    // agent's identity, its production-calls switch and its connections on it,
+    // rather than the list of everything with one new row somewhere in it.
     await waitFor(() =>
-      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents"),
+      expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/agents/agt_1"),
     );
   });
 

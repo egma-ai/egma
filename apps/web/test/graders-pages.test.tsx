@@ -480,6 +480,32 @@ const SHELF = {
   body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
 } as const;
 
+/**
+ * One running copy's acts, reached the way somebody reaches them: through the
+ * ⋮ at the end of its row.
+ *
+ * **Both acts moved into that menu on 2026-08-23**, so that the trailing lane
+ * on this list is the same 48px slot every list in the product ends with. Two
+ * buttons drawn in the cell had pushed it out to 156px, which is the one place
+ * the lane went crooked. `index` is the row, in the order the answer lists the
+ * copies in.
+ */
+async function rowMenus(): Promise<HTMLElement[]> {
+  return screen.findAllByRole("button", { name: /^Actions for /u });
+}
+
+/** One row's menu, opened. */
+async function openRowMenu(index: number): Promise<HTMLElement> {
+  fireEvent.click((await rowMenus())[index]!);
+  return screen.findByRole("menu");
+}
+
+/** One row's act, opened and pressed. */
+async function press(index: number, act: string): Promise<void> {
+  const menu = await openRowMenu(index);
+  fireEvent.click(within(menu).getByRole("menuitem", { name: act }));
+}
+
 describe("the running graders of one project", () => {
   it("names its project in both reads, and says where each copy applies and whether it blocks", async () => {
     const { asked } = apiAnswers({
@@ -557,9 +583,8 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    const off = await screen.findAllByRole("button", { name: "Switch off" });
     // The table's rows are in answer order, so Latency's is the second.
-    fireEvent.click(off[1]!);
+    await press(1, "Switch off");
     fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
 
     expect((await screen.findByRole("status")).textContent).toContain(
@@ -592,9 +617,7 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Switch off" }))[0]!,
-    );
+    await press(0, "Switch off");
 
     expect(screen.getByText(runningCopy.SWITCH_OFF.stops)).toBeTruthy();
     expect(screen.getByText(runningCopy.SWITCH_OFF.keeps)).toBeTruthy();
@@ -628,9 +651,7 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Switch off" }))[0]!,
-    );
+    await press(0, "Switch off");
     expect(screen.getByText(runningCopy.SWITCH_OFF.theLastOne)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
@@ -661,9 +682,7 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Switch off" }))[0]!,
-    );
+    await press(0, "Switch off");
     fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
 
     expect(
@@ -685,19 +704,20 @@ describe("the running graders of one project", () => {
     });
     render(<RunningGradersPage />);
 
-    const off = (await screen.findAllByRole("button", {
-      name: "Switch off",
-    }))[0]!;
-    const edit = screen.getAllByRole("button", { name: "Edit" })[0]!;
+    // Both acts are offered in the row's menu and both are inert, with the
+    // reason for each written into the panel where a keyboard reaches it.
+    const menu = await openRowMenu(0);
+    const off = within(menu).getByRole("menuitem", { name: "Switch off" });
+    const edit = within(menu).getByRole("menuitem", { name: "Edit" });
 
     expect((off as HTMLButtonElement).disabled).toBe(true);
     expect((edit as HTMLButtonElement).disabled).toBe(true);
     expect(
-      screen.getAllByText(runningCopy.SWITCH_OFF.notYours("viewer")),
-    ).not.toHaveLength(0);
+      within(menu).getByText(runningCopy.SWITCH_OFF.notYours("viewer")),
+    ).toBeTruthy();
     expect(
-      screen.getAllByText(runningCopy.EDIT.notYours("viewer")),
-    ).not.toHaveLength(0);
+      within(menu).getByText(runningCopy.EDIT.notYours("viewer")),
+    ).toBeTruthy();
   });
 });
 
@@ -712,7 +732,7 @@ describe("the running graders of one project", () => {
  * update against Postgres.
  */
 describe("changing a running copy", () => {
-  it("connects each Edit button to the editor and moves focus to its heading", async () => {
+  it("connects each row's Edit to the editor and moves focus to its heading", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /v1/graders": {
@@ -723,25 +743,28 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    const edits = await screen.findAllByRole("button", { name: "Edit" });
-    expect(edits[1]!.getAttribute("aria-expanded")).toBe("false");
-    expect(edits[1]!.getAttribute("aria-controls")).toBe(
-      "grader-editor-grd_2",
-    );
+    /*
+     * **The row's ⋮ is what the reading position comes back to**, and it is
+     * the whole of the relationship now that Edit is an item inside it. The ⋮
+     * carries no `aria-expanded` for the editor: a menu's `aria-expanded` is
+     * about the menu, and claiming it was about the editor would say the panel
+     * is inside the panel that opened it. The editor is named after the copy
+     * and takes the focus; closing it hands the focus back to the row.
+     */
+    const menus = await rowMenus();
+    expect(menus[1]!.getAttribute("aria-expanded")).toBe("false");
 
-    fireEvent.click(edits[1]!);
+    await press(1, "Edit");
 
     const editor = screen.getByRole("region", { name: "Edit Latency" });
     const heading = within(editor).getByRole("heading", {
       name: "Edit Latency",
     });
     expect(editor.id).toBe("grader-editor-grd_2");
-    expect(edits[1]!.getAttribute("aria-expanded")).toBe("true");
     expect(document.activeElement).toBe(heading);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(document.activeElement).toBe(edits[1]);
-    expect(edits[1]!.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(menus[1]);
   });
 
   /**
@@ -763,7 +786,7 @@ describe("changing a running copy", () => {
     render(<RunningGradersPage />);
 
     // Latency's row is the second, and it is the one with values to fill in.
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[1]!);
+    await press(1, "Edit");
 
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "2000",
@@ -804,11 +827,11 @@ describe("changing a running copy", () => {
     render(<RunningGradersPage />);
 
     // The copy whose assertions are each test's own sentences: it asks nothing.
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
     expect(screen.getByText(runningCopy.EDIT.asksNothing)).toBeTruthy();
 
     // And now the other one, without closing the first.
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[1]!);
+    await press(1, "Edit");
 
     expect(screen.getByText(runningCopy.EDIT.title("Latency"))).toBeTruthy();
     expect(screen.queryByText(runningCopy.EDIT.asksNothing)).toBeNull();
@@ -832,13 +855,12 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    const edits = await screen.findAllByRole("button", { name: "Edit" });
-    fireEvent.click(edits[0]!);
+    await press(0, "Edit");
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Draft behavior grader" },
     });
 
-    fireEvent.click(edits[1]!);
+    await press(1, "Edit");
     expect(screen.getByRole("dialog").textContent).toContain(
       "Leave without saving?",
     );
@@ -874,7 +896,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
     fireEvent.change(screen.getByLabelText(runningCopy.EDIT.description), {
       target: { value: "Keep this draft" },
     });
@@ -939,8 +961,7 @@ describe("changing a running copy", () => {
     vi.stubGlobal("confirm", confirm);
     render(<RunningGradersPage />);
 
-    const edits = await screen.findAllByRole("button", { name: "Edit" });
-    fireEvent.click(edits[0]!);
+    await press(0, "Edit");
     fireEvent.change(screen.getByLabelText(runningCopy.EDIT.description), {
       target: { value: "Saving this note" },
     });
@@ -954,9 +975,18 @@ describe("changing a running copy", () => {
       (screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
-    expect(edits.every((edit) => (edit as HTMLButtonElement).disabled)).toBe(
-      true,
-    );
+    // Every row's acts are inert while the write is in flight, offered in the
+    // menu and refusing the press. The menu is closed again afterwards, so the
+    // navigation checks below run against the page rather than over a panel.
+    const busy = await openRowMenu(1);
+    for (const act of ["Edit", "Switch off"]) {
+      expect(
+        (within(busy).getByRole("menuitem", { name: act }) as HTMLButtonElement)
+          .disabled,
+        act,
+      ).toBe(true);
+    }
+    fireEvent.click((await rowMenus())[1]!);
 
     const leaving = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(leaving);
@@ -1007,7 +1037,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
     fireEvent.change(screen.getByLabelText("Bound"), {
       target: { value: "1200" },
     });
@@ -1047,7 +1077,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
       "Expected behaviors",
     );
@@ -1079,7 +1109,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
 
     expect(screen.getByText(runningCopy.EDIT.asksNothing)).toBeTruthy();
     expect(screen.queryByLabelText("Bound")).toBeNull();
@@ -1099,7 +1129,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
 
     const editor = screen.getByRole("region", {
       name: "Edit Expected behaviors",
@@ -1153,7 +1183,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
 
     // The panel names the copy, which is what the walk waits on before it
     // touches anything.
@@ -1195,7 +1225,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
     fireEvent.change(screen.getByLabelText(runningCopy.EDIT.sampleRate), {
       target: { value: "" },
     });
@@ -1225,7 +1255,7 @@ describe("changing a running copy", () => {
     });
     render(<RunningGradersPage />);
 
-    fireEvent.click((await screen.findAllByRole("button", { name: "Edit" }))[0]!);
+    await press(0, "Edit");
     fireEvent.change(screen.getByLabelText("Bound"), {
       target: { value: "1200" },
     });
@@ -1285,8 +1315,7 @@ describe("changing a running copy", () => {
 
     // The second row is the one with values to type into: a measure, a bound,
     // and a share of live traffic, because it applies to both.
-    const edits = await screen.findAllByRole("button", { name: "Edit" });
-    fireEvent.click(edits[1]!);
+    await press(1, "Edit");
     fireEvent.change(screen.getByLabelText("Bound"), {
       target: { value: "50" },
     });
@@ -1309,12 +1338,15 @@ describe("changing a running copy", () => {
       So the wait is on the control about to be pressed, rather than on
       something near it.
     */
+    const other = within(await openRowMenu(0)).getByRole("menuitem", {
+      name: "Edit",
+    });
     await waitFor(() => {
-      expect((edits[0] as HTMLButtonElement).disabled).toBe(false);
+      expect((other as HTMLButtonElement).disabled).toBe(false);
     });
 
     // Another row, over the top of a form that has been typed into and refused.
-    fireEvent.click(edits[0]!);
+    fireEvent.click(other);
     fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
 
     const behaviors = screen.getByRole("region", {
@@ -1329,7 +1361,7 @@ describe("changing a running copy", () => {
 
     // And back, which is where the field would show the typed value if the
     // state were the page's rather than the open row's.
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[1]!);
+    await press(1, "Edit");
     expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
       "2000",
     );
