@@ -37,14 +37,6 @@ import { Actions } from "../../../../../ui/section.tsx";
 import { EntryFields } from "../use-form.tsx";
 
 /**
- * One group of the edit form, and the word that names it.
- *
- * A `fieldset` because that is what a named group of controls is, and because
- * `disabled` on one makes every control inside it inert in one place while a
- * write is in flight. The hairline between groups is on the group rather than
- * between them, so a group added later is spaced without anybody remembering.
- */
-/**
  * One group of the editor.
  *
  * **The hairline is on the wrapper and the fieldset carries none**, which is a

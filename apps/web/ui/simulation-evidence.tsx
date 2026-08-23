@@ -117,9 +117,15 @@ export function SimulationEvidenceSummary({
 }) {
   const turns = turnsOf(evidence);
   return (
+    /*
+     * **The container is the wrapper, not the strip.** An element cannot be
+     * its own query container, so `@container` and `grid-cols-3` on one
+     * `<section>` left the query measuring nothing: the three facts stayed in
+     * three columns however little room the strip had.
+     */
+    <div className="@container/summary min-w-0">
     <section
       className={cn(
-        "@container/summary",
         "grid min-w-0 grid-cols-3 overflow-hidden rounded-card border border-border",
         /*
          * **Its own width decides, not the window's.** The reading sheet opens
@@ -149,6 +155,7 @@ export function SimulationEvidenceSummary({
         </strong>
       </div>
     </section>
+    </div>
   );
 }
 
@@ -1162,35 +1169,7 @@ function SimulationEvidencePanel({
   }
 
   return (
-    <section
-      className={cn(
-        REVIEW,
-        /*
-         * **The sheet is docked beside this page, so the page steps aside for
-         * it.** That is what a non-modal reading surface promises — the test
-         * covering this panel says it in as many words: "a panel docked beside
-         * this page rather than a layer over it, so the grader results stay
-         * reachable while the transcript is open". The panel is `position:
-         * fixed` against the viewport's right edge, which means nothing under
-         * it moves on its own: at 1440 the transcript covered the judge
-         * findings it is evidence *for*, and a reader had to close the
-         * transcript to read the finding that cited it.
-         *
-         * The room is the sheet's own width from the theme plus one gutter,
-         * and only where there is room to give: below 1100px the sheet is
-         * most of the screen and reading it *is* the mode, so the page stays
-         * where it is and the sheet covers it.
-         *
-         * It is not animated. `DESIGN.md` asks motion to run on `transform`
-         * and `opacity`, and this is padding — a layout property, on a panel
-         * holding a whole review. The sheet's own entrance already explains
-         * where the room went.
-         */
-        evidenceOpen &&
-          "min-[1100px]:pe-[calc(var(--sheet-width-wide)+var(--page-gutter))]",
-      )}
-      aria-label="Simulation evidence"
-    >
+    <section className={REVIEW} aria-label="Simulation evidence">
       <section
         className={cn(
           "flex min-h-full min-w-0 flex-col overflow-hidden",
@@ -1332,7 +1311,41 @@ export function SimulationEvidenceReview({
   useEffect(() => setEvidenceOpen(true), [evidence.id]);
 
   return (
-    <div className={REVIEW}>
+    <div
+      className={cn(
+        REVIEW,
+        /*
+         * **The sheet is docked beside this page, so the page steps aside for
+         * it.** That is what a non-modal reading surface promises — the test
+         * covering this panel says it in as many words: "a panel docked beside
+         * this page rather than a layer over it, so the grader results stay
+         * reachable while the transcript is open". The panel is `position:
+         * fixed` against the viewport's right edge, so nothing under it moves
+         * on its own: at 1440 the transcript covered the judge findings it is
+         * evidence *for*, and a reader had to close the transcript to read the
+         * finding that cited it.
+         *
+         * **The room is reserved here, on the block that holds both halves**,
+         * and not on the review panel alone. The summary strip is that panel's
+         * sibling, so padding the panel left the strip running on under the
+         * sheet — Duration cut in half and Total turns gone — while the panel
+         * beside it sat clear of it. One ancestor pays, and every child is
+         * inside what is left.
+         *
+         * The room is the sheet's own width from the theme plus one gutter,
+         * and only where there is room to give: below 1100px the sheet is
+         * most of the screen and reading it *is* the mode, so the page stays
+         * where it is and the sheet covers it.
+         *
+         * It is not animated. `DESIGN.md` asks motion to run on `transform`
+         * and `opacity`, and this is padding — a layout property, on a block
+         * holding a whole review. The sheet's own entrance already explains
+         * where the room went.
+         */
+        evidenceOpen &&
+          "min-[1100px]:pe-[calc(var(--sheet-width-wide)+var(--page-gutter))]",
+      )}
+    >
       <SimulationEvidenceSummary evidence={evidence} />
       <SimulationEvidencePanel
         evidence={evidence}
