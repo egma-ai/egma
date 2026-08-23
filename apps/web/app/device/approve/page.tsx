@@ -225,8 +225,12 @@ export default function ApproveDevicePage() {
       </dl>
 
       {/* Deny reads first and Approve is the filled one, so the stronger of the
-          two is never the one somebody reaches by habit. Stacked on a narrow
-          screen, Approve stays at the bottom under the thumb. */}
+          two is never the one somebody reaches by habit. On a narrow screen
+          the pair stacks and `flex-col-reverse` puts Approve on top, which is
+          what the class has always drawn — the sentence that used to be here
+          claimed the opposite. Which way round a security screen should stack
+          is a decision rather than a bug, so the drawing is unchanged and the
+          question is in the pull request. */}
       <div className="mt-6 flex gap-3 max-[620px]:flex-col-reverse [&>*]:flex-1">
         <Button
           type="button"

@@ -129,7 +129,14 @@ export function LinkLine({ children }: { readonly children: ReactNode }) {
     <p
       data-slot="link-line"
       className={cn(
-        "mt-5 text-sm text-muted-foreground",
+        /*
+         * `mb-0` is load-bearing. `globals.css` gives a `<p>` the browser's own
+         * `margin: 1em 0` back, and a class list that sets only the top margin
+         * leaves 14px hanging under the last line — which the panel then pays
+         * on top of its own 32px, so every access page with a link line ended
+         * in 46px of nothing.
+         */
+        "mt-5 mb-0 text-sm text-muted-foreground",
         "[[data-slot=link-line]+&]:mt-3",
         "[form+&]:mt-6 [form+&]:border-t [form+&]:border-border [form+&]:pt-5",
         "[&_a]:inline-block [&_a]:text-foreground",
