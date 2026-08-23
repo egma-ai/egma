@@ -121,19 +121,6 @@ const ROW_ACTIONS = [
 /** The same lane, for a row that offers one control and no reason. */
 const ROW_ACTION = "flex items-center justify-end gap-2 px-4";
 
-/**
- * A control inside a row, at the row's height.
- *
- * A form control is 44px and a row is 52, so a `Select` at its natural size
- * makes every row of this table 60px tall and stands a head above the buttons
- * beside it. 36px is the dense control the toolbar and the navigation row
- * already use, and it is what leaves the row at the 52px the boards draw. The
- * 44px coarse-pointer target is not traded away for it: `pointer-coarse` puts
- * it straight back, the same trade `Button` and the sidebar row make.
- */
-const ROW_CONTROL =
-  "w-auto min-h-(--control-md) pointer-coarse:min-h-(--tap-target) text-sm";
-
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   return (
@@ -348,7 +335,14 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       cell: (member) =>
         mayManage ? (
           <Select
-            className={ROW_CONTROL}
+            /*
+              The row's height, and the table's type step. The 36px is
+              `Select`'s own `default` now rather than a class list this page
+              kept: a form control is 44px, a control inside a 52px row is 36,
+              and the coarse-pointer target comes back in the primitive.
+            */
+            size="default"
+            className="w-auto text-sm"
             id={`role-${member.userId}`}
             aria-label={`${member.email} role`}
             value={member.role}
