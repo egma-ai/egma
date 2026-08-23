@@ -37,10 +37,11 @@ import { cn } from "@/lib/utils";
  * also a filter above a list and a control inside a row, and those are 36px —
  * so the height became a prop instead of something each caller wrote for
  * itself. The roster row had a 44px select standing a head above the two 36px
- * buttons beside it and made every row of that table 60px tall; two more
- * screen kept another copy of the same class list for its toolbar controls —
- * that one stays, because it is shared with `Input`, which cannot take a
- * `size` prop: `size` is already a native attribute on a text input.
+ * buttons beside it, which made every row of that table 60px tall.
+ *
+ * Two other screens keep a class list of their own for their toolbar filters,
+ * and that one stays: it is shared with `Input`, and a text input cannot take
+ * a `size` prop — `size` is already a native attribute there.
  *
  * The coarse-pointer minimum is not traded away for the smaller steps:
  * `pointer-coarse` puts the 44px target straight back, which is the trade

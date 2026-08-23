@@ -59,6 +59,23 @@ export type Column<Row> = {
   readonly mono?: boolean;
   /** A row control. It stays at the trailing edge in both table layouts. */
   readonly action?: boolean;
+  /**
+   * How wide this column is, when the boards say.
+   *
+   * **It is a real width, not a hint, and that was worth measuring.** The table
+   * lays out `auto`, where a declared width is only a preference — but every
+   * cell's content is clipped to one line, so a column's own minimum is its
+   * padding and nothing pushes back. A browser then gives the widths that were
+   * asked for and hands the slack to the columns that asked for none.
+   *
+   * Measured at 1440 on 2026-08-23, against `6ZM-0` and `8XV-0`: the agents
+   * list lands 260 / 160 / 360 with Created taking the 338 left over, and
+   * personas lands 260 / 140 / 110 / 90 / 130 with Description taking the
+   * slack. Both are the boards, to the pixel. So `table-fixed` is not needed,
+   * and a list that wants the boards' proportions only has to say them.
+   *
+   * A row control's slot is not a caller's to set: see `widthOf`.
+   */
   readonly width?: string;
 };
 

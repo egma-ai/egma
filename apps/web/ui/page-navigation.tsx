@@ -82,7 +82,16 @@ export function trailWithoutTitle(
 export function PageNavigation({ items }: { readonly items: DrawnTrail }) {
   return (
     <nav
-      className="mb-3 min-w-0"
+      /*
+       * **The room under the trail is for the width where it wraps.** In the
+       * 56px bar the trail and the heading are one centred row, and a bottom
+       * margin there lifts the trail off the heading's line by half of it —
+       * which nobody could see while the trail ended with the page's own name
+       * and ran the width of the bar. Under 900px the bar becomes the page's
+       * first lines and the trail takes a line of its own, which is where the
+       * 12px belongs.
+       */
+      className="mb-0 min-w-0 max-[900px]:mb-3"
       data-slot="page-navigation"
       aria-label="Breadcrumb"
     >
