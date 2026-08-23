@@ -538,8 +538,12 @@ describe("reading an agent's reach from the list", () => {
     // agent's own column is null until Start monitoring binds it, and this
     // agent has a live Retell connection.
     expect(screen.getByText("Retell")).toBeDefined();
-    // And when it joined egma.
-    expect(screen.getByText("2026-08-15")).toBeDefined();
+    /*
+     * And when it joined egma, as the boards write a date in a list column:
+     * the absolute short date, not the ISO day this printed before ticket 09
+     * gave every list one formatter (`asListInstant`).
+     */
+    expect(screen.getByText("Aug 15, 2026")).toBeDefined();
 
     expect(screen.queryByText("Not checked")).toBeNull();
     expect(screen.queryByText("Checked")).toBeNull();

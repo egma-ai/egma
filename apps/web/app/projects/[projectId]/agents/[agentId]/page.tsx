@@ -20,7 +20,7 @@ import {
   type ListedAgent,
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
-import { asDay } from "../../../../../lib/instants.ts";
+import { asListInstant } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { startMonitoringPath } from "../../../../../lib/monitoring.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
@@ -33,6 +33,7 @@ import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import {
+  ListInstant,
   RelativeInstant,
   useMinuteClock,
 } from "../../../../../ui/relative-time.tsx";
@@ -148,7 +149,7 @@ function connectionColumns({
       key: "created",
       header: "Created",
       hideOnMobile: true,
-      cell: (one) => asDay(one.createdAt),
+      cell: (one) => <ListInstant instant={one.createdAt} />,
     },
     {
       key: "menu",
@@ -338,7 +339,7 @@ function AgentDetailView({
          * sentence the connection panel ends with, in the same words.
          */}
         <p className="mt-0 mb-6 text-sm text-faint">
-          {`Created ${asDay(agent.createdAt)} · Last changed ${asDay(agent.updatedAt)}`}
+          {`Created ${asListInstant(agent.createdAt)} · Last changed ${asListInstant(agent.updatedAt)}`}
         </p>
         <ProductionCalls
           projectId={projectId}

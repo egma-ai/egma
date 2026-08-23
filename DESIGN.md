@@ -274,6 +274,7 @@ The measurements, all of them theme values:
 - Selected or active rows use Ember Wash plus a non-color state mark.
 - Mobile may restyle the same DOM as rows. It must not duplicate interactive content.
 - Empty, loading, failed, and filtered-empty are separate states.
+- A list's date column is the absolute short date — `Aug 16, 2026` — in tabular numerals, with the exact instant kept on the element. A relative age belongs in a sentence ("started just now", "last received 2 min ago") and never in a column: a column of ages cannot be scanned, and two rows a minute apart read the same for the whole of the first hour. One column names a moment rather than a day, and it keeps its precision in the same shape. (Read off `6ZJ-0`, `8TQ-0` and `8P4-0`, 2026-08-23.)
 
 ### Side sheets
 

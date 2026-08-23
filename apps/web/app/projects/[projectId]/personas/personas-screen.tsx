@@ -44,8 +44,7 @@ import {
 } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
-  RelativeInstant,
-  useMinuteClock,
+  ListInstant,
 } from "../../../../ui/relative-time.tsx";
 import { SearchField } from "../../../../ui/section.tsx";
 import {
@@ -117,7 +116,6 @@ export function PersonasScreen({
 }) {
   const { me } = useShellSession();
   const router = useRouter();
-  const now = useMinuteClock();
   // Null until the session read answers. A page that guessed would tell an
   // admin their role cannot do something it can, on every load.
   const role = me === null ? null : roleOf(me);
@@ -538,9 +536,7 @@ export function PersonasScreen({
         key: "updated",
         header: "Updated",
         width: "130px",
-        cell: (persona) => (
-          <RelativeInstant instant={persona.updatedAt} now={now} />
-        ),
+        cell: (persona) => <ListInstant instant={persona.updatedAt} />,
       },
       {
         key: "actions",

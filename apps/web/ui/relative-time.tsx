@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  asListInstant,
   formatViewerInstant,
   relativeViewerInstant,
   type InstantPrecision,
@@ -49,6 +50,38 @@ export function RelativeInstant({
       suppressHydrationWarning
     >
       {relativeViewerInstant(instant, now)}
+    </time>
+  );
+}
+
+/**
+ * A settled date in a list column: the boards' `Aug 16, 2026`.
+ *
+ * **This is the element every list's date column uses, and `RelativeInstant`
+ * is not.** The two are one decision written twice — see `asListInstant` for
+ * why a column of ages cannot be scanned — and they share everything else: the
+ * RFC 3339 value stays on the element, the exact viewer-local moment with its
+ * zone stays in the title, and the figures are tabular so a column of dates is
+ * one column rather than a ragged edge.
+ *
+ * There is no page clock, because a settled date does not change. That is the
+ * whole difference in the signature.
+ */
+export function ListInstant({
+  instant,
+  precision = "day",
+}: {
+  readonly instant: string;
+  readonly precision?: InstantPrecision;
+}) {
+  return (
+    <time
+      className="tabular-nums"
+      dateTime={instant}
+      title={formatViewerInstant(instant, precision)}
+      suppressHydrationWarning
+    >
+      {asListInstant(instant, precision)}
     </time>
   );
 }

@@ -25,7 +25,7 @@ import {
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { MenuDivider, MenuItem } from "../../../../ui/menu.tsx";
-import { RelativeInstant, useMinuteClock } from "../../../../ui/relative-time.tsx";
+import { ListInstant } from "../../../../ui/relative-time.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { SearchField } from "../../../../ui/section.tsx";
 import {
@@ -63,12 +63,10 @@ export default function TestsPage() {
 
 function columnsFor({
   projectId,
-  now,
   duplicateNames,
   menuFor,
 }: {
   readonly projectId: string;
-  readonly now: number;
   readonly duplicateNames: ReadonlySet<string>;
   readonly menuFor: (suite: TestSuite) => ReactNode;
 }): readonly Column<TestSuite>[] {
@@ -102,7 +100,7 @@ function columnsFor({
       key: "changed",
       header: "Changed",
       width: "200px",
-      cell: (suite) => <RelativeInstant instant={suite.updatedAt} now={now} />,
+      cell: (suite) => <ListInstant instant={suite.updatedAt} />,
     },
     {
       key: "menu",
@@ -118,7 +116,6 @@ function Suites({ projectId }: { readonly projectId: string }) {
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
   const mayAuthor = role !== null && canAuthor(role);
-  const now = useMinuteClock();
   const { answer, reload } = useProjectRead<TestSuitePage>(
     (projectId) =>
       platformAnswer(
@@ -332,7 +329,7 @@ function Suites({ projectId }: { readonly projectId: string }) {
       <>
         <DataTable
           label="Test suites in this project"
-          columns={columnsFor({ projectId, now, duplicateNames, menuFor })}
+          columns={columnsFor({ projectId, duplicateNames, menuFor })}
           rows={items}
           keyOf={(suite) => suite.id}
           stretchPrimaryLink

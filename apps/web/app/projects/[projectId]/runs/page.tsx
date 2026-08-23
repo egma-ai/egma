@@ -36,8 +36,7 @@ import { DataTable, type Column } from "../../../../ui/data-table.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import {
-  RelativeInstant,
-  useMinuteClock,
+  ListInstant,
 } from "../../../../ui/relative-time.tsx";
 import {
   RunStatus,
@@ -85,7 +84,6 @@ function columnsFor(
   /** Null while the session read has not answered, so no control is drawn. */
   mayControl: boolean | null,
   onCancel: (runId: string) => void,
-  now: number,
 ): readonly Column<RunRow>[] {
   return [
     {
@@ -114,9 +112,7 @@ function columnsFor(
       key: "started",
       header: "Started",
       width: "130px",
-      cell: (run) => (
-        <RelativeInstant instant={run.createdAt} now={now} />
-      ),
+      cell: (run) => <ListInstant instant={run.createdAt} />,
     },
     {
       key: "status",
@@ -207,7 +203,6 @@ function Runs({ projectId }: { readonly projectId: string }) {
   /** The earliest day to show, as somebody typed it and as it was asked for. */
   const [typedSince, setTypedSince] = useState("");
   const [since, setSince] = useState("");
-  const now = useMinuteClock();
 
   const asked = JSON.stringify({ agent, connection, status, verdict, since });
   const { answer, reload } = useProjectRead<RunHistoryPage>(
@@ -507,7 +502,6 @@ function Runs({ projectId }: { readonly projectId: string }) {
             projectId,
             role === null ? null : mayStart,
             openCancel,
-            now,
           )}
           rows={items}
           keyOf={(run) => run.id}

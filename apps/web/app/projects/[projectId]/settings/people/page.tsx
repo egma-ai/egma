@@ -43,8 +43,7 @@ import {
 } from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
-  RelativeInstant,
-  useMinuteClock,
+  ListInstant,
 } from "../../../../../ui/relative-time.tsx";
 import { Section } from "../../../../../ui/section.tsx";
 import {
@@ -562,7 +561,6 @@ function Invitations({
   readonly onRefused: (refusal: Refusal | null) => void;
   readonly onBusy: (busy: boolean) => void;
 }) {
-  const now = useMinuteClock();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<string>("viewer");
   const [link, setLink] = useState<string | null>(null);
@@ -642,10 +640,7 @@ function Invitations({
     {
       key: "expiry",
       header: "Expiry",
-      mono: true,
-      cell: (invitation) => (
-        <RelativeInstant instant={invitation.expiresAt} now={now} />
-      ),
+      cell: (invitation) => <ListInstant instant={invitation.expiresAt} />,
     },
     {
       key: "actions",
