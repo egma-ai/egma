@@ -18,7 +18,9 @@
  * The skill offer is here rather than anywhere else for the same reason it is
  * a question rather than a default: it is the only thing in the walk that
  * writes outside the repository, and it is asked when the developer has just
- * seen what egma is for and can decide whether they want more of it.
+ * seen what egma is for and can decide whether they want more of it. What it
+ * offers is every public Egma skill, and what writes them is the standard
+ * skills installer that shipped inside this package.
  *
  * **A stop from here is still this ending.** Once the run exists, every
  * promise the walk made has been kept — the tests are on egma and the suite is
@@ -36,7 +38,7 @@ import type { SignedIn } from "../platform/signed-in.ts";
 import { followRun, RunFollower } from "../run/follow.ts";
 import type { RunView } from "../run/view.ts";
 import {
-  installEgmaSkill,
+  installEgmaSkills,
   skillPlacesFor,
   type SkillPlaces,
   type SkillScope,
@@ -110,16 +112,19 @@ async function offerTheSkill(
     return { kind: "skipped", drivenAgentName: places.name };
   }
 
-  const installed = await installEgmaSkill({ places, scope });
-  ui.pushStatus(
-    `${ACTION_MARK} ${installed.replaced ? "Replaced the Egma skill in" : "The Egma skill is in"} ${installed.file}`,
-  );
+  const installed = await installEgmaSkills({ places, scope });
+  if (installed.kind === "failed") {
+    // An offer accepted and not kept says so. A developer who was told nothing
+    // walks away believing their coding agent learned something it did not.
+    ui.pushStatus(`${FAILURE_MARK} ${installed.reason}`);
+    return { kind: "install-failed", reason: installed.reason };
+  }
+  for (const where of installed.landed) ui.pushStatus(`${ACTION_MARK} ${where}`);
   return {
     kind: "installed",
     scope: installed.scope,
-    file: installed.file,
-    drivenAgentName: places.name,
-    replaced: installed.replaced,
+    places,
+    landed: installed.landed,
   };
 }
 
@@ -230,9 +235,9 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     repository: options.cwd,
     home: options.home,
   });
-  // A coding agent whose skill convention egma does not know gets no offer.
-  // Writing a file into a directory it may never read would be egma leaving
-  // litter behind and calling it help.
+  // A coding agent the skills installer cannot name gets no offer. Aiming an
+  // install at nobody would leave litter in somebody's repository and tell them
+  // egma had helped.
   const skill: SkillOutcome =
     places === null ? { kind: "not-offered" } : await offerTheSkill(options, places);
 

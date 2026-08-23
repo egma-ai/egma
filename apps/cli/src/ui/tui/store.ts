@@ -32,6 +32,7 @@ import type {
   CodingAgentChoice,
   DrivenAgent,
   GateId,
+  GoalAsk,
   PlatformNotice,
 } from "../wizard-ui.ts";
 import type { ConnectionAsk } from "../wizard-ui.ts";
@@ -44,32 +45,35 @@ export const WIZARD_SCREENS: Sequence = [
   // moment there is not — which is the router working the flow out from state
   // rather than the flow navigating anywhere.
   { id: "login", show: (state) => state.phase === "login" && state.login !== null },
+  // The one question about what Egma is here to do, asked once discovery knows
+  // the agent and its platform.
+  { id: "goal", show: (state) => state.phase === "goal" && state.goalAsk !== null },
   {
     id: "retell-key",
-    show: (state) => state.phase === "provider-setup" && state.asking === "retell-key",
+    show: (state) => state.phase === "connection-setup" && state.asking === "retell-key",
   },
   {
     id: "connection-field",
     show: (state) =>
-      state.phase === "provider-setup" && state.asking?.startsWith("connection:") === true,
+      state.phase === "connection-setup" && state.asking?.startsWith("connection:") === true,
   },
   // Never reached with one agent on the account, because the flow only opens
   // this question when there is a choice to make.
   {
     id: "retell-agent",
-    show: (state) => state.phase === "provider-setup" && state.asking === "retell-agent",
+    show: (state) => state.phase === "connection-setup" && state.asking === "retell-agent",
   },
   // The one question that decides what egma creates. Never skipped and never
   // answered for the developer.
   {
     id: "reach",
-    show: (state) => state.phase === "provider-setup" && state.asking === "reach",
+    show: (state) => state.phase === "connection-setup" && state.asking === "reach",
   },
   // Never reached when Retell routes one number to the agent, because the flow
   // only opens this question when there is a choice to make.
   {
     id: "phone-number",
-    show: (state) => state.phase === "provider-setup" && state.asking === "phone-number",
+    show: (state) => state.phase === "connection-setup" && state.asking === "phone-number",
   },
   {
     id: "existing-tests",
@@ -83,10 +87,13 @@ export const WIZARD_SCREENS: Sequence = [
   },
   // The list, while it is waiting on the one keystroke it exists for.
   { id: "gate", show: (state) => state.phase === "review" && state.gate !== null },
-  // The files arriving, one at a time, while they arrive.
+  // The files arriving, one at a time, while they arrive. The mocked world is
+  // written by the same kind of dispatch, so it fills the same pane.
   {
     id: "generating",
-    show: (state) => state.phase === "test-writing" && state.generation !== null,
+    show: (state) =>
+      (state.phase === "test-writing" || state.phase === "mock-authoring") &&
+      state.generation !== null,
   },
   // The run, from the moment it is created until the wizard closes. It never
   // completes on this screen: the wizard leaves and the suite carries on.
@@ -229,6 +236,10 @@ export class WizardStore {
 
   setDetection(detection: Detection | null): void {
     this.change({ detection });
+  }
+
+  setGoalAsk(goalAsk: GoalAsk | null): void {
+    this.change({ goalAsk });
   }
 
   setLogin(login: LoginPrompt | null): void {

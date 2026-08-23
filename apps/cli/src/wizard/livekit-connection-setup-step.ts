@@ -1,4 +1,11 @@
-/** LiveKit connection setup for the wizard, drawn from the platform catalog. */
+/**
+ * LiveKit connection setup for the wizard, drawn from the platform catalog.
+ *
+ * A connection is how Egma's simulator reaches the agent — on LiveKit that is
+ * the customer's server URL and their key pair or token endpoint. The Egma SDK
+ * inside the customer's own worker is a separate thing, wired by the mock
+ * authoring step after the tests are written.
+ */
 
 import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
 import {
@@ -24,7 +31,7 @@ import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
-export type LiveKitConnectStepOptions = {
+export type LiveKitConnectionSetupStepOptions = {
   readonly ui: WizardUI;
   readonly platform: PlatformAccess;
   readonly cwd: string;
@@ -153,8 +160,8 @@ function providerReason(
 }
 
 /** Ask from server-owned metadata, then register through the platform API. */
-export async function connectLiveKitStep(
-  options: LiveKitConnectStepOptions,
+export async function liveKitConnectionSetupStep(
+  options: LiveKitConnectionSetupStepOptions,
 ): Promise<LiveKitConnected> {
   const held = await readCredentials(options.platform.credentialsFile, options.platform.url);
   if (held === null) {

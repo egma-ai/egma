@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { gradeEveryRun } from "./support/grading.ts";
-import { runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
+import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
   FAKE_AGENT,
@@ -157,6 +157,7 @@ describe("the key screen", () => {
     // Waited for whole, down to the last line this screen draws: what is
     // asserted below is what the screen does *not* say, and a frame that is
     // still arriving says nothing at all.
+    await chooseTesting(run);
     const asking = await showing(
       run,
       "Paste your Retell API key",
@@ -218,6 +219,7 @@ describe("stopping at the key screen", () => {
     retell = await startFakeRetell(ONE_AGENT);
     const run = await wizard();
 
+    await chooseTesting(run);
     await showing(
       run,
       "Paste your Retell API key",
@@ -250,6 +252,7 @@ describe("the picker", () => {
     retell = await startFakeRetell(TWO_AGENTS);
     const run = await wizard();
 
+    await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     // A key copied out of a password manager arrives whole, with the newline
     // that ended the line on it. The screen must read that as Enter rather
@@ -297,6 +300,7 @@ describe("the choice between text and phone", () => {
     retell = await startFakeRetell(VOICE_AGENT);
     const run = await wizard();
 
+    await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
 
@@ -350,6 +354,7 @@ describe("the choice between text and phone", () => {
     });
     const run = await wizard();
 
+    await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
     await showing(run, "How should Egma reach this agent?");
@@ -393,6 +398,7 @@ describe("the choice between text and phone", () => {
     retell = await startFakeRetell(VOICE_AGENT);
     const run = await wizard();
 
+    await chooseTesting(run);
     await showing(run, "Paste your Retell API key");
     run.write(`${KEY}\n`);
     await showing(run, "How should Egma reach this agent?", "[esc] neither");

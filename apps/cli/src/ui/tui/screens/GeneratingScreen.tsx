@@ -109,7 +109,9 @@ export function GeneratingScreen({ progress }: GeneratingScreenProps) {
       <Text>
         {progress.what === "converting"
           ? "Turning what you already had into test files."
-          : "Writing tests for your voice agent."}
+          : progress.what === "mocking"
+            ? "Writing what Egma answers your agent's tools with."
+            : "Writing tests for your voice agent."}
       </Text>
       <Box height={1} />
       <Box flexDirection="row">

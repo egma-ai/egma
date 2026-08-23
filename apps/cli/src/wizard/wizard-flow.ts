@@ -2,11 +2,19 @@
  * The wizard flow, from the first consent screen to the final status.
  *
  * The flow never draws anything and never reads a keystroke: it pushes state at
- * the UI and parks on a gate. Five steps — sign this machine in, find the voice
- * agent, reach it, write the tests that put it under pressure, and run them —
- * and the shape of the middle three is deliberately one shape: skills plus a
+ * the UI and parks on a gate. Sign this machine in, find the voice agent, ask
+ * what Egma is here to do, reach the agent, write the tests that put it under
+ * pressure, write the mocked world those tests run in, and run them — and the
+ * shape of every intelligent step is deliberately one shape: skills plus a
  * task, dispatched to the developer's own coding agent, with every action it
  * takes shown as it happens.
+ *
+ * Two things end the walk before any of that. A repository that already has an
+ * egma folder is refused where it stands, because the wizard onboards new
+ * repositories and a second setup would half-run into somebody's committed
+ * files. And an answer to the goal question that asks for production traffic to
+ * be watched creates nothing at all for now: that lane is not built into the
+ * terminal yet, and the flow that can do it today is named instead.
  *
  * The last step is the only one that does not end when it is finished. It ends
  * when the developer has seen a verdict, which is the whole point of the ten
@@ -14,6 +22,8 @@
  * a terminal has never stopped one.
  */
 
+import type { Dirent } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import process from "node:process";
 import path from "node:path";
 
@@ -23,27 +33,39 @@ import {
   type InstalledCodingAgent,
 } from "../acp/coding-agents.ts";
 import { withDrivenAgent, type DrivenAgent } from "../acp/driven-agent.ts";
+import {
+  FOLDER_NAME,
+  folderPathsIn,
+  SUITE_MANIFEST_FILE_NAME,
+} from "../folder/egma-folder.ts";
 import type { Registered, RegisterOptions } from "../platform/agents.ts";
 import { signedInAt } from "../platform/signed-in.ts";
 import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
-import { connectStep } from "./connect-step.ts";
-import { agentPlatformIn, isSupportedAgentPlatform } from "./agent-platform.ts";
+import { connectionSetupStep } from "./connection-setup-step.ts";
+import {
+  agentPlatformIn,
+  agentPlatformLabel,
+  isSupportedAgentPlatform,
+} from "./agent-platform.ts";
 import { detect } from "./detection.ts";
 import { findTheAgent } from "./discovery.ts";
 import { openDrivenAgentLog, type DrivenAgentLog } from "./driven-agent-log.ts";
 import type { ExitReport } from "./exit-line.ts";
 import { generateStep } from "./generate-step.ts";
 import { logInStep, type PlatformAccess, type WizardPlatform } from "./login-step.ts";
-import { connectLiveKitStep } from "./livekit-connect-step.ts";
+import { liveKitConnectionSetupStep } from "./livekit-connection-setup-step.ts";
+import { mockAuthoringStep } from "./mock-authoring-step.ts";
 import { runStep } from "./run-step.ts";
 import { ACTION_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 import {
   INITIAL_WIZARD_STATE,
   transitionWizard,
+  WIZARD_GOALS,
   type WizardEvent,
+  type WizardGoal,
   type WizardState,
 } from "./wizard-machine.ts";
 
@@ -147,6 +169,23 @@ async function runWizardFlow(
     ui.setPhase(machine.phase);
   };
 
+  // Asked before anything at all is started, because the answer is that
+  // nothing should be. The wizard onboards new repositories: a second walk over
+  // a folder somebody has already committed would create a second suite beside
+  // theirs and write half of another setup into files they own. So the refusal
+  // comes before a coding agent is even chosen, and it says the one thing that
+  // redoes setup on purpose.
+  if (await hasAnEgmaFolder(cwd)) {
+    advance({ type: "repository-already-onboarded" });
+    const report: ExitReport = {
+      kind: "already-onboarded",
+      folder: `${FOLDER_NAME}/`,
+      hasSuites: await hasASuite(cwd),
+    };
+    ui.setExit(report);
+    return report;
+  }
+
   const codingAgent: WizardCodingAgent =
     "launch" in options
       ? { kind: "selected", launch: options.launch }
@@ -195,9 +234,7 @@ async function runWizardFlow(
   // platform by default, so where a repository's identifiers are going is the
   // developer's to read first, not to find out afterwards.
   ui.setPlatform(
-    options.platform === undefined
-      ? null
-      : { url: options.platform.url, bound: options.platform.bound },
+    options.platform === undefined ? null : { url: options.platform.url },
   );
 
   await untilAborted(ui.waitForGate("begin"), signal);
@@ -235,6 +272,68 @@ async function runWizardFlow(
     },
     (drivenAgent) => runWizardWithAgent(options, platform, log, drivenAgent, advance),
   );
+}
+
+/**
+ * Whether this repository has been through the wizard already.
+ *
+ * The folder itself is the question, rather than what is inside it: it is what
+ * the refusal names, what a developer deletes or renames to redo setup, and
+ * what every clone of the repository commits. A folder that cannot be read at
+ * all is treated as absent — a repository the wizard cannot look into is a
+ * repository it has no reason to refuse.
+ */
+async function hasAnEgmaFolder(cwd: string): Promise<boolean> {
+  try {
+    return (await stat(folderPathsIn(cwd).root)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether that folder holds a suite egma could push and run as it stands.
+ *
+ * Asked because the refusal offers `egma push` and `egma run` as the other way
+ * forward, and those are only the other way forward when there is something to
+ * push. A folder left behind by a walk that stopped between binding and
+ * registering holds a platform line and nothing else, and `egma push` refuses
+ * it. One manifest is the whole question, so it is answered by looking for one
+ * rather than by parsing the repository — a folder egma cannot read is a folder
+ * with nothing to offer either.
+ */
+async function hasASuite(cwd: string): Promise<boolean> {
+  const paths = folderPathsIn(cwd);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(paths.tests, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const found = await stat(
+      path.join(paths.tests, entry.name, SUITE_MANIFEST_FILE_NAME),
+    ).then(
+      (manifest) => manifest.isFile(),
+      () => false,
+    );
+    if (found) return true;
+  }
+  return false;
+}
+
+/**
+ * The one question about what Egma is here to do, asked once.
+ *
+ * `null` — a closed wizard, a run with nobody watching — is testing, which is
+ * the lane every `npx egma` has taken until now. A word nobody offered is
+ * testing too: this is a choice among three, not a place to smuggle a fourth.
+ */
+function goalFrom(said: string | null): WizardGoal {
+  return (WIZARD_GOALS as readonly string[]).includes(said ?? "")
+    ? (said as WizardGoal)
+    : "testing";
 }
 
 /** The wizard work that shares one coding-agent process and ACP session. */
@@ -286,6 +385,39 @@ async function runWizardWithAgent(
   }
   advance({ type: "agent-found", platform: agentPlatform });
 
+  // The one question the wizard asks about itself, and it is asked here because
+  // here is where it can be asked concretely: Egma has the repository's agent
+  // and knows which platform runs it, so each answer speaks about that agent
+  // rather than about voice agents in general.
+  ui.setGoalAsk({
+    platform: agentPlatform,
+    platformLabel: agentPlatformLabel(agentPlatform),
+    agentName: found.facts.get("agent-name") ?? null,
+    goals: WIZARD_GOALS,
+  });
+  const said = await untilAborted(ui.waitForAnswer("goal"), signal);
+  ui.setGoalAsk(null);
+  if (signal.aborted) {
+    const report = stopReport(signal, drivenAgent.name);
+    ui.setExit(report);
+    return report;
+  }
+  const goal = goalFrom(said ?? null);
+  advance({ type: "goal-chosen", goal });
+
+  // Watching production traffic is not built into the terminal yet, and the
+  // both lane starts with it. Neither is half-run: nothing is created, and the
+  // developer is sent to the one flow that can do it today.
+  if (goal !== "testing") {
+    const report: ExitReport = {
+      kind: "monitoring-in-the-web",
+      goal,
+      platformUrl: platform.url,
+    };
+    ui.setExit(report);
+    return report;
+  }
+
   // The binding is written inside the connect step, at the last moment before
   // egma asks the platform to create anything — not here. Bound at this line, a
   // walk that ended at the key box, at an unanswered choice of agent, or at
@@ -299,7 +431,7 @@ async function runWizardWithAgent(
     } | null;
   };
   if (agentPlatform === "retell") {
-    const retell = await connectStep({
+    const retell = await connectionSetupStep({
       ui,
       platform,
       cwd,
@@ -323,7 +455,7 @@ async function runWizardWithAgent(
             },
     };
   } else {
-    connected = await connectLiveKitStep({
+    connected = await liveKitConnectionSetupStep({
       ui,
       platform,
       cwd,
@@ -340,8 +472,9 @@ async function runWizardWithAgent(
     ui.setExit(connected.report);
     return connected.report;
   }
-  advance({ type: "provider-ready" });
+  advance({ type: "connection-ready" });
 
+  const registered = connected.connected.registered;
   const written = await generateStep({
     ui,
     drivenAgent,
@@ -349,10 +482,36 @@ async function runWizardWithAgent(
     signal,
     log,
     signedIn,
-    registered: connected.connected.registered,
+    registered,
     source: connected.connected.source,
     facts: found.facts,
-    onReviewReady: (count) => advance({ type: "tests-ready", count }),
+    // The tests exist, and the mocked world they run in is written next. On
+    // Retell there is nothing to write — mock tools are not served there yet —
+    // so the lane passes straight to the gate with no screen in between.
+    betweenWritingAndReview: async ({ tests, suiteDirectory }) => {
+      advance({ type: "tests-ready", count: tests.length });
+      if (agentPlatform !== "livekit") return { halted: null };
+      const authored = await mockAuthoringStep({
+        ui,
+        drivenAgent,
+        signal,
+        log,
+        paths: folderPathsIn(cwd),
+        context: {
+          cwd,
+          suiteDirectory,
+          facts: found.facts,
+          agentName: registered.agent.name,
+          tests,
+        },
+      });
+      if (authored.halted !== null) return { halted: authored.halted };
+      advance({ type: "mocks-ready" });
+      return {
+        halted: null,
+        changed: authored.sdkEntry === null ? [] : [authored.sdkEntry],
+      };
+    },
     onReviewApproved: (count) => advance({ type: "review-approved", count }),
     ...(options.howManyTests === undefined ? {} : { howMany: options.howManyTests }),
   });

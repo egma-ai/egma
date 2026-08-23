@@ -479,6 +479,13 @@ function walkExitCode(report: ExitReport): number {
     // egma did everything it could here: it named what is missing and handed
     // over words that work without it. That is the run finishing, not failing.
     case "no-coding-agent":
+    // Nothing was created and nothing is half-done. Egma named the flow that
+    // can watch production traffic today and stopped, which is a run that did
+    // what it could rather than one that broke.
+    case "monitoring-in-the-web":
+    // The repository is already set up. Refusing to onboard it twice is the
+    // command working, so it answers a shell the way working commands do.
+    case "already-onboarded":
       return 0;
     case "interrupted":
       return 130;
@@ -1019,7 +1026,6 @@ export async function main(argv: readonly string[]): Promise<void> {
       const selected = chosen;
       process.exitCode = await theWizard({
         url: selected.url,
-        bound: selected.binding !== null,
         credentialsFile: selected.credentialsFile,
       });
     }

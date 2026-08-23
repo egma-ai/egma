@@ -4,35 +4,88 @@
  * The flow owns effects such as ACP work, platform requests, and UI updates.
  * This module owns only which phase can follow which. That gives the flow one
  * small seam for ordering and gives tests the same seam.
+ *
+ * **The goal lives here and nowhere else.** After discovery the wizard knows
+ * the agent and its platform, so it can ask what Egma is here to do — test the
+ * agent, watch its production traffic, or both — and the answer becomes state.
+ * Nothing in the public CLI mirrors it: a coding agent types verbs, and a verb
+ * that named a phase of this machine would be a second way to run the wizard.
  */
 
 export type WizardAgentPlatform = "retell" | "livekit";
 export type UnsupportedWizardAgentPlatform = "pipecat" | "vapi";
 
+/** What Egma is being asked to do for the agent the wizard just found. */
+export type WizardGoal = "testing" | "monitoring" | "both";
+
+/** Every goal, in the order the question offers them. */
+export const WIZARD_GOALS: readonly WizardGoal[] = ["testing", "monitoring", "both"];
+
+/** The two goals whose lane runs the testing work. */
+type TestingGoal = "testing" | "both";
+
+/** The two goals that want production traffic watched. */
+type MonitoringGoal = "monitoring" | "both";
+
 type ChosenCodingAgent = { readonly codingAgentId: string };
+
+type OnAPlatform = {
+  readonly platform: WizardAgentPlatform;
+  readonly goal: TestingGoal;
+};
 
 export type WizardState =
   | { readonly phase: "coding-agent" }
   | ({ readonly phase: "intro" } & ChosenCodingAgent)
   | ({ readonly phase: "login" } & ChosenCodingAgent)
   | ({ readonly phase: "discovery" } & ChosenCodingAgent)
-  | ({ readonly phase: "provider-setup"; readonly platform: WizardAgentPlatform } & ChosenCodingAgent)
-  | ({ readonly phase: "test-writing"; readonly platform: WizardAgentPlatform } & ChosenCodingAgent)
+  /** The one question, asked once the agent and its platform are known. */
+  | ({ readonly phase: "goal"; readonly platform: WizardAgentPlatform } & ChosenCodingAgent)
+  | ({ readonly phase: "connection-setup" } & OnAPlatform & ChosenCodingAgent)
+  | ({ readonly phase: "test-writing" } & OnAPlatform & ChosenCodingAgent)
+  /**
+   * The mocked world, written after the tests it has to serve.
+   *
+   * Only LiveKit reaches it, because only a LiveKit simulation is served mock
+   * tools. On Retell the lane passes from test writing to the review gate with
+   * no screen in between, and the type says so rather than a comment.
+   */
+  | ({
+      readonly phase: "mock-authoring";
+      readonly platform: "livekit";
+      readonly goal: TestingGoal;
+      readonly testCount: number;
+    } & ChosenCodingAgent)
   | ({
       readonly phase: "review";
-      readonly platform: WizardAgentPlatform;
       readonly testCount: number;
-    } & ChosenCodingAgent)
+    } & OnAPlatform &
+      ChosenCodingAgent)
   | ({
       readonly phase: "run";
-      readonly platform: WizardAgentPlatform;
       readonly testCount: number;
-    } & ChosenCodingAgent)
+    } & OnAPlatform &
+      ChosenCodingAgent)
   | ({
       readonly phase: "complete";
-      readonly platform: WizardAgentPlatform;
       readonly testCount: number;
+    } & OnAPlatform &
+      ChosenCodingAgent)
+  /**
+   * Monitoring, which this wizard cannot yet set up from the terminal.
+   *
+   * A terminal phase on purpose and a temporary one: the monitoring lane is
+   * built by the tickets after this one, and until then the honest ending is
+   * the web flow that can do it today. Nothing is created and nothing is
+   * half-done.
+   */
+  | ({
+      readonly phase: "monitoring-elsewhere";
+      readonly platform: WizardAgentPlatform;
+      readonly goal: MonitoringGoal;
     } & ChosenCodingAgent)
+  /** The repository has already been through the wizard once. */
+  | { readonly phase: "already-onboarded" }
   | ({ readonly phase: "no-agent" } & ChosenCodingAgent)
   | ({
       readonly phase: "unsupported-platform";
@@ -45,6 +98,8 @@ export type WizardPhase = WizardState["phase"];
 export type WizardEvent =
   | { readonly type: "coding-agent-selected"; readonly id: string }
   | { readonly type: "coding-agent-unavailable" }
+  /** An egma folder is already here, so this repository is not a new one. */
+  | { readonly type: "repository-already-onboarded" }
   | { readonly type: "intro-accepted" }
   | { readonly type: "login-finished" }
   | { readonly type: "agent-found"; readonly platform: WizardAgentPlatform }
@@ -53,8 +108,11 @@ export type WizardEvent =
       readonly type: "agent-unsupported";
       readonly platform: UnsupportedWizardAgentPlatform;
     }
-  | { readonly type: "provider-ready" }
+  | { readonly type: "goal-chosen"; readonly goal: WizardGoal }
+  | { readonly type: "connection-ready" }
   | { readonly type: "tests-ready"; readonly count: number }
+  /** The mocked world is written, so the gate can show it beside the tests. */
+  | { readonly type: "mocks-ready" }
   | { readonly type: "review-approved"; readonly count: number }
   | { readonly type: "wizard-completed" };
 
@@ -84,6 +142,11 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
       if (event.type === "coding-agent-unavailable") {
         return movedTo({ phase: "no-coding-agent" });
       }
+      // Read before a coding agent is even selected, so a repository that has
+      // been through the wizard once starts nothing at all the second time.
+      if (event.type === "repository-already-onboarded") {
+        return movedTo({ phase: "already-onboarded" });
+      }
       if (event.type === "coding-agent-selected") {
         if (event.id.trim() === "") return invalid(state, event, "invalid-coding-agent");
         return movedTo({ phase: "intro", codingAgentId: event.id });
@@ -105,7 +168,7 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
     case "discovery":
       if (event.type === "agent-found") {
         return movedTo({
-          phase: "provider-setup",
+          phase: "goal",
           platform: event.platform,
           codingAgentId: state.codingAgentId,
         });
@@ -122,11 +185,34 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
       }
       break;
 
-    case "provider-setup":
-      if (event.type === "provider-ready") {
+    case "goal":
+      if (event.type === "goal-chosen") {
+        // Watching production traffic is not built into the terminal yet, and
+        // the both lane starts with it. Both therefore end here for now rather
+        // than running half of what they promised.
+        if (event.goal !== "testing") {
+          return movedTo({
+            phase: "monitoring-elsewhere",
+            platform: state.platform,
+            goal: event.goal,
+            codingAgentId: state.codingAgentId,
+          });
+        }
+        return movedTo({
+          phase: "connection-setup",
+          platform: state.platform,
+          goal: event.goal,
+          codingAgentId: state.codingAgentId,
+        });
+      }
+      break;
+
+    case "connection-setup":
+      if (event.type === "connection-ready") {
         return movedTo({
           phase: "test-writing",
           platform: state.platform,
+          goal: state.goal,
           codingAgentId: state.codingAgentId,
         });
       }
@@ -137,10 +223,34 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
         if (!Number.isSafeInteger(event.count) || event.count < 1) {
           return invalid(state, event, "invalid-test-count");
         }
+        // Mock tools are served on LiveKit and nowhere else yet, so a Retell
+        // lane has no mocked world to author and no screen for one.
+        if (state.platform === "livekit") {
+          return movedTo({
+            phase: "mock-authoring",
+            platform: "livekit",
+            goal: state.goal,
+            testCount: event.count,
+            codingAgentId: state.codingAgentId,
+          });
+        }
         return movedTo({
           phase: "review",
           platform: state.platform,
+          goal: state.goal,
           testCount: event.count,
+          codingAgentId: state.codingAgentId,
+        });
+      }
+      break;
+
+    case "mock-authoring":
+      if (event.type === "mocks-ready") {
+        return movedTo({
+          phase: "review",
+          platform: state.platform,
+          goal: state.goal,
+          testCount: state.testCount,
           codingAgentId: state.codingAgentId,
         });
       }
@@ -160,6 +270,7 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
         return movedTo({
           phase: "run",
           platform: state.platform,
+          goal: state.goal,
           testCount: event.count,
           codingAgentId: state.codingAgentId,
         });
@@ -171,6 +282,7 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
         return movedTo({
           phase: "complete",
           platform: state.platform,
+          goal: state.goal,
           testCount: state.testCount,
           codingAgentId: state.codingAgentId,
         });
@@ -178,6 +290,8 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
       break;
 
     case "complete":
+    case "monitoring-elsewhere":
+    case "already-onboarded":
     case "no-agent":
     case "unsupported-platform":
     case "no-coding-agent":

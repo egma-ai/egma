@@ -19,7 +19,11 @@ import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
-import type { WizardPhase } from "../wizard/wizard-machine.ts";
+import type {
+  WizardAgentPlatform,
+  WizardGoal,
+  WizardPhase,
+} from "../wizard/wizard-machine.ts";
 
 /**
  * A point the flow waits at until the developer has moved past it.
@@ -71,6 +75,17 @@ export type ConnectionAsk = {
 export type AskId =
   | ConnectionAskId
   | "coding-agent"
+  /**
+   * What Egma is here to do for the agent it just found: test it, watch its
+   * production traffic, or both.
+   *
+   * A question rather than a gate because there are three answers and none of
+   * them is agreement to the other two. It is asked after discovery so the
+   * choices can speak about this repository's own agent rather than about
+   * voice agents in general. No answer means testing, which is the lane every
+   * `npx egma` has run until now.
+   */
+  | "goal"
   | "retell-key"
   | "retell-agent"
   /**
@@ -98,20 +113,38 @@ export type AskId =
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
 
+/** What the goal question knows about the agent it is asking about. */
+export type GoalAsk = {
+  readonly platform: WizardAgentPlatform;
+  /** What a developer calls that agent platform, e.g. `LiveKit Agents`. */
+  readonly platformLabel: string;
+  /** What the repository calls the agent, when discovery reported a name. */
+  readonly agentName: string | null;
+  /** The answers on offer, in the order they are shown. */
+  readonly goals: readonly WizardGoal[];
+};
+
+/** What each answer to the goal question means, in one line each. */
+export const GOAL_LINES: Readonly<Record<WizardGoal, string>> = {
+  testing: "Test it — write tests, run them, and grade what the agent did.",
+  monitoring: "Watch its production traffic — bring real transcripts into Egma.",
+  both: "Both — watch production traffic and test the agent.",
+};
+
+/** The question itself, said the same way on a screen and in plain lines. */
+export const GOAL_ASK_LINE = "What should Egma do for this voice agent?";
+
 /**
- * Which egma a walk will use, and how a developer would change it.
+ * Which egma a walk will use.
  *
- * The address alone is not enough for the screen that shows it. An unbound
- * repository changes egma by naming another one on the command; a bound one
- * cannot — a different `--url` is refused, with the whole move under it — and
- * changes egma by editing the file it already commits. Offering the wrong one
- * of those sends somebody to a command egma turns away, so the fact that
- * decides which is carried here rather than guessed at the screen.
+ * Only the address, because only one kind of repository ever reads this screen.
+ * A repository that has committed a platform has an `egma/` folder, and the
+ * wizard refuses one of those before it draws anything — so every walk that
+ * gets here is unbound, and naming another egma on the command really is the
+ * way to change it.
  */
 export type PlatformNotice = {
   readonly url: string;
-  /** True when `egma/config.yaml` names it. */
-  readonly bound: boolean;
 };
 
 export interface WizardUI {
@@ -166,6 +199,15 @@ export interface WizardUI {
    * with nobody at the keyboard answers `null` forever.
    */
   takeLoginPaste(): string | null;
+
+  /**
+   * The one question about what Egma is here to do, while it is open, or
+   * `null` when it is closed.
+   *
+   * A write and not a question, exactly as every other offer is: the flow says
+   * the choice is open and what it is about, and the screen collects the word.
+   */
+  setGoalAsk(ask: GoalAsk | null): void;
 
   /**
    * What egma needs handed to it before it can reach the developer's provider,

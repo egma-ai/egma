@@ -352,7 +352,6 @@ describe("one task, driven on a scripted agent", () => {
       platform: {
         url: "http://127.0.0.1:1",
         credentialsFile: workspace.credentialsFile,
-        bound: false,
       },
     });
 

@@ -1,5 +1,10 @@
 /**
- * The wizard's connect step: the same flow the headless verb runs, on a screen.
+ * The wizard's connection setup on Retell: the same flow the headless verb
+ * runs, on a screen.
+ *
+ * A connection is how Egma's simulator reaches the agent, and nothing else. It
+ * is not the Egma SDK inside the customer's own process, which the mocked world
+ * needs and which a later step wires in.
  *
  * Everything the developer sees is pushed at the UI and everything they type
  * comes back through a gate carrying a value, so this step owns no drawing and
@@ -34,7 +39,7 @@ import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
-export type ConnectStepOptions = {
+export type ConnectionSetupStepOptions = {
   readonly ui: WizardUI;
   readonly platform: PlatformAccess;
   /** The folder the repository's prompt is looked for in. */
@@ -115,7 +120,7 @@ export type Connected = {
  * Unlike login, every ending here is an ending: past this point egma has no
  * agent to test, so there is nothing for the walk to carry on into.
  */
-export async function connectStep(options: ConnectStepOptions): Promise<Connected> {
+export async function connectionSetupStep(options: ConnectionSetupStepOptions): Promise<Connected> {
   const { ui, signal } = options;
 
   const held = await readCredentials(

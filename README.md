@@ -592,13 +592,16 @@ room's token.
 
 ## Agent Skills
 
-The public repository is the source for three Agent Skills:
+The public repository is the source for four Agent Skills:
 
 - `egma` operates the CLI, keeps repository tests in step with Egma, starts a
   run, and reads its verdicts.
 - `find-voice-agent` maps a repository's voice-agent framework, prompts, tools,
   deployment path, and provider identifier location. Its provider references
   currently include Retell and LiveKit, and it recognizes Pipecat and Vapi.
+- `integrate-egma-sdk` puts the Egma Python SDK into a LiveKit Agents worker:
+  the testing entry so simulations can be served mock tools, and the monitoring
+  entry so production traffic reaches Egma.
 - `write-egma-tests` writes and edits the Markdown tests in `egma/tests/`.
 
 Install any skill into a supported coding agent with:
@@ -606,14 +609,15 @@ Install any skill into a supported coding agent with:
 ```bash
 npx skills add egma-ai/egma --skill egma
 npx skills add egma-ai/egma --skill find-voice-agent
+npx skills add egma-ai/egma --skill integrate-egma-sdk
 npx skills add egma-ai/egma --skill write-egma-tests
 ```
 
-Leave out `--skill` to choose from all three.
+Leave out `--skill` to choose from all four.
 
 The CLI also carries the exact skill snapshot from its release tag. This lets
-the wizard use `find-voice-agent` and `write-egma-tests` without downloading
-them, and offer the `egma` skill for direct installation after a run.
+the wizard use them without downloading anything, and offer all four for
+installation after a run.
 
 ## Working on it
 

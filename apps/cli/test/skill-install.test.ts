@@ -1,10 +1,16 @@
 /**
- * The one skill egma installs, and the three answers it can be given.
+ * The skills egma installs, and the three answers the offer can be given.
  *
  * This is the only thing in the whole walk that writes outside the developer's
- * repository, so what is checked is the filesystem itself: which file landed,
- * where, with what in it — and, for the answer that installs nothing, that
- * every file on both trees is exactly where it was.
+ * repository, so what is checked is the filesystem itself: which files landed,
+ * where — and, for the answer that installs nothing, that every file on both
+ * trees is exactly where it was.
+ *
+ * What writes them is no longer egma. It is the standard skills installer,
+ * pinned as a dependency of this package, so what these checks prove is that
+ * egma points it at the right tree, at the right agent, with the right scope,
+ * and that the copy it runs is the vendored one rather than anything a network
+ * would hand back.
  *
  * The home is passed in throughout. A check that wrote a global skill would
  * otherwise write into the home of whoever ran the suite, and a check that had
@@ -12,26 +18,39 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installableSkill, installableSkillFile } from "../src/skills/index.ts";
+import {
+  drivingSkill,
+  drivingSkillFile,
+  PUBLIC_SKILL_NAMES,
+  publicSkillsDirectory,
+} from "../src/skills/index.ts";
 import {
   homeIn,
-  installEgmaSkill,
+  installArguments,
+  installEgmaSkills,
   installedLine,
+  landedLines,
   skillPlacesFor,
+  skillsCliEntry,
   skippedLine,
+  SKILLS_CLI_PACKAGE,
+  SKILLS_LOCK_FILE,
 } from "../src/skills/install.ts";
-import { BANNED, SCENARIO_HEADING } from "./support/glossary.ts";
+import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
 import { CLI_ENTRY, filesUnder, makeWorkspace, type Workspace } from "./support/workspace.ts";
 
 const run = promisify(execFile);
+
+// The installer is a real subprocess reading and writing a real tree.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let repository: Workspace;
 let home: Workspace;
@@ -58,57 +77,38 @@ async function everything(): Promise<{ repository: string[]; home: string[] }> {
   };
 }
 
-describe("where the skill goes", () => {
-  it("puts Claude Code's where Claude Code keeps skills, at both scopes", () => {
-    const places = placesFor("claude-acp");
+describe("who the offer is aimed at", () => {
+  it.each([
+    ["claude", "claude-code", "Claude Code"],
+    ["claude-acp", "claude-code", "Claude Code"],
+    ["codex", "codex", "Codex"],
+    ["codex-acp", "codex", "Codex"],
+    ["cursor", "cursor", "Cursor"],
+    ["opencode", "opencode", "OpenCode"],
+  ])("names %s to the installer as %s", (id, skillsAgentId, name) => {
+    const places = placesFor(id);
 
-    expect(places?.name).toBe("Claude Code");
-    expect(places?.project).toBe(
-      path.join(repository.dir, ".claude", "skills", "egma", "SKILL.md"),
-    );
-    expect(places?.global).toBe(path.join(home.dir, ".claude", "skills", "egma", "SKILL.md"));
-  });
-
-  it("puts Codex's where Codex keeps skills, at both scopes", () => {
-    const places = placesFor("codex-acp");
-
-    expect(places?.name).toBe("Codex");
-    expect(places?.project).toBe(
-      path.join(repository.dir, ".codex", "skills", "egma", "SKILL.md"),
-    );
-    expect(places?.global).toBe(path.join(home.dir, ".codex", "skills", "egma", "SKILL.md"));
-  });
-
-  it("puts Cursor's where Cursor keeps skills, at both scopes", () => {
-    const places = placesFor("cursor");
-
-    expect(places?.name).toBe("Cursor");
-    expect(places?.project).toBe(
-      path.join(repository.dir, ".cursor", "skills", "egma", "SKILL.md"),
-    );
-    expect(places?.global).toBe(path.join(home.dir, ".cursor", "skills", "egma", "SKILL.md"));
-  });
-
-  it("puts OpenCode's in its different project and global roots", () => {
-    const places = placesFor("opencode");
-
-    expect(places?.name).toBe("OpenCode");
-    expect(places?.project).toBe(
-      path.join(repository.dir, ".opencode", "skills", "egma", "SKILL.md"),
-    );
-    expect(places?.global).toBe(
-      path.join(home.dir, ".config", "opencode", "skills", "egma", "SKILL.md"),
-    );
+    expect(places?.skillsAgentId).toBe(skillsAgentId);
+    expect(places?.name).toBe(name);
+    expect(places?.repository).toBe(repository.dir);
+    expect(places?.home).toBe(home.dir);
   });
 
   /**
-   * A coding agent whose skill convention egma does not know gets no offer at
-   * all. Guessing at a directory would put a file somewhere nothing reads, and
-   * tell the developer egma had done something for them.
+   * A coding agent the installer cannot name gets no offer at all. Aiming an
+   * install at nobody would write files nothing reads and tell the developer
+   * egma had done something useful.
    */
-  it("offers nothing for a coding agent whose convention egma does not know", () => {
+  it("offers nothing for a coding agent egma cannot name to the installer", () => {
     expect(placesFor("gemini")).toBeNull();
     expect(placesFor("some-agent-nobody-has-heard-of")).toBeNull();
+  });
+
+  it("offers every public skill, not just the one that drives egma", () => {
+    expect(placesFor("claude")?.skills).toEqual(PUBLIC_SKILL_NAMES);
+    expect(placesFor("claude")?.skills).toContain("egma");
+    expect(placesFor("claude")?.skills).toContain("write-egma-tests");
+    expect(placesFor("claude")?.skills).toContain("integrate-egma-sdk");
   });
 
   it("reads the home from the environment the way every other tool does", () => {
@@ -122,81 +122,127 @@ describe("where the skill goes", () => {
   });
 });
 
-describe("installing it", () => {
-  it("writes one file into the repository at project scope, and nothing else", async () => {
+describe("the installer egma runs", () => {
+  /**
+   * The pinned copy that arrived with egma, and never a name on a `PATH` or a
+   * version a registry would resolve today. An unpinned fetch at the moment a
+   * developer says yes is the supply chain the old hand-rolled writer existed
+   * to avoid, and vendoring is how that stays true.
+   */
+  it("is the copy inside this package", () => {
+    const entry = skillsCliEntry();
+
+    expect(entry).not.toBeNull();
+    expect(entry as string).toContain(`${path.sep}${SKILLS_CLI_PACKAGE}${path.sep}bin${path.sep}`);
+    expect(path.basename(entry as string)).toBe("cli.mjs");
+  });
+
+  it("is a real dependency of this package, pinned exactly", async () => {
+    const manifest = JSON.parse(
+      await readFile(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"),
+    ) as { dependencies: Record<string, string> };
+
+    expect(manifest.dependencies[SKILLS_CLI_PACKAGE]).toMatch(/^\d+\.\d+\.\d+$/u);
+  });
+
+  it("points at the skills this package carries, for the chosen agent and scope", () => {
+    const places = placesFor("claude");
+    if (places === null) throw new Error("Claude Code has an installer name");
+
+    expect(installArguments({ places, scope: "project" })).toEqual([
+      "add",
+      publicSkillsDirectory(),
+      "--skill",
+      "*",
+      "--agent",
+      "claude-code",
+      "--yes",
+    ]);
+    expect(installArguments({ places, scope: "global" })).toContain("--global");
+  });
+
+  /**
+   * The installer draws its box in ASCII on a plain terminal and in
+   * box-drawing characters on a capable one, and the wizard runs it under both.
+   * A reader that only knew one of them would relay nothing on the other and
+   * the developer would never be told where their skills went.
+   */
+  it.each([
+    {
+      terminal: "a plain one",
+      output: [
+        "|  o  Installed 2 skills ---------+",
+        "|  ✓ egma (copied)                |",
+        "|    → ./.claude/skills/egma      |",
+        "|  ✓ write-egma-tests (copied)    |",
+        "|    → ./.claude/skills/write     |",
+        "+--------------------------------+",
+      ],
+    },
+    {
+      terminal: "a capable one",
+      output: [
+        "│  ◇  Installed 2 skills ────────╮",
+        "│  ✓ egma (copied)               │",
+        "│    → ./.claude/skills/egma     │",
+        "│  ✓ write-egma-tests (copied)   │",
+        "│    → ./.claude/skills/write    │",
+        "├───────────────────────────────╯",
+      ],
+    },
+  ])("keeps the installer's own account of where each skill went, on $terminal", ({ output }) => {
+    expect(landedLines(output.join("\n"))).toEqual([
+      "./.claude/skills/egma",
+      "./.claude/skills/write",
+    ]);
+  });
+});
+
+describe("installing them", () => {
+  it("writes into the repository at project scope, and nothing into the home", async () => {
     const before = await everything();
-    const places = placesFor("claude-acp");
-    if (places === null) throw new Error("Claude Code has a skill convention");
+    const places = placesFor("claude");
+    if (places === null) throw new Error("Claude Code has an installer name");
 
-    const installed = await installEgmaSkill({ places, scope: "project" });
+    const installed = await installEgmaSkills({ places, scope: "project" });
 
-    expect(installed.file).toBe(places.project);
-    expect(await readFile(installed.file, "utf8")).toBe(`${installableSkill()}\n`);
+    expect(installed.kind).toBe("installed");
+    if (installed.kind !== "installed") throw new Error(installed.reason);
+    expect(installed.scope).toBe("project");
+    expect(installed.skills).toEqual(PUBLIC_SKILL_NAMES);
 
     const after = await everything();
-    expect(after.repository).toEqual(
-      [...before.repository, ".claude/skills/egma/SKILL.md"].sort(),
-    );
+    const written = after.repository.filter((file) => !before.repository.includes(file));
+    for (const skill of PUBLIC_SKILL_NAMES) {
+      expect(written).toContain(`.claude/skills/${skill}/SKILL.md`);
+    }
+    expect(
+      await readFile(
+        path.join(repository.dir, ".claude", "skills", "egma", "SKILL.md"),
+        "utf8",
+      ),
+    ).toContain(drivingSkill());
     // The developer's home was not touched at all.
     expect(after.home).toEqual(before.home);
   });
 
-  it("writes one file into the home at global scope, and nothing into the repository", async () => {
+  it("writes into the passed-in home at global scope, and not into the repository", async () => {
     const before = await everything();
-    const places = placesFor("claude-acp");
-    if (places === null) throw new Error("Claude Code has a skill convention");
+    const places = placesFor("codex");
+    if (places === null) throw new Error("Codex has an installer name");
 
-    const installed = await installEgmaSkill({ places, scope: "global" });
+    const installed = await installEgmaSkills({ places, scope: "global" });
 
-    expect(installed.file).toBe(places.global);
-    expect(await readFile(installed.file, "utf8")).toBe(`${installableSkill()}\n`);
+    expect(installed.kind).toBe("installed");
+    if (installed.kind !== "installed") throw new Error(installed.reason);
 
     const after = await everything();
-    expect(after.home).toEqual([...before.home, ".claude/skills/egma/SKILL.md"].sort());
+    const written = after.home.filter((file) => !before.home.includes(file));
+    expect(written.length).toBeGreaterThan(0);
+    for (const skill of PUBLIC_SKILL_NAMES) {
+      expect(written.some((file) => file.includes(`skills/${skill}/SKILL.md`))).toBe(true);
+    }
     expect(after.repository).toEqual(before.repository);
-  });
-
-  it("writes Codex's into Codex's own tree", async () => {
-    const places = placesFor("codex-acp");
-    if (places === null) throw new Error("Codex has a skill convention");
-
-    await installEgmaSkill({ places, scope: "project" });
-
-    expect(await filesUnder(repository.dir)).toContain(".codex/skills/egma/SKILL.md");
-    expect(await filesUnder(repository.dir)).not.toContain(".claude/skills/egma/SKILL.md");
-  });
-
-  /**
-   * Accepting the offer a second time means this package's copy is the current
-   * one. Half an old skill beside half a new one would be worse than either.
-   *
-   * And it says so. A developer who had edited that file has just lost the
-   * edit, and the line they keep is the only place they will ever hear about
-   * it — a tool that overwrites quietly is a tool that loses somebody's work
-   * and lets them find out weeks later.
-   */
-  it("replaces a file that is already there, and says that it did", async () => {
-    const places = placesFor("claude-acp");
-    if (places === null) throw new Error("Claude Code has a skill convention");
-
-    const first = await installEgmaSkill({ places, scope: "project" });
-    expect(first.replaced).toBe(false);
-    expect(installedLine("project", first.file, places.name, first.replaced)).not.toContain(
-      "replaced",
-    );
-
-    await writeFile(places.project, "# my own notes, written over the top\n", "utf8");
-    const second = await installEgmaSkill({ places, scope: "project" });
-
-    expect(second.replaced).toBe(true);
-    expect(installedLine("project", second.file, places.name, second.replaced)).toBe(
-      `The Egma skill in ${places.project} was replaced with this version's. Commit it, and everybody on this repository has it.`,
-    );
-
-    expect(await filesUnder(repository.dir)).toEqual(
-      ["package.json", ".claude/skills/egma/SKILL.md"].sort(),
-    );
-    expect(await readFile(places.project, "utf8")).toBe(`${installableSkill()}\n`);
   });
 
   /**
@@ -207,39 +253,67 @@ describe("installing it", () => {
   it("leaves the machine untouched when nothing is installed", async () => {
     const before = await everything();
 
-    // Reading where the skill would go is not writing anything there.
-    const places = placesFor("claude-acp");
-    expect(places).not.toBeNull();
+    // Reading where the skills would go is not writing anything there.
+    expect(placesFor("claude")).not.toBeNull();
 
     expect(await everything()).toEqual(before);
   });
 
   it("says what it did, both ways round, so neither answer is silent", () => {
-    const places = placesFor("claude-acp");
-    if (places === null) throw new Error("Claude Code has a skill convention");
+    const places = placesFor("claude");
+    if (places === null) throw new Error("Claude Code has an installer name");
 
-    expect(installedLine("project", places.project, places.name)).toContain(places.project);
-    expect(installedLine("project", places.project, places.name)).toContain("Commit it");
-    expect(installedLine("global", places.global, places.name)).toContain(places.global);
-    expect(installedLine("global", places.global, places.name)).toContain("Claude Code");
+    const said = installedLine("project", places, ["./.claude/skills/egma"]);
+    expect(said).toContain("./.claude/skills/egma");
+    expect(said).toContain("Commit all of it");
+    // The lock file is the one thing a project install writes that is not a
+    // skill, and a developer who finds it in their diff was told about it.
+    expect(said).toContain(SKILLS_LOCK_FILE);
+    expect(installedLine("global", places, [])).toContain("Claude Code");
+    // Global scope writes no lock file into the repository, so it names none.
+    expect(installedLine("global", places, [])).not.toContain(SKILLS_LOCK_FILE);
+
+    // Counted from what the installer said it wrote, never from what the offer
+    // said it would: on the day one of them fails those are different numbers,
+    // and the line a developer keeps has to be about what really happened.
+    expect(installedLine("project", places, ["a", "b"])).toContain("2 Egma skills are");
+    expect(installedLine("project", places, ["a"])).toContain("1 Egma skill is");
+    expect(installedLine("project", places, [])).toContain("The Egma skills are");
 
     expect(skippedLine(places.name)).toContain("Nothing was installed");
     expect(skippedLine(places.name)).toContain("egma --help");
   });
+
+  /**
+   * A project install writes a lock file at the repository root beside the
+   * skills. It is committed with everything else, so it is disclosed with
+   * everything else.
+   */
+  it("really does write the lock file it says it writes", async () => {
+    const places = placesFor("claude");
+    if (places === null) throw new Error("Claude Code has an installer name");
+
+    const installed = await installEgmaSkills({ places, scope: "project" });
+    expect(installed.kind).toBe("installed");
+    if (installed.kind !== "installed") throw new Error(installed.reason);
+
+    expect(await filesUnder(repository.dir)).toContain(SKILLS_LOCK_FILE);
+    expect(installedLine("project", places, installed.landed)).toContain(SKILLS_LOCK_FILE);
+  });
 });
 
-describe("the skill that gets installed", () => {
+describe("the skill that teaches a coding agent to drive egma", () => {
   it("is a skill file, in the shape a coding agent reads one", () => {
-    const content = installableSkill();
+    const content = drivingSkill();
 
     expect(content.startsWith("---\n")).toBe(true);
     expect(content).toMatch(/^name: egma$/mu);
     expect(content).toMatch(/^description: \S.+$/mu);
-    expect(path.basename(installableSkillFile())).toBe("SKILL.md");
+    expect(path.basename(drivingSkillFile())).toBe("SKILL.md");
   });
 
   it("teaches the four things a coding agent needs to drive egma", () => {
-    const content = installableSkill();
+    const content = drivingSkill();
 
     expect(content).toContain("egma/config.yaml");
     expect(content).toContain("egma --help");
@@ -254,7 +328,7 @@ describe("the skill that gets installed", () => {
    * one as the other would send the developer hunting a bug that is not there.
    */
   it("names all four verdicts and forbids folding them into three", () => {
-    const content = installableSkill();
+    const content = drivingSkill();
 
     for (const verdict of ["passed", "failed", "skipped", "errored"]) {
       expect(content).toContain(verdict);
@@ -267,13 +341,15 @@ describe("the skill that gets installed", () => {
   /**
    * The same ban list the sent skills are held to, and for a harder reason.
    *
-   * This is the only text egma leaves on the machine, and a coding agent reads
-   * it in every future task in that repository. A near synonym in here does not
-   * teach one developer the wrong word once — it teaches their agent the wrong
-   * word for good, and the agent will then use it back at them.
+   * This is text egma leaves on the machine, and a coding agent reads it in
+   * every future task in that repository. A near synonym in here does not teach
+   * one developer the wrong word once — it teaches their agent the wrong word
+   * for good, and the agent will then use it back at them.
    */
   it("uses the words egma uses, because this is the text that stays behind", () => {
-    const content = installableSkill().replaceAll(SCENARIO_HEADING, "");
+    const content = drivingSkill()
+      .replaceAll(SCENARIO_HEADING, "")
+      .replaceAll(LIVEKIT_SESSION_OBJECT, "");
 
     for (const banned of BANNED) {
       expect({ banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({
@@ -291,7 +367,7 @@ describe("the skill that gets installed", () => {
    * agent into a loop nobody is watching.
    */
   it("names only verbs and flags the command really has", async () => {
-    const content = installableSkill();
+    const content = drivingSkill();
     // Asked of the built command rather than of a list in the source, because
     // the skill sends a reader to `egma --help` and that is the answer they
     // get. A verb renamed there and left here is a loop nobody is watching.
@@ -327,13 +403,16 @@ describe("the skill that gets installed", () => {
   });
 });
 
-describe("the skill in the package", () => {
-  it("survives npm packing, which is the only reason it is outside dist", async () => {
+describe("the skills in the package", () => {
+  it("survive npm packing, which is the only reason they are outside dist", async () => {
     const root = fileURLToPath(new URL("..", import.meta.url));
 
     const { stdout } = await run("npm", ["pack", "--dry-run", "--json"], { cwd: root });
     const packed = (JSON.parse(stdout) as { files: { path: string }[] }[])[0];
+    const paths = (packed?.files ?? []).map((file) => file.path);
 
-    expect((packed?.files ?? []).map((file) => file.path)).toContain("skills/egma/SKILL.md");
+    for (const skill of PUBLIC_SKILL_NAMES) {
+      expect(paths).toContain(`skills/${skill}/SKILL.md`);
+    }
   });
 });

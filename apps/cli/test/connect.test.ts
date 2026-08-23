@@ -26,7 +26,7 @@ import {
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
-import { connectStep } from "../src/wizard/connect-step.ts";
+import { connectionSetupStep } from "../src/wizard/connection-setup-step.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -161,7 +161,7 @@ class ScriptedUI extends HeadlessUI {
 async function run(options: RunOptions) {
   const ui = new ScriptedUI(options);
 
-  const { report, connected } = await connectStep({
+  const { report, connected } = await connectionSetupStep({
     ui,
     platform: {
       url: platform.url,

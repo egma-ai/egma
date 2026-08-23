@@ -15,6 +15,7 @@ import { ConnectionFieldScreen } from "./screens/ConnectionFieldScreen.tsx";
 import { CodingAgentScreen } from "./screens/CodingAgentScreen.tsx";
 import { GateScreen } from "./screens/GateScreen.tsx";
 import { GeneratingScreen } from "./screens/GeneratingScreen.tsx";
+import { GoalScreen } from "./screens/GoalScreen.tsx";
 import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
 import { PhoneNumberScreen } from "./screens/PhoneNumberScreen.tsx";
@@ -71,6 +72,15 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
         }}
         onType={(typed) => store.typeLogin(typed)}
         onSubmit={() => store.submitLogin()}
+        onQuit={onQuit}
+      />
+    );
+  }
+  if (screen === "goal" && state.goalAsk !== null) {
+    return (
+      <GoalScreen
+        ask={state.goalAsk}
+        onAnswer={(goal) => store.answer("goal", goal)}
         onQuit={onQuit}
       />
     );

@@ -21,6 +21,7 @@ import type {
   CodingAgentChoice,
   ConnectionAsk,
   DrivenAgent,
+  GoalAsk,
   PlatformNotice,
 } from "../wizard-ui.ts";
 
@@ -44,6 +45,8 @@ export type WizardState = {
   readonly detection: Detection | null;
   /** What has to be approved in a browser, while it still has to be. */
   readonly login: LoginPrompt | null;
+  /** What Egma is being asked to do for this agent, while the choice is open. */
+  readonly goalAsk: GoalAsk | null;
   /** What the developer is typing back at the login screen, so far. */
   readonly loginTyping: string;
   /** True for the moment after the address is copied, so the screen can say so. */
@@ -98,6 +101,7 @@ export function emptyState(): WizardState {
     platform: null,
     detection: null,
     login: null,
+    goalAsk: null,
     loginTyping: "",
     loginCopied: false,
     keyAsk: null,

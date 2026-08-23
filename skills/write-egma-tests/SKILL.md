@@ -63,10 +63,17 @@ Apply these rules:
   the test useful. Write a situation, not a script.
 - Under `## Expected behaviors`, write at least one numbered statement. Keep
   each statement observable in the transcript or tool record.
-- Add `## Mock tools` only when this test needs an answer different from the
-  project-wide mocked world. Name the real tool in a `###` heading. Put either
-  `answer` or `error` in its JSON block. Make `answer` the same JSON shape that
-  the real tool returns. Do not infer that shape from this example.
+- Add `## Mock tools` when this test depends on a specific backend state — an
+  empty calendar, a lookup that fails, an answer that takes three seconds.
+  Otherwise leave the section out.
+  - Where the project already has a mocked world in `egma/mock-tools.md`, a
+    block here replaces that world's answer for this test alone. Do not repeat
+    an answer the project file already gives.
+  - Where the project has no mocked world, a block here is the only answer Egma
+    will serve for that tool, and every tool without one runs for real.
+  - Name the real tool in a `###` heading. Put either `answer` or `error` in its
+    JSON block. Make `answer` the same JSON shape that the real tool returns. Do
+    not infer that shape from this example.
 
 ## Handle personas carefully
 

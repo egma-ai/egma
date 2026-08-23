@@ -29,19 +29,6 @@ import type { WizardState } from "../state.ts";
 export const ANOTHER_PLATFORM =
   "For a different Egma instance, quit and run it again with --url <address>.";
 
-/**
- * The same offer for a repository that has already committed a platform, where
- * the line above would be advice egma itself refuses.
- *
- * A bound repository pointed at another address is turned away, with every line
- * of the move under it — so telling somebody here to quit and re-run with a
- * flag sends them to a command that will not run. This is the screen that takes
- * the keystroke of consent, which makes it the worst place in the product to be
- * wrong about what happens next.
- */
-export const BOUND_PLATFORM =
-  "This repository names that Egma instance in egma/config.yaml. A different one is an edit to that file, not a flag on this command.";
-
 export type IntroScreenProps = {
   readonly state: WizardState;
   readonly onBegin: () => void;
@@ -81,9 +68,7 @@ export function IntroScreen({ state, onBegin, onQuit }: IntroScreenProps) {
         <>
           <Box height={1} />
           <Text>{`This uses ${state.platform.url}. Nothing has been sent to it yet.`}</Text>
-          <Text dimColor>
-            {state.platform.bound ? BOUND_PLATFORM : ANOTHER_PLATFORM}
-          </Text>
+          <Text dimColor>{ANOTHER_PLATFORM}</Text>
         </>
       )}
       <Box height={1} />

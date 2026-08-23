@@ -4,12 +4,20 @@ import {
   MOVE_TO_ANOTHER_PLATFORM,
   teachingTheMove,
 } from "../src/folder/egma-folder.ts";
+import { skillPlacesFor, type SkillPlaces } from "../src/skills/install.ts";
 import {
   buildExitLine,
   buildExitNotice,
   exitLines,
+  WEB_MONITORING_POINTER,
   type ExitReport,
 } from "../src/wizard/exit-line.ts";
+
+/** Where an offer would have gone, from the same code the wizard asks. */
+const PLACES: SkillPlaces = skillPlacesFor("claude", {
+  repository: "/repo",
+  home: "/home/you",
+}) as SkillPlaces;
 
 const RESULTS_URL = "http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J";
 
@@ -31,9 +39,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
     skill: {
       kind: "installed",
       scope: "project",
-      file: "/repo/.claude/skills/egma/SKILL.md",
-      drivenAgentName: "Claude Code",
-      replaced: false,
+      places: PLACES,
+      landed: ["/repo/.claude/skills/egma"],
     },
   },
   {
@@ -44,9 +51,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
     skill: {
       kind: "installed",
       scope: "global",
-      file: "/home/you/.claude/skills/egma/SKILL.md",
-      drivenAgentName: "Claude Code",
-      replaced: true,
+      places: PLACES,
+      landed: [],
     },
   },
   {
@@ -67,6 +73,17 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "unsupported-agent-platform", platform: "pipecat" },
   { kind: "unsupported-agent-platform", platform: "vapi" },
   { kind: "no-coding-agent" },
+  { kind: "monitoring-in-the-web", goal: "monitoring", platformUrl: "https://egma.example" },
+  { kind: "monitoring-in-the-web", goal: "both", platformUrl: null },
+  { kind: "already-onboarded", folder: "egma/", hasSuites: true },
+  { kind: "already-onboarded", folder: "egma/", hasSuites: false },
+  {
+    kind: "run-started",
+    resultsUrl: RESULTS_URL,
+    graded: 1,
+    total: 12,
+    skill: { kind: "install-failed", reason: "The skills installer stopped: no such agent." },
+  },
   {
     kind: "coding-agent-stopped",
     drivenAgentName: "Claude Agent",
@@ -174,6 +191,65 @@ describe("the exit line", () => {
     ).toBe("Claude Agent stopped before it found your voice agent, and did not say why.");
   });
 
+  /**
+   * The two endings that have no coding agent to drive still have a path to
+   * watching production traffic, and it is the same path in both — one
+   * sentence, so the two cannot drift apart.
+   */
+  it("points at the web Monitoring flow wherever the terminal cannot do it", () => {
+    expect(buildExitLine({ kind: "no-coding-agent" })).toContain(WEB_MONITORING_POINTER);
+
+    expect(
+      buildExitLine({
+        kind: "monitoring-in-the-web",
+        goal: "monitoring",
+        platformUrl: "https://egma.example",
+      }),
+    ).toBe(
+      "Egma cannot yet set up production monitoring from the terminal, so it set nothing up. " +
+        "To watch production traffic, open Egma at https://egma.example and start monitoring from its Monitoring page. " +
+        "Run egma again and choose testing whenever you want tests as well.",
+    );
+
+    // Both is monitoring first, so both stops in the same place and says so.
+    expect(
+      buildExitLine({ kind: "monitoring-in-the-web", goal: "both", platformUrl: null }),
+    ).toContain("set up testing and production monitoring together");
+    expect(
+      buildExitLine({ kind: "monitoring-in-the-web", goal: "both", platformUrl: null }),
+    ).toContain(WEB_MONITORING_POINTER);
+  });
+
+  /**
+   * A repository that has been through the wizard is refused politely, and the
+   * refusal has to carry the one thing that redoes setup on purpose.
+   *
+   * The second way forward is only a way forward when there is something to
+   * push. A folder holding a binding and no suite — which is what a walk that
+   * stopped between binding and registering leaves behind — is refused by
+   * `egma push` for the contract it does not have yet, so the line does not
+   * send anybody there.
+   */
+  it("says how to redo setup, and names push and run only when there is a suite", () => {
+    const withTests = buildExitLine({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: true,
+    });
+    expect(withTests).toContain("already set up");
+    expect(withTests).toContain("only works with new repositories");
+    expect(withTests).toContain("Delete or rename egma/");
+    expect(withTests).toContain("egma push and egma run on the tests that are already there");
+
+    const empty = buildExitLine({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: false,
+    });
+    expect(empty).toContain("Delete or rename egma/ and run egma again to redo setup.");
+    expect(empty).not.toContain("egma push");
+  });
+
   it("prints something to copy when the developer has to copy something", () => {
     for (const report of EVERY_ENDING) {
       const notice = buildExitNotice(report);
@@ -269,17 +345,16 @@ describe("the exit line", () => {
         skill: {
           kind: "installed",
           scope: "global",
-          file: "/home/you/.claude/skills/egma/SKILL.md",
-          drivenAgentName: "Claude Code",
-          replaced: false,
+          places: PLACES,
+          landed: ["~/.agents/skills/egma"],
         },
       }),
     ).toBe(
-      "The Egma skill is in /home/you/.claude/skills/egma/SKILL.md. Every repository you open Claude Code in has it.",
+      "1 Egma skill is beside Claude Code. ~/.agents/skills/egma. Every repository you open Claude Code in has them.",
     );
 
-    // A file that was already there is gone, and this is the only place the
-    // developer will ever be told so.
+    // Where they went, in the installer's own words, because that is the only
+    // account of it that cannot be wrong.
     expect(
       buildExitNotice({
         kind: "run-started",
@@ -289,14 +364,24 @@ describe("the exit line", () => {
         skill: {
           kind: "installed",
           scope: "project",
-          file: "/repo/.claude/skills/egma/SKILL.md",
-          drivenAgentName: "Claude Code",
-          replaced: true,
+          places: PLACES,
+          landed: ["./.claude/skills/egma", "./.claude/skills/write-egma-tests"],
         },
       }),
     ).toBe(
-      "The Egma skill in /repo/.claude/skills/egma/SKILL.md was replaced with this version's. Commit it, and everybody on this repository has it.",
+      "2 Egma skills are in this repository. ./.claude/skills/egma, ./.claude/skills/write-egma-tests. It also wrote skills-lock.json at the repository root. Commit all of it, and everybody on this repository has these skills.",
     );
+
+    // An offer accepted and not kept is never silent either.
+    expect(
+      buildExitNotice({
+        kind: "run-started",
+        resultsUrl: RESULTS_URL,
+        graded: 1,
+        total: 12,
+        skill: { kind: "install-failed", reason: "The skills installer stopped: no agent." },
+      }),
+    ).toBe("The skills installer stopped: no agent.");
 
     expect(
       buildExitNotice({

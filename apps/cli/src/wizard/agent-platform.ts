@@ -39,3 +39,20 @@ export function isSupportedAgentPlatform(
 ): platform is SupportedAgentPlatform {
   return platform === "retell" || platform === "livekit";
 }
+
+/**
+ * What a developer calls each agent platform, for the screens that name one.
+ *
+ * The vendors' own spellings, so a sentence about the repository reads the way
+ * the repository's own dependency list does.
+ */
+const PLATFORM_LABELS: Readonly<Record<KnownAgentPlatform, string>> = {
+  retell: "Retell",
+  livekit: "LiveKit Agents",
+  pipecat: "Pipecat",
+  vapi: "Vapi",
+};
+
+export function agentPlatformLabel(platform: KnownAgentPlatform): string {
+  return PLATFORM_LABELS[platform];
+}
