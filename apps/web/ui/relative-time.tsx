@@ -37,6 +37,13 @@ export function RelativeInstant({
 }) {
   return (
     <time
+      /*
+       * "Metrics, dates, durations, and scores use tabular numerals."
+       * An age is a figure, and a column of them is what somebody scans: a
+       * proportional face puts "2 minutes ago" and "9 minutes ago" at two
+       * widths, so the eye has to read each row instead of seeing the column.
+       */
+      className="tabular-nums"
       dateTime={instant}
       title={formatViewerInstant(instant, precision)}
       suppressHydrationWarning

@@ -22,7 +22,6 @@
 
 /** The list page. */
 export const LIST = {
-  eyebrow: "Project",
   /**
    * The heading, and deliberately not the navigation label: the sidebar reads
    * its words from `lib/navigation.ts`, which is where a navigation item is
@@ -30,7 +29,6 @@ export const LIST = {
    * many, and this is the one the page renders.
    */
   title: "Monitoring",
-  lead: "What your agents did in production, newest first.",
   /** What the table is called where somebody hears it rather than sees it. */
   tableLabel: "Production transcripts in this project",
   loadingWhat: "this project's production transcripts",

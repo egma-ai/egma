@@ -259,12 +259,13 @@ export function UseForm({
         />
       </Field>
 
+      {/* The answer leads and the way out follows it, which is `7DA-0`. */}
       <FormActions>
-        <Button type="button" variant="secondary" onClick={onCancel}>
-          {USE.cancel}
-        </Button>
         <Button type="submit" disabled={busy}>
           {busy ? USE.submitting : USE.submit}
+        </Button>
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          {USE.cancel}
         </Button>
       </FormActions>
     </Form>

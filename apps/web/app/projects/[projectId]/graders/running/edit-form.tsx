@@ -37,16 +37,18 @@ import { Actions } from "../../../../../ui/section.tsx";
 import { EntryFields } from "../use-form.tsx";
 
 /**
- * One group of the edit form, and the word that names it.
+ * One group of the editor.
  *
- * A `fieldset` because that is what a named group of controls is, and because
- * `disabled` on one makes every control inside it inert in one place while a
- * write is in flight. The hairline between groups is on the group rather than
- * between them, so a group added later is spaced without anybody remembering.
+ * **The hairline is on the wrapper and the fieldset carries none**, which is a
+ * fix rather than a preference: a `<legend>` sits *on* its fieldset's top
+ * border and the browser removes the border behind it, so a rule drawn on the
+ * fieldset started to the right of the group's name and never to the left of
+ * it. The fieldset stays, because `disabled` on it is what makes every control
+ * in the group inert while a save is in flight.
  */
-const FORM_GROUP =
-  "m-0 grid min-w-0 gap-5 px-0 pb-0 pt-5 first:pt-0 " +
-  "border-t border-border first:border-t-0";
+const FORM_GROUP_FRAME = "min-w-0 border-t border-border pt-5";
+
+const FORM_GROUP = "m-0 grid min-w-0 gap-5 border-0 p-0";
 
 const FORM_GROUP_TITLE = "m-0 mb-4 p-0 text-base font-medium text-foreground";
 
@@ -249,120 +251,132 @@ export function EditForm({
       <Help>{EDIT.lead}</Help>
       {refused === null ? null : <Refused message={refused.message} />}
 
-      <fieldset className={FORM_GROUP} disabled={busy}>
-        <legend className={FORM_GROUP_TITLE}>{EDIT.groups.general}</legend>
-        <Field label={EDIT.name} hint={EDIT.nameMeans} htmlFor="edit-name">
-          <Input
-            id="edit-name"
-            value={name}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </Field>
+      <div className={FORM_GROUP_FRAME}>
+        <fieldset className={FORM_GROUP} disabled={busy}>
+          <legend className={FORM_GROUP_TITLE}>{EDIT.groups.general}</legend>
+          <Field label={EDIT.name} hint={EDIT.nameMeans} htmlFor="edit-name">
+            <Input
+              id="edit-name"
+              value={name}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
 
-        <Field
-          label={EDIT.description}
-          hint={EDIT.descriptionMeans}
-          htmlFor="edit-description"
-        >
-          <Input
-            id="edit-description"
-            value={description}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </Field>
-      </fieldset>
-
-      <fieldset className={FORM_GROUP} disabled={busy}>
-        <legend className={FORM_GROUP_TITLE}>{EDIT.groups.logic}</legend>
-        {/*
-          The entry's own questions, rendered by the component the Use form
-          renders them with — one declaration, one reading of it.
-        */}
-        <EntryFields
-          params={params}
-          filled={filled}
-          onFilled={(parameter, value) =>
-            setFilled((was) => ({ ...was, [parameter]: value }))
-          }
-          named="edit"
-          sentence={EDIT.asksNothing}
-        />
-      </fieldset>
-
-      <fieldset className={FORM_GROUP} disabled={busy}>
-        <legend className={FORM_GROUP_TITLE}>
-          {EDIT.groups.applicability}
-        </legend>
-        <Field label={EDIT.scope} hint={EDIT.scopeMeans} htmlFor="edit-scope">
-          <Select
-            id="edit-scope"
-            value={scope}
-            onChange={(event) => setScope(event.target.value)}
+          <Field
+            label={EDIT.description}
+            hint={EDIT.descriptionMeans}
+            htmlFor="edit-description"
           >
-            {Object.entries(SCOPES).map(([stored, said]) => (
-              <option key={stored} value={stored}>
-                {said}
-              </option>
-            ))}
-          </Select>
-        </Field>
+            <Input
+              id="edit-description"
+              value={description}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </Field>
+        </fieldset>
+      </div>
 
-        {/*
-          The share of live traffic, on the shared numeric field.
-
-          **The bounds are now on the control rather than only in the
-          sentence.** `sampleRateMeans` says "a whole percentage from 0 to 100",
-          which is a claim a text box told to look numeric would happily take
-          900 against; `min`, `max` and `step` are the browser's own validation
-          and its own arrow-key stepping, so the sentence and the box agree. The
-          sentence stays as it is, because its second half — that a change
-          reaches future live traffic only — is the part a bound cannot say.
-
-          An empty box is still left out of the write rather than sent as
-          nought. That rule is in `save` below, and it is where it has to be:
-          `Number("")` is `0`, and `0` is a perfectly good share of live
-          traffic.
-        */}
-        {scope === "production" || scope === "both" ? (
-          <NumberField
-            id="edit-sample-rate"
-            label={EDIT.sampleRate}
-            hint={EDIT.sampleRateMeans}
-            value={sampleRate}
-            unit="%"
-            min={0}
-            max={100}
-            step={1}
-            onChange={setSampleRate}
+      <div className={FORM_GROUP_FRAME}>
+        <fieldset className={FORM_GROUP} disabled={busy}>
+          <legend className={FORM_GROUP_TITLE}>{EDIT.groups.logic}</legend>
+          {/*
+            The entry's own questions, rendered by the component the Use form
+            renders them with — one declaration, one reading of it.
+          */}
+          <EntryFields
+            params={params}
+            filled={filled}
+            onFilled={(parameter, value) =>
+              setFilled((was) => ({ ...was, [parameter]: value }))
+            }
+            named="edit"
+            sentence={EDIT.asksNothing}
           />
-        ) : null}
-      </fieldset>
+        </fieldset>
+      </div>
 
-      <fieldset className={FORM_GROUP} disabled={busy}>
-        <legend className={FORM_GROUP_TITLE}>{EDIT.groups.impact}</legend>
-        {/*
-          Both readings of `required` are spelled out beside the control, and
-          both carry the same warning: no verdict is rewritten, and every run
-          already read is counted again the next time somebody opens it.
-        */}
-        <Field
-          label={EDIT.required}
-          hint={required ? EDIT.requiredOn : EDIT.requiredOff}
-          htmlFor="edit-required"
-        >
-          <Checkbox
-            id="edit-required"
-            checked={required}
-            onChange={(event) => setRequired(event.target.checked)}
-          />
-        </Field>
-      </fieldset>
+      <div className={FORM_GROUP_FRAME}>
+        <fieldset className={FORM_GROUP} disabled={busy}>
+          <legend className={FORM_GROUP_TITLE}>
+            {EDIT.groups.applicability}
+          </legend>
+          <Field label={EDIT.scope} hint={EDIT.scopeMeans} htmlFor="edit-scope">
+            <Select
+              id="edit-scope"
+              value={scope}
+              onChange={(event) => setScope(event.target.value)}
+            >
+              {Object.entries(SCOPES).map(([stored, said]) => (
+                <option key={stored} value={stored}>
+                  {said}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
+          {/*
+            The share of live traffic, on the shared numeric field.
+
+            **The bounds are now on the control rather than only in the
+            sentence.** `sampleRateMeans` says "a whole percentage from 0 to 100",
+            which is a claim a text box told to look numeric would happily take
+            900 against; `min`, `max` and `step` are the browser's own validation
+            and its own arrow-key stepping, so the sentence and the box agree. The
+            sentence stays as it is, because its second half — that a change
+            reaches future live traffic only — is the part a bound cannot say.
+
+            An empty box is still left out of the write rather than sent as
+            nought. That rule is in `save` below, and it is where it has to be:
+            `Number("")` is `0`, and `0` is a perfectly good share of live
+            traffic.
+          */}
+          {scope === "production" || scope === "both" ? (
+            <NumberField
+              id="edit-sample-rate"
+              label={EDIT.sampleRate}
+              hint={EDIT.sampleRateMeans}
+              value={sampleRate}
+              unit="%"
+              min={0}
+              max={100}
+              step={1}
+              onChange={setSampleRate}
+            />
+          ) : null}
+        </fieldset>
+      </div>
+
+      <div className={FORM_GROUP_FRAME}>
+        <fieldset className={FORM_GROUP} disabled={busy}>
+          <legend className={FORM_GROUP_TITLE}>{EDIT.groups.impact}</legend>
+          {/*
+            Both readings of `required` are spelled out beside the control, and
+            both carry the same warning: no verdict is rewritten, and every run
+            already read is counted again the next time somebody opens it.
+          */}
+          <Field
+            label={EDIT.required}
+            hint={required ? EDIT.requiredOn : EDIT.requiredOff}
+            htmlFor="edit-required"
+          >
+            <Checkbox
+              id="edit-required"
+              checked={required}
+              onChange={(event) => setRequired(event.target.checked)}
+            />
+          </Field>
+        </fieldset>
+      </div>
+
+      {/* The answer leads and the way out follows it, which is `7DA-0`. */}
       <FormActions>
+        <Button type="submit" busy={busy}>
+          {busy ? EDIT.submitting : EDIT.submit}
+        </Button>
         <Button
           type="button"
           variant="secondary"
@@ -370,9 +384,6 @@ export function EditForm({
           disabled={busy}
         >
           {EDIT.cancel}
-        </Button>
-        <Button type="submit" busy={busy}>
-          {busy ? EDIT.submitting : EDIT.submit}
         </Button>
       </FormActions>
     </Form>
@@ -444,10 +455,11 @@ export function SwitchOffPanel({
       {theLastOne ? <p>{SWITCH_OFF.theLastOne}</p> : null}
       {refused === null ? null : <Refused message={refused.message} />}
 
+      {/*
+        Inside the confirmation, the destructive act is the filled failure
+        button — the one place in the product that draws one.
+      */}
       <Actions>
-        <Button type="button" variant="secondary" onClick={onCancel}>
-          {SWITCH_OFF.cancel}
-        </Button>
         <Button
           type="button"
           variant="destructive"
@@ -455,6 +467,9 @@ export function SwitchOffPanel({
           onClick={() => void switchOff()}
         >
           {busy ? SWITCH_OFF.confirming : SWITCH_OFF.confirm}
+        </Button>
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          {SWITCH_OFF.cancel}
         </Button>
       </Actions>
     </>

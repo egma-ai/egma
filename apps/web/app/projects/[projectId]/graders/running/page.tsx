@@ -61,6 +61,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { Notice } from "../../../../ui.tsx";
 import { GraderTabs, VIEW_CONTENT } from "../tabs.tsx";
 import { EditForm, SwitchOffPanel } from "./edit-form.tsx";
 
@@ -251,9 +252,18 @@ function columnsFor(
           >
             {EDIT.open}
           </Button>{" "}
+          {/*
+            **The one destructive act on this row, as a text action in the
+            failure colour.** `DESIGN.md`: the control that opens a destructive
+            confirmation is text, and the filled failure-coloured button lives
+            inside the confirmation it opens. Two outlined buttons side by side
+            said that switching a grader off and editing it were the same size
+            of decision.
+          */}
           <Button
             type="button"
-            variant="secondary"
+            variant="ghost"
+            className="text-failure pointer-hover:text-failure"
             disabled={!mayAct || editorBusy}
             {...(mayAct || whyNotSwitchOff === undefined
               ? {}
@@ -474,10 +484,9 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
+      {/* The trail and the title, and the strip under them. See the library. */}
       <PageHeader
-        eyebrow="Project"
         title={RUNNING.title}
-        lead={RUNNING.lead}
         breadcrumbs={[
           {
             label: "Graders",
@@ -520,16 +529,19 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
             somebody has after saving a tighter bound or switching a grader off is
             always about the runs they have already read.
           */}
-          {said === null ? null : <p role="status">{said}</p>}
+          {said === null ? null : <Notice tone="success">{said}</Notice>}
 
           {/*
             One column while nothing is open, two while an editor is.
 
-            The 230px shell leaves about 1170px of work area at a 1400px
-            viewport, and below that the five-column table and the 440px editor
-            are both cramped — so the editor goes above the list rather than
-            beside it. The width that decides is the whole product frame rather
-            than a phone.
+            **Measured rather than estimated, after a 1440 screenshot.** Five
+            columns, two of which are fixed at 170 and 130, plus a row that
+            carries two labelled controls, need about 900px before anything is
+            clipped; the editor is 440 and the gap is 24. With the 224px
+            sidebar and the page's own gutters that is roughly 1640px of
+            window. Below it the editor goes above the list, where both get the
+            full width. The earlier number left the two controls half off the
+            panel at 1440, which is the width this product is designed at.
           */}
           <div
             className={
@@ -537,7 +549,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
               "data-[editing=true]:grid data-[editing=true]:items-start " +
               "data-[editing=true]:gap-6 " +
               "data-[editing=true]:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] " +
-              "max-[1400px]:data-[editing=true]:grid-cols-[minmax(0,1fr)]"
+              "max-[1640px]:data-[editing=true]:grid-cols-[minmax(0,1fr)]"
             }
             data-editing={open?.act === "edit" ? "true" : "false"}
           >
@@ -554,10 +566,10 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
                 className={
                   "sticky top-6 col-start-2 row-start-1 min-w-0 " +
                   "border-l border-border pl-6 " +
-                  "max-[1400px]:static max-[1400px]:col-start-1 " +
-                  "max-[1400px]:row-auto max-[1400px]:border-l-0 " +
-                  "max-[1400px]:border-b max-[1400px]:pt-0 max-[1400px]:pr-0 " +
-                  "max-[1400px]:pb-5 max-[1400px]:pl-0"
+                  "max-[1640px]:static max-[1640px]:col-start-1 " +
+                  "max-[1640px]:row-auto max-[1640px]:border-l-0 " +
+                  "max-[1640px]:border-b max-[1640px]:pt-0 max-[1640px]:pr-0 " +
+                  "max-[1640px]:pb-5 max-[1640px]:pl-0"
                 }
                 aria-labelledby={`${editorPanelId(open.copy.id)}-title`}
               >
@@ -589,7 +601,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
               className={
                 "min-w-0 in-data-[editing=true]:col-start-1 " +
                 "in-data-[editing=true]:row-start-1 " +
-                "max-[1400px]:in-data-[editing=true]:row-auto"
+                "max-[1640px]:in-data-[editing=true]:row-auto"
               }
             >
               {body()}
