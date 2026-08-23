@@ -1465,7 +1465,16 @@ describe("what the router draws while a page is still coming", () => {
     expect(within(crumbs).getByRole("link", { name: "Tests" }).getAttribute("href")).toBe(
       "/projects/prj_1/tests",
     );
-    expect(within(crumbs).getByText("Test")).toBeTruthy();
+    /*
+     * The current page is the `<h1>` beside the trail rather than a second copy
+     * inside it. `PageHeader` draws both in one 56px bar, so a trail that
+     * ended with the page said its name twice — "Tests / Test   Test" — which
+     * is not what `9VT-0` and `B9M-0` draw. The fallback and the page it
+     * stands in for both stop the trail at the parent (ui-refresh ticket 05);
+     * the shape they have to share is what this case is about, and they still
+     * share it.
+     */
+    expect(screen.getByRole("heading", { name: "Test" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Loading this test…");
   });
 });

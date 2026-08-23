@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 
 import { projectPath } from "../../../../../lib/project-context.ts";
+import { trailInto } from "../../../../../lib/test-suites.ts";
 import { Loading } from "../../../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../../../ui/shell.tsx";
 
@@ -13,10 +14,10 @@ import { ProductStatePage } from "../../../../../ui/shell.tsx";
  * Its own boundary rather than the list's, for the same reason the new agent
  * form has one: **Write a test** must not be answered with “Loading tests…”.
  *
- * Its header is the page's own down to its shape — the same eyebrow or the
- * same crumbs, never one standing in for the other — so nothing is redrawn a
- * second way when the page arrives. `agents/loading.tsx` carries the
- * reasoning every one of these shares.
+ * **What arrives is the suite with the write-a-test panel over it**, so the
+ * fallback wears the suite's shape rather than a page title of its own: the
+ * same trail, the same bar, nothing redrawn a second way on arrival.
+ * `agents/loading.tsx` carries the reasoning every one of these shares.
  */
 export default function NewTestLoading() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -24,11 +25,11 @@ export default function NewTestLoading() {
   return (
     <div data-slot="route-loading">
       <ProductStatePage
-        title="Write a test"
-        breadcrumbs={[
-          { label: "Tests", href: projectPath(projectId, "tests") },
-          { label: "New test" },
-        ]}
+        title="Test suite"
+        breadcrumbs={trailInto({
+          label: "Tests",
+          href: projectPath(projectId, "tests"),
+        })}
       >
         <Loading what="the test form" />
       </ProductStatePage>

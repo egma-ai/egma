@@ -123,19 +123,18 @@ function detailAnswers(options: {
   readonly me?: Me;
   readonly test?: Record<string, unknown>;
   readonly saved?: Stub;
-  readonly history?: readonly Record<string, unknown>[];
 } = {}): void {
   const test = options.test ?? testBody();
+  // No version list is stubbed, and that is the point: versioning is hidden
+  // from the interface for launch, so the test page reads the test and its
+  // suite and nothing else. A read of `/v1/tests/tst_1/versions` would fail
+  // here, which is what keeps that true.
   answers({
     "/api/me": { status: 200, body: options.me ?? meWith(options.role ?? "admin") },
     "/v1/tests/tst_1":
       options.saved === undefined
         ? { status: 200, body: test }
         : [{ status: 200, body: test }, options.saved],
-    "/v1/tests/tst_1/versions": {
-      status: 200,
-      body: { versions: options.history ?? [], nextPageToken: null },
-    },
     "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
     "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
   });
@@ -244,7 +243,7 @@ describe("the suite-first Tests route", () => {
     expect(screen.queryByRole("link", { name: "Write a test" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Create suite" }));
-    const dialog = await screen.findByRole("dialog", { name: "Create a test suite" });
+    const dialog = await screen.findByRole("dialog", { name: "Create a suite" });
     fireEvent.change(within(dialog).getByLabelText("Suite name"), {
       target: { value: "Northside Ford" },
     });
@@ -281,12 +280,20 @@ describe("the suite-first Tests route", () => {
     render(<TestSuitePage />);
 
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
-    expect(screen.getByText("ste_1")).toBeTruthy();
+    // The suite id left the page with the boards: it is a fact about the
+    // record, and it lives in the rename panel where somebody who needs to
+    // quote it goes to find it.
+    expect(screen.queryByText("ste_1")).toBeNull();
     expect(screen.getByText("No tests in this suite")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Write a test" }).getAttribute("href")).toBe(
+    expect(screen.getAllByRole("link", { name: "Write a test" })[0]?.getAttribute("href")).toBe(
       "/projects/prj_1/tests/new?suite=ste_1",
     );
-    expect(screen.queryByRole("button", { name: /run/i })).toBeNull();
+    // "Run suite" opens the run builder carrying this suite. Nothing on this
+    // screen starts a run, so there is no control that could.
+    expect(screen.queryByRole("button", { name: /^run/i })).toBeNull();
+    expect(screen.getByRole("link", { name: "Run suite" }).getAttribute("href")).toBe(
+      "/projects/prj_1/runs/new?suite=ste_1",
+    );
   });
 
   it("lets a viewer read a suite while every suite write stays inert", async () => {
@@ -304,11 +311,23 @@ describe("the suite-first Tests route", () => {
     render(<TestSuitePage />);
 
     expect(await screen.findByRole("link", { name: "Books service" })).toBeTruthy();
-    for (const name of ["Write a test", "Rename suite", "Delete suite"]) {
-      const control = screen.getByRole("button", { name });
-      expect((control as HTMLButtonElement).disabled, name).toBe(true);
-      fireEvent.click(control);
+    const write = screen.getByRole("button", { name: "Write a test" });
+    expect((write as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(write);
+
+    // Renaming and deleting moved into the suite's own ⋮ menu, so a viewer
+    // meets them there — offered, inert, and with the reason beside them.
+    fireEvent.click(screen.getByRole("button", { name: "Open the suite menu" }));
+    for (const name of ["Rename suite", "Delete suite"]) {
+      const item = await screen.findByRole("menuitem", { name });
+      expect((item as HTMLButtonElement).disabled, name).toBe(true);
+      fireEvent.click(item);
     }
+    expect(
+      screen.getByText(
+        "Your viewer role cannot change test suites. Ask an organization admin to change your role.",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(sent.some((request) => ["POST", "PATCH", "DELETE"].includes(request.method))).toBe(
       false,
@@ -371,8 +390,11 @@ describe("the suite-first Tests route", () => {
     render(<TestSuitePage />);
     expect(await screen.findByRole("heading", { name: "Northside Ford" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Rename suite" }));
-    const rename = await screen.findByRole("dialog", { name: "Rename test suite" });
+    fireEvent.click(screen.getByRole("button", { name: "Open the suite menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename suite" }));
+    // The rename surface is a side sheet named by the suite it is about, so
+    // the list behind it stays on screen while the name is changed.
+    const rename = await screen.findByRole("dialog", { name: "Northside Ford" });
     fireEvent.change(within(rename).getByLabelText("Suite name"), {
       target: { value: "Northside Ford Service" },
     });
@@ -385,13 +407,19 @@ describe("the suite-first Tests route", () => {
       body: { name: "Northside Ford Service" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete suite" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open the suite menu" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete suite" }));
     const deletion = await screen.findByRole("dialog", {
-      name: "Delete Northside Ford Service",
+      name: "Delete Northside Ford Service?",
     });
     expect(
       within(deletion).getByText(
-        "This permanently deletes Northside Ford Service and every test in it. You cannot restore them.",
+        "This deletes the suite and its tests. Nobody can author or run them after this.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(deletion).getByText(
+        "Runs that already happened keep their results and transcripts.",
       ),
     ).toBeTruthy();
     fireEvent.click(within(deletion).getByRole("button", { name: "Delete suite" }));
@@ -423,20 +451,25 @@ describe("the suite-first Tests route", () => {
         },
       },
       "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
-      "/v1/tests": {
-        status: 201,
-        body: {
-          id: "tst_1",
-          projectId: "prj_1",
-          suiteId: "ste_1",
-          name: "Books service",
+      // The address draws the suite with the write panel over it, so the suite's
+      // own tests are read before anything is written into it.
+      "/v1/tests": [
+        { status: 200, body: { tests: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            id: "tst_1",
+            projectId: "prj_1",
+            suiteId: "ste_1",
+            name: "Books service",
+          },
         },
-      },
+      ],
     });
 
     render(<NewTestPage />);
 
-    expect(await screen.findByText("Northside Ford")).toBeTruthy();
+    expect(await screen.findByText("In suite Northside Ford")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Books service" } });
     fireEvent.change(screen.getByLabelText("Scenario"), {
       target: { value: "The caller asks to book the next service slot." },
@@ -488,10 +521,6 @@ describe("the suite-first Tests route", () => {
         { status: 200, body: test },
         { status: 204, body: null },
       ],
-      "/v1/tests/tst_1/versions": {
-        status: 200,
-        body: { versions: [], nextPageToken: null },
-      },
       "/v1/test-suites/ste_1": {
         status: 200,
         body: {
@@ -516,10 +545,15 @@ describe("the suite-first Tests route", () => {
     expect(screen.queryByText(/applies to agents/i)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete test" }));
-    const deletion = await screen.findByRole("dialog", { name: "Delete Books service" });
+    const deletion = await screen.findByRole("dialog", { name: "Delete this test?" });
     expect(
       within(deletion).getByText(
-        "This permanently deletes Books service. You cannot restore it. Past run evidence stays available.",
+        "“Books service” leaves the Northside Ford suite. Nobody can author or run it after this.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(deletion).getByText(
+        "Runs that already ran it keep their results and transcripts.",
       ),
     ).toBeTruthy();
     fireEvent.click(within(deletion).getByRole("button", { name: "Delete test" }));
@@ -549,10 +583,6 @@ describe("the suite-first Tests route", () => {
           waitFor: saving,
         },
       ],
-      "/v1/tests/tst_1/versions": {
-        status: 200,
-        body: { versions: [], nextPageToken: null },
-      },
       "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
       "/v1/personas": { status: 200, body: { personas: [], nextPageToken: null } },
     });
@@ -647,7 +677,9 @@ describe("the suite-first Tests route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save version" }));
 
     expect(await screen.findByText(message)).toBeTruthy();
-    expect(screen.getByText("Save failed")).toBeTruthy();
+    expect(
+      screen.getByText("Cannot save · the test changed since you opened it"),
+    ).toBeTruthy();
     const body = sent.find(
       (request) => request.path === "/v1/tests/tst_1" && request.method === "PATCH",
     )?.body as Record<string, unknown>;
@@ -667,49 +699,6 @@ describe("the suite-first Tests route", () => {
     expect((screen.getByLabelText("Expected behavior 1") as HTMLTextAreaElement).value).toBe(
       "Keeps this refused behavior",
     );
-  });
-
-  it("reads an older version without offering to restore it", async () => {
-    routed.pathname = "/projects/prj_1/tests/tst_1";
-    routed.params = { projectId: "prj_1", testId: "tst_1" };
-    const version = (overrides: Record<string, unknown>) => ({
-      id: "tstv_2",
-      testId: "tst_1",
-      testName: "Books service",
-      version: 2,
-      current: true,
-      scenario: "The current scenario.",
-      expectedBehaviors: ["Uses the current policy"],
-      personas: [],
-      overrideCount: 0,
-      createdAt: "2026-08-21T10:00:00.000Z",
-      ...overrides,
-    });
-    detailAnswers({
-      test: testBody({ version: 2, versionId: "tstv_2" }),
-      history: [
-        version({}),
-        version({
-          id: "tstv_1",
-          version: 1,
-          current: false,
-          scenario: "The earlier scenario.",
-          expectedBehaviors: ["Uses the earlier policy"],
-          createdAt: "2026-08-20T10:00:00.000Z",
-        }),
-      ],
-    });
-
-    render(<TestDetailPage />);
-    const readers = await screen.findAllByRole("button", { name: "Read" });
-    fireEvent.click(readers[1] as HTMLElement);
-
-    const reading = await screen.findByRole("article", { name: "Version 1" });
-    expect(within(reading).getByText("The earlier scenario.")).toBeTruthy();
-    expect(within(reading).getByText("Uses the earlier policy")).toBeTruthy();
-    expect(within(reading).getByText("Personas: none.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /restore this version/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /make current/i })).toBeNull();
   });
 
   it("protects a dirty test across links, project switches, and browser unload", async () => {
