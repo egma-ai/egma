@@ -130,29 +130,28 @@ function ApiKeyReceipt({
   }
 
   return (
-    <Section
-      title="Copy your new key"
-      /*
-       * That this is the only time, said beside the heading rather than only
-       * inside the paragraph under it — which is what `2BN-0` draws. The word
-       * carries the meaning and the icon carries it again for anybody reading
-       * without colour: "state is not communicated by colour alone".
-       */
-      action={
-        <span className="inline-flex items-center gap-2 text-sm text-(--bad)">
-          <EyeOffIcon aria-hidden="true" className="size-4" strokeWidth={1.75} />
-          Shown once
-        </span>
-      }
-    >
+    <Section title="Copy your new key">
       <Card className="gap-4">
         <div className="flex flex-col gap-3">
-          <p className="m-0 max-w-[72ch] text-sm text-muted-foreground" role="status">
-            <strong className="font-medium text-foreground">
-              Here is your key. Copy it now.
-            </strong>{" "}
-            Egma will not show it again, and cannot: only its hash was kept.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <p className="m-0 max-w-[72ch] text-sm text-muted-foreground" role="status">
+              <strong className="font-medium text-foreground">
+                Here is your key. Copy it now.
+              </strong>{" "}
+              Egma will not show it again, and cannot: only its hash was kept.
+            </p>
+            {/*
+             * That this is the only time, said at the head of the panel rather
+             * than only inside the sentence — which is what `2BO-0` draws. The
+             * word carries the meaning and the icon carries it again for
+             * anybody reading without colour: "state is not communicated by
+             * colour alone".
+             */}
+            <span className="inline-flex flex-none items-center gap-2 text-sm text-(--bad)">
+              <EyeOffIcon aria-hidden="true" className="size-4" strokeWidth={1.75} />
+              Shown once
+            </span>
+          </div>
           {/*
            * The secret on its own contained surface, in the mono face, wrapped
            * rather than clipped (`7D6-0`). A key that ran off the edge of its
@@ -334,10 +333,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
     <ProductPage viewport>
       <PageHeader
         title="API keys"
-        breadcrumbs={[
-          { label: "Settings", href: settingsPath(projectId) },
-          { label: "API keys" },
-        ]}
         lead="What a terminal or a script authenticates to Egma with."
       />
       <PageBody>

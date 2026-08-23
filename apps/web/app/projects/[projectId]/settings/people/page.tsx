@@ -94,16 +94,24 @@ type Tab = "people" | "invitations";
  * slot and needs the row's own padding back inside it, or the last button sits
  * against the panel's hairline.
  *
- * **The reason under a disabled control is given its own line.** `Button`
- * writes `why` as a `<span>` beside the control it explains, so with two
- * buttons in one cell the sentence would otherwise land between them. `order`
- * moves it visually and leaves the reading order alone, which is what
- * `aria-describedby` follows.
+ * **It is a grid, and a browser is what said so.** `Button` writes `why` as a
+ * `<span>` beside the control it explains, so a cell holding two of them holds
+ * button, sentence, button — and wrapping that in a flex row put the sentence
+ * between the two buttons. Letting the row wrap fixed the sentence and broke
+ * the buttons instead: a wrapping flex box is only as wide as its widest child,
+ * so the table shrank the column to one button and stacked the other under it.
+ * Two `max-content` columns give the cell a minimum the table has to honour,
+ * and the sentence is placed on a second row spanning both — so the buttons sit
+ * side by side whether or not there is a reason under them. The reading order
+ * does not move, which is what `aria-describedby` follows.
  */
 const ROW_ACTIONS = [
-  "flex flex-wrap items-center justify-end gap-2 px-4",
-  "[&>span]:order-last [&>span]:basis-full [&>span]:text-left",
+  "grid grid-cols-[max-content_max-content] items-center gap-2 px-4",
+  "[&>span]:col-span-2 [&>span]:row-start-2 [&>span]:text-left",
 ].join(" ");
+
+/** The same lane, for a row that offers one control and no reason. */
+const ROW_ACTION = "flex items-center justify-end gap-2 px-4";
 
 /**
  * A control inside a row, at the row's height.
@@ -289,10 +297,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       <ProductPage viewport>
         <PageHeader
             title="People"
-          breadcrumbs={[
-            { label: "Settings", href: settingsPath(projectId) },
-            { label: "People" },
-          ]}
         />
         <PageBody>
           <SettingsLayout projectId={projectId} current="people">
@@ -308,10 +312,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       <ProductPage viewport>
         <PageHeader
             title="People"
-          breadcrumbs={[
-            { label: "Settings", href: settingsPath(projectId) },
-            { label: "People" },
-          ]}
         />
         <PageBody>
           <SettingsLayout projectId={projectId} current="people">
@@ -421,10 +421,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
     <ProductPage viewport>
       <PageHeader
         title="People"
-        breadcrumbs={[
-          { label: "Settings", href: settingsPath(projectId) },
-          { label: "People" },
-        ]}
         lead="Everybody in this organization, and what each of them may do."
       />
       <PageBody>
@@ -450,18 +446,23 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
               role={mayManage ? "tabpanel" : undefined}
               aria-labelledby={mayManage ? "people-view-people-tab" : undefined}
             >
-              <Section title="People">
-                {members.length === 0 ? (
-                  <Empty title="Nobody is here yet." />
-                ) : (
-                  <DataTable
-                    label="Members"
-                    columns={columns}
-                    rows={members}
-                    keyOf={(member) => member.userId}
-                  />
-                )}
-              </Section>
+              {/*
+                * No heading over this table. The tab above it says "People",
+                * the title bar says "People", and a third one in the largest
+                * type on the page said it a third time. The Invitations panel
+                * keeps its two headings, because it holds two different things
+                * and the headings are what tell them apart.
+                */}
+              {members.length === 0 ? (
+                <Empty title="Nobody is here yet." />
+              ) : (
+                <DataTable
+                  label="Members"
+                  columns={columns}
+                  rows={members}
+                  keyOf={(member) => member.userId}
+                />
+              )}
             </div>
           ) : (
             <div
@@ -650,7 +651,7 @@ function Invitations({
       // cannot be waited on, so the one thing left to do about it is here.
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
-          <div className={ROW_ACTIONS}>
+          <div className={ROW_ACTION}>
             <Button
               type="button"
               variant="secondary"

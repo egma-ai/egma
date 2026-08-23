@@ -12,7 +12,6 @@ import type { Refusal } from "../../lib/api.ts";
 import { roleOf } from "../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../lib/platform-client.ts";
 import { projectLanding } from "../../lib/project-context.ts";
-import { Section } from "../../ui/section.tsx";
 import {
   Field,
   Form,
@@ -118,13 +117,20 @@ function NewProject() {
 
   return (
     <ProductPage>
+      {/*
+        * No label over the title. This address is reached from the project
+        * selector rather than from Settings, so an eyebrow reading "Settings"
+        * put the page in a section it is not in — and there is no trail here
+        * for it to be the first step of. The title bar names the page and the
+        * line under it says what a project is.
+        */}
       <PageHeader
-        eyebrow="Settings"
         title="New project"
         lead="A project holds its own agents, tests, personas, graders and runs. Everybody in the organization can work in every one of them."
       />
       <PageBody>
-        <Section title="Name it">
+        {/* One form, and the title bar has already named it. */}
+        <div className="flex flex-col gap-4">
           {/*
             * Said before the form rather than instead of it. A viewer or a
             * member sees exactly this page with the controls disabled, so the
@@ -187,7 +193,7 @@ function NewProject() {
               </Button>
             </FormActions>
           </Form>
-        </Section>
+        </div>
       </PageBody>
     </ProductPage>
   );

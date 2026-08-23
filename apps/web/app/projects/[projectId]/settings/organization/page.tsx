@@ -20,7 +20,6 @@ import {
   Refused,
 } from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { Section } from "../../../../../ui/section.tsx";
 import {
   SettingsLayout,
   settingsPath,
@@ -124,10 +123,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       <ProductPage viewport>
         <PageHeader
             title="Organization"
-          breadcrumbs={[
-            { label: "Settings", href: settingsPath(projectId) },
-            { label: "Organization" },
-          ]}
         />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
@@ -143,10 +138,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
       <ProductPage viewport>
         <PageHeader
             title="Organization"
-          breadcrumbs={[
-            { label: "Settings", href: settingsPath(projectId) },
-            { label: "Organization" },
-          ]}
         />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
@@ -168,15 +159,12 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
     <ProductPage viewport>
       <PageHeader
         title="Organization"
-        breadcrumbs={[
-          { label: "Settings", href: settingsPath(projectId) },
-          { label: "Organization" },
-        ]}
         lead="The customer every project below belongs to."
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="organization">
-          <Section title="Details">
+          {/* One form, and the title bar has already named the page. */}
+          <div className="flex flex-col gap-4">
             {refused === null ? null : <Refused message={refused.message} />}
 
             <Form onSubmit={() => void save()}>
@@ -223,7 +211,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 </Button>
               </FormActions>
             </Form>
-          </Section>
+          </div>
         </SettingsLayout>
       </PageBody>
     </ProductPage>
