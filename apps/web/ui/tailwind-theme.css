@@ -347,8 +347,19 @@
     rgb(122 49 23 / 0.02) -130px 256px 115px 0;
 }
 
-/* Dark theme semantic overrides. */
-:root[data-theme="dark"] {
+/*
+ * Dark theme semantic overrides.
+ *
+ * **Two selectors, and the second one is what makes the proof page honest.**
+ * The document carries `data-theme` on `<html>`, which is what the theme
+ * script writes and what every real page reads. `/design-system` also has to
+ * draw the dark theme *beside* the light one, in a frame, so a person can hold
+ * the two against each other without reloading — and a rule bound to `:root`
+ * alone cannot dress a `<div>`. The attribute means the same thing in both
+ * places: everything inside me is dark.
+ */
+:root[data-theme="dark"],
+[data-theme="dark"] {
   --background: #151514;
   --surface: #1b1b1a;
   --surface-soft: #222220;

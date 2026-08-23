@@ -204,7 +204,12 @@ export function Menu({
         </PopoverTrigger>
         <PopoverContent
           className={cn(
-            "w-max p-2",
+            /*
+             * 4px of padding, which is what the boards give a row menu
+             * (`9AH-0`): the items are 36px and they are the panel. Eight put a
+             * visible margin round a list of four words.
+             */
+            "w-max p-1",
             "min-w-[min(240px,calc(100vw-var(--space-8)))]",
             "max-w-[min(320px,calc(100vw-var(--space-8)))]",
             /*
@@ -281,12 +286,12 @@ export function MenuItem({
 
 export function MenuLabel({ children }: { readonly children: ReactNode }) {
   return (
-    <p className="m-0 px-3 pt-2 pb-1 text-xs tracking-(--tracking-label) text-faint uppercase">
+    <p className="m-0 px-3 pt-2 pb-1 text-2xs tracking-(--tracking-label) text-faint uppercase">
       {children}
     </p>
   );
 }
 
 export function MenuDivider() {
-  return <div className="my-2 h-px bg-border" role="separator" />;
+  return <div className="my-1 h-px bg-border" role="separator" />;
 }

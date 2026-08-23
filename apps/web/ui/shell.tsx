@@ -438,7 +438,8 @@ function ThemeItem() {
       >
         <span
           className={cn(
-            "absolute top-0.5 left-0.5 block size-[9px] rounded-full bg-muted-foreground",
+            /* Square, like everything else: a switch is a component. */
+            "absolute top-0.5 left-0.5 block size-[9px] bg-muted-foreground",
             "transition-transform duration-(--duration-press) ease-out",
             "group-aria-checked/theme:translate-x-[11px] group-aria-checked/theme:bg-background",
             /* Keyboard activation is immediate: the thumb is already there. */

@@ -182,8 +182,6 @@ function TabsTrigger({
            * with every tab below it.
            */
           "group-data-[orientation=horizontal]/tabs:group-data-[variant=line]/tabs-list:first:pl-0",
-          "group-data-[orientation=horizontal]/tabs:group-data-[variant=line]/tabs-list:rounded-b-none",
-          "group-data-[orientation=vertical]/tabs:group-data-[variant=line]/tabs-list:rounded-r-none",
           /*
            * The mark, drawn for the current tab and colourless for the rest.
            *

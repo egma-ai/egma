@@ -50,6 +50,17 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetBody,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/sonner";
@@ -557,11 +568,65 @@ export function DesignSystemProof() {
                       </DialogFooter>
                     </DialogContent>
                   </BaseDialog>
+
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <BaseButton type="button">Open connection</BaseButton>
+                    </SheetTrigger>
+                    <SheetContent aria-describedby={undefined}>
+                      <SheetHeader>
+                        <SheetTitle>phone</SheetTitle>
+                        <SheetDescription>
+                          Retell · production
+                        </SheetDescription>
+                      </SheetHeader>
+                      <SheetBody>
+                        <Field label="Name" htmlFor="proof-sheet-name">
+                          <Input
+                            id="proof-sheet-name"
+                            value="phone"
+                            autoComplete="off"
+                            spellCheck={false}
+                            onChange={() => undefined}
+                          />
+                        </Field>
+                        <Field label="Phone number" htmlFor="proof-sheet-number">
+                          <Input
+                            id="proof-sheet-number"
+                            value="+1 415 555 0134"
+                            autoComplete="off"
+                            spellCheck={false}
+                            onChange={() => undefined}
+                          />
+                        </Field>
+                        <p className="m-0 text-sm text-faint">
+                          Created Aug 16, 2026 · Updated Aug 20, 2026
+                        </p>
+                      </SheetBody>
+                      <SheetFooter
+                        destructive={
+                          <BaseButton type="button" variant="ghost" className="text-failure">
+                            Delete
+                          </BaseButton>
+                        }
+                      >
+                        <BaseButton type="button" size="lg">
+                          Save connection
+                        </BaseButton>
+                        <SheetClose asChild>
+                          <BaseButton type="button" size="lg" variant="secondary">
+                            Cancel
+                          </BaseButton>
+                        </SheetClose>
+                      </SheetFooter>
+                    </SheetContent>
+                  </Sheet>
                 </div>
                 <p className="m-0 text-sm text-muted-foreground">
                   The menu and the popover grow from the control that opened
-                  them; the dialog stays centred. Every duration is a DESIGN.md
-                  motion token and every one is under 300ms.
+                  them; the dialog stays centred; the side sheet comes in from
+                  the right edge it is anchored to. Every duration is a
+                  DESIGN.md motion token and every one is under 300ms.
                 </p>
               </div>
             </div>
@@ -1102,8 +1167,60 @@ export function DesignSystemProof() {
         </article>
 
         <article className={cn(PANEL_WIDE)}>
-          <p className={KICKER}>Responsive and motion checks</p>
+          <p className={KICKER}>Responsive, theme and motion checks</p>
           <div className="grid grid-cols-2 gap-6 max-[760px]:grid-cols-1 max-[760px]:gap-4">
+            {/*
+              * **The dark theme, beside the light one rather than instead of
+              * it.** Every shared component has to support both, and the way
+              * that rule is broken is never on purpose — it is a colour written
+              * where a token belonged, and it only shows when the two are held
+              * against each other. The account menu's switch still flips the
+              * whole document; this frame is what makes a difference visible
+              * without leaving the page.
+              *
+              * `data-theme` on a `<div>` works because `tailwind-theme.css`
+              * binds the dark values to the attribute as well as to `:root`.
+              */}
+            <section
+              className={cn(PREVIEW, "col-span-2 max-[760px]:col-span-1")}
+              aria-label="Dark theme component preview"
+              data-preview="dark"
+              data-theme="dark"
+            >
+              <header className={cn(PREVIEW_HEAD)}>
+                <strong className="font-medium">Dark theme preview</strong>
+                <span className="text-muted-foreground">
+                  The same components on the dark tokens
+                </span>
+              </header>
+              <div className="flex flex-col gap-4 bg-background p-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <BaseButton type="button">Connect an agent</BaseButton>
+                  <BaseButton type="button" variant="secondary">
+                    Edit
+                  </BaseButton>
+                  <BaseButton type="button" variant="destructive">
+                    Archive
+                  </BaseButton>
+                  <BaseBadge variant="success">Passed</BaseBadge>
+                  <BaseBadge shape="count">+3</BaseBadge>
+                </div>
+                <Input
+                  aria-label="Search agents by name in the dark preview"
+                  placeholder="Search by name"
+                  value=""
+                  autoComplete="off"
+                  onChange={() => undefined}
+                />
+                <DataTable
+                  label="Proof agents in dark theme"
+                  columns={COLUMNS}
+                  rows={AGENTS.slice(0, 2)}
+                  keyOf={(agent) => agent.id}
+                />
+              </div>
+            </section>
+
             <section
               className={PREVIEW}
               aria-label="Narrow 360 pixel component preview"
