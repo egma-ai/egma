@@ -113,8 +113,8 @@ export const QUIET = {
   setUp: {
     title: "Nothing has been recorded here yet",
     lead:
-      "Turn on Pull production calls for a Retell agent, or send LiveKit " +
-      "spans to Egma from the agent's own process.",
+      "Open an agent and start monitoring it. Egma reads a Retell agent's " +
+      "production traffic for you; a LiveKit agent sends its own.",
     action: "Start monitoring an agent",
   },
   organizationKey: {
