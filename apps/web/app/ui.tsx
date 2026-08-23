@@ -62,7 +62,14 @@ export function Brand() {
   return (
     /* eslint-disable-next-line @next/next/no-img-element */
     <img
-      className="block h-8 w-auto [[data-theme=dark]_&]:invert"
+      /*
+       * `self-start` is the half that keeps the mark a mark. The column it
+       * sits in stretches its children to 440px, and a stretched item with
+       * `w-auto` and a fixed height is a logo squashed to the width of the
+       * panel — which `DESIGN.md` forbids outright. Sized by its own content,
+       * the width comes off the viewBox and the proportion is the SVG's.
+       */
+      className="block h-8 w-auto self-start [[data-theme=dark]_&]:invert"
       src="/brand/egma-wordmark.svg"
       alt="Egma"
       height={32}
