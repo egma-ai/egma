@@ -327,6 +327,8 @@
    */
   --access-panel-width: 440px;
   --dialog-width: 480px;
+  /* One sentence under an empty state's title, held to the board's measure. */
+  --state-lead-width: 520px;
   --search-width: 300px;
   --chip-height: 22px;
   --menu-width: 210px;
