@@ -7,7 +7,15 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The centered modal layer.
+ * The centered modal layer, drawn the way the confirm boards draw it.
+ *
+ * 480px wide, 24px of padding, a 20px column gap, the shared orange-brown
+ * shadow over a neutral hairline and no corner at all — read off `BEM-0` and
+ * `BMT-0` with `get_computed_styles` on 2026-08-23. The header is a title with
+ * a close beside it over a hairline; the footer is the answer and the way out,
+ * in that order, at the left. The boards put 28px of padding on the panel and
+ * this is 24: 28px is off `DESIGN.md`'s 4px spacing list, and the ticket rounds
+ * it to the step that is on it.
  *
  * Radix supplies what `DESIGN.md` requires of a dialog and a hand-written one
  * keeps getting wrong: focus is trapped, the page behind it is inert, Escape
@@ -73,8 +81,8 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-30 -translate-x-1/2 -translate-y-1/2",
-          "flex w-[min(420px,calc(100vw-40px))] flex-col gap-5",
-          "rounded-card border border-border bg-surface p-5 text-foreground shadow-modal",
+          "flex w-[min(480px,calc(100vw-var(--space-8)))] flex-col gap-5",
+          "rounded-card border border-border bg-surface p-6 text-foreground shadow-modal",
           className,
         )}
         {...props}
@@ -84,7 +92,7 @@ function DialogContent({
           <DialogPrimitive.Close
             data-slot="dialog-close"
             className={cn(
-              "absolute top-4 right-4 inline-flex size-8 cursor-pointer items-center justify-center",
+              "absolute top-6 right-6 inline-flex size-8 cursor-pointer items-center justify-center",
               "rounded-button border border-transparent text-muted-foreground",
               /* "Pointer targets are at least 44px on coarse pointers." */
               "pointer-coarse:size-(--tap-target)",
@@ -120,13 +128,27 @@ function DialogFooter({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-footer"
-      className={cn("flex flex-wrap justify-end gap-3", className)}
+      /*
+       * The answer leads and the way out follows it, both at the left edge —
+       * which is what `BEM-0` draws and the reverse of shadcn's default. A
+       * destructive footer also carries a third thing at the right end; that
+       * is the caller's, and `justify-between` on the caller's own class list
+       * is what puts it there.
+       */
+      className={cn("flex flex-wrap items-center gap-3", className)}
       {...props}
     />
   );
 }
 
-/* Weight 500, which `DESIGN.md` reserves for titles that need the hierarchy. */
+/*
+ * The lead step, at weight 400.
+ *
+ * The boards write a dialog's question at 24px in the ordinary weight rather
+ * than at 16px in weight 500: the size is the hierarchy, which is what
+ * `DESIGN.md` asks for first ("hierarchy comes from size, space, and
+ * restrained use of weight 500").
+ */
 function DialogTitle({
   className,
   ...props
@@ -134,7 +156,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("m-0 pr-8 text-base font-medium", className)}
+      className={cn("m-0 pr-8 text-lg", className)}
       {...props}
     />
   );

@@ -5,7 +5,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The chip, at the 9999px tag radius.
+ * The chip, square like everything else.
  *
  * The variant names are the meanings rather than shadcn's `default`,
  * `secondary` and `destructive`. A chip in this product usually carries a
@@ -23,8 +23,7 @@ import { cn } from "@/lib/utils";
 const badgeVariants = cva(
   [
     "inline-flex w-fit shrink-0 items-center justify-center gap-2 whitespace-nowrap",
-    "min-h-(--control-sm) rounded-chip border px-3",
-    "text-sm tracking-(--tracking-label) uppercase",
+    "rounded-chip border text-sm",
     "[&>svg]:pointer-events-none [&>svg]:size-3",
   ],
   {
@@ -35,9 +34,25 @@ const badgeVariants = cva(
         warning: "border-warning-border text-warning",
         failure: "border-failure-border text-failure",
       },
+      /*
+       * Two shapes, and the second one is a chip that holds a number.
+       *
+       * `verdict` is the chip this product has always drawn: a word in
+       * letter-spaced capitals, at the dense control height. `count` is the
+       * overflow chip the boards put at the end of a cell that ran out of room
+       * (`719-0`) — "+3", 22px tall on the quiet neutral surface, in ordinary
+       * sentence case because it is a number and capitals would say nothing.
+       * It is deliberately not a variant of the colour axis above: a count
+       * carries no verdict, and the colours there all do.
+       */
+      shape: {
+        verdict: "min-h-(--control-sm) px-3 tracking-(--tracking-label) uppercase",
+        count: "h-[22px] min-w-7 bg-surface-soft px-2",
+      },
     },
     defaultVariants: {
       variant: "neutral",
+      shape: "verdict",
     },
   },
 );
@@ -45,6 +60,7 @@ const badgeVariants = cva(
 function Badge({
   className,
   variant,
+  shape,
   asChild = false,
   ...props
 }: ComponentProps<"span"> &
@@ -56,7 +72,8 @@ function Badge({
   return (
     <Component
       data-slot="badge"
-      className={cn(badgeVariants({ variant }), className)}
+      data-shape={shape ?? "verdict"}
+      className={cn(badgeVariants({ variant, shape }), className)}
       {...props}
     />
   );
