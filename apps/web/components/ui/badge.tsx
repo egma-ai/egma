@@ -47,7 +47,7 @@ const badgeVariants = cva(
        */
       shape: {
         verdict: "min-h-(--control-sm) px-3 tracking-(--tracking-label) uppercase",
-        count: "h-[22px] min-w-7 bg-surface-soft px-2",
+        count: "h-(--chip-height) min-w-7 bg-surface-soft px-2",
       },
     },
     defaultVariants: {
@@ -72,7 +72,6 @@ function Badge({
   return (
     <Component
       data-slot="badge"
-      data-shape={shape ?? "verdict"}
       className={cn(badgeVariants({ variant, shape }), className)}
       {...props}
     />

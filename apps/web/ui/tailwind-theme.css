@@ -303,16 +303,25 @@
   --table-action-width: 48px;
 
   /*
-   * How wide a side sheet is — the one the boards draw, and the reading
-   * surface `ui/dialog.tsx` opens beside a page.
+   * How wide each surface is. Every one of these lived in a class list as a
+   * bare number until 2026-08-23; a size is a design value like a colour is,
+   * and `DESIGN.md` says a component holds neither.
    *
-   * They were 440 and 640 and there is no reason for a product to have two
-   * side sheets of two widths: a person meets both and sees one control that
-   * cannot make up its mind. `77F-0` says 440, so 440 is the width, and it is
-   * one declaration so that widening the reading surface later is one edit
-   * rather than a hunt through two components.
+   * **Two side sheets, two widths, and they are two things.** `--sheet-width`
+   * is the modal panel the boards draw one record in (`77F-0`): create, read
+   * and edit, over a scrim, with the page behind it inert.
+   * `--sheet-width-wide` is the *reading* surface `ui/dialog.tsx` opens beside
+   * a page that stays usable — a transcript against its grader results, a
+   * persona's version history. Collapsing the second into the first took 200px
+   * off a transcript to make a number match, which is a worse product for a
+   * tidier theme.
    */
   --sheet-width: 440px;
+  --sheet-width-wide: 640px;
+  --dialog-width: 480px;
+  --search-width: 300px;
+  --chip-height: 22px;
+  --menu-width: 210px;
 
   /* Product shell measurements. */
   --sidebar-width: 224px;
@@ -363,7 +372,14 @@
   --background: #151514;
   --surface: #1b1b1a;
   --surface-soft: #222220;
-  --surface-active: color-mix(in srgb, var(--color-ember) 16%, var(--surface));
+  /*
+   * The designer's own dark wash, read from the Paper file's tokens
+   * (`--color-dark-surface-active`). It was a `color-mix` of Ember into the
+   * surface, which landed within one hex step of this — so the value barely
+   * moved, and taking it from the file rather than deriving it is what stops
+   * the two drifting the next time either side is tuned.
+   */
+  --surface-active: #43241c;
   --foreground: #f2f2ed;
   --muted: #a3a39b;
   --faint: #82827b;
@@ -371,10 +387,28 @@
   --border-strong: #4a4a44;
   --focus: var(--color-ember);
   --accent: var(--color-ember);
-  --action: var(--color-ember-deep);
-  --action-hover: var(--color-ember-hover);
-  --action-pressed: var(--color-ember-pressed);
-  --action-text: var(--color-paper);
+  /*
+   * The primary action's ink, lightened for the dark wash it sits on.
+   *
+   * **Deep Ember on the dark wash is 2.69:1, which fails AA and fails even the
+   * 3:1 a non-text control gets.** That was true before this theme change as
+   * well — the wash was already Ember-on-dark and the ink was already
+   * `#c2410c` — so this is a fault being fixed rather than one being created.
+   * Ember alone is 4.3:1, still short. Ember pulled 20% towards paper is
+   * `#ff7554` at **5.26:1**, which passes AA for the 14px label a button
+   * carries, and it is the same colour family the light theme uses.
+   *
+   * Hover and press move *further* towards paper, which is "further from the
+   * surface it sits on" — the same direction, in dark, that the light theme's
+   * darker steps take. `--destructive` above already works this way.
+   *
+   * `DESIGN.md`: "Dark theme uses lighter status values that keep the same
+   * meanings." This is that rule applied to the action family.
+   */
+  --action: color-mix(in srgb, var(--color-ember) 80%, var(--color-paper));
+  --action-hover: color-mix(in srgb, var(--color-ember) 62%, var(--color-paper));
+  --action-pressed: color-mix(in srgb, var(--color-ember) 46%, var(--color-paper));
+  --action-text: var(--color-midnight);
   --good: #55bd8c;
   --warn: #d69a38;
   --bad: #e27373;

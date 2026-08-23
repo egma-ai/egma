@@ -210,7 +210,8 @@ export function Menu({
              * visible margin round a list of four words.
              */
             "w-max p-1",
-            "min-w-[min(240px,calc(100vw-var(--space-8)))]",
+            /* 210px, which is what the boards draw a row menu at (`9AH-0`). */
+            "min-w-[min(var(--menu-width),calc(100vw-var(--space-8)))]",
             "max-w-[min(320px,calc(100vw-var(--space-8)))]",
             /*
              * A panel keeps a gap off the edge it was pushed against, and
@@ -286,7 +287,7 @@ export function MenuItem({
 
 export function MenuLabel({ children }: { readonly children: ReactNode }) {
   return (
-    <p className="m-0 px-3 pt-2 pb-1 text-2xs tracking-(--tracking-label) text-faint uppercase">
+    <p className="m-0 px-3 pt-2 pb-1 text-xs tracking-(--tracking-label) text-faint uppercase">
       {children}
     </p>
   );

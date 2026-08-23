@@ -66,14 +66,16 @@ const PANEL_SHAPE = {
     "overflow-y-auto border-y-0 border-l-0",
   ],
   /*
-   * **One side sheet look, at one width.** This is the same panel
-   * `components/ui/sheet.tsx` draws — right-anchored, `--sheet-width` wide,
-   * Pure Paper behind a hairline on its left edge, no corner — and the width
-   * is the theme's rather than a second number here. The two components are
-   * still two: this one is a *reading* surface that deliberately leaves the
-   * page beside it usable, and that one is a modal form portaled inside
-   * `<main>`. They differ in what they do and no longer in what they look
-   * like.
+   * **One side sheet look, in two sizes.** This is the same panel
+   * `components/ui/sheet.tsx` draws — right-anchored, Pure Paper behind a
+   * hairline on its left edge, no corner, the same travel — and both widths
+   * are the theme's rather than numbers written here.
+   *
+   * The two components are still two, and the difference is behaviour: this
+   * one is a *reading* surface that deliberately leaves the page beside it
+   * usable, and that one is a modal form portaled inside `<main>`.
+   * `size="wide"` is for the reading surface, where the content is a
+   * transcript rather than a form and 440px is not enough of a page.
    */
   sheet: [
     "top-0 right-0 left-auto h-full max-h-none",
@@ -84,25 +86,15 @@ const PANEL_SHAPE = {
 } as const;
 
 /**
- * The travel of each edge kind — and there is none left to write here.
+ * The wider panel, for a surface that is read rather than filled in.
  *
- * Both movements are in `tailwind-theme.css` now, keyed on `data-kind`, as
- * animations of their own at the drawer's tokens. An animation rather than a
- * transition, because Radix removes a panel on `animationend`: whatever is
- * animating is what holds the panel on screen while it leaves, and a
- * transition racing the centred dialog's `scale` is what used to cut the sheet
- * off at its own edge.
- *
- * The sheet used to travel on a transition at the *dialog's* tokens, with a
- * `@starting-style` to give the entrance somewhere to come from and four more
- * rules to give reduced motion a form. It shares the drawer's rule now, so it
- * shares the drawer's reduced-motion form as well: nothing travels, and the
- * opacity says a surface arrived and left.
+ * Only the sheet has one. A dialog is a question and a drawer is a list of
+ * places to go; neither gets bigger by holding more.
  */
-const PANEL_TRAVEL = {
+const PANEL_WIDE = {
   dialog: "",
   drawer: "",
-  sheet: "",
+  sheet: "w-[min(var(--sheet-width-wide),100vw)]",
 } as const;
 
 /** A sheet's head is a fixed bar over a body that scrolls under it. */
@@ -164,12 +156,18 @@ const TAKES_THE_SCREEN = { dialog: true, drawer: true, sheet: false } as const;
 
 export function Dialog({
   kind = "dialog",
+  size = "default",
   title,
   onClose,
   returnFocusTo,
   children,
 }: {
   readonly kind?: "dialog" | "drawer" | "sheet";
+  /**
+   * How much room the surface needs. `wide` is the reading sheet — evidence
+   * beside a page — and does nothing to the other two kinds.
+   */
+  readonly size?: "default" | "wide";
   readonly title: string;
   readonly onClose: () => void;
   /** A known trigger to restore when the surface closes. */
@@ -250,7 +248,7 @@ export function Dialog({
       }}
     >
       <DialogContent
-        className={cn(PANEL_SHAPE[kind], PANEL_TRAVEL[kind])}
+        className={cn(PANEL_SHAPE[kind], size === "wide" && PANEL_WIDE[kind])}
         data-kind={kind}
         /*
          * Every caller writes its own body, and most bodies are not one

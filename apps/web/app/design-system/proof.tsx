@@ -92,7 +92,7 @@ import { NumberField } from "../../ui/number-field.tsx";
 import { Empty, Failure, Loading } from "../../ui/page-state.tsx";
 import { ProjectSelector } from "../../ui/project-selector.tsx";
 import { RunProgress, VerdictBadge } from "../../ui/run-status.tsx";
-import { Actions, Section, Toolbar } from "../../ui/section.tsx";
+import { Actions, SearchField, Section, Toolbar } from "../../ui/section.tsx";
 import { SettingsNav } from "../../ui/settings-nav.tsx";
 import { AppShell, ProductPage } from "../../ui/shell.tsx";
 
@@ -231,6 +231,40 @@ const COLUMNS: readonly Column<ProofAgent>[] = [
     ),
   },
   { key: "id", header: "Identifier", mono: true, cell: (agent) => agent.id },
+  /*
+   * The row menu's lane.
+   *
+   * `action: true` is what makes the cell a fixed `--table-action-width` slot
+   * at the trailing edge, on every row and in the header, so the ⋮ marks line
+   * up in one column down the table instead of each floating to the right of
+   * whatever text came before it. It is drawn here because a lane that only
+   * exists on product screens is a lane nothing holds to the boards.
+   */
+  {
+    key: "menu",
+    header: "Actions",
+    action: true,
+    cell: (agent) => (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <BaseButton
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Actions for ${agent.name}`}
+          >
+            <EllipsisIcon />
+          </BaseButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem>Open</DropdownMenuItem>
+          <DropdownMenuItem>Edit</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive">Archive</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ),
+  },
 ];
 
 const TRANSCRIPT: EvidenceTranscript = {
@@ -1205,7 +1239,8 @@ export function DesignSystemProof() {
                   <BaseBadge variant="success">Passed</BaseBadge>
                   <BaseBadge shape="count">+3</BaseBadge>
                 </div>
-                <Input
+                <SearchField
+                  id="proof-dark-search"
                   aria-label="Search agents by name in the dark preview"
                   placeholder="Search by name"
                   value=""
@@ -1329,6 +1364,22 @@ export function DesignSystemProof() {
               <BaseButton type="button">Register agent</BaseButton>
             </Actions>
           </div>
+          {/*
+            * The list toolbar, at the shape every list page has: the 300×36
+            * search box on the left, the one action hard right.
+            */}
+          <Toolbar
+            action={<BaseButton type="button">Connect an agent</BaseButton>}
+          >
+            <SearchField
+              id="proof-agent-search"
+              aria-label="Search proof agents by name"
+              placeholder="Search by name"
+              value=""
+              autoComplete="off"
+              onChange={() => undefined}
+            />
+          </Toolbar>
           <DataTable label="Proof agents" columns={COLUMNS} rows={AGENTS} keyOf={(agent) => agent.id} />
         </article>
 

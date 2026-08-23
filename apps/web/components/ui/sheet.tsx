@@ -154,15 +154,25 @@ function SheetOverlay({
 function SheetContent({
   className,
   children,
+  size = "default",
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content>) {
+}: ComponentProps<typeof DialogPrimitive.Content> & {
+  /**
+   * How much room the panel needs. `default` is the boards' 440px form panel;
+   * `wide` is the 640px reading panel, for a surface whose content is evidence
+   * rather than fields. Both widths are theme values.
+   */
+  readonly size?: "default" | "wide";
+}) {
   return (
     <SheetPortal>
       <SheetOverlay />
       <DialogPrimitive.Content
         data-slot="sheet-content"
+        data-size={size}
         className={cn(
           "fixed inset-y-0 right-0 z-30 flex w-[min(var(--sheet-width),100vw)] flex-col gap-5",
+          size === "wide" && "w-[min(var(--sheet-width-wide),100vw)]",
           "border-l border-border bg-surface p-6 text-foreground shadow-modal",
           "outline-none",
           className,

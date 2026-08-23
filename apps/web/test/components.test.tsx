@@ -460,6 +460,40 @@ describe("nested page navigation", () => {
     expect(screen.getAllByText("Runs")).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
   });
+
+  /**
+   * The other half of the rule above, and it needs its own case.
+   *
+   * A page with no trail still says which section it is in, and on one screen
+   * that label is a *fact* rather than a repetition: the transcript page puts
+   * the trace's source and environment in it — "production / default" — and
+   * states it nowhere else. Sixty-four call sites pass this prop, so a version
+   * of `PageHeader` that accepted it and quietly drew nothing would take a
+   * line off every one of them and break no test at all. This is that test.
+   *
+   * It is not in the title bar. The bar holds the page title alone, which is
+   * what `71V-0` draws; the label and the purpose statement are the quiet
+   * block under it.
+   */
+  it("draws the eyebrow when a page offers no trail, outside the title bar", () => {
+    render(
+      <PageHeader
+        eyebrow="production / default"
+        title="Nightly smoke"
+        lead="What this run was for."
+      />,
+    );
+
+    const label = screen.getByText("production / default");
+    expect(label).toBeTruthy();
+    expect(label.closest('[data-slot="page-topbar"]')).toBeNull();
+    expect(label.closest('[data-slot="page-toolbar"]')).not.toBeNull();
+
+    const title = screen.getByRole("heading", { name: "Nightly smoke" });
+    expect(title.closest('[data-slot="page-topbar"]')).not.toBeNull();
+    /* One header holds both, which is how a page finds its own controls. */
+    expect(title.closest("header")).toBe(label.closest("header"));
+  });
 });
 
 /* ------------------------------------------------------------------------ */

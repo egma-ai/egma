@@ -636,6 +636,7 @@ function PersonaDetail({
         {historyOpen ? (
           <Dialog
             kind="sheet"
+            size="wide"
             title="Version history"
             returnFocusTo={historyButton.current}
             onClose={() => setHistoryOpen(false)}

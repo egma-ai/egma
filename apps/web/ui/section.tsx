@@ -164,7 +164,7 @@ export function SearchField({
  * filters leave and stops at its maximum.
  */
 export const TOOLBAR_SEARCH = [
-  "w-[300px] max-w-full min-h-(--control-md) text-sm",
+  "w-(--search-width) max-w-full min-h-(--control-md) text-sm",
   /* One column on a phone, where 300px is most of the screen. */
   "max-[900px]:w-full",
 ].join(" ");

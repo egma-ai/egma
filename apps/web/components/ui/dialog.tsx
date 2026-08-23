@@ -81,7 +81,7 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-30 -translate-x-1/2 -translate-y-1/2",
-          "flex w-[min(480px,calc(100vw-var(--space-8)))] flex-col gap-5",
+          "flex w-[min(var(--dialog-width),calc(100vw-var(--space-8)))] flex-col gap-5",
           "rounded-card border border-border bg-surface p-6 text-foreground shadow-modal",
           className,
         )}

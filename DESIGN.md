@@ -67,7 +67,7 @@ Rules:
 - Keep the canonical geometry, proportions, and black-and-white treatment.
 - Do not recolor, stretch, rotate, outline, shadow, or animate the logo.
 - The signed-in sidebar starts with the Egma wordmark, in a 56px bar with a hairline under it. It links to the product root. (Developer decision, 2026-08-23: "our logo, not the organization's". This replaces the earlier rule that kept the full logo out of the signed-in sidebar, which asked for exactly this approval.)
-- Dark theme inverts the wordmark. Black line art printed white is the same mark, not a recolor.
+- 2026-08-23: the sidebar wordmark follows the access pages' existing dark-theme treatment (the black line art is printed white by inversion).
 - The organization is the eyebrow above the project name, under the wordmark bar. The project is the line that opens the switcher.
 - Auth, onboarding, and public brand surfaces may use the full logo.
 - Product icons and status symbols must not imitate the logo.
@@ -117,7 +117,7 @@ Egma uses neutral paper surfaces and one orange-red brand family. Routine produc
 
 ### Dark theme
 
-- Dark theme uses neutral dark surfaces and the same Ember focus and action family.
+- Dark theme uses neutral dark surfaces and the same Ember focus and action family, lightened where a dark surface needs it. The primary action's text is Ember pulled towards paper rather than Deep Ember: Deep Ember on the dark Ember Wash is 2.69:1 and fails AA, and the lighter step is 5.26:1. (Developer decision, 2026-08-23.)
 - Dense evidence may use a dark contained surface in either theme.
 - Every shared component must support light and dark themes.
 - Verify text, borders, focus, status, overlays, and disabled states in both themes.
@@ -278,7 +278,8 @@ The measurements, all of them theme values:
 ### Side sheets
 
 - One record is created, read, and edited in a side sheet anchored to the right edge: agents, connections, personas, and tests. The list stays on screen behind it. (Developer decision, 2026-08-23.)
-- A side sheet is 440px wide, full height, on Pure Paper behind a hairline on its left edge, over a scrim.
+- **There are two side sheets, and they are two behaviours.** The **modal** sheet is the create, read, and edit surface named above: it is 440px, sits over a scrim, and makes the page behind it inert. The **wide reading** sheet is the evidence surface — a transcript beside its grader results, a persona's version history — it is 640px, has no scrim, and deliberately leaves the page beside it usable, because that page is what the evidence is being read against. Both widths are theme values. (Developer decision, 2026-08-23.)
+- A side sheet is full height, on Pure Paper behind a hairline on its left edge.
 - Its head is the record's name at the lead step with a close beside it, over a hairline. Its body is the fields and scrolls. Its footer is pinned to the bottom: the answer and the way out at the left, the one destructive action at the right.
 - It travels from the edge it is attached to, on the drawer's durations, and fades in place under reduced motion.
 - It traps focus, makes the page behind it inert, closes with Escape, and restores the exact opener.
