@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   createRun,
   getAgent,
@@ -12,6 +12,7 @@ import {
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
@@ -42,7 +43,6 @@ import {
 } from "../../../../../ui/form.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../../ui/resource.ts";
-import { Section } from "../../../../../ui/section.tsx";
 import { useUnsavedChanges } from "../../../../../ui/settings-read.ts";
 import {
   AppShell,
@@ -55,6 +55,44 @@ import {
 function connectionLabel(connection: ListedConnection): string {
   const environment = connection.environment === null ? "" : ` · ${connection.environment}`;
   return `${connection.name} · ${connection.productLabel} · ${connection.modality}${environment}`;
+}
+
+/**
+ * One group of the builder: a legend, the sentence under it, and its fields.
+ *
+ * **A fieldset rather than the page-level `Section`.** The four groups are
+ * parts of one form on one surface, not four blocks of a page: `Section`
+ * carries a 24px title and 32px of its own room above it, which on a form
+ * inside a card reads as four separate forms 52px apart. This is the shape the
+ * grader editor already draws its four groups in — a hairline between, a 16px
+ * legend — so the two forms in this product read as one.
+ */
+function Group({
+  title,
+  lead,
+  children,
+}: {
+  readonly title: string;
+  readonly lead?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    /*
+     * **The hairline is on the wrapper and the fieldset carries none.** A
+     * `<legend>` sits on its fieldset's top border and the browser drops the
+     * border behind it, so a rule drawn on the fieldset would start to the
+     * right of the group's name and never to the left of it.
+     */
+    <div className="min-w-0 not-first:border-t not-first:border-border not-first:pt-5">
+      <fieldset className={cn("m-0 grid min-w-0 gap-4 border-0 p-0")}>
+        <legend className="m-0 mb-1 p-0 text-base font-medium text-foreground">
+          {title}
+        </legend>
+        {lead === undefined ? null : <Help>{lead}</Help>}
+        {children}
+      </fieldset>
+    </div>
+  );
 }
 
 function newRunIntentKey(): string {
@@ -390,7 +428,10 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
               }
             />
           ) : (
-            <Section title="Test suite" lead="Egma runs the full suite. Individual tests cannot be picked here.">
+            <Group
+              title="Test suite"
+              lead="Egma runs the full suite. Individual tests cannot be picked here."
+            >
               <Field label="Test suite" htmlFor="run-suite">
                 <Select
                   id="run-suite"
@@ -430,10 +471,10 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                   {loadingSuites ? "Loading…" : "Load more suites"}
                 </Button>
               )}
-            </Section>
+            </Group>
           )}
 
-          <Section title="Agent" lead="Choose the agent under test.">
+          <Group title="Agent" lead="Choose the agent under test.">
             {agents.length === 0 ? (
               <Empty title="This project has no active agent" />
             ) : (
@@ -465,9 +506,9 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
                 )}
               </>
             )}
-          </Section>
+          </Group>
 
-          <Section title="Connection" lead="Choose how Egma reaches this agent.">
+          <Group title="Connection" lead="Choose how Egma reaches this agent.">
             {agentId === "" ? (
               <p className="m-0 text-sm text-muted-foreground">Choose an agent first.</p>
             ) : agentDetail === null ? (
@@ -495,9 +536,9 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
             ) : agentDetail.status === "signed-out" ? null : (
               <Failure message={agentDetail.refusal.message} />
             )}
-          </Section>
+          </Group>
 
-          <Section title="Run details">
+          <Group title="Run details">
             <Field label="Run name (optional)" htmlFor="run-name">
               <Input
                 id="run-name"
@@ -512,7 +553,7 @@ function RunBuilder({ projectId }: { readonly projectId: string }) {
               />
             </Field>
             <Help>Leave this blank and Egma will use the test suite name.</Help>
-          </Section>
+          </Group>
 
           {moreRefused === null ? null : <Refused message={moreRefused.message} />}
           {refused === null ? null : <Refused message={refused.message} />}

@@ -176,6 +176,14 @@ function columnsFor(
               <Button
                 type="button"
                 variant="secondary"
+                /*
+                 * The trailing lane pays no side padding — it is sized for a
+                 * ⋮, and a control that carries a word instead would sit hard
+                 * against the panel's own edge. The margin is on the control
+                 * rather than the cell, and equal on both sides, so the lane
+                 * widens around it and the button stays centred in it.
+                 */
+                className="mx-4"
                 onClick={() => onCancel(run.id)}
               >
                 Cancel

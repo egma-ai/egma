@@ -176,9 +176,14 @@ function StartMonitoring({ projectId }: { readonly projectId: string }) {
     <PageHeader
       title={COPY.title}
       lead={COPY.lead}
+      /*
+        The trail names the section and where in it this page sits; the title
+        beside it says the same thing at full length. Ending the trail with the
+        page's own title put the same three words twice in one 56px bar.
+      */
       breadcrumbs={[
         { label: COPY.eyebrow, href: monitoring },
-        { label: COPY.title },
+        { label: "Start" },
       ]}
     />
   );

@@ -497,9 +497,14 @@ function RunDetailView({
       <PageHeader
         eyebrow="Simulation runs"
         title={displayTitle}
+        /*
+         * The trail names the section and the kind of record; the title beside
+         * it names *this* record. Ending the trail with the run's own name put
+         * the same words twice in one 56px bar, a comma apart.
+         */
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
-          { label: displayTitle },
+          { label: "Run" },
         ]}
         action={
           !mayControl || !active ? undefined : (

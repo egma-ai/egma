@@ -418,31 +418,39 @@ export default function TranscriptPage({
             { label: LIST.title, href: transcriptsPath(projectId) },
             { label: DETAIL.title },
           ]}
+          /*
+            One line of facts about this exchange, ending with its state.
+            **The chip is here rather than in the page's action slot**: an
+            action slot draws a 52px strip of its own, and a chip alone at the
+            far right of an otherwise empty strip is a gap with a badge in it.
+            A transcript offers no action, so the strip has nothing else to
+            hold.
+          */
           lead={
-            <>
+            <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>
                 {detail.trace.source} / {detail.trace.environment}
               </span>
-              {" · "}
+              <span aria-hidden="true">·</span>
               <RelativeInstant instant={openedAt} now={now} precision="second" />
-              {" · "}
-              {howLong(detail.trace.durationNs)}
-            </>
-          }
-          action={
-            <Badge variant={errored > 0 ? "failure" : "success"}>
-              {/*
-                The dot the hand-drawn chip carried as `::before`, kept. It is
-                `bg-current` and the same circle either way, so it separates
-                nothing on its own — `Recorded` and `1 error` are what say which
-                state this is. It is the chip's mark, not its meaning.
-              */}
-              <span
-                aria-hidden="true"
-                className="size-1.5 shrink-0 rounded-chip bg-current"
-              />
-              {errored === 0 ? DETAIL.recorded : DETAIL.errors(errored)}
-            </Badge>
+              <span aria-hidden="true">·</span>
+              <span className="tabular-nums">
+                {howLong(detail.trace.durationNs)}
+              </span>
+              <Badge variant={errored > 0 ? "failure" : "success"}>
+                {/*
+                  The dot the hand-drawn chip carried as `::before`, kept. It is
+                  `bg-current` and the same circle either way, so it separates
+                  nothing on its own — `Recorded` and `1 error` are what say which
+                  state this is. It is the chip's mark, not its meaning.
+                */}
+                <span
+                  aria-hidden="true"
+                  className="size-1.5 shrink-0 rounded-chip bg-current"
+                />
+                {errored === 0 ? DETAIL.recorded : DETAIL.errors(errored)}
+              </Badge>
+            </span>
           }
         />
 
