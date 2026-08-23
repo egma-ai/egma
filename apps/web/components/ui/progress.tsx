@@ -72,10 +72,12 @@ function Progress({
          * "Quiet hover, read-only, progress, and supporting surfaces use a
          * neutral Graphite-and-Paper mix." That mix is `--surface-soft`.
          *
-         * The chip radius, because a track is a pill and `DESIGN.md` names the
-         * pill for "tag, chip, filter" — the nearest named type, and the rule
-         * it is guarding against is one big radius on everything rather than a
-         * pill on something pill-shaped.
+         * The track is square, like every other component: the 2026-08-23
+         * ruling collapsed the radius table to one line and a progress bar is
+         * a component rather than a shape. The paragraph below about a round
+         * cap is kept because the mechanism it argues for is still the right
+         * one — a `translateX` inside a clipping track survives a cap of any
+         * radius, including none.
          */
         "relative h-2 w-full overflow-hidden rounded-chip bg-surface-soft",
         className,

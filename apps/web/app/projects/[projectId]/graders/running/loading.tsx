@@ -4,7 +4,6 @@ import { useParams } from "next/navigation";
 
 import { RUNNING } from "../../../../../lib/grader-running-copy.ts";
 import { GRADERS_SECTION } from "../../../../../lib/graders.ts";
-import { GRADER_VIEW_LABELS } from "../../../../../lib/presentation.ts";
 import { projectPath } from "../../../../../lib/project-context.ts";
 import { Loading } from "../../../../../ui/page-state.tsx";
 import { ProductStatePage } from "../../../../../ui/shell.tsx";
@@ -31,7 +30,7 @@ export default function RunningGradersLoading() {
         title={RUNNING.title}
         breadcrumbs={[
           { label: "Graders", href: projectPath(projectId, GRADERS_SECTION) },
-          { label: GRADER_VIEW_LABELS.running },
+          { label: RUNNING.title },
         ]}
       >
         <Loading what={RUNNING.loading} />

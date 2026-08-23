@@ -21,7 +21,6 @@ import {
   Refused,
 } from "../../../../ui/form.tsx";
 import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { Section } from "../../../../ui/section.tsx";
 import { SettingsLayout } from "../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
@@ -200,7 +199,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   if (answer === null) {
     return (
       <ProductPage viewport>
-        <PageHeader eyebrow="Settings" title="Project" />
+        <PageHeader title="Project" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="project">
             <Loading what="this project" />
@@ -213,7 +212,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   if (answer.status !== "ready") {
     return (
       <ProductPage viewport>
-        <PageHeader eyebrow="Settings" title="Project" />
+        <PageHeader title="Project" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="project">
             {answer.status === "missing" ? (
@@ -237,13 +236,22 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   return (
     <ProductPage viewport>
       <PageHeader
-        eyebrow="Settings"
         title="Project"
         lead="What this product area is called, and what it is for."
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="project">
-          <Section title="Details">
+          {/*
+            * No section heading over a page that holds one form.
+            *
+            * The title bar says "Project", the line under it says what the
+            * page is for, and the rail says which settings these are. A
+            * "Details" heading over the only thing on the screen was the
+            * largest type on it — larger than the page's own title — and said
+            * less than anything else. A page that grows a second group gets
+            * `Section` back, and then the heading is doing work.
+            */}
+          <div className="flex flex-col gap-4">
             {refused === null ? null : (
               <Refused
                 message={refused.message}
@@ -314,7 +322,7 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                 </Button>
               </FormActions>
             </Form>
-          </Section>
+          </div>
         </SettingsLayout>
       </PageBody>
     </ProductPage>

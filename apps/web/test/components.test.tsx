@@ -74,6 +74,12 @@ const routed = vi.hoisted(() => {
     back,
     router: { push, replace, back },
     pathname: "/projects/prj_1/agents",
+    /*
+     * Which side sheet the agents screen has open is in the address and
+     * nowhere else, so a page rendered here needs the query as well as the
+     * path. Empty is the plain list with no panel over it.
+     */
+    search: "",
     projectId: "prj_1" as string | undefined,
   };
 });
@@ -81,6 +87,7 @@ const routed = vi.hoisted(() => {
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
   useRouter: () => routed.router,
+  useSearchParams: () => new URLSearchParams(routed.search),
   useParams: () => ({ projectId: routed.projectId }),
 }));
 
@@ -459,6 +466,40 @@ describe("nested page navigation", () => {
 
     expect(screen.getAllByText("Runs")).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "Nightly smoke" })).toBeTruthy();
+  });
+
+  /**
+   * The other half of the rule above, and it needs its own case.
+   *
+   * A page with no trail still says which section it is in, and on one screen
+   * that label is a *fact* rather than a repetition: the transcript page puts
+   * the trace's source and environment in it — "production / default" — and
+   * states it nowhere else. Sixty-four call sites pass this prop, so a version
+   * of `PageHeader` that accepted it and quietly drew nothing would take a
+   * line off every one of them and break no test at all. This is that test.
+   *
+   * It is not in the title bar. The bar holds the page title alone, which is
+   * what `71V-0` draws; the label and the purpose statement are the quiet
+   * block under it.
+   */
+  it("draws the eyebrow when a page offers no trail, outside the title bar", () => {
+    render(
+      <PageHeader
+        eyebrow="production / default"
+        title="Nightly smoke"
+        lead="What this run was for."
+      />,
+    );
+
+    const label = screen.getByText("production / default");
+    expect(label).toBeTruthy();
+    expect(label.closest('[data-slot="page-topbar"]')).toBeNull();
+    expect(label.closest('[data-slot="page-toolbar"]')).not.toBeNull();
+
+    const title = screen.getByRole("heading", { name: "Nightly smoke" });
+    expect(title.closest('[data-slot="page-topbar"]')).not.toBeNull();
+    /* One header holds both, which is how a page finds its own controls. */
+    expect(title.closest("header")).toBe(label.closest("header"));
   });
 });
 
@@ -1431,7 +1472,16 @@ describe("what the router draws while a page is still coming", () => {
     expect(within(crumbs).getByRole("link", { name: "Tests" }).getAttribute("href")).toBe(
       "/projects/prj_1/tests",
     );
-    expect(within(crumbs).getByText("Test")).toBeTruthy();
+    /*
+     * The current page is the `<h1>` beside the trail rather than a second copy
+     * inside it. `PageHeader` draws both in one 56px bar, so a trail that
+     * ended with the page said its name twice — "Tests / Test   Test" — which
+     * is not what `9VT-0` and `B9M-0` draw. The fallback and the page it
+     * stands in for both stop the trail at the parent (ui-refresh ticket 05);
+     * the shape they have to share is what this case is about, and they still
+     * share it.
+     */
+    expect(screen.getByRole("heading", { name: "Test" })).toBeTruthy();
     expect(screen.getByRole("status").textContent).toBe("Loading this test…");
   });
 });
@@ -1619,7 +1669,18 @@ describe("the role the shell shows", () => {
     expect(sessionReads).toHaveLength(2);
   });
 
-  it("starts the signed-in sidebar with project context, not a repeated logo", () => {
+  /**
+   * The bar starts with the Egma wordmark, and the project context is under it.
+   *
+   * **This assertion was the other way round until 2026-08-23.** `DESIGN.md`
+   * kept the full logo out of the signed-in sidebar and asked for explicit
+   * approval to change that rule; the developer gave it, looking at the Paper
+   * boards — "our logo, not the organization's" — and `DESIGN.md` records the
+   * decision with its date. The organization did not disappear with the change:
+   * it moved into the eyebrow above the project name, which is what the second
+   * half of this case holds.
+   */
+  it("starts the signed-in sidebar with the Egma wordmark, then project context", () => {
     render(
       <AppShell initialMe={meWith("admin")}>
         <p>page</p>
@@ -1627,9 +1688,16 @@ describe("the role the shell shows", () => {
     );
 
     const sidebar = screen.getByRole("complementary");
+    const wordmark = within(sidebar).getByRole("img", { name: /egma/i });
+    expect(wordmark.getAttribute("src")).toBe("/brand/egma-wordmark.svg");
+    expect(
+      within(sidebar).getByRole("link", { name: "Egma home" }).getAttribute("href"),
+    ).toBe("/");
+
     const firstControl = sidebar.querySelector("button");
     expect(firstControl?.getAttribute("aria-label")).toMatch(/^Organization Acme/);
-    expect(within(sidebar).queryByRole("img", { name: /egma/i })).toBeNull();
+    /* The organization is the eyebrow now; the project is the line you press. */
+    expect(within(sidebar).getByText("Acme")).toBeTruthy();
   });
 
   it("keeps navigation icons decorative and every label visible", () => {
@@ -1896,6 +1964,10 @@ describe("the Agents page", () => {
     projectId: "prj_1",
     name: "Front desk",
     description: "Answers the main line.",
+    // Every field the contract makes required is here, `agentPlatform`
+    // included: the row reads it to say which platform an agent is on, and a
+    // fixture that left it out would be a shape the API cannot answer with.
+    agentPlatform: null,
     // The list read carries every agent's connections, so a row in this
     // fixture carries the field. An agent with none is one of the states the
     // page draws, and it is drawn from an empty list rather than a missing one.
@@ -1966,7 +2038,7 @@ describe("the Agents page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
 
     // No project here to connect an agent to, so nothing offers to.
-    for (const control of screen.getAllByRole("button", { name: "Connect agent" })) {
+    for (const control of screen.getAllByRole("button", { name: "Connect an agent" })) {
       expect((control as HTMLButtonElement).disabled).toBe(true);
     }
   });
@@ -2087,7 +2159,7 @@ describe("the Agents page", () => {
       },
     });
     const { unmount } = render(<AgentsPage />);
-    expect(await screen.findByRole("link", { name: "Connect agent" })).toBeDefined();
+    expect(await screen.findByRole("link", { name: "Connect an agent" })).toBeDefined();
     unmount();
 
     apiAnswers({
@@ -2099,9 +2171,9 @@ describe("the Agents page", () => {
     });
     render(<AgentsPage />);
 
-    const refused = await screen.findByRole("button", { name: "Connect agent" });
+    const refused = await screen.findByRole("button", { name: "Connect an agent" });
     expect((refused as HTMLButtonElement).disabled).toBe(true);
     expect(refused.getAttribute("title")).toContain("viewer role cannot");
-    expect(screen.queryByRole("link", { name: "Connect agent" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Connect an agent" })).toBeNull();
   });
 });

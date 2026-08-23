@@ -31,7 +31,14 @@
 
 export const LIBRARY = {
   title: "Graders",
-  lead: "Choose a grader to use in this project.",
+  /*
+   * **There was a `lead` here and the screen stopped drawing it.** The boards
+   * put a title bar, one strip of controls and the table over a list screen and
+   * nothing else, so the purpose sentence had nowhere left to be — and the rule
+   * this file states about itself says a word nobody renders is deleted rather
+   * than kept. A purpose statement is still what a form gets; a list is
+   * explained by the table under it.
+   */
   /** What the page says it is waiting for, never merely that it is waiting. */
   loading: "the grader library",
   /**

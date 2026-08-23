@@ -34,10 +34,7 @@ import {
   platformAnswer,
   platformClient,
 } from "../../../../../lib/platform-client.ts";
-import {
-  graderDisplayName,
-  GRADER_VIEW_LABELS,
-} from "../../../../../lib/presentation.ts";
+import { graderDisplayName } from "../../../../../lib/presentation.ts";
 import {
   projectLanding,
   projectPath,
@@ -45,6 +42,12 @@ import {
 import { canAuthor } from "../../../../../lib/roles.ts";
 import { DataTable, type Column } from "../../../../../ui/data-table.tsx";
 import { Dialog } from "../../../../../ui/dialog.tsx";
+import { MenuDivider, MenuItem } from "../../../../../ui/menu.tsx";
+import {
+  DestructiveItem,
+  MenuReason,
+  RowMenu,
+} from "../../../../../ui/row-menu.tsx";
 import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import {
   Empty,
@@ -61,6 +64,7 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { Notice } from "../../../../ui.tsx";
 import { GraderTabs, VIEW_CONTENT } from "../tabs.tsx";
 import { EditForm, SwitchOffPanel } from "./edit-form.tsx";
 
@@ -152,7 +156,16 @@ type Open =
   | { readonly act: "switch-off"; readonly copy: RunningGrader }
   | null;
 
-/** The stable relationship between a row's Edit button and its editor. */
+/**
+ * The stable relationship between a row and its editor.
+ *
+ * The editor is a region drawn beside the table and named after the copy it
+ * belongs to. The row's ⋮ carries no `aria-expanded` for it: a menu's
+ * `aria-expanded` is about the menu, and claiming it is about the editor would
+ * say the panel is inside the panel that opened it. What ties the two together
+ * is the focus move — the editor's heading takes it when it opens, and the
+ * row's ⋮ takes it back when it closes.
+ */
 function editorPanelId(copyId: string): string {
   return `grader-editor-${copyId}`;
 }
@@ -229,40 +242,66 @@ function columnsFor(
        * half is why this is here: the ellipsis comes from `overflow: hidden`
        * on the cell, and an outline is clipped by an ancestor's overflow, so a
        * control in an unmarked cell had the Ember focus ring cut off on every
-       * side. Other row controls were already marked; these were the same
-       * concept drawn two ways.
+       * side.
+       *
+       * **And the two acts are inside a ⋮ rather than beside it.** The lane is
+       * one 48px slot on every list in the product, which is what makes the
+       * menus line up in a straight column; two buttons drawn in the cell
+       * pushed this one out to 156px and bent the lane on the one screen that
+       * had them. (2026-08-23.)
        */
       action: true,
-      width: "200px",
       cell: (copy) => (
-        <>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!mayAct || editorBusy}
-            {...(mayAct || whyNotEdit === undefined ? {} : { why: whyNotEdit })}
-            aria-expanded={open?.act === "edit" && open.copy.id === copy.id}
-            aria-controls={editorPanelId(copy.id)}
-            ref={(button) => {
-              if (button === null) editButtons.delete(copy.id);
-              else editButtons.set(copy.id, button);
-            }}
-            onClick={() => show({ act: "edit", copy })}
-          >
-            {EDIT.open}
-          </Button>{" "}
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!mayAct || editorBusy}
-            {...(mayAct || whyNotSwitchOff === undefined
-              ? {}
-              : { why: whyNotSwitchOff })}
-            onClick={() => show({ act: "switch-off", copy })}
-          >
-            {SWITCH_OFF.open}
-          </Button>
-        </>
+        <RowMenu
+          label={`Actions for ${graderDisplayName(copy.name)}`}
+          onTrigger={(button) => {
+            if (button === null) editButtons.delete(copy.id);
+            else editButtons.set(copy.id, button);
+          }}
+        >
+          {(close) => (
+            <>
+              <MenuItem
+                disabled={!mayAct || editorBusy}
+                onClick={() => {
+                  close();
+                  show({ act: "edit", copy });
+                }}
+              >
+                {EDIT.open}
+              </MenuItem>
+              {/*
+                **The one destructive act on this row, last and under a
+                divider.** `DESIGN.md`: the control that opens a destructive
+                confirmation is a text action in the failure colour, and the
+                filled failure-coloured button lives inside the confirmation it
+                opens.
+              */}
+              <MenuDivider />
+              <DestructiveItem
+                disabled={!mayAct || editorBusy}
+                onClick={() => {
+                  close();
+                  show({ act: "switch-off", copy });
+                }}
+              >
+                {SWITCH_OFF.open}
+              </DestructiveItem>
+              {/*
+                Why neither is theirs, drawn in the panel rather than hung off
+                a disabled control a keyboard cannot reach. Both sentences,
+                because they are two acts and a role may be refused each for a
+                reason of its own.
+              */}
+              {mayAct || whyNotEdit === undefined ? null : (
+                <MenuReason>{whyNotEdit}</MenuReason>
+              )}
+              {mayAct || whyNotSwitchOff === undefined ? null : (
+                <MenuReason>{whyNotSwitchOff}</MenuReason>
+              )}
+            </>
+          )}
+        </RowMenu>
       ),
     },
   ];
@@ -303,19 +342,31 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
 
   useUnsavedChanges(editorState.atRisk, editorState.busy);
 
-  // The panel appears beside the table on wide screens and before it on a
-  // narrow one. Put the reading position on its heading in either layout, so
-  // opening Edit never leaves a keyboard or screen reader back in the row.
+  /*
+   * The panel appears beside the table on wide screens and before it on a
+   * narrow one. Put the reading position on its heading in either layout, so
+   * opening Edit never leaves a keyboard or screen reader back in the row.
+   *
+   * **Twice, because the menu the press came from hands focus back one task
+   * later.** Edit is an item in the row's ⋮ now, and an anchored panel returns
+   * the keyboard to its own trigger when it closes — correctly, for a menu
+   * somebody finished with. Here the press opened something else, and the
+   * reading position belongs on that. The second call is after the panel has
+   * finished leaving, so it is the last word rather than a race with it.
+   */
   useEffect(() => {
     if (open?.act === "edit") {
-      editorHeading.current?.focus();
-      return;
+      const heading = editorHeading.current;
+      heading?.focus();
+      const settled = setTimeout(() => heading?.focus(), 0);
+      return () => clearTimeout(settled);
     }
 
     const copyId = returnFocusTo.current;
-    if (copyId === null) return;
+    if (copyId === null) return undefined;
     returnFocusTo.current = null;
     editButtons.current.get(copyId)?.focus();
+    return undefined;
   }, [open]);
 
   const mayAct = role !== null && canAuthor(role);
@@ -474,16 +525,22 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
+      {/* The trail and the title, and the strip under them. See the library. */}
       <PageHeader
-        eyebrow="Project"
         title={RUNNING.title}
-        lead={RUNNING.lead}
+        /*
+          The trail ends with this screen's own name, and `PageHeader` takes
+          that step off. What is left is the section; the title beside it says
+          what the screen holds. Before that rule the bar read "Graders /
+          Running   Running graders" — the word "Running" twice, once as a tab
+          label and once inside the title.
+        */
         breadcrumbs={[
           {
             label: "Graders",
             href: projectPath(projectId, GRADERS_SECTION),
           },
-          { label: GRADER_VIEW_LABELS.running },
+          { label: RUNNING.title },
         ]}
       />
       <PageBody>
@@ -520,16 +577,19 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
             somebody has after saving a tighter bound or switching a grader off is
             always about the runs they have already read.
           */}
-          {said === null ? null : <p role="status">{said}</p>}
+          {said === null ? null : <Notice tone="success">{said}</Notice>}
 
           {/*
             One column while nothing is open, two while an editor is.
 
-            The 230px shell leaves about 1170px of work area at a 1400px
-            viewport, and below that the five-column table and the 440px editor
-            are both cramped — so the editor goes above the list rather than
-            beside it. The width that decides is the whole product frame rather
-            than a phone.
+            **Measured rather than estimated, after a 1440 screenshot.** Five
+            columns, two of which are fixed at 170 and 130, plus a row that
+            carries two labelled controls, need about 900px before anything is
+            clipped; the editor is 440 and the gap is 24. With the 224px
+            sidebar and the page's own gutters that is roughly 1640px of
+            window. Below it the editor goes above the list, where both get the
+            full width. The earlier number left the two controls half off the
+            panel at 1440, which is the width this product is designed at.
           */}
           <div
             className={
@@ -537,7 +597,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
               "data-[editing=true]:grid data-[editing=true]:items-start " +
               "data-[editing=true]:gap-6 " +
               "data-[editing=true]:grid-cols-[minmax(0,1fr)_minmax(360px,440px)] " +
-              "max-[1400px]:data-[editing=true]:grid-cols-[minmax(0,1fr)]"
+              "max-[1640px]:data-[editing=true]:grid-cols-[minmax(0,1fr)]"
             }
             data-editing={open?.act === "edit" ? "true" : "false"}
           >
@@ -554,10 +614,10 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
                 className={
                   "sticky top-6 col-start-2 row-start-1 min-w-0 " +
                   "border-l border-border pl-6 " +
-                  "max-[1400px]:static max-[1400px]:col-start-1 " +
-                  "max-[1400px]:row-auto max-[1400px]:border-l-0 " +
-                  "max-[1400px]:border-b max-[1400px]:pt-0 max-[1400px]:pr-0 " +
-                  "max-[1400px]:pb-5 max-[1400px]:pl-0"
+                  "max-[1640px]:static max-[1640px]:col-start-1 " +
+                  "max-[1640px]:row-auto max-[1640px]:border-l-0 " +
+                  "max-[1640px]:border-b max-[1640px]:pt-0 max-[1640px]:pr-0 " +
+                  "max-[1640px]:pb-5 max-[1640px]:pl-0"
                 }
                 aria-labelledby={`${editorPanelId(open.copy.id)}-title`}
               >
@@ -589,7 +649,7 @@ function RunningGraders({ projectId }: { readonly projectId: string }) {
               className={
                 "min-w-0 in-data-[editing=true]:col-start-1 " +
                 "in-data-[editing=true]:row-start-1 " +
-                "max-[1400px]:in-data-[editing=true]:row-auto"
+                "max-[1640px]:in-data-[editing=true]:row-auto"
               }
             >
               {body()}

@@ -84,7 +84,6 @@ export default function SignInPage() {
 
   return (
     <AuthShell
-      animated
       eyebrow="Welcome back"
       title="Sign in"
       lead="Sign in to continue to your organization."
@@ -150,7 +149,7 @@ export default function SignInPage() {
           </div>
         </Field>
 
-        <Button type="submit" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </AuthForm>

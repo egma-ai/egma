@@ -7,7 +7,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The menu, on Pure Paper with the short orange-brown shadow.
+ * The menu, on Pure Paper with the shared orange-brown shadow.
  *
  * Two things here are `DESIGN.md` rather than shadcn. The highlighted item — the
  * one under the pointer or the arrow keys — uses the quiet neutral mix, because
@@ -17,8 +17,9 @@ import { cn } from "@/lib/utils";
  * alone. shadcn spends one colour on both and would have said "hovered" and
  * "chosen" the same way.
  *
- * Items are 44px so a coarse pointer can hit them, and take the 6px button
- * radius inside the 12px menu.
+ * Items are 36px, which is what the boards draw (`9AH-0`), and 44px wherever
+ * the pointer is coarse — the same trade every dense control in this product
+ * makes. The panel holds them on 4px of padding.
  *
  * The transitions name their properties. `transition-colors` would include
  * `outline-color`, and an item reached with the arrow keys would then fade its
@@ -88,7 +89,8 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex min-h-(--control-lg) cursor-pointer items-center gap-2 rounded-button px-3",
+        "relative flex min-h-(--control-md) cursor-pointer items-center gap-2 rounded-button px-3",
+        "pointer-coarse:min-h-(--tap-target)",
         "text-sm outline-none select-none",
         "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
@@ -118,7 +120,8 @@ function DropdownMenuCheckboxItem({
       data-slot="dropdown-menu-checkbox-item"
       checked={checked}
       className={cn(
-        "relative flex min-h-(--control-lg) cursor-pointer items-center gap-2 rounded-button py-2 pr-3 pl-8",
+        "relative flex min-h-(--control-md) cursor-pointer items-center gap-2 rounded-button py-2 pr-3 pl-8",
+        "pointer-coarse:min-h-(--tap-target)",
         "text-sm outline-none select-none",
         "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
@@ -201,7 +204,8 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex min-h-(--control-lg) cursor-pointer items-center gap-2 rounded-button px-3",
+        "flex min-h-(--control-md) cursor-pointer items-center gap-2 rounded-button px-3",
+        "pointer-coarse:min-h-(--tap-target)",
         "text-sm outline-none select-none",
         "transition-[color,background-color] duration-(--duration-hover) ease-out",
         "data-[highlighted]:bg-accent data-[state=open]:bg-accent",

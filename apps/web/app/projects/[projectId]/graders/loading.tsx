@@ -17,7 +17,7 @@ import { ProductStatePage } from "../../../../ui/shell.tsx";
 export default function GradersLoading() {
   return (
     <div data-slot="route-loading">
-      <ProductStatePage eyebrow="Project" title={LIBRARY.title}>
+      <ProductStatePage title={LIBRARY.title}>
         <Loading what={LIBRARY.loading} />
       </ProductStatePage>
     </div>
