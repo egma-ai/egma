@@ -194,7 +194,7 @@ export default function ResetPasswordPage() {
           />
         </Field>
 
-        <Button type="submit" size="lg" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Setting…" : "Set the password"}
         </Button>
       </AuthForm>

@@ -298,7 +298,7 @@ export default function InvitePage() {
           />
         </Field>
 
-        <Button type="submit" size="lg" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Joining…" : `Join ${invitation.organization.name}`}
         </Button>
       </AuthForm>

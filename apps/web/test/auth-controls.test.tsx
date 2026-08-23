@@ -10,10 +10,6 @@ import ResetPasswordPage from "../app/reset-password/page.tsx";
 import SignInPage from "../app/sign-in/page.tsx";
 import SignUpPage from "../app/signup/page.tsx";
 
-vi.mock("next/image", () => ({
-  default: ({ alt }: { readonly alt: string }) => <img alt={alt} />,
-}));
-
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -63,11 +59,28 @@ describe("the shared controls on access pages", () => {
     expect(screen.getByRole("link", { name: "Sign up" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeTruthy();
     expect(screen.queryByText("Trust starts with what happened.")).toBeNull();
-    // The statement outlived the split screen it used to fill: one quiet line
-    // under the wordmark, above the panel. The canvas behind it did not.
-    expect(screen.getByText("Trust the voice agents you ship in production.")).toBeTruthy();
     expect(screen.queryByText("Voice agent reliability")).toBeNull();
     expect(document.querySelector("canvas")).toBeNull();
+
+    /*
+     * The statement outlived the split screen it used to fill, and where it
+     * went is the whole of what changed: the wordmark, then the sentence, then
+     * the panel — three children of one column, in that order. Asserting only
+     * that the words are somewhere on the page would pass with them back
+     * beside a canvas, which is the arrangement this ticket removed.
+     */
+    const column = document.querySelector('[data-slot="auth-column"]');
+    expect(column).toBeTruthy();
+    const above = [...(column?.children ?? [])];
+    expect(above[0]?.tagName).toBe("IMG");
+    expect(above[0]?.getAttribute("alt")).toBe("Egma");
+    expect(above[1]?.textContent).toBe(
+      "Trust the voice agents you ship in production.",
+    );
+    expect(above[2]?.getAttribute("data-slot")).toBe("auth-panel");
+    expect(above[2]?.contains(screen.getByRole("heading", { name: "Sign in" }))).toBe(
+      true,
+    );
   });
 
   it("keeps first setup as one labelled form with a described organization default", async () => {

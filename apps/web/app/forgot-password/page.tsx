@@ -100,7 +100,7 @@ export default function ForgotPasswordPage() {
           />
         </Field>
 
-        <Button type="submit" size="lg" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Sending…" : "Send reset link"}
         </Button>
       </AuthForm>

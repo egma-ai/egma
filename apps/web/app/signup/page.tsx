@@ -203,7 +203,7 @@ export default function SignUpPage() {
           />
         </Field>
 
-        <Button type="submit" size="lg" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Setting up…" : "Create my Egma instance"}
         </Button>
       </AuthForm>

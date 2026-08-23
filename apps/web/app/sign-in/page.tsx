@@ -149,7 +149,7 @@ export default function SignInPage() {
           </div>
         </Field>
 
-        <Button type="submit" size="lg" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </AuthForm>

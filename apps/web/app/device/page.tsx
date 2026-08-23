@@ -69,7 +69,7 @@ export default function DeviceCodePage() {
           />
         </Field>
 
-        <Button type="submit" size="lg">
+        <Button className="w-full" type="submit" size="lg">
           Continue
         </Button>
       </AuthForm>

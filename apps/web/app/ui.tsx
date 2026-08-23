@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -46,8 +45,11 @@ const STATEMENT = "Trust the voice agents you ship in production.";
 /**
  * The full Egma logo, which belongs here and in the signed-in sidebar.
  *
- * 32px tall, on the wordmark's own 150.6 × 41 proportion, so 118 wide. It is
- * left-aligned to the panel's edge and is deliberately **not a link**: signed
+ * 32px tall, and only that: the width comes off the SVG's own viewBox, the way
+ * the signed-in sidebar's copy of this mark takes it. A number in the class
+ * list would be a second declaration of the logo's proportion, and a logo has
+ * exactly one. It is left-aligned to the panel's edge and is deliberately
+ * **not a link**: signed
  * out, `/` sends everybody straight back to `/sign-in`, so a link here would be
  * a control that reloads the page somebody is already on.
  *
@@ -58,13 +60,12 @@ const STATEMENT = "Trust the voice agents you ship in production.";
  */
 export function Brand() {
   return (
-    <Image
-      className="block h-8 w-[118px] [[data-theme=dark]_&]:invert"
+    /* eslint-disable-next-line @next/next/no-img-element */
+    <img
+      className="block h-8 w-auto [[data-theme=dark]_&]:invert"
       src="/brand/egma-wordmark.svg"
       alt="Egma"
-      width={118}
       height={32}
-      priority
     />
   );
 }
@@ -235,7 +236,7 @@ export function AuthShell({
       <div
         data-slot="auth-column"
         className={cn(
-          "flex w-full max-w-[440px] flex-col items-stretch",
+          "flex w-full max-w-(--access-panel-width) flex-col items-stretch",
           /*
            * The one entrance. `translate` rather than `transform`, so what the
            * movement writes is a property nothing else on this column writes —
