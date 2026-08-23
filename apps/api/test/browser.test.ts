@@ -3172,7 +3172,13 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "New persona",
         address: at("personas", "new"),
-        says: "Who speaks with the agent, and how they behave",
+        /*
+         * The New sheet's own sub-line, which the settled panel draws over the
+         * list. The page's purpose statement moved there with the form when
+         * the record moved into a side sheet, so this is the sentence the
+         * shape now carries.
+         */
+        says: "Starts at v1 and is nobody's default",
       },
       {
         what: "one persona",

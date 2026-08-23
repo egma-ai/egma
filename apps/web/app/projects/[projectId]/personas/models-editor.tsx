@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
@@ -7,7 +9,7 @@ import {
   type PersonaForm,
   type PersonaModelCatalogEntry,
 } from "../../../../lib/personas.ts";
-import { Field, FormRow, Help } from "../../../../ui/form.tsx";
+import { Field, FormRow } from "../../../../ui/form.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
 
 /**
@@ -17,16 +19,26 @@ import { NumberField } from "../../../../ui/number-field.tsx";
  * adapter catalog. The form never lets an author combine a provider from one
  * adapter with a model from another. Technical Voice appears only in the TTS
  * group. Credentials do not appear here at all.
+ *
+ * **What a change here does to the version number is said at the end rather
+ * than at the start**, which is where the boards put it (`AZC-0`, `B0J-0`).
+ * The sentence is about the whole group above it, and a person reads it in the
+ * moment they have finished choosing rather than before they have begun. The
+ * caller writes it, because a create and a save say different things: one
+ * makes v1, the other makes the next one.
  */
 export function ModelFields({
   draft,
   form,
   disabled = false,
+  note,
   onChange,
 }: {
   readonly draft: ModelsDraft;
   readonly form: PersonaForm;
   readonly disabled?: boolean;
+  /** What a save of these choices does to the version, drawn under them. */
+  readonly note?: ReactNode;
   readonly onChange: (draft: ModelsDraft) => void;
 }) {
   const entries = (job: PersonaModelCatalogEntry["job"]) =>
@@ -63,11 +75,6 @@ export function ModelFields({
 
   return (
     <>
-      <Help>
-        These choices are part of this persona version. Provider keys belong to
-        the Egma deployment and never become persona data.
-      </Help>
-
       <FormRow>
         <Field
           label="Language model"
@@ -150,7 +157,7 @@ export function ModelFields({
         <Field
           label="Voice"
           htmlFor="persona-tts-voice"
-          hint="The TTS provider's voice id."
+          hint="The voice id at the text-to-speech provider."
         >
           <Input
             id="persona-tts-voice"
@@ -180,6 +187,8 @@ export function ModelFields({
           onChange={(speed) => onChange({ ...draft, speed })}
         />
       </FormRow>
+
+      {note}
     </>
   );
 }

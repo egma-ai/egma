@@ -1,6 +1,7 @@
 import type {
   GetPersonaFormResponse,
   GetPersonaResponse,
+  GetPersonaUsageResponse,
   ListPersonasResponse,
   ListPersonaVersionsResponse,
 } from "@egma/platform-api/client";
@@ -34,6 +35,18 @@ export type PersonaPage = ListPersonasResponse;
 /** One frozen version, as history and the older-version read show it. */
 export type PersonaVersionPage = ListPersonaVersionsResponse;
 export type PersonaVersion = PersonaVersionPage["versions"][number];
+
+/**
+ * The active tests that name this persona, as `/v1/personas/{id}/usage`
+ * answers them.
+ *
+ * **It is read once, when a sheet or the archive confirmation opens, and never
+ * per row.** A list of forty personas would be forty more requests for a
+ * column nobody reads down; the two places it genuinely decides something are
+ * the sheet's `USED BY` and the archive confirmation, which has to say which
+ * tests would be left naming somebody who is no longer in the list.
+ */
+export type PersonaUsage = GetPersonaUsageResponse;
 
 export type PersonaForm = GetPersonaFormResponse;
 export type PersonaModelCatalogEntry = PersonaForm["modelCatalog"][number];
@@ -173,4 +186,33 @@ export function sameModelsDraft(
   return (Object.keys(left) as (keyof ModelsDraft)[]).every(
     (key) => left[key] === right[key],
   );
+}
+
+/**
+ * What a person calls a provider, as against what a persona stores.
+ *
+ * A persona stores `openai`; the server's catalog is where `OpenAI` is
+ * written, and the boards read the sheet's models back with the catalog's own
+ * label. The provider is the fallback rather than an error: the catalog is a
+ * second read that may not have answered yet, and a persona can name a
+ * provider the deployment has since stopped offering. Neither is a reason to
+ * show nothing.
+ */
+export function modelSaid(
+  catalog: readonly PersonaModelCatalogEntry[] | undefined,
+  job: PersonaModelCatalogEntry["job"],
+  selection: { readonly provider: string; readonly model: string },
+): string {
+  const entry = catalog?.find(
+    (one) =>
+      one.job === job &&
+      one.provider === selection.provider &&
+      one.model === selection.model,
+  );
+  return `${entry?.label ?? selection.provider} · ${selection.model}`;
+}
+
+/** The persona's type, in the two words the product uses for it. */
+export function ownerSaid(owner: Persona["owner"]): string {
+  return owner === "egma" ? "Egma-provided" : "Custom";
 }

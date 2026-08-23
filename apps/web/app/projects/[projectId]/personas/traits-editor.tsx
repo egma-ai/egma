@@ -48,75 +48,8 @@ export function TraitFields({
           value={draft.personality}
           rows={3}
           disabled={disabled}
-          placeholder="Seventy, hard of hearing, and gets louder when she mishears."
+          placeholder="Who they are: age, temperament, how they speak, what they know."
           onChange={set("personality")}
-        />
-      </Field>
-
-      <FormRow>
-        <Field label="Manner" htmlFor="persona-manner" hint="Optional.">
-          <Textarea
-            id="persona-manner"
-            value={draft.manner}
-            rows={2}
-            disabled={disabled}
-            placeholder="Warm, and talks over the end of a sentence."
-            onChange={set("manner")}
-          />
-        </Field>
-        <Field label="Patience" htmlFor="persona-patience" hint="Optional.">
-          <Textarea
-            id="persona-patience"
-            value={draft.patience}
-            rows={2}
-            disabled={disabled}
-            placeholder="Waits about a minute before asking for somebody else."
-            onChange={set("patience")}
-          />
-        </Field>
-      </FormRow>
-
-      <FormRow>
-        <Field label="Accent" htmlFor="persona-accent" hint="Optional.">
-          <Input
-            id="persona-accent"
-            value={draft.accent}
-            disabled={disabled}
-            placeholder="Glaswegian"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={set("accent")}
-          />
-        </Field>
-        <Field
-          label="Background noise"
-          htmlFor="persona-background-noise"
-          hint="Optional."
-        >
-          <Input
-            id="persona-background-noise"
-            value={draft.backgroundNoise}
-            disabled={disabled}
-            placeholder="A busy kitchen"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={set("backgroundNoise")}
-          />
-        </Field>
-      </FormRow>
-
-      <Field
-        label="Under friction"
-        htmlFor="persona-under-friction"
-        hint="Optional. What they do when the agent gets it wrong or will not budge."
-      >
-        <Textarea
-          id="persona-under-friction"
-          value={draft.underFriction}
-          rows={2}
-          disabled={disabled}
-          placeholder="Repeats the question louder, then asks to escalate."
-          onChange={set("underFriction")}
         />
       </Field>
 
@@ -135,6 +68,74 @@ export function TraitFields({
           onChange={set("language")}
         />
       </Field>
+
+      <FormRow>
+        <Field label="Manner" htmlFor="persona-manner" hint="Optional.">
+          <Textarea
+            id="persona-manner"
+            value={draft.manner}
+            rows={2}
+            disabled={disabled}
+            placeholder="Warm, brisk, formal, distracted"
+            onChange={set("manner")}
+          />
+        </Field>
+        <Field label="Patience" htmlFor="persona-patience" hint="Optional.">
+          <Textarea
+            id="persona-patience"
+            value={draft.patience}
+            rows={2}
+            disabled={disabled}
+            placeholder="How long they stay with something before they push"
+            onChange={set("patience")}
+          />
+        </Field>
+      </FormRow>
+
+      <FormRow>
+        <Field label="Accent" htmlFor="persona-accent" hint="Optional.">
+          <Input
+            id="persona-accent"
+            value={draft.accent}
+            disabled={disabled}
+            placeholder="Where they sound from"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={set("accent")}
+          />
+        </Field>
+        <Field
+          label="Background noise"
+          htmlFor="persona-background-noise"
+          hint="Optional."
+        >
+          <Input
+            id="persona-background-noise"
+            value={draft.backgroundNoise}
+            disabled={disabled}
+            placeholder="What is around them"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={set("backgroundNoise")}
+          />
+        </Field>
+      </FormRow>
+
+      <Field
+        label="Under friction"
+        htmlFor="persona-under-friction"
+        hint="Optional. What they do when the agent gets it wrong or will not budge."
+      >
+        <Textarea
+          id="persona-under-friction"
+          value={draft.underFriction}
+          rows={2}
+          disabled={disabled}
+          placeholder="Repeats louder, asks for a person, ends the conversation"
+          onChange={set("underFriction")}
+        />
+      </Field>
+
     </>
   );
 }
