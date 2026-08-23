@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
+  archiveConnection,
   getAgent,
   stopMonitoring,
   updateAgent,
@@ -19,6 +20,7 @@ import {
   type ListedAgent,
   type ListedConnection,
 } from "../../../../../lib/agents.ts";
+import { asDay } from "../../../../../lib/instants.ts";
 import { roleOf } from "../../../../../lib/me.ts";
 import { startMonitoringPath } from "../../../../../lib/monitoring.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
@@ -43,7 +45,11 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../../ui/shell.tsx";
+import { ArchiveConfirm } from "../archive.tsx";
+import { ConnectAgentSheet } from "../connect-sheet.tsx";
 import { modalityLabel } from "../connection-facts.tsx";
+import { ConnectionSheet } from "../connection-sheet.tsx";
+import { RowMenu, RowMenuDestructive, RowMenuLink } from "../row-menu.tsx";
 
 /**
  * One agent: what egma owns about it, and every way egma can reach it.
@@ -87,28 +93,35 @@ export default function AgentDetailPage() {
  * kept in this application would be a second vocabulary able to disagree with
  * the registry that gates the connection forms.
  */
-function connectionColumns(
-  projectId: string,
-  agentId: string,
-): readonly Column<ListedConnection>[] {
+function connectionColumns({
+  projectId,
+  agentId,
+  whyNotChange,
+  onArchive,
+}: {
+  readonly projectId: string;
+  readonly agentId: string;
+  /** Why a destructive item is not this person's, or nothing when it is. */
+  readonly whyNotChange: string | undefined;
+  readonly onArchive: (connection: ListedConnection) => void;
+}): readonly Column<ListedConnection>[] {
+  const home = projectPath(projectId, "agents", agentId);
+  /*
+   * The panel opens over *this* page. The connection's own address still
+   * exists and still opens the same panel, over the list — but a person who
+   * pressed a name here came from this agent and should come back to it, so
+   * the link that opens the panel is a state of this page rather than a
+   * different one.
+   */
+  const opens = (one: ListedConnection) =>
+    `${home}?connection=${encodeURIComponent(one.id)}`;
+
   return [
     {
       key: "name",
       header: "Name",
       primary: true,
-      cell: (one) => (
-        <Link
-          href={projectPath(
-            projectId,
-            "agents",
-            agentId,
-            "connections",
-            one.id,
-          )}
-        >
-          {one.name}
-        </Link>
-      ),
+      cell: (one) => <Link href={opens(one)}>{one.name}</Link>,
     },
     {
       key: "environment",
@@ -129,6 +142,26 @@ function connectionColumns(
       width: "100px",
       cell: (one) => modalityLabel(one.modality),
     },
+    {
+      key: "created",
+      header: "Created",
+      hideOnMobile: true,
+      width: "140px",
+      cell: (one) => asDay(one.createdAt),
+    },
+    {
+      key: "menu",
+      header: "Actions",
+      action: true,
+      cell: (one) => (
+        <RowMenu label={`Actions for ${one.name}`}>
+          <RowMenuLink href={opens(one)}>Open connection</RowMenuLink>
+          <RowMenuDestructive onSelect={() => onArchive(one)} why={whyNotChange}>
+            Archive connection
+          </RowMenuDestructive>
+        </RowMenu>
+      ),
+    },
   ];
 }
 
@@ -139,10 +172,12 @@ function AgentDetailView({
   readonly projectId: string;
   readonly agentId: string;
 }) {
+  const router = useRouter();
+  const query = useSearchParams();
   const { me } = useShellSession();
   const role = me === null ? null : roleOf(me);
 
-  const { answer, reload } = useProjectRead<AgentDetail>(
+  const { answer, reload, refresh } = useProjectRead<AgentDetail>(
     (projectId) =>
       platformAnswer(
         getAgent({ agentId, projectId }, { client: platformClient }),
@@ -152,18 +187,32 @@ function AgentDetailView({
   );
 
   const [editing, setEditing] = useState(false);
+  /** The connection a confirmation is standing in front of. */
+  const [archiving, setArchiving] = useState<ListedConnection | null>(null);
 
   useEffect(() => {
     if (answer?.status === "signed-out") window.location.replace("/sign-in");
   }, [answer]);
 
   const agents = projectPath(projectId, "agents");
+  const home = projectPath(projectId, "agents", agentId);
+
+  /**
+   * Which panel this page has open, read from the address and nowhere else.
+   *
+   * `?connection=<id>` opens that connection over this page, and
+   * `?sheet=connect` opens the connect panel with this agent already chosen.
+   * Both are states of *this* page rather than journeys away from it, so Back
+   * closes the panel and a copied link opens it.
+   */
+  const openConnection = query.get("connection");
+  const connecting = query.get("sheet") === "connect";
+  const closeSheet = () => router.replace(home);
 
   if (answer === null || answer.status === "signed-out") {
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Agent"
           title="Agent"
           breadcrumbs={[
             { label: "Agents", href: agents },
@@ -181,7 +230,6 @@ function AgentDetailView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Agent"
           title="Agent"
           breadcrumbs={[
             { label: "Agents", href: agents },
@@ -199,7 +247,6 @@ function AgentDetailView({
     return (
       <ProductPage>
         <PageHeader
-          eyebrow="Agent"
           title="Agent"
           breadcrumbs={[
             { label: "Agents", href: agents },
@@ -223,7 +270,6 @@ function AgentDetailView({
   return (
     <ProductPage>
       <PageHeader
-        eyebrow="Agent"
         title={agent.name}
         breadcrumbs={[
           { label: "Agents", href: agents },
@@ -262,6 +308,24 @@ function AgentDetailView({
         }
       />
       <PageBody>
+        {/*
+         * What egma owns about this agent, in one panel above the way in.
+         *
+         * **The platform is deliberately not here.** Production calls below
+         * already states it, and that one is the monitoring *binding* — the
+         * platform egma asks for finished calls — while the list's Platform
+         * column is read from the connections. Two facts that share a word, on
+         * one page, would leave a person unable to tell which they were
+         * reading. Here the page states what only it holds: when the agent
+         * joined egma, and when its identity last moved.
+         */}
+        <Facts
+          layout="panel"
+          facts={[
+            { label: "Created", value: asDay(agent.createdAt) },
+            { label: "Last changed", value: asDay(agent.updatedAt) },
+          ]}
+        />
         <ProductionCalls
           projectId={projectId}
           agent={agent}
@@ -283,18 +347,14 @@ function AgentDetailView({
           lead="How Egma reaches this agent."
           action={
             role === null ? undefined : mayAuthor ? (
+              /*
+               * The connect panel, opened over this page with this agent
+               * already chosen. It is a link rather than a button because it
+               * is an address — the same panel `connections/new` opens — and a
+               * person may want it in a new tab.
+               */
               <Button asChild variant="secondary">
-                <Link
-                  href={projectPath(
-                    projectId,
-                    "agents",
-                    agentId,
-                    "connections",
-                    "new",
-                  )}
-                >
-                  Add connection
-                </Link>
+                <Link href={`${home}?sheet=connect`}>Add connection</Link>
               </Button>
             ) : (
               <Button type="button" variant="secondary" disabled why={whyNot}>
@@ -311,7 +371,12 @@ function AgentDetailView({
           ) : (
             <DataTable
               label="Connections for this agent"
-              columns={connectionColumns(projectId, agentId)}
+              columns={connectionColumns({
+                projectId,
+                agentId,
+                whyNotChange: mayAuthor ? undefined : whyNot,
+                onArchive: setArchiving,
+              })}
               rows={connections}
               keyOf={(one) => one.id}
               stretchPrimaryLink
@@ -332,6 +397,69 @@ function AgentDetailView({
         />
       ) : null}
 
+      {connecting ? (
+        <ConnectAgentSheet
+          projectId={projectId}
+          agents={[]}
+          agentId={agentId}
+          mayAuthor={mayAuthor}
+          role={role}
+          onClose={closeSheet}
+          onConnected={() => {
+            router.replace(home);
+            refresh();
+          }}
+        />
+      ) : null}
+
+      {openConnection === null ? null : (
+        <ConnectionSheet
+          projectId={projectId}
+          agentId={agentId}
+          connectionId={openConnection}
+          environments={[
+            ...new Set(
+              connections.flatMap((one) =>
+                one.environment === null ? [] : [one.environment],
+              ),
+            ),
+          ]}
+          mayAuthor={mayAuthor}
+          role={role}
+          onClose={closeSheet}
+          onChanged={refresh}
+        />
+      )}
+
+      {archiving === null ? null : (
+        <ArchiveConfirm
+          title="Archive connection"
+          onArchive={async () => {
+            const done = await platformAnswer(
+              archiveConnection(
+                {
+                  agentId,
+                  connectionId: archiving.id,
+                  projectId,
+                },
+                { client: platformClient },
+              ),
+            );
+            if (done.status === "signed-out") {
+              window.location.replace("/sign-in");
+              return null;
+            }
+            return done.status === "ready" ? null : done.refusal;
+          }}
+          onClose={() => setArchiving(null)}
+          onArchived={() => {
+            setArchiving(null);
+            reload();
+          }}
+        >
+          {`Egma stops using “${archiving.name}” to reach “${agent.name}”, and every run waiting on it stops. Transcripts already stored stay stored.`}
+        </ArchiveConfirm>
+      )}
     </ProductPage>
   );
 }
