@@ -58,11 +58,11 @@ export type DiscoveredAgent = {
 export type Discovered =
   | { readonly kind: "agents"; readonly agents: readonly DiscoveredAgent[] }
   /**
-   * Egma asked Retell and Retell said no, or Egma could not ask.
+   * Egma asked Retell with that key and Retell said no.
    *
-   * One kind for both, because the sentence is the platform's own and it says
-   * which — and because a terminal does the same thing with either: show it and
-   * offer the box again.
+   * Its own kind, because it is the one refusal worth offering the box again
+   * for: the developer can fix it by pasting a different key. Retell being
+   * unreachable is not that, and comes back as an ordinary refusal.
    */
   | { readonly kind: "refused-key"; readonly reason: string }
   | CommonFailure;
@@ -180,8 +180,10 @@ export async function discoverRetellAgents(
     requestOptions(options),
   );
 
-  const status = answer.response?.status;
-  if (status === 422 || status === 503) {
+  // 422 is the key: Egma reached Retell and Retell would not take it. Every
+  // other refusal — including Retell not answering at all — is the platform's
+  // to explain and nobody's to fix by typing again.
+  if (answer.response?.status === 422) {
     return {
       kind: "refused-key",
       reason: platformText(

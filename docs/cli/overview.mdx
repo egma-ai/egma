@@ -133,6 +133,11 @@ Egma answers every permission request the agent raises and starts it in the most
   requests it through Egma. Secrets must not enter a model's context. Egma
   refuses the file, tells the agent to work from your code instead, and asks
   you for anything it still needs.
+
+  This holds while Egma sets monitoring up on LiveKit, where a `.env` really is
+  written: the two environment lines are written by Egma's own code, with your
+  agreement, and only when Git already ignores the file. Your coding agent still
+  never opens it.
 </Warning>
 
 ## Installing Egma's skills into your coding agent

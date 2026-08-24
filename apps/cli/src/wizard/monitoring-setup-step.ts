@@ -190,7 +190,8 @@ async function watchOnRetell(
   const { ui, signal } = options;
 
   // What went wrong last time, so a screen that asks again can say it above the
-  // box rather than leaving the developer to guess what changed.
+  // box rather than leaving the developer to guess what changed. Written by the
+  // flow's own `say` below and cleared by each ask.
   let problem: string | null = null;
   /*
    * The key the developer pastes, kept for the length of this sitting.
@@ -205,8 +206,12 @@ async function watchOnRetell(
   const outcome = await watchRetellAgent({
     platform: access,
     signal,
-    say: (line, kind) =>
-      ui.pushStatus(kind === "action" ? `${ACTION_MARK} ${line}` : line),
+    say: (line, kind) => {
+      // What went wrong is kept, so the screen that asks for the key again can
+      // say it above the box rather than leaving the developer to guess.
+      if (kind !== "action") problem = line;
+      ui.pushStatus(kind === "action" ? `${ACTION_MARK} ${line}` : line);
+    },
     ...(options.waitMs === undefined ? {} : { waitMs: options.waitMs }),
     ...(options.pollMs === undefined ? {} : { pollMs: options.pollMs }),
     // The one name a sitting threads through both halves. Discovery's own word

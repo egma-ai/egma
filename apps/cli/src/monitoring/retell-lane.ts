@@ -148,6 +148,71 @@ async function pause(options: WatchOptions, ms: number): Promise<void> {
 }
 
 /**
+ * The key, checked, and the account's agents it opens — or the ending it forces.
+ *
+ * The two failures worth a second try are told apart by name and re-asked once
+ * each, exactly as connection setup re-asks: a typo should cost seconds, and a
+ * second wrong answer means the answer is somewhere else. A promptless run has
+ * nobody to ask twice, so its second ask answers with nothing and the flow ends
+ * carrying what really went wrong rather than "no key was given".
+ */
+async function keyAndAgents(
+  options: WatchOptions,
+): Promise<
+  | {
+      readonly kind: "ok";
+      readonly key: RetellKey;
+      readonly agents: readonly DiscoveredAgent[];
+    }
+  | WatchOutcome
+> {
+  let refusedFor: { readonly kind: "invalid-key"; readonly reason: string } | null =
+    null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (options.signal.aborted) return { kind: "interrupted" };
+
+    const key = await options.askForKey();
+    if (options.signal.aborted) return { kind: "interrupted" };
+    if (key === null) return refusedFor ?? { kind: "no-key" };
+
+    const found = await discoverRetellAgents(key, options.platform);
+    if (options.signal.aborted) return { kind: "interrupted" };
+
+    switch (found.kind) {
+      case "agents":
+        if (found.agents.length > 0) {
+          return { kind: "ok", key, agents: found.agents };
+        }
+        if (attempt === 0) {
+          options.say(NO_VOICE_AGENTS_LINE);
+          break;
+        }
+        return { kind: "no-agents" };
+      case "refused-key":
+        if (attempt === 0) {
+          refusedFor = { kind: "invalid-key", reason: found.reason };
+          options.say(found.reason);
+          break;
+        }
+        return { kind: "invalid-key", reason: found.reason };
+      case "not-authenticated":
+        return {
+          kind: "failed",
+          reason: "Egma would not take this machine's key. Run egma login, then try again.",
+        };
+      // Not a key problem, so asking again would be asking the developer to
+      // fix something that is not theirs.
+      case "refused":
+      case "unreachable":
+        return { kind: "failed", reason: found.reason };
+    }
+  }
+
+  return refusedFor ?? { kind: "no-agents" };
+}
+
+/**
  * Runs the whole flow and answers what happened.
  *
  * Every ending is a value, because every ending means something different to
@@ -157,34 +222,9 @@ async function pause(options: WatchOptions, ms: number): Promise<void> {
 export async function watchRetellAgent(
   options: WatchOptions,
 ): Promise<WatchOutcome> {
-  if (options.signal.aborted) return { kind: "interrupted" };
-
-  const key = await options.askForKey();
-  if (options.signal.aborted) return { kind: "interrupted" };
-  if (key === null) return { kind: "no-key" };
-
-  const found = await discoverRetellAgents(key, options.platform);
-  if (options.signal.aborted) return { kind: "interrupted" };
-  switch (found.kind) {
-    case "agents":
-      break;
-    case "refused-key":
-      return { kind: "invalid-key", reason: found.reason };
-    case "not-authenticated":
-      return {
-        kind: "failed",
-        reason: "Egma would not take this machine's key. Run egma login, then try again.",
-      };
-    case "refused":
-    case "unreachable":
-      return { kind: "failed", reason: found.reason };
-  }
-
-  const agents = found.agents;
-  if (agents.length === 0) {
-    options.say(NO_VOICE_AGENTS_LINE);
-    return { kind: "no-agents" };
-  }
+  const checked = await keyAndAgents(options);
+  if (checked.kind !== "ok") return checked;
+  const { key, agents } = checked;
 
   // One agent is not a choice, so it is not a question. The developer reads
   // which one Egma took, inside the flow, with nothing to answer.
