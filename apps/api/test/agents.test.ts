@@ -633,6 +633,56 @@ describe("registering an agent", () => {
     expect(agentOf(claimed).name).toBe("Not wired yet");
   });
 
+  /**
+   * A LiveKit worker that only ever pushes its production evidence is a real
+   * agent in the roster, and there is nothing for Egma's simulator to dial —
+   * so the binding has to be settable without a connection under it. It is the
+   * agent's own fact (ADR-0015), and the row it writes is what the terminal's
+   * monitoring lane creates for a repository it never connects.
+   */
+  it("binds an agent to a platform with no connection under it", async () => {
+    api = await createApi("agents_bound_without_connection");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const bound = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk worker",
+      agentPlatform: "livekit_agents",
+    });
+
+    expect(bound.status).toBe(201);
+    expect(bound.body).not.toHaveProperty("connection");
+    expect(agentOf(bound)).toMatchObject({
+      name: "Front desk worker",
+      agentPlatform: "livekit_agents",
+      // The binding and nothing else: push is observed, never declared, so
+      // there is no platform id to hold and no switch to turn on.
+      platformAgentId: null,
+      pullProductionCalls: false,
+      monitoringKeyPresent: false,
+    });
+
+    const read = await get(
+      `/v1/agents/${String(agentOf(bound).id)}`,
+      withKey(ada.secret),
+    );
+    expect(read.body.agent).toMatchObject({ agentPlatform: "livekit_agents" });
+    expect(read.body.connections).toEqual([]);
+  });
+
+  it("names the platforms it knows when a registration says another", async () => {
+    api = await createApi("agents_unknown_platform");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      name: "Front desk worker",
+      agentPlatform: "pipecat",
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toContain("retell, livekit_agents");
+    expect(await agentRowCount()).toBe(0);
+  });
+
   it("refuses a registration with no name, in the factory's own words", async () => {
     api = await createApi("agents_needs_a_name");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

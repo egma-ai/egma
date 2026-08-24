@@ -343,7 +343,7 @@ const CONNECTION_EDIT_KEYS = [
 ] as const;
 const CONNECTION_RESTORE_KEYS = ["name", "credential"] as const;
 
-const AGENT_KEYS = ["name", "projectId", "connection"] as const;
+const AGENT_KEYS = ["name", "projectId", "agentPlatform", "connection"] as const;
 const CONNECTION_KEYS = [
   "name",
   "agentPlatform",
@@ -963,6 +963,21 @@ export async function agentRoutes(
 
     const project = given(text(query.projectId)) ?? given(text(body.projectId));
 
+    /*
+     * The agent's own platform binding, which a registration may set and
+     * mostly does not. It is the agent's fact rather than a connection's
+     * (ADR-0015), and it is settable without one: a LiveKit worker that only
+     * pushes its production evidence belongs in the roster and has nothing
+     * for Egma's simulator to dial. `null` is written the same as absent —
+     * an unbound row — so a client that always sends the field needs no
+     * special case for the agent it cannot place.
+     */
+    const boundTo =
+      body.agentPlatform === null
+        ? null
+        : textWhenGiven(body.agentPlatform, "an agent platform");
+    if (isRefusal(boundTo)) return refused(reply, boundTo);
+
     const inline =
       body.connection === undefined
         ? undefined
@@ -997,6 +1012,11 @@ export async function agentRoutes(
       // Empty rather than absent, so the factory's own "an agent needs a name"
       // is what a request with no name hears.
       name: name ?? "",
+      // Handed on as it arrived: the factory names a platform it does not know,
+      // in the same sentence a direct caller would hear.
+      ...(boundTo === undefined
+        ? {}
+        : { agentPlatform: boundTo as AgentPlatform | null }),
       ...(confirmedInline === undefined ? {} : { connection: confirmedInline }),
     });
 

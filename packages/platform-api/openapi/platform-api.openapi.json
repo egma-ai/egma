@@ -504,6 +504,20 @@
                   "name": {
                     "type": "string"
                   },
+                  "agentPlatform": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "retell",
+                          "livekit_agents"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "connection": {
                     "type": "object",
                     "properties": {

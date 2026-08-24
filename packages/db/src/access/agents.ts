@@ -17,6 +17,7 @@ import {
 import { db, type Queryable } from "../client.ts";
 import {
   agent,
+  AGENT_PLATFORMS,
   connection,
   type AccessVariant,
   type AgentPlatform,
@@ -157,6 +158,16 @@ export type RestoreCredential =
 
 export type NewAgent = {
   readonly name: string;
+  /**
+   * Which platform runs this agent, written onto its own row.
+   *
+   * The binding belongs to the agent and not to a connection (ADR-0015), and
+   * the two are independent: a LiveKit worker that only pushes its production
+   * evidence is a real agent in the roster with nothing for Egma's simulator
+   * to dial. Absent leaves the row unbound, which is what every registration
+   * that says nothing about it means.
+   */
+  readonly agentPlatform?: AgentPlatform | null | undefined;
   /**
    * The optional first connection, written in the same transaction — the
    * happy onboarding path never produces an unreachable agent, and a bad
@@ -794,7 +805,11 @@ export async function insertAgentWithin(
   on: Queryable,
   auth: AuthContext,
   projectId: string,
-  identity: { readonly name: string },
+  identity: {
+    readonly name: string;
+    /** The platform binding, when the caller has one. Null leaves it unbound. */
+    readonly agentPlatform?: AgentPlatform | null | undefined;
+  },
 ): Promise<Agent> {
   const [inserted] = await on
     .insert(agent)
@@ -803,6 +818,9 @@ export async function insertAgentWithin(
       organizationId: auth.organizationId,
       projectId,
       name: identity.name,
+      ...(identity.agentPlatform == null
+        ? {}
+        : { agentPlatform: identity.agentPlatform }),
       createdBy: auth.userId,
     })
     .returning(COLUMNS)
@@ -827,6 +845,7 @@ async function settled(
 ): Promise<{
   readonly projectId: string;
   readonly name: string;
+  readonly agentPlatform: AgentPlatform | null;
   readonly inline: AdmittedConnection | undefined;
 }> {
   const { projectId } = auth;
@@ -837,6 +856,7 @@ async function settled(
   }
 
   const name = validName(input.name, "an agent");
+  const agentPlatform = boundPlatform(input.agentPlatform);
   const inline =
     input.connection === undefined
       ? undefined
@@ -846,7 +866,26 @@ async function settled(
     throw new ProjectOutsideOrganizationError(auth.organizationId, projectId);
   }
 
-  return { projectId, name, inline };
+  return { projectId, name, agentPlatform, inline };
+}
+
+/**
+ * The platform binding a write asked for, refused here rather than by the
+ * column's own CHECK — a driver error names a constraint, and whoever sent the
+ * word needs to be told which words there are.
+ */
+function boundPlatform(
+  asked: AgentPlatform | null | undefined,
+): AgentPlatform | null {
+  if (asked === undefined || asked === null) return null;
+  if (!(AGENT_PLATFORMS as readonly string[]).includes(asked)) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `an agent platform is one of ${AGENT_PLATFORMS.join(", ")}, and this ` +
+        `registration said ${JSON.stringify(asked)}`,
+    );
+  }
+  return asked;
 }
 
 export async function createAgent(
@@ -855,8 +894,8 @@ export async function createAgent(
 ): Promise<CreatedAgent> {
   authorize(auth, "configure_agents", here(auth));
 
-  const { projectId, name, inline } = await settled(auth, input);
-  const identity = { name };
+  const { projectId, name, agentPlatform, inline } = await settled(auth, input);
+  const identity = { name, agentPlatform };
 
   if (inline === undefined) {
     return insertAgentWithin(db(), auth, projectId, identity);
@@ -926,8 +965,8 @@ export async function registerAgent(
 ): Promise<Registration> {
   authorize(auth, "configure_agents", here(auth));
 
-  const { projectId, name, inline } = await settled(auth, input);
-  const identity = { name };
+  const { projectId, name, agentPlatform, inline } = await settled(auth, input);
+  const identity = { name, agentPlatform };
 
   if (inline === undefined) {
     return {

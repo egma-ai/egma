@@ -98,6 +98,7 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
+    agentPlatform?: 'retell' | 'livekit_agents' | null;
     connection?: {
         name?: string;
         agentPlatform: 'retell' | 'livekit_agents' | null;
@@ -125,6 +126,7 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'name' },
+                { in: 'body', key: 'agentPlatform' },
                 { in: 'body', key: 'connection' }
             ] }]);
     return (options?.client ?? client).post<RegisterAgentResponses, RegisterAgentErrors, ThrowOnError>({

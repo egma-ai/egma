@@ -242,6 +242,7 @@ export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses];
 export type RegisterAgentData = {
     body: {
         name: string;
+        agentPlatform?: 'retell' | 'livekit_agents' | null;
         connection?: {
             name?: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;

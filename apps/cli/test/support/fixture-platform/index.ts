@@ -8,16 +8,24 @@
 
 import { newId } from "../../../../../packages/ids/src/index.ts";
 import { agentRoutes, type AgentControls } from "./agents.ts";
+import { apiKeyRoutes, type ApiKeyControls } from "./api-keys.ts";
 import { controlRoutes } from "./controls.ts";
 import { deviceRoutes, type DeviceControls } from "./device.ts";
 import { mockToolRoutes, type MockToolControls } from "./mock-tools.ts";
+import { monitoringRoutes, type MonitoringControls } from "./monitoring.ts";
 import { runControlRoutes, runRoutes, type RunControls } from "./runs.ts";
 import { startFixturePlatform, type FixturePlatform } from "./server.ts";
 import { suiteRoutes, type SuiteControls } from "./suites.ts";
 import { testRoutes, type TestControls } from "./tests.ts";
 
 export type { AgentControls } from "./agents.ts";
+export type { ApiKeyControls, MintedKey } from "./api-keys.ts";
 export type { DeviceControls } from "./device.ts";
+export type {
+  MonitoringControls,
+  RetellAccountAgent,
+  StartRefusalReason,
+} from "./monitoring.ts";
 export type { MockToolControls, SeedMockTool, SeededMockTool } from "./mock-tools.ts";
 export type {
   AdvanceStep,
@@ -38,6 +46,10 @@ export type Platform = FixturePlatform & {
   readonly device: DeviceControls;
   /** What was registered, and what the platform was handed to seal. */
   readonly registered: AgentControls;
+  /** The Retell account Egma discovers, and the keys sealed onto agent rows. */
+  readonly monitoring: MonitoringControls;
+  /** Every key this instance minted through its own API. */
+  readonly keys: ApiKeyControls;
   /** What somebody authoring in the dashboard would do, done directly. */
   readonly tests: TestControls;
   readonly suites: SuiteControls;
@@ -60,6 +72,8 @@ export type StartPlatformOptions = {
 export async function startPlatform(options: StartPlatformOptions = {}): Promise<Platform> {
   let device!: DeviceControls;
   let registered!: AgentControls;
+  let monitoring!: MonitoringControls;
+  let keys!: ApiKeyControls;
   let tests!: TestControls;
   let suites!: SuiteControls;
   let mocking!: MockToolControls;
@@ -75,6 +89,7 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     // naming a project meets one answer rather than one per route group.
     const holdsKey = (key: string): boolean => device.keys.includes(key);
     const projectId = newId("prj");
+    const organizationId = newId("org");
 
     const suiteGroup = suiteRoutes({
       holdsKey,
@@ -88,6 +103,26 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
 
     const agentGroup = agentRoutes({ knowsKey: holdsKey, projectId });
     registered = agentGroup.controls;
+
+    // Monitoring writes to the same agent rows the agent group answers reads
+    // from, because the binding, the sealed key and the switch are the agent's
+    // own (ADR-0015). It is handed the roster rather than a copy.
+    const monitoringGroup = monitoringRoutes({
+      holdsKey,
+      projectId,
+      roster: agentGroup.roster,
+    });
+    monitoring = monitoringGroup.controls;
+
+    // A key minted here is a key this instance authorizes, so what a terminal
+    // writes into a `.env` is a credential this platform would really take.
+    const apiKeyGroup = apiKeyRoutes({
+      holdsKey,
+      accept: (key) => device.accept(key),
+      organizationId,
+      projectId,
+    });
+    keys = apiKeyGroup.controls;
 
     // The scope a mock tool may name is read out of the agent group rather
     // than copied, so an agent registered after this is wired is one a mock
@@ -126,6 +161,8 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     return [
       deviceGroup.group,
       agentGroup.group,
+      monitoringGroup.group,
+      apiKeyGroup.group,
       suiteGroup.group,
       testGroup.group,
       mockToolGroup.group,
@@ -139,6 +176,8 @@ export async function startPlatform(options: StartPlatformOptions = {}): Promise
     ...platform,
     device,
     registered,
+    monitoring,
+    keys,
     tests,
     suites,
     mocking,

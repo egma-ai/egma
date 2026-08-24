@@ -420,6 +420,19 @@ export const agentOperations = {
         type: "object",
         properties: {
           name: { type: "string" },
+          /**
+           * Which platform runs this agent, written onto the agent's own row.
+           *
+           * The binding is the agent's, not the connection's (ADR-0015), and
+           * an agent may hold one without a connection at all: a LiveKit
+           * worker that only ever pushes its production evidence is a real
+           * agent in the roster and there is nothing for Egma's simulator to
+           * dial. Left out, the row stays unbound exactly as before.
+           */
+          agentPlatform: nullable({
+            type: "string",
+            enum: ["retell", "livekit_agents"],
+          }),
           connection: connectionInput,
         },
         required: ["name"],
