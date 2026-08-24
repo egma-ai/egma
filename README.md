@@ -287,9 +287,14 @@ browser you signed up in — registers your voice agent together with the way
 Egma reaches it, creates a real test suite, writes its tests with that coding
 agent, puts them on your instance, and starts one complete-suite run. Every
 step is also a verb (`egma login`, `egma connect`, `egma suite create`,
-`egma push`, `egma run <suite-directory>`) that prints one
-fact per line and answers with a number, for a coding agent driving it with
+`egma push`, `egma run <suite-directory>`, `egma monitoring enable`) that prints
+one fact per line and answers with a number, for a coding agent driving it with
 nobody watching. `apps/cli/README.md` is the whole of it.
+
+The wizard asks one question first: whether Egma should test the agent, watch
+its production traffic, or both. Watching is the same walk from the other end —
+on Retell one pasted key starts it, on LiveKit the coding agent adds the SDK's
+monitoring entry and Egma mints the project key its worker exports with.
 
 **What happens, said plainly.** The run is created and followed live, the
 simulator claims it and conducts the conversation, and the grader judges what

@@ -625,6 +625,11 @@ secrets, and once read they are in a model's context for good. Egma refuses the
 file and tells the agent to work from your code and to ask you for anything it
 still needs.
 
+That holds while Egma sets monitoring up on LiveKit, where a `.env` really is
+written: the two lines the Egma SDK reads are written by Egma's own code, with
+your agreement, and only when Git already ignores the file. Your coding agent
+still never opens it.
+
 ## Options
 
 ```
@@ -643,6 +648,15 @@ egma push [options]      Send one atomic complete repository change set.
 egma run <suite-directory> [options]
                          Run the complete suite after an exact sync check.
                          Follows the run and prints every change.
+egma monitoring enable [options]
+                         Start watching this agent's production traffic. On
+                         Retell the account key comes in on standard input,
+                         never as an argument. On LiveKit Egma mints a project
+                         key and writes the two lines the Egma SDK reads into
+                         .env when Git ignores it, printing them either way.
+egma monitoring disable  Turn the switch off. Everything stored stays stored.
+egma monitoring status   Print the switch, the binding, the key hint, and when
+                         a production conversation last arrived.
 
   --coding-agent <id>  Use one installed coding agent without asking.
                        claude, codex, cursor, opencode
@@ -675,7 +689,16 @@ egma run <suite-directory> [options]
                        folder's tests are for.
   --connection <name>  With init: what to call the way Egma reaches it.
   --name <name>        With suite create: the suite display name. With run:
-                       an optional run name.
+                       an optional run name. With monitoring enable: what to
+                       call the agent Egma writes.
+  --platform <retell|livekit>
+                       With monitoring enable: which platform runs this agent.
+                       Left out, Egma reads it from the agent's own binding, or
+                       from the connections that reach it, and refuses when it
+                       cannot tell.
+  --platform-agent <id>
+                       With monitoring enable on Retell: which agent on the
+                       account to watch, when it holds more than one.
   --headless           Run with no terminal and no keystroke: plain lines,
                        and the task taken as already agreed to.
   -h, --help           Print this.
