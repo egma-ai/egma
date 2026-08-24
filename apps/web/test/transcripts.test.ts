@@ -801,64 +801,70 @@ describe("what the exchange measured", () => {
     );
 
     // Rendered from the answer's own field.
-    expect(page).toContain("detail.measures");
-    // With the unit the answer carried, never one this page assumed — a page
-    // that said "ms" would be wrong the moment a measure is not a duration.
-    expect(page).toContain("one.unit");
+    expect(page).toContain("detail.metrics");
+    // With the unit the answer carried, never one this application assumed — a
+    // formatter that said "ms" would be wrong the moment a measure is not a
+    // duration. The words live in the one shared formatter both pages import.
+    const shared = await readFile(path.join(WEB, "lib/transcripts.ts"), "utf8");
+    expect(shared).toContain("one.unit");
     // And separate from the verdicts, because a measure measures and a grader
     // judges: nothing here is green or red.
     expect(page).toContain("MEASURES.label");
   });
 
   /**
-   * **The reduction is the platform's, and this page must not be able to
-   * repeat it.**
+   * **The reduction is the platform's, and this application must not be able
+   * to repeat it.**
    *
-   * The one number a bound is held against arrives on the answer as `worst`.
-   * Taking the maximum here instead would look harmless and would be a second
-   * implementation of exactly that figure — correct while both happen to take
-   * the maximum, silently wrong the first day a grader reduces some other way,
-   * with nothing anywhere failing. The page held those four lines once; this is
-   * what stops them coming back.
+   * The number the pages lead with arrives on the answer as `mean`, rounded
+   * once by the shared measure module. Averaging the samples here instead
+   * would look harmless and would be a second implementation of exactly that
+   * figure — correct until the rounding or the samples change under one of
+   * them, with nothing anywhere failing.
    *
-   * The rule that no source file outside the measure module reduces a series
-   * lives in `packages/db/test/one-measure-path.test.ts` and covers this file
-   * too. What is asserted here is the positive half: the page reads the reduced
-   * figure it was sent.
+   * The words live in one shared formatter (`metricLine`), so the transcript
+   * page and the simulation evidence cannot come to word one conversation's
+   * numbers two ways. What is asserted here is the positive half: the
+   * formatter reads the reduced figure it was sent.
    */
   it("prints the reduction it was handed, and never computes one", async () => {
-    const page = await readFile(
-      path.join(WEB, DETAIL_PAGE),
+    const shared = await readFile(
+      path.join(WEB, "lib/transcripts.ts"),
       "utf8",
     );
 
-    expect(page).toContain("one.worst");
+    expect(shared).toContain("one.mean");
     // The series is used for one thing, which is saying how many there were.
-    expect(page).toContain("one.samples.length");
-    expect(page).not.toContain("samples.reduce");
-    expect(page).not.toContain("samples[0]");
+    expect(shared).toContain("one.samples.length");
+    expect(shared).not.toContain("samples.reduce");
+    expect(shared).not.toContain("samples[0]");
+
+    // And the page renders through the shared formatter rather than holding
+    // words of its own.
+    const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+    expect(page).toContain("metricLine(one)");
   });
 
   it("says which measurement it is showing, and how many there were", () => {
-    expect(copy.MEASURES.worst).toBe("worst");
+    expect(copy.MEASURES.average).toBe("average");
     expect(copy.MEASURES.counted(1)).toContain("1 measurement");
     expect(copy.MEASURES.counted(11)).toContain("11 measurements");
   });
 
   /**
    * A reading the store's span limit cut short holds the first part of a long
-   * exchange, so its worst measurement is the worst of that part — the slowest
-   * turn may be past the cut. Saying so is the difference between a figure a
-   * reader can use and one that quietly means something else.
+   * exchange, so its average is the average of that part — the turns past the
+   * cut moved it. Saying so is the difference between a figure a reader can
+   * use and one that quietly means something else.
    */
   it("qualifies the figure when the reading is only part of the exchange", async () => {
-    const page = await readFile(
-      path.join(WEB, DETAIL_PAGE),
+    const shared = await readFile(
+      path.join(WEB, "lib/transcripts.ts"),
       "utf8",
     );
 
-    expect(page).toContain("one.partial");
-    expect(copy.MEASURES.partialWorst).toContain("part Egma holds");
+    expect(shared).toContain("one.partial");
+    expect(copy.MEASURES.partialAverage).toContain("part Egma holds");
   });
 
   it("says nothing was measured rather than showing a blank", () => {
@@ -881,10 +887,11 @@ describe("what the exchange measured", () => {
 describe("saying which numbers Egma worked out", () => {
   it("adds a clause only when a worked-out figure is on the page", async () => {
     const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+    const shared = await readFile(path.join(WEB, "lib/transcripts.ts"), "utf8");
 
     // Shown from the answer's own flag, and only when one is set — a caveat
     // about something that did not happen is noise on every other exchange.
-    expect(page).toContain("one.derived === true");
+    expect(shared).toContain("one.derived === true");
     expect(page).toContain("MEASURES.derived");
     expect(copy.MEASURES.derived).toContain("your framework's own timings");
     // Marked on the figure too, so a page mixing the two can be read without
@@ -926,16 +933,18 @@ describe("saying which numbers Egma worked out", () => {
    */
   it("never words a platform-reported figure as one Egma worked out", async () => {
     const page = await readFile(path.join(WEB, DETAIL_PAGE), "utf8");
+    const shared = await readFile(path.join(WEB, "lib/transcripts.ts"), "utf8");
 
     // The gate itself: reported figures are outside it, by the field that is
-    // the only thing telling them from worked-out ones.
-    expect(page).toContain(
+    // the only thing telling them from worked-out ones. One predicate, in the
+    // shared formatter's home, imported by both pages that show a metric.
+    expect(shared).toContain(
       "return one.derived === true && one.reportedBy === undefined;",
     );
     // And it is the only way to either the caveat or the mark.
-    expect(page).toContain("{measured.some(workedOut) ? (");
-    expect(page).toContain("const from = workedOut(one)");
-    expect(page.split("MEASURES.derivedOne")).toHaveLength(2);
+    expect(page).toContain("{measured.some(workedOutMetric) ? (");
+    expect(shared).toContain("const from = workedOutMetric(one)");
+    expect(shared.split("MEASURES.derivedOne")).toHaveLength(2);
   });
 
   it("keeps the nothing-was-measured sentence exactly as it was", () => {

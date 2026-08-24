@@ -41,6 +41,7 @@ export {
 
 export {
   everySpanIn,
+  meanOf,
   measuresFromSpans,
   worstSampleOf,
   type MeasuredFromSpans,

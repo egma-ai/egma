@@ -163,7 +163,7 @@ const MEASURE: Measured = {
   derived: false,
   samples: [420, 1100],
   spanIds: ["span_turn_agent", "span_turn_agent"],
-  worst: { value: 1100, spanId: "span_turn_agent" },
+  mean: 760,
   partial: false,
 };
 
@@ -186,7 +186,7 @@ function detail(over: Partial<Detail> = {}): Detail {
     turns: [HUMAN_TURN, AGENT_TURN],
     spans: [OUTSIDE_STEP],
     spansTruncated: false,
-    measures: [MEASURE],
+    metrics: [MEASURE],
     simulationId: null,
     outcome: {
       verdict: "passed",
@@ -507,7 +507,7 @@ describe("what the exchange measured", () => {
     expect(within(measures).getByText("Agent response latency")).toBeTruthy();
     expect(
       within(measures).getByText(
-        `1100 ms · ${MEASURES.worst} of ${MEASURES.counted(2)}`,
+        `760 ms · ${MEASURES.average} of ${MEASURES.counted(2)}`,
       ),
     ).toBeTruthy();
   });
@@ -515,14 +515,14 @@ describe("what the exchange measured", () => {
   it("qualifies the figure when the reading is part of the exchange", async () => {
     stub({
       status: 200,
-      body: detail({ measures: [{ ...MEASURE, partial: true }] }),
+      body: detail({ metrics: [{ ...MEASURE, partial: true }] }),
     });
     await open();
     await settled();
 
     expect(
       within(screen.getByLabelText(MEASURES.label)).getByText(
-        `1100 ms · ${MEASURES.partialWorst}`,
+        `760 ms · ${MEASURES.partialAverage}`,
       ),
     ).toBeTruthy();
   });
@@ -536,7 +536,7 @@ describe("what the exchange measured", () => {
   it("marks a worked-out figure, and says so once for the panel", async () => {
     stub({
       status: 200,
-      body: detail({ measures: [{ ...MEASURE, derived: true }] }),
+      body: detail({ metrics: [{ ...MEASURE, derived: true }] }),
     });
     await open();
     await settled();
@@ -552,7 +552,7 @@ describe("what the exchange measured", () => {
     stub({
       status: 200,
       body: detail({
-        measures: [{ ...MEASURE, derived: true, reportedBy: "retell" }],
+        metrics: [{ ...MEASURE, derived: true, reportedBy: "retell" }],
       }),
     });
     await open();
@@ -565,7 +565,7 @@ describe("what the exchange measured", () => {
   });
 
   it("says nothing was measured rather than drawing a blank strip", async () => {
-    stub({ status: 200, body: detail({ measures: [] }) });
+    stub({ status: 200, body: detail({ metrics: [] }) });
     await open();
     await settled();
 
@@ -780,7 +780,7 @@ describe("the three views of what happened", () => {
   it("says no timed work was recorded when there is none", async () => {
     stub({
       status: 200,
-      body: detail({ turns: [], spans: [], verdicts: [], measures: [] }),
+      body: detail({ turns: [], spans: [], verdicts: [], metrics: [] }),
     });
     await open();
     await settled();
@@ -865,7 +865,7 @@ describe("the inspector", () => {
   it("says to select something when there is nothing to select", async () => {
     stub({
       status: 200,
-      body: detail({ turns: [], spans: [], verdicts: [], measures: [] }),
+      body: detail({ turns: [], spans: [], verdicts: [], metrics: [] }),
     });
     await open();
     await settled();

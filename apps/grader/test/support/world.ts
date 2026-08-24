@@ -676,14 +676,16 @@ export async function conductProductionTrace(
      * root span's payload, and placeholder turns beside it — every one opening
      * at the conversation's own start, lasting nothing, with no speech inside.
      *
-     * **The two go together because on a real platform they always do.** Retell
-     * publishes no per-turn timing, so `normaliseRetellCall` has no instant to
-     * open a turn at except the one the conversation opened at, and no width to
-     * give it — and the block exists precisely because there is nothing else to
-     * measure from. A harness writing the block onto turns egma could read the
-     * geometry of would be describing a conversation no platform produces: the
-     * derivation would answer first and outrank the block, and this option
-     * would quietly stop being about the source it names.
+     * **The two go together because that is a real stored shape.** A Retell
+     * turn whose payload carried no word bounds — and every turn stored before
+     * `normaliseRetellCall` learned to read them — has no instant to open at
+     * except the one the conversation opened at, and no width: the placeholder
+     * fallback, said plainly in `apps/api/src/retell/normalise.ts`. On a
+     * word-bounded call the turns carry real timestamps, the derivation
+     * answers first and outranks the block — which is exercised in
+     * `packages/metrics/test/derived-retell.test.ts` — so this option stays
+     * the placeholder shape on purpose: it is the shape where the block is the
+     * only answer.
      *
      * The instants matter as much as the widths, and that is the sharp edge.
      * Zero-width turns at instants two seconds apart are **chat**-shaped —

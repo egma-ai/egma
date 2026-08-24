@@ -196,6 +196,17 @@ function evidence(overrides: Record<string, unknown> = {}) {
     providerReference: "call_abc123",
     hasRecording: false,
     measures: { durationMs: 40000, turnCount: 2, toolCallCount: 1 },
+    metrics: [
+      {
+        measure: "turn_response_latency",
+        unit: "milliseconds",
+        derived: false,
+        samples: [420, 1100],
+        spanIds: ["span_agent_1", "span_agent_2"],
+        mean: 760,
+        partial: false,
+      },
+    ],
     test: {
       id: "tst_1",
       versionId: "tstv_1",
@@ -479,6 +490,24 @@ describe("one simulation's evidence", () => {
       (await screen.findAllByText("Expected behaviors")).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("expected_behaviors")).toBeNull();
+  });
+
+  /**
+   * The observed metrics, under the three facts and apart from the verdicts:
+   * the same mean the transcript page leads with, worded by the one shared
+   * formatter, so the two surfaces cannot describe one conversation two ways.
+   */
+  it("shows what was measured, mean-led, apart from the verdicts", async () => {
+    page();
+    render(<SimulationEvidencePage />);
+
+    const measured = await screen.findByRole("region", {
+      name: "What was measured",
+    });
+    expect(within(measured).getByText("Turn response latency")).toBeTruthy();
+    expect(
+      within(measured).getByText("760 milliseconds · average of 2 measurements"),
+    ).toBeTruthy();
   });
 
   it("puts human-named graders behind default-open transcript and audio", async () => {

@@ -16481,6 +16481,54 @@
                       },
                       "additionalProperties": false
                     },
+                    "metrics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "measure": {
+                            "type": "string"
+                          },
+                          "unit": {
+                            "type": "string"
+                          },
+                          "derived": {
+                            "type": "boolean"
+                          },
+                          "reportedBy": {
+                            "type": "string"
+                          },
+                          "samples": {
+                            "type": "array",
+                            "items": {
+                              "type": "number"
+                            }
+                          },
+                          "spanIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "mean": {
+                            "type": "number"
+                          },
+                          "partial": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "measure",
+                          "unit",
+                          "derived",
+                          "samples",
+                          "spanIds",
+                          "mean",
+                          "partial"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
                     "test": {
                       "type": "object",
                       "properties": {
@@ -17353,6 +17401,7 @@
                     "providerReference",
                     "hasRecording",
                     "measures",
+                    "metrics",
                     "test",
                     "persona",
                     "agent",
@@ -20961,7 +21010,7 @@
                     "spansTruncated": {
                       "type": "boolean"
                     },
-                    "measures": {
+                    "metrics": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -20990,28 +21039,8 @@
                               "type": "string"
                             }
                           },
-                          "worst": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "value": {
-                                    "type": "number"
-                                  },
-                                  "spanId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "value",
-                                  "spanId"
-                                ],
-                                "additionalProperties": false
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
+                          "mean": {
+                            "type": "number"
                           },
                           "partial": {
                             "type": "boolean"
@@ -21023,7 +21052,7 @@
                           "derived",
                           "samples",
                           "spanIds",
-                          "worst",
+                          "mean",
                           "partial"
                         ],
                         "additionalProperties": false
@@ -21241,7 +21270,7 @@
                     "turns",
                     "spans",
                     "spansTruncated",
-                    "measures",
+                    "metrics",
                     "simulationId",
                     "verdicts",
                     "outcome",

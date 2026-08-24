@@ -131,7 +131,7 @@ type ReadMeasure = {
   readonly derived: boolean;
   readonly samples: readonly number[];
   readonly spanIds: readonly string[];
-  readonly worst: { readonly value: number; readonly spanId: string } | null;
+  readonly mean: number;
 };
 
 async function measuresOfTheCapture(): Promise<readonly ReadMeasure[]> {
@@ -142,7 +142,7 @@ async function measuresOfTheCapture(): Promise<readonly ReadMeasure[]> {
     WINDOW,
   );
   expect(read.statusCode).toBe(200);
-  return (read.json() as { measures?: readonly ReadMeasure[] }).measures ?? [];
+  return (read.json() as { metrics?: readonly ReadMeasure[] }).metrics ?? [];
 }
 
 function measure(
@@ -220,11 +220,14 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
       "00820fa943b873e6",
       "11a1eaca219437a9",
     ]);
-    // The worst of them is what a bound is held against, and it is the second.
-    expect(measured?.worst).toEqual({
-      value: 1994.917806,
-      spanId: "11a1eaca219437a9",
-    });
+    // The mean is the number the pages lead with, rounded once in the module
+    // — the average of the two waits above, to the nearest millisecond.
+    expect(measured?.mean).toBe(
+      Math.round(
+        HAND_COMPUTED.turn_response_latency.reduce((sum, one) => sum + one, 0) /
+          HAND_COMPUTED.turn_response_latency.length,
+      ),
+    );
   });
 
   it("measures each speaking turn's speech at the hand-computed numbers", async () => {

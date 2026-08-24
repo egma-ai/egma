@@ -105,37 +105,49 @@ could be counted, and they are deliberately not.
 
 A **derived** measure is one Egma works out from a framework's own spans rather
 than reading off a timing span named for it. It is a fact about one
-conversation, not a new measure and not a new word: the same three names below
-are timed on a simulation and derived on a stock LiveKit call, and a grader
-bounding one never has to know which it got.
+conversation, not a new measure and not a new word: the same names below are
+timed on a simulation and derived on a stock LiveKit call or a word-bounded
+Retell one, and a grader bounding one never has to know which it got.
 
 Why they exist: a team pointing a stock LiveKit agent at Egma got `skipped` on
 every production conversation, because the framework times its turns in its own
 vocabulary and Egma read only its own. The durations were there the whole time.
+The same was true of Retell twice over: its payloads carry per-word `start` and
+`end` bounds on every spoken turn, which the normalizer has written as real
+turn timestamps since commit `cc7b8c9` — and the derivations then ignored the
+root because it is filed as `conversation` rather than `root`, so
+`first_response_latency` was never computed there either.
 
 Three rules hold over all of them.
 
-- **Recognition rides the door's scope vetting, never a span name.** The ingest
-  door assigns `root`, `turn:human`, `turn:agent` and `speaking` from a table
-  keyed by the emitting instrumentation scope; a scope it does not know is filed
-  as `other`, whatever its spans are called. So the kinds below are already
-  evidence that Egma recognised the emitter, and a lookalike span from some
-  other framework becomes nothing.
+- **Recognition rides the door's vetting, never a span name.** The OTLP door
+  assigns `turn:human`, `turn:agent` and `speaking` from a table keyed by the
+  emitting instrumentation scope, and the Retell normalizer assigns them to the
+  turns it built itself; a scope the door does not know is filed as `other`,
+  whatever its spans are called. So the kinds below are already evidence that
+  Egma recognised the emitter, and a lookalike span from some other framework
+  becomes nothing. **The root is not recognised by kind at all**: a root wears
+  whatever word its platform uses — `root` on Egma's own traces and LiveKit's,
+  `conversation` on a Retell one — so the derivations find it the way the trace
+  read does, by the empty parent.
 - **Egma's own timing vocabulary wins absolutely.** When a conversation carries
   timing spans for a measure, no derivation for that measure runs. A
   conversation carrying both has one answer, never two appended.
-- **A measurement that runs backwards is not kept.** The agent begins speaking
-  before the human stops on every interruption — five of twelve neighbouring
-  turn pairs on the captured call. A negative latency would drag a mean below
-  zero and pass a bound that should have failed.
+- **A measurement that runs backwards is not kept.** Turn spans overlap on a
+  real captured call — five of twelve neighbouring pairs — and the overlap is
+  the framework's turn bookkeeping, not audible talk-over: the same call's
+  speaking spans carry zero seconds of simultaneous audio
+  (`research/voice-agent-interruption-metrics.md`, planning root). A negative
+  latency would drag a mean below zero and pass a bound that should have
+  failed, so the overlapping pair contributes nothing.
 
 Derived at read time. Nothing new is stored, and every conversation already in
 the store gains these on the next read.
 
-| Measure | Derived from the LiveKit scope as | Taken |
+| Measure | Derived from recognised turn spans as | Taken |
 | --- | --- | --- |
 | `turn_response_latency` | From each `turn:human` span's **end** to the start of the next `turn:agent` span's first `speaking` child — or to that agent turn's own start when it carried no `speaking` child. The next agent turn is the next one by start time, which is the order a transcript reads in. **An agent turn answers only the nearest human turn before it: a human turn followed by another human turn before any agent turn was not answered, and measures nothing.** | One sample per human turn, in conversation order. A human turn nobody answered, one the caller spoke over with a second turn, and one whose sample runs backwards contribute none. |
-| `first_response_latency` | From the `root` span's start to the start of the first `turn:agent` span's first `speaking` child. A first agent turn that never spoke has no first word to have waited for, and nothing is measured. | Once. |
+| `first_response_latency` | From the root span's start — the earliest parentless span — to the first `turn:agent` span's first `speaking` child's start. Where the conversation carries no `speaking` spans at all, the first agent turn's own start stands in — a word-bounded Retell turn begins at its first word; a framework that does write speech makes a speechless first turn unmeasurable. A first agent turn with neither speech nor width measures nothing. | Once. |
 | `agent_speech_duration` | The sum of a `turn:agent` span's own `speaking` children's durations — so a turn that thought for two seconds and then talked for one spoke for one. | One sample per agent turn **that spoke**. A turn with no speech in it has no speech duration; a zero would measure something that never happened. |
 
 Each sample cites the span its number came from: the span whose start closed the
@@ -148,6 +160,15 @@ children.
   traffic.
 - `persona_speech_duration` — Egma's synthetic caller is not in a production
   conversation, so the measure has no production meaning.
+
+**The Retell derivations were checked against Retell's own ruler** on a live
+production call (2026-08-22): the word-bound gaps Egma derives — 2218 ms,
+2557 ms, 3325 ms — matched Retell's own reported `e2e` values exactly where
+both measured (2218, 2557), and caught a third answered turn Retell's list
+missed. That is why a derived measure keeps precedence over a reported one:
+same ruler, more coverage. A Retell turn with no word bounds — and every turn
+stored before commit `cc7b8c9` — is a zero-width placeholder; a conversation
+of those derives nothing and answers from the reported block instead.
 
 Every other framework derives nothing until an effort of its own teaches this
 document its shapes.

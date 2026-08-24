@@ -393,7 +393,7 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
     // sample a timing span's own duration in milliseconds — including the
     // 862.5, which a whole-number division would have floored away.
     expect(
-      detail.measures.map(({ measure, unit, samples }) => ({
+      detail.metrics.map(({ measure, unit, samples }) => ({
         measure,
         unit,
         samples,
@@ -412,19 +412,23 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
     ]);
 
     /**
-     * **And the reduction rides with them.** The one number a bound is held
-     * against is worked out by the platform, beside the series it came from, so
-     * that no reader has to reduce anything: a client taking the maximum for
-     * itself would be a second implementation of exactly the figure a verdict
-     * rests on, right until the day a grader reduces some other way.
+     * **And the reduction rides with them.** The average the pages lead with
+     * is worked out by the platform, rounded once, beside the series it came
+     * from, so that no reader has to reduce anything: a client averaging the
+     * samples for itself would be a second implementation of exactly the
+     * figure the pages lead with, right until the rounding changed under one
+     * of them.
      */
-    for (const measured of detail.measures) {
+    for (const measured of detail.metrics) {
       expect(measured.spanIds).toHaveLength(measured.samples.length);
       for (const spanId of measured.spanIds) expect(spanId).not.toBe("");
 
-      expect(measured.worst?.value).toBe(Math.max(...measured.samples));
-      // And where it happened, which is what a judgment about it cites.
-      expect(measured.spanIds).toContain(measured.worst?.spanId);
+      expect(measured.mean).toBe(
+        Math.round(
+          measured.samples.reduce((sum, one) => sum + one, 0) /
+            measured.samples.length,
+        ),
+      );
       // A whole reading, so the figure is the exchange's rather than a prefix's.
       expect(measured.partial).toBe(false);
     }

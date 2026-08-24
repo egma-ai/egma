@@ -268,11 +268,11 @@ export const FACTS = {
  * the verdicts above say what somebody decided about it. Nothing here is green
  * or red, because a duration is not good or bad until a grader has been asked.
  *
- * The numbers are the same ones a `latency` grader is judged on, computed once
- * by egma's shared measure module and read here through it — so a developer
- * reading "1100 ms at its worst" on this page and a verdict row saying a bound
- * was missed are the same arithmetic, and the page can never be the reason
- * somebody distrusts the judgment.
+ * The numbers come off egma's one shared measure module — the same module a
+ * `latency` grader is judged through — and the page leads with the average
+ * turn, which is the question a developer opens the page with. The samples a
+ * verdict was decided over are the same list this average was reduced from, so
+ * the page can never be the reason somebody distrusts the judgment.
  *
  * A measure the spans do not carry is **absent** rather than shown as nothing:
  * an empty row would read as a measurement of zero, and a chat exchange has no
@@ -312,20 +312,20 @@ export const MEASURES = {
    * no caveat at all; where it came from stays on the record, not on the page.
    */
   derivedOne: "from your framework's timings",
-  /** One measurement is the number; several are the worst of them. */
-  worst: "worst",
+  /** One measurement is the number; several are the average of them. */
+  average: "average",
   counted: (howMany: number): string =>
     howMany === 1 ? "1 measurement" : `${howMany} measurements`,
   /**
    * Said instead of the count when the reading is a prefix of a long exchange.
    *
-   * The worst measurement of the first part is not the worst measurement of the
-   * call — the slowest turn is as likely to be past the cut as before it — so
-   * the figure is qualified rather than shown as though it were the whole. A
-   * count would be worse than useless here: it would say how many measurements
-   * arrived, which is not how many there were.
+   * The average of the first part is not the average of the call — the turns
+   * past the cut moved it, and nobody holds them — so the figure is qualified
+   * rather than shown as though it were the whole. A count would be worse than
+   * useless here: it would say how many measurements arrived, which is not how
+   * many there were.
    */
-  partialWorst: "worst of the part Egma holds",
+  partialAverage: "average of the part Egma holds",
 } as const;
 
 /**

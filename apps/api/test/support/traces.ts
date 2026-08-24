@@ -388,10 +388,10 @@ export type DetailMeasure = {
   readonly samples: readonly number[];
   readonly spanIds: readonly string[];
   /**
-   * The one number a bound is held against, reduced by the platform rather than
+   * The average the pages lead with, rounded once by the platform rather than
    * left for every reader to work out for itself.
    */
-  readonly worst: { readonly value: number; readonly spanId: string } | null;
+  readonly mean: number;
   /** True when the reading is a prefix, so the figure is of the part held. */
   readonly partial: boolean;
 };
@@ -404,7 +404,7 @@ export type TraceDetailBody = {
   /** The simulation this trace is, or `null` for a customer's own telemetry. */
   readonly simulationId: string | null;
   /** What was measured — the metrics display's read path. Empty, never absent. */
-  readonly measures: readonly DetailMeasure[];
+  readonly metrics: readonly DetailMeasure[];
 };
 
 export type ReadQuery = {

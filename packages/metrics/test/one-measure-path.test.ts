@@ -212,12 +212,13 @@ describe("reducing the measurements to one number", () => {
    */
   const MAY_HOLD_THE_SERIES: Readonly<Record<string, string>> = {
     [THE_MODULE]: "builds it, and reduces it",
-    "apps/api/src/routes/trace-reads.ts":
-      "sends it, beside the module's own reduction of it",
+    "apps/api/src/http/metrics.ts":
+      "sends it, beside the module's own reduction of it — for both surfaces",
     "apps/grader/src/graders/latency.ts": "counts it, for the rationale",
     "apps/grader/src/judge/input.ts": "renders it, as words a judge reads",
-    [THE_TRANSCRIPT_PAGE]: "counts it, and prints the reduction it was handed",
-    "packages/platform-api/src/contract/operations/trace-reads.ts":
+    "apps/web/lib/transcripts.ts":
+      "counts it, and words the reduction it was handed — for both pages",
+    "packages/platform-api/src/contract/schemas.ts":
       "defines it once on the platform wire",
     "packages/platform-api/src/generated/types.gen.ts":
       "declares what arrives through the generated client",

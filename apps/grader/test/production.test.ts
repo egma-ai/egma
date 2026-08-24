@@ -262,6 +262,13 @@ describe("a production trace whose root span closes", () => {
     // carries no speech, so its own start is the answer — begins at 2000 ms.
     expect(conversation.measures).toEqual([
       {
+        measure: "first_response_latency",
+        unit: "milliseconds",
+        origin: "derived",
+        reportedBy: "",
+        samples: [{ value: 2_000, spanId: expect.any(String) }],
+      },
+      {
         measure: "turn_response_latency",
         unit: "milliseconds",
         origin: "derived",
@@ -269,17 +276,15 @@ describe("a production trace whose root span closes", () => {
         samples: [{ value: 1_000, spanId: expect.any(String) }],
       },
     ]);
-    // The other two are absent, and each for a reason this tree has: nothing
-    // here spoke, so there is no speech to have measured and no first word to
-    // have waited for. A grader asked for either answers `skipped`, which leaves
-    // the score's denominator. A production trace that *does* carry egma's own
-    // timing spans measures exactly what a simulation's identical spans measure,
-    // which the case below is about.
+    // `first_response_latency` is here because this conversation carries no
+    // `speaking` spans at all: where the framework wrote no speech granularity,
+    // the first agent turn's own start stands in — the same fallback the turn
+    // latency above already uses. `agent_speech_duration` stays absent, and for
+    // a reason this tree has: it is defined over speech, and nothing here
+    // spoke. A grader asked for it answers `skipped`, which leaves the score's
+    // denominator.
     expect(conversation.measures.map((one) => one.measure)).not.toContain(
       "agent_speech_duration",
-    );
-    expect(conversation.measures.map((one) => one.measure)).not.toContain(
-      "first_response_latency",
     );
 
     // Empty, and honestly so: a trace that arrived at the OTLP door was not
@@ -325,6 +330,7 @@ describe("a production trace whose root span closes", () => {
     // rather than a conversation that had nothing in it anyway.
     expect(whole.nothingToJudgeBecause).toBeNull();
     expect(whole.measures.map((one) => one.measure)).toEqual([
+      "first_response_latency",
       "turn_response_latency",
     ]);
 

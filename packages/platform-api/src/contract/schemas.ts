@@ -68,3 +68,35 @@ export function parameters<
     additionalProperties: false,
   } as const satisfies ParameterSchema;
 }
+
+/**
+ * One observed metric as either conversation read answers it: the catalog
+ * measure it names, the samples with the spans they happened in, and the one
+ * reduction the platform computed — the mean, rounded once in the shared
+ * measure module so no client ever rounds for itself. Shared here because two
+ * operations answer it — a trace's transcript and one simulation's evidence —
+ * and a projection written out at each door is two chances to disagree.
+ */
+export const metricSchema = {
+  type: "object",
+  properties: {
+    measure: { type: "string" },
+    unit: { type: "string" },
+    derived: { type: "boolean" },
+    reportedBy: { type: "string" },
+    samples: { type: "array", items: { type: "number" } },
+    spanIds: { type: "array", items: { type: "string" } },
+    mean: { type: "number" },
+    partial: { type: "boolean" },
+  },
+  required: [
+    "measure",
+    "unit",
+    "derived",
+    "samples",
+    "spanIds",
+    "mean",
+    "partial",
+  ],
+  additionalProperties: false,
+} as const satisfies JsonSchema;

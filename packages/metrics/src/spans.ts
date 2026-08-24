@@ -20,6 +20,10 @@ import type { ReportedMeasurement } from "./reported.ts";
  */
 export type TraceSpan = {
   readonly spanId: string;
+  /** As it arrived. `""` on a root, and that emptiness is how a root is
+   * recognised — by its place in the tree, never by a kind word each platform
+   * spells its own way. */
+  readonly parentSpanId: string;
   readonly name: string;
   readonly kind: string;
   readonly startedAt: string;

@@ -155,10 +155,19 @@ const TIMING = "timing";
  * called. So a span carrying one of these kinds is a span egma recognised the
  * emitter of, and nothing here has to re-check a name a lookalike framework
  * could have chosen. `speaking` is LiveKit's alone today; the two turn kinds
- * are LiveKit's and egma's own simulator's, and a simulation carries timing
- * spans, which win outright below.
+ * are LiveKit's, egma's own simulator's, and the Retell normalizer's — whose
+ * turns carry real word-bound timings, so the derivations below read them
+ * exactly as they read LiveKit's. A simulation carries timing spans, which win
+ * outright below.
+ *
+ * **The root is not a kind.** A root wears whatever word its platform uses —
+ * `root` on egma's own traces and on LiveKit's, `conversation` on a Retell one
+ * — so the derivations recognise it the way the trace read itself does: by the
+ * empty parent, the one fact about a root no platform spells differently. A
+ * reader that named kinds would have to learn a new word per platform, and
+ * forgetting one costs a measure silently (Retell's `first_response_latency`
+ * was never derived for exactly that reason).
  */
-const ROOT = "root";
 const HUMAN_TURN = "turn:human";
 const AGENT_TURN = "turn:agent";
 const SPEAKING = "speaking";
@@ -262,6 +271,30 @@ export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
     if (worst === undefined || sample.value > worst.value) worst = sample;
   }
   return worst;
+}
+
+/**
+ * The average of a measure's samples, rounded to the nearest whole unit.
+ *
+ * **The number a person reads first.** The pages lead with the mean because a
+ * conversation's typical speed is the question a developer opens the page
+ * with; the worst turn stays the grader's business through `worstSampleOf`
+ * above. The rounding happens here, once, so two surfaces printing one
+ * conversation can never disagree in the last digit — every sample is already
+ * in the catalog's own unit, and a fraction of a millisecond is beneath what
+ * any of these measures can honestly claim.
+ *
+ * The mean cites no single span — it is computed over all of them, and the
+ * samples beside it carry the citations — so it is a number rather than a
+ * `Sample`. `undefined` for a measure with no samples, which nothing this
+ * module builds ever has, answered rather than assumed for `worstSampleOf`'s
+ * exact reason.
+ */
+export function meanOf(measured: MeasuredFromSpans): number | undefined {
+  if (measured.samples.length === 0) return undefined;
+  let sum = 0;
+  for (const sample of measured.samples) sum += sample.value;
+  return Math.round(sum / measured.samples.length);
 }
 
 /**
@@ -451,9 +484,11 @@ function derivedFromFrameworkSpans(
       turns.push(timed(span));
       continue;
     }
-    // The earliest root, so a trace holding more than one — a flush whose
-    // parent never came — is read from where the conversation actually began.
-    if (span.kind === ROOT) {
+    // The earliest parentless span, so a trace holding more than one — a
+    // flush whose parent never came reads as a second root — is read from
+    // where the conversation actually began: the true root starts before
+    // everything that happened inside it.
+    if (span.parentSpanId === "") {
       const candidate = timed(span);
       if (root === undefined || candidate.startedAt < root.startedAt) {
         root = candidate;
@@ -489,22 +524,29 @@ function put(
  * reads in.
  *
  * **A measurement that runs backwards is not a slow answer and is not kept.**
- * The agent begins speaking before the human stops on every interruption, and
- * on a real captured call that is five neighbouring turn pairs out of twelve. A
+ * Turn spans overlap on a real captured call — five neighbouring pairs out of
+ * twelve — and the overlap is the framework's turn bookkeeping, not audible
+ * talk-over: the same call's speaking spans carry zero seconds of simultaneous
+ * audio (`research/voice-agent-interruption-metrics.md`, planning root). A
  * negative latency would drag a mean below zero and make a bound pass that
  * should have failed — a number that is wrong is worse than a measurement that
- * is missing, so the overlapping turn contributes nothing and the turns around
+ * is missing, so the overlapping pair contributes nothing and the turns around
  * it still count.
  *
  * **A zero read off a turn that had no width is two placeholders agreeing, and
- * is not kept either.** Retell publishes no per-turn timing, so its normalizer
- * opens every turn at the production trace's own start and closes it in the
- * same instant — placeholders, said plainly in
- * `apps/api/src/retell/normalise.ts`. Subtract one from the next and the answer
- * is zero, every time, for the arithmetic's own reasons and not the agent's: a
- * series a bound cannot fail, so a trace whose worst wait was really 2145 ms
- * holds a two-second bound with "0 milliseconds at its worst" as its rationale,
- * which is the false pass this product exists to kill.
+ * is not kept either.** Retell reports per-word timings on every spoken turn,
+ * and its normalizer has written real turn timestamps from them since commit
+ * `cc7b8c9` — but a turn whose words are missing, and every turn stored before
+ * that commit, keeps the prior honest fallback: opened at the trace's own
+ * start and closed in the same instant, said plainly in
+ * `apps/api/src/retell/normalise.ts`. Subtract one such placeholder from the
+ * next and the answer is zero, every time, for the arithmetic's own reasons
+ * and not the agent's: a series a bound cannot fail, so a trace whose worst
+ * wait was really 2145 ms holds a two-second bound with a zero as its
+ * rationale, which is the false pass this product exists to kill. A
+ * conversation of placeholders therefore derives nothing here and answers
+ * from the platform's reported block instead — which is exactly what those
+ * stored rows carry.
  *
  * **It is the pair that says so, and never the width alone.** A chat simulation
  * writes turns of no width too — a typed message is one instant and there is
@@ -530,11 +572,22 @@ function turnResponseLatency(turns: readonly TimedSpan[]): readonly Sample[] {
  * How long the agent took to say anything at all, from the moment the
  * conversation began.
  *
- * The root span is where a conversation begins — the one span the whole thing
- * happened inside — and the agent's first word is its first turn's first
- * `speaking` child. A first agent turn that never spoke has no first word to
- * have waited for, so nothing is measured rather than a start time standing in
- * for one: this measure is taken once, and one wrong number is the whole of it.
+ * The root span is where a conversation begins — the earliest parentless span,
+ * the one the whole thing happened inside — and the agent's first word is its
+ * first turn's first `speaking` child.
+ *
+ * **Where the framework wrote no `speaking` spans at all**, the first agent
+ * turn's own start stands in: a word-bounded Retell turn begins at its first
+ * word, which is the same fact spelled the other way. The fallback is about
+ * granularity the emitter lacks, never about the turn — a framework that does
+ * write speech makes a speechless first turn honestly unmeasurable, because
+ * there a turn with no speech is a turn that never said anything, not a turn
+ * whose words went unrecorded.
+ *
+ * A first agent turn with **neither speech nor width** has nothing measured —
+ * a zero-width turn is the Retell normalizer's placeholder, opened at the
+ * trace's own start, and reading it would answer a zero nobody waited. This
+ * measure is taken once, and one wrong number is the whole of it.
  */
 function firstResponseLatency(
   root: TimedSpan | undefined,
@@ -543,11 +596,17 @@ function firstResponseLatency(
   if (root === undefined) return [];
   const first = turns.find((turn) => turn.kind === AGENT_TURN);
   if (first === undefined) return [];
+  const speechless = turns.every((turn) => turn.speech.length === 0);
   const spoke = first.speech[0];
-  if (spoke === undefined) return [];
-  const latency = milliseconds(spoke.startedAt - root.startedAt);
+  const from =
+    spoke ??
+    (speechless && first.duration > 0n
+      ? { startedAt: first.startedAt, spanId: first.spanId }
+      : undefined);
+  if (from === undefined) return [];
+  const latency = milliseconds(from.startedAt - root.startedAt);
   if (latency < 0) return [];
-  return [{ value: latency, spanId: spoke.spanId }];
+  return [{ value: latency, spanId: from.spanId }];
 }
 
 /**

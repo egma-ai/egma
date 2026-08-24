@@ -2,6 +2,7 @@ import { defineOperation } from "../definition.ts";
 import {
   arrayOf,
   dateTimeSchema,
+  metricSchema,
   nullable,
   parameters,
   rateLimitResponse,
@@ -182,6 +183,7 @@ const simulationSchema = {
       },
       additionalProperties: false,
     },
+    metrics: arrayOf(metricSchema),
     test: {
       type: "object",
       properties: {
@@ -334,6 +336,7 @@ const simulationSchema = {
     "providerReference",
     "hasRecording",
     "measures",
+    "metrics",
     "test",
     "persona",
     "agent",
