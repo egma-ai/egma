@@ -204,6 +204,8 @@ function evidence(overrides: Record<string, unknown> = {}) {
         samples: [420, 1100],
         spanIds: ["span_agent_1", "span_agent_2"],
         mean: 760,
+        p50: 420,
+        p90: 1100,
         partial: false,
       },
     ],
@@ -506,7 +508,7 @@ describe("one simulation's evidence", () => {
     });
     expect(within(measured).getByText("Turn response latency")).toBeTruthy();
     expect(
-      within(measured).getByText("760 milliseconds · average of 2 measurements"),
+      within(measured).getByText("1100 milliseconds · p90 of 2 measurements"),
     ).toBeTruthy();
   });
 

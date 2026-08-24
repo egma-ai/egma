@@ -833,7 +833,7 @@ describe("what the exchange measured", () => {
       "utf8",
     );
 
-    expect(shared).toContain("one.mean");
+    expect(shared).toContain("one.p90");
     // The series is used for one thing, which is saying how many there were.
     expect(shared).toContain("one.samples.length");
     expect(shared).not.toContain("samples.reduce");
@@ -846,7 +846,7 @@ describe("what the exchange measured", () => {
   });
 
   it("says which measurement it is showing, and how many there were", () => {
-    expect(copy.MEASURES.average).toBe("average");
+    expect(copy.MEASURES.p90).toBe("p90");
     expect(copy.MEASURES.counted(1)).toContain("1 measurement");
     expect(copy.MEASURES.counted(11)).toContain("11 measurements");
   });
@@ -864,7 +864,7 @@ describe("what the exchange measured", () => {
     );
 
     expect(shared).toContain("one.partial");
-    expect(copy.MEASURES.partialAverage).toContain("part Egma holds");
+    expect(copy.MEASURES.partialP90).toContain("part Egma holds");
   });
 
   it("says nothing was measured rather than showing a blank", () => {

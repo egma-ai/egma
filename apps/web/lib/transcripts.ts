@@ -42,10 +42,10 @@ export type Outcome = NonNullable<GetTraceResponse["outcome"]>;
  * One measure this exchange produced, as the read hands it over.
  *
  * **Computed by the platform, never here — the reduction included.** The
- * samples arrive already worked out by egma's one shared measure module, and so
- * does `mean`: the average a person reads first, rounded once in that module.
- * Both are the platform's arithmetic, so this page renders figures rather than
- * deriving any.
+ * samples arrive already worked out by egma's one shared measure module, and
+ * so do the reductions — `mean`, `p50` and `p90`, each computed once in that
+ * module. All of it is the platform's arithmetic, so this application renders
+ * figures rather than deriving any.
  *
  * The reduction is the part that matters. Averaging the samples here would look
  * harmless and would be a second implementation of the exact number the page
@@ -78,28 +78,34 @@ export function workedOutMetric(one: Measured): boolean {
 
 /**
  * One metric as a person reads it, the same words on every surface that shows
- * one: the average the platform reduced to, its unit, and — where there was
- * more than one measurement — how many the average is of.
+ * one: the p90 the platform reduced to, its unit, and — where there was more
+ * than one measurement — how many the figure stands over.
  *
- * **Nothing is worked out here.** `mean` arrives on the answer, rounded once
- * by the shared measure module; this reads it. The series is used for one
+ * **The p90 leads because the tail is what a caller feels.** The wire also
+ * carries the median and the mean, computed by the same module; which of the
+ * three a surface shows is a display decision, and today's is the p90. One
+ * measurement is simply the number — every reduction of one sample is that
+ * sample, so naming a statistic over it would be dressing.
+ *
+ * **Nothing is worked out here.** `p90` arrives on the answer, nearest-rank
+ * from the shared measure module; this reads it. The series is used for one
  * thing only, which is saying how many measurements there were. A prefix says
- * so instead of the count, because the average of the part Egma holds is not
- * the average of the call.
+ * so instead of the count, because the p90 of the part Egma holds is not the
+ * p90 of the call.
  *
  * Written once and imported by the transcript page and the simulation
  * evidence, so the two surfaces that show one conversation's metrics cannot
  * come to word the same figure two ways.
  */
 export function metricLine(one: Measured): string {
-  const shown = `${String(one.mean)} ${one.unit}`;
+  const shown = `${String(one.p90)} ${one.unit}`;
   const from = workedOutMetric(one) ? ` · ${MEASURES.derivedOne}` : "";
   if (one.partial === true) {
-    return `${shown} · ${MEASURES.partialAverage}${from}`;
+    return `${shown} · ${MEASURES.partialP90}${from}`;
   }
   return one.samples.length === 1
     ? `${shown}${from}`
-    : `${shown} · ${MEASURES.average} of ${MEASURES.counted(one.samples.length)}${from}`;
+    : `${shown} · ${MEASURES.p90} of ${MEASURES.counted(one.samples.length)}${from}`;
 }
 export type Detail = GetTraceResponse;
 

@@ -164,6 +164,8 @@ const MEASURE: Measured = {
   samples: [420, 1100],
   spanIds: ["span_turn_agent", "span_turn_agent"],
   mean: 760,
+  p50: 420,
+  p90: 1100,
   partial: false,
 };
 
@@ -507,7 +509,7 @@ describe("what the exchange measured", () => {
     expect(within(measures).getByText("Agent response latency")).toBeTruthy();
     expect(
       within(measures).getByText(
-        `760 ms · ${MEASURES.average} of ${MEASURES.counted(2)}`,
+        `1100 ms · ${MEASURES.p90} of ${MEASURES.counted(2)}`,
       ),
     ).toBeTruthy();
   });
@@ -522,7 +524,7 @@ describe("what the exchange measured", () => {
 
     expect(
       within(screen.getByLabelText(MEASURES.label)).getByText(
-        `760 ms · ${MEASURES.partialAverage}`,
+        `1100 ms · ${MEASURES.partialP90}`,
       ),
     ).toBeTruthy();
   });

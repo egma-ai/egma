@@ -754,6 +754,8 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       "derived",
       "mean",
       "measure",
+      "p50",
+      "p90",
       "partial",
       "samples",
       "spanIds",
@@ -772,6 +774,8 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       "derived",
       "mean",
       "measure",
+      "p50",
+      "p90",
       "partial",
       "reportedBy",
       "samples",
@@ -785,6 +789,9 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     expect(only.samples).toEqual([517, 2145]);
     // The mean of the two reported waits, rounded once in the module.
     expect(only.mean).toBe(1331);
+    // Nearest-rank over [517, 2145]: the median is the first, the p90 the second.
+    expect(only.p50).toBe(517);
+    expect(only.p90).toBe(2145);
   });
 
   /**

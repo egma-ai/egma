@@ -40,8 +40,8 @@ export {
 } from "./measures.ts";
 
 export {
+  aggregateOf,
   everySpanIn,
-  meanOf,
   measuresFromSpans,
   worstSampleOf,
   type MeasuredFromSpans,

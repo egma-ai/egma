@@ -71,9 +71,11 @@ export function parameters<
 
 /**
  * One observed metric as either conversation read answers it: the catalog
- * measure it names, the samples with the spans they happened in, and the one
- * reduction the platform computed — the mean, rounded once in the shared
- * measure module so no client ever rounds for itself. Shared here because two
+ * measure it names, the samples with the spans they happened in, and the
+ * reductions the platform computed — the mean, the median and the p90, each
+ * worked out once in the shared measure module so no client ever reduces for
+ * itself. Which one a page leads with is the page's decision; today it is the
+ * p90, the number the tail of the call is felt in. Shared here because two
  * operations answer it — a trace's transcript and one simulation's evidence —
  * and a projection written out at each door is two chances to disagree.
  */
@@ -87,6 +89,8 @@ export const metricSchema = {
     samples: { type: "array", items: { type: "number" } },
     spanIds: { type: "array", items: { type: "string" } },
     mean: { type: "number" },
+    p50: { type: "number" },
+    p90: { type: "number" },
     partial: { type: "boolean" },
   },
   required: [
@@ -96,6 +100,8 @@ export const metricSchema = {
     "samples",
     "spanIds",
     "mean",
+    "p50",
+    "p90",
     "partial",
   ],
   additionalProperties: false,

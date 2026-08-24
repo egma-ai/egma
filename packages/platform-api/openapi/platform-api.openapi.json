@@ -16513,6 +16513,12 @@
                           "mean": {
                             "type": "number"
                           },
+                          "p50": {
+                            "type": "number"
+                          },
+                          "p90": {
+                            "type": "number"
+                          },
                           "partial": {
                             "type": "boolean"
                           }
@@ -16524,6 +16530,8 @@
                           "samples",
                           "spanIds",
                           "mean",
+                          "p50",
+                          "p90",
                           "partial"
                         ],
                         "additionalProperties": false
@@ -21042,6 +21050,12 @@
                           "mean": {
                             "type": "number"
                           },
+                          "p50": {
+                            "type": "number"
+                          },
+                          "p90": {
+                            "type": "number"
+                          },
                           "partial": {
                             "type": "boolean"
                           }
@@ -21053,6 +21067,8 @@
                           "samples",
                           "spanIds",
                           "mean",
+                          "p50",
+                          "p90",
                           "partial"
                         ],
                         "additionalProperties": false

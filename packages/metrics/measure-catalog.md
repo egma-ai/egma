@@ -209,6 +209,12 @@ question, and both are accepted.
 A latency check almost always wants a percentile. A mean hides the one turn that
 took nine seconds, which is the turn the caller hung up on.
 
+All eight are implemented by the shared measure module (`aggregateOf`), whose
+switch is exhaustive over this list — a name joining it without a case stops
+the build. The conversation reads carry `mean`, `p50` and `p90` on the wire;
+the product currently leads with the p90, and which reduction a surface shows
+is that surface's decision, never new arithmetic.
+
 The list is stated per measure in `src/measures.ts` rather than once for all of
 them, so that the day a measure arrives which must never be summed — a rate, a
 percentage — the refusal lives in the catalog beside that measure rather than in

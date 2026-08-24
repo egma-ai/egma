@@ -1,5 +1,5 @@
 import type { TraceDetail } from "@egma/db";
-import { meanOf, measuresFromSpans } from "@egma/metrics";
+import { aggregateOf, measuresFromSpans } from "@egma/metrics";
 
 /**
  * What a conversation measured — the one projection of the observed metrics
@@ -12,12 +12,13 @@ import { meanOf, measuresFromSpans } from "@egma/metrics";
  * them to answer a field the other does not.
  *
  * **Every number comes off the shared measure module**, including the
- * reduction. The mean rides the wire because the module rounds it once —
- * a browser averaging the samples for itself would be a second
- * implementation of the number a page leads with, correct until the day the
- * rounding or the samples change under one of them. The series still rides
- * along: the mean should be checkable against what it was reduced from, and
- * counting the measurements is the page's honest business.
+ * reductions. The mean, the median and the p90 ride the wire because the
+ * module computes each once — a browser reducing the samples for itself
+ * would be a second implementation of the number a page leads with, correct
+ * until the day the arithmetic or the samples change under one of them. The
+ * series still rides along: a reduction should be checkable against what it
+ * was reduced from, and counting the measurements is the page's honest
+ * business.
  *
  * **The same call for a simulation and for a real caller's trace.** Nothing
  * here looks at `source`; a trace whose agent emits no timing spans simply
@@ -34,7 +35,9 @@ export function describedMetrics(
   detail: TraceDetail,
 ): readonly Record<string, unknown>[] {
   return measuresFromSpans(detail).map((measured) => {
-    const mean = meanOf(measured);
+    const mean = aggregateOf(measured, "mean");
+    const p50 = aggregateOf(measured, "p50");
+    const p90 = aggregateOf(measured, "p90");
     return {
       measure: measured.measure,
       unit: measured.unit,
@@ -48,10 +51,15 @@ export function describedMetrics(
         : {}),
       samples: measured.samples.map((sample) => sample.value),
       spanIds: measured.samples.map((sample) => sample.spanId),
-      // Unreachable fallback: a measure with no samples is absent from the
-      // module's answer rather than present and empty. Sent rather than
-      // assumed away, because the alternative is a client inventing a figure.
+      // The three reductions a page may lead with: the typical turn (median),
+      // the tail the caller feels (p90), and the average. Which one a surface
+      // shows is that surface's decision; the arithmetic is only here. The
+      // zero fallbacks are unreachable — a measure with no samples is absent
+      // from the module's answer — and sent rather than assumed away, because
+      // the alternative is a client inventing a figure.
       mean: mean ?? 0,
+      p50: p50 ?? 0,
+      p90: p90 ?? 0,
       partial: measured.origin === "reported" ? false : detail.truncated,
     };
   });

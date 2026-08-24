@@ -4576,6 +4576,8 @@ export type GetSimulationResponses = {
             samples: Array<number>;
             spanIds: Array<string>;
             mean: number;
+            p50: number;
+            p90: number;
             partial: boolean;
         }>;
         test: {
@@ -5814,6 +5816,8 @@ export type GetTraceResponses = {
             samples: Array<number>;
             spanIds: Array<string>;
             mean: number;
+            p50: number;
+            p90: number;
             partial: boolean;
         }>;
         simulationId: string | null;

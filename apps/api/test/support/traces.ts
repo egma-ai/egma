@@ -392,6 +392,8 @@ export type DetailMeasure = {
    * left for every reader to work out for itself.
    */
   readonly mean: number;
+  readonly p50: number;
+  readonly p90: number;
   /** True when the reading is a prefix, so the figure is of the part held. */
   readonly partial: boolean;
 };

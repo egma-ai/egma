@@ -269,10 +269,10 @@ export const FACTS = {
  * or red, because a duration is not good or bad until a grader has been asked.
  *
  * The numbers come off egma's one shared measure module — the same module a
- * `latency` grader is judged through — and the page leads with the average
- * turn, which is the question a developer opens the page with. The samples a
- * verdict was decided over are the same list this average was reduced from, so
- * the page can never be the reason somebody distrusts the judgment.
+ * `latency` grader is judged through — and the page leads with the p90 turn,
+ * because the slow tail is what a caller hangs up on. The samples a verdict
+ * was decided over are the same list this figure was reduced from, so the
+ * page can never be the reason somebody distrusts the judgment.
  *
  * A measure the spans do not carry is **absent** rather than shown as nothing:
  * an empty row would read as a measurement of zero, and a chat exchange has no
@@ -312,20 +312,21 @@ export const MEASURES = {
    * no caveat at all; where it came from stays on the record, not on the page.
    */
   derivedOne: "from your framework's timings",
-  /** One measurement is the number; several are the average of them. */
-  average: "average",
+  /** One measurement is the number; several are read at the p90 — the figure
+   * the slow tail of the call is felt in. */
+  p90: "p90",
   counted: (howMany: number): string =>
     howMany === 1 ? "1 measurement" : `${howMany} measurements`,
   /**
    * Said instead of the count when the reading is a prefix of a long exchange.
    *
-   * The average of the first part is not the average of the call — the turns
-   * past the cut moved it, and nobody holds them — so the figure is qualified
-   * rather than shown as though it were the whole. A count would be worse than
+   * The p90 of the first part is not the p90 of the call — the turns past the
+   * cut moved it, and nobody holds them — so the figure is qualified rather
+   * than shown as though it were the whole. A count would be worse than
    * useless here: it would say how many measurements arrived, which is not how
    * many there were.
    */
-  partialAverage: "average of the part Egma holds",
+  partialP90: "p90 of the part Egma holds",
 } as const;
 
 /**

@@ -1,4 +1,8 @@
-import { MEASURE_CATALOG, type CatalogedMeasure } from "./measures.ts";
+import {
+  MEASURE_CATALOG,
+  type CatalogedMeasure,
+  type MeasureAggregation,
+} from "./measures.ts";
 import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
 
 /**
@@ -274,27 +278,59 @@ export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
 }
 
 /**
- * The average of a measure's samples, rounded to the nearest whole unit.
+ * One of the catalog's eight reductions, computed over a measure's samples.
  *
- * **The number a person reads first.** The pages lead with the mean because a
- * conversation's typical speed is the question a developer opens the page
- * with; the worst turn stays the grader's business through `worstSampleOf`
- * above. The rounding happens here, once, so two surfaces printing one
- * conversation can never disagree in the last digit — every sample is already
- * in the catalog's own unit, and a fraction of a millisecond is beneath what
- * any of these measures can honestly claim.
+ * **The whole list, implemented in one place.** The catalog declares which
+ * reductions a threshold may ask of a measure; this switch is that list made
+ * runnable, exhaustively — a name joining `MEASURE_AGGREGATIONS` without a
+ * case here stops the build instead of shipping as a reduction that answers
+ * nothing. The surfaces choose what to show and the wire carries what a page
+ * needs; the arithmetic never lives anywhere else.
  *
- * The mean cites no single span — it is computed over all of them, and the
- * samples beside it carry the citations — so it is a number rather than a
- * `Sample`. `undefined` for a measure with no samples, which nothing this
- * module builds ever has, answered rather than assumed for `worstSampleOf`'s
- * exact reason.
+ * **Percentiles are nearest-rank**, exactly as the catalog states them: the
+ * p90 of ten measurements is the ninth of them, not an interpolation — a
+ * measurement that actually happened, findable in the transcript. The mean is
+ * rounded to the nearest whole unit here, once, so two surfaces printing one
+ * conversation can never disagree in the last digit; every other reduction
+ * answers a sample (or a sum of samples) verbatim.
+ *
+ * A reduction cites no single span — the samples beside it carry the
+ * citations — so it is a number rather than a `Sample`. `undefined` for a
+ * measure with no samples, which nothing this module builds ever has,
+ * answered rather than assumed for `worstSampleOf`'s exact reason.
  */
-export function meanOf(measured: MeasuredFromSpans): number | undefined {
-  if (measured.samples.length === 0) return undefined;
-  let sum = 0;
-  for (const sample of measured.samples) sum += sample.value;
-  return Math.round(sum / measured.samples.length);
+export function aggregateOf(
+  measured: MeasuredFromSpans,
+  aggregation: MeasureAggregation,
+): number | undefined {
+  const values = measured.samples.map((sample) => sample.value);
+  if (values.length === 0) return undefined;
+  switch (aggregation) {
+    case "mean":
+      return Math.round(values.reduce((sum, one) => sum + one, 0) / values.length);
+    case "sum":
+      return values.reduce((sum, one) => sum + one, 0);
+    case "min":
+      return Math.min(...values);
+    case "max":
+      return Math.max(...values);
+    case "p50":
+      return nearestRank(values, 50);
+    case "p90":
+      return nearestRank(values, 90);
+    case "p95":
+      return nearestRank(values, 95);
+    case "p99":
+      return nearestRank(values, 99);
+  }
+}
+
+/** The nearest-rank percentile: the value at rank ⌈p/100 × n⌉ of the sorted
+ * samples, so the answer is a measurement that actually happened. */
+function nearestRank(values: readonly number[], percentile: number): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const rank = Math.max(1, Math.ceil((percentile / 100) * sorted.length));
+  return sorted[rank - 1] as number;
 }
 
 /**
