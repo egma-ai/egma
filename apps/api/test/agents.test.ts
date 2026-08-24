@@ -1538,9 +1538,9 @@ describe("the vendor payload egma no longer keeps", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "projectId, connection; the agent's content stays at the " +
-        "provider, where Egma reads it fresh rather than out of a copy that " +
-        "would go stale.",
+        "projectId, agentPlatform, connection; the agent's content stays at " +
+        "the provider, where Egma reads it fresh rather than out of a copy " +
+        "that would go stale.",
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -1587,7 +1587,7 @@ describe("the vendor payload egma no longer keeps", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a registration has no key "organization"; it holds name, projectId, connection',
+        'a registration has no key "organization"; it holds name, projectId, agentPlatform, connection',
     });
   });
 

@@ -385,17 +385,31 @@ describe("what lands on the platform", () => {
     expect(connected?.reach).toBe("phone");
     expect(platform.registered.connections[0]?.modality).toBe("voice");
 
-    // None of it went to egma. The agent it just registered holds no trace of
-    // what the provider is running.
+    // None of it went to egma. The agent it just registered holds its identity
+    // and the monitoring half it owns (ADR-0015) — a binding, a sealed key and
+    // a switch, all empty here — and nothing at all about what the provider is
+    // running: no prompt, no voice, no tools.
     const [agent] = platform.registered.agents;
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
+      "agentPlatform",
       "createdAt",
       "id",
+      "lastReceivedAt",
+      "monitoringApiKey",
+      "monitoringApiKeyHint",
       "name",
+      "platformAgentId",
       "projectId",
+      "pullProductionCalls",
       "updatedAt",
     ]);
+    expect(agent).toMatchObject({
+      agentPlatform: null,
+      platformAgentId: null,
+      monitoringApiKey: null,
+      pullProductionCalls: false,
+    });
   });
 
   /**
@@ -431,9 +445,9 @@ describe("what lands on the platform", () => {
       message:
         "Egma no longer keeps what was pulled from the provider, so a " +
         'registration has no "pulled" key. Drop it and send name, ' +
-        "projectId, connection; the agent's content stays at the " +
-        "provider, where Egma reads it fresh rather than out of a copy that " +
-        "would go stale.",
+        "projectId, agentPlatform, connection; the agent's content stays at " +
+        "the provider, where Egma reads it fresh rather than out of a copy " +
+        "that would go stale.",
     });
     expect(platform.registered.agents).toHaveLength(0);
   });
