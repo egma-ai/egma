@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -516,7 +516,7 @@ export const revokeApiKey = <ThrowOnError extends boolean = false>(parameters: {
 };
 
 /**
- * List grader library entries
+ * List the grader library for a project
  */
 export const listGraderLibrary = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
@@ -532,6 +532,128 @@ export const listGraderLibrary = <ThrowOnError extends boolean = false>(paramete
         url: '/v1/grader-library',
         ...options,
         ...params
+    });
+};
+
+/**
+ * Get one grader library entry
+ */
+export const getGraderLibraryEntry = <ThrowOnError extends boolean = false>(parameters: {
+    graderDefinitionId: string;
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<GetGraderLibraryEntryResponses, GetGraderLibraryEntryErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'graderDefinitionId' }, { in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).get<GetGraderLibraryEntryResponses, GetGraderLibraryEntryErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/grader-library/{graderDefinitionId}',
+        ...options,
+        ...params
+    });
+};
+
+/**
+ * Use a grader in the current project
+ */
+export const useGraderInProject = <ThrowOnError extends boolean = false>(parameters: {
+    graderDefinitionId: string;
+    projectId?: string;
+    scope: {
+        simulations: Array<{
+            kind: 'all';
+        } | {
+            kind: 'test_suite';
+            id: string;
+        } | {
+            kind: 'test';
+            id: string;
+        }>;
+        production: {
+            samplePercent: number;
+        } | null;
+    };
+    settings: {
+        [key: string]: unknown;
+    };
+    passThreshold: number;
+}, options?: Options<never, ThrowOnError>): RequestResult<UseGraderInProjectResponses, UseGraderInProjectErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'graderDefinitionId' },
+                { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'scope' },
+                { in: 'body', key: 'settings' },
+                { in: 'body', key: 'passThreshold' }
+            ] }]);
+    return (options?.client ?? client).post<UseGraderInProjectResponses, UseGraderInProjectErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/grader-library/{graderDefinitionId}/use',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
+    });
+};
+
+/**
+ * Create and use a custom LLM grader
+ *
+ * Creates one organization-owned LLM judge and its current-project policy. The server fixes its type, model, output contract, and empty settings contract.
+ */
+export const createCustomGrader = <ThrowOnError extends boolean = false>(parameters: {
+    projectId?: string;
+    name: string;
+    description?: string | null;
+    gradingInstructions: string;
+    modalities: Array<'chat' | 'voice'>;
+    scope: {
+        simulations: Array<{
+            kind: 'all';
+        } | {
+            kind: 'test_suite';
+            id: string;
+        } | {
+            kind: 'test';
+            id: string;
+        }>;
+        production: {
+            samplePercent: number;
+        } | null;
+    };
+    passThreshold: number;
+}, options?: Options<never, ThrowOnError>): RequestResult<CreateCustomGraderResponses, CreateCustomGraderErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'name' },
+                { in: 'body', key: 'description' },
+                { in: 'body', key: 'gradingInstructions' },
+                { in: 'body', key: 'modalities' },
+                { in: 'body', key: 'scope' },
+                { in: 'body', key: 'passThreshold' }
+            ] }]);
+    return (options?.client ?? client).post<CreateCustomGraderResponses, CreateCustomGraderErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/grader-library/custom',
+        ...options,
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
     });
 };
 
@@ -556,16 +678,55 @@ export const listGraders = <ThrowOnError extends boolean = false>(parameters?: {
 };
 
 /**
- * Update a project grader's pass threshold
+ * Remove an optional grader from a project
+ */
+export const removeGrader = <ThrowOnError extends boolean = false>(parameters: {
+    graderId: string;
+    projectId?: string;
+}, options?: Options<never, ThrowOnError>): RequestResult<RemoveGraderResponses, RemoveGraderErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'graderId' }, { in: 'query', key: 'projectId' }] }]);
+    return (options?.client ?? client).delete<RemoveGraderResponses, RemoveGraderErrors, ThrowOnError>({
+        security: [{ scheme: 'bearer', type: 'http' }, {
+                in: 'cookie',
+                name: 'egma.session_token',
+                type: 'apiKey'
+            }],
+        url: '/v1/graders/{graderId}',
+        ...options,
+        ...params
+    });
+};
+
+/**
+ * Update a project grader's policy
  */
 export const updateGrader = <ThrowOnError extends boolean = false>(parameters: {
     graderId: string;
     projectId?: string;
-    passThreshold: number;
+    scope?: {
+        simulations: Array<{
+            kind: 'all';
+        } | {
+            kind: 'test_suite';
+            id: string;
+        } | {
+            kind: 'test';
+            id: string;
+        }>;
+        production: {
+            samplePercent: number;
+        } | null;
+    };
+    settings?: {
+        [key: string]: unknown;
+    };
+    passThreshold?: number;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateGraderResponses, UpdateGraderErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'graderId' },
                 { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'scope' },
+                { in: 'body', key: 'settings' },
                 { in: 'body', key: 'passThreshold' }
             ] }]);
     return (options?.client ?? client).patch<UpdateGraderResponses, UpdateGraderErrors, ThrowOnError>({

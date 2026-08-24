@@ -121,6 +121,7 @@ async function resultOf(
   try {
     const result = await execute({
       definition: entry.definition,
+      parameterValues: entry.parameterValues,
       conversation,
       judging: { judge: judges.get(entry.projectGraderId) ?? null },
       reading,

@@ -5,8 +5,10 @@ import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { db, type Queryable } from "../client.ts";
 import {
   GRADER_DEFINITION_CATALOG,
+  type GraderOutputContract,
   type PredefinedGraderDefinition,
 } from "../grader-library/catalog.ts";
+import type { GraderParameter } from "../grader-library/parameters.ts";
 import {
   snapshotGraderDefinition,
   type GraderDefinitionSnapshot,
@@ -14,7 +16,9 @@ import {
 import {
   graderDefinition,
   graderDefinitionVersion,
+  projectGrader,
   type GraderDefinitionType,
+  type GraderModality,
 } from "../schema/graders.ts";
 import type { AuthContext } from "./context.ts";
 import { authorize, here } from "./permissions.ts";
@@ -25,15 +29,19 @@ import {
 
 const RECONCILING_GRADER_CATALOG = "egma:reconcile-grader-catalog";
 
-export type GraderDefinition = {
+export type GraderLibraryEntry = {
   readonly id: string;
-  readonly projectId: string | null;
   readonly name: string;
   readonly description: string | null;
-  readonly type: GraderDefinitionType;
+  readonly owner: "egma" | "organization";
   readonly scopeEditable: boolean;
   readonly currentDefinitionVersion: number;
-  readonly owner: "egma" | "customer";
+  readonly type: GraderDefinitionType;
+  readonly gradingInstructions: string | null;
+  readonly parameterContract: readonly GraderParameter[];
+  readonly outputContract: GraderOutputContract | null;
+  readonly modalities: readonly GraderModality[];
+  readonly activeProjectGraderId: string | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 };
@@ -52,86 +60,130 @@ export type ReconciledGraderCatalog = {
 const DEFINITION_COLUMNS = {
   id: graderDefinition.id,
   organizationId: graderDefinition.organizationId,
-  projectId: graderDefinition.projectId,
   name: graderDefinition.name,
   description: graderDefinition.description,
-  type: graderDefinition.type,
   scopeEditable: graderDefinition.scopeEditable,
   currentDefinitionVersion: graderDefinition.currentDefinitionVersion,
   createdAt: graderDefinition.createdAt,
   updatedAt: graderDefinition.updatedAt,
 } as const;
 
-function definitionFromRow(
-  row: typeof graderDefinition.$inferSelect,
-): GraderDefinition {
+const VERSION_COLUMNS = {
+  definitionId: graderDefinitionVersion.definitionId,
+  version: graderDefinitionVersion.version,
+  type: graderDefinitionVersion.type,
+  prompt: graderDefinitionVersion.prompt,
+  parameterContract: graderDefinitionVersion.parameterContract,
+  outputContract: graderDefinitionVersion.outputContract,
+  modalities: graderDefinitionVersion.modalities,
+  judgeModel: graderDefinitionVersion.judgeModel,
+} as const;
+
+const LIBRARY_COLUMNS = {
+  ...DEFINITION_COLUMNS,
+  ...VERSION_COLUMNS,
+  activeProjectGraderId: projectGrader.id,
+} as const;
+
+function visibleDefinition(auth: AuthContext) {
+  return or(
+    isNull(graderDefinition.organizationId),
+    eq(graderDefinition.organizationId, auth.organizationId),
+  );
+}
+
+function activeInProject(auth: AuthContext) {
+  return and(
+    eq(projectGrader.graderDefinitionId, graderDefinition.id),
+    eq(projectGrader.organizationId, auth.organizationId),
+    auth.projectId === undefined
+      ? sql`false`
+      : eq(projectGrader.projectId, auth.projectId),
+    isNull(projectGrader.archivedAt),
+  );
+}
+
+function libraryEntryFromRow(row: {
+  readonly id: string;
+  readonly organizationId: string | null;
+  readonly name: string;
+  readonly description: string | null;
+  readonly scopeEditable: boolean;
+  readonly currentDefinitionVersion: number;
+  readonly definitionId: string;
+  readonly version: number;
+  readonly type: string;
+  readonly prompt: string | null;
+  readonly parameterContract: unknown;
+  readonly outputContract: unknown;
+  readonly modalities: unknown;
+  readonly judgeModel: unknown;
+  readonly activeProjectGraderId: string | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}): GraderLibraryEntry {
+  const version = snapshotGraderDefinition(row);
   return {
     id: row.id,
-    projectId: row.projectId,
     name: row.name,
     description: row.description,
-    type: row.type as GraderDefinitionType,
+    owner: row.organizationId === null ? "egma" : "organization",
     scopeEditable: row.scopeEditable,
     currentDefinitionVersion: row.currentDefinitionVersion,
-    owner: row.organizationId === null ? "egma" : "customer",
+    type: version.type,
+    gradingInstructions: version.prompt,
+    parameterContract: version.parameterContract,
+    outputContract: version.outputContract,
+    modalities: version.modalities,
+    activeProjectGraderId: row.activeProjectGraderId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-function visibleDefinition(auth: AuthContext) {
-  return and(
-    or(
-      isNull(graderDefinition.organizationId),
-      eq(graderDefinition.organizationId, auth.organizationId),
-    ),
-    auth.projectId === undefined
-      ? undefined
-      : or(
-          isNull(graderDefinition.projectId),
-          eq(graderDefinition.projectId, auth.projectId),
+function libraryQuery(auth: AuthContext) {
+  return db()
+    .select(LIBRARY_COLUMNS)
+    .from(graderDefinition)
+    .innerJoin(
+      graderDefinitionVersion,
+      and(
+        eq(graderDefinitionVersion.definitionId, graderDefinition.id),
+        eq(
+          graderDefinitionVersion.version,
+          graderDefinition.currentDefinitionVersion,
         ),
-  );
+      ),
+    )
+    .leftJoin(projectGrader, activeInProject(auth));
 }
 
-export async function listGraderDefinitions(
+/** List the shared Egma library plus this organization's own definitions. */
+export async function listGraderLibrary(
   auth: AuthContext,
-): Promise<readonly GraderDefinition[]> {
+): Promise<readonly GraderLibraryEntry[]> {
   authorize(auth, "read", here(auth));
-  const rows = await db()
-    .select(DEFINITION_COLUMNS)
-    .from(graderDefinition)
+  const rows = await libraryQuery(auth)
     .where(visibleDefinition(auth))
     .orderBy(asc(graderDefinition.name), asc(graderDefinition.id));
-  return rows.map((row) => definitionFromRow(row));
+  return rows.map(libraryEntryFromRow);
 }
 
-export async function getGraderDefinition(
+/** Read one visible library definition at its current immutable version. */
+export async function getGraderLibraryEntry(
   auth: AuthContext,
-  id: string,
-): Promise<GraderDefinition | undefined> {
+  definitionId: string,
+): Promise<GraderLibraryEntry | undefined> {
   authorize(auth, "read", here(auth));
-  const [row] = await db()
-    .select(DEFINITION_COLUMNS)
-    .from(graderDefinition)
-    .where(and(eq(graderDefinition.id, id), visibleDefinition(auth)))
+  const [row] = await libraryQuery(auth)
+    .where(
+      and(eq(graderDefinition.id, definitionId), visibleDefinition(auth)),
+    )
     .limit(1);
-  return row === undefined ? undefined : definitionFromRow(row);
+  return row === undefined ? undefined : libraryEntryFromRow(row);
 }
 
-const VERSION_COLUMNS = {
-  definitionId: graderDefinitionVersion.definitionId,
-  version: graderDefinitionVersion.version,
-  type: graderDefinition.type,
-  prompt: graderDefinitionVersion.prompt,
-  parameterContract: graderDefinitionVersion.parameterContract,
-  outputContract: graderDefinitionVersion.outputContract,
-  sourceCode: graderDefinitionVersion.sourceCode,
-  sourceCodeLanguage: graderDefinitionVersion.sourceCodeLanguage,
-  modalities: graderDefinitionVersion.modalities,
-  judgeModel: graderDefinitionVersion.judgeModel,
-} as const;
-
+/** Read one exact immutable version for a visible definition. */
 export async function getGraderDefinitionVersion(
   auth: AuthContext,
   definitionId: string,
@@ -158,11 +210,10 @@ export async function getGraderDefinitionVersion(
 
 function catalogVersion(entry: PredefinedGraderDefinition) {
   return {
+    type: entry.type,
     prompt: entry.prompt,
     parameterContract: entry.parameterContract,
     outputContract: entry.outputContract,
-    sourceCode: entry.sourceCode,
-    sourceCodeLanguage: entry.sourceCodeLanguage,
     modalities: entry.modalities,
     judgeModel: entry.judgeModel,
   };
@@ -176,10 +227,7 @@ async function reconcileDefinitions(
 
   for (const entry of catalog) {
     const [installed] = await on
-      .select({
-        ...DEFINITION_COLUMNS,
-        ...VERSION_COLUMNS,
-      })
+      .select({ ...DEFINITION_COLUMNS, ...VERSION_COLUMNS })
       .from(graderDefinition)
       .leftJoin(
         graderDefinitionVersion,
@@ -200,10 +248,8 @@ async function reconcileDefinitions(
       await on.insert(graderDefinition).values({
         id: entry.id,
         organizationId: null,
-        projectId: null,
         name: entry.name,
         description: entry.description,
-        type: entry.type,
         scopeEditable: entry.scopeEditable,
         currentDefinitionVersion: 1,
         createdAt: entry.createdAt,
@@ -219,13 +265,8 @@ async function reconcileDefinitions(
       continue;
     }
 
-    if (installed.organizationId !== null || installed.projectId !== null) {
-      throw new Error(`catalog identity ${entry.id} is customer-owned`);
-    }
-    if (installed.type !== entry.type) {
-      throw new Error(
-        `catalog definition ${entry.id} cannot change type; use a new definition identity`,
-      );
+    if (installed.organizationId !== null) {
+      throw new Error(`catalog identity ${entry.id} is organization-owned`);
     }
     if (installed.version === null) {
       throw new Error(
@@ -234,11 +275,10 @@ async function reconcileDefinitions(
     }
 
     const held = {
+      type: installed.type,
       prompt: installed.prompt,
       parameterContract: installed.parameterContract,
       outputContract: installed.outputContract,
-      sourceCode: installed.sourceCode,
-      sourceCodeLanguage: installed.sourceCodeLanguage,
       modalities: installed.modalities,
       judgeModel: installed.judgeModel,
     };

@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 76 current operations", () => {
+  it("contains one unique definition for each of the 78 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(76);
+    expect(operations).toHaveLength(78);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
@@ -67,22 +67,38 @@ describe("the platform API operation registry", () => {
       .toBe(operations.length);
   });
 
-  it("exposes project graders without an Add or Remove door", () => {
+  it("activates library definitions instead of creating project-owned copies", () => {
     expect(platformOperations).not.toHaveProperty("createGrader");
     expect(platformOperations).not.toHaveProperty("deleteGrader");
     expect(operationKeys()).not.toContain("POST /v1/graders createGrader");
-    expect(operationKeys()).not.toContain(
-      "DELETE /v1/graders/{graderId} deleteGrader",
+    expect(operationKeys()).toContain(
+      "POST /v1/grader-library/{graderDefinitionId}/use useGraderInProject",
     );
+    expect(operationKeys()).toContain(
+      "DELETE /v1/graders/{graderId} removeGrader",
+    );
+    expect(operationKeys()).not.toContain(
+      "POST /v1/grader-library authorPredefinedGrader",
+    );
+    expect(
+      platformOperations.createCustomGrader.request.body.properties,
+    ).not.toHaveProperty("type");
+    expect(
+      platformOperations.createCustomGrader.request.body.properties,
+    ).not.toHaveProperty("sourceCode");
   });
 
-  it("lets a customer change only one project grader's pass threshold", () => {
+  it("lets a customer change one project grader's policy", () => {
     expect(platformOperations.updateGrader.request.body).toEqual({
       type: "object",
       properties: {
+        scope:
+          platformOperations.listGraders.responses[200].schema.properties.graders
+            .items.properties.scope,
+        settings: { type: "object", additionalProperties: true },
         passThreshold: { type: "number", minimum: 0, maximum: 1 },
       },
-      required: ["passThreshold"],
+      minProperties: 1,
       additionalProperties: false,
     });
   });
@@ -97,11 +113,16 @@ describe("the platform API operation registry", () => {
         "description",
         "graderDefinitionId",
         "id",
+        "modalities",
         "name",
+        "owner",
         "passThreshold",
         "projectId",
+        "removable",
         "scope",
         "scopeEditable",
+        "settings",
+        "type",
         "updatedAt",
       ].sort(),
     );
@@ -158,7 +179,7 @@ describe("the platform API operation registry", () => {
     });
   });
 
-  it("lists stable grader definitions without the retired activation form", () => {
+  it("lists stable definitions with details and current-project use state", () => {
     const definition =
       platformOperations.listGraderLibrary.responses[200].schema.properties
         .graderLibraryEntries.items;
@@ -168,11 +189,15 @@ describe("the platform API operation registry", () => {
         "createdAt",
         "currentDefinitionVersion",
         "description",
+        "activeProjectGraderId",
+        "gradingInstructions",
         "id",
+        "modalities",
         "name",
         "owner",
-        "projectId",
+        "requiredEvidence",
         "scopeEditable",
+        "settingDefinitions",
         "type",
         "updatedAt",
       ].sort(),
@@ -180,6 +205,9 @@ describe("the platform API operation registry", () => {
     expect(definition.properties).not.toHaveProperty("params");
     expect(definition.properties).not.toHaveProperty("outputDefinition");
     expect(definition.properties).not.toHaveProperty("prompt");
+    expect(definition.properties.type.enum).toEqual(["llm_as_judge", "code"]);
+    expect(definition.properties.settingDefinitions.items.properties.valueType)
+      .toEqual({ type: "string", enum: ["integer"] });
   });
 
   it("generates exactly the same method, path, and operation ID set", () => {

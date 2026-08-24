@@ -9,6 +9,7 @@ import type {
 export type ExecutableProjectGrader = {
   readonly projectGraderId: string;
   readonly passThreshold: number;
+  readonly parameterValues: Readonly<Record<string, unknown>>;
   readonly definition: GraderDefinitionSnapshot;
 };
 
@@ -18,8 +19,9 @@ export type PlanItem = {
   readonly graderDefinitionId: string;
   readonly graderDefinitionVersion: number;
   readonly graderName: string;
-  readonly graderType: string;
+  readonly type: string;
   readonly passThreshold: number;
+  readonly parameterValues: Readonly<Record<string, unknown>>;
 };
 
 export type PlanGroup = {
@@ -75,8 +77,9 @@ function itemFrom(candidate: ProjectGraderCandidate): PlanItem {
     graderDefinitionId: candidate.definition.definitionId,
     graderDefinitionVersion: candidate.definition.definitionVersion,
     graderName: candidate.graderName,
-    graderType: candidate.definition.type,
+    type: candidate.definition.type,
     passThreshold: candidate.passThreshold,
+    parameterValues: candidate.parameterValues,
   };
 }
 

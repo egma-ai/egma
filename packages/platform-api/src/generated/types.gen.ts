@@ -1321,6 +1321,14 @@ export type ListGraderLibraryErrors = {
      */
     403: Refusal;
     /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
      * The request rate limit was reached.
      */
     429: Refusal;
@@ -1330,18 +1338,30 @@ export type ListGraderLibraryError = ListGraderLibraryErrors[keyof ListGraderLib
 
 export type ListGraderLibraryResponses = {
     /**
-     * Grader library entries.
+     * Grader definitions visible to the organization, with current-project use state.
      */
     200: {
         graderLibraryEntries: Array<{
             id: string;
             name: string;
             description: string | null;
+            owner: 'egma' | 'organization';
             type: 'llm_as_judge' | 'code';
-            owner: 'egma' | 'customer';
-            projectId: string | null;
             scopeEditable: boolean;
             currentDefinitionVersion: number;
+            modalities: Array<'chat' | 'voice'>;
+            gradingInstructions: string | null;
+            requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+            settingDefinitions: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer';
+                defaultValue: number;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            activeProjectGraderId: string | null;
             createdAt: string;
             updatedAt: string;
         }>;
@@ -1350,6 +1370,309 @@ export type ListGraderLibraryResponses = {
 };
 
 export type ListGraderLibraryResponse = ListGraderLibraryResponses[keyof ListGraderLibraryResponses];
+
+export type GetGraderLibraryEntryData = {
+    body?: never;
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}';
+};
+
+export type GetGraderLibraryEntryErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type GetGraderLibraryEntryError = GetGraderLibraryEntryErrors[keyof GetGraderLibraryEntryErrors];
+
+export type GetGraderLibraryEntryResponses = {
+    /**
+     * The grader definition and its current-project use state.
+     */
+    200: {
+        id: string;
+        name: string;
+        description: string | null;
+        owner: 'egma' | 'organization';
+        type: 'llm_as_judge' | 'code';
+        scopeEditable: boolean;
+        currentDefinitionVersion: number;
+        modalities: Array<'chat' | 'voice'>;
+        gradingInstructions: string | null;
+        requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+        settingDefinitions: Array<{
+            key: string;
+            label: string;
+            valueType: 'integer';
+            defaultValue: number;
+            unit: string | null;
+            minimum: number | null;
+            maximum: number | null;
+        }>;
+        activeProjectGraderId: string | null;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type GetGraderLibraryEntryResponse = GetGraderLibraryEntryResponses[keyof GetGraderLibraryEntryResponses];
+
+export type UseGraderInProjectData = {
+    body: {
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings: {
+            [key: string]: unknown;
+        };
+        passThreshold: number;
+    };
+    path: {
+        graderDefinitionId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/{graderDefinitionId}/use';
+};
+
+export type UseGraderInProjectErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type UseGraderInProjectError = UseGraderInProjectErrors[keyof UseGraderInProjectErrors];
+
+export type UseGraderInProjectResponses = {
+    /**
+     * The new current-project grader policy.
+     */
+    201: {
+        id: string;
+        projectId: string;
+        graderDefinitionId: string;
+        name: string;
+        description: string | null;
+        owner: 'egma' | 'organization';
+        type: 'llm_as_judge' | 'code';
+        modalities: Array<'chat' | 'voice'>;
+        scopeEditable: boolean;
+        removable: boolean;
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings: {
+            [key: string]: unknown;
+        };
+        passThreshold: number;
+        createdAt: string;
+        updatedAt: string;
+    };
+};
+
+export type UseGraderInProjectResponse = UseGraderInProjectResponses[keyof UseGraderInProjectResponses];
+
+export type CreateCustomGraderData = {
+    body: {
+        name: string;
+        description?: string | null;
+        gradingInstructions: string;
+        modalities: Array<'chat' | 'voice'>;
+        scope: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        passThreshold: number;
+    };
+    path?: never;
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/grader-library/custom';
+};
+
+export type CreateCustomGraderErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type CreateCustomGraderError = CreateCustomGraderErrors[keyof CreateCustomGraderErrors];
+
+export type CreateCustomGraderResponses = {
+    /**
+     * The custom definition and its current-project policy.
+     */
+    201: {
+        definition: {
+            id: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'organization';
+            type: 'llm_as_judge' | 'code';
+            scopeEditable: boolean;
+            currentDefinitionVersion: number;
+            modalities: Array<'chat' | 'voice'>;
+            gradingInstructions: string | null;
+            requiredEvidence: Array<'transcript' | 'ending_outcome' | 'tool_calls' | 'observed_metrics' | 'test_expected_behaviors' | 'turn_response_latency'>;
+            settingDefinitions: Array<{
+                key: string;
+                label: string;
+                valueType: 'integer';
+                defaultValue: number;
+                unit: string | null;
+                minimum: number | null;
+                maximum: number | null;
+            }>;
+            activeProjectGraderId: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        grader: {
+            id: string;
+            projectId: string;
+            graderDefinitionId: string;
+            name: string;
+            description: string | null;
+            owner: 'egma' | 'organization';
+            type: 'llm_as_judge' | 'code';
+            modalities: Array<'chat' | 'voice'>;
+            scopeEditable: boolean;
+            removable: boolean;
+            scope: {
+                simulations: Array<{
+                    kind: 'all';
+                } | {
+                    kind: 'test_suite';
+                    id: string;
+                } | {
+                    kind: 'test';
+                    id: string;
+                }>;
+                production: {
+                    samplePercent: number;
+                } | null;
+            };
+            settings: {
+                [key: string]: unknown;
+            };
+            passThreshold: number;
+            createdAt: string;
+            updatedAt: string;
+        };
+    };
+};
+
+export type CreateCustomGraderResponse = CreateCustomGraderResponses[keyof CreateCustomGraderResponses];
 
 export type ListGradersData = {
     body?: never;
@@ -1384,7 +1707,7 @@ export type ListGradersError = ListGradersErrors[keyof ListGradersErrors];
 
 export type ListGradersResponses = {
     /**
-     * Project graders, newest first.
+     * Project graders, ordered by name.
      */
     200: {
         graders: Array<{
@@ -1393,7 +1716,11 @@ export type ListGradersResponses = {
             graderDefinitionId: string;
             name: string;
             description: string | null;
+            owner: 'egma' | 'organization';
+            type: 'llm_as_judge' | 'code';
+            modalities: Array<'chat' | 'voice'>;
             scopeEditable: boolean;
+            removable: boolean;
             scope: {
                 simulations: Array<{
                     kind: 'all';
@@ -1408,6 +1735,9 @@ export type ListGradersResponses = {
                     samplePercent: number;
                 } | null;
             };
+            settings: {
+                [key: string]: unknown;
+            };
             passThreshold: number;
             createdAt: string;
             updatedAt: string;
@@ -1418,9 +1748,75 @@ export type ListGradersResponses = {
 
 export type ListGradersResponse = ListGradersResponses[keyof ListGradersResponses];
 
+export type RemoveGraderData = {
+    body?: never;
+    path: {
+        graderId: string;
+    };
+    query?: {
+        projectId?: string;
+    };
+    url: '/v1/graders/{graderId}';
+};
+
+export type RemoveGraderErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type RemoveGraderError = RemoveGraderErrors[keyof RemoveGraderErrors];
+
+export type RemoveGraderResponses = {
+    /**
+     * The optional project grader was removed.
+     */
+    204: void;
+};
+
+export type RemoveGraderResponse = RemoveGraderResponses[keyof RemoveGraderResponses];
+
 export type UpdateGraderData = {
     body: {
-        passThreshold: number;
+        scope?: {
+            simulations: Array<{
+                kind: 'all';
+            } | {
+                kind: 'test_suite';
+                id: string;
+            } | {
+                kind: 'test';
+                id: string;
+            }>;
+            production: {
+                samplePercent: number;
+            } | null;
+        };
+        settings?: {
+            [key: string]: unknown;
+        };
+        passThreshold?: number;
     };
     path: {
         graderId: string;
@@ -1470,7 +1866,11 @@ export type UpdateGraderResponses = {
         graderDefinitionId: string;
         name: string;
         description: string | null;
+        owner: 'egma' | 'organization';
+        type: 'llm_as_judge' | 'code';
+        modalities: Array<'chat' | 'voice'>;
         scopeEditable: boolean;
+        removable: boolean;
         scope: {
             simulations: Array<{
                 kind: 'all';
@@ -1484,6 +1884,9 @@ export type UpdateGraderResponses = {
             production: {
                 samplePercent: number;
             } | null;
+        };
+        settings: {
+            [key: string]: unknown;
         };
         passThreshold: number;
         createdAt: string;

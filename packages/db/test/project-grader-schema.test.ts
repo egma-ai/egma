@@ -51,15 +51,15 @@ describe("the project grader records", () => {
     await connection.sql("begin");
     await connection.sql(
       `insert into grader_definition
-         (id, name, type, scope_editable, current_definition_version)
-       values ($1, 'Expected behaviors fixture', 'llm_as_judge', false, 1)`,
+         (id, name, scope_editable, current_definition_version)
+       values ($1, 'Expected behaviors fixture', false, 1)`,
       [definitionId],
     );
     await connection.sql(
       `insert into grader_definition_version
-         (definition_id, version, prompt, parameter_contract,
+         (definition_id, version, type, prompt, parameter_contract,
           output_contract, modalities, judge_model)
-       values ($1, 1, 'Grade it', '[]'::jsonb, '{}'::jsonb,
+       values ($1, 1, 'llm_as_judge', 'Grade it', '[]'::jsonb, '{}'::jsonb,
                '["chat", "voice"]'::jsonb,
                '{"provider":"openai","model":"gpt-5"}'::jsonb)`,
       [definitionId],

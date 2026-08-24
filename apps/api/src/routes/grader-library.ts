@@ -1,8 +1,16 @@
 import {
-  listGraderDefinitions,
+  authorize,
+  createCustomLlmGrader,
+  getGraderLibraryEntry,
+  listGraderLibrary,
   NotPermittedError,
+  PREDEFINED_GRADERS,
   UnprocessableInputError,
-  type GraderDefinition,
+  useGraderInProject,
+  type GraderLibraryEntry,
+  type GraderModality,
+  type ProjectGrader,
+  type ProjectGraderScope,
 } from "@egma/db";
 import { isId } from "@egma/ids";
 import { graderLibraryOperations } from "@egma/platform-api/contract";
@@ -12,15 +20,22 @@ import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing } from "../http/acting.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
-import { invalid, notPermitted, unprocessable } from "../http/refusals.ts";
+import {
+  invalid,
+  notFound,
+  notPermitted,
+  unprocessable,
+} from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
-import { given } from "../http/reading.ts";
+import { given, text } from "../http/reading.ts";
 
 /**
- * The shared grader-definition library.
+ * The organization-visible grader library and the two ways a definition enters
+ * the current project.
  *
- * This read exposes identity and ownership. Executable prompts, source code,
- * model choices, and output contracts stay inside the trusted grader service.
+ * Egma definitions are installed from the backend catalog. No route here can
+ * author one. A customer can use a visible definition, or create one custom
+ * LLM definition whose type, model and output contract are fixed by the server.
  */
 
 export type GraderLibraryRoutesOptions = {
@@ -33,28 +48,109 @@ type Query = {
   readonly pageToken?: string;
 };
 
-const PAGE_SIZE = 100;
+type Body = Record<string, unknown>;
 
-function described(entry: GraderDefinition): Record<string, unknown> {
+const PAGE_SIZE = 100;
+const MODALITIES = ["chat", "voice"] as const;
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unknownKey(
+  value: Body,
+  allowed: readonly string[],
+  noun: string,
+): string | undefined {
+  const key = Object.keys(value).find((one) => !allowed.includes(one));
+  return key === undefined ? undefined : `${noun} has no key "${key}"`;
+}
+
+function scopeForDb(value: unknown): unknown {
+  if (!isObject(value)) return value;
+  const production = value.production;
+  if (!isObject(production)) return value;
+  const { samplePercent, ...unknown } = production;
+  return {
+    ...value,
+    production: { ...unknown, sample_percent: samplePercent },
+  };
+}
+
+function scopeForApi(scope: ProjectGraderScope): Record<string, unknown> {
+  return {
+    simulations: scope.simulations,
+    production:
+      scope.production === null
+        ? null
+        : { samplePercent: scope.production.sample_percent },
+  };
+}
+
+function requiredEvidence(
+  entry: Pick<GraderLibraryEntry, "id" | "type">,
+): readonly string[] {
+  if (entry.id === PREDEFINED_GRADERS.expectedBehaviors) {
+    return ["transcript", "test_expected_behaviors"];
+  }
+  if (entry.id === PREDEFINED_GRADERS.responseLatency) {
+    return ["turn_response_latency"];
+  }
+  return entry.type === "llm_as_judge"
+    ? ["transcript", "ending_outcome", "tool_calls", "observed_metrics"]
+    : [];
+}
+
+function describedLibraryEntry(
+  entry: GraderLibraryEntry,
+  activeProjectGraderId = entry.activeProjectGraderId,
+): Record<string, unknown> {
   return {
     id: entry.id,
     name: entry.name,
     description: entry.description,
-    type: entry.type,
     owner: entry.owner,
-    projectId: entry.projectId,
+    type: entry.type,
     scopeEditable: entry.scopeEditable,
     currentDefinitionVersion: entry.currentDefinitionVersion,
+    modalities: entry.modalities,
+    // Egma-owned prompts and trusted implementation details are not an
+    // authoring surface. Organization-owned instructions are the customer's.
+    gradingInstructions:
+      entry.owner === "organization" ? entry.gradingInstructions : null,
+    requiredEvidence: requiredEvidence(entry),
+    settingDefinitions: entry.parameterContract,
+    activeProjectGraderId,
     createdAt: entry.createdAt.toISOString(),
     updatedAt: entry.updatedAt.toISOString(),
   };
 }
 
+function describedProjectGrader(one: ProjectGrader): Record<string, unknown> {
+  return {
+    id: one.id,
+    projectId: one.projectId,
+    graderDefinitionId: one.graderDefinitionId,
+    name: one.name,
+    description: one.description,
+    owner: one.owner,
+    type: one.type,
+    modalities: one.modalities,
+    scopeEditable: one.scopeEditable,
+    removable: one.graderDefinitionId !== PREDEFINED_GRADERS.expectedBehaviors,
+    scope: scopeForApi(one.scope),
+    settings: one.parameterValues,
+    passThreshold: one.passThreshold,
+    createdAt: one.createdAt.toISOString(),
+    updatedAt: one.updatedAt.toISOString(),
+  };
+}
+
 function pageAfter(
-  all: readonly GraderDefinition[],
+  all: readonly GraderLibraryEntry[],
   cursor: string | undefined,
 ): {
-  readonly items: readonly GraderDefinition[];
+  readonly items: readonly GraderLibraryEntry[];
   readonly next: string | null;
 } {
   let start = 0;
@@ -75,14 +171,32 @@ function pageAfter(
   };
 }
 
+function noSuchDefinition(id: string): string {
+  return `There is no grader definition ${id} available in this organization.`;
+}
+
+function modalitiesFrom(value: unknown): readonly GraderModality[] | string {
+  if (!Array.isArray(value) || value.length === 0) {
+    return "modalities must contain chat, voice, or both";
+  }
+  if (
+    new Set(value).size !== value.length ||
+    value.some(
+      (one) =>
+        typeof one !== "string" ||
+        !(MODALITIES as readonly string[]).includes(one),
+    )
+  ) {
+    return "modalities must contain chat, voice, or both, with no repeats";
+  }
+  return value as readonly GraderModality[];
+}
+
 export async function graderLibraryRoutes(
   app: FastifyInstance,
   options: GraderLibraryRoutesOptions,
 ): Promise<void> {
-  credentialed(app, {
-    provider: options.provider,
-    rateLimit: options.rateLimit,
-  });
+  credentialed(app, options);
 
   registerPlatformOperation(
     app,
@@ -103,10 +217,146 @@ export async function graderLibraryRoutes(
         );
       }
 
-      const page = pageAfter(await listGraderDefinitions(acting.auth), cursor);
+      const page = pageAfter(await listGraderLibrary(acting.auth), cursor);
       return reply.send({
-        graderLibraryEntries: page.items.map(described),
+        graderLibraryEntries: page.items.map((entry) =>
+          describedLibraryEntry(entry),
+        ),
         nextPageToken: page.next,
+      });
+    },
+  );
+
+  registerPlatformOperation(
+    app,
+    graderLibraryOperations.getGraderLibraryEntry,
+    async (request, reply) => {
+      const query = (request.query ?? {}) as Query;
+      const { graderDefinitionId } = request.params as {
+        readonly graderDefinitionId: string;
+      };
+      const acting = await actingIn(
+        requesterOf(request).auth,
+        given(query.projectId),
+      );
+      if ("refusal" in acting) return refuseActing(reply, acting);
+      const entry = await getGraderLibraryEntry(
+        acting.auth,
+        graderDefinitionId,
+      );
+      return entry === undefined
+        ? notFound(reply, noSuchDefinition(graderDefinitionId))
+        : reply.send(describedLibraryEntry(entry));
+    },
+  );
+
+  registerPlatformOperation(
+    app,
+    graderLibraryOperations.useGraderInProject,
+    async (request, reply) => {
+      const query = (request.query ?? {}) as Query;
+      const body = (request.body ?? {}) as Body;
+      const { graderDefinitionId } = request.params as {
+        readonly graderDefinitionId: string;
+      };
+      const acting = await actingIn(
+        requesterOf(request).auth,
+        given(query.projectId),
+      );
+      if ("refusal" in acting) return refuseActing(reply, acting);
+      authorize(acting.auth, "author_definitions", {
+        organizationId: acting.auth.organizationId,
+        projectId: acting.auth.projectId,
+      });
+
+      const unknown = unknownKey(
+        body,
+        ["scope", "settings", "passThreshold"],
+        "a Use in project request",
+      );
+      if (unknown !== undefined) return invalid(reply, unknown);
+      if (!("scope" in body) || !("settings" in body)) {
+        return invalid(reply, "scope and settings are required");
+      }
+      if (typeof body.passThreshold !== "number") {
+        return invalid(reply, "passThreshold must be a number from 0 through 1");
+      }
+
+      const used = await useGraderInProject(acting.auth, graderDefinitionId, {
+        scope: scopeForDb(body.scope),
+        parameterValues: body.settings,
+        passThreshold: body.passThreshold,
+      });
+      return used === undefined
+        ? notFound(reply, noSuchDefinition(graderDefinitionId))
+        : reply.code(201).send(describedProjectGrader(used));
+    },
+  );
+
+  registerPlatformOperation(
+    app,
+    graderLibraryOperations.createCustomGrader,
+    async (request, reply) => {
+      const query = (request.query ?? {}) as Query;
+      const body = (request.body ?? {}) as Body;
+      const acting = await actingIn(
+        requesterOf(request).auth,
+        given(query.projectId),
+      );
+      if ("refusal" in acting) return refuseActing(reply, acting);
+      authorize(acting.auth, "author_definitions", {
+        organizationId: acting.auth.organizationId,
+        projectId: acting.auth.projectId,
+      });
+
+      const unknown = unknownKey(
+        body,
+        [
+          "name",
+          "description",
+          "gradingInstructions",
+          "modalities",
+          "scope",
+          "passThreshold",
+        ],
+        "a custom grader",
+      );
+      if (unknown !== undefined) return invalid(reply, unknown);
+      const name = given(text(body.name));
+      if (name === undefined) return invalid(reply, "name is required");
+      if (
+        body.description !== undefined &&
+        body.description !== null &&
+        typeof body.description !== "string"
+      ) {
+        return invalid(reply, "description must be text or null");
+      }
+      const gradingInstructions = given(text(body.gradingInstructions));
+      if (gradingInstructions === undefined) {
+        return invalid(reply, "gradingInstructions is required");
+      }
+      const modalities = modalitiesFrom(body.modalities);
+      if (typeof modalities === "string") return invalid(reply, modalities);
+      if (!("scope" in body)) return invalid(reply, "scope is required");
+      if (typeof body.passThreshold !== "number") {
+        return invalid(reply, "passThreshold must be a number from 0 through 1");
+      }
+
+      const created = await createCustomLlmGrader(acting.auth, {
+        name,
+        description:
+          body.description === null ? null : given(text(body.description)) ?? null,
+        gradingInstructions,
+        modalities,
+        scope: scopeForDb(body.scope),
+        passThreshold: body.passThreshold,
+      });
+      return reply.code(201).send({
+        definition: describedLibraryEntry(
+          created.definition,
+          created.projectGrader.id,
+        ),
+        grader: describedProjectGrader(created.projectGrader),
       });
     },
   );

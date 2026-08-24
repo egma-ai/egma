@@ -37,8 +37,6 @@ function definition(): GraderDefinitionSnapshot {
     prompt: found.prompt,
     parameterContract: found.parameterContract,
     outputContract: found.outputContract,
-    sourceCode: found.sourceCode,
-    sourceCodeLanguage: found.sourceCodeLanguage,
     modalities: found.modalities,
     judgeModel: found.judgeModel,
   };
@@ -82,6 +80,7 @@ async function grade(
   const scripted = scriptedJudging({ answers });
   const result = await executeExpectedBehaviors({
     definition: definition(),
+    parameterValues: {},
     conversation: conversation(overrides.conversation),
     judging: scripted.judging,
     reading: {

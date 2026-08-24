@@ -1,7 +1,8 @@
-import type {
-  GraderOutputContract,
-  GraderParameter,
-} from "./catalog.ts";
+import type { GraderOutputContract } from "./catalog.ts";
+import {
+  validateGraderParameterContract,
+  type GraderParameter,
+} from "./parameters.ts";
 import {
   GRADER_DEFINITION_TYPES,
   GRADER_MODALITIES,
@@ -17,8 +18,6 @@ export type GraderDefinitionSnapshot = {
   readonly prompt: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly outputContract: GraderOutputContract | null;
-  readonly sourceCode: string | null;
-  readonly sourceCodeLanguage: string | null;
   readonly modalities: readonly GraderModality[];
   readonly judgeModel: GraderJudgeModel | null;
 };
@@ -30,8 +29,6 @@ export type GraderDefinitionSource = {
   readonly prompt: string | null;
   readonly parameterContract: unknown;
   readonly outputContract: unknown;
-  readonly sourceCode: string | null;
-  readonly sourceCodeLanguage: string | null;
   readonly modalities: unknown;
   readonly judgeModel: unknown;
 };
@@ -51,16 +48,18 @@ export function snapshotGraderDefinition(
     throw malformed("has no positive version");
   }
   if (!(GRADER_DEFINITION_TYPES as readonly string[]).includes(source.type)) {
-    throw malformed(`has an execution type Egma does not know: ${source.type}`);
+    throw malformed(`has a type Egma does not know: ${source.type}`);
   }
-  if (!Array.isArray(source.parameterContract)) {
+  let parameterContract: readonly GraderParameter[];
+  try {
+    parameterContract = validateGraderParameterContract(
+      source.parameterContract,
+    );
+  } catch {
     throw malformed("holds a parameter contract Egma never writes");
   }
   if (source.outputContract !== null && !isObject(source.outputContract)) {
     throw malformed("holds an output contract Egma never writes");
-  }
-  if ((source.sourceCode === null) !== (source.sourceCodeLanguage === null)) {
-    throw malformed("holds only half of its executable source");
   }
   if (
     !Array.isArray(source.modalities) ||
@@ -88,11 +87,8 @@ export function snapshotGraderDefinition(
     definitionVersion: source.version,
     type,
     prompt: source.prompt,
-    parameterContract:
-      source.parameterContract as readonly GraderParameter[],
+    parameterContract,
     outputContract: source.outputContract as GraderOutputContract | null,
-    sourceCode: source.sourceCode,
-    sourceCodeLanguage: source.sourceCodeLanguage,
     modalities: source.modalities as readonly GraderModality[],
     judgeModel: source.judgeModel as GraderJudgeModel | null,
   };

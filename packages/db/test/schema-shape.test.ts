@@ -417,14 +417,13 @@ describe("the grader definition's nullable tenancy", () => {
         column.table_name === "grader_definition" && column.column_name === name,
     );
 
-  it("is two identifier columns, both nullable, because egma owns entries too", () => {
-    for (const name of ["organization_id", "project_id"]) {
-      const live = tenancy(name);
-      expect(live, `grader_definition.${name}`).toBeDefined();
-      expect(live?.type_name, `grader_definition.${name} type`).toBe("text");
-      expect(live?.collation_name, `grader_definition.${name} collation`).toBe("C");
-      expect(live?.not_null, `grader_definition.${name} nullable`).toBe(false);
-    }
+  it("uses one nullable organization owner and no project owner", () => {
+    const organization = tenancy("organization_id");
+    expect(organization).toBeDefined();
+    expect(organization?.type_name).toBe("text");
+    expect(organization?.collation_name).toBe("C");
+    expect(organization?.not_null).toBe(false);
+    expect(tenancy("project_id")).toBeUndefined();
   });
 
   /**
@@ -449,17 +448,7 @@ describe("the grader definition's nullable tenancy", () => {
     ]);
   });
 
-  it("arrives whole or not at all, held by a check rather than by convention", async () => {
-    const { rows } = await database.sql<{ definition: string }>(
-      `select pg_get_constraintdef(oid) as definition
-         from pg_constraint where conname = 'grader_definition_tenancy_is_whole_or_egmas'`,
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.definition).toContain("organization_id IS NULL");
-    expect(rows[0]?.definition).toContain("project_id IS NULL");
-  });
-
-  it("closes the tenancy pairing, so no raw write can name another customer's project", async () => {
+  it("keeps organization-owned definitions inside their organization", async () => {
     const { rows } = await database.sql<{
       conname: string;
       definition: string;
@@ -472,8 +461,8 @@ describe("the grader definition's nullable tenancy", () => {
     `);
     const byName = new Map(rows.map((row) => [row.conname, row.definition]));
 
-    expect(byName.get("grader_definition_project_organization_fk")).toMatch(
-      /FOREIGN KEY \(project_id, organization_id\) REFERENCES project\(id, organization_id\)/,
+    expect(byName.get("grader_definition_organization_id_organization_id_fk")).toMatch(
+      /FOREIGN KEY \(organization_id\) REFERENCES organization\(id\)/,
     );
   });
 });
@@ -545,7 +534,7 @@ describe("a persona version is executable by itself", () => {
 });
 
 describe("grader execution ownership", () => {
-  it("stores the non-secret model only on the immutable grader version", () => {
+  it("stores type and the non-secret model only on the immutable grader version", () => {
     const model = columns.find(
       (column) =>
         column.table_name === "grader_definition_version" &&
@@ -553,8 +542,34 @@ describe("grader execution ownership", () => {
     );
     expect(model?.type_name).toBe("jsonb");
     expect(model?.has_default).toBe(false);
+    expect(columns.some(
+      (column) =>
+        column.table_name === "grader_definition_version" &&
+        column.column_name === "type",
+    )).toBe(true);
+    expect(columns.some(
+      (column) =>
+        column.table_name === "grader_definition" &&
+        column.column_name === "type",
+    )).toBe(false);
+    expect(columns.some(
+      (column) =>
+        column.table_name === "grader_definition_version" &&
+        ["source_code", "source_code_language"].includes(column.column_name),
+    )).toBe(false);
     expect(columns.some((column) => column.table_name === "judge_configuration")).toBe(false);
     expect(columns.some((column) => column.table_name === "judge_credential")).toBe(false);
+  });
+
+  it("stores complete project settings on the project grader with no default", () => {
+    const values = columns.find(
+      (column) =>
+        column.table_name === "project_grader" &&
+        column.column_name === "parameter_values",
+    );
+    expect(values?.type_name).toBe("jsonb");
+    expect(values?.not_null).toBe(true);
+    expect(values?.has_default).toBe(false);
   });
 
   it("keeps no credential reference on a grading plan", () => {
@@ -591,7 +606,7 @@ describe("every enumerated value", () => {
       { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
-      { table: "grader_definition", column: "type" },
+      { table: "grader_definition_version", column: "type" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },

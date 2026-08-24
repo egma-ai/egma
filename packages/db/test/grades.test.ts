@@ -252,6 +252,29 @@ describe("the immutable production selection receipt", () => {
     expect(physical).toEqual([{ count: "1" }]);
   });
 
+  it("keeps complete project settings with the frozen production selection", async () => {
+    const traceId = "3434343434343434343434343434cdcd";
+    const entry = {
+      projectGraderId: newId("grd"),
+      graderDefinitionId: newId("grl"),
+      graderDefinitionVersion: 2,
+      graderPassThreshold: 1,
+      parameterValues: {
+        maximum_average_response_time_ms: 2_500,
+      },
+    } as const;
+    const written = await recordProductionGradingPlan(auth, {
+      traceId,
+      traceStartedAtMicroseconds: micros("2026-08-21T09:05:00Z"),
+      entries: [entry],
+    });
+
+    expect(written.entries).toEqual([entry]);
+    await expect(readProductionGradingPlan(auth, traceId)).resolves.toEqual(
+      written,
+    );
+  });
+
   it("refuses a conflicting physical receipt instead of choosing one plan", async () => {
     const traceId = "5555555555555555555555555555eeee";
     const input = {
@@ -287,6 +310,7 @@ describe("the immutable production selection receipt", () => {
         graderDefinitionId: newId("grl"),
         graderDefinitionVersion: 0,
         graderPassThreshold: 1,
+        parameterValues: {},
       }],
     })).rejects.toThrow("graderDefinitionVersion must fit UInt32");
   });

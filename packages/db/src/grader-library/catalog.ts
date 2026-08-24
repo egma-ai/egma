@@ -4,31 +4,27 @@ import type {
   GraderJudgeModel,
   GraderModality,
 } from "../schema/graders.ts";
+import type { GraderParameter } from "./parameters.ts";
 
-export type GraderParameter = {
-  readonly name: string;
-  readonly label: string;
-  readonly kind: "text" | "number" | "measure";
-  readonly means: string;
-};
+export type { GraderParameter } from "./parameters.ts";
 
 /** A definition-owned description of the structured details it can return. */
 export type GraderOutputContract = Readonly<Record<string, unknown>>;
 
-const EXPECTED_BEHAVIORS_OUTPUT: GraderOutputContract = {
+export const NORMALIZED_GRADE_OUTPUT_CONTRACT: GraderOutputContract = {
   score: {
     type: "number | null",
     minimum: 0,
     maximum: 1,
     means:
-      "the fraction of expected-behavior assertions that passed; null when any assertion errored",
+      "the normalized score produced by the grader; null when the grader errored",
   },
   details: {
     type: "object",
     properties: {
       rationale: {
         type: "string",
-        means: "a summary of how many expected behaviors passed",
+        means: "a short explanation of the score",
       },
       error: {
         type: "string",
@@ -36,7 +32,7 @@ const EXPECTED_BEHAVIORS_OUTPUT: GraderOutputContract = {
       },
       assertions: {
         type: "array",
-        means: "one stored result for each expected behavior, in test order",
+        means: "optional supporting results for graders that check several assertions",
         items: {
           key: { type: "string" },
           score: { type: "number", minimum: 0, maximum: 1 },
@@ -65,8 +61,6 @@ export type PredefinedGraderDefinition = {
   readonly prompt: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly outputContract: GraderOutputContract | null;
-  readonly sourceCode: string | null;
-  readonly sourceCodeLanguage: string | null;
   readonly modalities: readonly GraderModality[];
   readonly judgeModel: GraderJudgeModel | null;
   readonly createdAt: Date;
@@ -74,11 +68,16 @@ export type PredefinedGraderDefinition = {
 
 export const PREDEFINED_GRADERS = {
   expectedBehaviors: "grl_01M01MH8KAE8ZB19B0YJ7Z7EYW",
+  responseLatency: "grl_01M0TQE5HBE1X9PDN9HFJC987Q",
 } as const;
 
-const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
+export const MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER =
+  "maximum_average_response_time_ms";
 
-/** The first product library contains one grader and no retired Latency row. */
+const SHIPPED = new Date("2026-08-14T00:00:00.000Z");
+const RESPONSE_LATENCY_SHIPPED = new Date("2026-08-24T00:00:00.000Z");
+
+/** The product library shipped and maintained by Egma. */
 export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = [
   {
     id: PREDEFINED_GRADERS.expectedBehaviors,
@@ -89,11 +88,33 @@ export const GRADER_DEFINITION_CATALOG: readonly PredefinedGraderDefinition[] = 
     scopeEditable: false,
     prompt: EXPECTED_BEHAVIORS_PROMPT,
     parameterContract: [],
-    outputContract: EXPECTED_BEHAVIORS_OUTPUT,
-    sourceCode: null,
-    sourceCodeLanguage: null,
+    outputContract: NORMALIZED_GRADE_OUTPUT_CONTRACT,
     modalities: ["chat", "voice"],
     judgeModel: RECOMMENDED_GRADER_MODEL,
     createdAt: SHIPPED,
+  },
+  {
+    id: PREDEFINED_GRADERS.responseLatency,
+    name: "Response latency",
+    description:
+      "Grades the average response time across measured turns against the maximum this project chooses.",
+    type: "code",
+    scopeEditable: true,
+    prompt: null,
+    parameterContract: [
+      {
+        key: MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+        label: "Maximum average response time",
+        valueType: "integer",
+        defaultValue: 3_000,
+        unit: "milliseconds",
+        minimum: 1,
+        maximum: null,
+      },
+    ],
+    outputContract: NORMALIZED_GRADE_OUTPUT_CONTRACT,
+    modalities: ["chat", "voice"],
+    judgeModel: null,
+    createdAt: RESPONSE_LATENCY_SHIPPED,
   },
 ];

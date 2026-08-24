@@ -160,6 +160,7 @@ const CONTEXT_REQUIRING = [
   "createAgent",
   "createApiKey",
   "createInvitation",
+  "createCustomLlmGrader",
   "createMockTool",
   "createPersona",
   // A predefined definition grades nothing until a project has a
@@ -200,7 +201,7 @@ const CONTEXT_REQUIRING = [
   // The shelf: one entry, and one page of it. Both answer egma's entries
   // beside the caller's own, with owner derived from tenancy rather than
   // stored — which is the whole reason that one table's tenancy is nullable.
-  "getGraderDefinition",
+  "getGraderLibraryEntry",
   "getGraderDefinitionVersion",
   "getGradingJob",
   "getGradingJobForTrace",
@@ -217,7 +218,7 @@ const CONTEXT_REQUIRING = [
   "listAgents",
   "listApiKeys",
   "listConnections",
-  "listGraderDefinitions",
+  "listGraderLibrary",
   "listGradingJobsForSimulation",
   "listMembers",
   "listTestVersions",
@@ -238,6 +239,7 @@ const CONTEXT_REQUIRING = [
   "listTests",
   "listTestSuites",
   "listTraces",
+  "useGraderInProject",
   "markSimulationCanceled",
   "readOrganization",
   "readOrganizationSettings",
@@ -395,6 +397,7 @@ const THE_GRADER_LIBRARY = [
   "GRADER_DEFINITION_CATALOG",
   "GRADER_DEFINITION_TYPES",
   "GRADER_MODALITIES",
+  "MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER",
   // The identifiers of the entries egma ships, by the name a person calls
   // them. Exported because three things outside this module point at one — the
   // copy every project is seeded with, the engine's roster of what it can

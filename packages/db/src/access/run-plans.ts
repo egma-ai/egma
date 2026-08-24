@@ -1,7 +1,8 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { validateGraderParameterValues } from "../grader-library/parameters.ts";
 import { snapshotGraderDefinition } from "../grader-library/snapshot.ts";
 import {
   planGroupsFor,
@@ -72,15 +73,14 @@ const CANDIDATE_COLUMNS = {
   projectGraderId: projectGrader.id,
   graderName: graderDefinition.name,
   passThreshold: projectGrader.passThreshold,
+  parameterValues: projectGrader.parameterValues,
   scope: projectGrader.scope,
   definitionId: graderDefinitionVersion.definitionId,
   version: graderDefinitionVersion.version,
-  type: graderDefinition.type,
+  type: graderDefinitionVersion.type,
   prompt: graderDefinitionVersion.prompt,
   parameterContract: graderDefinitionVersion.parameterContract,
   outputContract: graderDefinitionVersion.outputContract,
-  sourceCode: graderDefinitionVersion.sourceCode,
-  sourceCodeLanguage: graderDefinitionVersion.sourceCodeLanguage,
   modalities: graderDefinitionVersion.modalities,
   judgeModel: graderDefinitionVersion.judgeModel,
 } as const;
@@ -109,22 +109,38 @@ export async function applicableGraders(
       ),
     )
     .where(
-      within(
-        auth,
-        projectGrader,
-        and(eq(projectGrader.projectId, projectId), isNull(projectGrader.archivedAt)),
+      and(
+        within(
+          auth,
+          projectGrader,
+          and(
+            eq(projectGrader.projectId, projectId),
+            isNull(projectGrader.archivedAt),
+          ),
+        ),
+        or(
+          isNull(graderDefinition.organizationId),
+          eq(graderDefinition.organizationId, auth.organizationId),
+        ),
       ),
     )
     .orderBy(asc(projectGrader.id))
     .for("share", { of: projectGrader });
 
-  return rows.map((row) => ({
-    projectGraderId: row.projectGraderId,
-    graderName: row.graderName,
-    passThreshold: row.passThreshold,
-    scope: row.scope as ProjectGraderScope,
-    definition: snapshotGraderDefinition(row),
-  }));
+  return rows.map((row) => {
+    const definition = snapshotGraderDefinition(row);
+    return {
+      projectGraderId: row.projectGraderId,
+      graderName: row.graderName,
+      passThreshold: row.passThreshold,
+      parameterValues: validateGraderParameterValues(
+        definition.parameterContract,
+        row.parameterValues,
+      ),
+      scope: row.scope as ProjectGraderScope,
+      definition,
+    };
+  });
 }
 
 /** Resolve and freeze the graders for one completed production trace. */
@@ -149,9 +165,10 @@ export async function resolveProductionGraders(
           production.sample_percent,
         );
     })
-    .map(({ projectGraderId, passThreshold, definition }) => ({
+    .map(({ projectGraderId, passThreshold, parameterValues, definition }) => ({
       projectGraderId,
       passThreshold,
+      parameterValues,
       definition,
     }));
 }
@@ -258,7 +275,7 @@ export async function pinnedSimulationGradersOn(
         item.graderDefinitionId,
         item.graderDefinitionVersion,
       );
-      if (definition === undefined || definition.type !== item.graderType) {
+      if (definition === undefined || definition.type !== item.type) {
         throw new Error(
           `grading plan for simulation ${simulationId} names an unreadable grader definition`,
         );
@@ -266,6 +283,7 @@ export async function pinnedSimulationGradersOn(
       return {
         projectGraderId: item.projectGraderId,
         passThreshold: item.passThreshold,
+        parameterValues: item.parameterValues,
         definition,
       };
     }),

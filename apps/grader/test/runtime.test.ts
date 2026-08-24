@@ -8,18 +8,22 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
+  editProjectGrader,
   finishGradingJob,
+  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  PREDEFINED_GRADERS,
   readTraceGrades,
   readTraceGrading,
   reconcileGraderCatalog,
+  regradeTrace,
   requestGrading,
+  useGraderInProject,
   type AuthContext,
   type NewSpan,
 } from "@egma/db";
 
 import {
   createMigratedDatabase,
-  openSingleConnection,
   TEST_ENCRYPTION_KEY,
   type MigratedDatabase,
 } from "../../../packages/db/test/support/database.ts";
@@ -36,10 +40,10 @@ let store: MigratedTraceStore;
 const organizationId = newId("org");
 const projectId = newId("prj");
 const userId = newId("usr");
-const definitionId = newId("grl");
-const projectGraderId = newId("grd");
 const traceId = "5555555555555555555555555555eeee";
 const startedAt = new Date("2026-08-21T10:00:00.000Z");
+const rootSpanId = "1111111111111111";
+let projectGraderId = "";
 
 const auth: AuthContext = {
   organizationId,
@@ -52,7 +56,7 @@ const auth: AuthContext = {
 function span(): NewSpan {
   return {
     traceId,
-    spanId: "1111111111111111",
+    spanId: rootSpanId,
     parentSpanId: "",
     source: "production",
     emitter: "agent",
@@ -83,6 +87,18 @@ function span(): NewSpan {
   };
 }
 
+function responseLatencySpan(): NewSpan {
+  return {
+    ...span(),
+    spanId: "2222222222222222",
+    parentSpanId: rootSpanId,
+    name: "turn_response_latency",
+    kind: "timing",
+    durationNanoseconds: 2_000_000_000n,
+    endsTrace: false,
+  };
+}
+
 beforeAll(async () => {
   database = await createMigratedDatabase("grader_runtime_target");
   store = await createMigratedTraceStore("grader_runtime_target");
@@ -98,35 +114,25 @@ beforeAll(async () => {
   ]);
   await seedUser(database, userId, "grader-worker@example.com");
   await reconcileGraderCatalog();
-
-  const setup = await openSingleConnection(database.url);
-  await setup.sql("begin");
-  await setup.sql(
-    `insert into grader_definition
-       (id, name, description, type, scope_editable, current_definition_version)
-     values ($1, 'Custom policy', 'Not executable in the first roster',
-             'code', true, 1)`,
-    [definitionId],
+  const used = await useGraderInProject(
+    auth,
+    PREDEFINED_GRADERS.responseLatency,
+    {
+      scope: {
+        simulations: [],
+        production: { sample_percent: 100 },
+      },
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+      },
+      passThreshold: 1,
+    },
   );
-  await setup.sql(
-    `insert into grader_definition_version
-       (definition_id, version, prompt, parameter_contract, output_contract,
-        source_code, source_code_language, modalities, judge_model)
-     values ($1, 1, null, '[]'::jsonb, '{}'::jsonb,
-             'return 1', 'javascript', '["chat", "voice"]'::jsonb, null)`,
-    [definitionId],
-  );
-  await setup.sql("commit");
-  await setup.close();
-  await database.sql(
-    `insert into project_grader
-       (id, organization_id, project_id, grader_definition_id, scope, pass_threshold)
-     values ($1, $2, $3, $4,
-             '{"simulations":[],"production":{"sample_percent":100}}'::jsonb,
-             0.6)`,
-    [projectGraderId, organizationId, projectId, definitionId],
-  );
-  await appendSpans(auth, [span()]);
+  if (used === undefined) {
+    throw new Error("Response latency is not in the library");
+  }
+  projectGraderId = used.id;
+  await appendSpans(auth, [span(), responseLatencySpan()]);
 });
 
 afterAll(async () => {
@@ -137,7 +143,7 @@ afterAll(async () => {
 });
 
 describe("the worker consumes one frozen trace plan", () => {
-  it("turns an unsupported grader into its own error grade and cleans up the job", async () => {
+  it("grades Response latency and keeps the selected settings through edits and regrading", async () => {
     await requestGrading(auth, {
       source: "production",
       traceId,
@@ -151,6 +157,22 @@ describe("the worker consumes one frozen trace plan", () => {
       capacity: 50,
     });
     if (claim === undefined) throw new Error("the production trace was not claimed");
+
+    expect(claim.entries).toMatchObject([{
+      projectGraderId,
+      graderDefinitionId: PREDEFINED_GRADERS.responseLatency,
+      graderPassThreshold: 1,
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+      },
+      definition: { type: "code" },
+    }]);
+
+    await editProjectGrader(auth, projectGraderId, {
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 1_000,
+      },
+    });
 
     await expect(gradeClaim(claim, {
       providerCredentials: {
@@ -168,22 +190,56 @@ describe("the worker consumes one frozen trace plan", () => {
     const read = await readTraceGrades(auth, { source: "production", traceId });
     expect(read.current).toMatchObject([{
       projectGraderId,
-      graderDefinitionId: definitionId,
-      score: null,
-      graderPassThreshold: 0.6,
+      graderDefinitionId: PREDEFINED_GRADERS.responseLatency,
+      score: 1,
+      graderPassThreshold: 1,
       gradingSequence: claim.sequenceBase + claim.attempts,
-      result: "errored",
+      result: "passed",
       details: {
-        error: expect.stringContaining("does not execute grader definition"),
+        observedAverageResponseTimeMs: 2_000,
+        maximumAverageResponseTimeMs: 3_000,
       },
     }]);
 
     await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
     await expect(readTraceGrading(auth, { source: "production", traceId }))
       .resolves.toMatchObject({
-        state: "error",
-        combinedScore: null,
-        current: [{ graderName: "Custom policy", result: "errored" }],
+        state: "complete",
+        combinedScore: 1,
+        current: [{ graderName: "Response latency", result: "passed" }],
       });
+
+    await expect(regradeTrace(auth, { source: "production", traceId }))
+      .resolves.toMatchObject({ kind: "queued", reopened: true });
+    const [regrade] = await claimGradingJobs({
+      claimant: "grader-runtime-regrade-test",
+      capacity: 50,
+    });
+    if (regrade === undefined) throw new Error("the regrade was not claimed");
+    expect(regrade.entries).toMatchObject([{
+      projectGraderId,
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+      },
+    }]);
+    await gradeClaim(regrade, {
+      providerCredentials: {
+        async load() {
+          throw new Error("a code-only plan must not load model credentials");
+        },
+      },
+    });
+    await finishGradingJob(regrade.auth, regrade.id, regrade.claimedBy);
+
+    const afterRegrade = await readTraceGrades(auth, {
+      source: "production",
+      traceId,
+    });
+    expect(afterRegrade.history).toHaveLength(2);
+    expect(afterRegrade.history.map((grade) => grade.score)).toEqual([1, 1]);
+    expect(afterRegrade.current).toMatchObject([{
+      score: 1,
+      details: { maximumAverageResponseTimeMs: 3_000 },
+    }]);
   });
 });

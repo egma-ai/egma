@@ -4,13 +4,25 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../src/client.ts";
 import {
   archiveProjectGrader,
+  createCustomLlmGrader,
   editProjectGrader,
   getExecutableGraderDefinition,
   getProjectGrader,
+  listProjectGraders,
+  useGraderInProject,
 } from "../src/access/graders.ts";
-import { reconcileGraderCatalog } from "../src/access/grader-library.ts";
+import {
+  getGraderLibraryEntry,
+  listGraderLibrary,
+  reconcileGraderCatalog,
+} from "../src/access/grader-library.ts";
+import { createProject } from "../src/access/projects.ts";
 import { provisionOrganization } from "../src/access/provisioning.ts";
-import { GRADER_DEFINITION_CATALOG } from "../src/grader-library/catalog.ts";
+import {
+  GRADER_DEFINITION_CATALOG,
+  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  PREDEFINED_GRADERS,
+} from "../src/grader-library/catalog.ts";
 import type { AuthContext } from "../src/access/context.ts";
 import {
   createConnectedDatabase,
@@ -82,6 +94,179 @@ describe("shared definitions and project grader policy", () => {
     ).rejects.toThrow("cannot be removed");
   });
 
+  it("offers Response latency inactive, then validates, edits, and removes its project policy", async () => {
+    const library = await listGraderLibrary(auth);
+    expect(library.map(({ id }) => id)).toEqual(expect.arrayContaining([
+      PREDEFINED_GRADERS.expectedBehaviors,
+      PREDEFINED_GRADERS.responseLatency,
+    ]));
+    const responseLatency = await getGraderLibraryEntry(
+      auth,
+      PREDEFINED_GRADERS.responseLatency,
+    );
+    expect(responseLatency).toMatchObject({
+      name: "Response latency",
+      owner: "egma",
+      type: "code",
+      scopeEditable: true,
+      activeProjectGraderId: null,
+      parameterContract: [{
+        key: MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+        defaultValue: 3_000,
+        minimum: 1,
+        maximum: null,
+      }],
+    });
+
+    await expect(useGraderInProject(auth, responseLatency?.id ?? "missing", {
+      scope: { simulations: [{ kind: "all" }], production: null },
+      parameterValues: {},
+      passThreshold: 1,
+    })).rejects.toThrow(`need values for ${MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER}`);
+
+    const active = await useGraderInProject(
+      auth,
+      PREDEFINED_GRADERS.responseLatency,
+      {
+        scope: { simulations: [{ kind: "all" }], production: null },
+        parameterValues: {
+          [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+        },
+        passThreshold: 1,
+      },
+    );
+    expect(active).toMatchObject({
+      type: "code",
+      owner: "egma",
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+      },
+      passThreshold: 1,
+    });
+    await expect(useGraderInProject(
+      auth,
+      PREDEFINED_GRADERS.responseLatency,
+      {
+        scope: { simulations: [], production: null },
+        parameterValues: {
+          [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+        },
+        passThreshold: 1,
+      },
+    )).rejects.toThrow("already active");
+
+    const edited = await editProjectGrader(auth, active?.id ?? "missing", {
+      scope: { simulations: [], production: null },
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_000,
+      },
+      passThreshold: 0.8,
+    });
+    expect(edited).toMatchObject({
+      scope: { simulations: [], production: null },
+      parameterValues: {
+        [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_000,
+      },
+      passThreshold: 0.8,
+    });
+    await expect(archiveProjectGrader(auth, active?.id ?? "missing"))
+      .resolves.toBe(true);
+    await expect(getGraderLibraryEntry(
+      auth,
+      PREDEFINED_GRADERS.responseLatency,
+    )).resolves.toMatchObject({ activeProjectGraderId: null });
+  });
+
+  it("creates one organization LLM definition and lets another project use it", async () => {
+    const second = await createProject(auth, { name: "Second" });
+    const secondAuth: AuthContext = { ...auth, projectId: second.id };
+    expect(await listProjectGraders(secondAuth)).toHaveLength(1);
+
+    const created = await createCustomLlmGrader(auth, {
+      name: "Policy compliance",
+      description: "Grades one policy instruction.",
+      gradingInstructions: "The agent must state the cancellation policy.",
+      modalities: ["chat", "voice"],
+      scope: { simulations: [{ kind: "all" }], production: null },
+      passThreshold: 1,
+    });
+    expect(created.definition).toMatchObject({
+      owner: "organization",
+      type: "llm_as_judge",
+      gradingInstructions: "The agent must state the cancellation policy.",
+      parameterContract: [],
+      activeProjectGraderId: created.projectGrader.id,
+    });
+    expect(created.projectGrader).toMatchObject({
+      owner: "organization",
+      type: "llm_as_judge",
+      parameterValues: {},
+    });
+
+    await expect(getGraderLibraryEntry(secondAuth, created.definition.id))
+      .resolves.toMatchObject({
+        owner: "organization",
+        activeProjectGraderId: null,
+      });
+    const secondUse = await useGraderInProject(
+      secondAuth,
+      created.definition.id,
+      {
+        scope: { simulations: [], production: { sample_percent: 100 } },
+        parameterValues: {},
+        passThreshold: 0.9,
+      },
+    );
+    expect(secondUse).toMatchObject({
+      projectId: second.id,
+      graderDefinitionId: created.definition.id,
+      passThreshold: 0.9,
+    });
+
+    const otherOwnerId = newId("usr");
+    await database.sql(
+      `insert into "user" (id, email) values ($1, 'other@example.test')`,
+      [otherOwnerId],
+    );
+    const other = await provisionOrganization({
+      ownerUserId: otherOwnerId,
+      organizationName: "Other",
+      organizationSlug: "other-graders",
+      projectName: "Main",
+      projectSlug: "main",
+    });
+    const otherAuth: AuthContext = {
+      userId: otherOwnerId,
+      organizationId: other.organizationId,
+      projectId: other.projectId,
+      role: "admin",
+      via: "session",
+    };
+    await expect(getGraderLibraryEntry(otherAuth, created.definition.id))
+      .resolves.toBeUndefined();
+    await expect(useGraderInProject(otherAuth, created.definition.id, {
+      scope: { simulations: [], production: null },
+      parameterValues: {},
+      passThreshold: 1,
+    })).resolves.toBeUndefined();
+  });
+
+  it("allows reads but refuses viewer project-grader writes", async () => {
+    const viewer: AuthContext = { ...auth, role: "viewer" };
+    await expect(listGraderLibrary(viewer)).resolves.toEqual(expect.any(Array));
+    await expect(useGraderInProject(
+      viewer,
+      PREDEFINED_GRADERS.responseLatency,
+      {
+        scope: { simulations: [], production: null },
+        parameterValues: {
+          [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 3_000,
+        },
+        passThreshold: 1,
+      },
+    )).rejects.toThrow("may not author_definitions");
+  });
+
   it("updates one shared definition version without copying it into projects", async () => {
     const entry = GRADER_DEFINITION_CATALOG[0];
     if (entry === undefined || entry.prompt === null) {
@@ -107,8 +292,10 @@ describe("shared definitions and project grader policy", () => {
     const rows = await database.sql<{ count: string }>(
       `select count(*) as count
          from project_grader
-        where project_id = $1 and archived_at is null`,
-      [auth.projectId],
+        where project_id = $1
+          and grader_definition_id = $2
+          and archived_at is null`,
+      [auth.projectId, entry.id],
     );
     expect(Number(rows.rows[0]?.count)).toBe(1);
     expect((await getProjectGrader(auth, expectedProjectGraderId))?.currentDefinitionVersion).toBe(2);
@@ -130,23 +317,26 @@ describe("shared definitions and project grader policy", () => {
     try {
       await connection.sql(
         `insert into grader_definition
-           (id, organization_id, project_id, name, type, scope_editable, current_definition_version)
-         values ($1, $2, $3, 'Fixture', 'llm_as_judge', true, 1)`,
-        [definitionId, auth.organizationId, auth.projectId],
+           (id, organization_id, name, scope_editable, current_definition_version)
+         values ($1, $2, 'Fixture', true, 1)`,
+        [definitionId, auth.organizationId],
       );
       await connection.sql(
         `insert into grader_definition_version
-           (definition_id, version, prompt, parameter_contract,
+           (definition_id, version, type, prompt, parameter_contract,
             output_contract, modalities, judge_model)
-         values ($1, 1, 'Grade it', '[]'::jsonb, '{}'::jsonb,
+         values ($1, 1, 'llm_as_judge', 'Grade it', '[]'::jsonb, '{}'::jsonb,
                  '["chat"]'::jsonb,
                  '{"provider":"openai","model":"gpt-5"}'::jsonb)`,
         [definitionId],
       );
       await connection.sql(
         `insert into project_grader
-           (id, organization_id, project_id, grader_definition_id, scope, pass_threshold)
-         values ($1, $2, $3, $4, '{"simulations":[],"production":null}'::jsonb, 0.5)`,
+           (id, organization_id, project_id, grader_definition_id, scope,
+            parameter_values, pass_threshold)
+         values ($1, $2, $3, $4,
+                 '{"simulations":[],"production":null}'::jsonb,
+                 '{}'::jsonb, 0.5)`,
         [projectGraderId, auth.organizationId, auth.projectId, definitionId],
       );
       await connection.sql(

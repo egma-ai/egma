@@ -76,6 +76,7 @@ export type ProductionGradingPlanEntry = {
   readonly graderDefinitionId: string;
   readonly graderDefinitionVersion: number;
   readonly graderPassThreshold: number;
+  readonly parameterValues: Readonly<Record<string, unknown>>;
 };
 
 export type NewProductionGradingPlan = {
@@ -205,7 +206,11 @@ function canonicalEntries(
   entries: readonly ProductionGradingPlanEntry[],
 ): readonly ProductionGradingPlanEntry[] {
   const byProjectGrader = new Set<string>();
-  for (const entry of entries) {
+  const canonical = entries.map((entry) => ({
+    ...entry,
+    parameterValues: canonicalParameterValues(entry.parameterValues),
+  }));
+  for (const entry of canonical) {
     if (entry.projectGraderId === "" || entry.graderDefinitionId === "") {
       throw new TypeError("a production grading-plan entry must name its grader");
     }
@@ -223,21 +228,43 @@ function canonicalEntries(
     }
   }
 
-  return [...entries].sort((left, right) => {
+  return canonical.sort((left, right) => {
     const leftKey = JSON.stringify([
       left.projectGraderId,
       left.graderDefinitionId,
       left.graderDefinitionVersion,
       left.graderPassThreshold,
+      left.parameterValues,
     ]);
     const rightKey = JSON.stringify([
       right.projectGraderId,
       right.graderDefinitionId,
       right.graderDefinitionVersion,
       right.graderPassThreshold,
+      right.parameterValues,
     ]);
     return leftKey.localeCompare(rightKey);
   });
+}
+
+function canonicalParameterValues(
+  value: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("production grading-plan settings must be an object");
+  }
+  const answer = Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, value[key]]),
+  );
+  const encoded = JSON.stringify(answer);
+  if (encoded === undefined) {
+    throw new TypeError("production grading-plan settings must be JSON values");
+  }
+  const decoded: unknown = JSON.parse(encoded);
+  if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
+    throw new TypeError("production grading-plan settings must be a JSON object");
+  }
+  return decoded as Readonly<Record<string, unknown>>;
 }
 
 function planHash(entries: readonly ProductionGradingPlanEntry[]): string {
@@ -247,6 +274,7 @@ function planHash(entries: readonly ProductionGradingPlanEntry[]): string {
       entry.graderDefinitionId,
       entry.graderDefinitionVersion,
       entry.graderPassThreshold,
+      entry.parameterValues,
     ])))
     .digest("hex");
 }
@@ -437,8 +465,9 @@ type ProductionPlanRow = {
         readonly grader_definition_id: string;
         readonly grader_definition_version: number;
         readonly grader_pass_threshold: number;
+        readonly parameter_values: string;
       }
-    | readonly [string, string, number, number]
+    | readonly [string, string, number, number, string]
   )[];
 };
 
@@ -451,6 +480,7 @@ function entryOf(
       graderDefinitionId: row.grader_definition_id,
       graderDefinitionVersion: Number(row.grader_definition_version),
       graderPassThreshold: Number(row.grader_pass_threshold),
+      parameterValues: parameterValuesOf(row.parameter_values),
     };
   }
   return {
@@ -458,7 +488,20 @@ function entryOf(
     graderDefinitionId: row[1],
     graderDefinitionVersion: Number(row[2]),
     graderPassThreshold: Number(row[3]),
+    parameterValues: parameterValuesOf(row[4]),
   };
+}
+
+function parameterValuesOf(value: string): Readonly<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("production grading plan has unreadable parameter values");
+  }
+  return canonicalParameterValues(
+    parsed as Readonly<Record<string, unknown>>,
+  );
 }
 
 function productionPlanOf(row: ProductionPlanRow): ProductionGradingPlan {
@@ -562,7 +605,7 @@ export async function recordProductionGradingPlan(
               {trace_id:String},
               {trace_started_at:DateTime64(6, 'UTC')},
               unhex({plan_hash:String}),
-              {entries:Array(Tuple(String, String, UInt32, Float64))}
+              {entries:Array(Tuple(String, String, UInt32, Float64, String))}
             )`,
     query_params: {
       organization_id: auth.organizationId,
@@ -575,6 +618,7 @@ export async function recordProductionGradingPlan(
         entry.graderDefinitionId,
         entry.graderDefinitionVersion,
         entry.graderPassThreshold,
+        JSON.stringify(entry.parameterValues),
       ])),
     },
   });

@@ -27,6 +27,7 @@ export type FrozenGradingEntry = {
   readonly graderDefinitionId: string;
   readonly graderDefinitionVersion: number;
   readonly graderPassThreshold: number;
+  readonly parameterValues: Readonly<Record<string, unknown>>;
   readonly definition: GraderDefinitionSnapshot;
 };
 

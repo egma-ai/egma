@@ -397,16 +397,17 @@ export {
 } from "./tests.ts";
 
 export {
-  getGraderDefinition,
+  getGraderLibraryEntry,
   getGraderDefinitionVersion,
-  listGraderDefinitions,
+  listGraderLibrary,
   reconcileGraderCatalog,
-  type GraderDefinition,
+  type GraderLibraryEntry,
   type ReconciledGraderCatalog,
   type ReconciledGraderDefinition,
 } from "./grader-library.ts";
 export {
   GRADER_DEFINITION_CATALOG,
+  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
   PREDEFINED_GRADERS,
   type GraderOutputContract,
   type GraderParameter,
@@ -424,13 +425,17 @@ export {
 
 export {
   archiveProjectGrader,
+  createCustomLlmGrader,
   editProjectGrader,
   getExecutableGraderDefinition,
   getProjectGrader,
   listProjectGraders,
+  useGraderInProject,
+  type CreateCustomLlmGraderInput,
   type GraderDefinitionSnapshot,
   type ProjectGrader,
   type ProjectGraderChanges,
+  type UseGraderInProjectInput,
 } from "./graders.ts";
 export {
   cancelRun,

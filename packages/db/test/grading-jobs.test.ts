@@ -152,25 +152,28 @@ beforeAll(async () => {
   await setup.sql("begin");
   await setup.sql(
     `insert into grader_definition
-       (id, name, description, type, scope_editable, current_definition_version)
-     values ($1, 'Policy quality', 'A fixture grader', 'code', true, 1)`,
+       (id, name, description, scope_editable, current_definition_version)
+     values ($1, 'Policy quality', 'A fixture grader', true, 1)`,
     [definitionId],
   );
   await setup.sql(
     `insert into grader_definition_version
-       (definition_id, version, prompt, parameter_contract, output_contract,
-        source_code, source_code_language, modalities, judge_model)
-     values ($1, 1, null, '[]'::jsonb, '{}'::jsonb,
-             'return 1', 'javascript', '["chat", "voice"]'::jsonb, null)`,
+       (definition_id, version, type, prompt, parameter_contract,
+        output_contract, modalities, judge_model)
+     values ($1, 1, 'code', null,
+             '[{"key":"maximum","label":"Maximum","valueType":"integer","defaultValue":7,"unit":null,"minimum":1,"maximum":null}]'::jsonb,
+             '{}'::jsonb, '["chat", "voice"]'::jsonb, null)`,
     [definitionId],
   );
   await setup.sql("commit");
   await setup.close();
   await database.sql(
     `insert into project_grader
-       (id, organization_id, project_id, grader_definition_id, scope, pass_threshold)
+       (id, organization_id, project_id, grader_definition_id, scope,
+        parameter_values, pass_threshold)
      values ($1, $2, $3, $4,
              '{"simulations":[],"production":{"sample_percent":100}}'::jsonb,
+             '{"maximum":7}'::jsonb,
              0.7)`,
     [projectGraderId, organizationId, projectId, definitionId],
   );
@@ -672,10 +675,11 @@ describe("regrading uses frozen history", () => {
 
     await database.sql(
       `insert into grader_definition_version
-         (definition_id, version, prompt, parameter_contract, output_contract,
-          source_code, source_code_language, modalities, judge_model)
-       values ($1, 2, null, '[]'::jsonb, '{}'::jsonb,
-               'return 0', 'javascript', '["chat", "voice"]'::jsonb, null)`,
+         (definition_id, version, type, prompt, parameter_contract,
+          output_contract, modalities, judge_model)
+       values ($1, 2, 'code', null,
+               '[{"key":"maximum","label":"Maximum","valueType":"integer","defaultValue":2,"unit":null,"minimum":1,"maximum":null}]'::jsonb,
+               '{}'::jsonb, '["chat", "voice"]'::jsonb, null)`,
       [definitionId],
     );
     await database.sql(
@@ -683,7 +687,7 @@ describe("regrading uses frozen history", () => {
       [definitionId],
     );
     await database.sql(
-      "update project_grader set pass_threshold = 0.2 where id = $1",
+      "update project_grader set pass_threshold = 0.2, parameter_values = '{\"maximum\":2}'::jsonb where id = $1",
       [projectGraderId],
     );
 
@@ -704,7 +708,8 @@ describe("regrading uses frozen history", () => {
     expect(entryOf(second)).toMatchObject({
       graderDefinitionVersion: 1,
       graderPassThreshold: 0.7,
-      definition: { definitionVersion: 1, sourceCode: "return 1" },
+      parameterValues: { maximum: 7 },
+      definition: { definitionVersion: 1, type: "code" },
     });
     await appendOne(second, 0.5, 1_777_000_003_000_000n);
     await finishGradingJob(second.auth, second.id, second.claimedBy);

@@ -15,6 +15,10 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { organization, project } from "./tenancy.ts";
+import type {
+  GraderParameter,
+  GraderParameterValues,
+} from "../grader-library/parameters.ts";
 import {
   createdAt,
   idText,
@@ -59,11 +63,12 @@ export const graderDefinitionVersion = pgTable(
         onDelete: "cascade",
       }),
     version: integer("version").notNull(),
+    type: text("type").notNull(),
     prompt: text("prompt"),
-    parameterContract: jsonb("parameter_contract").notNull(),
+    parameterContract: jsonb("parameter_contract")
+      .$type<readonly GraderParameter[]>()
+      .notNull(),
     outputContract: jsonb("output_contract"),
-    sourceCode: text("source_code"),
-    sourceCodeLanguage: text("source_code_language"),
     modalities: jsonb("modalities")
       .$type<readonly GraderModality[]>()
       .notNull(),
@@ -81,6 +86,9 @@ export const graderDefinitionVersion = pgTable(
       "grader_definition_version_version_is_positive",
       sql`${table.version} >= 1`,
     ),
+    oneOf("grader_definition_version_type_allowed", table.type, [
+      ...GRADER_DEFINITION_TYPES,
+    ]),
     check(
       "grader_definition_version_modalities_allowed",
       sql`${table.modalities} in (
@@ -89,10 +97,6 @@ export const graderDefinitionVersion = pgTable(
         '["chat", "voice"]'::jsonb,
         '["voice", "chat"]'::jsonb
       )`,
-    ),
-    check(
-      "grader_definition_version_source_code_columns_agree",
-      sql`(${table.sourceCode} is null) = (${table.sourceCodeLanguage} is null)`,
     ),
   ],
 );
@@ -109,10 +113,8 @@ export const graderDefinition = pgTable(
       () => organization.id,
       { onDelete: "cascade" },
     ),
-    projectId: idText("project_id"),
     name: text("name").notNull(),
     description: text("description"),
-    type: text("type").notNull(),
     scopeEditable: boolean("scope_editable").notNull(),
     currentDefinitionVersion: integer("current_definition_version")
       .notNull()
@@ -122,18 +124,6 @@ export const graderDefinition = pgTable(
   },
   (table) => [
     prefixCheck("grader_definition_id_prefix", table.id, "grl"),
-    oneOf("grader_definition_type_allowed", table.type, [
-      ...GRADER_DEFINITION_TYPES,
-    ]),
-    check(
-      "grader_definition_tenancy_is_whole_or_egmas",
-      sql`(${table.organizationId} is null) = (${table.projectId} is null)`,
-    ),
-    foreignKey({
-      name: "grader_definition_project_organization_fk",
-      columns: [table.projectId, table.organizationId],
-      foreignColumns: [project.id, project.organizationId],
-    }).onDelete("cascade"),
     foreignKey({
       name: "grader_definition_current_version_fk",
       columns: [table.id, table.currentDefinitionVersion],
@@ -145,10 +135,7 @@ export const graderDefinition = pgTable(
     uniqueIndex("grader_definition_predefined_name_unique")
       .on(table.name)
       .where(sql`${table.organizationId} is null`),
-    index("grader_definition_organization_id_project_id_idx").on(
-      table.organizationId,
-      table.projectId,
-    ),
+    index("grader_definition_organization_id_idx").on(table.organizationId),
   ],
 );
 
@@ -165,6 +152,9 @@ export const projectGrader = pgTable(
       .notNull()
       .references(() => graderDefinition.id, { onDelete: "restrict" }),
     scope: jsonb("scope").$type<ProjectGraderScope>().notNull(),
+    parameterValues: jsonb("parameter_values")
+      .$type<GraderParameterValues>()
+      .notNull(),
     passThreshold: doublePrecision("pass_threshold").notNull(),
     archivedAt: moment("archived_at"),
     createdAt: createdAt(),

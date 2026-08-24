@@ -1,8 +1,10 @@
 import {
+  archiveProjectGrader,
   authorize,
   editProjectGrader,
   listProjectGraders,
   NotPermittedError,
+  PREDEFINED_GRADERS,
   UnprocessableInputError,
   type ProjectGrader,
   type ProjectGraderScope,
@@ -24,14 +26,7 @@ import {
 import type { RateLimit } from "../http/rate-limit.ts";
 import { given } from "../http/reading.ts";
 
-/**
- * A project grader is the project's policy for one shared definition.
- *
- * The first product surface has one row: Expected behaviors. Every project is
- * created with it. Its simulation coverage is fixed by Egma, while the project
- * may change the score the grader must reach. The executable prompt and model
- * stay on the shared definition and never cross this route.
- */
+/** One project's active policy rows over shared grader definitions. */
 
 export type GraderRoutesOptions = {
   readonly provider: SessionIdentityProvider;
@@ -46,6 +41,21 @@ type Query = {
 type Body = Record<string, unknown>;
 
 const PAGE_SIZE = 100;
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function scopeForDb(value: unknown): unknown {
+  if (!isObject(value)) return value;
+  const production = value.production;
+  if (!isObject(production)) return value;
+  const { samplePercent, ...unknown } = production;
+  return {
+    ...value,
+    production: { ...unknown, sample_percent: samplePercent },
+  };
+}
 
 function scopeForApi(scope: ProjectGraderScope): Record<string, unknown> {
   return {
@@ -64,8 +74,13 @@ function described(one: ProjectGrader): Record<string, unknown> {
     graderDefinitionId: one.graderDefinitionId,
     name: one.name,
     description: one.description,
+    owner: one.owner,
+    type: one.type,
+    modalities: one.modalities,
     scopeEditable: one.scopeEditable,
+    removable: one.graderDefinitionId !== PREDEFINED_GRADERS.expectedBehaviors,
     scope: scopeForApi(one.scope),
+    settings: one.parameterValues,
     passThreshold: one.passThreshold,
     createdAt: one.createdAt.toISOString(),
     updatedAt: one.updatedAt.toISOString(),
@@ -102,10 +117,7 @@ export async function graderRoutes(
   app: FastifyInstance,
   options: GraderRoutesOptions,
 ): Promise<void> {
-  credentialed(app, {
-    provider: options.provider,
-    rateLimit: options.rateLimit,
-  });
+  credentialed(app, options);
 
   registerPlatformOperation(
     app,
@@ -138,41 +150,74 @@ export async function graderRoutes(
     app,
     graderOperations.updateGrader,
     async (request, reply) => {
-      const auth = requesterOf(request).auth;
       const { graderId } = request.params as { readonly graderId: string };
       const body = (request.body ?? {}) as Body;
       const query = (request.query ?? {}) as Query;
-
-      // Refuse the role before reading the edit. A viewer must get the same
-      // permission answer for every body shape.
-      authorize(auth, "author_definitions", {
-        organizationId: auth.organizationId,
-        projectId: auth.projectId,
-      });
-
-      const unknown = Object.keys(body).find((key) => key !== "passThreshold");
-      if (unknown !== undefined) {
-        return invalid(
-          reply,
-          `a project grader update has no key "${unknown}"; only passThreshold can be changed`,
-        );
-      }
-      if (typeof body.passThreshold !== "number") {
-        return invalid(reply, "passThreshold must be a number from 0 through 1");
-      }
-
       const acting = await actingIn(
-        auth,
+        requesterOf(request).auth,
         given(query.projectId),
       );
       if ("refusal" in acting) return refuseActing(reply, acting);
+      authorize(acting.auth, "author_definitions", {
+        organizationId: acting.auth.organizationId,
+        projectId: acting.auth.projectId,
+      });
+
+      const allowed = ["scope", "settings", "passThreshold"];
+      const unknown = Object.keys(body).find((key) => !allowed.includes(key));
+      if (unknown !== undefined) {
+        return invalid(
+          reply,
+          `a project grader update has no key "${unknown}"; change scope, settings, or passThreshold`,
+        );
+      }
+      if (Object.keys(body).length === 0) {
+        return invalid(
+          reply,
+          "a project grader update must change scope, settings, or passThreshold",
+        );
+      }
+      if (
+        "passThreshold" in body &&
+        typeof body.passThreshold !== "number"
+      ) {
+        return invalid(reply, "passThreshold must be a number from 0 through 1");
+      }
 
       const changed = await editProjectGrader(acting.auth, graderId, {
-        passThreshold: body.passThreshold,
+        ...(body.scope === undefined ? {} : { scope: scopeForDb(body.scope) }),
+        ...(body.settings === undefined
+          ? {}
+          : { parameterValues: body.settings }),
+        ...(body.passThreshold === undefined
+          ? {}
+          : { passThreshold: body.passThreshold as number }),
       });
       return changed === undefined
         ? notFound(reply, noSuchGrader(graderId))
         : reply.send(described(changed));
+    },
+  );
+
+  registerPlatformOperation(
+    app,
+    graderOperations.removeGrader,
+    async (request, reply) => {
+      const { graderId } = request.params as { readonly graderId: string };
+      const query = (request.query ?? {}) as Query;
+      const acting = await actingIn(
+        requesterOf(request).auth,
+        given(query.projectId),
+      );
+      if ("refusal" in acting) return refuseActing(reply, acting);
+      authorize(acting.auth, "author_definitions", {
+        organizationId: acting.auth.organizationId,
+        projectId: acting.auth.projectId,
+      });
+      const removed = await archiveProjectGrader(acting.auth, graderId);
+      return removed
+        ? reply.code(204).send()
+        : notFound(reply, noSuchGrader(graderId));
     },
   );
 

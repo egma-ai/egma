@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS production_grading_plans
       project_grader_id String,
       grader_definition_id String,
       grader_definition_version UInt32,
-      grader_pass_threshold Float64
+      grader_pass_threshold Float64,
+      parameter_values String
     )),
 
     CONSTRAINT production_plan_thresholds_are_normalized

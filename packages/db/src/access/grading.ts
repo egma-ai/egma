@@ -208,6 +208,7 @@ function frozen(entry: ResolvedEntry): FrozenGradingEntry {
     graderDefinitionId: entry.definition.definitionId,
     graderDefinitionVersion: entry.definition.definitionVersion,
     graderPassThreshold: entry.passThreshold,
+    parameterValues: entry.parameterValues,
     definition: entry.definition,
   };
 }
@@ -218,6 +219,7 @@ function receiptEntry(entry: FrozenGradingEntry): ProductionGradingPlanEntry {
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
     graderPassThreshold: entry.graderPassThreshold,
+    parameterValues: entry.parameterValues,
   };
 }
 

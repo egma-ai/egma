@@ -13,13 +13,14 @@ Three Postgres records control which graders can run:
 
 - A `grader_definition` is the stable library identity and owner.
 - A `grader_definition_version` is immutable executable logic, such as a
-  prompt, code contract, model, output contract, and compatible modalities.
+  type, grading instructions, settings contract, model, output contract, and
+  compatible modalities.
 - A `project_grader` is one project's policy for that definition. It stores the
-  scope and the pass threshold.
+  scope, complete setting values, and the pass threshold.
 
 The temporary grading job freezes the exact definition version, project grader,
-scope result, and pass threshold that apply to the trace. Later edits cannot
-change work that was already requested.
+setting values, scope result, and pass threshold that apply to the trace. Later
+edits cannot change work that was already requested.
 
 The durable result is a ClickHouse `grade` row. It contains:
 
@@ -90,10 +91,14 @@ Overlapping simulation selectors still run a project grader once. A deleted or
 missing selected ID matches nothing and never widens to all. Modality
 compatibility is checked before a grader enters the frozen plan.
 
-Expected behaviors is the only product grader in this version. Every project
-gets it automatically. It grades every completed simulation, does not grade
-production, and customers cannot edit its scope. Customers can edit its pass
-threshold.
+Expected behaviors is the only grader that every project gets automatically. It
+grades every completed simulation, does not grade production, and customers
+cannot edit its scope. Customers can edit its pass threshold.
+
+Response latency is an optional Egma grader. A project chooses whether to use
+it, where it applies, its Maximum average response time setting, and its pass
+threshold. A customer-created LLM grader is shared in that organization and is
+active only in projects that choose it.
 
 ## Expected behaviors
 
@@ -104,6 +109,24 @@ the normalized fraction of behaviors that passed.
 
 One failed assertion does not stop its siblings. If the grader cannot produce a
 valid top-level score, it writes one error grade with a null score.
+
+## Response latency
+
+The response-latency grader reads the existing `turn_response_latency` metric
+from the trace and computes its arithmetic mean. It returns `1` when the mean is
+at or below the project's frozen maximum and `0` when it is above. A trace with
+no response-latency metric gets an error grade with a null score.
+
+## Customer LLM graders
+
+A customer LLM grader makes one model call per trace. Its saved Grading
+instructions are the one criterion. The model reads only the existing text
+evidence: transcript, ending outcome, observed tool calls, and observed metrics.
+`met` becomes `1`, `not_met` becomes `0`, and `cannot_determine` becomes an
+error grade with a null score.
+
+Customers cannot run custom code in this version. Trusted Egma code executors
+live in this repository and are selected by the stable definition ID.
 
 ## Judge providers
 

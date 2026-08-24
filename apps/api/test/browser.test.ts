@@ -2106,30 +2106,91 @@ describe.skipIf(!storage.available)("hearing a recording from a transcript", () 
   );
 });
 
+const BROWSER_CUSTOM_GRADER = "Polite resolution";
+
 /**
- * The current Graders surface: one fixed-scope project grader and one editable
- * policy value. There is no Library activation flow and no Latency grader.
+ * The Graders surface, through the same browser, API, and stores a customer
+ * uses. A definition on the library shelf is not active until this project
+ * chooses it; customer authoring creates an organization definition and its
+ * first project policy together.
  */
-describe("the Expected behaviors project grader", () => {
+describe("the project grader library", () => {
   it(
-    "shows its fixed scope and saves its pass threshold",
+    "uses Response latency and creates one custom LLM grader",
     async () => {
       await page.goto(`${origin}/projects/${acme}/graders`);
-      await page.waitForSelector("text=Grades all simulations");
+      await page.getByText("Expected behaviors", { exact: true }).waitFor();
+      expect(await page.getByRole("tab", { name: "Active graders" }).count())
+        .toBe(1);
+      expect(await page.getByRole("tab", { name: "Grader library" }).count())
+        .toBe(1);
+      expect(await page.innerText("main")).toContain(
+        "All simulations · Production off",
+      );
 
-      const shown = await page.innerText("main");
-      expect(shown).toContain("Grades all simulations");
-      expect(shown).toContain("Production off");
-      expect(shown).not.toContain("Latency");
+      await page.getByRole("tab", { name: "Grader library" }).click();
+      const latency = page
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: "Response latency" });
+      await latency.waitFor();
+      expect(await latency.innerText()).toContain("Available");
+      await latency
+        .getByRole("button", { name: "Open the menu for Response latency" })
+        .click();
+      await page.getByRole("menuitem", { name: "View details" }).click();
 
-      await page.getByRole("button", { name: "Edit threshold" }).click();
-      const threshold = page.getByLabel("Pass threshold");
-      expect(await threshold.inputValue()).toBe("1");
-      await threshold.fill("0.75");
-      await page.getByRole("button", { name: "Save threshold" }).click();
+      const details = page.getByRole("dialog", { name: "Response latency" });
+      await details.waitFor();
+      expect(await details.innerText()).toContain("turn response latency");
+      expect(await details.innerText()).toContain(
+        "Maximum average response time: 3 seconds by default",
+      );
+      await details.getByRole("button", { name: "Use in project" }).click();
+      await details.getByLabel("Grades simulations").click();
+      await details.getByLabel("All simulations").click();
+      await details.getByLabel("Maximum average response time").fill("2.5");
+      await details.getByRole("button", { name: "Use in project" }).click();
 
-      await page.waitForSelector("text=Pass threshold saved.");
-      await page.waitForSelector("text=0.75");
+      await page.getByText("Grader added to Active graders.").waitFor();
+      const activeLatency = page
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: "Response latency" });
+      await activeLatency.waitFor();
+      expect(await activeLatency.innerText()).toContain("All simulations");
+      await activeLatency
+        .getByRole("button", { name: "Open the menu for Response latency" })
+        .click();
+      await page.getByRole("menuitem", { name: "View and edit" }).click();
+      const activeLatencyDetails = page.getByRole("dialog", {
+        name: "Response latency",
+      });
+      expect(
+        await activeLatencyDetails
+          .getByLabel("Maximum average response time")
+          .inputValue(),
+      ).toBe("2.5");
+      await activeLatencyDetails.getByRole("button", { name: "Cancel" }).click();
+
+      await page.getByRole("button", { name: "Create custom grader" }).click();
+      const custom = page.getByRole("dialog", { name: "Create custom grader" });
+      await custom.waitFor();
+      await custom.getByLabel("Name").fill(BROWSER_CUSTOM_GRADER);
+      await custom
+        .getByLabel("Grading instructions")
+        .fill("The agent stays polite and resolves the request.");
+      await custom.getByRole("button", { name: "Create grader" }).click();
+
+      await page.getByText("Custom grader created and added to Active graders.")
+        .waitFor();
+      const activeCustom = page
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: BROWSER_CUSTOM_GRADER });
+      await activeCustom.waitFor();
+      expect(await activeCustom.innerText()).toContain("Organization");
+      expect(await activeCustom.innerText()).toContain("LLM judge");
     },
     SETTLE,
   );
@@ -2700,23 +2761,43 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "edits this project's Expected behaviors threshold and not the first project's",
+    "sees the organization's custom grader inactive and edits only this project's Expected behaviors threshold",
     async () => {
       await walk.goto(at("graders"));
       await walk.waitForSelector("text=Expected behaviors");
-      await saysWithin(walk, "Grades all simulations");
-      await saysWithin(walk, "Production off");
+      await saysWithin(walk, "All simulations · Production off");
+
+      expect(
+        await walk
+          .locator("table")
+          .getByRole("row")
+          .filter({ hasText: BROWSER_CUSTOM_GRADER })
+          .count(),
+      ).toBe(0);
+      await walk.getByRole("tab", { name: "Grader library" }).click();
+      const customDefinition = walk
+        .locator("table")
+        .getByRole("row")
+        .filter({ hasText: BROWSER_CUSTOM_GRADER });
+      await customDefinition.waitFor();
+      expect(await customDefinition.innerText()).toContain("Available");
+
+      await walk.getByRole("tab", { name: "Active graders" }).click();
 
       const secondProjectGrader = walk
         .locator("table")
         .getByRole("row")
         .filter({ hasText: "Expected behaviors" });
       await secondProjectGrader
-        .getByRole("button", { name: "Edit threshold" })
+        .getByRole("button", { name: "Open the menu for Expected behaviors" })
         .click();
-      await walk.getByLabel("Pass threshold").fill("0.62");
-      await walk.getByRole("button", { name: "Save threshold" }).click();
-      await walk.waitForSelector("text=Pass threshold saved.");
+      await walk.getByRole("menuitem", { name: "View and edit" }).click();
+      const thresholdEditor = walk.getByRole("dialog", {
+        name: "Expected behaviors",
+      });
+      await thresholdEditor.getByLabel("Pass threshold").fill("0.62");
+      await thresholdEditor.getByRole("button", { name: "Save changes" }).click();
+      await walk.waitForSelector("text=Grader changes saved.");
       await expect
         .poll(() => secondProjectGrader.innerText(), { timeout: 30_000 })
         .toContain("0.62");

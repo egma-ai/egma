@@ -4983,7 +4983,7 @@
     "/v1/grader-library": {
       "get": {
         "operationId": "listGraderLibrary",
-        "summary": "List grader library entries",
+        "summary": "List the grader library for a project",
         "tags": [
           "Graders"
         ],
@@ -5017,7 +5017,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Grader library entries.",
+            "description": "Grader definitions visible to the organization, with current-project use state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5045,6 +5045,13 @@
                               }
                             ]
                           },
+                          "owner": {
+                            "type": "string",
+                            "enum": [
+                              "egma",
+                              "organization"
+                            ]
+                          },
                           "type": {
                             "type": "string",
                             "enum": [
@@ -5052,14 +5059,113 @@
                               "code"
                             ]
                           },
-                          "owner": {
-                            "type": "string",
-                            "enum": [
-                              "egma",
-                              "customer"
+                          "scopeEditable": {
+                            "type": "boolean"
+                          },
+                          "currentDefinitionVersion": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "modalities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "chat",
+                                "voice"
+                              ]
+                            },
+                            "minItems": 1,
+                            "uniqueItems": true
+                          },
+                          "gradingInstructions": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
                             ]
                           },
-                          "projectId": {
+                          "requiredEvidence": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "transcript",
+                                "ending_outcome",
+                                "tool_calls",
+                                "observed_metrics",
+                                "test_expected_behaviors",
+                                "turn_response_latency"
+                              ]
+                            }
+                          },
+                          "settingDefinitions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "key": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "valueType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "integer"
+                                  ]
+                                },
+                                "defaultValue": {
+                                  "type": "integer"
+                                },
+                                "unit": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "minimum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "maximum": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "key",
+                                "label",
+                                "valueType",
+                                "defaultValue",
+                                "unit",
+                                "minimum",
+                                "maximum"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "activeProjectGraderId": {
                             "anyOf": [
                               {
                                 "type": "string",
@@ -5069,13 +5175,6 @@
                                 "type": "null"
                               }
                             ]
-                          },
-                          "scopeEditable": {
-                            "type": "boolean"
-                          },
-                          "currentDefinitionVersion": {
-                            "type": "integer",
-                            "minimum": 1
                           },
                           "createdAt": {
                             "type": "string",
@@ -5090,11 +5189,15 @@
                           "id",
                           "name",
                           "description",
-                          "type",
                           "owner",
-                          "projectId",
+                          "type",
                           "scopeEditable",
                           "currentDefinitionVersion",
+                          "modalities",
+                          "gradingInstructions",
+                          "requiredEvidence",
+                          "settingDefinitions",
+                          "activeProjectGraderId",
                           "createdAt",
                           "updatedAt"
                         ],
@@ -5152,6 +5255,26 @@
               }
             }
           },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
           "429": {
             "description": "The request rate limit was reached.",
             "headers": {
@@ -5174,10 +5297,10 @@
         }
       }
     },
-    "/v1/graders": {
+    "/v1/grader-library/{graderDefinitionId}": {
       "get": {
-        "operationId": "listGraders",
-        "summary": "List project graders",
+        "operationId": "getGraderLibraryEntry",
+        "summary": "Get one grader library entry",
         "tags": [
           "Graders"
         ],
@@ -5191,16 +5314,16 @@
         ],
         "parameters": [
           {
-            "name": "projectId",
-            "in": "query",
-            "required": false,
+            "name": "graderDefinitionId",
+            "in": "path",
+            "required": true,
             "schema": {
               "type": "string",
               "minLength": 1
             }
           },
           {
-            "name": "pageToken",
+            "name": "projectId",
             "in": "query",
             "required": false,
             "schema": {
@@ -5211,33 +5334,107 @@
         ],
         "responses": {
           "200": {
-            "description": "Project graders, newest first.",
+            "description": "The grader definition and its current-project use state.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "graders": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "organization"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "llm_as_judge",
+                        "code"
+                      ]
+                    },
+                    "scopeEditable": {
+                      "type": "boolean"
+                    },
+                    "currentDefinitionVersion": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "modalities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "voice"
+                        ]
+                      },
+                      "minItems": 1,
+                      "uniqueItems": true
+                    },
+                    "gradingInstructions": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "requiredEvidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "transcript",
+                          "ending_outcome",
+                          "tool_calls",
+                          "observed_metrics",
+                          "test_expected_behaviors",
+                          "turn_response_latency"
+                        ]
+                      }
+                    },
+                    "settingDefinitions": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "projectId": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "graderDefinitionId": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "name": {
+                          "key": {
                             "type": "string"
                           },
-                          "description": {
+                          "label": {
+                            "type": "string"
+                          },
+                          "valueType": {
+                            "type": "string",
+                            "enum": [
+                              "integer"
+                            ]
+                          },
+                          "defaultValue": {
+                            "type": "integer"
+                          },
+                          "unit": {
                             "anyOf": [
                               {
                                 "type": "string"
@@ -5247,132 +5444,40 @@
                               }
                             ]
                           },
-                          "scopeEditable": {
-                            "type": "boolean"
-                          },
-                          "scope": {
-                            "type": "object",
-                            "properties": {
-                              "simulations": {
-                                "type": "array",
-                                "items": {
-                                  "oneOf": [
-                                    {
-                                      "type": "object",
-                                      "properties": {
-                                        "kind": {
-                                          "type": "string",
-                                          "enum": [
-                                            "all"
-                                          ]
-                                        }
-                                      },
-                                      "required": [
-                                        "kind"
-                                      ],
-                                      "additionalProperties": false
-                                    },
-                                    {
-                                      "type": "object",
-                                      "properties": {
-                                        "kind": {
-                                          "type": "string",
-                                          "enum": [
-                                            "test_suite"
-                                          ]
-                                        },
-                                        "id": {
-                                          "type": "string",
-                                          "minLength": 1
-                                        }
-                                      },
-                                      "required": [
-                                        "kind",
-                                        "id"
-                                      ],
-                                      "additionalProperties": false
-                                    },
-                                    {
-                                      "type": "object",
-                                      "properties": {
-                                        "kind": {
-                                          "type": "string",
-                                          "enum": [
-                                            "test"
-                                          ]
-                                        },
-                                        "id": {
-                                          "type": "string",
-                                          "minLength": 1
-                                        }
-                                      },
-                                      "required": [
-                                        "kind",
-                                        "id"
-                                      ],
-                                      "additionalProperties": false
-                                    }
-                                  ]
-                                }
+                          "minimum": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
                               },
-                              "production": {
-                                "anyOf": [
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "samplePercent": {
-                                        "type": "number",
-                                        "minimum": 1,
-                                        "maximum": 100
-                                      }
-                                    },
-                                    "required": [
-                                      "samplePercent"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
+                              {
+                                "type": "null"
                               }
-                            },
-                            "required": [
-                              "simulations",
-                              "production"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
-                          "passThreshold": {
-                            "type": "number",
-                            "minimum": 0,
-                            "maximum": 1
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "updatedAt": {
-                            "type": "string",
-                            "format": "date-time"
+                          "maximum": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           }
                         },
                         "required": [
-                          "id",
-                          "projectId",
-                          "graderDefinitionId",
-                          "name",
-                          "description",
-                          "scopeEditable",
-                          "scope",
-                          "passThreshold",
-                          "createdAt",
-                          "updatedAt"
+                          "key",
+                          "label",
+                          "valueType",
+                          "defaultValue",
+                          "unit",
+                          "minimum",
+                          "maximum"
                         ],
                         "additionalProperties": false
                       }
                     },
-                    "nextPageToken": {
+                    "activeProjectGraderId": {
                       "anyOf": [
                         {
                           "type": "string",
@@ -5382,11 +5487,31 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   },
                   "required": [
-                    "graders",
-                    "nextPageToken"
+                    "id",
+                    "name",
+                    "description",
+                    "owner",
+                    "type",
+                    "scopeEditable",
+                    "currentDefinitionVersion",
+                    "modalities",
+                    "gradingInstructions",
+                    "requiredEvidence",
+                    "settingDefinitions",
+                    "activeProjectGraderId",
+                    "createdAt",
+                    "updatedAt"
                   ],
                   "additionalProperties": false
                 }
@@ -5423,6 +5548,26 @@
               }
             }
           },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
           "429": {
             "description": "The request rate limit was reached.",
             "headers": {
@@ -5445,10 +5590,10 @@
         }
       }
     },
-    "/v1/graders/{graderId}": {
-      "patch": {
-        "operationId": "updateGrader",
-        "summary": "Update a project grader's pass threshold",
+    "/v1/grader-library/{graderDefinitionId}/use": {
+      "post": {
+        "operationId": "useGraderInProject",
+        "summary": "Use a grader in the current project",
         "tags": [
           "Graders"
         ],
@@ -5462,7 +5607,7 @@
         ],
         "parameters": [
           {
-            "name": "graderId",
+            "name": "graderDefinitionId",
             "in": "path",
             "required": true,
             "schema": {
@@ -5487,6 +5632,103 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "scope": {
+                    "type": "object",
+                    "properties": {
+                      "simulations": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "all"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "test_suite"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "id"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "test"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "id"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "production": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "samplePercent": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 100
+                              }
+                            },
+                            "required": [
+                              "samplePercent"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "simulations",
+                      "production"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
                   "passThreshold": {
                     "type": "number",
                     "minimum": 0,
@@ -5494,6 +5736,8 @@
                   }
                 },
                 "required": [
+                  "scope",
+                  "settings",
                   "passThreshold"
                 ],
                 "additionalProperties": false
@@ -5502,8 +5746,8 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "The updated project grader.",
+          "201": {
+            "description": "The new current-project grader policy.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5534,7 +5778,36 @@
                         }
                       ]
                     },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "organization"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "llm_as_judge",
+                        "code"
+                      ]
+                    },
+                    "modalities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "voice"
+                        ]
+                      },
+                      "minItems": 1,
+                      "uniqueItems": true
+                    },
                     "scopeEditable": {
+                      "type": "boolean"
+                    },
+                    "removable": {
                       "type": "boolean"
                     },
                     "scope": {
@@ -5630,6 +5903,10 @@
                       ],
                       "additionalProperties": false
                     },
+                    "settings": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
                     "passThreshold": {
                       "type": "number",
                       "minimum": 0,
@@ -5650,8 +5927,13 @@
                     "graderDefinitionId",
                     "name",
                     "description",
+                    "owner",
+                    "type",
+                    "modalities",
                     "scopeEditable",
+                    "removable",
                     "scope",
+                    "settings",
                     "passThreshold",
                     "createdAt",
                     "updatedAt"
@@ -5660,6 +5942,1496 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/grader-library/custom": {
+      "post": {
+        "operationId": "createCustomGrader",
+        "summary": "Create and use a custom LLM grader",
+        "description": "Creates one organization-owned LLM judge and its current-project policy. The server fixes its type, model, output contract, and empty settings contract.",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "gradingInstructions": {
+                    "type": "string"
+                  },
+                  "modalities": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "chat",
+                        "voice"
+                      ]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  },
+                  "scope": {
+                    "type": "object",
+                    "properties": {
+                      "simulations": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "all"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "test_suite"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "id"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "test"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "id"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "production": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "samplePercent": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 100
+                              }
+                            },
+                            "required": [
+                              "samplePercent"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "simulations",
+                      "production"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "passThreshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "name",
+                  "gradingInstructions",
+                  "modalities",
+                  "scope",
+                  "passThreshold"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The custom definition and its current-project policy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "definition": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "owner": {
+                          "type": "string",
+                          "enum": [
+                            "egma",
+                            "organization"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "llm_as_judge",
+                            "code"
+                          ]
+                        },
+                        "scopeEditable": {
+                          "type": "boolean"
+                        },
+                        "currentDefinitionVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ]
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "gradingInstructions": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "requiredEvidence": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "transcript",
+                              "ending_outcome",
+                              "tool_calls",
+                              "observed_metrics",
+                              "test_expected_behaviors",
+                              "turn_response_latency"
+                            ]
+                          }
+                        },
+                        "settingDefinitions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "valueType": {
+                                "type": "string",
+                                "enum": [
+                                  "integer"
+                                ]
+                              },
+                              "defaultValue": {
+                                "type": "integer"
+                              },
+                              "unit": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "minimum": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "maximum": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "key",
+                              "label",
+                              "valueType",
+                              "defaultValue",
+                              "unit",
+                              "minimum",
+                              "maximum"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "activeProjectGraderId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "description",
+                        "owner",
+                        "type",
+                        "scopeEditable",
+                        "currentDefinitionVersion",
+                        "modalities",
+                        "gradingInstructions",
+                        "requiredEvidence",
+                        "settingDefinitions",
+                        "activeProjectGraderId",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "grader": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "projectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "graderDefinitionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "owner": {
+                          "type": "string",
+                          "enum": [
+                            "egma",
+                            "organization"
+                          ]
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "llm_as_judge",
+                            "code"
+                          ]
+                        },
+                        "modalities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "voice"
+                            ]
+                          },
+                          "minItems": 1,
+                          "uniqueItems": true
+                        },
+                        "scopeEditable": {
+                          "type": "boolean"
+                        },
+                        "removable": {
+                          "type": "boolean"
+                        },
+                        "scope": {
+                          "type": "object",
+                          "properties": {
+                            "simulations": {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "all"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "test_suite"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "test"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "production": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "samplePercent": {
+                                      "type": "number",
+                                      "minimum": 1,
+                                      "maximum": 100
+                                    }
+                                  },
+                                  "required": [
+                                    "samplePercent"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "simulations",
+                            "production"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "settings": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "passThreshold": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "graderDefinitionId",
+                        "name",
+                        "description",
+                        "owner",
+                        "type",
+                        "modalities",
+                        "scopeEditable",
+                        "removable",
+                        "scope",
+                        "settings",
+                        "passThreshold",
+                        "createdAt",
+                        "updatedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "definition",
+                    "grader"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/graders": {
+      "get": {
+        "operationId": "listGraders",
+        "summary": "List project graders",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project graders, ordered by name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "graders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "projectId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "graderDefinitionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "owner": {
+                            "type": "string",
+                            "enum": [
+                              "egma",
+                              "organization"
+                            ]
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "llm_as_judge",
+                              "code"
+                            ]
+                          },
+                          "modalities": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "chat",
+                                "voice"
+                              ]
+                            },
+                            "minItems": 1,
+                            "uniqueItems": true
+                          },
+                          "scopeEditable": {
+                            "type": "boolean"
+                          },
+                          "removable": {
+                            "type": "boolean"
+                          },
+                          "scope": {
+                            "type": "object",
+                            "properties": {
+                              "simulations": {
+                                "type": "array",
+                                "items": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "all"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "kind"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "test_suite"
+                                          ]
+                                        },
+                                        "id": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "id"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "test"
+                                          ]
+                                        },
+                                        "id": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "id"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ]
+                                }
+                              },
+                              "production": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "samplePercent": {
+                                        "type": "number",
+                                        "minimum": 1,
+                                        "maximum": 100
+                                      }
+                                    },
+                                    "required": [
+                                      "samplePercent"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "simulations",
+                              "production"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "settings": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "passThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "graderDefinitionId",
+                          "name",
+                          "description",
+                          "owner",
+                          "type",
+                          "modalities",
+                          "scopeEditable",
+                          "removable",
+                          "scope",
+                          "settings",
+                          "passThreshold",
+                          "createdAt",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "nextPageToken": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "graders",
+                    "nextPageToken"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/graders/{graderId}": {
+      "patch": {
+        "operationId": "updateGrader",
+        "summary": "Update a project grader's policy",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "graderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "object",
+                    "properties": {
+                      "simulations": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "all"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "test_suite"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "id"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "test"
+                                  ]
+                                },
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "id"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "production": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "samplePercent": {
+                                "type": "number",
+                                "minimum": 1,
+                                "maximum": 100
+                              }
+                            },
+                            "required": [
+                              "samplePercent"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "simulations",
+                      "production"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "passThreshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "minProperties": 1,
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated project grader.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "graderDefinitionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "owner": {
+                      "type": "string",
+                      "enum": [
+                        "egma",
+                        "organization"
+                      ]
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "llm_as_judge",
+                        "code"
+                      ]
+                    },
+                    "modalities": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "chat",
+                          "voice"
+                        ]
+                      },
+                      "minItems": 1,
+                      "uniqueItems": true
+                    },
+                    "scopeEditable": {
+                      "type": "boolean"
+                    },
+                    "removable": {
+                      "type": "boolean"
+                    },
+                    "scope": {
+                      "type": "object",
+                      "properties": {
+                        "simulations": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "all"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "test_suite"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "test"
+                                    ]
+                                  },
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "id"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          }
+                        },
+                        "production": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "samplePercent": {
+                                  "type": "number",
+                                  "minimum": 1,
+                                  "maximum": 100
+                                }
+                              },
+                              "required": [
+                                "samplePercent"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "simulations",
+                        "production"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "settings": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "passThreshold": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "graderDefinitionId",
+                    "name",
+                    "description",
+                    "owner",
+                    "type",
+                    "modalities",
+                    "scopeEditable",
+                    "removable",
+                    "scope",
+                    "settings",
+                    "passThreshold",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "removeGrader",
+        "summary": "Remove an optional grader from a project",
+        "tags": [
+          "Graders"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "graderId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The optional project grader was removed."
           },
           "400": {
             "description": "The request was refused.",

@@ -49,6 +49,8 @@ export type Reading = {
 /** Everything an executor may use, and no project policy. */
 export type Execution = {
   readonly definition: GraderDefinitionSnapshot;
+  /** The complete project settings frozen when this trace was selected. */
+  readonly parameterValues: Readonly<Record<string, unknown>>;
   readonly conversation: Conversation;
   readonly judging: Judging;
   readonly reading: Reading;

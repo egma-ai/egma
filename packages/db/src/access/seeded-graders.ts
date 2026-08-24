@@ -52,6 +52,7 @@ export async function insertExpectedBehaviorsProjectGrader(
     projectId: input.projectId,
     graderDefinitionId: PREDEFINED_GRADERS.expectedBehaviors,
     scope: EXPECTED_BEHAVIORS_SCOPE,
+    parameterValues: {},
     passThreshold: 1,
   });
   return id;
