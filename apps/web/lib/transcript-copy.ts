@@ -22,7 +22,6 @@
 
 /** The list page. */
 export const LIST = {
-  eyebrow: "Project",
   /**
    * The heading, and deliberately not the navigation label: the sidebar reads
    * its words from `lib/navigation.ts`, which is where a navigation item is
@@ -30,7 +29,6 @@ export const LIST = {
    * many, and this is the one the page renders.
    */
   title: "Monitoring",
-  lead: "What your agents did in production, newest first.",
   /** What the table is called where somebody hears it rather than sees it. */
   tableLabel: "Production transcripts in this project",
   loadingWhat: "this project's production transcripts",
@@ -38,6 +36,13 @@ export const LIST = {
   signedOutLead: "This page is about your project.",
   signIn: "Sign in",
   setUp: "Set up Egma",
+  /**
+   * The one action this page offers, and it is a verb about an agent rather
+   * than a noun about an object: there is no monitoring setup to fill in any
+   * more. A per-agent switch turns pull on, and push needs nothing at all
+   * (ADR-0015).
+   */
+  startMonitoring: "Start monitoring",
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
   window: "Window",
@@ -112,9 +117,15 @@ export const QUIET = {
   },
   setUp: {
     title: "Nothing has been recorded here yet",
+    /*
+     * **No storage word, and none of the banned ones.** These two pages read
+     * the product's own vocabulary, so what a Retell agent did in production
+     * is what Egma pulls, and a LiveKit Agents agent reports its own work.
+     */
     lead:
-      "Choose Retell or LiveKit Agents and complete its production Monitoring setup.",
-    action: "Set up monitoring",
+      "Start monitoring an agent. Egma pulls what a Retell agent did in " +
+      "production, using that agent's own key; a LiveKit Agents agent " +
+      "reports its own work and needs no switch at all.",
   },
   organizationKey: {
     title: "A key here names the whole organization",

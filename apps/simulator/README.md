@@ -23,7 +23,7 @@ touching the others:
   `scripted` walks the scenario deterministically and is what CI and the
   local story run on; `openai` speaks the OpenAI chat-completions shape to
   any provider, selected purely by configuration.
-- **The connection plugs** (`plugs/`) — one component per connection kind
+- **The connection plugs** (`plugs/`) — one component per connection type
   that alone knows how to reach and exchange turns with the target.
   Everything else is plug-blind. Two local stand-ins ship as the first
   plugs — the scripted counterpart, whose agent answers from a script over
@@ -63,7 +63,7 @@ touching the others:
   future speech-to-speech persona a different leg-set rather than a rewrite.
 
 One pipeline is assembled per simulation from its own spec and torn down
-after (`pipeline.py`). Modality selects the legs. Connection kind selects the
+after (`pipeline.py`). Modality selects the legs. Connection type selects the
 plug, and access variant supplies that plug's configuration and authority. A
 chat simulation is the plug and the brain, walked
 a turn at a time. A voice simulation on a full-duplex transport is the
@@ -71,7 +71,7 @@ same brain with the speech legs around it, conducted by a real Pipecat
 pipeline (`conductor.py`): both directions of the transport are open at once,
 the detector and the turn model decide where turns fall, and nothing
 announces a turn because nothing announces one on a real call. A spec
-naming a connection kind the simulator holds no plug for is refused out
+naming a connection type the simulator holds no plug for is refused out
 loud at claim time and reported not at all: the row stays the control
 plane's to sweep.
 

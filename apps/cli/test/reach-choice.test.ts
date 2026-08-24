@@ -196,7 +196,7 @@ describe("choosing the phone", () => {
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionKind).toBe("phone_number");
+    expect(connection?.connectionType).toBe("phone_number");
     expect(connection?.accessVariant).toBe("phone_number.public_e164");
     expect(connection?.modality).toBe("voice");
     expect(connection?.name).toBe("phone_number-1");
@@ -316,7 +316,7 @@ describe("choosing text", () => {
     expect(platform.registered.connections).toHaveLength(1);
     const [connection] = platform.registered.connections;
     expect(connection?.agentPlatform).toBe("retell");
-    expect(connection?.connectionKind).toBe("retell_chat_api");
+    expect(connection?.connectionType).toBe("retell_chat_api");
     expect(connection?.accessVariant).toBe("retell_chat_api.api_key");
     expect(connection?.modality).toBe("chat");
     // The selected chat agent's own identity is the connection target.

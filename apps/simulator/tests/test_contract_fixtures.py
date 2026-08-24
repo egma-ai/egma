@@ -140,7 +140,7 @@ def test_phone_connection_stays_phone_while_models_select_voice_legs():
 
     spec = SimulationSpec.from_document(document)
 
-    assert spec.connection_kind == "phone_number"
+    assert spec.connection_type == "phone_number"
     assert spec.models.stt.provider == "deepgram"
     assert spec.models.tts.provider == "cartesia"
     assert spec.models.tts.voice_id == "brisk-tenor-7"

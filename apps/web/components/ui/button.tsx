@@ -9,42 +9,67 @@ import { cn } from "@/lib/utils";
  *
  * The variant names are shadcn's, so a component pasted from the registry
  * arrives already dressed. What each name *draws* is egma's: `default` is the
- * Deep Ember primary, `secondary` and `outline` are both the one outlined kind
+ * wash primary, `secondary` and `outline` are both the one outlined kind
  * `DESIGN.md` describes, and `ghost` and `link` are both the quiet action.
  * shadcn's own `secondary` — a filled grey button — is a look this product does
  * not have, so no name produces it.
  *
- * **When migrating:** the CSS Modules `Button` defaults to the outlined kind and
- * takes `weight="strong"` for the filled one. This one defaults to the filled
- * one, because that is what `variant="default"` means everywhere shadcn is
- * used. A migrated quiet button therefore has to say `variant="secondary"` out
- * loud; a migration that drops the prop turns a quiet button primary.
+ * **`default` is the wash button, and it replaced a Deep Ember block.** The
+ * boards draw the one action a page offers as Ember Wash behind Deep Ember
+ * text on a neutral hairline (`71O-0` on the agents board, `7DC-0` in the side
+ * sheet's footer), 36px tall with 16px of side padding. The developer ruled on
+ * 2026-08-23 that this *is* the primary action and retired the filled one, so
+ * no variant name produces a Deep Ember block any more. Hover and press move
+ * both halves one step: the fill takes a little more Ember, the ink takes the
+ * darker Ember steps `DESIGN.md` already named for a primary's feedback.
+ *
+ * **Sizes are 32 / 36 / 44, and 36 is the default.** The board's toolbar
+ * control is 36px and its form control is 44px, so `default` is the toolbar's
+ * and `lg` is the one a sheet or a dialog footer wears. A 36px button is under
+ * the 44px `DESIGN.md` asks of a coarse pointer, so the base puts that back on
+ * every touch screen — the same trade the sidebar row already makes.
  *
  * Every value here is a theme key, and every theme key reads one of egma's
- * own declarations in `tailwind-theme.css`. The result is the same 44px,
- * 6px-radius, weight-500 button the CSS Modules `Button` drew, which is what
- * made replacing it a restyle rather than a redesign.
+ * own declarations in `tailwind-theme.css`. Nothing here holds a colour, a
+ * size, a radius or a duration of its own.
  */
 const buttonVariants = cva(
   [
     "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap",
     "rounded-button text-sm font-medium no-underline",
+    /* "Pointer targets are at least 44px on coarse pointers." */
+    "pointer-coarse:min-h-(--tap-target)",
     // Named properties, never `all`, and never `outline-color`. Tailwind's
     // `transition-colors` includes it, which fades the focus ring in over
     // 140ms on every Tab step — motion on keyboard navigation, which
     // `DESIGN.md` forbids outright.
     "transition-[color,background-color,border-color] duration-(--duration-hover) ease-out",
+    /*
+     * **A control that cannot be pressed does not answer a pointer.** Every
+     * variant's hover state is behind `not-disabled:`, because the wash
+     * primary's was not: a disabled Save repainted as an available one the
+     * moment somebody's pointer rested on it, which is the opposite of what a
+     * disabled control is for. `active:` needs no guard — a browser does not
+     * fire it on a disabled element.
+     */
     "disabled:cursor-not-allowed disabled:opacity-55",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   ],
   {
     variants: {
       variant: {
-        /* Primary: Deep Ember fill, white text. */
+        /*
+         * Primary: Ember Wash behind Deep Ember, on the ordinary neutral
+         * hairline — the button the boards draw. The border stays `--border`
+         * through every state: what answers a press is the fill and the ink,
+         * and a hairline that moved as well would make the control look like
+         * it changed size.
+         */
         default: [
-          "border border-primary bg-primary text-primary-foreground",
-          "pointer-hover:bg-primary-hover pointer-hover:border-primary-hover",
-          "active:bg-primary-pressed active:border-primary-pressed",
+          "border border-border bg-primary-wash text-primary",
+          "pointer-hover:not-disabled:bg-primary-wash-hover",
+          "pointer-hover:not-disabled:text-primary-hover",
+          "active:bg-primary-wash-pressed active:text-primary-pressed",
         ],
         /*
          * Secondary: transparent with a one-pixel Midnight Ink border.
@@ -59,30 +84,40 @@ const buttonVariants = cva(
          */
         secondary: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
+          "pointer-hover:not-disabled:border-foreground",
+          "pointer-hover:not-disabled:bg-surface-soft",
         ],
         outline: [
           "border border-border-strong bg-transparent text-foreground",
-          "pointer-hover:border-foreground pointer-hover:bg-surface-soft",
+          "pointer-hover:not-disabled:border-foreground",
+          "pointer-hover:not-disabled:bg-surface-soft",
         ],
         /* Quiet action: text only. */
-        ghost:
-          "border border-transparent bg-transparent text-foreground pointer-hover:bg-surface-soft",
-        link: "border border-transparent bg-transparent text-foreground underline-offset-4 pointer-hover:underline",
+        ghost: [
+          "border border-transparent bg-transparent text-foreground",
+          "pointer-hover:not-disabled:bg-surface-soft",
+        ],
+        link: [
+          "border border-transparent bg-transparent text-foreground underline-offset-4",
+          "pointer-hover:not-disabled:underline",
+        ],
         /* Destructive: the failure colour, and never the brand colour. */
         destructive: [
           "border border-destructive bg-destructive text-destructive-foreground",
-          "pointer-hover:bg-destructive-hover pointer-hover:border-destructive-hover",
+          "pointer-hover:not-disabled:bg-destructive-hover",
+          "pointer-hover:not-disabled:border-destructive-hover",
           "active:bg-destructive-pressed active:border-destructive-pressed",
         ],
       },
       size: {
-        /* 44px, which is also the coarse-pointer target `DESIGN.md` asks for. */
-        default: "min-h-(--control-lg) px-4",
-        /* Dense toolbars, where the row is the target rather than the control. */
+        /* 36px and 16px of side padding: the toolbar control the boards draw. */
+        default: "min-h-(--control-md) px-4",
+        /* Denser still, for a control inside a row rather than above a list. */
         sm: "min-h-(--control-sm) px-3",
+        /* 44px: the form control, which is what a sheet or a dialog footer holds. */
         lg: "min-h-(--control-lg) px-5",
-        icon: "min-h-(--control-lg) w-(--control-lg) px-0",
+        /* A square, sized to the toolbar control it stands beside. */
+        icon: "min-h-(--control-md) w-(--control-md) px-0",
       },
     },
     defaultVariants: {

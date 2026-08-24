@@ -33,12 +33,15 @@ import { observeRequest, type FetchInput } from "./platform-request.ts";
 const routed = vi.hoisted(() => ({
   push: vi.fn(),
   pathname: "/projects/prj_1/personas",
+  /** The query, because which of the two lists is shown is an address. */
+  search: "",
   projectId: "prj_1",
   personaId: "prs_1",
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
+  useSearchParams: () => new URLSearchParams(routed.search),
   useRouter: () => ({ push: routed.push, replace: vi.fn(), back: vi.fn() }),
   useParams: () => ({
     projectId: routed.projectId,
@@ -159,11 +162,22 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
         body: request.body,
       });
 
+      /*
+       * Three reads every one of these screens makes, defaulted so that a case
+       * about something else does not have to stub them: the authoring
+       * choices, the list the panel is drawn over, and the tests that name one
+       * persona. A case that is *about* one of them still stubs it, and its
+       * stub wins.
+       */
       const held =
         answers[key] ??
         (key === "GET /v1/persona-form"
           ? { status: 200, body: PERSONA_FORM }
-          : undefined);
+          : key === "GET /v1/personas"
+            ? { status: 200, body: { personas: [], nextPageToken: null } }
+            : at.pathname.endsWith("/usage")
+              ? { status: 200, body: { tests: [] } }
+              : undefined);
       if (held === undefined) throw new Error(`nothing stubbed for ${key}`);
 
       const turn = seen[key] ?? 0;
@@ -230,6 +244,7 @@ const DEFAULT_PERSONA: Persona = {
 beforeEach(() => {
   routed.push.mockReset();
   routed.pathname = "/projects/prj_1/personas";
+  routed.search = "";
   routed.projectId = "prj_1";
   routed.personaId = "prs_1";
   vi.stubGlobal("scrollTo", vi.fn());
@@ -243,7 +258,7 @@ afterEach(() => {
 /* ------------------------------------------------------------------------ */
 
 describe("the Personas list", () => {
-  it("shows Type and Project default as separate facts", async () => {
+  it("shows the columns the boards name, and marks the default on its own row", async () => {
     const { asked } = apiAnswers({
       "GET /api/me": { status: 200, body: meWith("admin") },
       "GET /v1/personas": {
@@ -262,12 +277,28 @@ describe("the Personas list", () => {
     const table = screen.getByRole("table", {
       name: "Active personas in this project",
     });
+    for (const column of [
+      "Name",
+      "Type",
+      "Language",
+      "Description",
+      "Version",
+      "Updated",
+    ]) {
+      expect(
+        within(table).getByRole("columnheader", { name: column }),
+        column,
+      ).toBeDefined();
+    }
+    /*
+     * **The Yes/No column is gone and the fact is not.** "Project default" was
+     * a column that said No on every row but one, which is a column of noise
+     * with one fact in it. The chip says the same thing on the row it is true
+     * of and nowhere else.
+     */
     expect(
-      within(table).getByRole("columnheader", { name: "Type" }),
-    ).toBeDefined();
-    expect(
-      within(table).getByRole("columnheader", { name: "Project default" }),
-    ).toBeDefined();
+      within(table).queryByRole("columnheader", { name: "Project default" }),
+    ).toBeNull();
 
     const customRow = screen.getByText("Impatient Rita").closest("tr");
     const egmaProvidedRow = screen.getByText("Default Persona").closest("tr");
@@ -275,9 +306,109 @@ describe("the Personas list", () => {
     expect(egmaProvidedRow).not.toBeNull();
     expect(within(customRow!).getByText("Custom")).toBeDefined();
     expect(within(egmaProvidedRow!).getByText("Egma-provided")).toBeDefined();
-    expect(within(customRow!).getByText("No")).toBeDefined();
-    expect(within(egmaProvidedRow!).getByText("Yes")).toBeDefined();
+    expect(within(egmaProvidedRow!).getByText("Default")).toBeDefined();
+    expect(within(customRow!).queryByText("Default")).toBeNull();
+    expect(within(customRow!).getByText("en-US")).toBeDefined();
+    expect(within(customRow!).getByText("v1")).toBeDefined();
+    expect(
+      within(customRow!).getByRole("button", {
+        name: "Actions for Impatient Rita",
+      }),
+    ).toBeDefined();
     expect(screen.getAllByRole("table")).toHaveLength(1);
+  });
+
+  /**
+   * A search that matches nobody is not an empty project, and saying so with
+   * the empty project's words would send somebody looking for a persona they
+   * have not lost.
+   */
+  it("filters by name, and offers the way out of a search that matches nobody", async () => {
+    const { asked } = apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /v1/personas": [
+        {
+          status: 200,
+          body: { personas: [RITA, DEFAULT_PERSONA], nextPageToken: null },
+        },
+        { status: 200, body: { personas: [], nextPageToken: null } },
+        {
+          status: 200,
+          body: { personas: [RITA, DEFAULT_PERSONA], nextPageToken: null },
+        },
+      ],
+    });
+    render(<PersonasPage />);
+    expect(await screen.findAllByText("Impatient Rita")).not.toHaveLength(0);
+
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Search personas by name" }),
+      { target: { value: "nobody" } },
+    );
+
+    expect(await screen.findByText("No persona here matches that")).toBeDefined();
+    expect(
+      asked.some((one) => one.path.includes("search=nobody")),
+    ).toBe(true);
+    expect(screen.queryByText("No personas in this project yet")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    expect(await screen.findAllByText("Impatient Rita")).not.toHaveLength(0);
+  });
+
+  /**
+   * **The archive was unreachable and Restore was a dead end.** The filter's
+   * control came off this page in an earlier batch and nothing replaced it, so
+   * the branch that reads the archived half was written, correct, and
+   * impossible to arrive at. The footer link is the way back to it, and it is
+   * an address rather than a control so a link to it can be sent.
+   */
+  it("reaches the archived list from the footer, and comes back from it", async () => {
+    const { asked } = apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("admin") },
+      "GET /v1/personas": [
+        { status: 200, body: { personas: [RITA], nextPageToken: null } },
+        {
+          status: 200,
+          body: {
+            personas: [
+              {
+                ...RITA,
+                id: "prs_old",
+                name: "Retired Ray",
+                archivedAt: "2026-08-12T09:00:00.000Z",
+              },
+            ],
+            nextPageToken: null,
+          },
+        },
+      ],
+    });
+    const { rerender } = render(<PersonasPage />);
+
+    expect(await screen.findByText("1 active persona ·")).toBeDefined();
+    expect(
+      screen
+        .getByRole("link", { name: "Archived" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/personas?archived=1");
+
+    // Following the link is a change of address, not a change of state.
+    routed.search = "archived=1";
+    rerender(<PersonasPage />);
+
+    expect(await screen.findAllByText("Retired Ray")).not.toHaveLength(0);
+    expect(
+      asked.some((one) => one.path.includes("archived=true")),
+    ).toBe(true);
+    expect(
+      screen.getByText(/Out of the lists a test is authored from/),
+    ).toBeDefined();
+    expect(
+      screen
+        .getByRole("link", { name: "Back to active" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/personas");
   });
 
   /*
@@ -582,7 +713,17 @@ describe("authoring a persona", () => {
 
 /* ------------------------------------------------------------------------ */
 
-describe("one persona's page", () => {
+describe("one persona's sheet", () => {
+  /**
+   * The panel opens on the read view, which is what the boards draw, so every
+   * case about the editor presses the one control that opens it first. A
+   * viewer never gets past this line, and that is the point of it.
+   */
+  async function openEditor(): Promise<void> {
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await screen.findByLabelText("Name");
+  }
+
   const reads = (persona: Persona = RITA) => ({
     "GET /api/me": { status: 200, body: meWith("member") },
     "GET /v1/persona-form": { status: 200, body: PERSONA_FORM },
@@ -615,7 +756,8 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    const name = await screen.findByLabelText("Name");
+    await openEditor();
+    const name = screen.getByLabelText("Name");
     const save = screen.getByRole("button", { name: "Save changes" });
     expect((save as HTMLButtonElement).disabled).toBe(true);
 
@@ -659,12 +801,10 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "Personality" }),
-      {
-        target: { value: "Patient at first, then asks for a person." },
-      },
-    );
+    await openEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Personality" }), {
+      target: { value: "Patient at first, then asks for a person." },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await vi.waitFor(() => {
@@ -710,7 +850,8 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    const stt = await screen.findByLabelText("Speech-to-text model");
+    await openEditor();
+    const stt = screen.getByLabelText("Speech-to-text model");
     fireEvent.change(stt, {
       target: { value: JSON.stringify(["deepgram", "nova-3-general"]) },
     });
@@ -754,7 +895,8 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.change(await screen.findByLabelText("Name"), {
+    await openEditor();
+    fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Rita" },
     });
     fireEvent.change(screen.getByLabelText("Description"), {
@@ -797,12 +939,10 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "Personality" }),
-      {
-        target: { value: "Patient at first, then asks for a person." },
-      },
-    );
+    await openEditor();
+    fireEvent.change(screen.getByRole("textbox", { name: "Personality" }), {
+      target: { value: "Patient at first, then asks for a person." },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     const said = await screen.findByRole("alert");
@@ -819,7 +959,14 @@ describe("one persona's page", () => {
     ).toBe("Patient at first, then asks for a person.");
   });
 
-  it("shows an older version on its own, without leaving the page", async () => {
+  /**
+   * **The history stopped being a second panel over the first one.** It used
+   * to be a sheet opened from a page that was already a sheet's worth of
+   * reading, then a dialog over that sheet to read one version. "Which version
+   * is this, and what were the others" is one question; the boards fold it
+   * into the panel and this holds them to it.
+   */
+  it("reads an older version inside the same panel, and comes back from it", async () => {
     const current = {
       ...RITA,
       version: 2,
@@ -858,35 +1005,104 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    const historyButton = await screen.findByRole("button", {
-      name: "Version history",
-    });
-    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
-    fireEvent.click(historyButton);
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    expect(screen.queryAllByRole("dialog")).toHaveLength(1);
 
-    const history = await screen.findByRole("dialog", {
-      name: "Version history",
-    });
-    expect(history.getAttribute("data-kind")).toBe("sheet");
-    expect(history.textContent).toContain(
-      "Newest first. Past versions do not change and stay readable.",
-    );
-    const versions = within(history).getAllByRole("listitem");
+    const versions = within(panel).getAllByRole("listitem");
     expect(versions).toHaveLength(2);
     expect(versions[0]?.textContent).toContain("v2");
     expect(versions[0]?.textContent).toContain("Current");
     expect(versions[1]?.textContent).toContain("v1");
+    // The version this panel is already showing is not offered to be read.
+    expect(within(versions[0]!).queryByRole("button", { name: "Read" })).toBeNull();
 
     fireEvent.click(within(versions[1]!).getByRole("button", { name: "Read" }));
 
-    const version = await screen.findByRole("dialog", { name: "Version 1" });
-    expect(version.textContent).toContain("hard of hearing");
-
-    fireEvent.click(within(version).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog", { name: "Version 1" })).toBeNull();
+    // The same panel, showing the frozen version rather than a second panel.
+    expect(screen.queryAllByRole("dialog")).toHaveLength(1);
+    expect(within(panel).getByText("Custom · v1 of 2")).toBeDefined();
+    expect(within(panel).getByText("Older version")).toBeDefined();
+    expect(within(panel).getByText(/hard of hearing/)).toBeDefined();
     expect(
-      screen.getByRole("dialog", { name: "Version history" }),
+      within(panel).getByText(
+        "This version is frozen. Runs that used it read exactly this.",
+      ),
     ).toBeDefined();
+    expect(within(panel).getByText("Reading")).toBeDefined();
+    /*
+     * A frozen version carries no description — identity is live — so the
+     * panel does not print today's description under a sentence saying this
+     * one cannot change.
+     */
+    expect(within(panel).queryByText("Description")).toBeNull();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Back to v2" }));
+    expect(within(panel).getByText("Custom · v2")).toBeDefined();
+    expect(within(panel).queryByText("Older version")).toBeNull();
+  });
+
+  /**
+   * Writing an old version forward needs no operation of its own: a version is
+   * exactly its traits and its models, so the ordinary update is what "use
+   * this again" means — and it arrives as a new version, so every run that
+   * pinned the old one still reads the old one.
+   */
+  it("writes an older version forward as a new one", async () => {
+    const current = { ...RITA, version: 2, versionId: "prsv_2" };
+    const { asked } = apiAnswers({
+      ...reads(current),
+      "GET /v1/personas/prs_1/versions": {
+        status: 200,
+        body: {
+          versions: [
+            {
+              id: "prsv_2",
+              personaId: "prs_1",
+              version: 2,
+              traits: current.traits,
+              models: current.models,
+              createdAt: "2026-08-16T10:00:00.000Z",
+            },
+            {
+              id: "prsv_1",
+              personaId: "prs_1",
+              version: 1,
+              traits: {
+                ...RITA.traits,
+                personality: "Seventy, and out of patience.",
+              },
+              models: RITA.models,
+              createdAt: "2026-08-15T10:00:00.000Z",
+            },
+          ],
+          nextPageToken: null,
+        },
+      },
+      "PATCH /v1/personas/prs_1": {
+        status: 200,
+        body: { ...current, version: 3, versionId: "prsv_3" },
+      },
+    });
+    render(<PersonaPage />);
+
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    const versions = within(panel).getAllByRole("listitem");
+    fireEvent.click(within(versions[1]!).getByRole("button", { name: "Read" }));
+    expect(within(panel).getByText("Writes v1 as v3.")).toBeDefined();
+
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Use as new version" }),
+    );
+
+    await vi.waitFor(() => {
+      expect(asked.filter((one) => one.method === "PATCH")).toHaveLength(1);
+    });
+    expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
+      expectedRevision: "revision-one",
+      expectedVersionId: "prsv_2",
+      traits: { personality: "Seventy, and out of patience." },
+      models: RITA.models,
+    });
   });
 
   it("asks who takes the pointer before archiving the project's default", async () => {
@@ -965,6 +1181,128 @@ describe("one persona's page", () => {
     expect(written).not.toHaveProperty("replacementPersonaId");
   });
 
+  /**
+   * **The write refuses a persona an active test still names, and it refuses
+   * by naming ids.** That is the right answer for an API and a useless one for
+   * a person deciding, so the names are read before the confirmation is
+   * offered and the button that cannot work is not offered at all.
+   */
+  it("names the tests that would be left naming nobody, and refuses to archive", async () => {
+    const { asked } = apiAnswers({
+      ...reads(),
+      "GET /v1/personas/prs_1/usage": {
+        status: 200,
+        body: {
+          tests: [
+            { id: "tst_1", name: "Reschedule a visit" },
+            { id: "tst_2", name: "Late arrival" },
+          ],
+        },
+      },
+    });
+    render(<PersonaPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Archive Impatient Rita?",
+    });
+
+    expect(
+      await within(dialog).findByText(
+        /2 active tests name them: Reschedule a visit, Late arrival/,
+      ),
+    ).toBeDefined();
+    expect(
+      (
+        within(dialog).getByRole("button", {
+          name: "Archive persona",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(asked.some((one) => one.path.endsWith("/archive"))).toBe(false);
+  });
+
+  it("says plainly when nothing else changes", async () => {
+    apiAnswers(reads());
+    render(<PersonaPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Archive Impatient Rita?",
+    });
+
+    expect(
+      await within(dialog).findByText(
+        "No active test names them. Nothing else changes.",
+      ),
+    ).toBeDefined();
+    expect(
+      (
+        within(dialog).getByRole("button", {
+          name: "Archive persona",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+  });
+
+  /**
+   * **A usage read that fails does not take Archive out of the product**, and
+   * it must not leave the panel silent either. The server refuses a persona an
+   * active test names whatever a browser managed to read first, so the button
+   * stays offered — but nothing here may look like an all-clear.
+   */
+  it("says so when the confirmation could not read which tests name them", async () => {
+    apiAnswers({
+      ...reads(),
+      /*
+       * Three reads of the same address, in the order they happen: the panel
+       * behind the confirmation, the confirmation's own read, and the
+       * deliberate second attempt at it.
+       */
+      "GET /v1/personas/prs_1/usage": [
+        { status: 200, body: { tests: [] } },
+        {
+          status: 503,
+          body: {
+            error: "unavailable",
+            message: "Egma could not reach the tests store.",
+          },
+        },
+        { status: 200, body: { tests: [] } },
+      ],
+    });
+    render(<PersonaPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Archive Impatient Rita?",
+    });
+
+    expect(
+      await within(dialog).findByText(/could not read which tests name them/),
+    ).toBeDefined();
+    expect(
+      within(dialog).queryByText(
+        "No active test names them. Nothing else changes.",
+      ),
+    ).toBeNull();
+    // The decision is still the server's, so the press is still offered.
+    expect(
+      (
+        within(dialog).getByRole("button", {
+          name: "Archive persona",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+    expect(
+      await within(dialog).findByText(
+        "No active test names them. Nothing else changes.",
+      ),
+    ).toBeDefined();
+  });
+
   it("makes any active available persona the project default", async () => {
     const selected = { ...RITA, isDefault: true };
     const { asked } = apiAnswers({
@@ -989,9 +1327,9 @@ describe("one persona's page", () => {
         asked.find((one) => one.path === "/v1/personas/prs_1/default")?.body,
       ).toEqual({ projectId: "prj_1" });
     });
-    expect(
-      await screen.findByText("Project default: Yes"),
-    ).toBeDefined();
+
+    // The pointer is a chip on the record it points at, not a Yes/No line.
+    expect(await screen.findByText("Project default")).toBeDefined();
     expect(
       screen.queryByRole("button", { name: "Make project default" }),
     ).toBeNull();
@@ -1001,17 +1339,23 @@ describe("one persona's page", () => {
     apiAnswers(reads({ ...RITA, archivedAt: "2026-08-14T09:00:00.000Z" }));
     render(<PersonaPage />);
 
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    expect(within(panel).getByRole("button", { name: "Restore" })).toBeDefined();
+    expect(within(panel).queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(panel).getByText(/^Archived/)).toBeDefined();
+    // Nothing names an archived persona, and the panel says so rather than
+    // leaving the section empty.
     expect(
-      await screen.findByRole("button", { name: "Restore" }),
+      within(panel).getByText("No active test names them."),
     ).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
-    expect(screen.getAllByText("Archived").length).toBeGreaterThan(0);
   });
 
-  it("shows an Egma-provided persona as plain text with history in a sheet, then forks it", async () => {
+  it("shows an Egma-provided persona as plain text, with its versions in the panel, then forks it", async () => {
     const egmaProvided: Persona = {
       ...DEFAULT_PERSONA,
       id: "prs_1",
+      isDefault: false,
     };
     const { asked } = apiAnswers({
       ...reads(egmaProvided),
@@ -1022,30 +1366,21 @@ describe("one persona's page", () => {
     });
     render(<PersonaPage />);
 
-    const title = await screen.findByRole("heading", {
-      level: 1,
+    const panel = await screen.findByRole("dialog", {
       name: "Default Persona",
     });
-    const header = title.closest("header");
-    if (header === null)
-      throw new Error("the persona title needs a page header");
-    expect(within(header).getByText("Type: Egma-provided")).toBeDefined();
-    expect(within(header).getByText("Project default: Yes")).toBeDefined();
-    expect(within(header).queryByText("v1")).toBeNull();
-    expect(within(header).queryByText(/Updated/)).toBeNull();
+    expect(within(panel).getByText("Egma-provided · v1")).toBeDefined();
     expect(
-      within(header)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Version history", "Fork"]);
+      within(panel).getByText("Provided by Egma · Shared with every project"),
+    ).toBeDefined();
 
-    const details = await screen.findByRole("region", {
-      name: "Persona details",
-    });
+    // The catalog's own word for a provider, rather than the id a persona
+    // stores. It arrives with the authoring choices, so it is waited for.
+    await within(panel).findByText("OpenAI · gpt-4o-mini");
+
     expect(
-      Array.from(details.querySelectorAll("dt"), (term) => term.textContent),
+      Array.from(panel.querySelectorAll("dt"), (term) => term.textContent),
     ).toEqual([
-      "Name",
       "Description",
       "Personality",
       "Language",
@@ -1057,16 +1392,15 @@ describe("one persona's page", () => {
       "Language model",
       "Speech-to-text model",
       "Text-to-speech model",
-      "Voice",
       "Speech rate",
+      "Voice",
     ]);
     expect(
       Array.from(
-        details.querySelectorAll("dd"),
+        panel.querySelectorAll("dd"),
         (definition) => definition.textContent,
       ),
     ).toEqual([
-      "Default Persona",
       "Regular conversationalist persona",
       "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
       "en-US",
@@ -1075,45 +1409,35 @@ describe("one persona's page", () => {
       "Neutral American English.",
       "None.",
       "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
-      "openai — gpt-4o-mini",
-      "openai — gpt-live-transcribe",
-      "cartesia — sonic-3.5",
+      "OpenAI · gpt-4o-mini",
+      "OpenAI · gpt-live-transcribe",
+      "Cartesia · sonic-3.5",
+      "1×",
       "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-      "1",
     ]);
-    expect(
-      screen.getAllByText("Regular conversationalist persona"),
-    ).toHaveLength(1);
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Personality" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Read" })).toBeNull();
 
-    fireEvent.click(
-      within(header).getByRole("button", { name: "Version history" }),
-    );
-    const history = await screen.findByRole("dialog", {
-      name: "Version history",
-    });
-    expect(history.getAttribute("data-kind")).toBe("sheet");
-    const versions = within(history).getAllByRole("listitem");
+    // Nothing here is editable, and nothing pretends to be.
+    expect(within(panel).queryByRole("textbox")).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(within(panel).queryByRole("button", { name: "Archive" })).toBeNull();
+    expect(
+      within(panel).getByText("Read-only. Fork makes an editable copy."),
+    ).toBeDefined();
+
+    // Versions are a section of this panel now, not a panel over it.
+    const versions = within(panel).getAllByRole("listitem");
     expect(versions).toHaveLength(1);
     expect(within(versions[0]!).getByText("v1")).toBeDefined();
     expect(within(versions[0]!).getByText("Current")).toBeDefined();
+    expect(screen.queryAllByRole("dialog")).toHaveLength(1);
 
-    fireEvent.click(within(versions[0]!).getByRole("button", { name: "Read" }));
-    const version = await screen.findByRole("dialog", { name: "Version 1" });
-    expect(version.textContent).toContain("Version 1");
-    expect(version.textContent).toContain("Speaks clear, natural English.");
-    fireEvent.click(within(version).getByRole("button", { name: "Close" }));
-    fireEvent.click(
-      within(screen.getByRole("dialog", { name: "Version history" })).getByRole(
-        "button",
-        { name: "Close" },
-      ),
-    );
+    // The default pointer is a quiet link in the meta line, because a shared
+    // persona has no footer of its own to put it in.
+    expect(
+      within(panel).getByRole("button", { name: "Make project default" }),
+    ).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Fork" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Fork" }));
 
     await vi.waitFor(() => {
       expect(asked.some((one) => one.path === "/v1/personas/prs_1/fork")).toBe(
@@ -1125,25 +1449,26 @@ describe("one persona's page", () => {
     });
   });
 
-  it("leaves a viewer every field genuinely inert, and every write control disabled", async () => {
+  /**
+   * **A viewer never reaches a field, because the panel opens on the read
+   * view.** The old page put a whole form in front of them with every control
+   * disabled; the panel says the same thing once, on the control that would
+   * have opened it, and says it where a keyboard and a screen reader can
+   * reach it.
+   */
+  it("leaves a viewer the facts, and every write control disabled with its reason", async () => {
     apiAnswers({
       ...reads(),
       "GET /api/me": { status: 200, body: meWith("viewer") },
     });
     render(<PersonaPage />);
 
-    const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
-    expect(name.disabled).toBe(true);
-    expect(
-      (
-        screen.getByRole("textbox", {
-          name: "Personality",
-        }) as HTMLTextAreaElement
-      ).disabled,
-    ).toBe(true);
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    expect(within(panel).getByText(/hard of hearing/)).toBeDefined();
+    expect(within(panel).queryByRole("textbox")).toBeNull();
 
-    for (const label of ["Save changes", "Fork", "Archive"]) {
-      const control = screen.getByRole("button", {
+    for (const label of ["Edit", "Fork", "Archive"]) {
+      const control = within(panel).getByRole("button", {
         name: label,
       }) as HTMLButtonElement;
       expect(control.disabled, label).toBe(true);
@@ -1151,13 +1476,9 @@ describe("one persona's page", () => {
         "viewer role cannot",
       );
     }
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Version history",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false);
+
+    // Reading the history is not authoring, so it is not refused.
+    expect(within(panel).getAllByRole("listitem")).toHaveLength(1);
   });
 
   it("shows a persona this project has not got as an absence, in egma's words", async () => {
@@ -1205,7 +1526,56 @@ describe("one persona's page", () => {
     );
 
     fireEvent.click(within(said).getByRole("button", { name: "Try again" }));
-    expect(await screen.findByLabelText("Name")).toBeDefined();
+    expect(
+      await screen.findByRole("dialog", { name: "Impatient Rita" }),
+    ).toBeDefined();
+  });
+
+  /**
+   * **"No active test names them" is a claim, and a read still in flight
+   * cannot make it.** That line is what somebody reads before they archive, so
+   * a usage read that has not answered says it has not answered.
+   */
+  it("says the usage read is still running rather than claiming nobody names them", async () => {
+    apiAnswers({ ...reads(), "GET /v1/personas/prs_1/usage": "never" });
+    render(<PersonaPage />);
+
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    expect(
+      await within(panel).findByText("Reading which tests name them…"),
+    ).toBeDefined();
+    expect(within(panel).queryByText("No active test names them.")).toBeNull();
+  });
+
+  /** A read egma refused is not an empty list either, and it can be asked again. */
+  it("says a failed usage read failed, and names the tests once it is asked again", async () => {
+    apiAnswers({
+      ...reads(),
+      "GET /v1/personas/prs_1/usage": [
+        {
+          status: 503,
+          body: {
+            error: "unavailable",
+            message: "Egma could not reach the tests store.",
+          },
+        },
+        {
+          status: 200,
+          body: { tests: [{ id: "tst_1", name: "Reschedule a visit" }] },
+        },
+      ],
+    });
+    render(<PersonaPage />);
+
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    const said = await within(panel).findByRole("alert");
+    expect(said.textContent).toContain("Egma could not reach the tests store.");
+    expect(within(panel).queryByText("No active test names them.")).toBeNull();
+
+    fireEvent.click(within(said).getByRole("button", { name: "Try again" }));
+    expect(
+      await within(panel).findByRole("link", { name: "Reschedule a visit" }),
+    ).toBeDefined();
   });
 });
 
@@ -1230,7 +1600,7 @@ describe("one persona's page", () => {
  * move there was no test anywhere asking `Choice` for any of this.
  */
 describe("driving the Personas area without a pointer", () => {
-  it("traps focus in version history, closes it with Escape, and restores its trigger", async () => {
+  it("moves focus into the persona panel, and Escape leaves it for the list", async () => {
     apiAnswers({
       "GET /api/me": { status: 200, body: meWith("member") },
       "GET /v1/personas/prs_1": { status: 200, body: RITA },
@@ -1253,20 +1623,50 @@ describe("driving the Personas area without a pointer", () => {
     });
     render(<PersonaPage />);
 
+    const panel = await screen.findByRole("dialog", { name: "Impatient Rita" });
+    expect(panel.getAttribute("data-slot")).toBe("sheet-content");
+    expect(panel.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // Closing the panel is going back to the list, because the panel is an
+    // address rather than a piece of state.
+    await vi.waitFor(() => {
+      expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/personas");
+    });
+  });
+
+  /**
+   * **The keyboard goes back to the row control, on the press.** That is what
+   * makes the panel restore it afterwards: the panel remembers whatever had
+   * focus when it opened, and this is what puts the ⋮ there first.
+   */
+  it("hands the keyboard back to the row control its menu was opened from", async () => {
+    apiAnswers({
+      "GET /api/me": { status: 200, body: meWith("member") },
+      "GET /v1/personas": {
+        status: 200,
+        body: { personas: [RITA], nextPageToken: null },
+      },
+    });
+    render(<PersonasPage />);
+
     const trigger = await screen.findByRole("button", {
-      name: "Version history",
+      name: "Actions for Impatient Rita",
     });
     trigger.focus();
     fireEvent.click(trigger);
 
-    const sheet = await screen.findByRole("dialog", {
-      name: "Version history",
+    const menu = screen.getByRole("menu", {
+      name: "Actions for Impatient Rita",
     });
-    expect(sheet.getAttribute("data-kind")).toBe("sheet");
-    expect(sheet.contains(document.activeElement)).toBe(true);
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open", "Edit", "Fork", "Make project default", "Archive"]);
 
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Open" }));
     expect(document.activeElement).toBe(trigger);
   });
 });
@@ -1302,7 +1702,19 @@ describe("what this page does when something goes wrong underneath it", () => {
         status: 200,
         body: { ...RITA, isDefault: true },
       },
+      /*
+       * Three reads of the same address, in the order they happen: the list
+       * behind the panel, the confirmation's own read of who could take the
+       * pointer, and the deliberate second attempt at it.
+       */
       "GET /v1/personas": [
+        {
+          status: 200,
+          body: {
+            personas: [{ ...RITA, isDefault: true }],
+            nextPageToken: null,
+          },
+        },
         {
           status: 503,
           body: {
@@ -1330,7 +1742,9 @@ describe("what this page does when something goes wrong underneath it", () => {
     render(<PersonaPage />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", {
+      name: "Archive Impatient Rita?",
+    });
 
     const said = await within(dialog).findByRole("alert");
     expect(said.textContent).toContain(
@@ -1374,8 +1788,6 @@ describe("what this page does when something goes wrong underneath it", () => {
     });
     render(<PersonaPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
-    await screen.findByRole("dialog");
     await new Promise((settle) => setTimeout(settle, 0));
 
     expect(replaced).toHaveBeenCalledWith("/sign-in");
@@ -1413,21 +1825,32 @@ describe("what this page does when something goes wrong underneath it", () => {
         if (at.pathname.endsWith("/versions")) {
           return json(200, { versions: [], nextPageToken: null });
         }
+        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
+        if (at.pathname === "/v1/personas") {
+          return json(200, { personas: [], nextPageToken: null });
+        }
         return personaFor(at.pathname.split("/").pop() ?? "prs_1");
       }),
     );
 
     const { rerender } = render(<PersonaPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "Rita" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     // Somebody opens another persona while that write is still in flight. The
-    // page is not remounted — it is the same route with another id in it.
+    // screen is not remounted — it is the same route with another id in it.
     routed.personaId = "prs_2";
     routed.pathname = "/projects/prj_1/personas/prs_2";
     rerender(<PersonaPage />);
+    expect(
+      await screen.findByRole("dialog", { name: "Patient Pat" }),
+    ).toBeDefined();
+    // The panel is named the moment the read lands and offers its footer one
+    // render later, when the editor has been filled from it.
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     expect(await screen.findByDisplayValue("Patient Pat")).toBeDefined();
 
     release(
@@ -1462,12 +1885,10 @@ describe("what this page does when something goes wrong underneath it", () => {
 
     // And nothing claims anything about a role egma has not been told yet.
     expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
     expect(screen.queryByText(/role cannot/)).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Version history" }),
-    ).toBeDefined();
   });
 
   it("gives a viewer the reason without a pointer, not only in a tooltip", async () => {
@@ -1478,14 +1899,14 @@ describe("what this page does when something goes wrong underneath it", () => {
     });
     render(<PersonaPage />);
 
-    const save = (await screen.findByRole("button", {
-      name: "Save changes",
+    const edit = (await screen.findByRole("button", {
+      name: "Edit",
     })) as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
+    expect(edit.disabled).toBe(true);
 
     // The sentence is on the page and the control names it, so it reaches a
     // screen reader and a keyboard — not only a hovering mouse.
-    const described = save.getAttribute("aria-describedby");
+    const described = edit.getAttribute("aria-describedby");
     expect(described).not.toBeNull();
     expect(document.getElementById(String(described))?.textContent).toContain(
       "viewer role cannot",
@@ -1525,6 +1946,7 @@ describe("after a save lands", () => {
     });
     render(<PersonaPage />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: "Personality" }),
       {
@@ -1588,12 +2010,17 @@ describe("a save answering while the author is still typing", () => {
         if (at.pathname.endsWith("/versions")) {
           return json(200, { versions: [], nextPageToken: null });
         }
+        if (at.pathname.endsWith("/usage")) return json(200, { tests: [] });
+        if (at.pathname === "/v1/personas") {
+          return json(200, { personas: [], nextPageToken: null });
+        }
         return json(200, RITA);
       }),
     );
 
     render(<PersonaPage />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     // A name that egma will trim, sent.
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "  A  " },

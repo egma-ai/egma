@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getOrganization, updateOrganization } from "@egma/platform-api/client";
 
 import type { Refusal } from "../../../../../lib/api.ts";
@@ -20,11 +20,7 @@ import {
   Refused,
 } from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { Section } from "../../../../../ui/section.tsx";
-import {
-  SettingsLayout,
-  settingsPath,
-} from "../../../../../ui/settings-nav.tsx";
+import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
@@ -56,8 +52,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   const settled = answer?.status === "ready" ? answer.value : null;
   const mayAdminister = settled?.mayManageOrganization === true;
 
-  /* The field's hint, named so the input can point at it. */
-  const nameHint = useId();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -124,14 +118,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   if (answer === null) {
     return (
       <ProductPage viewport>
-        <PageHeader
-          eyebrow="Settings"
-          title="Organization"
-          breadcrumbs={[
-            { label: "Settings", href: settingsPath(projectId) },
-            { label: "Organization" },
-          ]}
-        />
+        <PageHeader title="Organization" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
             <Loading what="this organization" />
@@ -144,14 +131,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   if (answer.status !== "ready") {
     return (
       <ProductPage viewport>
-        <PageHeader
-          eyebrow="Settings"
-          title="Organization"
-          breadcrumbs={[
-            { label: "Settings", href: settingsPath(projectId) },
-            { label: "Organization" },
-          ]}
-        />
+        <PageHeader title="Organization" />
         <PageBody>
           <SettingsLayout projectId={projectId} current="organization">
             <Failure
@@ -171,21 +151,30 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   return (
     <ProductPage viewport>
       <PageHeader
-        eyebrow="Settings"
         title="Organization"
-        breadcrumbs={[
-          { label: "Settings", href: settingsPath(projectId) },
-          { label: "Organization" },
-        ]}
         lead="The customer every project below belongs to."
       />
       <PageBody>
         <SettingsLayout projectId={projectId} current="organization">
-          <Section title="Details">
+          {/* One form, and the title bar has already named the page. */}
+          <div className="flex flex-col gap-4">
             {refused === null ? null : <Refused message={refused.message} />}
 
             <Form onSubmit={() => void save()}>
-              <Field label="Name" htmlFor="organization-name">
+              {/*
+                * The hint is the field's own rather than a paragraph written
+                * beside it. `Field` draws the sentence and hands its id to
+                * whatever control it wraps through context, so the
+                * `aria-describedby` cannot be dropped by an edit here and the
+                * space under the input is the 8px every other field in the
+                * product gets. The words and the wiring did not move; a second
+                * copy of a shared component's job did.
+                */}
+              <Field
+                label="Name"
+                htmlFor="organization-name"
+                hint="What Egma calls your organization. Changing it breaks no link and no invitation."
+              >
                 <Input
                   id="organization-name"
                   value={name}
@@ -193,17 +182,12 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                   spellCheck={false}
                   disabled={!mayAdminister}
                   aria-invalid={named ? undefined : true}
-                  aria-describedby={nameHint}
                   onChange={(event) => {
                     editVersion.current += 1;
                     setName(event.target.value);
                     setSaved(false);
                   }}
                 />
-                <p className="m-0 text-sm leading-(--line-normal) text-faint" id={nameHint}>
-                  What Egma calls your organization. Changing it breaks no link
-                  and no invitation.
-                </p>
               </Field>
 
               {named ? null : <Problem>An organization needs a name.</Problem>}
@@ -220,7 +204,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                 </Button>
               </FormActions>
             </Form>
-          </Section>
+          </div>
         </SettingsLayout>
       </PageBody>
     </ProductPage>

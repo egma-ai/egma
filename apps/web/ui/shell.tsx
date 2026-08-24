@@ -23,8 +23,10 @@ import {
 } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { SheetHost } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import {
+  SidebarBrand,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -50,9 +52,11 @@ import { DraftNavigationProvider } from "./draft-navigation.tsx";
 import { MENU_ITEM, Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 import {
   PageNavigation,
+  trailWithoutTitle,
   type PageNavigationItems,
 } from "./page-navigation.tsx";
 import { ProjectSelector } from "./project-selector.tsx";
+import { Toolbar } from "./section.tsx";
 import { settingsPath } from "./settings-nav.tsx";
 import { useTheme } from "./theme.tsx";
 
@@ -251,7 +255,14 @@ function Navigation({
 
   return (
     <SidebarProvider onNavigate={onNavigate}>
-      <SidebarContent asChild>
+      {/*
+       * The 16px gutter is the bar's, and it is on every block in the column
+       * rather than on the column itself. The wordmark bar's hairline has to
+       * run the full 224px, so the `<aside>` can carry no side padding — and
+       * the rows are 192px wide with their Ember mark exactly on the gutter,
+       * which is what the boards draw (`725-0`, `72Z-0`).
+       */}
+      <SidebarContent className="px-4" asChild>
         <nav aria-label="Product navigation">
           {groups.map((group) => (
             <SidebarGroup key={group.id} labelled={group.label !== null}>
@@ -342,7 +353,7 @@ function AccountMenu({
       label={`Account ${standing}. Open the account menu`}
       triggerClassName={cn(
         "grid w-full min-w-0 items-center gap-3",
-        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) p-2",
+        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) px-2 py-1",
         "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
         "transition-transform duration-(--duration-press) ease-out",
         "pointer-coarse:min-h-(--tap-target)",
@@ -372,7 +383,8 @@ function AccountMenu({
                 {standing}
               </span>
               {role === null ? null : (
-                <span className="block text-xs tracking-(--tracking-label) text-faint uppercase">
+                /* 12px: the micro label the boards give the role line (`720-0`). */
+                <span className="block text-2xs tracking-(--tracking-label) text-faint uppercase">
                   {canAuthor(role) ? role : VIEW_ONLY}
                 </span>
               )}
@@ -427,7 +439,8 @@ function ThemeItem() {
       >
         <span
           className={cn(
-            "absolute top-0.5 left-0.5 block size-[9px] rounded-full bg-muted-foreground",
+            /* Square, like everything else: a switch is a component. */
+            "absolute top-0.5 left-0.5 block size-[9px] bg-muted-foreground",
             "transition-transform duration-(--duration-press) ease-out",
             "group-aria-checked/theme:translate-x-[11px] group-aria-checked/theme:bg-background",
             /* Keyboard activation is immediate: the thumb is already there. */
@@ -562,14 +575,38 @@ function ShellFrame({
        */}
       <aside
         className={cn(
-          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible p-4",
+          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible pb-4",
           "border-r border-border bg-surface",
           "max-[900px]:hidden",
         )}
       >
-        <SidebarHeader>{selector(false)}</SidebarHeader>
+        {/*
+         * The wordmark, and a link home.
+         *
+         * `[[data-theme=dark]_&]:invert` is the whole of the dark-theme
+         * treatment: the asset is black line art on nothing, so inverting it
+         * gives white line art on nothing. `DESIGN.md` forbids recolouring the
+         * logo and this does not recolour it — it is the same two-value mark,
+         * the way a black wordmark is printed white on a dark page.
+         */}
+        <SidebarBrand>
+          <Link
+            className="inline-flex items-center rounded-button no-underline"
+            href="/"
+            aria-label="Egma home"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              className="h-6 w-auto [[data-theme=dark]_&]:invert"
+              src="/brand/egma-wordmark.svg"
+              alt="Egma"
+              height={24}
+            />
+          </Link>
+        </SidebarBrand>
+        <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
-        <SidebarFooter>
+        <SidebarFooter className="px-4">
           {role !== null && !canAuthor(role) ? (
             <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>
           ) : null}
@@ -586,7 +623,7 @@ function ShellFrame({
       <div className="flex min-w-0 flex-col bg-background">
         <header
           className={cn(
-            "sticky top-0 z-10 hidden h-(--topbar-height) items-center gap-3 px-4",
+            "sticky top-0 z-20 hidden h-(--topbar-height) items-center gap-3 px-4",
             "border-b border-border backdrop-blur-[12px]",
             /*
              * Nearly the raised surface, so what scrolls under the bar is felt
@@ -649,12 +686,28 @@ function ShellFrame({
 }
 
 /**
- * The page itself.
+ * The page itself: a 56px title bar, then the page's own toolbar, then its
+ * content, all inside 24px gutters.
+ *
+ * **The board's page is not centred and this one stopped being centred with
+ * it.** `6ZL-0` starts at the left gutter and runs to the right one. The
+ * maximum survives — a settings form on a 2560px monitor is still held to a
+ * readable width — but it is applied to the content rather than to the page,
+ * and without `mx-auto`, so the title in the bar and the first cell of the
+ * table under it are always on the same vertical line. Centring the page put
+ * them 8px apart at 1440.
  *
  * `wide` is for a page whose subject is wide by nature — a transcript beside
  * the timing of what happened during it, a run beside its simulations. It is a
  * different maximum and not a different layout, so a page asks for room rather
- * than styling itself.
+ * than styling itself. It is published as `--page-content-max` because the two
+ * blocks that read it, `PageHeader` and `PageBody`, are this component's
+ * siblings' children rather than its own props.
+ *
+ * **The sheet host is drawn last, inside `<main>`.** Every create, edit and
+ * read panel in the product is portaled into it, so the browser walk's
+ * `page.innerText("main")` reads what a person is actually looking at.
+ * `components/ui/sheet.tsx` records the whole argument.
  */
 export function ProductPage({
   wide = false,
@@ -669,106 +722,206 @@ export function ProductPage({
   return (
     <main
       className={cn(
-        "mx-auto w-full max-w-(--page-max) px-(--page-gutter) py-10",
-        "max-[900px]:px-4 max-[900px]:pt-5 max-[900px]:pb-8",
-        wide && "max-w-(--page-max-wide)",
+        "flex w-full min-w-0 flex-col",
+        "[--page-content-max:var(--page-max)]",
+        wide && "[--page-content-max:var(--page-max-wide)]",
         viewport && [
-          "flex h-svh min-h-0 flex-col overflow-hidden",
+          "h-svh min-h-0 overflow-hidden",
           "max-[900px]:h-[calc(100svh-var(--topbar-height))]",
           /*
            * Settings is a set of views rather than a long document: the page
            * title stays put and the body owns the remaining height. The rule
            * is on the page because only the page knows it was asked for a
-           * viewport.
+           * viewport. The bottom gutter goes with it — the body scrolls now,
+           * and its own last group already ends the page.
            */
           "[&>[data-slot=page-body]]:min-h-0",
           "[&>[data-slot=page-body]]:flex-1",
           "[&>[data-slot=page-body]]:overflow-hidden",
+          "[&>[data-slot=page-body]]:pb-0",
         ],
       )}
     >
-      {children}
+      <SheetHost>{children}</SheetHost>
     </main>
   );
 }
 
+/**
+ * The title bar, and the strip of controls under it.
+ *
+ * **The title moved into a bar of its own**, 56px tall over a hairline with
+ * 24px of side padding, which is `71V-0`. It is where a person looks to answer
+ * "what am I on", so it stays put while the page scrolls under it and it is
+ * the same 56px as the wordmark bar across the divider from it.
+ *
+ * **The page's actions are not in that bar.** They sit in the toolbar row
+ * below it, hard right, opposite whatever the page filters by — which is the
+ * one shape every list in the product now has (`71N-0`). `toolbar` is the left
+ * half of that row and is new; `action` is the right half and is the prop
+ * every page already passes.
+ *
+ * **The bar holds the page title and nothing else**, which is what `71V-0`
+ * draws. `lead` is a quiet line at the top of the page's own block — the
+ * purpose statement `DESIGN.md` asks for, kept where somebody reads it rather
+ * than squeezed into a 56px strip beside the title it explains.
+ *
+ * **A trail never repeats the title beside it.** A page passes the real trail
+ * into its record, ending with the record's own name, and this header takes
+ * that last step off before drawing it — because the `<h1>` beside it is that
+ * step. Without the rule every record page read its own name twice in one bar
+ * ("Tests / Default   Default"), and the two workarounds for it left either a
+ * dangling separator or the kind of record where its name belonged.
+ *
+ * `eyebrow` moved out of the bar with it, and is drawn in the same quiet
+ * block. **It is not decoration on every page**: the transcript screen puts the
+ * trace's source and environment there — "production / default" — which is a
+ * fact about the record and the only place the page states it. On a list page
+ * it says "Project" over a page whose project the sidebar already names twice,
+ * which is noise; delete the prop when you next touch such a page, and the
+ * label goes with it. Real `breadcrumbs` still draw in the bar, as the trail
+ * into the record being read.
+ *
+ * **One `<header>` wraps both rows, and it is `display: contents`.** A page
+ * that walks up from its own title to find its own controls — the persona page
+ * does exactly that, and a test holds it to it — has to find one element
+ * holding both. A header that generates no box gives them that ancestor while
+ * the two rows still lay out as children of `<main>`, so the bar goes on
+ * sticking to the top of the page rather than to the header.
+ */
 export function PageHeader({
   eyebrow,
   title,
   lead,
   action,
+  toolbar,
   breadcrumbs,
 }: {
   readonly eyebrow?: string;
   readonly title: string;
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
+  /** What this page filters or searches by, at the left of the toolbar row. */
+  readonly toolbar?: ReactNode;
   /** Parent links and the current page, in that order. */
   readonly breadcrumbs?: PageNavigationItems;
 }) {
+  /*
+   * A page that draws a real trail does not also draw the label above it: the
+   * breadcrumb already says which section this record is in, and saying it
+   * twice is the thing this suppression has always been for.
+   */
+  const label = breadcrumbs === undefined ? eyebrow : undefined;
+  /*
+   * The trail, with this page's own name taken off the end. See
+   * `trailWithoutTitle`: the trail and the heading sit in one 56px bar, so a
+   * trail that ended with the page said its name twice.
+   */
+  const trail = trailWithoutTitle(breadcrumbs, title);
+  const hasBlock =
+    toolbar !== undefined ||
+    action !== undefined ||
+    lead !== undefined ||
+    label !== undefined;
+
   return (
-    <>
-      {breadcrumbs === undefined ? null : (
-        <PageNavigation items={breadcrumbs} />
-      )}
-      {/*
-       * **Both halves wrap**, and they have to. A run can offer long action
-       * labels such as Cancel run and Retry, and on a phone they once sat on
-       * one unbreakable line inside a 390px screen, which pushed the whole
-       * document sideways: every page then scrolled horizontally, including
-       * the parts that fit perfectly.
-       *
-       * Not behind the breakpoint: a header runs out of room when its own
-       * contents are wider than it, which is a narrow window rather than a
-       * phone, and a page with one control has nothing to wrap at any width.
-       */}
-      <header
+    /*
+     * `peer`, so the body under this header can read whether a toolbar row was
+     * drawn. See `PageBody`: the toolbar row carries the gap to whatever comes
+     * next, and a body that added its own would double it.
+     */
+    <header className="peer contents" data-slot="page-header">
+      <div
+        data-slot="page-topbar"
         className={cn(
-          "flex flex-wrap items-start justify-between gap-5",
-          "border-b border-border pb-4",
-          "max-[900px]:flex-col",
+          "sticky top-0 z-10 flex min-w-0 flex-none items-center gap-3",
+          "h-(--topbar-height) border-b border-border bg-background",
+          "px-(--page-gutter)",
+          /*
+           * Under the one layout breakpoint the page has a top bar of its own
+           * already — the drawer button, the switcher and the account control
+           * — so this stops being a bar and becomes the page's first line.
+           */
+          "max-[900px]:static max-[900px]:h-auto max-[900px]:flex-wrap",
+          "max-[900px]:border-b-0 max-[900px]:px-4 max-[900px]:pt-4",
         )}
       >
-        <div>
-          {eyebrow === undefined || breadcrumbs !== undefined ? null : (
-            <p className="mt-0 mb-1 text-xs tracking-(--tracking-label) text-faint uppercase">
-              {eyebrow}
+        {trail === undefined ? null : <PageNavigation items={trail} />}
+        {/* A heading carries no size of its own; the class is the size. */}
+        <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+      </div>
+
+      {hasBlock ? (
+        <div
+          data-slot="page-toolbar"
+          className={cn(
+            "flex flex-none flex-col px-(--page-gutter) pt-(--page-gutter)",
+            "max-[900px]:px-4 max-[900px]:pt-4",
+          )}
+        >
+          {label === undefined ? null : (
+            <p
+              className={cn(
+                "m-0 text-xs tracking-(--tracking-label) text-faint uppercase",
+                lead === undefined ? "" : "mb-1",
+              )}
+            >
+              {label}
             </p>
           )}
-          {/* A heading carries no size of its own; the class is the size. */}
-          <h1 className="m-0 text-xl font-medium">{title}</h1>
           {lead === undefined ? null : (
-            <p className="mt-2 mb-0 max-w-[62ch] text-base leading-(--line-normal) text-muted-foreground">
+            <p className="m-0 w-full max-w-[92ch] text-sm text-muted-foreground">
               {lead}
             </p>
           )}
+          {(lead !== undefined || label !== undefined) &&
+          (toolbar !== undefined || action !== undefined) ? (
+            /* The gap to the toolbar row, when the block holds both. */
+            <div className="h-4" aria-hidden="true" />
+          ) : null}
+          {toolbar === undefined && action === undefined ? null : (
+            <Toolbar action={action}>{toolbar}</Toolbar>
+          )}
         </div>
-        {action === undefined ? null : (
-          /*
-           * `flex-initial` — grow 0, **shrink 1**. Refusing to grow is right;
-           * a strip of controls should not stretch across a wide page. Refusing
-           * to shrink made this box as wide as its contents laid out on one
-           * line, whatever the screen was, and a box already at its preferred
-           * width has nothing to wrap — so the wrap above did nothing until
-           * this changed with it.
-           *
-           * `min-w-0` for the reason one flex item in three needs it: `auto`
-           * floors a flex item at its content, and the sentence saying why a
-           * control is unavailable is a whole sentence.
-           */
-          <div className="flex min-w-0 flex-initial flex-wrap items-center gap-3">
-            {action}
-          </div>
-        )}
-      </header>
-    </>
+      ) : null}
+    </header>
   );
 }
 
+/**
+ * The page's content, under the bar and the toolbar.
+ *
+ * The gutters are the board's — 24px at the sides, 24px above and 40px below —
+ * and the inner block is where `--page-content-max` is spent. It is not
+ * centred: see `ProductPage`.
+ *
+ * **The top gutter goes when a toolbar row was drawn, because that row already
+ * carries it.** `71N-0` is a 52px strip — a 36px control with 16px under it —
+ * and `6ZM-0`, the table, starts at the pixel the strip ends on: 132 from the
+ * top of the page, which is the 56px title bar, the 24px gutter and the 52px
+ * strip and nothing else. A body that added a gutter of its own under that
+ * strip put the panel at 156. A page whose header drew no toolbar row keeps the
+ * 24px, because then there is nothing above to carry it. (Read off `6ZJ-0`,
+ * 2026-08-23.)
+ *
+ * `flex-1 min-h-0` on the inner block is what lets a viewport page hand its
+ * remaining height to whatever it holds. `SettingsLayout` asks for `h-full`,
+ * and a percentage height needs a parent with a settled one.
+ */
 export function PageBody({ children }: { readonly children: ReactNode }) {
   return (
-    <div className="mt-5" data-slot="page-body">
-      {children}
+    <div
+      className={cn(
+        "flex min-w-0 flex-col px-(--page-gutter) pt-(--page-gutter) pb-10",
+        "peer-has-[[data-slot=toolbar]]:pt-0",
+        "max-[900px]:px-4 max-[900px]:pt-4 max-[900px]:pb-8",
+        "max-[900px]:peer-has-[[data-slot=toolbar]]:pt-0",
+      )}
+      data-slot="page-body"
+    >
+      <div className="flex w-full max-w-(--page-content-max) min-h-0 flex-1 flex-col">
+        {children}
+      </div>
     </div>
   );
 }

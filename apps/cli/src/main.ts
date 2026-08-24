@@ -354,7 +354,7 @@ export function helpText(): string {
     "  url, retell_agents, retell_agent, retell_agent_id, retell_response_engine,",
     "  prompt_characters, tools, reach_option, retell_number, reach, phone_number,",
     "  agent_id, agent_name, connection_id, connection_name, agent_platform,",
-    "  connection_kind, access_variant, product_label, connection_modality,",
+    "  connection_type, access_variant, product_label, connection_modality,",
     "  registration, agent_registration,",
     "  connection_registration, drift, grounded_in, status",
     "",

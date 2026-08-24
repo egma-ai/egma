@@ -241,7 +241,7 @@ agent_name: order-line
 connection_id: con_01K…
 connection_name: phone_number-1
 agent_platform: retell
-connection_kind: phone_number
+connection_type: phone_number
 access_variant: phone_number.public_e164
 product_label: Retell phone
 connection_modality: voice
@@ -430,7 +430,7 @@ A **verdict** is one of four, and Egma never turns four into three:
 A test that could not run is not a test that failed, and reporting one as the
 other would send you hunting a bug that is not there.
 
-If your connection kind has no simulator adapter, Egma refuses
+If your connection type has no simulator adapter, Egma refuses
 the run **at creation**, in its own words, and the wizard prints those words as
 they came. You never wait on a run that could not happen.
 

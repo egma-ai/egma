@@ -1,3 +1,4 @@
+import { cva, type VariantProps } from "class-variance-authority";
 import type { ComponentProps } from "react";
 
 import { useFieldHint } from "@/ui/field-hint.ts";
@@ -29,19 +30,59 @@ import { cn } from "@/lib/utils";
  * server owns is a list that is wrong the day the server grows an entry, and
  * silently: the form would keep offering yesterday's choices and refusing
  * today's.
+ *
+ * **The three sizes are `Button`'s, and `default` is not the default here.** A
+ * select is mostly a form field, so `lg` (44px, the form control) is what a
+ * caller gets for saying nothing and every form is unchanged. But a select is
+ * also a filter above a list and a control inside a row, and those are 36px —
+ * so the height became a prop instead of something each caller wrote for
+ * itself. The roster row had a 44px select standing a head above the two 36px
+ * buttons beside it, which made every row of that table 60px tall.
+ *
+ * Two other screens keep a class list of their own for their toolbar filters,
+ * and that one stays: it is shared with `Input`, and a text input cannot take
+ * a `size` prop — `size` is already a native attribute there.
+ *
+ * The coarse-pointer minimum is not traded away for the smaller steps:
+ * `pointer-coarse` puts the 44px target straight back, which is the trade
+ * `Button` and the sidebar row already make — and which the copied class lists
+ * were not making at all.
  */
-function Select({ className, ...props }: ComponentProps<"select">) {
+const selectVariants = cva(
+  [
+    "w-full rounded-input border border-input bg-surface px-3",
+    "text-base text-foreground",
+    "disabled:cursor-not-allowed disabled:opacity-60",
+    /* "Pointer targets are at least 44px on coarse pointers." */
+    "pointer-coarse:min-h-(--tap-target)",
+  ],
+  {
+    variants: {
+      size: {
+        /* Denser still, for a control inside a row rather than above a list. */
+        sm: "min-h-(--control-sm)",
+        /* 36px: the toolbar control, and the one a table row holds. */
+        default: "min-h-(--control-md)",
+        /* 44px: the form control, which is what a field or a sheet holds. */
+        lg: "min-h-(--control-lg)",
+      },
+    },
+    defaultVariants: { size: "lg" },
+  },
+);
+
+function Select({
+  className,
+  size,
+  ...props
+}: Omit<ComponentProps<"select">, "size"> &
+  VariantProps<typeof selectVariants>) {
   const hint = useFieldHint();
 
   return (
     <select
       data-slot="select"
-      className={cn(
-        "w-full min-h-(--control-lg) rounded-input border border-input bg-surface px-3",
-        "text-base text-foreground",
-        "disabled:cursor-not-allowed disabled:opacity-60",
-        className,
-      )}
+      className={cn(selectVariants({ size }), className)}
       {...props}
       /* After the spread, so a caller passing nothing cannot erase the hint. */
       aria-describedby={props["aria-describedby"] ?? hint}
@@ -49,4 +90,4 @@ function Select({ className, ...props }: ComponentProps<"select">) {
   );
 }
 
-export { Select };
+export { Select, selectVariants };

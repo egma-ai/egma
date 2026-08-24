@@ -2,7 +2,7 @@ import { newId } from "@egma/ids";
 import type { Browser, Page, Request, Route } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { asSecond } from "../../web/lib/instants.ts";
+import { asListInstant, asSecond } from "../../web/lib/instants.ts";
 import { openBrowser } from "./support/browser.ts";
 import {
   capturedRequests,
@@ -359,7 +359,7 @@ describe("adding a colleague, with no mail configured", () => {
       // forced click goes nowhere. A control that looked disabled and still
       // fired would promise a refusal it does not deliver — and the refusal
       // that does hold is the server's, proved in `agents.test.ts`.
-      const connect = bob.getByRole("button", { name: "Connect agent" });
+      const connect = bob.getByRole("button", { name: "Connect an agent" });
       await connect.first().waitFor();
       expect(
         await connect.evaluateAll((controls) =>
@@ -367,7 +367,7 @@ describe("adding a colleague, with no mail configured", () => {
         ),
       ).not.toContain(false);
       expect(
-        await bob.getByRole("link", { name: "Connect agent" }).count(),
+        await bob.getByRole("link", { name: "Connect an agent" }).count(),
       ).toBe(0);
       const before = bob.url();
       await connect.first().click({ force: true }).catch(() => undefined);
@@ -907,7 +907,23 @@ describe("what a project recorded in production", () => {
           .getByRole("link", { name: "Simulation runs", exact: true })
           .count(),
       ).toBe(0);
-      expect(await sidebar.getByRole("link", { name: "Home" }).count()).toBe(0);
+      /*
+       * **There is a way home in this bar, and it is the wordmark.**
+       *
+       * This line used to say there was none, from the time the bar held six
+       * navigation rows and nothing else. The developer put the Egma wordmark
+       * at the top of the sidebar on 2026-08-23 — "our logo, not the
+       * organization's" — and it links to the product root, so the assertion is
+       * now about what that link is rather than that it is absent. What must
+       * stay absent is a *navigation row* called Home: the bar names areas, and
+       * a row pointing at the root would be a seventh area that is not one.
+       */
+      expect(
+        await sidebar.getByRole("link", { name: "Egma home", exact: true }).getAttribute("href"),
+      ).toBe("/");
+      expect(
+        await sidebar.getByRole("link", { name: "Home", exact: true }).count(),
+      ).toBe(0);
       expect(
         await sidebar.getByRole("link", { name: "Simulations" }).count(),
       ).toBe(0);
@@ -1119,10 +1135,19 @@ describe("what a project recorded in production", () => {
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
 
-      // The heading is the product's word for this area, and the page says what
-      // it holds before a single row is read.
+      // The heading is the product's word for this area.
+      //
+      // **And it is the whole of what stands above the list now.** The boards
+      // draw a list screen as a title bar, one strip of controls and the table
+      // (`71V-0`, `71N-0`) — no label over the title and no purpose sentence
+      // under it. The sidebar already says which section this is and which
+      // project it belongs to, and the table says what it holds; the sentence
+      // that used to sit here is kept for the screens that ask somebody to
+      // fill something in. Updated with the ui-refresh restyle of this screen.
       expect(shown).toContain("Monitoring");
-      expect(shown).toContain("What your agents did in production, newest first.");
+      expect(shown).not.toContain(
+        "What your agents did in production, newest first.",
+      );
 
       // The window control is on the default nobody chose, and the capture is
       // inside it — the browser's clock is pinned to the evening of the day the
@@ -1131,7 +1156,17 @@ describe("what a project recorded in production", () => {
 
       // The facts the list endpoint returns, as columns.
       const started = page.locator("tbody time").first();
-      expect(await started.innerText()).toBe("2 hours ago");
+      /*
+       * **A list's date column is an absolute short date, never a changing
+       * age.** The boards print `Aug 16, 2026` in every list column that holds
+       * a time, and a column of ages cannot be scanned — two exchanges a
+       * minute apart read the same for the whole of the first hour. This
+       * column names the exchange itself, so it keeps the precision it has
+       * always had and takes that shape (ui-refresh ticket 09, item a).
+       */
+      expect(await started.innerText()).toBe(
+        asListInstant(FIXTURE_TRACE.started_at, "second"),
+      );
       expect(await started.getAttribute("title")).toBe(
         asSecond(FIXTURE_TRACE.started_at),
       );
@@ -2201,13 +2236,28 @@ describe("pressing Use on a second grader while the first one's form is open", (
  * then switches off.
  */
 describe("changing a running grader and switching it off", () => {
-  /** One running copy's button, from the table rather than the mobile list. */
-  function on(named: string, button: string) {
-    return page
+  /**
+   * One running copy's act, reached the way a person reaches it.
+   *
+   * **Both acts are inside the row's ⋮ now** (ui-refresh 10): the trailing lane
+   * is the same 48px slot on every list in the product, and two buttons drawn
+   * in the cell had pushed this one out to 156px. So the act is opened rather
+   * than pressed — the ⋮ from the table rather than from the mobile list, then
+   * the item in the panel it opens, which the kit draws at the end of the page.
+   */
+  async function act(named: string, item: string): Promise<void> {
+    await page
       .locator("table")
       .getByRole("row")
       .filter({ hasText: named })
-      .getByRole("button", { name: button });
+      .getByRole("button", { name: `Actions for ${named}` })
+      .click();
+    await page.getByRole("menuitem", { name: item, exact: true }).click();
+  }
+
+  /** Whether a copy is still on the list at all. */
+  function rowFor(named: string) {
+    return page.locator("table").getByRole("row").filter({ hasText: named });
   }
 
   /** Every row of the table, the heading row included. */
@@ -2250,7 +2300,7 @@ describe("changing a running grader and switching it off", () => {
       // Blocking, as anything switched on is unless somebody said otherwise.
       await page.waitForSelector("text=Blocks");
 
-      await on("Latency", "Edit").click();
+      await act("Latency", "Edit");
       await page.waitForSelector("text=Edit Latency");
 
       // Filled in from the copy, which is the half a source scan cannot see:
@@ -2273,7 +2323,7 @@ describe("changing a running grader and switching it off", () => {
       // And opening it again shows the saved value rather than the old one —
       // which is the whole round trip: the browser wrote it, the API versioned
       // it, and the list handed it back.
-      await on("Latency", "Edit").click();
+      await act("Latency", "Edit");
       await page.waitForSelector("text=Edit Latency");
       expect(await page.locator(theEntrysNumber).inputValue()).toBe("1500");
     },
@@ -2286,7 +2336,7 @@ describe("changing a running grader and switching it off", () => {
       await page.goto(await gradersUrl("running"));
       await settlesAt(3);
 
-      await on("Latency", "Switch off").click();
+      await act("Latency", "Switch off");
 
       // The sentence that makes the button pressable: what stops is obvious,
       // and what stays is the thing somebody is actually worried about.
@@ -2301,7 +2351,7 @@ describe("changing a running grader and switching it off", () => {
       // project is created with is still there — only the one that was named
       // stopped judging.
       await settlesAt(2);
-      expect(await on("Latency", "Switch off").count()).toBe(0);
+      expect(await rowFor("Latency").count()).toBe(0);
       await page.waitForSelector("text=Expected behaviors");
     },
     SETTLE,
@@ -2589,33 +2639,32 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("agents"));
       await saysWithin(walk, "No agents in this project yet");
 
-      await walk.getByRole("link", { name: "Connect agent" }).first().click();
+      /*
+       * **One panel does both halves.** The agent and its first way in used to
+       * be two pages with a forward between them, and an agent that never
+       * reached the second one sat in the list unreachable. `/agents/new` is
+       * still the address — the CLI and the documentation print it — and what
+       * it opens is the side sheet over this list.
+       */
+      await walk.getByRole("link", { name: "Connect an agent" }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
       await reactHasTakenOver(walk, "form");
 
+      // One field for the agent, and the shortness is the product's decision:
+      // an agent's prompt, model and tools live where the customer configures
+      // them, and the description column went with them (ADR-0015).
       await walk.fill("#agent-name", "The Support line");
-      await walk.fill(
-        "#agent-description",
-        "The one that answers the phone at the front desk.",
-      );
-      await walk.getByRole("button", { name: "Register agent" }).click();
 
-      await walk.waitForURL(/\/agents\/agt_[^/]+\/connections\/new\?onboarding=connection$/);
-      agentAddress = walk
-        .url()
-        .replace(/\/connections\/new\?onboarding=connection$/u, "");
-      expect(
-        agentAddress,
-        "registering the agent left its detail address",
-      ).toMatch(new RegExp(`/projects/${second}/agents/agt_[^/]+$`));
-      // The form is drawn from the registry rather than from a list in the
-      // browser, so waiting for the first field is waiting for that read.
+      // The panel is drawn from the registry rather than from a list in the
+      // browser, so waiting for the platform field is waiting for that read.
       await walk.waitForSelector("#agent-platform");
-
       await walk.getByLabel("Platform").selectOption("retell");
-      await walk
-        .getByLabel("Access")
-        .selectOption("phone_number.public_e164");
+      /*
+       * **Modality is the access choice on Retell.** Retell offers a chat
+       * connection and a voice one and nothing else, so the board's segmented
+       * control chooses between them and there is no Access select beside it.
+       */
+      await walk.getByRole("radio", { name: "Voice" }).click();
       await walk.fill("#connection-name", "Retell staging");
       await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
       const discoveryResponse = walk.waitForResponse(
@@ -2635,22 +2684,124 @@ describe("the complete product, walked in order in a second project", () => {
           .locator("#discovered-connection option:checked")
           .textContent(),
       ).toContain(BROWSER_RETELL_NUMBER);
+      /*
+       * **One write, both halves.** `registerAgent` carries the connection, so
+       * there is no window in which the agent exists and nothing can reach it.
+       */
       const connectionResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
-          /^\/v1\/agents\/agt_[^/]+\/connections$/u.test(
-            new URL(response.url()).pathname,
-          ),
+          new URL(response.url()).pathname === "/v1/agents",
       );
-      await walk.getByRole("button", { name: "Add connection" }).click();
+      await walk.getByRole("button", { name: "Connect agent" }).click();
       const connected = await connectionResponse;
       expect(connected.status(), await connected.text()).toBe(201);
 
-      // Onboarding ends on the agent itself. The connection row there is the
-      // product's route to the detail page; keep that address for the direct
-      // route proof below instead of reconstructing it from a database id.
-      await walk.waitForURL(agentAddress);
+      /*
+       * **The panel closes onto the agent it just made**, which is the record
+       * the person created rather than the list of everything that holds it.
+       * The address is read from the product — the browser is standing on it —
+       * rather than reconstructed from a database id.
+       */
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/agents/agt_[^/?#]+$`),
+      );
+      agentAddress = walk.url();
+      await saysWithin(walk, "The Support line");
       await saysWithin(walk, "Retell staging");
+
+      // The selected discovery candidate goes through the generic connection
+      // write. The stored connection is only the public phone destination; the
+      // Retell key and agent id do not enter it.
+      const stored = await instance.database.sql<{
+        id: string;
+        connection_type: string;
+        access_variant: string;
+        modality: string;
+        config: Record<string, unknown>;
+        credentials: string | null;
+      }>(
+        // No `agent_platform` column: which platform a connection reaches is
+        // answered by its type where the type pins one, and by the agent
+        // otherwise. `phone_number` spans platforms and pins nothing.
+        `select id, connection_type, access_variant, modality, config, credentials
+           from connection where name = 'Retell staging'`,
+      );
+      expect(stored.rows).toHaveLength(1);
+      expect(stored.rows[0]).toMatchObject({
+        connection_type: "phone_number",
+        access_variant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: BROWSER_RETELL_NUMBER },
+        credentials: null,
+      });
+      // The connection's own address still exists and still opens the same
+      // panel; the row's link, read off the list below, is the query form of it.
+      const storedConnectionId = stored.rows[0]?.id ?? "";
+      connectionAddress = `${agentAddress}/connections/${storedConnectionId}`;
+      expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
+      expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
+
+      /*
+       * The agent's page is its identity, whether Egma pulls its production
+       * calls, and its connections. Nothing else.
+       *
+       * The absences are asserted only after the connection's own name has
+       * landed. A page still loading says none of these words either, so
+       * checking them first would pass for the wrong reason — and go on
+       * passing after the connections it is meant to guard stopped being drawn.
+       */
+      const agentPage = await walk.innerText("main");
+      expect(agentPage).toContain("Connections");
+      // The pull switch, which is the only stored monitoring choice in the
+      // product and lives on the agent that owns it (ADR-0015). Nothing binds
+      // this agent to a platform yet, so it reads off and says so.
+      expect(agentPage).toContain("Production calls");
+      expect(agentPage).toContain("Not bound");
+      expect(agentPage).not.toContain("Recent runs");
+      expect(agentPage).not.toContain("Attached tests");
+
+      /*
+       * And the list says egma can reach it, without anybody opening it. This
+       * is the whole point of the widened read: the row carries the connection
+       * in the registry's own words, the channel, and the environment label —
+       * written out, because this connection has none.
+       */
+      await walk.goto(at("agents"));
+      await saysWithin(walk, "The Support line");
+      /*
+       * **The row names the agent as plain text, and its ⋮ is the way in.**
+       * This list is the one agent screen (`6ZJ-0`), so the name is a name
+       * rather than a link, and the underline on this row belongs to the
+       * connections alone. Open agent still carries the address the panel
+       * landed on.
+       */
+      const named = walk
+        .locator('table[aria-label="Agents in this project"] tbody tr')
+        .filter({ hasText: "The Support line" })
+        .first();
+      await named.waitFor();
+      expect(
+        await named
+          .getByRole("link", { name: "The Support line", exact: true })
+          .count(),
+        "the agent's name is not a link",
+      ).toBe(0);
+      await named
+        .getByRole("button", { name: "Actions for The Support line" })
+        .click();
+      const openAgent = walk.getByRole("menuitem", {
+        name: "Open agent",
+        exact: true,
+      });
+      await openAgent.waitFor();
+      expect(
+        new URL((await openAgent.getAttribute("href")) ?? "/", origin).toString(),
+        "the registered agent has a row whose menu opens it",
+      ).toBe(agentAddress);
+      await walk.keyboard.press("Escape");
+      // And the way in is named on the row, as a link that opens it over the
+      // list rather than as four facts nobody can press.
       const connection = walk
         .getByRole("link", { name: "Retell staging", exact: true })
         .first();
@@ -2658,75 +2809,27 @@ describe("the complete product, walked in order in a second project", () => {
       const connectionHref = await connection.getAttribute("href");
       expect(
         connectionHref,
-        "the created connection has a detail link",
-      ).toMatch(
-        new RegExp(
-          `^/projects/${second}/agents/agt_[^/]+/connections/con_[^/]+$`,
-        ),
-      );
-      connectionAddress = new URL(connectionHref ?? "/", origin).toString();
-
-      // The selected discovery candidate goes through the generic connection
-      // write. The stored connection is only the public phone destination; the
-      // Retell key and agent id do not enter it.
-      const stored = await instance.database.sql<{
-        id: string;
-        type: string;
-        modality: string;
-        config: Record<string, unknown>;
-        credentials: string | null;
-      }>(
-        `select id, agent_platform, connection_kind, access_variant, modality, config, credentials
-           from connection where name = 'Retell staging'`,
-      );
-      expect(stored.rows).toHaveLength(1);
-      expect(stored.rows[0]).toMatchObject({
-        agent_platform: "retell",
-        connection_kind: "phone_number",
-        access_variant: "phone_number.public_e164",
-        modality: "voice",
-        config: { phoneNumber: BROWSER_RETELL_NUMBER },
-        credentials: null,
-      });
-      expect(connectionAddress).toBe(
-        `${agentAddress}/connections/${stored.rows[0]?.id ?? ""}`,
-      );
-      expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
-      expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
-
-      /*
-       * The agent's page is its identity and its connections, and nothing else.
-       *
-       * The absences are asserted only after the connection's own name has
-       * landed. A page still loading says none of these words either, so
-       * checking them first would pass for the wrong reason — and go on
-       * passing after the connections it is meant to guard stopped being drawn.
-       */
-      await saysWithin(walk, "Retell staging");
-      const agentPage = await walk.innerText("main");
-      expect(agentPage).toContain("Connections");
-      expect(agentPage).not.toContain("Recent runs");
-      expect(agentPage).not.toContain("Attached tests");
-
-      /*
-       * And the list says egma can reach it, without anybody opening it. This
-       * is the whole point of the widened read: the row carries the platform in
-       * the registry's own words, the channel, and the environment label —
-       * written out, because this connection has none.
-       */
-      await walk.goto(at("agents"));
-      await saysWithin(walk, "The Support line");
+        "the created connection opens from the row it is on",
+      ).toContain("sheet=connection");
+      expect(connectionHref).toContain(storedConnectionId);
       const row = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
         .first();
+      // The way in, by the name somebody gave it.
       await expect
         .poll(() => row.innerText(), { timeout: 30_000 })
-        .toContain("Retell phone · Voice");
+        .toContain("Retell staging");
       const said = await row.innerText();
-      expect(said).toContain("Unlabelled");
-      expect(said).toContain("The one that answers the phone at the front desk.");
+      /*
+       * **An em dash under Platform, and that is a fact rather than a gap.**
+       * A `phone_number` connection spans platforms, so it answers the platform
+       * question through its agent — and this agent is unbound, because binding
+       * an agent to its platform is Start monitoring's job and never Register
+       * agent's. The two custodies are separate on purpose (ADR-0015).
+       */
+      expect(said).toContain("—");
       expect(said.toLowerCase()).not.toContain("not checked");
-      expect(said.toLowerCase()).not.toContain("no connections");
+      expect(said.toLowerCase()).not.toContain("no connections yet");
     },
     SETTLE,
   );
@@ -2833,7 +2936,7 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.getByRole("button", { name: "Create suite" }).click();
       const dialog = walk.getByRole("dialog", {
-        name: "Create a test suite",
+        name: "Create a suite",
       });
       await dialog.waitFor();
       await dialog.getByLabel("Suite name").fill("Support reception");
@@ -2865,10 +2968,11 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(suiteAddress);
       await walk.getByRole("link", { name: "Write a test" }).first().click();
       await walk.waitForURL(testWriterAddress());
-      await saysWithin(walk, "What should happen");
-      expect(await walk.innerText("main")).toContain(
-        "This test will stay in Support reception.",
-      );
+      // The writer is the side sheet the boards draw, over the suite it writes
+      // into: the block label is what the page says, and the panel's own
+      // sub-line is which suite this test will belong to.
+      await saysWithin(walk, "EXPECTED BEHAVIORS");
+      expect(await walk.innerText("main")).toContain("In suite Support reception");
 
       await walk.fill("#test-name", "Reschedules a booked appointment");
       await walk.fill(
@@ -3118,7 +3222,7 @@ describe("the complete product, walked in order in a second project", () => {
         address: at("agents", "new"),
         // The refused shape of this page carries the other lead, so this
         // sentence is the form itself rather than the address of it.
-        says: "Its name and description in Egma",
+        says: "Its name in Egma",
       },
       { what: "one agent", address: agentAddress, says: "The Support line" },
       {
@@ -3146,7 +3250,7 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Write a test",
         address: testWriterAddress(),
-        says: "What should happen",
+        says: "In suite Support reception",
       },
       {
         what: "one test",
@@ -3157,7 +3261,13 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "New persona",
         address: at("personas", "new"),
-        says: "Who speaks with the agent, and how they behave",
+        /*
+         * The New sheet's own sub-line, which the settled panel draws over the
+         * list. The page's purpose statement moved there with the form when
+         * the record moved into a side sheet, so this is the sentence the
+         * shape now carries.
+         */
+        says: "Starts at v1 and is nobody's default",
       },
       {
         what: "one persona",
@@ -3197,6 +3307,20 @@ describe("the complete product, walked in order in a second project", () => {
         what: "one conversation",
         address: `${origin}${conversation}`,
         says: "Reschedules a booked appointment",
+      },
+      {
+        what: "Start monitoring",
+        address: at("monitoring", "start"),
+        /*
+         * The start-monitoring flow, which replaced the monitoring-setup page
+         * when the setup object was dropped (ADR-0015). The header's lead is
+         * drawn while the roster read is still in flight, so the phrase is the
+         * picker's own section heading, which only the settled page draws.
+         *
+         * The Monitoring list itself is not here: this walk opens it many
+         * times already, under `monitoringAt`, and against its own states.
+         */
+        says: "What Egma should watch",
       },
       {
         what: "Settings",
@@ -3414,8 +3538,19 @@ describe("the complete product, walked in order in a second project", () => {
                * whole of `NAVIGATION_GROUPS` — Agents, Graders, Tests,
                * Personas, Runs, Transcripts — and a row added or dropped
                * should be a decision somebody takes here on purpose.
+               *
+               * **Seven links, and the seventh is not a row.** The Egma
+               * wordmark at the top of the bar is a link to the product root
+               * (`/`), added on 2026-08-23 by the developer's ruling. It is
+               * separated out rather than counted in, so this stays a count of
+               * the navigation and the brand link stays named.
                */
-              expect(addresses.length).toBe(6);
+              const home = addresses.filter((one) => one === "/");
+              expect(home, addresses.join(", ")).toHaveLength(1);
+              expect(
+                addresses.filter((one) => one !== "/").length,
+                addresses.join(", "),
+              ).toBe(6);
               for (const address of addresses) {
                 expect(address, address).not.toContain("simulations");
               }
@@ -3706,6 +3841,9 @@ describe("the complete product, walked in order in a second project", () => {
         const headings: number[] = [];
         const cells: string[] = [];
         const rows: number[] = [];
+        const lanes: number[] = [];
+        /** Where the toolbar strip ends and the panel under it begins. */
+        let strip = { ends: 0, panelBegins: 0 };
 
         for (const address of lists) {
           await walk.goto(address);
@@ -3714,8 +3852,59 @@ describe("the complete product, walked in order in a second project", () => {
           headings.push(Math.round(await heightOf(walk, "table thead tr")));
           cells.push(await cellStyle());
           rows.push(Math.round(await heightOf(walk, "table tbody tr")));
+          if (address === lists[0]) {
+            /*
+             * **The toolbar row carries the gap, and the panel starts on the
+             * pixel it ends on.** `71N-0` is a 52px strip — a 36px control with
+             * 16px under it — and `6ZM-0` begins at 132 from the top of the
+             * page, which is the title bar, the page gutter and that strip and
+             * nothing more. Read as a relationship rather than as 132, because
+             * 132 is three other numbers added up and this is the one of them
+             * that was wrong: the body was adding a second gutter under the
+             * strip and putting the panel at 156.
+             */
+            strip = await walk.evaluate(() => {
+              const find = (selector: string) =>
+                (
+                  Reflect.get(globalThis, "document") as {
+                    querySelector(one: string): {
+                      getBoundingClientRect(): {
+                        readonly top: number;
+                        readonly bottom: number;
+                      };
+                    } | null;
+                  }
+                ).querySelector(selector);
+              const toolbar = find('[data-slot="toolbar"]');
+              const panel = find('[data-slot="table-panel"]');
+              return {
+                ends: Math.round(toolbar?.getBoundingClientRect().bottom ?? -1),
+                panelBegins: Math.round(
+                  panel?.getBoundingClientRect().top ?? -2,
+                ),
+              };
+            });
+          }
+          /*
+           * Only the lists that declare a trailing lane have one to measure.
+           * All five do now — the last two grew a row ⋮ in ui-refresh 10 — and
+           * this still measures whichever are there rather than demanding a
+           * lane of a list that has no row control to put in one.
+           */
+          const lane = walk.locator('table tbody td[data-action="true"]');
+          if ((await lane.count()) > 0) {
+            lanes.push(
+              Math.round(
+                await widthOf(walk, 'table tbody td[data-action="true"]'),
+              ),
+            );
+          }
         }
 
+        expect(
+          strip.panelBegins,
+          `the toolbar strip ends at ${String(strip.ends)}`,
+        ).toBe(strip.ends);
         expect(new Set(sidebars).size, sidebars.join(", ")).toBe(1);
         expect(new Set(headings).size, headings.join(", ")).toBe(1);
         expect(new Set(cells).size, cells.join(" | ")).toBe(1);
@@ -3724,11 +3913,16 @@ describe("the complete product, walked in order in a second project", () => {
          * **A row is measured as a floor rather than as an equality**, and the
          * distinction is the honest one.
          *
-         * `--row-height` is a `height` on a table cell, which a browser treats
-         * as a minimum: a row carrying controls can be taller than a row
+         * `--row-min-height` is a `height` on a table cell, which a browser
+         * treats as a minimum: a row carrying controls can be taller than a row
          * carrying a sentence, on the same table, from the same definition. A
          * test demanding one number would be a test demanding that no list ever
          * hold a button.
+         *
+         * It is the *body* row's token. `--row-height` is the header's, and
+         * the header is held to an equality above because it holds no
+         * controls. The two parted company on 2026-08-23, when the boards gave
+         * a 40px header row and a 52px body row.
          *
          * What a copied implementation would break is the three above — the
          * shell, the heading row that holds no controls, and the cell's own
@@ -3749,7 +3943,15 @@ describe("the complete product, walked in order in a second project", () => {
               read.getPropertyValue("--sidebar-width"),
               10,
             ),
-            row: Number.parseInt(read.getPropertyValue("--row-height"), 10),
+            row: Number.parseInt(
+              read.getPropertyValue("--row-min-height"),
+              10,
+            ),
+            header: Number.parseInt(read.getPropertyValue("--row-height"), 10),
+            lane: Number.parseInt(
+              read.getPropertyValue("--table-action-width"),
+              10,
+            ),
             control: Number.parseInt(read.getPropertyValue("--control-lg"), 10),
           };
         });
@@ -3757,6 +3959,15 @@ describe("the complete product, walked in order in a second project", () => {
         // The shell's width is the token's own, rather than five pages
         // happening to agree on a hand-typed number.
         expect(sidebars[0]).toBe(tokens.sidebar);
+        // The header row holds no controls, so it is an equality rather than a
+        // floor — and it is the token's own number, not five pages agreeing.
+        expect(headings[0], headings.join(", ")).toBe(tokens.header);
+        // The trailing lane a row control stands in, on every list that has
+        // one. A page that drew its own action column would put its control
+        // somewhere else down the table.
+        expect(lanes.length, "no list offered a row control").toBeGreaterThan(0);
+        expect(new Set(lanes).size, lanes.join(", ")).toBe(1);
+        expect(lanes[0], lanes.join(", ")).toBe(tokens.lane);
         // No list sinks below the row token, and none rises above it by more
         // than one control — which is the whole of what a row may hold.
         expect(Math.min(...rows), rows.join(", ")).toBeGreaterThanOrEqual(
@@ -3834,7 +4045,7 @@ describe("the complete product, walked in order in a second project", () => {
             sidebar: Math.round(await widthOf(walk, "aside")),
             row: Math.round(await heightOf(walk, "table tbody tr")),
             sidebarToken: await pixelToken(walk, "--sidebar-width"),
-            rowToken: await pixelToken(walk, "--row-height"),
+            rowToken: await pixelToken(walk, "--row-min-height"),
           };
           const nextSidebar = before.sidebarToken + 36;
           // A table row may already sit above its token because a control plus
@@ -3849,7 +4060,7 @@ describe("the complete product, walked in order in a second project", () => {
           );
           const putBackRow = await retuned(
             walk,
-            "--row-height",
+            "--row-min-height",
             `${nextRow}px`,
           );
 
@@ -3907,7 +4118,7 @@ describe("the complete product, walked in order in a second project", () => {
 
         const tokens = {
           sidebar: await pixelToken(walk, "--sidebar-width"),
-          row: await pixelToken(walk, "--row-height"),
+          row: await pixelToken(walk, "--row-min-height"),
           control: await pixelToken(walk, "--control-lg"),
         };
 
@@ -4140,6 +4351,14 @@ describe("the complete product, walked in order in a second project", () => {
         // No click first: a fresh document starts with the focus on nothing, so
         // the first Tab is the first focusable thing on the page. Clicking a
         // corner would make the answer depend on what is drawn there.
+        //
+        // **The wordmark is the first stop, and the switcher is the second.**
+        // The bar's topmost thing is the Egma wordmark in a bar of its own,
+        // linking to the product root (`DESIGN.md`, Shell; the developer's
+        // ruling of 2026-08-23). The topmost *control* is still the switcher,
+        // which is the line under it.
+        await walk.keyboard.press("Tab");
+        expect(await focused()).toBe("Egma home");
         await walk.keyboard.press("Tab");
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");
@@ -4161,10 +4380,12 @@ describe("the complete product, walked in order in a second project", () => {
      * The case above stops at the sidebar, and stopping there is what left the
      * word *tables* in this criterion covered by nothing: a list whose rows
      * could not be reached by Tab would have passed every keyboard case in this
-     * file. A row's name is a link, so the promise is the ordinary one — Tab
-     * gets there, Enter follows it — and it has to hold past the page's own
-     * controls, one of which is a radio group whose whole design is that it
-     * costs a single Tab stop rather than one per option.
+     * file. A row's name is plain text now — the agents list is the one agent
+     * screen — so the row's own control is its ⋮, and the promise is the
+     * ordinary one: Tab gets to it, Enter opens it, Enter follows the way in
+     * it offers. It has to hold past the page's own controls, one of which is
+     * a radio group whose whole design is that it costs a single Tab stop
+     * rather than one per option.
      *
      * The presses are bounded and the trail is reported. "Press Tab until
      * something happens" with no bound is a test that hangs where it should
@@ -4180,15 +4401,17 @@ describe("the complete product, walked in order in a second project", () => {
 
         const trail: string[] = [];
         let reached = false;
-        for (let press = 0; press < 20 && !reached; press += 1) {
+        // The row's ⋮ sits after the connection links in the same row, so the
+        // bound allows for those stops as well as the page's own controls.
+        for (let press = 0; press < 30 && !reached; press += 1) {
           await walk.keyboard.press("Tab");
           const name = await focused();
           trail.push(name === "" ? "(nothing)" : name);
-          reached = name === "The Support line";
+          reached = name === "Actions for The Support line";
         }
         expect(reached, `the focus went ${trail.join(" → ")}`).toBe(true);
 
-        // It is the row's own link in the table, rather than a heading or a
+        // It is the row's own control in the table, rather than a heading or a
         // control that happens to carry the same words.
         expect(
           await walk.evaluate(() => {
@@ -4210,6 +4433,13 @@ describe("the complete product, walked in order in a second project", () => {
         expect(trail.filter((name) => name === "Active")).toEqual([]);
         expect(trail.filter((name) => name === "Archived")).toEqual([]);
 
+        // Enter opens the row's menu on its first item, and Enter again
+        // follows it to the agent this row is a row for.
+        await walk.keyboard.press("Enter");
+        await walk
+          .getByRole("menuitem", { name: "Open agent", exact: true })
+          .waitFor();
+        expect(await focused()).toBe("Open agent");
         await walk.keyboard.press("Enter");
         await walk.waitForURL(agentAddress);
         await saysWithin(walk, "The Support line");
@@ -4394,9 +4624,12 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(suiteAddress);
       await saysWithin(walk, "Reschedules a booked appointment");
 
-      await walk.getByRole("button", { name: "Rename suite" }).click();
+      // Renaming and deleting a suite live in the suite's own ⋮ menu now, and
+      // the rename surface is a side sheet named by the suite it is about.
+      await walk.getByRole("button", { name: "Open the suite menu" }).click();
+      await walk.getByRole("menuitem", { name: "Rename suite" }).click();
       const rename = walk.getByRole("dialog", {
-        name: "Rename test suite",
+        name: "Support reception",
       });
       await rename.waitFor();
       await rename.getByLabel("Suite name").fill("Northside Ford");
@@ -4421,13 +4654,17 @@ describe("the complete product, walked in order in a second project", () => {
 
       await walk.goto(suiteAddress);
       await saysWithin(walk, "Northside Ford");
-      await walk.getByRole("button", { name: "Delete suite" }).click();
+      await walk.getByRole("button", { name: "Open the suite menu" }).click();
+      await walk.getByRole("menuitem", { name: "Delete suite" }).click();
       const deletion = walk.getByRole("dialog", {
-        name: "Delete Northside Ford",
+        name: "Delete Northside Ford?",
       });
       await deletion.waitFor();
       expect(await deletion.innerText()).toContain(
-        "This permanently deletes Northside Ford and every test in it. You cannot restore them.",
+        "This deletes the suite and its tests. Nobody can author or run them after this.",
+      );
+      expect(await deletion.innerText()).toContain(
+        "Runs that already happened keep their results and transcripts.",
       );
 
       const deleteResponse = walk.waitForResponse(

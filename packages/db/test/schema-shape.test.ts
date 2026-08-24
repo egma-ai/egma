@@ -73,10 +73,8 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   // column — the shape both junction tables have, for the same reason.
   idempotent_operation: "org",
   grading_job: "gjb",
-  // One project's setup for one production agent platform.
-  monitoring_setup: "mns",
-  // One platform agent selected under a Retell monitoring setup.
-  retell_monitored_agent: "rma",
+  // One pulled agent's machine notebook: cursor, windows, lease, retry clock.
+  monitoring_state: "mst",
   // A provider call egma could not fetch or normalize: its bounded retry
   // budget, and then the identity-only marker that stops the overlap starting
   // a second one. It holds no provider document and expires by itself.
@@ -349,6 +347,14 @@ describe("test suite ownership", () => {
 
   it("removes the retired applicability, capability-skip, retry, and archive shapes", () => {
     for (const { table, column } of [
+      // Agents own platform monitoring now: the agent's description and both
+      // live revisions went with the same pre-launch pass, and the connection
+      // answers "which platform" from its type or through its agent.
+      { table: "agent", column: "description" },
+      { table: "agent", column: "revision" },
+      { table: "connection", column: "revision" },
+      { table: "connection", column: "agent_platform" },
+      { table: "connection", column: "connection_kind" },
       { table: "test", column: "applicability_revision" },
       { table: "test", column: "archived_at" },
       { table: "test", column: "archive_reason" },
@@ -584,8 +590,11 @@ describe("every enumerated value", () => {
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
-      { table: "connection", column: "agent_platform" },
-      { table: "connection", column: "connection_kind" },
+      // The platform is the agent's, not the connection's (ADR-0015). A
+      // connection answers "which platform" from its type or through its
+      // agent, and holds no column of its own to enumerate.
+      { table: "agent", column: "agent_platform" },
+      { table: "connection", column: "connection_type" },
       { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
@@ -598,6 +607,7 @@ describe("every enumerated value", () => {
       { table: "simulation", column: "modality" },
       { table: "run_event", column: "kind" },
       { table: "run_event", column: "verdict" },
+      { table: "monitoring_state", column: "scan_kind" },
     ];
 
     const { rows } = await database.sql<{

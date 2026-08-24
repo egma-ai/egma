@@ -1,8 +1,6 @@
 import { gzipSync } from "node:zlib";
 
 import {
-  configureLiveKitMonitoring,
-  listMonitoringSetups,
   type AuthContext,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -168,17 +166,12 @@ describe.skipIf(!storage.available)("what the door stages for Monitoring", () =>
   }
 
   /**
-   * Monitoring's "last heard from" is a fact about evidence being
-   * *query-visible*, so the door does not assert it: it accepts, and what the
-   * drainer finds in the object is what moves that state. What the door decides
-   * is which of these exports produces evidence at all, and that is what is read
-   * out of the pending object here — the setup's own bookkeeping is proved where
-   * the drainer writes it.
+   * A pushing agent writes nothing down: the door authenticates with the project
+   * key, stores and grades, and keeps no bookkeeping at all (ADR-0015). What the
+   * door decides is which of these exports produces evidence, and that is what
+   * is read out of the pending object here.
    */
   it("stages nothing for evidence it refuses, and platform identity for what it takes", async () => {
-    const configured = await configureLiveKitMonitoring(auth());
-    expect(configured.lastReceivedAt).toBeNull();
-
     const refused = await stage(
       jsonExport([
         jsonSpan({
@@ -228,12 +221,6 @@ describe.skipIf(!storage.available)("what the door stages for Monitoring", () =>
       ends_trace: true,
     });
     await api.drainEvidence();
-
-    expect(
-      (await listMonitoringSetups(auth())).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      ),
-    ).toBeDefined();
   });
 });
 

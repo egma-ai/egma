@@ -61,11 +61,11 @@ export type AuthContext = {
  *
  * `monitoring` is the third of them, for background production ingestion. Two
  * things build one, and neither takes a customer identifier from a caller:
- * `claimDueRetellMonitoringAgent` builds one from the project-owned Monitoring
- * setup and selected Retell agent, and the ingestion drainer builds one from
- * the organization and project sealed inside a pending object — a statement the
- * segment's own checksum covers, and one the drainer holds against Postgres
- * before it writes anything under it.
+ * `claimDueMonitoringPull` builds one from the pulled agent's own row and its
+ * monitoring notebook — never from a simulation connection — and the ingestion
+ * drainer builds one from the organization and project sealed inside a pending
+ * object, a statement the segment's own checksum covers, and one the drainer
+ * holds against Postgres before it writes anything under it.
  *
  * It is its own word so that a context which came from claimed Monitoring work
  * says so wherever it is read, and so that it opens neither of the other two

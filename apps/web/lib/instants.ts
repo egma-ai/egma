@@ -48,6 +48,35 @@ function formatterFor(
 }
 
 /**
+ * The boards' short absolute form, cached the same way as the ISO one above.
+ *
+ * `en-US` rather than `en-CA`: the month name and the comma are what make
+ * "Aug 16, 2026" the date the boards draw, and the ISO formatter beside it
+ * stays exactly as it was for evidence and for the elements' titles.
+ */
+function listFormatterFor(precision: InstantPrecision): Intl.DateTimeFormat {
+  const key = `list:${precision}`;
+  const cached = FORMATTERS.get(key);
+  if (cached !== undefined) return cached;
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    ...(precision === "day"
+      ? {}
+      : {
+          hour: "2-digit",
+          minute: "2-digit",
+          ...(precision === "second" ? { second: "2-digit" } : {}),
+          hourCycle: "h23",
+        }),
+  });
+  FORMATTERS.set(key, formatter);
+  return formatter;
+}
+
+/**
  * One formatter for every visible absolute instant.
  *
  * Product callers omit `timeZone`, which lets the browser use the viewer's
@@ -74,9 +103,34 @@ export function formatViewerInstant(
   return `${day} ${clock} ${part("timeZoneName")}`.trimEnd();
 }
 
-/** The local day something happened: what a list column has room for. */
-export function asDay(instant: string): string {
-  return formatViewerInstant(instant, "day");
+/**
+ * The one absolute form a list column carries: `Aug 16, 2026`.
+ *
+ * **A list's date column is an absolute short date, and never a relative age.**
+ * The boards print `Aug 16, 2026` in every list column that holds a time
+ * (`6ZJ-0`, `8TQ-0`, `8P4-0`), and the product printed two other things: an ISO
+ * day on the agents list and a changing age on personas, suites, tests, runs,
+ * transcripts, keys and invitations. A column of ages is a column that cannot
+ * be scanned — every row says "a moment ago" until it says "2 days ago" — and
+ * two rows a minute apart are indistinguishable by the time anybody reads them.
+ * Relative time stays where it is a fact inside a sentence: "started just now",
+ * "last received 2 min ago".
+ *
+ * `precision` is here because one column names a *moment* rather than a day:
+ * the transcript list's leading column is the exchange's own identity and has
+ * always been to the second. It keeps that precision and takes this shape, so
+ * there is still one absolute form in the product rather than two.
+ *
+ * The exact instant is not lost. `ListInstant` keeps the RFC 3339 value on the
+ * element and the viewer-local moment with its zone in the title.
+ */
+export function asListInstant(
+  instant: string,
+  precision: InstantPrecision = "day",
+): string {
+  const at = Date.parse(instant);
+  if (Number.isNaN(at)) return instant;
+  return listFormatterFor(precision).format(new Date(at));
 }
 
 /** The local moment to the minute: what detail and history views need. */

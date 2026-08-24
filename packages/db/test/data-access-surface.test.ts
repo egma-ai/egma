@@ -101,10 +101,10 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
-  // The poller names no customer. It claims the next due selected agent and
+  // The poller names no customer. It claims the next due pulled agent and
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringPull",
   // Which process, out of however many are running, drains the pending prefix.
   // One claim per deployment rather than one per customer: the prefix holds
   // every project's evidence, so there is no customer to name.
@@ -160,15 +160,13 @@ const CONTEXT_REQUIRING = [
   "cancelRun",
   "changeRole",
   "completeSimulation",
-  "configureLiveKitMonitoring",
-  "configureRetellMonitoring",
   // The kind of one connection, by its id alone — the only connection read
   // that does not name an agent. It exists for the deployment gate in front of
   // run creation, which is handed a connection id and no agent id and has to
   // know whether a phone call is what this run would place. It answers a kind
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
-  "connectionKindOf",
+  "connectionTypeOf",
   // What the trace store already holds, asked about a batch at a time and
   // answered without any evidence in it: which spans are committed and what
   // each of their fingerprints is, and which of a list of trace ids exist.
@@ -209,9 +207,9 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failRetellMonitoringTarget",
+  "failMonitoringPull",
   "finishGradingJob",
-  "finishRetellMonitoringScan",
+  "finishMonitoringScan",
   "getAgent",
   "getConnection",
   "getGrader",
@@ -238,7 +236,6 @@ const CONTEXT_REQUIRING = [
   "listGraders",
   "listGradingJobsForSimulation",
   "listMembers",
-  "listMonitoringSetups",
   "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
@@ -274,6 +271,7 @@ const CONTEXT_REQUIRING = [
   // test.
   "readAssertionShelf",
   "readAssertionWords",
+  "readAgentPullState",
   // Asks one question and answers it about the acting customer: does this
   // project belong to them. The drainer holds a scope it read out of a sealed
   // object and must not write under a pair Postgres has never agreed to.
@@ -286,27 +284,31 @@ const CONTEXT_REQUIRING = [
   "readRunVerdicts",
   "readTrace",
   "readVerdicts",
-  // The one writer for "evidence for this platform reached the store". Its
-  // merge is monotone, because the instant it is given comes from the evidence
-  // and a replay therefore carries an older one than the row already holds.
-  "recordProductionEvidenceReceived",
+  // The one writer for "a pulled call reached the store". Its merge is
+  // monotone, because the instant it is given comes from the evidence and a
+  // replayed segment therefore carries an older one than the row already holds.
+  "recordPulledCallReceived",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
   "recordProductionTraces",
-  // Poll progress belongs to the selected Monitoring agent, never to a
+  // Poll progress belongs to the pulled agent's own notebook, never to a
   // simulation connection. A call that lands writes nothing here at all; only
   // one that did not leaves a short-lived retry row behind it.
-  "checkpointRetellMonitoringPage",
+  "checkpointMonitoringPage",
   "deleteRetellCallRetry",
+  "disablePullProductionCalls",
   "dueRetellCallRetries",
+  "enablePullProductionCalls",
   "recordRetellCallAttempt",
   "sweepExpiredRetellCallMarkers",
   "transientRetellCallState",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
+  // Register a platform agent egma does not know and start pulling it, as one
+  // write. Split in two, a refused switch leaves an unbound agent behind.
+  "registerAgentPullingProductionCalls",
   "regrade",
-  "recoverRetellMonitoringSetup",
-  "releaseRetellMonitoringLease",
+  "releaseMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
   "reopenGradingJob",
@@ -317,9 +319,8 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
-  "removeMonitoringSetup",
   "renameTestSuite",
-  "renewRetellMonitoringLease",
+  "renewMonitoringLease",
   "runAlreadyStartedFor",
   // No `listGraderVersions` and no `restoreGrader`, and both were here. A
   // running copy has no version history a person browses and no archive to come
@@ -388,7 +389,7 @@ const CONTEXT_REQUIRING = [
   // and the answers to whatever that entry's form asked.
   "useLibraryEntry",
   "writePlatformSettings",
-  "yieldRetellMonitoringLease",
+  "yieldMonitoringLease",
 ];
 
 /**
@@ -561,7 +562,7 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
-  "connectionKindUsesPlatformCarrier",
+  "connectionTypeUsesPlatformCarrier",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
@@ -594,14 +595,13 @@ const READ_LIMITS = [
 ];
 
 /**
- * The shipped list of agent platforms Monitoring keeps a setup for, beside the
- * type spelled from it.
+ * The shipped list of agent platforms, beside the type spelled from it.
  *
  * Deciding whether a word names one is a question about that list, and a list
  * written out a second time somewhere else is a list that will one day disagree
  * with itself — quietly, as a platform whose bookkeeping stopped being written.
  */
-const THE_MONITORED_PLATFORMS = ["MONITORING_PLATFORMS"];
+const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
 
 /**
  * How many times one conversation is handed out before egma stops trying.
@@ -767,7 +767,7 @@ describe("the data-access module's surface", () => {
         ...PERMISSION,
         ...VALUES,
         ...READ_LIMITS,
-        ...THE_MONITORED_PLATFORMS,
+        ...THE_AGENT_PLATFORMS,
         ...THE_GRADING_BUDGET,
         ...THE_RETELL_BUDGET,
         ...THE_FOLD,

@@ -26,8 +26,14 @@
  */
 
 export const RUNNING = {
-  title: "Graders",
-  lead: "The graders judging this project now.",
+  /*
+   * **Not "Graders", which is the first crumb of this page's own trail.** The
+   * title bar draws the trail and then the title, so a page titled with the
+   * word its trail opens with reads "Graders / Running   Graders". The trail
+   * says which section and where in it; the title says what this screen holds.
+   */
+  title: "Running graders",
+  /* See `LIBRARY` for why a list screen keeps no purpose sentence. */
   /** What the page says it is waiting for, never merely that it is waiting. */
   loading: "running graders",
   /**

@@ -83,10 +83,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <AuthShell
-      eyebrow="Forgotten password"
-      title="Set a new password."
-    >
+    <AuthShell eyebrow="Forgotten password" title="Set a new password.">
       <AuthForm onSubmit={() => void submit()}>
         {problem === null ? null : <Notice tone="error">{problem}</Notice>}
 
@@ -103,7 +100,7 @@ export default function ForgotPasswordPage() {
           />
         </Field>
 
-        <Button type="submit" disabled={submitting}>
+        <Button className="w-full" type="submit" size="lg" disabled={submitting}>
           {submitting ? "Sending…" : "Send reset link"}
         </Button>
       </AuthForm>

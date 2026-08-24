@@ -301,7 +301,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
 
         LOOPBACK = spec_for({
             "agent_platform": None,
-            "connection_kind": "loopback",
+            "connection_type": "loopback",
             "access_variant": "loopback.in_process",
             "config": {"replies": ["Noted."]},
             "credentials": None,
@@ -309,7 +309,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         PHONE = spec_for(
             {
                 "agent_platform": None,
-                "connection_kind": "phone_number",
+                "connection_type": "phone_number",
                 "access_variant": "phone_number.public_e164",
                 "config": {
                     "phoneNumber": "+15551234567",

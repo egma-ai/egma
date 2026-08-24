@@ -1,6 +1,6 @@
 import type {
   NewSpan,
-  RetellMonitoringTarget,
+  MonitoringPullTarget,
   TransientRetellCall,
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -32,9 +32,8 @@ const AUTH = {
   via: "monitoring",
 } as const;
 
-const TARGET: RetellMonitoringTarget = {
-  setupId: "mns_ingestion_test",
-  monitoredAgentId: "rma_ingestion_test",
+const TARGET: MonitoringPullTarget = {
+  agentId: "rma_ingestion_test",
   platformAgentId: "agent-secret-id-must-not-be-logged",
   platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
@@ -45,7 +44,7 @@ const TARGET: RetellMonitoringTarget = {
   seenPaginationKeys: [],
   importGeneration: 1,
   hasTransientCallState: false,
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
@@ -124,7 +123,7 @@ type StoreChanges = Partial<RetellProductionIngestionStore>;
 
 function store(
   recorded: StoreRecord,
-  target: RetellMonitoringTarget | undefined = TARGET,
+  target: MonitoringPullTarget | undefined = TARGET,
   changes: StoreChanges = {},
 ): RetellProductionIngestionStore {
   let offered = false;
@@ -134,36 +133,33 @@ function store(
       (row.expiresAt !== null && row.expiresAt > now));
 
   return {
-    async claimDueRetellMonitoringAgent() {
+    async claimDueMonitoringPull() {
       recorded.claims += 1;
       if (offered || target === undefined) return undefined;
       offered = true;
       return { ...target, hasTransientCallState: recorded.rows.size > 0 };
     },
-    async renewRetellMonitoringLease() {
+    async renewMonitoringLease() {
       recorded.renewals += 1;
       return true;
     },
-    async checkpointRetellMonitoringPage(_auth, _target, checkpoint) {
+    async checkpointMonitoringPage(_auth, _target, checkpoint) {
       recorded.checkpoints.push(checkpoint);
       return true;
     },
-    async yieldRetellMonitoringLease(_auth, _target, input) {
+    async yieldMonitoringLease(_auth, _target, input) {
       recorded.yields.push(input.retryAt);
       return true;
     },
-    async finishRetellMonitoringScan(_auth, _target, options) {
+    async finishMonitoringScan(_auth, _target, options) {
       recorded.finishes.push(options?.pollMilliseconds ?? -1);
       return true;
     },
-    async failRetellMonitoringTarget(_auth, _target, input) {
+    async failMonitoringPull(_auth, _target, input) {
       recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
       return { changed: true, failures: 1, startedAt: input.now ?? BASE };
     },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
-    },
-    async releaseRetellMonitoringLease(_auth, _target, input) {
+    async releaseMonitoringLease(_auth, _target, input) {
       recorded.releases.push(input.errorKind);
     },
     async transientRetellCallState(_auth, input) {
@@ -213,7 +209,7 @@ function store(
       });
       return { recorded: true, attempts, dropped, changed: attempts === 1 };
     },
-    async deleteRetellCallRetry(_auth, _target, input) {
+    async deleteRetellCallRetry(_auth, input) {
       recorded.deletes.push(input.providerCallId);
       recorded.rows.delete(input.providerCallId);
     },
@@ -410,7 +406,7 @@ function logger(): {
 }
 
 type MetricRecord = {
-  attempts: RetellMonitoringTarget["scanKind"][];
+  attempts: MonitoringPullTarget["scanKind"][];
   turns: RetellProductionIngestionMetricTurn[];
   lags: number[];
   providerFailures: string[];
@@ -707,7 +703,7 @@ describe("Retell production ingestion", () => {
     const recorded = record();
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         recorded.renewals += 1;
         return false;
       },
@@ -735,7 +731,7 @@ describe("Retell production ingestion", () => {
     let renewals = 0;
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -770,7 +766,7 @@ describe("Retell production ingestion", () => {
     let listRequests = 0;
     let hydrationRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -966,7 +962,7 @@ describe("Retell production ingestion", () => {
   it("uses one setup-wide Retry-After gate without a repeated log", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
-      async failRetellMonitoringTarget(_auth, _target, input) {
+      async failMonitoringPull(_auth, _target, input) {
         recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
         return { changed: false, failures: 4, startedAt: BASE };
       },
@@ -1001,12 +997,12 @@ describe("Retell production ingestion", () => {
     expect(observed.recorded.providerFailures).toEqual(["rate_limited"]);
   });
 
-  it("caps unavailable-provider backoff and logs only the health transition", async () => {
+  it("caps unavailable-provider backoff and logs only the class change", async () => {
     const recorded = record();
     const { log, events } = logger();
-    const failedManyTimes: RetellMonitoringTarget = {
+    const failedManyTimes: MonitoringPullTarget = {
       ...TARGET,
-      setupConsecutiveFailures: 20,
+      consecutiveFailures: 20,
     };
 
     await runRetellProductionIngestion({
@@ -1032,36 +1028,6 @@ describe("Retell production ingestion", () => {
     expect(delay).toBeLessThanOrEqual(5 * 60_000);
     expect(events.warn).toHaveLength(1);
     expect(events.error).toHaveLength(0);
-  });
-
-  it("logs one recovery after a successful provider turn", async () => {
-    const recorded = record();
-    const { log, events } = logger();
-    const storage = store(recorded, TARGET, {
-      async recoverRetellMonitoringSetup() {
-        return {
-          recovered: true,
-          failures: 3,
-          startedAt: new Date(BASE.getTime() - 60_000),
-        };
-      },
-    });
-
-    await runRetellProductionIngestion({
-      log,
-      store: storage,
-      provider: provider(),
-      clock: () => BASE,
-    });
-
-    expect(events.info).toHaveLength(1);
-    expect(events.info[0]).toMatchObject({
-      "otel.event.name": "egma.monitoring.retell.health.recovered",
-      outage_duration_ms: 60_000,
-      failure_count: 3,
-    });
-    expect(events.warn).toEqual([]);
-    expect(events.error).toEqual([]);
   });
 
   it("blocks an invalid key until configuration changes and logs only its state change", async () => {
@@ -1503,7 +1469,7 @@ describe("the bounded Retell retry budget", () => {
 
     const turn = async (
       at: Date,
-      target: RetellMonitoringTarget = TARGET,
+      target: MonitoringPullTarget = TARGET,
     ): Promise<RetellProductionIngestionResult> =>
       runRetellProductionIngestion({
         log: heard.log,
@@ -1616,7 +1582,7 @@ describe("the bounded Retell retry budget", () => {
     expect(dropped[0]).toMatchObject({
       organization_id: AUTH.organizationId,
       project_id: AUTH.projectId,
-      retell_monitored_agent_id: TARGET.monitoredAgentId,
+      agent_id: TARGET.agentId,
       provider_call_id: "call_that_will_not_hydrate",
       error_kind: "provider_call_not_found",
       automatic_retries: 3,
@@ -1679,7 +1645,7 @@ describe("the bounded Retell retry budget", () => {
     // never the setup door.
     world.succeed();
     world.recorded.rows.clear();
-    const reimport: RetellMonitoringTarget = {
+    const reimport: MonitoringPullTarget = {
       ...TARGET,
       scanKind: "historical_import",
       importGeneration: 2,
@@ -1711,7 +1677,7 @@ describe("the bounded Retell retry budget", () => {
     expect(world.recorded.rows.size).toBe(1);
 
     world.succeed();
-    const reimport: RetellMonitoringTarget = {
+    const reimport: MonitoringPullTarget = {
       ...TARGET,
       scanKind: "historical_import",
       importGeneration: 2,

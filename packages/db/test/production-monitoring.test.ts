@@ -1,24 +1,26 @@
 import {
-  checkpointRetellMonitoringPage,
-  claimDueRetellMonitoringAgent,
-  configureLiveKitMonitoring,
-  configureRetellMonitoring,
+  checkpointMonitoringPage,
+  claimDueMonitoringPull,
+  createAgent,
   deleteRetellCallRetry,
+  disablePullProductionCalls,
   dueRetellCallRetries,
-  failRetellMonitoringTarget,
-  finishRetellMonitoringScan,
-  listMonitoringSetups,
-  NotPermittedError,
-  recordProductionEvidenceReceived,
+  enablePullProductionCalls,
+  failMonitoringPull,
+  finishMonitoringScan,
+  getAgent,
+  MOST_RETELL_CALL_ATTEMPTS,
+  readAgentPullState,
+  recordPulledCallReceived,
   recordRetellCallAttempt,
-  recoverRetellMonitoringSetup,
-  releaseRetellMonitoringLease,
-  renewRetellMonitoringLease,
+  registerAgentPullingProductionCalls,
+  releaseMonitoringLease,
+  renewMonitoringLease,
   sweepExpiredRetellCallMarkers,
   transientRetellCallState,
-  yieldRetellMonitoringLease,
+  yieldMonitoringLease,
   type AuthContext,
-  type RetellMonitoringTarget,
+  type MonitoringPullTarget,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import {
@@ -33,22 +35,38 @@ import {
 import {
   createConnectedDatabase,
   errorCodeOf,
-  openSingleConnection,
   POSTGRES_ERROR,
   type MigratedDatabase,
 } from "./support/database.ts";
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
+/**
+ * Monitoring, agent-shaped, on the durable ingestion boundary.
+ *
+ * There is no setup object and no health surface to test. An agent binds to
+ * its platform, holds that platform's sealed monitoring key, and one switch
+ * turns polling on. What is worth proving is what the schema now makes
+ * impossible — two agents polling one platform agent, a switch that cannot be
+ * kept — and what the poller's notebook promises around it: one clock, a park
+ * a lesser failure cannot shorten, a resume that does no backfill, and a
+ * bounded retry budget for a call that would not come.
+ *
+ * A call that lands leaves no row here at all. Its evidence is in the object
+ * store and then the trace store, where committed span identity is the
+ * exactly-once rule (ADR-0014).
+ */
+
 let database: MigratedDatabase;
 
 const acme = { organization: newId("org"), project: newId("prj") };
 const acmeOther = { organization: acme.organization, project: newId("prj") };
-const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
-const gene = newId("usr");
 const RETELL_KEY = "key_live_retell_monitoring_secret_QRST";
-const ROTATED_RETELL_KEY = "key_live_retell_monitoring_rotated_WXYZ";
+const ROTATED_KEY = "key_live_retell_monitoring_rotated_WXYZ";
 const SETUP_TIME = new Date("2026-08-20T08:00:00.000Z");
+const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1_000;
+const FIVE_MINUTES = 5 * 60_000;
+const FOREVER = new Date("9999-12-31T23:59:59.999Z");
 
 function at(
   customer: typeof acme,
@@ -64,13 +82,57 @@ function at(
   };
 }
 
-function selected() {
-  return [
-    {
-      platformAgentId: "agent_retell_voice_1",
-      platformAgentName: "Front desk",
-    },
-  ] as const;
+/** A bare roster entry: no platform, no key, no switch. */
+async function agentNamed(
+  name: string,
+  customer: typeof acme = acme,
+): Promise<string> {
+  const created = await createAgent(at(customer, ada), { name });
+  return created.id;
+}
+
+async function pulling(
+  name: string,
+  platformAgentId: string,
+  customer: typeof acme = acme,
+  now: Date = SETUP_TIME,
+): Promise<string> {
+  const agentId = await agentNamed(name, customer);
+  await enablePullProductionCalls(at(customer, ada), {
+    agentId,
+    agentPlatform: "retell",
+    platformAgentId,
+    apiKey: RETELL_KEY,
+    now,
+  });
+  return agentId;
+}
+
+/** The notebook as the database holds it. No access function publishes it. */
+async function notebook(agentId: string) {
+  const { rows } = await database.sql<{
+    scan_kind: string | null;
+    scan_from: Date | null;
+    scan_through: Date | null;
+    completed_through: Date | null;
+    regular_floor_at: Date | null;
+    import_generation: number;
+    next_poll_at: Date;
+    consecutive_failures: number;
+    last_error_kind: string | null;
+    last_received_at: Date | null;
+  }>(`select scan_kind, scan_from, scan_through, completed_through,
+             regular_floor_at, import_generation, next_poll_at,
+             consecutive_failures, last_error_kind, last_received_at
+        from monitoring_state where agent_id = '${agentId}'`);
+  return rows[0];
+}
+
+async function claimed(now = SETUP_TIME): Promise<MonitoringPullTarget> {
+  const target = await claimDueMonitoringPull({ now });
+  expect(target).toBeDefined();
+  if (target === undefined) throw new Error("nothing was due");
+  return target;
 }
 
 beforeAll(async () => {
@@ -79,17 +141,12 @@ beforeAll(async () => {
     { id: acme.project, slug: "default" },
     { id: acmeOther.project, slug: "other" },
   ]);
-  await seedOrganization(database, globex.organization, [
-    { id: globex.project, slug: "default" },
-  ]);
   await seedUser(database, ada, "ada@acme.example");
-  await seedUser(database, gene, "gene@globex.example");
 });
 
 beforeEach(async () => {
   await database.sql(
-    "truncate retell_call_retry, retell_monitored_agent, " +
-      "monitoring_setup cascade",
+    "truncate retell_call_retry, monitoring_state, connection, agent cascade",
   );
 });
 
@@ -97,193 +154,193 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe("Retell Monitoring setup", () => {
-  it("stores one sealed key and gives each selected agent a fixed 30-day import", async () => {
-    const configured = await configureRetellMonitoring(at(acme, ada), {
+describe("the pull switch", () => {
+  /**
+   * **Registering and switching on are one write.**
+   *
+   * Watching an unregistered platform agent means registering it, and the two
+   * halves cannot be separate commits: the switch's uniqueness index is what
+   * refuses a second agent on one platform agent, and a create that had
+   * already committed would leave that agent in the roster bound to nothing.
+   */
+  it("registers an unknown platform agent and starts it in one write", async () => {
+    const state = await registerAgentPullingProductionCalls(at(acme, ada), {
+      name: "Registered by monitoring",
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_registered_1",
       apiKey: RETELL_KEY,
-      agents: selected(),
       now: SETUP_TIME,
     });
 
-    expect(configured).toMatchObject({
+    expect(state).toMatchObject({
+      pullProductionCalls: true,
       agentPlatform: "retell",
-      strategy: "retell_api_polling",
-      credentialsHint: "QRST",
-      agents: [
-        {
-          platformAgentId: "agent_retell_voice_1",
-          platformAgentName: "Front desk",
-          state: "importing",
-          scanKind: "historical_import",
-        },
-      ],
-    });
-    expect(JSON.stringify(configured)).not.toContain(RETELL_KEY);
-
-    const setup = await database.sql<{ credentials: string }>(
-      "select credentials from monitoring_setup",
-    );
-    expect(setup.rows[0]?.credentials).not.toContain(RETELL_KEY);
-    expect(setup.rows[0]?.credentials.startsWith("v1.")).toBe(true);
-
-    const importState = await database.sql<{
-      scan_from: Date;
-      scan_through: Date;
-      pagination_trail: string;
-    }>(
-      "select scan_from, scan_through, pagination_trail " +
-        "from retell_monitored_agent",
-    );
-    expect(importState.rows[0]).toEqual({
-      scan_from: new Date("2026-07-21T08:00:00.000Z"),
-      scan_through: SETUP_TIME,
-      pagination_trail: "[]",
-    });
-  });
-
-  it("lets two first saves share one Retell Monitoring setup", async () => {
-    const auth = at(acme, ada);
-    await database.sql(`
-      create function pause_first_monitoring_setup_insert()
-      returns trigger language plpgsql as $$
-      begin
-        perform pg_sleep(0.15);
-        return new;
-      end
-      $$
-    `);
-    await database.sql(`
-      create trigger pause_first_monitoring_setup_insert
-      before insert on monitoring_setup
-      for each row execute function pause_first_monitoring_setup_insert()
-    `);
-    try {
-      const [first, second] = await Promise.all([
-        configureRetellMonitoring(auth, {
-          apiKey: RETELL_KEY,
-          agents: selected(),
-          now: SETUP_TIME,
-        }),
-        configureRetellMonitoring(auth, {
-          apiKey: RETELL_KEY,
-          agents: selected(),
-          now: SETUP_TIME,
-        }),
-      ]);
-
-      expect(first.id).toBe(second.id);
-      expect(
-        await database.sql<{ count: string }>(
-          "select count(*) from monitoring_setup where project_id = $1 " +
-            "and agent_platform = 'retell'",
-          [acme.project],
-        ),
-      ).toMatchObject({ rows: [{ count: "1" }] });
-    } finally {
-      await database.sql(
-        "drop trigger pause_first_monitoring_setup_insert on monitoring_setup",
-      );
-      await database.sql("drop function pause_first_monitoring_setup_insert()");
-    }
-  });
-
-  it("lists Monitoring setup only inside the acting project", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-
-    expect(await listMonitoringSetups(at(acmeOther, ada))).toEqual([]);
-  });
-
-  it("records received production evidence only in the acting project", async () => {
-    const acmeAuth = at(acme, ada);
-    const otherAuth = at(acmeOther, ada);
-    for (const auth of [acmeAuth, otherAuth]) {
-      await configureRetellMonitoring(auth, {
-        apiKey: RETELL_KEY,
-        agents: selected(),
-        now: SETUP_TIME,
-      });
-      await configureLiveKitMonitoring(auth);
-    }
-
-    const retellReceivedAt = new Date("2026-08-20T08:01:00.000Z");
-    const liveKitReceivedAt = new Date("2026-08-20T08:02:00.000Z");
-    await recordProductionEvidenceReceived(acmeAuth, {
-      agentPlatform: "retell",
-      platformAgentId: selected()[0].platformAgentId,
-      receivedAt: retellReceivedAt,
-    });
-    await recordProductionEvidenceReceived(acmeAuth, {
-      agentPlatform: "livekit_agents",
-      receivedAt: liveKitReceivedAt,
-    });
-
-    const acmeSetups = await listMonitoringSetups(acmeAuth);
-    expect(
-      acmeSetups.find((setup) => setup.agentPlatform === "retell"),
-    ).toMatchObject({
-      lastReceivedAt: retellReceivedAt,
-      agents: [{ lastCallReceivedAt: retellReceivedAt }],
-    });
-    expect(
-      acmeSetups.find((setup) => setup.agentPlatform === "livekit_agents"),
-    ).toMatchObject({ lastReceivedAt: liveKitReceivedAt });
-
-    const otherSetups = await listMonitoringSetups(otherAuth);
-    expect(
-      otherSetups.find((setup) => setup.agentPlatform === "retell"),
-    ).toMatchObject({
+      platformAgentId: "agent_retell_registered_1",
+      monitoringApiKeyHint: RETELL_KEY.slice(-4),
+      scanKind: "historical_import",
       lastReceivedAt: null,
-      agents: [{ lastCallReceivedAt: null }],
     });
+    const opened = await notebook(state.agentId);
+    expect(opened?.scan_from).toEqual(
+      new Date(SETUP_TIME.getTime() - THIRTY_DAYS),
+    );
+    expect(opened?.scan_through).toEqual(SETUP_TIME);
+    expect(opened?.import_generation).toBe(1);
+  });
+
+  /** The sealed key never leaves the row, and the hint is what a person reads. */
+  it("seals the key on the agent and publishes only its hint", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const { rows } = await database.sql<{
+      monitoring_api_key: string;
+      monitoring_api_key_hint: string;
+    }>(
+      `select monitoring_api_key, monitoring_api_key_hint
+         from agent where id = '${agentId}'`,
+    );
+    expect(rows[0]?.monitoring_api_key).not.toContain(RETELL_KEY);
+    expect(rows[0]?.monitoring_api_key_hint).toBe(RETELL_KEY.slice(-4));
+    expect(await readAgentPullState(at(acme, ada), agentId)).not.toHaveProperty(
+      "monitoringApiKey",
+    );
+  });
+
+  /**
+   * Two Egma agents polling one Retell agent would double the API load and
+   * contest attribution. The database refuses it rather than the code avoiding
+   * it, because a read that checked first would race the very next request.
+   */
+  it("refuses a second switched-on agent for one platform agent", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const second = await agentNamed("Front desk copy");
+
+    const refusal = await enablePullProductionCalls(at(acme, ada), {
+      agentId: second,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    }).catch((error: unknown) => error);
+
+    expect(errorCodeOf(refusal)).toBe(POSTGRES_ERROR.uniqueViolation);
+  });
+
+  /** Two switched-off rows may lawfully name one platform agent. */
+  it("lets a stopped agent share a platform agent with the one now watching", async () => {
+    const first = await pulling("Front desk", "agent_retell_voice_1");
+    expect(await disablePullProductionCalls(at(acme, ada), first)).toBe(true);
+
+    const second = await agentNamed("Front desk again");
+    const state = await enablePullProductionCalls(at(acme, ada), {
+      agentId: second,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: SETUP_TIME,
+    });
+    expect(state.pullProductionCalls).toBe(true);
+  });
+
+  /** Stop keeps everything stored, including the notebook and the key. */
+  it("keeps the binding, the key and the notebook when the switch goes off", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    await disablePullProductionCalls(at(acme, ada), agentId);
+
+    const state = await readAgentPullState(at(acme, ada), agentId);
+    expect(state).toMatchObject({
+      pullProductionCalls: false,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      monitoringApiKeyHint: RETELL_KEY.slice(-4),
+    });
+    expect(await notebook(agentId)).toBeDefined();
+    expect(await claimDueMonitoringPull({ now: SETUP_TIME })).toBeUndefined();
+  });
+
+  /**
+   * **Pause and resume do no backfill.**
+   *
+   * Turning the switch on again is a new observation from that moment — a
+   * fresh generation, a floor at the switch, and no second 30-day import. The
+   * deep import happens once, on an agent's first ever switch-on.
+   */
+  it("resumes from now rather than backfilling what it missed", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    await disablePullProductionCalls(at(acme, ada), agentId);
+
+    const resumedAt = new Date(SETUP_TIME.getTime() + 6 * 60 * 60_000);
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: resumedAt,
+    });
+
+    const resumed = await notebook(agentId);
+    expect(resumed?.scan_kind).toBeNull();
+    expect(resumed?.regular_floor_at).toEqual(resumedAt);
+    expect(resumed?.completed_through).toEqual(resumedAt);
+    expect(resumed?.import_generation).toBe(2);
+
+    // And the window the poller then fixes starts at the floor, never five
+    // minutes behind it into the hours the switch was off.
+    const target = await claimed(resumedAt);
+    expect(target.scanKind).toBe("regular");
+    expect(target.scanFrom).toEqual(resumedAt);
+  });
+
+  /**
+   * **A turn already in flight may not outlive the switch-on.**
+   *
+   * Turning the switch on opens a new observation, so a lease taken over the
+   * window before it names a scan that no longer exists. Were that turn
+   * allowed to finish, its own completion would drag `completed_through` back
+   * to its older bound and delete the floor the switch just wrote — and the
+   * next regular window would reach into the hours pull was off, which is the
+   * backfill this branch exists to refuse.
+   */
+  it("voids an in-flight lease when the switch is turned on again", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const inFlight = await claimed();
+
+    const resumedAt = new Date(SETUP_TIME.getTime() + 20_000);
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: resumedAt,
+    });
+
+    // Every write the old turn still tries is refused by its own owner check.
     expect(
-      otherSetups.find((setup) => setup.agentPlatform === "livekit_agents"),
-    ).toMatchObject({ lastReceivedAt: null });
+      await renewMonitoringLease(inFlight.auth, inFlight, { now: resumedAt }),
+    ).toBe(false);
+    expect(
+      await finishMonitoringScan(inFlight.auth, inFlight, { now: resumedAt }),
+    ).toBe(false);
+
+    // And the row is free at once, rather than waiting out a lease nobody owns.
+    const resumed = await claimed(resumedAt);
+    expect(resumed.importGeneration).toBe(2);
+    expect(resumed.scanKind).toBe("regular");
+    expect(resumed.scanFrom).toEqual(resumedAt);
   });
+});
 
-  it("rejects a selected agent that pairs another tenant with the setup key", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const setup = await database.sql<{ id: string }>(
-      "select id from monitoring_setup",
-    );
-
-    await expect(
-      database.sql(
-        `insert into retell_monitored_agent
-           (id, monitoring_setup_id, organization_id, project_id,
-            platform_agent_id, platform_agent_name, next_poll_at)
-         values ($1, $2, $3, $4, 'agent_cross_tenant', 'Cross tenant', $5)`,
-        [
-          newId("rma"),
-          setup.rows[0]?.id,
-          globex.organization,
-          globex.project,
-          SETUP_TIME,
-        ],
-      ),
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
-    );
-  });
-
-  it("lets only one replica claim one due selected agent", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
+describe("the poller's notebook", () => {
+  /**
+   * Two API replicas poll on the same cadence, so the claim is raced rather
+   * than taken in turn. `for update skip locked` is what makes the loser see
+   * nothing instead of queueing behind the winner.
+   */
+  it("lets only one replica claim one due agent", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
 
     const [first, second] = await Promise.all([
-      claimDueRetellMonitoringAgent({ now: SETUP_TIME }),
-      claimDueRetellMonitoringAgent({ now: SETUP_TIME }),
+      claimDueMonitoringPull({ now: SETUP_TIME }),
+      claimDueMonitoringPull({ now: SETUP_TIME }),
     ]);
     const held = [first, second].filter(
       (target): target is NonNullable<typeof target> => target !== undefined,
@@ -303,886 +360,474 @@ describe("Retell Monitoring setup", () => {
     });
   });
 
-  it("voids an in-flight lease when the agent is selected again", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
+  it("claims one due agent, holds its window, and finishes it", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
+
+    expect(target).toMatchObject({
+      agentId,
+      platformAgentId: "agent_retell_voice_1",
+      platformAgentName: "Front desk",
       apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const active = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(active).toBeDefined();
-    if (active === undefined) return;
-
-    // Selecting the agent again arms a new fixed 30-day window. A lease taken
-    // over the old one names a scan that no longer exists, so it has to stop
-    // being a lease: were it allowed to finish, its own completion would
-    // overwrite the window the customer just asked for and the re-import would
-    // silently never happen.
-    const savedAt = new Date(SETUP_TIME.getTime() + 1_000);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: savedAt,
-    });
-
-    expect(
-      await renewRetellMonitoringLease(active.auth, active, { now: savedAt }),
-    ).toBe(false);
-    expect(
-      await finishRetellMonitoringScan(active.auth, active, { now: savedAt }),
-    ).toBe(false);
-
-    const rearmed = await claimDueRetellMonitoringAgent({ now: savedAt });
-    expect(rearmed).toMatchObject({
       scanKind: "historical_import",
-      scanThrough: savedAt,
-      paginationKey: null,
-      importGeneration: 2,
-    });
-  });
-
-  it("ignores a provider failure from a lease that used the previous key", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(stale).toBeDefined();
-    if (stale === undefined) return;
-
-    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
-    await configureRetellMonitoring(auth, {
-      apiKey: ROTATED_RETELL_KEY,
-      agents: selected(),
-      now: rotatedAt,
-    });
-    await failRetellMonitoringTarget(stale.auth, stale, {
-      kind: "invalid_credential",
-      retryAt: new Date("9999-12-31T23:59:59.999Z"),
-      now: rotatedAt,
-    });
-
-    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
-      healthState: "healthy",
-      blockedUntil: null,
+      hasTransientCallState: false,
       consecutiveFailures: 0,
     });
-    expect(
-      await claimDueRetellMonitoringAgent({ now: rotatedAt }),
-    ).toMatchObject({ apiKey: ROTATED_RETELL_KEY });
-  });
-
-  it("ignores a provider failure after the target lost its lease", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(stale).toBeDefined();
-    if (stale === undefined) return;
-    await yieldRetellMonitoringLease(stale.auth, stale, {
-      retryAt: new Date(SETUP_TIME.getTime() + 30_000),
-      now: SETUP_TIME,
-    });
-
-    await failRetellMonitoringTarget(stale.auth, stale, {
-      kind: "invalid_credential",
-      retryAt: new Date("9999-12-31T23:59:59.999Z"),
-      now: SETUP_TIME,
-    });
-
-    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
-      healthState: "healthy",
-      blockedUntil: null,
-      consecutiveFailures: 0,
-    });
-  });
-
-  it("releases an old-key target without attaching its contract error", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const stale = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(stale).toBeDefined();
-    if (stale === undefined) return;
-
-    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
-    await configureRetellMonitoring(auth, {
-      apiKey: ROTATED_RETELL_KEY,
-      agents: selected(),
-      now: rotatedAt,
-    });
-    await releaseRetellMonitoringLease(stale.auth, stale, {
-      retryAt: new Date(rotatedAt.getTime() + 30_000),
-      errorKind: "provider_contract",
-      now: rotatedAt,
-    });
-
-    expect((await listMonitoringSetups(auth))[0]?.agents[0]).toMatchObject({
-      lastErrorKind: null,
-      consecutiveFailures: 0,
-    });
-    expect(
-      await claimDueRetellMonitoringAgent({ now: rotatedAt }),
-    ).toMatchObject({ apiKey: ROTATED_RETELL_KEY });
-  });
-
-  it("does not release a selected agent through another setup id", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const liveKit = await configureLiveKitMonitoring(auth);
-    const target = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(target).toBeDefined();
-    if (target === undefined) return;
-
-    await failRetellMonitoringTarget(
-      target.auth,
-      { ...target, setupId: liveKit.id },
-      {
-        kind: "provider_unavailable",
-        retryAt: new Date(SETUP_TIME.getTime() + 30_000),
-        now: SETUP_TIME,
-      },
-    );
+    // Leased, so nothing else may take it.
+    expect(await claimDueMonitoringPull({ now: SETUP_TIME })).toBeUndefined();
 
     expect(
-      await renewRetellMonitoringLease(target.auth, target, {
-        now: SETUP_TIME,
+      await checkpointMonitoringPage(target.auth, target, {
+        paginationKey: "page-2",
+        seenPaginationKeys: ["page-1"],
       }),
     ).toBe(true);
-  });
-
-  /**
-   * **A replay is not news.**
-   *
-   * Evidence becomes durable in one order and is drained in another, so an
-   * older segment can perfectly well be written after a newer one — a
-   * ClickHouse outage, a retained object repaired a day later, a restart that
-   * found a backlog. Each of those carries the instant its evidence was
-   * received rather than the instant it is being replayed at, and a plain
-   * assignment would answer a customer's "last production conversation" by
-   * winding it back to a call from an hour ago. The merge is `greatest`, so the
-   * later fact stands whichever order the two arrive in.
-   */
-  it("never winds a customer's last-received state backwards", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-
-    const newer = new Date("2026-08-20T09:00:00.000Z");
-    const older = new Date("2026-08-20T08:00:00.000Z");
-    for (const receivedAt of [newer, older]) {
-      await recordProductionEvidenceReceived(auth, {
-        agentPlatform: "retell",
-        platformAgentId: selected()[0].platformAgentId,
-        receivedAt,
-      });
-    }
-
-    const [setup] = await listMonitoringSetups(auth);
-    expect(setup).toMatchObject({
-      lastReceivedAt: newer,
-      agents: [{ lastCallReceivedAt: newer }],
-    });
-
-    // And the same instant twice is a no-op rather than a step of any kind,
-    // which is what a rediscovered object does.
-    await recordProductionEvidenceReceived(auth, {
-      agentPlatform: "retell",
-      platformAgentId: selected()[0].platformAgentId,
-      receivedAt: newer,
-    });
-    expect((await listMonitoringSetups(auth))[0]).toMatchObject({
-      lastReceivedAt: newer,
-      agents: [{ lastCallReceivedAt: newer }],
-    });
-  });
-
-  it("moves only the named platform's setup, never the one beside it", async () => {
-    const auth = at(acme, ada);
-    await configureRetellMonitoring(auth, {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    await configureLiveKitMonitoring(auth);
-
-    const receivedAt = new Date(SETUP_TIME.getTime() + 1_000);
-    await recordProductionEvidenceReceived(auth, {
-      agentPlatform: "retell",
-      platformAgentId: selected()[0].platformAgentId,
-      receivedAt,
-    });
-
-    const setups = await listMonitoringSetups(auth);
     expect(
-      setups.find((setup) => setup.agentPlatform === "retell"),
-    ).toMatchObject({ lastReceivedAt: receivedAt });
-    // A customer with both platforms configured has two independent facts, and
-    // one platform's evidence is not the other platform's news.
-    expect(
-      setups.find((setup) => setup.agentPlatform === "livekit_agents"),
-    ).toMatchObject({ lastReceivedAt: null });
-  });
-
-  it("stops an already leased agent when another agent sets the key-wide gate", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: [
-        ...selected(),
-        {
-          platformAgentId: "agent_retell_voice_2",
-          platformAgentName: "Overflow desk",
-        },
-      ],
-      now: SETUP_TIME,
-    });
-    const first = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    const alreadyLeased = await claimDueRetellMonitoringAgent({
-      now: SETUP_TIME,
-    });
-    expect(first).toBeDefined();
-    expect(alreadyLeased).toBeDefined();
-    if (first === undefined || alreadyLeased === undefined) return;
-
-    const retryAt = new Date(SETUP_TIME.getTime() + 60_000);
-    await failRetellMonitoringTarget(first.auth, first, {
-      kind: "rate_limited",
-      retryAt,
-      now: SETUP_TIME,
-    });
-
-    expect(
-      await renewRetellMonitoringLease(
-        alreadyLeased.auth,
-        alreadyLeased,
-        { now: new Date(SETUP_TIME.getTime() + 1_000) },
-      ),
-    ).toBe(false);
-  });
-
-  it("does not clear a newer key-wide failure from an older successful target", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: [
-        ...selected(),
-        {
-          platformAgentId: "agent_retell_voice_2",
-          platformAgentName: "Overflow desk",
-        },
-      ],
-      now: SETUP_TIME,
-    });
-    const failed = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    const staleSuccess = await claimDueRetellMonitoringAgent({
-      now: SETUP_TIME,
-    });
-    expect(failed).toBeDefined();
-    expect(staleSuccess).toBeDefined();
-    if (failed === undefined || staleSuccess === undefined) return;
-
-    const retryAt = new Date(SETUP_TIME.getTime() + 60_000);
-    await failRetellMonitoringTarget(failed.auth, failed, {
-      kind: "rate_limited",
-      retryAt,
-      now: SETUP_TIME,
-    });
-
-    expect(
-      await recoverRetellMonitoringSetup(
-        staleSuccess.auth,
-        staleSuccess,
-        SETUP_TIME,
-      ),
-    ).toEqual({ recovered: false });
-    expect((await listMonitoringSetups(staleSuccess.auth))[0]).toMatchObject({
-      healthState: "rate_limited",
-      blockedUntil: retryAt,
-      consecutiveFailures: 1,
-    });
-  });
-
-  it("keeps invalid credentials until the customer changes the key", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: [
-        ...selected(),
-        {
-          platformAgentId: "agent_retell_voice_2",
-          platformAgentName: "Overflow desk",
-        },
-      ],
-      now: SETUP_TIME,
-    });
-    const invalid = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    const lateUnavailable = await claimDueRetellMonitoringAgent({
-      now: SETUP_TIME,
-    });
-    expect(invalid).toBeDefined();
-    expect(lateUnavailable).toBeDefined();
-    if (invalid === undefined || lateUnavailable === undefined) return;
-
-    const invalidUntil = new Date("9999-12-31T23:59:59.999Z");
-    await failRetellMonitoringTarget(invalid.auth, invalid, {
-      kind: "invalid_credential",
-      retryAt: invalidUntil,
-      now: SETUP_TIME,
-    });
-    await failRetellMonitoringTarget(
-      lateUnavailable.auth,
-      lateUnavailable,
-      {
-        kind: "provider_unavailable",
-        retryAt: new Date(SETUP_TIME.getTime() + 30_000),
-        now: new Date(SETUP_TIME.getTime() + 1_000),
-      },
-    );
-
-    expect((await listMonitoringSetups(invalid.auth))[0]).toMatchObject({
-      healthState: "invalid_credential",
-      blockedUntil: invalidUntil,
-    });
-  });
-
-  it("does not shorten a newer Retry-After gate", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: [
-        ...selected(),
-        {
-          platformAgentId: "agent_retell_voice_2",
-          platformAgentName: "Overflow desk",
-        },
-      ],
-      now: SETUP_TIME,
-    });
-    const rateLimited = await claimDueRetellMonitoringAgent({
-      now: SETUP_TIME,
-    });
-    const lateUnavailable = await claimDueRetellMonitoringAgent({
-      now: SETUP_TIME,
-    });
-    expect(rateLimited).toBeDefined();
-    expect(lateUnavailable).toBeDefined();
-    if (rateLimited === undefined || lateUnavailable === undefined) return;
-
-    const retryAt = new Date(SETUP_TIME.getTime() + 120_000);
-    await failRetellMonitoringTarget(rateLimited.auth, rateLimited, {
-      kind: "rate_limited",
-      retryAt,
-      now: SETUP_TIME,
-    });
-    await failRetellMonitoringTarget(
-      lateUnavailable.auth,
-      lateUnavailable,
-      {
-        kind: "provider_unavailable",
-        retryAt: new Date(SETUP_TIME.getTime() + 30_000),
-        now: new Date(SETUP_TIME.getTime() + 1_000),
-      },
-    );
-
-    expect((await listMonitoringSetups(rateLimited.auth))[0]).toMatchObject({
-      healthState: "rate_limited",
-      blockedUntil: retryAt,
-    });
-  });
-
-  it("keeps the provider cursor and fixed window when bounded work yields", async () => {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: SETUP_TIME,
-    });
-    const first = await claimDueRetellMonitoringAgent({ now: SETUP_TIME });
-    expect(first).toBeDefined();
-    if (first === undefined) return;
-
-    expect(
-      await checkpointRetellMonitoringPage(first.auth, first, {
-        paginationKey: "opaque/page-2",
-        seenPaginationKeys: ["opaque/page-2"],
-      }),
+      await renewMonitoringLease(target.auth, target, { now: SETUP_TIME }),
     ).toBe(true);
-    const resumeAt = new Date(SETUP_TIME.getTime() + 1_000);
-    expect(
-      await yieldRetellMonitoringLease(first.auth, first, {
-        retryAt: resumeAt,
-        now: SETUP_TIME,
-      }),
-    ).toBe(true);
+    expect(await finishMonitoringScan(target.auth, target)).toBe(true);
 
-    const resumed = await claimDueRetellMonitoringAgent({ now: resumeAt });
-    expect(resumed).toMatchObject({
-      scanKind: "historical_import",
-      scanFrom: new Date("2026-07-21T08:00:00.000Z"),
-      scanThrough: SETUP_TIME,
-      paginationKey: "opaque/page-2",
-      seenPaginationKeys: ["opaque/page-2"],
-    });
-    if (resumed === undefined) return;
-    expect(
-      await checkpointRetellMonitoringPage(at(globex, gene), resumed, {
-        paginationKey: "opaque/cross-tenant",
-        seenPaginationKeys: ["opaque/cross-tenant"],
-      }),
-    ).toBe(false);
+    const finished = await notebook(agentId);
+    expect(finished?.scan_kind).toBeNull();
+    expect(finished?.completed_through).toEqual(target.scanThrough);
+    expect(finished?.regular_floor_at).toBeNull();
+    expect(finished?.consecutive_failures).toBe(0);
   });
 
-  it("refuses a viewer before it stores the key", async () => {
-    await expect(
-      configureRetellMonitoring(at(acme, ada, "viewer"), {
-        apiKey: RETELL_KEY,
-        agents: selected(),
-        now: SETUP_TIME,
-      }),
-    ).rejects.toBeInstanceOf(NotPermittedError);
-    const stored = await database.sql<{ count: string }>(
-      "select count(*) as count from monitoring_setup",
+  /** The overlap is the only late-arrival net there is: no daily re-walk. */
+  it("reaches five minutes back from the last completed bound and no further", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const first = await claimed();
+    await finishMonitoringScan(first.auth, first, { now: SETUP_TIME });
+
+    const later = new Date(SETUP_TIME.getTime() + 60_000);
+    const regular = await claimed(later);
+    expect(regular.scanKind).toBe("regular");
+    expect(regular.scanFrom).toEqual(
+      new Date(first.scanThrough.getTime() - FIVE_MINUTES),
     );
-    expect(stored.rows[0]?.count).toBe("0");
+    expect(regular.scanThrough).toEqual(later);
+  });
+
+  /** A yield is a pause inside one scan: the window and the cursor stay put. */
+  it("yields bounded work without losing the window it is inside", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
+    await checkpointMonitoringPage(target.auth, target, {
+      paginationKey: "page-2",
+      seenPaginationKeys: ["page-1"],
+    });
+
+    const retryAt = new Date(SETUP_TIME.getTime() + 30_000);
+    expect(await yieldMonitoringLease(target.auth, target, { retryAt })).toBe(
+      true,
+    );
+
+    const resumed = await claimed(retryAt);
+    expect(resumed.scanKind).toBe("historical_import");
+    expect(resumed.scanFrom).toEqual(target.scanFrom);
+    expect(resumed.scanThrough).toEqual(target.scanThrough);
+    expect(resumed.paginationKey).toBe("page-2");
+    expect(resumed.seenPaginationKeys).toEqual(["page-1"]);
   });
 });
 
-describe("the bounded Retell call budget", () => {
-  const BACKOFF = [30_000, 60_000, 120_000];
-
-  async function leased(now = SETUP_TIME): Promise<RetellMonitoringTarget> {
-    const target = await claimDueRetellMonitoringAgent({ now });
-    if (target === undefined) throw new Error("no due selected agent");
-    return target;
-  }
-
-  async function configured(now = SETUP_TIME): Promise<RetellMonitoringTarget> {
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now,
-    });
-    return leased(now);
-  }
-
-  /** Spend the whole budget for one call, returning when it is dropped. */
-  async function spendBudget(
-    target: RetellMonitoringTarget,
-    providerCallId: string,
-    from = SETUP_TIME,
-  ): Promise<Date> {
-    let at = from;
-    for (const wait of [0, ...BACKOFF]) {
-      at = new Date(at.getTime() + wait);
-      await recordRetellCallAttempt(target.auth, target, {
-        providerCallId,
-        errorKind: "provider_call_not_found",
-        retryBackoffMilliseconds: BACKOFF,
-        now: at,
-      });
-    }
-    return at;
-  }
-
-  it("counts one budget across attempts and refuses a fourth automatic retry", async () => {
-    const target = await configured();
-    let at = SETUP_TIME;
-    const seen: number[] = [];
-    for (const wait of [0, ...BACKOFF]) {
-      at = new Date(at.getTime() + wait);
-      const outcome = await recordRetellCallAttempt(target.auth, target, {
-        providerCallId: "call_never_arrives",
-        errorKind: "provider_call_not_found",
-        retryBackoffMilliseconds: BACKOFF,
-        now: at,
-      });
-      if (!outcome.recorded) throw new Error("the attempt was not recorded");
-      seen.push(outcome.attempts);
-      expect(outcome.dropped).toBe(outcome.attempts === 4);
-    }
-    expect(seen).toEqual([1, 2, 3, 4]);
-
-    // The marker cannot schedule a fifth attempt, whoever asks.
-    const due = await dueRetellCallRetries(target.auth, {
-      monitoredAgentId: target.monitoredAgentId,
-      importGeneration: target.importGeneration,
-      now: new Date(at.getTime() + 60 * 60_000),
-      limit: 25,
-    });
-    expect(due).toEqual([]);
-
-    const rows = await database.sql<{
-      attempts: number;
-      next_attempt_at: Date | null;
-      expires_at: Date | null;
-    }>(
-      "select attempts, next_attempt_at, expires_at from retell_call_retry",
-    );
-    expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0]?.attempts).toBe(4);
-    expect(rows.rows[0]?.next_attempt_at).toBeNull();
-    expect(rows.rows[0]?.expires_at).not.toBeNull();
-  });
-
-  it("answers one batched lookup for a whole page and keeps a marker out of it after expiry", async () => {
-    const target = await configured();
-    await recordRetellCallAttempt(target.auth, target, {
-      providerCallId: "call_retrying",
-      errorKind: "provider_call_refused",
-      retryBackoffMilliseconds: BACKOFF,
+describe("the cool-down", () => {
+  /**
+   * **A refused key parks until the customer acts.**
+   *
+   * A rate limit arriving after Retell called the key wrong may not bring the
+   * next poll forward — the answer about the key has not changed.
+   */
+  it("parks a refused key and refuses to let a lesser failure shorten it", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const refused = await claimed();
+    await failMonitoringPull(refused.auth, refused, {
+      kind: "invalid_credential",
+      retryAt: FOREVER,
       now: SETUP_TIME,
     });
-    const droppedAt = await spendBudget(target, "call_dropped");
-
-    const asked = ["call_retrying", "call_dropped", "call_never_seen"];
-    const found = await transientRetellCallState(target.auth, {
-      monitoredAgentId: target.monitoredAgentId,
-      providerCallIds: asked,
-      importGeneration: target.importGeneration,
-      now: droppedAt,
+    expect(await notebook(agentId)).toMatchObject({
+      next_poll_at: FOREVER,
+      last_error_kind: "invalid_credential",
+      consecutive_failures: 1,
     });
-    expect([...found.keys()].sort()).toEqual(["call_dropped", "call_retrying"]);
-    expect(found.get("call_retrying")?.nextAttemptAt).not.toBeNull();
-    expect(found.get("call_dropped")?.nextAttemptAt).toBeNull();
-    expect(found.get("call_dropped")?.expiresAt).not.toBeNull();
+    expect(await claimDueMonitoringPull({ now: SETUP_TIME })).toBeUndefined();
 
-    // A marker applies for as long as an overlap could still list the call,
-    // and then stops applying whether or not anybody has deleted it.
-    const wellPast = new Date(droppedAt.getTime() + 60 * 60_000);
-    const later = await transientRetellCallState(target.auth, {
-      monitoredAgentId: target.monitoredAgentId,
-      providerCallIds: asked,
-      importGeneration: target.importGeneration,
-      now: wellPast,
-    });
-    expect([...later.keys()]).toEqual(["call_retrying"]);
-
-    expect(
-      await sweepExpiredRetellCallMarkers(target.auth, {
-        monitoredAgentId: target.monitoredAgentId,
-        now: wellPast,
-      }),
-    ).toBe(1);
-    const remaining = await database.sql<{ provider_call_id: string }>(
-      "select provider_call_id from retell_call_retry",
+    // A later, lesser verdict about the same key changes nothing: the park it
+    // would write is shorter than the one already stored, and the refusal it
+    // would record is not the one that matters. Woken by hand, because a
+    // parked agent is exactly what the claim refuses to hand out.
+    await database.sql(
+      `update monitoring_state set next_poll_at = '${SETUP_TIME.toISOString()}'
+         where agent_id = '${agentId}'`,
     );
-    expect(remaining.rows.map((row) => row.provider_call_id)).toEqual([
-      "call_retrying",
-    ]);
+    const again = await claimed();
+    const later = new Date(SETUP_TIME.getTime() + 1_000);
+    const rateLimitedUntil = new Date(SETUP_TIME.getTime() + 30_000);
+    await failMonitoringPull(again.auth, again, {
+      kind: "rate_limited",
+      retryAt: rateLimitedUntil,
+      now: later,
+    });
+    const after = await notebook(agentId);
+    expect(after?.last_error_kind).toBe("invalid_credential");
+    expect(after?.next_poll_at).not.toEqual(rateLimitedUntil);
+    expect(after?.consecutive_failures).toBe(2);
   });
 
-  it("gives a new explicit import its own budget for a call an earlier scan dropped", async () => {
-    const first = await configured();
-    const droppedAt = await spendBudget(first, "call_dropped");
-
-    // Selecting the agent again is the explicit deep-import action, and it is
-    // a new observation of the provider's history.
-    const reselectedAt = new Date(droppedAt.getTime() + 60_000);
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: reselectedAt,
+  /** Turning the switch on again is the customer acting, so the park ends. */
+  it("ends the park when the customer offers the key again", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const refused = await claimed();
+    await failMonitoringPull(refused.auth, refused, {
+      kind: "invalid_credential",
+      retryAt: FOREVER,
+      now: SETUP_TIME,
     });
-    const second = await leased(reselectedAt);
-    expect(second.importGeneration).toBe(first.importGeneration + 1);
-    expect(second.scanKind).toBe("historical_import");
 
-    const found = await transientRetellCallState(second.auth, {
-      monitoredAgentId: second.monitoredAgentId,
-      providerCallIds: ["call_dropped"],
-      importGeneration: second.importGeneration,
-      now: reselectedAt,
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 60_000);
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: ROTATED_KEY,
+      now: rotatedAt,
     });
-    expect(found.size).toBe(0);
 
-    // And a failure under the new generation starts at one rather than five.
-    const outcome = await recordRetellCallAttempt(second.auth, second, {
-      providerCallId: "call_dropped",
-      errorKind: "provider_call_not_found",
-      retryBackoffMilliseconds: BACKOFF,
-      now: reselectedAt,
+    expect(await notebook(agentId)).toMatchObject({
+      next_poll_at: rotatedAt,
+      last_error_kind: null,
+      consecutive_failures: 0,
     });
-    expect(outcome).toMatchObject({ attempts: 1, dropped: false });
+    expect((await claimed(rotatedAt)).apiKey).toBe(ROTATED_KEY);
   });
 
   /**
-   * A row the new generation cannot see is a row nothing will ever read,
-   * sweep or delete — and the two existence checks that drive `degraded` and
-   * the poller's retry pass ask about the agent rather than the generation, so
-   * leaving one would pin a working agent degraded for work nobody owes.
+   * The backoff is per agent, because a sealed key on one agent is
+   * unrecognizable as the same key sealed on another. Each poller finds out on
+   * its own, and no gate is account-wide.
    */
-  it("takes the previous window's transient rows with it when the agent is selected again", async () => {
-    const first = await configured();
-    await recordRetellCallAttempt(first.auth, first, {
-      providerCallId: "call_retrying",
-      errorKind: "provider_call_refused",
-      retryBackoffMilliseconds: BACKOFF,
+  it("keeps one agent's refusal off another agent sharing the same key", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const other = await pulling("Overflow desk", "agent_retell_voice_2");
+
+    const first = await claimed();
+    await failMonitoringPull(first.auth, first, {
+      kind: "invalid_credential",
+      retryAt: FOREVER,
       now: SETUP_TIME,
     });
-    await spendBudget(first, "call_dropped");
-    const before = await database.sql<{ count: string }>(
-      "select count(*)::text as count from retell_call_retry",
-    );
-    expect(before.rows[0]?.count).toBe("2");
 
-    const reselectedAt = new Date(SETUP_TIME.getTime() + 60_000);
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
-      now: reselectedAt,
-    });
-
-    const after = await database.sql<{ count: string }>(
-      "select count(*)::text as count from retell_call_retry",
-    );
-    expect(after.rows[0]?.count).toBe("0");
-
-    // And the agent is not left owing anything: nothing to poll for, and
-    // nothing keeping it degraded.
-    const second = await leased(reselectedAt);
-    expect(second.hasTransientCallState).toBe(false);
+    const second = await claimed();
+    expect(second.agentId).toBe(other);
+    expect(second.consecutiveFailures).toBe(0);
   });
 
-  it("says a selected agent is degraded while a retry is in flight and not after it", async () => {
-    const target = await configured();
-    const state = async (): Promise<string | undefined> => {
-      const rows = await database.sql<{ state: string }>(
-        "select state from retell_monitored_agent",
-      );
-      return rows.rows[0]?.state;
-    };
-
-    await finishRetellMonitoringScan(target.auth, target, { now: SETUP_TIME });
-    expect(await state()).toBe("active");
-
-    const polling = await leased(new Date(SETUP_TIME.getTime() + 60_000));
-    await recordRetellCallAttempt(polling.auth, polling, {
-      providerCallId: "call_retrying",
-      errorKind: "provider_call_refused",
-      retryBackoffMilliseconds: BACKOFF,
-      now: SETUP_TIME,
+  /** A verdict about a key nobody holds any more is dropped, not counted. */
+  it("drops a verdict from a poll whose key was rotated under it", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const stale = await claimed();
+    const rotatedAt = new Date(SETUP_TIME.getTime() + 1_000);
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: ROTATED_KEY,
+      now: rotatedAt,
     });
-    expect(await state()).toBe("degraded");
 
-    await deleteRetellCallRetry(polling.auth, polling, {
-      providerCallId: "call_retrying",
-      now: SETUP_TIME,
+    await failMonitoringPull(stale.auth, stale, {
+      kind: "invalid_credential",
+      retryAt: FOREVER,
+      now: rotatedAt,
     });
-    expect(await state()).toBe("active");
+    expect(await notebook(agentId)).toMatchObject({
+      last_error_kind: null,
+      consecutive_failures: 0,
+    });
   });
 
-  it("restores a selected agent when two calls are made durable at the same moment", async () => {
-    const imported = await configured();
-    const state = async (): Promise<string | undefined> => {
-      const rows = await database.sql<{ state: string }>(
-        "select state from retell_monitored_agent",
-      );
-      return rows.rows[0]?.state;
-    };
-    await finishRetellMonitoringScan(imported.auth, imported, {
-      now: SETUP_TIME,
+  /** A call-only fault is not a refusal, so the ladder does not climb. */
+  it("releases a lease after a call-only fault without counting a refusal", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
+    const retryAt = new Date(SETUP_TIME.getTime() + 30_000);
+
+    await releaseMonitoringLease(target.auth, target, {
+      retryAt,
+      errorKind: "contract_breach",
     });
-    const target = await leased(new Date(SETUP_TIME.getTime() + 60_000));
-    for (const providerCallId of ["call_racing_a", "call_racing_b"]) {
-      await recordRetellCallAttempt(target.auth, target, {
-        providerCallId,
-        errorKind: "provider_call_refused",
-        retryBackoffMilliseconds: BACKOFF,
-        now: SETUP_TIME,
+
+    expect(await notebook(agentId)).toMatchObject({
+      next_poll_at: retryAt,
+      consecutive_failures: 0,
+      last_error_kind: "contract_breach",
+    });
+  });
+});
+
+describe('"last heard from"', () => {
+  it("moves forward for the pulled agent and never backward", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const auth = at(acme, ada);
+    const late = new Date(SETUP_TIME.getTime() + 60_000);
+
+    await recordPulledCallReceived(auth, {
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      receivedAt: late,
+    });
+    await recordPulledCallReceived(auth, {
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      receivedAt: new Date(SETUP_TIME.getTime() - 60 * 60_000),
+    });
+
+    expect((await notebook(agentId))?.last_received_at).toEqual(late);
+    expect((await readAgentPullState(auth, agentId))?.lastReceivedAt).toEqual(
+      late,
+    );
+  });
+
+  /** Push writes nothing down: a platform agent nobody pulls stamps nothing. */
+  it("stamps nothing for a platform agent this project does not pull", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    await recordPulledCallReceived(at(acme, ada), {
+      agentPlatform: "livekit_agents",
+      platformAgentId: "some-livekit-room",
+      receivedAt: new Date(SETUP_TIME.getTime() + 60_000),
+    });
+    expect((await notebook(agentId))?.last_received_at).toBeNull();
+  });
+
+  /** One project's evidence never moves another project's notebook. */
+  it("stays inside the acting project", async () => {
+    const mine = await pulling("Front desk", "agent_retell_voice_1");
+    const theirs = await pulling(
+      "Their front desk",
+      "agent_retell_voice_1",
+      acmeOther,
+    );
+    const late = new Date(SETUP_TIME.getTime() + 60_000);
+
+    await recordPulledCallReceived(at(acme, ada), {
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      receivedAt: late,
+    });
+
+    expect((await notebook(mine))?.last_received_at).toEqual(late);
+    expect((await notebook(theirs))?.last_received_at).toBeNull();
+  });
+
+  /**
+   * **It travels with the agent, because the agent is where a person reads it.**
+   *
+   * Whether it pulls and when it last received are the two facts the agent
+   * states about monitoring, and the second one lives on the machine notebook.
+   * The agent read carries it across, so the screen needs no second request and
+   * no second door.
+   */
+  it("travels on the agent an ordinary read answers", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const auth = at(acme, ada);
+    expect((await getAgent(auth, agentId))?.lastReceivedAt).toBeNull();
+
+    const late = new Date(SETUP_TIME.getTime() + 60_000);
+    await recordPulledCallReceived(auth, {
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      receivedAt: late,
+    });
+
+    expect((await getAgent(auth, agentId))?.lastReceivedAt).toEqual(late);
+    // And an agent with no notebook at all reads as never, not as missing.
+    const unbound = await agentNamed("Night line");
+    expect((await getAgent(auth, unbound))?.lastReceivedAt).toBeNull();
+  });
+});
+
+describe("a call that would not come", () => {
+  /**
+   * One attempt and three automatic retries, and then a marker that schedules
+   * nothing. The ceiling is stored, so a restart resumes a budget rather than
+   * starting it again — and the overlap listing the call once more meets the
+   * marker instead of starting a second budget.
+   */
+  it("spends a bounded budget and then leaves an expiring marker", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
+    const backoff = [30_000, 60_000, 120_000];
+
+    let now = SETUP_TIME;
+    for (let attempt = 1; attempt <= MOST_RETELL_CALL_ATTEMPTS; attempt += 1) {
+      const outcome = await recordRetellCallAttempt(target.auth, target, {
+        providerCallId: "call_broken",
+        errorKind: "hydrate_failed",
+        retryBackoffMilliseconds: backoff,
+        now,
       });
+      expect(outcome).toMatchObject({
+        recorded: true,
+        attempts: attempt,
+        dropped: attempt === MOST_RETELL_CALL_ATTEMPTS,
+      });
+      now = new Date(now.getTime() + 10 * 60_000);
     }
-    expect(await state()).toBe("degraded");
 
-    // A sibling deleter held open mid-transaction: it has taken the agent
-    // row, removed its own call, seen the other still in flight and left the
-    // restore to it — the moment two concurrent durable calls share. The
-    // delete under test must wait for this transaction rather than read past
-    // it, or both sides leave the restore to the other and the agent stays
-    // degraded owing nothing.
-    const sibling = await openSingleConnection(database.url);
-    try {
-      await sibling.sql("begin");
-      await sibling.sql(
-        "select id from retell_monitored_agent where id = $1 for update",
-        [target.monitoredAgentId],
-      );
-      await sibling.sql(
-        "delete from retell_call_retry where provider_call_id = $1",
-        ["call_racing_b"],
-      );
-      const inFlight = await sibling.sql(
-        "select id from retell_call_retry where next_attempt_at is not null",
-      );
-      expect(inFlight.rows).toHaveLength(1);
+    const marked = await transientRetellCallState(target.auth, {
+      agentId: target.agentId,
+      providerCallIds: ["call_broken"],
+      importGeneration: target.importGeneration,
+      now,
+    });
+    expect(marked.get("call_broken")).toMatchObject({
+      attempts: MOST_RETELL_CALL_ATTEMPTS,
+      nextAttemptAt: null,
+      expiresAt: expect.any(Date),
+    });
 
-      const deleting = deleteRetellCallRetry(target.auth, target, {
-        providerCallId: "call_racing_a",
-        now: SETUP_TIME,
-      });
-      // Long enough that a delete reading past the sibling would have
-      // finished inside the window; with the wait in place the length does
-      // not matter.
-      await new Promise<void>((wake) => {
-        setTimeout(wake, 100);
-      });
-      await sibling.sql("commit");
-      await deleting;
-    } finally {
-      await sibling.close();
-    }
+    // The marker schedules nothing, so no retry is ever due for it.
+    expect(
+      await dueRetellCallRetries(target.auth, {
+        agentId: target.agentId,
+        importGeneration: target.importGeneration,
+        now: new Date(now.getTime() + 60 * 60_000),
+        limit: 10,
+      }),
+    ).toEqual([]);
 
-    const remaining = await database.sql<{ count: string }>(
-      "select count(*)::text as count from retell_call_retry",
-    );
-    expect(remaining.rows[0]?.count).toBe("0");
-    expect(await state()).toBe("active");
+    // And it does not outlive the overlap it exists to survive.
+    expect(
+      await sweepExpiredRetellCallMarkers(target.auth, {
+        agentId: target.agentId,
+        now: new Date(now.getTime() + 60 * 60_000),
+      }),
+    ).toBe(1);
   });
 
-  it("clears the one budget two selected agents share for a call they both meet", async () => {
-    // Two selected agents in one project, so a provider call that turns out to
-    // belong to one of them is a `platform_agent_mismatch` the other can also
-    // meet — and the row is unique per project and call, so there is one of it.
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: [
-        {
-          platformAgentId: "agent_retell_voice_1",
-          platformAgentName: "Front desk",
-        },
-        {
-          platformAgentId: "agent_retell_voice_2",
-          platformAgentName: "Back office",
-        },
-      ],
-      now: SETUP_TIME,
-    });
-    const first = await leased(SETUP_TIME);
-    const second = await leased(SETUP_TIME);
-    expect(second.monitoredAgentId).not.toBe(first.monitoredAgentId);
-
-    // The second attempt lands on the first's row and counts against one budget
-    // rather than starting a second, taking ownership with it.
-    const a = await recordRetellCallAttempt(first.auth, first, {
-      providerCallId: "call_both_meet",
-      errorKind: "platform_agent_mismatch",
-      retryBackoffMilliseconds: BACKOFF,
-      now: SETUP_TIME,
-    });
-    const b = await recordRetellCallAttempt(second.auth, second, {
-      providerCallId: "call_both_meet",
-      errorKind: "platform_agent_mismatch",
-      retryBackoffMilliseconds: BACKOFF,
-      now: SETUP_TIME,
-    });
-    expect(a).toMatchObject({ attempts: 1 });
-    expect(b).toMatchObject({ attempts: 2 });
-
-    const rows = await database.sql<{
-      retell_monitored_agent_id: string;
-      attempts: number;
-    }>("select retell_monitored_agent_id, attempts from retell_call_retry");
-    expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0]?.attempts).toBe(2);
-    expect(rows.rows[0]?.retell_monitored_agent_id).toBe(second.monitoredAgentId);
-
-    // The first agent makes the call durable and clears it, even though the row
-    // is now the second's: the delete scopes by project and call, the same pair
-    // the finder used, so ownership cannot strand the one shared row.
-    await deleteRetellCallRetry(first.auth, first, {
-      providerCallId: "call_both_meet",
-      now: SETUP_TIME,
-    });
-    const after = await database.sql<{ count: string }>(
-      "select count(*)::text as count from retell_call_retry",
-    );
-    expect(after.rows[0]?.count).toBe("0");
-  });
-
-  it("tells the claim whether an agent owes anything, so an empty poll asks nothing", async () => {
-    const target = await configured();
-    expect(target.hasTransientCallState).toBe(false);
-
+  /** Durable evidence is what clears the row, and only durable evidence. */
+  it("forgets a call once its evidence is durable", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
     await recordRetellCallAttempt(target.auth, target, {
-      providerCallId: "call_retrying",
-      errorKind: "provider_call_refused",
-      retryBackoffMilliseconds: BACKOFF,
-      now: SETUP_TIME,
-    });
-    await yieldRetellMonitoringLease(target.auth, target, {
-      retryAt: SETUP_TIME,
+      providerCallId: "call_recovered",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
       now: SETUP_TIME,
     });
 
-    const owing = await leased(SETUP_TIME);
-    expect(owing.hasTransientCallState).toBe(true);
+    await deleteRetellCallRetry(target.auth, {
+      providerCallId: "call_recovered",
+    });
+
+    expect(
+      await transientRetellCallState(target.auth, {
+        agentId: target.agentId,
+        providerCallIds: ["call_recovered"],
+        importGeneration: target.importGeneration,
+        now: SETUP_TIME,
+      }),
+    ).toEqual(new Map());
   });
 
+  /**
+   * A new observation reads none of the last one's transient state, so leaving
+   * it behind would be rows nothing can ever look at again.
+   */
+  it("clears transient state a new observation cannot read", async () => {
+    const agentId = await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
+    await recordRetellCallAttempt(target.auth, target, {
+      providerCallId: "call_broken",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
+      now: SETUP_TIME,
+    });
+
+    await disablePullProductionCalls(at(acme, ada), agentId);
+    const restartedAt = new Date(SETUP_TIME.getTime() + 60_000);
+    await enablePullProductionCalls(at(acme, ada), {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: "agent_retell_voice_1",
+      apiKey: RETELL_KEY,
+      now: restartedAt,
+    });
+
+    const { rows } = await database.sql<{ n: string }>(
+      `select count(*)::text as n from retell_call_retry
+        where agent_id = '${agentId}'`,
+    );
+    expect(rows[0]?.n).toBe("0");
+  });
+
+  /** The batched page lookup is project-scoped, like every other read here. */
   it("keeps one project's transient call state out of another's page", async () => {
-    const target = await configured();
+    await pulling("Front desk", "agent_retell_voice_1");
+    const target = await claimed();
     await recordRetellCallAttempt(target.auth, target, {
       providerCallId: "call_retrying",
-      errorKind: "provider_call_refused",
-      retryBackoffMilliseconds: BACKOFF,
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
       now: SETUP_TIME,
     });
 
-    const elsewhere = await transientRetellCallState(at(globex, gene), {
-      monitoredAgentId: target.monitoredAgentId,
+    const elsewhere = await transientRetellCallState(at(acmeOther, ada), {
+      agentId: target.agentId,
       providerCallIds: ["call_retrying"],
       importGeneration: target.importGeneration,
       now: SETUP_TIME,
     });
     expect(elsewhere.size).toBe(0);
   });
-});
 
-describe("the regular window's floor", () => {
-  it("holds the first window at the floor and returns the overlap after it", async () => {
-    const cutover = new Date("2026-08-20T12:00:00.000Z");
-    await configureRetellMonitoring(at(acme, ada), {
-      apiKey: RETELL_KEY,
-      agents: selected(),
+  /**
+   * **One call is one budget, whichever agent meets it.**
+   *
+   * The row is unique per project and provider call, so two pulled agents in
+   * one project that both list the same call count against one budget rather
+   * than starting two — and the delete scopes by the same pair the finder
+   * used, so ownership moving to the later attempt cannot strand the row.
+   */
+  it("clears the one budget two pulled agents share for a call they both meet", async () => {
+    await pulling("Front desk", "agent_retell_voice_1");
+    await pulling("Back office", "agent_retell_voice_2");
+    const first = await claimed();
+    const second = await claimed();
+    expect(second.agentId).not.toBe(first.agentId);
+
+    const a = await recordRetellCallAttempt(first.auth, first, {
+      providerCallId: "call_both_meet",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
       now: SETUP_TIME,
     });
-    // The cutover's own statement, said here the way the migration says it.
-    await database.sql(
-      "update retell_monitored_agent set scan_kind = null, scan_from = null, " +
-        "scan_through = null, pagination_key = null, pagination_trail = '[]', " +
-        "lease_owner = null, lease_expires_at = null, completed_through = $1, " +
-        "next_poll_at = $1, regular_floor_at = $1",
-      [cutover],
+    const b = await recordRetellCallAttempt(second.auth, second, {
+      providerCallId: "call_both_meet",
+      errorKind: "hydrate_failed",
+      retryBackoffMilliseconds: [30_000],
+      now: SETUP_TIME,
+    });
+    expect(a).toMatchObject({ attempts: 1 });
+    expect(b).toMatchObject({ attempts: 2 });
+
+    const { rows } = await database.sql<{ agent_id: string; attempts: number }>(
+      "select agent_id, attempts from retell_call_retry",
     );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.attempts).toBe(2);
+    expect(rows[0]?.agent_id).toBe(second.agentId);
 
-    const first = await claimDueRetellMonitoringAgent({ now: cutover });
-    expect(first).toMatchObject({ scanKind: "regular", scanFrom: cutover });
-    if (first === undefined) return;
-
-    // Without the floor this window would start five minutes before the
-    // cutover and re-import evidence the release deliberately removed.
-    expect(first.scanFrom.getTime()).toBe(cutover.getTime());
-    expect(
-      await finishRetellMonitoringScan(first.auth, first, {
-        now: cutover,
-        pollMilliseconds: 1,
-      }),
-    ).toBe(true);
-
-    const nextAt = new Date(cutover.getTime() + 60_000);
-    const second = await claimDueRetellMonitoringAgent({ now: nextAt });
-    expect(second?.scanFrom.getTime()).toBe(
-      first.scanThrough.getTime() - 5 * 60_000,
+    // The first agent makes the call durable and clears it, although the row
+    // now names the second.
+    await deleteRetellCallRetry(first.auth, {
+      providerCallId: "call_both_meet",
+    });
+    const after = await database.sql<{ n: string }>(
+      "select count(*)::text as n from retell_call_retry",
     );
+    expect(after.rows[0]?.n).toBe("0");
   });
 });

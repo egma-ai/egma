@@ -12,7 +12,6 @@ import type { Refusal } from "../../lib/api.ts";
 import { roleOf } from "../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../lib/platform-client.ts";
 import { projectLanding } from "../../lib/project-context.ts";
-import { Section } from "../../ui/section.tsx";
 import {
   Field,
   Form,
@@ -81,6 +80,16 @@ function NewProject() {
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const [refused, setRefused] = useState<Refusal | null>(null);
+  /**
+   * Whether anybody has been in the name field yet.
+   *
+   * **A form that opens red is lying about what somebody did.** `DESIGN.md`
+   * asks every state to say what happened, and "A project needs a name" said
+   * before a page has been touched reports a mistake nobody has made. The
+   * sentence is true from the moment the field has been used and left empty,
+   * which is the moment it is about somebody's own work. (2026-08-23.)
+   */
+  const [nameTouched, setNameTouched] = useState(false);
 
   useUnsavedChanges((name !== "" || description !== "") && !creating, creating);
 
@@ -118,13 +127,20 @@ function NewProject() {
 
   return (
     <ProductPage>
+      {/*
+        * No label over the title. This address is reached from the project
+        * selector rather than from Settings, so an eyebrow reading "Settings"
+        * put the page in a section it is not in — and there is no trail here
+        * for it to be the first step of. The title bar names the page and the
+        * line under it says what a project is.
+        */}
       <PageHeader
-        eyebrow="Settings"
         title="New project"
         lead="A project holds its own agents, tests, personas, graders and runs. Everybody in the organization can work in every one of them."
       />
       <PageBody>
-        <Section title="Name it">
+        {/* One form, and the title bar has already named it. */}
+        <div className="flex flex-col gap-4">
           {/*
             * Said before the form rather than instead of it. A viewer or a
             * member sees exactly this page with the controls disabled, so the
@@ -150,9 +166,12 @@ function NewProject() {
                 id="new-project-name"
                 value={name}
                 disabled={!mayAdminister}
-                aria-invalid={!named && refused !== null ? true : undefined}
+                aria-invalid={
+                  !named && (nameTouched || refused !== null) ? true : undefined
+                }
                 autoComplete="off"
                 spellCheck={false}
+                onBlur={() => setNameTouched(true)}
                 onChange={(event) => setName(event.target.value)}
               />
             </Field>
@@ -171,7 +190,9 @@ function NewProject() {
               />
             </Field>
 
-            {named ? null : <Problem>A project needs a name.</Problem>}
+            {named || !nameTouched ? null : (
+              <Problem>A project needs a name.</Problem>
+            )}
 
             <FormActions>
               <Button
@@ -187,7 +208,7 @@ function NewProject() {
               </Button>
             </FormActions>
           </Form>
-        </Section>
+        </div>
       </PageBody>
     </ProductPage>
   );

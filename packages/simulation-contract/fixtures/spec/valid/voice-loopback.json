@@ -4,7 +4,7 @@
   "modality": "voice",
   "connection": {
     "agent_platform": null,
-    "connection_kind": "loopback",
+    "connection_type": "loopback",
     "access_variant": "loopback.in_process",
     "config": {
       "greeting": "Thanks for calling, this is the billing line.",

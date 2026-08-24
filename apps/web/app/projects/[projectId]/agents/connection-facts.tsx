@@ -1,21 +1,30 @@
 "use client";
 
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
-import { NO_ENVIRONMENT, type ListedConnection } from "@/lib/agents.ts";
+import { connectionsOnRow, type ListedConnection } from "@/lib/agents.ts";
 
 /**
  * How egma reaches an agent, said on the row rather than one click away.
  *
- * **These are the four facts somebody brings to a list of agents.** Which
- * supported setup, which modality, and which environment. A staging chat connection and a production
- * phone number are different enough that telling them apart should not cost a
- * page load, and an agent egma cannot reach at all should be visible here
- * rather than discovered when a run refuses to start.
+ * **The cell names the ways in and lets a person open one.** That is what the
+ * board draws (`6ZJ-0`): each connection is its own underlined link, and
+ * following it opens that connection over the list a person is already reading
+ * rather than sending them two pages away and back. An agent egma cannot reach
+ * at all says so here, in words, rather than at the moment a run refuses to
+ * start.
+ *
+ * **It used to be a line of facts per connection** — environment, product
+ * label, modality — stacked one under another, which made a row with three
+ * connections three times as tall as its neighbour and gave a person nothing to
+ * press. The resolved comment threads on the decision page ruled the other way:
+ * consistent row heights, two names then an overflow chip, and link text in the
+ * text colour. Those four facts have not gone anywhere; they are what the
+ * connection sheet opens onto.
  *
  * Everything is drawn from what the list read already carried. There is no
- * second request behind any of it: the product label comes down on the
- * connection, derived by the registry that gates the connection forms, so this
- * application keeps no label table able to disagree with it.
+ * second request behind any of it.
  */
 
 /**
@@ -23,7 +32,7 @@ import { NO_ENVIRONMENT, type ListedConnection } from "@/lib/agents.ts";
  *
  * Two values, and the words are the product's rather than the API's: a
  * connection's modality is `voice` or `chat`, and a person reading a list is
- * shown Voice or Chat. The connection page draws them that way, and these
+ * shown Voice or Chat. The connection sheet draws them that way, and these
  * surfaces say the same words rather than inventing a third pair.
  *
  * **It said Text until #158**, which made Retell a Chat connection and renamed
@@ -37,89 +46,77 @@ export function modalityLabel(modality: string): string {
 }
 
 /**
- * One connection, in one line of reading.
- *
- * The environment label leads because it is what somebody scans for — an
- * unlabelled connection says so in a word rather than leaving a blank cell
- * that reads as a rendering fault.
- */
-export function ConnectionFacts({
-  connection,
-}: {
-  readonly connection: ListedConnection;
-}) {
-  return (
-    /*
-     * It wraps rather than clips. On a narrow screen the table restyles into
-     * labelled rows and this cell gets about seventy per cent of a phone.
-     * On a wide screen there is room and it never wraps.
-     */
-    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <span className="truncate text-sm font-medium text-foreground">
-        {connection.environment ?? NO_ENVIRONMENT}
-      </span>
-      <span className="truncate text-sm text-muted-foreground">
-        {connection.productLabel} · {modalityLabel(connection.modality)}
-      </span>
-    </span>
-  );
-}
-
-/**
  * Every way into one agent, or the fact that there is none.
  *
- * **"No connections" is a state of the agent, not an empty cell.** An agent
+ * **"No connections yet" is a state of the agent, not an empty cell.** An agent
  * nobody has wired is an agent egma cannot test, and a row that simply left the
- * space blank would leave that to be found out at the start of a run. It is a
- * word and a mark, because `DESIGN.md` does not let colour carry a state on its
- * own — and it is the same neutral chip as the rest, because being unreachable
- * is a fact about setup rather than a failure anybody has had yet.
+ * space blank would leave that to be found out at the start of a run. It is
+ * quiet rather than a warning, because being unwired is a fact about setup and
+ * not a failure anybody has had yet.
+ *
+ * **The overflow chip counts rather than lists.** Two links, then "+3" — and
+ * the chip opens the agent, which is the one page that holds every connection.
+ * A row that grew a line per connection would be a different height per agent,
+ * and a column of ragged rows is what makes a dense list hard to scan.
  */
 export function ConnectionsOnRow({
   connections,
+  agentHref,
+  hrefOf,
 }: {
   readonly connections: readonly ListedConnection[];
+  /** Where the overflow chip goes: the one page that holds them all. */
+  readonly agentHref: string;
+  readonly hrefOf: (connection: ListedConnection) => string;
 }) {
   if (connections.length === 0) {
-    return (
-      <Badge variant="neutral">
-        <NoWayInMark />
-        No connections
-      </Badge>
-    );
+    return <span className="text-faint">No connections yet</span>;
   }
 
-  return (
-    <ul className="m-0 flex list-none flex-col gap-2 p-0">
-      {connections.map((one) => (
-        <li className="min-w-0" key={one.id}>
-          <ConnectionFacts connection={one} />
-        </li>
-      ))}
-    </ul>
-  );
-}
+  const { shown, overflow } = connectionsOnRow(connections);
 
-/** A way in that is not there: the same circle, struck through. */
-function NoWayInMark() {
   return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
-      <circle
-        cx="6"
-        cy="6"
-        r="4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-      <line
-        x1="3"
-        y1="9"
-        x2="9"
-        y2="3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
+    /*
+     * 20px between the links, which is `6ZJ-0`, and one line however long the
+     * names are. **The cell never wraps.** A second line here makes one row
+     * taller than the rows above and below it, and a column of ragged rows is
+     * what makes a dense list hard to scan — the same reason the chip counts
+     * instead of listing. A long name is cut with an ellipsis and carries its
+     * full text in a tooltip, and the connection sheet behind the link says
+     * the whole name again.
+     */
+    <span className="flex min-w-0 flex-nowrap items-center gap-x-5 whitespace-nowrap">
+      {shown.map((one) => (
+        <Link
+          className="min-w-0 truncate text-foreground"
+          href={hrefOf(one)}
+          key={one.id}
+          title={one.name}
+        >
+          {one.name}
+        </Link>
+      ))}
+      {overflow === 0 ? null : (
+        /*
+         * The chip is a link and says what it counts. "+3" alone is a number a
+         * screen reader would read as a number; the hidden half names what the
+         * number is of, so the same control means the same thing however it is
+         * read.
+         */
+        <Badge asChild shape="count">
+          {/*
+           * **The chip is not underlined, and the links beside it are.** A cell
+           * link in this product wears an underline (`DESIGN.md`), and a chip
+           * is a chip: the board draws it as a bordered count on the quiet
+           * surface, and an underline inside that border reads as a second,
+           * broken link rather than as one control.
+           */}
+          <Link className="flex-none no-underline" href={agentHref}>
+            <span aria-hidden="true">{`+${String(overflow)}`}</span>
+            <span className="sr-only">{`${String(overflow)} more connections`}</span>
+          </Link>
+        </Badge>
+      )}
+    </span>
   );
 }

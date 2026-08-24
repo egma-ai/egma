@@ -67,7 +67,7 @@ describe("the key-pair shape", () => {
     expect(result.registered.connection).toMatchObject({
       name: "livekit_room-1",
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
       modality: "voice",
       productLabel: "LiveKit project credentials",
@@ -127,7 +127,7 @@ describe("the token-endpoint shape", () => {
     if (result.kind !== "registered") return;
     expect(result.registered.connection).toMatchObject({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
       modality: "voice",
       productLabel: "LiveKit token endpoint",
@@ -200,7 +200,7 @@ describe("the server-owned connection form", () => {
             {
               agentPlatform: "livekit_agents",
               agentPlatformLabel: "LiveKit Agents",
-              connectionKind: "livekit_room",
+              connectionType: "livekit_room",
               accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
               accessVariantLabel: "LiveKit project credentials — Recommended",
               modality: "voice",
@@ -232,7 +232,7 @@ describe("the server-owned connection form", () => {
             {
               agentPlatform: "livekit_agents",
               agentPlatformLabel: "LiveKit Agents",
-              connectionKind: "livekit_room",
+              connectionType: "livekit_room",
               accessVariant: LIVEKIT_TOKEN_ENDPOINT_VARIANT,
               accessVariantLabel: "Customer token endpoint — Advanced",
               modality: "voice",
@@ -276,7 +276,7 @@ describe("the server-owned connection form", () => {
     );
     expect(livekit[0]).toMatchObject({
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: LIVEKIT_KEY_PAIR_VARIANT,
       modality: "voice",
       simulatorAdapter: true,

@@ -187,7 +187,7 @@ class SimulationSpec:
     agent_platform: str | None
     """What runs the agent. Provenance only; never adapter dispatch."""
 
-    connection_kind: str
+    connection_type: str
     """Which adapter reaches the agent. An open vocabulary, not an enum."""
 
     access_variant: str
@@ -237,7 +237,7 @@ class SimulationSpec:
             ),
             persona_traits=document["persona"]["traits"],
             agent_platform=connection["agent_platform"],
-            connection_kind=connection["connection_kind"],
+            connection_type=connection["connection_type"],
             access_variant=connection["access_variant"],
             connection_config=connection["config"],
             credentials=connection["credentials"],

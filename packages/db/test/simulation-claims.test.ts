@@ -102,7 +102,7 @@ async function seedCustomer(
     name: "Front desk",
     connection: {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_${apiKey}` },
@@ -356,7 +356,7 @@ describe("the connection door", () => {
     const reached = await resolveSimulationConnection(claim.auth, claim.id);
     expect(reached?.connectionId).toBe(acmeSeed.connectionId);
     expect(reached?.agentPlatform).toBe("retell");
-    expect(reached?.connectionKind).toBe("retell_chat_api");
+    expect(reached?.connectionType).toBe("retell_chat_api");
     expect(reached?.accessVariant).toBe("retell_chat_api.api_key");
     expect(reached?.config).toEqual({
       retellAgentId: "agent_retell-secret-A1B2C3D4WXYZ",
@@ -440,7 +440,7 @@ describe("the connection door", () => {
       name: "Front desk restored",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_restored_1" },
@@ -646,7 +646,7 @@ describe("a livekit connection's two credential shapes, through the claim", () =
   ): Promise<string> {
     const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: "livekit_room.project_credentials",
       modality: "voice",
       ...connection,
@@ -726,7 +726,7 @@ describe("archiving a target out from under work", () => {
     const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
       name,
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       config: { retellAgentId: `agent_${name}` },
@@ -743,7 +743,7 @@ describe("archiving a target out from under work", () => {
       name,
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: `agent_${name}` },
