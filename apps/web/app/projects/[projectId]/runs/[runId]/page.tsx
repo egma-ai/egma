@@ -43,6 +43,7 @@ import {
 } from "../../../../../ui/relative-time.tsx";
 import {
   GradingState,
+  RunProgress,
   RunStatus,
   SimulationStatus,
 } from "../../../../../ui/run-status.tsx";
@@ -461,11 +462,37 @@ function RunDetailView({
 
   const active = status === "pending" || status === "running";
 
+  /**
+   * How many of this run's simulations have landed — **a floor, never a
+   * guess.**
+   *
+   * `finishedCount` is what the run said when it was last read, and the run is
+   * only re-read when the feed says it is done. So a bar drawn from that alone
+   * would sit still for the whole of a live run. The feed, meanwhile, names
+   * every simulation that has reached a terminal state since the read, and each
+   * of those is finished by definition.
+   *
+   * The larger of the two is therefore true of both moments and can only move
+   * forwards: it never claims a simulation nobody has finished, and the final
+   * read settles it exactly. `RunProgress` clamps its own share, so an overlap
+   * between the two cannot push the bar past its end.
+   */
+  const landed = [...moved.values()].filter((one) =>
+    ["completed", "failed", "canceled"].includes(one.status),
+  ).length;
+  const finished = Math.max(read.finishedCount, landed);
+
   return (
     <ProductPage wide>
       <PageHeader
         eyebrow="Simulation runs"
         title={displayTitle}
+        /*
+         * The real trail: Runs, then this run. `PageHeader` takes the last
+         * step off, because the heading beside it is that step. Before that
+         * rule this page named the *kind* here — "Runs / Run   Pre-release
+         * check" — to keep the run's own name out of the bar twice.
+         */
         breadcrumbs={[
           { label: "Runs", href: projectPath(projectId, "runs") },
           { label: displayTitle },
@@ -525,7 +552,9 @@ function RunDetailView({
             <div className={FACT}>
               <dt>Grading</dt>
               <dd>
-                {read.gradedCount} of {read.gradableCount} graded
+                <span className="tabular-nums">
+                  {read.gradedCount} of {read.gradableCount} graded
+                </span>
               </dd>
             </div>
             <div className={FACT}>
@@ -574,6 +603,26 @@ function RunDetailView({
         </section>
 
         <Section title="Simulations">
+          {/*
+            How far the machinery has got, over the conversations it got there
+            through. **The bar measures simulations and says so**: judging
+            settles at a different moment, and one bar over both would have to
+            decide which half a half-full bar meant. Grading has its own figure
+            in the summary above.
+          */}
+          {read.expectedSimulationCount === 0 ? null : (
+            <div className="flex min-w-0 items-center gap-4">
+              <div className="min-w-0 flex-1">
+                <RunProgress
+                  finished={finished}
+                  expected={read.expectedSimulationCount}
+                />
+              </div>
+              <span className="flex-none font-mono text-sm text-faint tabular-nums">
+                {finished} of {read.expectedSimulationCount} finished
+              </span>
+            </div>
+          )}
           {simulationPage === null || simulationPage.status === "signed-out" ? (
             <Loading what="this run's simulations" />
           ) : simulationPage.status !== "ready" ? (

@@ -41,7 +41,6 @@ function projectNamedByPlatform(
 ): string | undefined {
   return given(text(query.projectId));
 }
-
 const NO_SUCH_SIMULATION =
   "no simulation of yours has that id. Check the id, or open the run it " +
   "belongs to with GET /v1/runs/{runId}.";
@@ -278,7 +277,7 @@ export async function simulationRoutes(
               },
         connectionSnapshot: {
           agentPlatform: run.connectionSnapshot.agentPlatform,
-          connectionKind: run.connectionSnapshot.connectionKind,
+          connectionType: run.connectionSnapshot.connectionType,
           accessVariant: run.connectionSnapshot.accessVariant,
           modality: run.connectionSnapshot.modality,
           topology: run.connectionSnapshot.topology,

@@ -37,15 +37,19 @@
  *
  *    | Name | Tailwind's | egma's |
  *    | --- | --- | --- |
- *    | `--radius-sm` | `0.25rem` | `6px` |
- *    | `--radius-md` | `0.375rem` | `8px` |
- *    | `--radius-lg` | `0.5rem` | `12px` |
+ *    | `--radius-sm` | `0.25rem` | `0px` |
+ *    | `--radius-md` | `0.375rem` | `0px` |
+ *    | `--radius-lg` | `0.5rem` | `0px` |
  *    | `--ease-out` | `cubic-bezier(0, 0, 0.2, 1)` | `cubic-bezier(0.23, 1, 0.32, 1)` |
  *    | `--ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | `cubic-bezier(0.77, 0, 0.175, 1)` |
  *
  *    This is load-bearing rather than incidental: moving these declarations
  *    into `@theme` would put them in that layer and hand all five names back
- *    to Tailwind — every radius in the product and two of its easings.
+ *    to Tailwind — every radius in the product and two of its easings. The
+ *    three radii all read `0px` now, and that makes the trick *more*
+ *    load-bearing rather than less: hand them back and every component in the
+ *    product grows a corner again, quietly, in a commit that touched no
+ *    component.
  *
  * A key may not reference its own name. `@theme inline { --text-sm:
  * var(--text-sm) }` compiles, but it emits a circular declaration that only
@@ -115,6 +119,24 @@
   --action-hover: var(--color-ember-hover);
   --action-pressed: var(--color-ember-pressed);
   --action-text: var(--color-paper);
+
+  /*
+   * The primary action's fill, and its two feedback steps.
+   *
+   * The boards draw the primary button as Ember Wash behind Deep Ember text on
+   * a neutral hairline (`71O-0`), not as a Deep Ember block with white text.
+   * The developer ruled that the wash button *is* the primary action on
+   * 2026-08-23 and retired the filled one. `--action` is still the ink, so the
+   * text steps above are the text's; these three are the fill's.
+   *
+   * Derived rather than fixed, so one declaration follows both themes: each
+   * step pulls a little more Ember into whatever `--surface-active` is in
+   * force. Light theme starts at `#fff5f2` and warms; dark theme starts at
+   * Ember-on-dark and warms the same way.
+   */
+  --action-wash: var(--surface-active);
+  --action-wash-hover: color-mix(in srgb, var(--color-ember) 8%, var(--surface-active));
+  --action-wash-pressed: color-mix(in srgb, var(--color-ember) 16%, var(--surface-active));
   --destructive: #b44444;
   --destructive-hover: #963636;
   --destructive-pressed: #7e2d2d;
@@ -163,15 +185,49 @@
   --space-12: 80px;
   --space-13: 100px;
 
-  /* Component shape. */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-pill: 9999px;
+  /*
+   * Component shape: one radius, and it is none.
+   *
+   * The four names stay because forty class lists read them — `rounded-button`
+   * on a button, `rounded-card` on a panel — and because a name says which
+   * component asked. What changed is every value. The developer ruled it on
+   * 2026-08-23 looking at the Paper boards: "0px radius, sharp corners, on
+   * every component". `DESIGN.md`'s per-component radius table collapsed to
+   * one line in the same change.
+   *
+   * **A round *shape* is not a component corner and is not drawn from here.**
+   * An avatar is a circle and a radio button is a circle; both say
+   * `rounded-full`, which is Tailwind's own and untouched by this block. That
+   * is the whole exception, and it is written down so the next person does not
+   * read a circular avatar as a radius that escaped.
+   */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-pill: 0px;
 
-  /* Accepted Arial type scale. */
-  --sans: Arial, Helvetica, sans-serif;
+  /*
+   * The accepted type scale.
+   *
+   * **`system-ui` leads, and the reason is the boards.** Paper renders its
+   * artboards in `system-ui`, so a product drawn in Arial first would not look
+   * like the thing that was approved — on a Mac the two are a different face,
+   * not a different hinting. Helvetica and Arial stay behind it, so a machine
+   * with no `system-ui` lands exactly where this product used to. Developer
+   * decision, 2026-08-23. Weights are still 400 and 500 and nothing else.
+   */
+  --sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: var(--egma-mono), "IBM Plex Mono", ui-monospace, monospace;
+  /*
+   * 12px, and it is one thing rather than a step of the scale.
+   *
+   * `DESIGN.md`'s scale starts at 14px and still does: this is the letter-
+   * spaced uppercase micro-label the boards draw twice — the organization
+   * eyebrow over the project name, and the role under the account's email —
+   * and nothing else may reach for it. It is named `micro` rather than given a
+   * number so that it cannot be mistaken for the bottom of the scale.
+   */
+  --text-micro: 12px;
   --text-caption: 14px;
   --text-body: 16px;
   --text-lead: 24px;
@@ -194,7 +250,7 @@
   --tracking-display: -2.05px;
 
   /* Compact type aliases used by shared components. */
-  --text-2xs: var(--text-caption);
+  --text-2xs: var(--text-micro);
   --text-xs: var(--text-caption);
   --text-sm: var(--text-caption);
   --text-md: var(--text-body);
@@ -224,24 +280,86 @@
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* A list row is one line of reading. */
+  /*
+   * A list row is one line of reading, and a header row is shorter than one.
+   *
+   * The boards separate the two: the header is a fixed 40px of quiet labels,
+   * and a body row is *at least* 52px — a minimum rather than a height,
+   * because a cell holding two connection links and an overflow chip has to be
+   * allowed to be taller than one holding a date.
+   */
   --row-height: 40px;
+  --row-min-height: 52px;
   --row-padding-y: var(--space-2);
   --row-padding-x: var(--space-4);
 
+  /*
+   * The trailing slot every row ends with, whether or not it holds a ⋮ menu.
+   *
+   * It is a fixed width rather than a cell that shrinks to its content,
+   * because the vertical lane it makes is what a person's eye follows down the
+   * table. A row with no menu keeps the empty slot for the same reason.
+   */
+  --table-action-width: 48px;
+
+  /*
+   * How wide each surface is. Every one of these lived in a class list as a
+   * bare number until 2026-08-23; a size is a design value like a colour is,
+   * and `DESIGN.md` says a component holds neither.
+   *
+   * **Two side sheets, two widths, and they are two things.** `--sheet-width`
+   * is the modal panel the boards draw one record in (`77F-0`): create, read
+   * and edit, over a scrim, with the page behind it inert.
+   * `--sheet-width-wide` is the *reading* surface `ui/dialog.tsx` opens beside
+   * a page that stays usable — a transcript against its grader results, a
+   * persona's version history. Collapsing the second into the first took 200px
+   * off a transcript to make a number match, which is a worse product for a
+   * tidier theme.
+   */
+  --sheet-width: 440px;
+  --sheet-width-wide: 640px;
+  /*
+   * The access panel, which is 440px for a different reason than a side sheet
+   * is. A sheet is that wide because it is a modal panel over a list that
+   * stays on screen; this one floats over nothing and is that wide because it
+   * is the whole of what somebody is doing. One name each, so a later change
+   * to either does not silently move the other.
+   */
+  --access-panel-width: 440px;
+  --dialog-width: 480px;
+  /* One sentence under an empty state's title, held to the board's measure. */
+  --state-lead-width: 520px;
+  --search-width: 300px;
+  --chip-height: 22px;
+  --menu-width: 210px;
+
   /* Product shell measurements. */
   --sidebar-width: 224px;
-  --topbar-height: 48px;
+  --sidebar-header-height: 56px;
+  --topbar-height: 56px;
   --page-gutter: var(--space-6);
   --page-max: 1200px;
   --page-max-wide: 1440px;
   --grade-fact-min: 150px;
 
-  /* Orange-brown elevation is reserved for menus, dialogs, and showcase panels. */
-  --shadow-menu: 0 12px 32px rgb(122 49 23 / 0.14);
+  /*
+   * Orange-brown elevation, reserved for what is raised off the page.
+   *
+   * **There used to be two recipes and the boards draw one.** The row menu
+   * (`9AH-0`), the side sheet (`77F-0`) and the confirm dialog (`BEM-0`) were
+   * read with `get_computed_styles` on 2026-08-23 and all three carry the same
+   * two-layer stack — the short menu shadow is not on any of them. So
+   * `--shadow-menu` reads the same declaration rather than holding a second
+   * value that nothing draws. The name stays because `shadow-popover` reads
+   * it and because a menu is still what asks.
+   *
+   * Everything the boards give a hairline and no shadow — the table panel, the
+   * sidebar, the topbar, inputs, the search box — keeps the hairline alone.
+   */
   --shadow-dialog:
     rgb(122 49 23 / 0.12) -8px 16px 39px 0,
     rgb(122 49 23 / 0.1) -33px 64px 72px 0;
+  --shadow-menu: var(--shadow-dialog);
   --shadow-showcase:
     rgb(122 49 23 / 0.12) -8px 16px 39px 0,
     rgb(122 49 23 / 0.1) -33px 64px 72px 0,
@@ -249,12 +367,30 @@
     rgb(122 49 23 / 0.02) -130px 256px 115px 0;
 }
 
-/* Dark theme semantic overrides. */
-:root[data-theme="dark"] {
+/*
+ * Dark theme semantic overrides.
+ *
+ * **Two selectors, and the second one is what makes the proof page honest.**
+ * The document carries `data-theme` on `<html>`, which is what the theme
+ * script writes and what every real page reads. `/design-system` also has to
+ * draw the dark theme *beside* the light one, in a frame, so a person can hold
+ * the two against each other without reloading — and a rule bound to `:root`
+ * alone cannot dress a `<div>`. The attribute means the same thing in both
+ * places: everything inside me is dark.
+ */
+:root[data-theme="dark"],
+[data-theme="dark"] {
   --background: #151514;
   --surface: #1b1b1a;
   --surface-soft: #222220;
-  --surface-active: color-mix(in srgb, var(--color-ember) 16%, var(--surface));
+  /*
+   * The designer's own dark wash, read from the Paper file's tokens
+   * (`--color-dark-surface-active`). It was a `color-mix` of Ember into the
+   * surface, which landed within one hex step of this — so the value barely
+   * moved, and taking it from the file rather than deriving it is what stops
+   * the two drifting the next time either side is tuned.
+   */
+  --surface-active: #43241c;
   --foreground: #f2f2ed;
   --muted: #a3a39b;
   --faint: #82827b;
@@ -262,10 +398,28 @@
   --border-strong: #4a4a44;
   --focus: var(--color-ember);
   --accent: var(--color-ember);
-  --action: var(--color-ember-deep);
-  --action-hover: var(--color-ember-hover);
-  --action-pressed: var(--color-ember-pressed);
-  --action-text: var(--color-paper);
+  /*
+   * The primary action's ink, lightened for the dark wash it sits on.
+   *
+   * **Deep Ember on the dark wash is 2.69:1, which fails AA and fails even the
+   * 3:1 a non-text control gets.** That was true before this theme change as
+   * well — the wash was already Ember-on-dark and the ink was already
+   * `#c2410c` — so this is a fault being fixed rather than one being created.
+   * Ember alone is 4.3:1, still short. Ember pulled 20% towards paper is
+   * `#ff7554` at **5.26:1**, which passes AA for the 14px label a button
+   * carries, and it is the same colour family the light theme uses.
+   *
+   * Hover and press move *further* towards paper, which is "further from the
+   * surface it sits on" — the same direction, in dark, that the light theme's
+   * darker steps take. `--destructive` above already works this way.
+   *
+   * `DESIGN.md`: "Dark theme uses lighter status values that keep the same
+   * meanings." This is that rule applied to the action family.
+   */
+  --action: color-mix(in srgb, var(--color-ember) 80%, var(--color-paper));
+  --action-hover: color-mix(in srgb, var(--color-ember) 62%, var(--color-paper));
+  --action-pressed: color-mix(in srgb, var(--color-ember) 46%, var(--color-paper));
+  --action-text: var(--color-midnight);
   --good: #55bd8c;
   --warn: #d69a38;
   --bad: #e27373;
@@ -411,11 +565,46 @@
   --color-selected: var(--surface-active);
   --color-selected-foreground: var(--foreground);
 
-  /* The primary filled action: Deep Ember with white text, and its two steps. */
+  /*
+   * The primary action.
+   *
+   * `--color-primary` and its two steps are the *ink* — Deep Ember, and the
+   * two darker Ember steps under pointer feedback. `--color-primary-wash` and
+   * its two are the *fill* the boards put behind that ink. `-foreground` is
+   * kept pointing at white for the one thing that still fills with Deep Ember
+   * (nothing in the product today; a pasted shadcn component tomorrow), so a
+   * component that reaches for it lands somewhere legible rather than nowhere.
+   */
   --color-primary: var(--action);
   --color-primary-foreground: var(--action-text);
   --color-primary-hover: var(--action-hover);
   --color-primary-pressed: var(--action-pressed);
+  --color-primary-wash: var(--action-wash);
+  --color-primary-wash-hover: var(--action-wash-hover);
+  --color-primary-wash-pressed: var(--action-wash-pressed);
+
+  /*
+   * The same seven declarations under the product's own word.
+   *
+   * **`primary` is shadcn's name for this and `action` is egma's, and a class
+   * that names a key the theme does not publish fails in silence.** `DESIGN.md`
+   * and the spec both say `--action`; the theme published only `--color-primary`,
+   * so `text-action` compiled to nothing at all, drew the inherited body colour,
+   * and looked exactly like somebody's decision. That is how "+ Add a behavior"
+   * shipped as ordinary text until a screenshot caught it.
+   *
+   * Both words now read one declaration. `primary` stays because a component
+   * pasted from the registry arrives asking for it; `action` is what the rest
+   * of the product writes. The two feedback fills are aliased as well, on
+   * purpose: publishing `action-wash` but not `action-wash-hover` would put
+   * the same silent hole back one name along.
+   */
+  --color-action: var(--action);
+  --color-action-hover: var(--action-hover);
+  --color-action-pressed: var(--action-pressed);
+  --color-action-wash: var(--action-wash);
+  --color-action-wash-hover: var(--action-wash-hover);
+  --color-action-wash-pressed: var(--action-wash-pressed);
 
   /* Destructive, which is the failure colour and never the brand colour. */
   --color-destructive: var(--destructive);
@@ -484,6 +673,9 @@
    * the 16px UI body. Line height and letter spacing travel with each step,
    * which is what keeps a heading from arriving with body tracking.
    */
+  --text-2xs: var(--text-micro);
+  --text-2xs--line-height: var(--line-caption);
+  --text-2xs--letter-spacing: 0px;
   --text-xs: var(--text-caption);
   --text-xs--line-height: var(--line-caption);
   --text-xs--letter-spacing: var(--tracking-caption);
@@ -650,6 +842,30 @@
 @keyframes egma-drawer-out {
   from { translate: 0 0; }
   to { translate: -100% 0; }
+}
+
+/*
+ * The side sheet, which comes in from the right edge and fades with it.
+ *
+ * `DESIGN.md` gives an edge-attached surface one behaviour — "translate from
+ * its attached edge" — and one pair of tokens, the drawer's. A sheet is that
+ * surface on the other edge, so it takes the same movement and the same
+ * durations. The opacity travels with it because a sheet lands over a scrim
+ * rather than over the bare page, and a panel that only slid would look like it
+ * had always been there, just off screen.
+ *
+ * `translate` and nothing else, for the reason the drawer's keyframes give: the
+ * panel's resting position is whatever its class list says, and an animation
+ * that wrote `transform` would replace it.
+ */
+@keyframes egma-sheet-in {
+  from { opacity: 0; translate: 100% 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes egma-sheet-out {
+  from { opacity: 1; translate: 0 0; }
+  to { opacity: 0; translate: 100% 0; }
 }
 
 @layer components {
@@ -821,6 +1037,25 @@
     animation: egma-drawer-out var(--duration-drawer-out) var(--ease-drawer);
   }
 
+  /* The side sheet, on the drawer's tokens. See the keyframes above. */
+  [data-slot="sheet-overlay"][data-state="open"] {
+    animation: egma-fade-in var(--duration-drawer-in) var(--ease-drawer);
+  }
+
+  [data-slot="sheet-overlay"][data-state="closed"] {
+    animation: egma-fade-out var(--duration-drawer-out) var(--ease-drawer);
+  }
+
+  [data-slot="sheet-content"][data-state="open"],
+  [data-slot="dialog-content"][data-kind="sheet"][data-state="open"] {
+    animation: egma-sheet-in var(--duration-drawer-in) var(--ease-drawer);
+  }
+
+  [data-slot="sheet-content"][data-state="closed"],
+  [data-slot="dialog-content"][data-kind="sheet"][data-state="closed"] {
+    animation: egma-sheet-out var(--duration-drawer-out) var(--ease-drawer);
+  }
+
   /*
    * The tooltip.
    *
@@ -899,6 +1134,60 @@
   [data-preview="reduced-motion"]
     [data-slot="tooltip-content"][data-input="pointer"][data-state="closed"] {
     animation: egma-fade-out var(--duration-hover) linear;
+  }
+
+  /*
+   * A page that drew its own toolbar row does not pay the top gutter twice.
+   *
+   * `PageHeader` opens the block under the title bar when a page hands it a
+   * purpose statement, an action or a filter, and `PageBody` opens one when
+   * the page did not — so whichever comes first carries the 24px, and the
+   * second one starts where the first left off. It is a sibling rule because
+   * that is the question: *is there already a block above me*, which no class
+   * on either element can answer about the other.
+   *
+   * The header between them is `display: contents`, which changes what is
+   * drawn and not what is a sibling of what — so the match is on the header
+   * that holds a toolbar rather than on the toolbar itself.
+   */
+  [data-slot="page-header"]:has([data-slot="page-toolbar"])
+    + [data-slot="page-body"] {
+    padding-top: 0;
+  }
+
+  /*
+   * A link inside a table cell.
+   *
+   * The boards underline it in the text colour and turn it Ember under the
+   * pointer (`71C-0`): an underline is what says "this is a link" without
+   * spending the brand colour on every row of a list, and the colour arrives
+   * when somebody is actually pointing at one. It is here rather than in
+   * `ui/data-table.tsx` because the cell's contents are written by the page —
+   * the component never sees the link — and because every list in the product
+   * has to answer this the same way.
+   *
+   * Underline offset and thickness are the board's. Both are properties of the
+   * text rather than values a component chose, and neither has a token because
+   * `DESIGN.md` names no scale for them.
+   */
+  [data-slot="table-cell"] a {
+    color: inherit;
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+    transition: color var(--duration-hover) var(--ease-out);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    [data-slot="table-cell"] a:hover {
+      color: var(--accent);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="table-cell"] a {
+      transition: none;
+    }
   }
 
   /*
@@ -985,7 +1274,10 @@
     [data-slot="dropdown-menu-sub-content"][data-state="open"],
     [data-slot="dialog-content"][data-state="open"],
     [data-slot="dialog-content"][data-kind="drawer"][data-state="open"],
-    [data-slot="dialog-overlay"][data-state="open"] {
+    [data-slot="dialog-overlay"][data-state="open"],
+    [data-slot="dialog-content"][data-kind="sheet"][data-state="open"],
+    [data-slot="sheet-content"][data-state="open"],
+    [data-slot="sheet-overlay"][data-state="open"] {
       animation: egma-fade-in var(--duration-hover) linear;
     }
 
@@ -994,7 +1286,10 @@
     [data-slot="dropdown-menu-sub-content"][data-state="closed"],
     [data-slot="dialog-content"][data-state="closed"],
     [data-slot="dialog-content"][data-kind="drawer"][data-state="closed"],
-    [data-slot="dialog-overlay"][data-state="closed"] {
+    [data-slot="dialog-overlay"][data-state="closed"],
+    [data-slot="dialog-content"][data-kind="sheet"][data-state="closed"],
+    [data-slot="sheet-content"][data-state="closed"],
+    [data-slot="sheet-overlay"][data-state="closed"] {
       animation: egma-fade-out var(--duration-hover) linear;
     }
 

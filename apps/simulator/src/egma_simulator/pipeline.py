@@ -99,10 +99,10 @@ def assemble(
     ``None`` is a deployment that places no calls, and a spec that then
     names a phone number is refused by the plug with a sentence saying so.
     """
-    factory = plug_for(spec.connection_kind)
+    factory = plug_for(spec.connection_type)
     if factory is None:
         raise PlugError(
-            f"no adapter for connection kind {spec.connection_kind!r}"
+            f"no adapter for connection type {spec.connection_type!r}"
         )
     # Built for every simulation, and handed to every plug: which of them
     # can put egma in front of the agent's tools is the plug's own answer,
@@ -126,7 +126,7 @@ def assemble(
         # alternative is a voice simulation with nobody to conduct it,
         # discovered somewhere far away from the plug that was wrong.
         raise PlugError(
-            f"the adapter for connection kind {spec.connection_kind!r} speaks "
+            f"the adapter for connection type {spec.connection_type!r} speaks "
             "voice but is not a Pipecat voice connection, so nothing can conduct it"
         )
     return Assembled(

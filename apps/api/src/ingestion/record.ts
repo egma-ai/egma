@@ -103,6 +103,15 @@ export type IngestionRecord = {
   readonly platform_agent_id: string;
   readonly platform_agent_name: string;
   readonly platform_agent_version: string;
+  /**
+   * The connection's type, under the envelope's own frozen name.
+   *
+   * The TypeScript field became `connectionType` (ADR-0015) and this key did
+   * not follow it. The envelope is versioned by `v` (ADR-0014), so its key
+   * names are a wire contract with objects already written under them —
+   * changing one is a version change with a reader for both spellings behind
+   * it, never a rename.
+   */
   readonly connection_kind: string;
   readonly run_id: string;
   readonly agent_id: string;
@@ -238,7 +247,7 @@ export function spanFor(record: IngestionRecord): NewSpan {
     platformAgentId: record.platform_agent_id,
     platformAgentName: record.platform_agent_name,
     platformAgentVersion: record.platform_agent_version,
-    connectionKind: record.connection_kind,
+    connectionType: record.connection_kind,
     runId: record.run_id,
     agentId: record.agent_id,
     agentVersionId: record.agent_version_id,
@@ -274,7 +283,7 @@ export function recordFor(span: NewSpan): IngestionRecord {
     platform_agent_id: span.platformAgentId,
     platform_agent_name: span.platformAgentName,
     platform_agent_version: span.platformAgentVersion,
-    connection_kind: span.connectionKind,
+    connection_kind: span.connectionType,
     run_id: span.runId,
     agent_id: span.agentId,
     agent_version_id: span.agentVersionId,

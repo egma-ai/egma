@@ -13,12 +13,13 @@ import { ProductStatePage } from "../../../../../ui/shell.tsx";
  * Its header is the page's own down to its shape — the same eyebrow or the
  * same crumbs, never one standing in for the other — so nothing is redrawn a
  * second way when the page arrives. `agents/loading.tsx` carries the
- * reasoning every one of these shares.
+ * reasoning every one of these shares. The list screen carries no label above
+ * its title now, so neither does this.
  */
 export default function TranscriptsLoading() {
   return (
     <div data-slot="route-loading">
-      <ProductStatePage eyebrow={LIST.eyebrow} title={LIST.title}>
+      <ProductStatePage title={LIST.title}>
         <Loading what={LIST.loadingWhat} />
       </ProductStatePage>
     </div>

@@ -96,7 +96,7 @@ export const REACH_LINES: Readonly<Record<Reach, string>> = {
     "telephone network, the way the people who call it do.",
 };
 
-/** What a developer can do after asking Retell for the wrong connection kind. */
+/** What a developer can do after asking Retell for the wrong connection type. */
 export const VOICE_REQUIRES_PHONE_LINE =
   "Retell says this is a voice agent. Voice agents require a Phone connection. " +
   "Choose --reach phone and try again. Nothing was written.";
@@ -387,7 +387,7 @@ function selectionFor(
       // convention in one place cannot drift from itself.
       connection: {
         agentPlatform: "retell",
-        connectionKind: "phone_number",
+        connectionType: "phone_number",
         accessVariant: "phone_number.public_e164",
         modality: "voice",
         config: { phoneNumber: number ?? "" },
@@ -403,7 +403,7 @@ function selectionFor(
     reach,
     connection: {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       // Only Retell chat agents reach this branch. Their vendor identity is the
       // connection target, and no phone number is read or stored.
@@ -419,7 +419,7 @@ function selectionFor(
 function isTheSameReach(held: RegisteredConnection, wanted: NewConnection): boolean {
   if (
     held.agentPlatform !== wanted.agentPlatform ||
-    held.connectionKind !== wanted.connectionKind ||
+    held.connectionType !== wanted.connectionType ||
     held.accessVariant !== wanted.accessVariant ||
     held.modality !== wanted.modality
   ) {
@@ -432,7 +432,7 @@ function isTheSameReach(held: RegisteredConnection, wanted: NewConnection): bool
 function retellAgentOf(held: RegisteredConnection): string | null {
   if (
     held.agentPlatform !== "retell" ||
-    held.connectionKind !== "retell_chat_api"
+    held.connectionType !== "retell_chat_api"
   ) {
     return null;
   }
@@ -584,7 +584,7 @@ async function register(
     // say at all — this is somebody else's agent under the same name, and the
     // next name is tried. Ambiguity goes that way on purpose: see above.
     const dialled = held.connections
-      .filter((one) => one.connectionKind === "phone_number")
+      .filter((one) => one.connectionType === "phone_number")
       .map((one) => one.config["phoneNumber"] ?? "");
     if (reaches.length === 0 && dialled.length > 0) {
       const routed = await numbersOfTheAgent();
@@ -625,7 +625,7 @@ async function register(
         continue;
       /**
        * Nothing here names a connection, so the platform picks the first free
-       * `<connection-kind>-<n>` itself. There is exactly one ordinary way it can still
+       * `<connection-type>-<n>` itself. There is exactly one ordinary way it can still
        * answer that the name is held: **two connects adding the same reach at
        * the same instant.** Both got past the check above while neither had
        * written anything, then one lost the connection-name index.

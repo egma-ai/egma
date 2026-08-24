@@ -1,13 +1,11 @@
 import {
   appendSpans,
   committedSpans,
-  configureLiveKitMonitoring,
   connectClickHouse,
   disconnectClickHouse,
   DRAIN_ADVISORY_LOCK,
   getSimulation,
   getGradingJobForTrace,
-  listMonitoringSetups,
   openDrainOwnership,
   readProductionGradingPlan,
   type AuthContext,
@@ -261,7 +259,6 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
       role: "admin",
       via: "session",
     };
-    await configureLiveKitMonitoring(auth);
 
     bucket = pendingObjectStore(running.ingestStore);
     drainer = startDrainer({
@@ -310,12 +307,6 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     });
     expect(await physicalReceiptCount(traceId)).toBe(1);
     expect(await gradingJobCount(traceId)).toBe(0);
-    expect(
-      (await listMonitoringSetups(auth)).find(
-        (setup) => setup.agentPlatform === "livekit_agents",
-      )?.lastReceivedAt,
-    ).toBeInstanceOf(Date);
-
     // And only then is the object gone.
     expect((await pending()).map((object) => object.key)).not.toContain(key);
   });

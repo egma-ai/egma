@@ -373,7 +373,7 @@ describe.skipIf(!storage.available)("the captured trace, posted at the door", ()
     expect(row?.payload).toContain("telemetry.sdk.version");
   });
 
-  it("records LiveKit Agents as the platform without inventing a connection kind", async () => {
+  it("records LiveKit Agents as the platform without inventing a connection type", async () => {
     const rows = await store().rows<{
       agent_platform: string;
       connection_type: string;

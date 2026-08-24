@@ -1,7 +1,7 @@
 -- Pre-launch forward cutover. Old run plans point at the retired project
 -- grader-version rows and cannot be translated honestly. Remove their control
 -- records before the old model leaves. Projects, suites, tests, personas,
--- agents, connections, production-monitoring state, and grader-independent
+-- agents, connections, agent-owned monitoring state, and grader-independent
 -- configuration remain.
 DELETE FROM "idempotent_operation" WHERE "operation" = 'start_run';
 --> statement-breakpoint
@@ -98,6 +98,7 @@ ALTER TABLE "grading_job" ALTER COLUMN "trace_id" SET NOT NULL;--> statement-bre
 ALTER TABLE "grading_job" ADD COLUMN "trace_started_at" timestamp with time zone NOT NULL;--> statement-breakpoint
 ALTER TABLE "grading_job" ADD COLUMN "run_id" text COLLATE "C";--> statement-breakpoint
 ALTER TABLE "grading_job" ADD COLUMN "entries" jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "grading_job" ADD COLUMN "sequence_base" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "grader_definition" ADD CONSTRAINT "grader_definition_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "grader_definition" ADD CONSTRAINT "grader_definition_project_organization_fk" FOREIGN KEY ("project_id","organization_id") REFERENCES "public"."project"("id","organization_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 -- A definition and its first version are born in one transaction. The two rows
@@ -145,7 +146,6 @@ ALTER TABLE "grading_job" DROP COLUMN "last_span_at";--> statement-breakpoint
 ALTER TABLE "grading_job" DROP COLUMN "last_seen_at";--> statement-breakpoint
 ALTER TABLE "grading_job" DROP COLUMN "root_closed_at";--> statement-breakpoint
 ALTER TABLE "grading_job" DROP COLUMN "regrade_grader_id";--> statement-breakpoint
-ALTER TABLE "grading_job" ADD COLUMN "sequence_base" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "run_event" ADD CONSTRAINT "run_event_run_shape" CHECK ("run_event"."kind" <> 'run'
         or ("run_event"."simulation_id" is null
           and "run_event"."reason" is null

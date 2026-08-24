@@ -892,7 +892,7 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_mixed" },

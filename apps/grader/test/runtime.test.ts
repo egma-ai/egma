@@ -72,7 +72,7 @@ function span(): NewSpan {
     platformAgentId: "agent-fixture",
     platformAgentName: "Front desk",
     platformAgentVersion: "",
-    connectionKind: "retell_phone",
+    connectionType: "phone_number",
     runId: "",
     agentId: "",
     agentVersionId: "",

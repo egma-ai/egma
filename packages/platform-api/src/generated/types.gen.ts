@@ -81,7 +81,7 @@ export type DiscoverAgentsResponses = {
             name: string;
             connectionCandidates: Array<{
                 agentPlatform: 'retell';
-                connectionKind: 'retell_chat_api' | 'phone_number';
+                connectionType: 'retell_chat_api' | 'phone_number';
                 accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164';
                 modality: 'chat' | 'voice';
                 productLabel: string;
@@ -123,7 +123,7 @@ export type ListConnectionOptionsResponses = {
         items: Array<{
             agentPlatform: 'retell' | 'livekit_agents' | null;
             agentPlatformLabel: string;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             accessVariantLabel: string;
             modality: 'voice' | 'chat';
@@ -200,8 +200,12 @@ export type ListAgentsResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -212,7 +216,7 @@ export type ListAgentsResponses = {
                 projectId: string;
                 name: string;
                 agentPlatform: 'retell' | 'livekit_agents' | null;
-                connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+                connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
                 accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
                 modality: 'voice' | 'chat';
                 productLabel: string;
@@ -223,7 +227,6 @@ export type ListAgentsResponses = {
                 };
                 credentialPresent: boolean;
                 credentialsHint: string | null;
-                revision: string;
                 archived: boolean;
                 archivedAt: string | null;
                 createdAt: string;
@@ -239,11 +242,10 @@ export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses];
 export type RegisterAgentData = {
     body: {
         name: string;
-        description?: string;
         connection?: {
             name?: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             environment?: string;
@@ -318,8 +320,12 @@ export type RegisterAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -331,7 +337,7 @@ export type RegisterAgentResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -342,7 +348,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -358,8 +363,12 @@ export type RegisterAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -371,7 +380,7 @@ export type RegisterAgentResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -382,7 +391,6 @@ export type RegisterAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -439,8 +447,12 @@ export type GetAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -452,7 +464,7 @@ export type GetAgentResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -463,7 +475,6 @@ export type GetAgentResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -477,8 +488,6 @@ export type GetAgentResponse = GetAgentResponses[keyof GetAgentResponses];
 export type UpdateAgentData = {
     body?: {
         name?: string;
-        description?: string | null;
-        expectedRevision?: string;
     };
     path: {
         agentId: string;
@@ -535,8 +544,12 @@ export type UpdateAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -551,7 +564,7 @@ export type AddConnectionData = {
     body: {
         name?: string;
         agentPlatform: 'retell' | 'livekit_agents' | null;
-        connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
         accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
         environment?: string;
@@ -628,7 +641,7 @@ export type AddConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -639,7 +652,6 @@ export type AddConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -652,7 +664,7 @@ export type AddConnectionResponse = AddConnectionResponses[keyof AddConnectionRe
 
 export type ArchiveAgentData = {
     body?: {
-        expectedRevision?: string;
+        [key: string]: never;
     };
     path: {
         agentId: string;
@@ -709,8 +721,12 @@ export type ArchiveAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -725,7 +741,6 @@ export type ArchiveAgentResponse = ArchiveAgentResponses[keyof ArchiveAgentRespo
 
 export type RestoreAgentData = {
     body?: {
-        expectedRevision?: string;
         name?: string;
     };
     path: {
@@ -783,8 +798,12 @@ export type RestoreAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            description: string | null;
-            revision: string;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringKeyPresent: boolean;
+            monitoringApiKeyHint: string | null;
+            pullProductionCalls: boolean;
+            lastReceivedAt: string | null;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -843,7 +862,7 @@ export type GetConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -854,7 +873,6 @@ export type GetConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -875,7 +893,6 @@ export type UpdateConnectionData = {
         credentials?: {
             [key: string]: unknown;
         };
-        expectedRevision?: string;
     };
     path: {
         agentId: string;
@@ -935,7 +952,7 @@ export type UpdateConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -946,7 +963,6 @@ export type UpdateConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -959,7 +975,7 @@ export type UpdateConnectionResponse = UpdateConnectionResponses[keyof UpdateCon
 
 export type ArchiveConnectionData = {
     body?: {
-        expectedRevision?: string;
+        [key: string]: never;
     };
     path: {
         agentId: string;
@@ -1019,7 +1035,7 @@ export type ArchiveConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -1030,7 +1046,6 @@ export type ArchiveConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -1044,7 +1059,6 @@ export type ArchiveConnectionResponse = ArchiveConnectionResponses[keyof Archive
 
 export type RestoreConnectionData = {
     body?: {
-        expectedRevision?: string;
         name?: string;
         credential?: {
             choice: 'replace';
@@ -1113,7 +1127,7 @@ export type RestoreConnectionResponses = {
             projectId: string;
             name: string;
             agentPlatform: 'retell' | 'livekit_agents' | null;
-            connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
             accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -1124,7 +1138,6 @@ export type RestoreConnectionResponses = {
             };
             credentialPresent: boolean;
             credentialsHint: string | null;
-            revision: string;
             archived: boolean;
             archivedAt: string | null;
             createdAt: string;
@@ -2057,69 +2070,6 @@ export type UpdateMockToolResponses = {
 
 export type UpdateMockToolResponse = UpdateMockToolResponses[keyof UpdateMockToolResponses];
 
-export type ListMonitoringSourcesData = {
-    body?: never;
-    path?: never;
-    query?: {
-        projectId?: string;
-    };
-    url: '/v1/monitoring';
-};
-
-export type ListMonitoringSourcesErrors = {
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type ListMonitoringSourcesError = ListMonitoringSourcesErrors[keyof ListMonitoringSourcesErrors];
-
-export type ListMonitoringSourcesResponses = {
-    /**
-     * Configured monitoring sources.
-     */
-    200: {
-        monitoringSources: Array<{
-            id: string;
-            projectId: string;
-            agentPlatform: string;
-            strategy: string;
-            credentialsHint: string | null;
-            health: {
-                state: string;
-                blockedUntil: string | null;
-                consecutiveFailures: number;
-                lastErrorAt: string | null;
-                lastRecoveredAt: string | null;
-                lastReceivedAt: string | null;
-            };
-            agents: Array<{
-                id: string;
-                platformAgentId: string;
-                platformAgentName: string;
-                state: string;
-                scanKind: string | null;
-                lastSuccessAt: string | null;
-                lastConversationAt: string | null;
-                lastErrorKind: string | null;
-                lastErrorAt: string | null;
-                consecutiveFailures: number;
-            }>;
-        }>;
-    };
-};
-
-export type ListMonitoringSourcesResponse = ListMonitoringSourcesResponses[keyof ListMonitoringSourcesResponses];
-
 export type DiscoverRetellVoiceAgentsData = {
     body: {
         apiKey: string;
@@ -2164,28 +2114,37 @@ export type DiscoverRetellVoiceAgentsResponses = {
         agents: Array<{
             id: string;
             name: string;
+            registeredAgentId: string | null;
+            registeredAgentName: string | null;
+            pullProductionCalls: boolean;
         }>;
     };
 };
 
 export type DiscoverRetellVoiceAgentsResponse = DiscoverRetellVoiceAgentsResponses[keyof DiscoverRetellVoiceAgentsResponses];
 
-export type ConfigureRetellMonitoringData = {
+export type StartMonitoringData = {
     body: {
+        agentPlatform: 'retell';
         apiKey: string;
-        agents: Array<{
-            id: string;
-            name: string;
+        watch: Array<{
+            platformAgentId: string;
+            name?: string;
+            agentId?: string;
         }>;
     };
     path?: never;
     query?: {
         projectId?: string;
     };
-    url: '/v1/monitoring/retell';
+    url: '/v1/monitoring/start';
 };
 
-export type ConfigureRetellMonitoringErrors = {
+export type StartMonitoringErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
     /**
      * The request was refused.
      */
@@ -2208,124 +2167,44 @@ export type ConfigureRetellMonitoringErrors = {
     503: Refusal;
 };
 
-export type ConfigureRetellMonitoringError = ConfigureRetellMonitoringErrors[keyof ConfigureRetellMonitoringErrors];
+export type StartMonitoringError = StartMonitoringErrors[keyof StartMonitoringErrors];
 
-export type ConfigureRetellMonitoringResponses = {
+export type StartMonitoringResponses = {
     /**
-     * The configured monitoring source.
+     * What each ticked platform agent turned out to be: the ones now pulling their production calls, and the ones refused.
      */
     200: {
-        monitoringSource: {
-            id: string;
-            projectId: string;
-            agentPlatform: string;
-            strategy: string;
-            credentialsHint: string | null;
-            health: {
-                state: string;
-                blockedUntil: string | null;
-                consecutiveFailures: number;
-                lastErrorAt: string | null;
-                lastRecoveredAt: string | null;
-                lastReceivedAt: string | null;
-            };
-            agents: Array<{
-                id: string;
-                platformAgentId: string;
-                platformAgentName: string;
-                state: string;
-                scanKind: string | null;
-                lastSuccessAt: string | null;
-                lastConversationAt: string | null;
-                lastErrorKind: string | null;
-                lastErrorAt: string | null;
-                consecutiveFailures: number;
-            }>;
-        };
+        watching: Array<{
+            agentId: string;
+            agentName: string;
+            platformAgentId: string;
+            created: boolean;
+            pullProductionCalls: boolean;
+        }>;
+        refused: Array<{
+            platformAgentId: string;
+            reason: 'contested' | 'name_taken' | 'not_found' | 'archived';
+            message: string;
+        }>;
     };
 };
 
-export type ConfigureRetellMonitoringResponse = ConfigureRetellMonitoringResponses[keyof ConfigureRetellMonitoringResponses];
+export type StartMonitoringResponse = StartMonitoringResponses[keyof StartMonitoringResponses];
 
-export type ConfigureLiveKitMonitoringData = {
-    body?: never;
-    path?: never;
-    query?: {
-        projectId?: string;
+export type StopMonitoringData = {
+    body?: {
+        [key: string]: never;
     };
-    url: '/v1/monitoring/livekit-agents';
-};
-
-export type ConfigureLiveKitMonitoringErrors = {
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type ConfigureLiveKitMonitoringError = ConfigureLiveKitMonitoringErrors[keyof ConfigureLiveKitMonitoringErrors];
-
-export type ConfigureLiveKitMonitoringResponses = {
-    /**
-     * The configured monitoring source.
-     */
-    200: {
-        monitoringSource: {
-            id: string;
-            projectId: string;
-            agentPlatform: string;
-            strategy: string;
-            credentialsHint: string | null;
-            health: {
-                state: string;
-                blockedUntil: string | null;
-                consecutiveFailures: number;
-                lastErrorAt: string | null;
-                lastRecoveredAt: string | null;
-                lastReceivedAt: string | null;
-            };
-            agents: Array<{
-                id: string;
-                platformAgentId: string;
-                platformAgentName: string;
-                state: string;
-                scanKind: string | null;
-                lastSuccessAt: string | null;
-                lastConversationAt: string | null;
-                lastErrorKind: string | null;
-                lastErrorAt: string | null;
-                consecutiveFailures: number;
-            }>;
-        };
-    };
-};
-
-export type ConfigureLiveKitMonitoringResponse = ConfigureLiveKitMonitoringResponses[keyof ConfigureLiveKitMonitoringResponses];
-
-export type DeleteMonitoringSourceData = {
-    body?: never;
     path: {
-        platform: string;
+        agentId: string;
     };
     query?: {
         projectId?: string;
     };
-    url: '/v1/monitoring/{platform}';
+    url: '/v1/monitoring/agents/{agentId}/stop';
 };
 
-export type DeleteMonitoringSourceErrors = {
+export type StopMonitoringErrors = {
     /**
      * The request was refused.
      */
@@ -2348,16 +2227,25 @@ export type DeleteMonitoringSourceErrors = {
     429: Refusal;
 };
 
-export type DeleteMonitoringSourceError = DeleteMonitoringSourceErrors[keyof DeleteMonitoringSourceErrors];
+export type StopMonitoringError = StopMonitoringErrors[keyof StopMonitoringErrors];
 
-export type DeleteMonitoringSourceResponses = {
+export type StopMonitoringResponses = {
     /**
-     * The monitoring source was deleted.
+     * The agent, with its pull switch off.
      */
-    204: void;
+    200: {
+        monitoring: {
+            agentId: string;
+            pullProductionCalls: boolean;
+            agentPlatform: 'retell' | 'livekit_agents' | null;
+            platformAgentId: string | null;
+            monitoringApiKeyHint: string | null;
+            lastReceivedAt: string | null;
+        };
+    };
 };
 
-export type DeleteMonitoringSourceResponse = DeleteMonitoringSourceResponses[keyof DeleteMonitoringSourceResponses];
+export type StopMonitoringResponse = StopMonitoringResponses[keyof StopMonitoringResponses];
 
 export type GetOrganizationData = {
     body?: never;
@@ -3970,7 +3858,7 @@ export type ListRunsResponses = {
             agentId: string;
             connectionId: string;
             agentPlatform: string | null;
-            connectionKind: string;
+            connectionType: string;
             accessVariant: string;
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -4068,7 +3956,7 @@ export type CreateRunResponses = {
         agentId: string;
         connectionId: string;
         agentPlatform: string | null;
-        connectionKind: string;
+        connectionType: string;
         accessVariant: string;
         modality: 'voice' | 'chat';
         productLabel: string;
@@ -4152,7 +4040,7 @@ export type GetRunResponses = {
         agentId: string;
         connectionId: string;
         agentPlatform: string | null;
-        connectionKind: string;
+        connectionType: string;
         accessVariant: string;
         modality: 'voice' | 'chat';
         productLabel: string;
@@ -4178,7 +4066,7 @@ export type GetRunResponses = {
         finishedAt: string | null;
         connectionSnapshot: {
             agentPlatform: string | null;
-            connectionKind: string;
+            connectionType: string;
             accessVariant: string;
             modality: 'voice' | 'chat';
             topology: string;
@@ -4401,7 +4289,7 @@ export type CancelRunResponses = {
         agentId: string;
         connectionId: string;
         agentPlatform: string | null;
-        connectionKind: string;
+        connectionType: string;
         accessVariant: string;
         modality: 'voice' | 'chat';
         productLabel: string;
@@ -4571,7 +4459,7 @@ export type GetSimulationResponses = {
         };
         connectionSnapshot: {
             agentPlatform: string | null;
-            connectionKind: string;
+            connectionType: string;
             accessVariant: string;
             modality: 'voice' | 'chat';
             topology: string;
@@ -5618,7 +5506,7 @@ export type ListTracesResponses = {
             source: 'simulation' | 'production';
             emitter: string;
             environment: string;
-            connectionKind: string;
+            connectionType: string;
             providerCallId: string;
             agentPlatform: string;
             platformAgentId: string;
@@ -5696,7 +5584,7 @@ export type GetTraceResponses = {
             source: 'simulation' | 'production';
             emitter: string;
             environment: string;
-            connectionKind: string;
+            connectionType: string;
             providerCallId: string;
             agentPlatform: string;
             platformAgentId: string;

@@ -17,7 +17,7 @@
  *
  * One shape of answer is a value rather than an exception, because it is an
  * ordinary thing that happens: **the platform refusing to start the run**. A
- * connection kind whose adapter has not shipped is the case that matters, and
+ * connection type whose adapter has not shipped is the case that matters, and
  * the platform's own sentence is carried up untouched — a terminal that
  * paraphrased it would be inventing an explanation for a decision it did not
  * make.
@@ -355,7 +355,7 @@ function eventFrom(body: RunEventWire): RunEvent | null {
  * Start one complete-suite run with an optional exact-set precondition.
  *
  * A refusal is an answer and not an exception. The one that matters is a
- * connection kind egma has no adapter for: it can never be conducted, so it is
+ * connection type egma has no adapter for: it can never be conducted, so it is
  * refused here at creation rather than left queued, and the sentence comes back
  * whole for the terminal to print as it stands.
  */

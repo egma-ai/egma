@@ -128,7 +128,6 @@ describe("one simulation's grades", () => {
       0.25,
       new Date("2026-08-21T10:00:00Z"),
     );
-
     const first = await request(
       api.app,
       "GET",
@@ -136,6 +135,16 @@ describe("one simulation's grades", () => {
       standing.key,
     );
     expect(first.statusCode, JSON.stringify(first.body)).toBe(200);
+    expect((first.body.connection as { name: string }).name).not.toBe(null);
+    const snapshot = first.body.connectionSnapshot as Record<string, unknown>;
+    expect(snapshot.agentPlatform).toBe("retell");
+    expect(snapshot.connectionType).toBe("retell_chat_api");
+    expect(snapshot.accessVariant).toBe("retell_chat_api.api_key");
+    expect(snapshot.modality).toBe("chat");
+    // Nothing a credential could ride in. The secret lives in its own sealed
+    // column and was never copied into the snapshot.
+    expect(JSON.stringify(snapshot)).not.toContain("retell-secret");
+    expect(snapshot).not.toHaveProperty("connectionKind");
     expect(first.body).toMatchObject({
       id: run.heard,
       status: "completed",

@@ -38,7 +38,7 @@ import { ProductStatePage } from "../../../../ui/shell.tsx";
 export default function AgentsLoading() {
   return (
     <div data-slot="route-loading">
-      <ProductStatePage eyebrow="Project" title="Agents">
+      <ProductStatePage title="Agents">
         <Loading what="agents" />
       </ProductStatePage>
     </div>

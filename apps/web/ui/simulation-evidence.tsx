@@ -89,11 +89,20 @@ const SUMMARY_CELL = "flex min-w-0 items-center justify-between gap-3 px-5 py-3"
  * The line between two facts. It runs beside them while the three sit in a row,
  * and above them once a narrow screen stacks the row into a column.
  */
-const SUMMARY_CELL_NEXT =
-  "border-border border-s max-[40rem]:border-s-0 max-[40rem]:border-t";
+const SUMMARY_CELL_NEXT = cn(
+  "border-border border-s",
+  "@max-[40rem]/summary:border-s-0 @max-[40rem]/summary:border-t",
+);
 
-/** Metrics and counts read straight in the mono face. */
-const SUMMARY_VALUE = "font-mono text-base font-normal text-foreground";
+/**
+ * Metrics and counts read straight in the mono face, on tabular figures.
+ *
+ * `WV-0` writes the three summary values in mono; `DESIGN.md` asks every
+ * metric, date, duration and score for tabular numerals. Both together are
+ * what stops "1m 04s" and "11m 40s" sitting at two widths in one strip.
+ */
+const SUMMARY_VALUE =
+  "font-mono text-base font-normal text-foreground tabular-nums";
 
 /**
  * The name of one fact, quiet, beside its value.
@@ -112,10 +121,24 @@ export function SimulationEvidenceSummary({
 }) {
   const turns = turnsOf(evidence);
   return (
+    /*
+     * **The container is the wrapper, not the strip.** An element cannot be
+     * its own query container, so `@container` and `grid-cols-3` on one
+     * `<section>` left the query measuring nothing: the three facts stayed in
+     * three columns however little room the strip had.
+     */
+    <div className="@container/summary min-w-0">
     <section
       className={cn(
         "grid min-w-0 grid-cols-3 overflow-hidden rounded-card border border-border",
-        "bg-surface max-[40rem]:grid-cols-1",
+        /*
+         * **Its own width decides, not the window's.** The reading sheet opens
+         * over the right half of this page by default, so at 1440 these three
+         * facts share about 520px — while a viewport rule was still calling it
+         * a wide screen and holding them in three 170px columns. A container
+         * query asks the strip how much room *it* has.
+         */
+        "bg-surface @max-[40rem]/summary:grid-cols-1",
       )}
       aria-label="Simulation summary"
     >
@@ -138,6 +161,7 @@ export function SimulationEvidenceSummary({
         </strong>
       </div>
     </section>
+    </div>
   );
 }
 
@@ -811,7 +835,7 @@ function ChatTranscript({
 
 /** The quiet mono kicker over a title: what kind of thing this block is. */
 const PANE_KIND =
-  "mb-1 block font-mono text-sm tracking-(--tracking-label) text-muted-foreground uppercase";
+  "mb-1 block font-mono text-sm tracking-(--tracking-label) text-faint uppercase";
 
 function GraderGroup({
   grader,
@@ -1095,6 +1119,7 @@ function SimulationEvidencePanel({
       {evidenceOpen ? (
         <Dialog
           kind="sheet"
+          size="wide"
           title="Transcript and audio"
           onClose={() => onEvidenceChange(false)}
         >
@@ -1159,7 +1184,41 @@ export function SimulationEvidenceReview({
   useEffect(() => setEvidenceOpen(true), [evidence.id]);
 
   return (
-    <div className={REVIEW}>
+    <div
+      className={cn(
+        REVIEW,
+        /*
+         * **The sheet is docked beside this page, so the page steps aside for
+         * it.** That is what a non-modal reading surface promises — the test
+         * covering this panel says it in as many words: "a panel docked beside
+         * this page rather than a layer over it, so the grader results stay
+         * reachable while the transcript is open". The panel is `position:
+         * fixed` against the viewport's right edge, so nothing under it moves
+         * on its own: at 1440 the transcript covered the grader findings it is
+         * evidence *for*, and a reader had to close the transcript to read the
+         * finding that cited it.
+         *
+         * **The room is reserved here, on the block that holds both halves**,
+         * and not on the review panel alone. The summary strip is that panel's
+         * sibling, so padding the panel left the strip running on under the
+         * sheet — Duration cut in half and Total turns gone — while the panel
+         * beside it sat clear of it. One ancestor pays, and every child is
+         * inside what is left.
+         *
+         * The room is the sheet's own width from the theme plus one gutter,
+         * and only where there is room to give: below 1100px the sheet is
+         * most of the screen and reading it *is* the mode, so the page stays
+         * where it is and the sheet covers it.
+         *
+         * It is not animated. `DESIGN.md` asks motion to run on `transform`
+         * and `opacity`, and this is padding — a layout property, on a block
+         * holding a whole review. The sheet's own entrance already explains
+         * where the room went.
+         */
+        evidenceOpen &&
+          "min-[1100px]:pe-[calc(var(--sheet-width-wide)+var(--page-gutter))]",
+      )}
+    >
       <SimulationEvidenceSummary evidence={evidence} />
       <SimulationEvidencePanel
         evidence={evidence}

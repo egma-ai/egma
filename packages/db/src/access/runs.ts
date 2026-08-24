@@ -27,7 +27,7 @@ import {
   connection,
   type AccessVariant,
   type AgentPlatform,
-  type ConnectionKind,
+  type ConnectionType,
   type Modality,
   type Topology,
 } from "../schema/agents.ts";
@@ -57,6 +57,7 @@ import { validClaimant } from "./claimants.ts";
 import {
   connectionIsConductable,
   noSimulatorAdapterMessage,
+  platformOfConnectionType,
 } from "./connection-registry.ts";
 import type { AuthContext } from "./context.ts";
 import { IdempotencyConflictError, RunWriteRefusedError } from "./errors.ts";
@@ -94,7 +95,7 @@ export type NewRun = {
 
 export type ConnectionSnapshot = {
   readonly agentPlatform: AgentPlatform | null;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly topology: Topology;
@@ -300,7 +301,7 @@ function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSna
   const row = value as Record<string, unknown>;
   if (
     (row.agentPlatform !== null && typeof row.agentPlatform !== "string") ||
-    typeof row.connectionKind !== "string" ||
+    typeof row.connectionType !== "string" ||
     typeof row.accessVariant !== "string" ||
     typeof row.modality !== "string" ||
     typeof row.topology !== "string" ||
@@ -310,7 +311,7 @@ function connectionSnapshotFromRow(value: unknown, runId: string): ConnectionSna
   }
   return {
     agentPlatform: row.agentPlatform as AgentPlatform | null,
-    connectionKind: row.connectionKind as ConnectionKind,
+    connectionType: row.connectionType as ConnectionType,
     accessVariant: row.accessVariant as AccessVariant,
     modality: row.modality as Modality,
     topology: row.topology as Topology,
@@ -598,8 +599,10 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       const [reached] = await tx
         .select({
           agentId: connection.agentId,
-          agentPlatform: connection.agentPlatform,
-          connectionKind: connection.connectionKind,
+          // The connection holds no platform of its own: the type answers
+          // where it pins one, else the agent's own binding does.
+          agentPlatform: agent.agentPlatform,
+          connectionType: connection.connectionType,
           accessVariant: connection.accessVariant,
           modality: connection.modality,
           topology: connection.topology,
@@ -618,8 +621,8 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         .limit(1)
         .for("share");
       if (reached === undefined) refuseRun("no_such_connection", `there is no active connection ${input.connectionId} on agent ${input.agentId}`);
-      if (!connectionIsConductable(reached.connectionKind, reached.accessVariant, reached.modality)) {
-        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionKind, reached.modality));
+      if (!connectionIsConductable(reached.connectionType, reached.accessVariant, reached.modality)) {
+        refuseRun("no_adapter", noSimulatorAdapterMessage(reached.connectionType, reached.modality));
       }
 
       const graderCandidates = await applicableGraders(auth, tx, projectId);
@@ -661,8 +664,12 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
         triggeredVia: "manual",
         triggeredBy: auth.userId,
         connectionSnapshot: {
-          agentPlatform: reached.agentPlatform,
-          connectionKind: reached.connectionKind,
+          // Derived exactly as a read derives it: the type answers where it
+          // pins one platform, else the agent's own binding does.
+          agentPlatform:
+            platformOfConnectionType(reached.connectionType) ??
+            reached.agentPlatform,
+          connectionType: reached.connectionType,
           accessVariant: reached.accessVariant,
           modality: reached.modality,
           topology: reached.topology,
@@ -1531,13 +1538,13 @@ export type SimulationStanding = {
 
 /**
  * How the simulator reaches the agent of one claimed simulation: the
- * connection kind, access variant, non-secret config, and unsealed credentials
+ * connection type, access variant, non-secret config, and unsealed credentials
  * — or null where the access variant takes no customer secret.
  */
 export type SimulationConnection = {
   readonly connectionId: string;
   readonly agentPlatform: AgentPlatform | null;
-  readonly connectionKind: ConnectionKind;
+  readonly connectionType: ConnectionType;
   readonly accessVariant: AccessVariant;
   readonly config: Readonly<Record<string, string>>;
   readonly credentials: Readonly<Record<string, string>> | null;
@@ -1586,8 +1593,8 @@ export async function resolveSimulationConnection(
   const [row] = await db()
     .select({
       connectionId: connection.id,
-      agentPlatform: connection.agentPlatform,
-      connectionKind: connection.connectionKind,
+      agentPlatform: agent.agentPlatform,
+      connectionType: connection.connectionType,
       accessVariant: connection.accessVariant,
       modality: connection.modality,
       config: connection.config,
@@ -1595,6 +1602,7 @@ export async function resolveSimulationConnection(
     })
     .from(simulation)
     .innerJoin(connection, eq(simulation.connectionId, connection.id))
+    .innerJoin(agent, eq(agent.id, connection.agentId))
     .where(
       within(
         auth,
@@ -1613,13 +1621,13 @@ export async function resolveSimulationConnection(
 
   if (
     !connectionIsConductable(
-      row.connectionKind,
+      row.connectionType,
       row.accessVariant,
       row.modality,
     )
   ) {
     throw new Error(
-      noSimulatorAdapterMessage(row.connectionKind, row.modality),
+      noSimulatorAdapterMessage(row.connectionType, row.modality),
     );
   }
 
@@ -1631,8 +1639,10 @@ export async function resolveSimulationConnection(
 
   return {
     connectionId: row.connectionId,
-    agentPlatform: row.agentPlatform as AgentPlatform | null,
-    connectionKind: row.connectionKind as ConnectionKind,
+    agentPlatform:
+      platformOfConnectionType(row.connectionType) ??
+      (row.agentPlatform as AgentPlatform | null),
+    connectionType: row.connectionType as ConnectionType,
     accessVariant: row.accessVariant as AccessVariant,
     config: stringRecordFromRow(row.config, malformed("config")),
     credentials:

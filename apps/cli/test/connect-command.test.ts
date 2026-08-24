@@ -157,7 +157,7 @@ describe("egma connect", () => {
     expect(said.connection_id).toMatch(/^con_/u);
     expect(said.connection_name).toBe("retell_chat_api-1");
     expect(said.agent_platform).toBe("retell");
-    expect(said.connection_kind).toBe("retell_chat_api");
+    expect(said.connection_type).toBe("retell_chat_api");
     expect(said.access_variant).toBe("retell_chat_api.api_key");
     expect(said.product_label).toBe("Retell chat");
     expect(said.connection_modality).toBe("chat");
@@ -419,7 +419,7 @@ describe("which connection egma creates", () => {
     expect(said.reach).toBe("phone");
     expect(said.phone_number).toBe(DIALLED);
     expect(said.agent_platform).toBe("retell");
-    expect(said.connection_kind).toBe("phone_number");
+    expect(said.connection_type).toBe("phone_number");
     expect(said.access_variant).toBe("phone_number.public_e164");
     expect(said.product_label).toBe("Retell phone");
     expect(said.connection_modality).toBe("voice");

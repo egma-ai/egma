@@ -242,7 +242,7 @@ agent_name: order-line
 connection_id: con_01K…
 connection_name: phone_number-1
 agent_platform: retell
-connection_kind: phone_number
+connection_type: phone_number
 access_variant: phone_number.public_e164
 product_label: Retell phone
 connection_modality: voice
@@ -428,7 +428,7 @@ produced a completed trace has no grading state and adds no grading wait. A
 grader outside scope or incompatible with the trace writes no grade; it is not
 called skipped.
 
-If your connection kind has no simulator adapter, Egma refuses
+If your connection type has no simulator adapter, Egma refuses
 the run **at creation**, in its own words, and the wizard prints those words as
 they came. You never wait on a run that could not happen.
 

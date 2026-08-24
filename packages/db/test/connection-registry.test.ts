@@ -2,7 +2,7 @@ import { AgentWriteRefusedError } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import {
-  conductableConnectionKinds,
+  conductableConnectionTypes,
   connectionIsConductable,
   descriptorOf,
   gatedConfig,
@@ -19,7 +19,7 @@ import {
  * with no database anywhere near them.
  *
  * The optional-gate machinery is exercised through a made-up type's gate map
- * rather than through whichever real connection kind happens to carry an
+ * rather than through whichever real connection type happens to carry an
  * optional key today. What is under test is the rule — absence admitted,
  * presence still checked, demanded keys still demanded — and a test written
  * against one type's shape would start measuring that type instead the moment
@@ -526,7 +526,7 @@ describe("a LiveKit connection that is half of each access variant", () => {
 describe("what the shipped simulator can conduct", () => {
   it("counts phone among them, because the phone plug ships", () => {
     expect(descriptorOf("phone_number").simulatorAdapter).toBe(true);
-    expect(conductableConnectionKinds()).toContain("phone_number");
+    expect(conductableConnectionTypes()).toContain("phone_number");
   });
 
   it("checks the exact stored kind, access variant, and modality before dispatch", () => {
@@ -555,15 +555,15 @@ describe("what the shipped simulator can conduct", () => {
 
   it("names every shipped type in the refusal, and takes the list from the registry", () => {
     // The sentence exists for a type egma has not shipped an adapter for.
-    // Every connection kind has one today, so the rule is exercised
+    // Every connection type has one today, so the rule is exercised
     // on a name the registry does not hold — which is exactly the case the
     // refusal is kept for.
     expect(noSimulatorAdapterMessage("vapi")).toBe(
       "Egma has no simulator adapter for a vapi connection yet, so it will " +
         "not start a run it cannot conduct. Run these tests over a " +
-        `connection Egma conducts today: ${conductableConnectionKinds().join(", ")}.`,
+        `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
     );
-    expect(conductableConnectionKinds()).toEqual([
+    expect(conductableConnectionTypes()).toEqual([
       "retell_chat_api",
       "phone_number",
       "livekit_room",

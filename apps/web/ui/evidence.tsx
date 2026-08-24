@@ -147,6 +147,25 @@ export function Transcript({
       className="flex flex-col overflow-hidden rounded-card border border-border bg-surface"
       data-slot="transcript"
     >
+      {/*
+       * The head the board draws over a transcript (`WU-0`): what this panel
+       * is at the leading edge, and how much of it there is at the other. The
+       * count and the clock are the mono tabular pair every figure in this
+       * product wears, so two transcripts side by side line up.
+       */}
+      <div
+        className={cn(
+          "flex min-h-(--row-height) flex-none items-center justify-between gap-3",
+          "border-b border-border bg-surface-soft px-5 py-2",
+        )}
+      >
+        <strong className="text-sm font-medium text-foreground">Transcript</strong>
+        <span className="font-mono text-sm text-faint tabular-nums">
+          {transcript.turns.length} turn{transcript.turns.length === 1 ? "" : "s"}
+          {" · "}
+          {howLong(transcript.durationNs)}
+        </span>
+      </div>
       {transcript.turns.map((turn, at) => {
         const inside = everyStep(turn.spans);
         const failed = inside.some((step) => step.status === "error");
@@ -160,7 +179,9 @@ export function Transcript({
               /* The leading edge is always there and usually invisible, so a
                  cited turn colours it rather than moving the text along. */
               "border-s-[3px] border-s-transparent",
-              "not-first:border-t not-first:border-t-border",
+              /* The panel header supplies the first division; every turn
+                 after it keeps the same row boundary. */
+              "border-t border-t-border",
               /* A grade points here. */
               cited && "border-s-brand bg-selected",
               /* Somebody followed a `Cites turn 3` link to this turn. The
@@ -479,35 +500,50 @@ export function Measures({
   }
 
   return (
-    <dl
-      className={cn(
-        "m-0 grid grid-cols-[repeat(auto-fit,minmax(148px,1fr))] overflow-hidden",
-        /*
-         * The hairline between two measures is the grid gap showing the
-         * background through it, so a row of them needs no border of its own
-         * and no rule about which edge is doubled.
-         */
-        "gap-px rounded-card border border-border bg-border",
-      )}
+    <div
+      className="flex min-w-0 flex-col overflow-hidden rounded-card border border-border bg-surface"
       data-slot="measures"
     >
-      {entries.map(([name, value]) => {
-        const how = MEASURES[name];
-        return (
-          <div
-            className="flex min-w-0 flex-col gap-1 bg-surface p-5"
-            key={name}
-          >
-            <dt className="text-sm text-muted-foreground">
-              {how?.label ?? name.replaceAll("_", " ")}
-            </dt>
-            <dd className="m-0 font-mono text-base text-foreground tabular-nums">
-              {how === undefined ? String(value) : how.shown(value)}
-            </dd>
-          </div>
-        );
-      })}
-    </dl>
+      <div
+        className={cn(
+          "flex min-h-(--row-height) flex-none items-center justify-between gap-3",
+          "border-b border-border bg-surface-soft px-5 py-2",
+        )}
+      >
+        <strong className="text-sm font-medium text-foreground">Measures</strong>
+        <span className="font-mono text-sm text-faint tabular-nums">
+          {entries.length} captured
+        </span>
+      </div>
+      {/*
+       * **A label at the leading edge and a figure in a fixed slot at the
+       * other**, which is what `1E8-0` asks for in as many words: "Value
+       * columns use a stable mono slot, so scans do not jump." A grid of cards
+       * put every figure at a different left edge, so reading four measures
+       * meant finding four of them.
+       */}
+      <dl className="m-0 flex min-w-0 flex-col">
+        {entries.map(([name, value]) => {
+          const how = MEASURES[name];
+          return (
+            <div
+              className={cn(
+                "flex min-w-0 items-baseline justify-between gap-4 px-5 py-2.5",
+                "not-first:border-t not-first:border-t-border",
+              )}
+              key={name}
+            >
+              <dt className="min-w-0 text-sm text-muted-foreground">
+                {how?.label ?? name.replaceAll("_", " ")}
+              </dt>
+              <dd className="m-0 w-[12ch] flex-none text-end font-mono text-sm text-foreground tabular-nums">
+                {how === undefined ? String(value) : how.shown(value)}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
   );
 }
 
@@ -554,9 +590,33 @@ export function MockToolEvidence({
 
   return (
     <div
-      className="flex flex-col gap-4 rounded-card border border-border bg-surface p-5"
+      className="flex min-w-0 flex-col overflow-hidden rounded-card border border-border bg-surface"
       data-slot="mock-tools"
     >
+      {/* The head `1EZ-0` draws: what this record is, and whether it matched. */}
+      <div
+        className={cn(
+          "flex min-h-(--row-height) flex-none items-center justify-between gap-3",
+          "border-b border-border bg-surface-soft px-5 py-2",
+        )}
+      >
+        <strong className="text-sm font-medium text-foreground">Mock tools</strong>
+        <span
+          className={cn(
+            "text-sm",
+            coverage !== null && coverage.uncovered.length === 0
+              ? "text-success"
+              : "text-faint",
+          )}
+        >
+          {coverage === null
+            ? "Nothing was asked"
+            : coverage.uncovered.length === 0
+              ? "Matched"
+              : `${String(coverage.uncovered.length)} ran for real`}
+        </span>
+      </div>
+      <div className="flex flex-col gap-4 p-5">
       {frozen.length === 0 ? null : (
         <div className="flex flex-wrap items-baseline gap-2">
           <strong className="me-2 text-sm font-medium text-foreground">
@@ -577,7 +637,11 @@ export function MockToolEvidence({
         </Help>
       ) : (
         <>
-          <div className="flex flex-wrap items-baseline gap-2">
+          {/*
+           * The good half of the record, on the quiet wash behind a narrow
+           * success edge — a state colour, never the brand one.
+           */}
+          <div className="flex flex-wrap items-baseline gap-2 border-s-[3px] border-s-success bg-surface-soft px-3 py-2">
             <strong className="me-2 text-sm font-medium text-foreground">
               Answered by Egma
             </strong>
@@ -615,6 +679,7 @@ export function MockToolEvidence({
           </Help>
         </>
       )}
+      </div>
     </div>
   );
 }

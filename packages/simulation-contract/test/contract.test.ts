@@ -316,7 +316,7 @@ describe("the two schemas, as one contract", () => {
       string,
       unknown
     >;
-    connection.connection_kind = "retell_chat_api";
+    connection.connection_type = "retell_chat_api";
     expect(validators.spec(nonPhoneWithCarrier)).toBe(false);
     expect(validators.spec.errors).toContainEqual(
       expect.objectContaining({

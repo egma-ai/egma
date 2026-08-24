@@ -327,7 +327,7 @@ describe("the choice between text and phone", () => {
     // alongside it, and the request-only confirmation key was not stored.
     expect(platform.registered.connections).toHaveLength(1);
     expect(platform.registered.connections[0]?.agentPlatform).toBe("retell");
-    expect(platform.registered.connections[0]?.connectionKind).toBe("phone_number");
+    expect(platform.registered.connections[0]?.connectionType).toBe("phone_number");
     expect(platform.registered.connections[0]?.accessVariant).toBe(
       "phone_number.public_e164",
     );

@@ -4719,9 +4719,11 @@ describe("the Retell polling-control cutover (0041)", () => {
 
   const organizationId = newId("org");
   const projectId = newId("prj");
-  const setupId = newId("mns");
-  const importingAgent = newId("rma");
-  const pollingAgent = newId("rma");
+  // Literal ids, because 0042 takes both prefixes out of the shipped minter:
+  // the rows this cutover reads are ones a build before 0042 wrote.
+  const setupId = `mns_${"A".repeat(26)}`;
+  const importingAgent = `rma_${"A".repeat(26)}`;
+  const pollingAgent = `rma_${"B".repeat(26)}`;
   const oldClaim = { id: `ptc_${"A".repeat(26)}`, callId: "call_before_it" };
   const oldFailure = { id: `rif_${"A".repeat(26)}`, callId: "call_lost" };
 
@@ -4970,5 +4972,278 @@ describe("the Retell polling-control cutover (0041)", () => {
       "select count(*)::text as count from retell_call_retry",
     );
     expect(rows).toEqual([{ count: "0" }]);
+  });
+});
+
+describe("agents own platform monitoring (0042)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  // Literal ids, because 0042 takes both prefixes out of the shipped minter:
+  // the rows this cutover reads are ones a build before 0042 wrote.
+  const setupId = `mns_${"A".repeat(26)}`;
+  const selectedAgent = `rma_${"A".repeat(26)}`;
+  const frontDesk = newId("agt");
+  const backOffice = newId("agt");
+  const chatConnection = newId("con");
+  const phoneConnection = newId("con");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("agents_own_platform_monitoring");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0042-"));
+    for (const migration of await readMigrations()) {
+      if (migration.name < "0042") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      `insert into organization (id, name, slug) values ($1, 'Owning', 'owning')`,
+      [organizationId],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Owning', 'owning', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+
+    // Two installed agents, each with a description and a revision, because
+    // this cutover drops both columns out from under rows that hold them.
+    for (const [id, name] of [
+      [frontDesk, "Front desk"],
+      [backOffice, "Back office"],
+    ]) {
+      await client.query(
+        `insert into agent
+           (id, organization_id, project_id, name, description, revision)
+         values ($1, $2, $3, $4, 'Written before the cutover', $5)`,
+        [id, organizationId, projectId, name, newId("rev")],
+      );
+    }
+
+    // Two connection kinds, so the rename has more than one value to carry
+    // and a column of one repeated value cannot pass for a carried one.
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, agent_platform,
+          connection_kind, modality, topology, access_variant, config, revision)
+       values ($1, $2, $3, $4, 'Chat', 'retell', 'retell_chat_api', 'chat',
+          'hosted-broker', 'retell_chat_api.api_key',
+          '{"retellAgentId":"agent_installed"}'::jsonb, $5)`,
+      [chatConnection, organizationId, projectId, frontDesk, newId("rev")],
+    );
+    await client.query(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, agent_platform,
+          connection_kind, modality, topology, access_variant, config, revision)
+       values ($1, $2, $3, $4, 'Line', 'retell', 'phone_number', 'voice',
+          'egma-dials-in', 'phone_number.public_e164',
+          '{"e164":"+15550000000"}'::jsonb, $5)`,
+      [phoneConnection, organizationId, projectId, backOffice, newId("rev")],
+    );
+
+    // The whole of what the old build owned: a setup object, one selected
+    // agent under it, and a retry row hanging off that agent mid-flight.
+    await client.query(
+      `insert into monitoring_setup
+         (id, organization_id, project_id, agent_platform, strategy,
+          credentials, credentials_hint)
+       values ($1, $2, $3, 'retell', 'retell_api_polling', 'sealed', 'key1')`,
+      [setupId, organizationId, projectId],
+    );
+    await client.query(
+      `insert into retell_monitored_agent
+         (id, monitoring_setup_id, organization_id, project_id,
+          platform_agent_id, platform_agent_name, state, pagination_trail,
+          completed_through, next_poll_at, regular_floor_at)
+       values ($1, $2, $3, $4, 'agent_installed', 'Installed', 'active', '[]',
+          now(), now(), now())`,
+      [selectedAgent, setupId, organizationId, projectId],
+    );
+    await client.query(
+      `insert into retell_call_retry
+         (id, organization_id, project_id, retell_monitored_agent_id,
+          provider_call_id, error_kind, attempts, last_attempt_at,
+          next_attempt_at)
+       values ($1, $2, $3, $4, 'call_mid_flight', 'provider_call_refused', 1,
+          now(), now() + interval '30 seconds')`,
+      [newId("rcr"), organizationId, projectId, selectedAgent],
+    );
+
+    const cutover = (await readMigrations()).find(
+      (migration) =>
+        migration.name === "0042_agents_own_platform_monitoring.sql",
+    );
+    if (cutover === undefined) throw new Error("missing migration 0042");
+    await writeFile(path.join(before, cutover.name), cutover.sql);
+    await runMigrations(database.url, before);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("takes the setup object and its selected agents out of the store", async () => {
+    const { rows } = await client.query<{ table_name: string }>(
+      `select table_name from information_schema.tables
+        where table_schema = 'public'
+          and table_name in ('monitoring_setup', 'retell_monitored_agent')`,
+    );
+    expect(rows).toEqual([]);
+    const state = await client.query<{ table_name: string }>(
+      `select table_name from information_schema.tables
+        where table_schema = 'public' and table_name = 'monitoring_state'`,
+    );
+    expect(state.rows).toHaveLength(1);
+  });
+
+  it("carries every connection kind across to the renamed column", async () => {
+    const { rows } = await client.query<{
+      name: string;
+      connection_type: string;
+    }>("select name, connection_type from connection order by name");
+    const columns = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'connection'`,
+    );
+    expect(rows).toEqual([
+      { name: "Chat", connection_type: "retell_chat_api" },
+      { name: "Line", connection_type: "phone_number" },
+    ]);
+    // The rename is in place, and the two columns the connection no longer
+    // owns went with it: the platform now sits on the agent, and concurrent
+    // edits are last-writer-wins.
+    const held = columns.rows.map((row) => row.column_name);
+    expect(held).not.toContain("connection_kind");
+    expect(held).not.toContain("agent_platform");
+    expect(held).not.toContain("revision");
+  });
+
+  it("names the surviving connection type under the column that holds it", async () => {
+    const { rows } = await client.query<{ conname: string }>(
+      `select conname from pg_constraint
+        where conname in ('connection_kind_allowed', 'connection_type_allowed',
+                          'connection_agent_platform_allowed')`,
+    );
+    expect(rows.map((row) => row.conname)).toEqual(["connection_type_allowed"]);
+  });
+
+  it("gives every installed agent the binding, switched off", async () => {
+    const { rows } = await client.query<{
+      name: string;
+      agent_platform: string | null;
+      platform_agent_id: string | null;
+      monitoring_api_key: string | null;
+      monitoring_api_key_hint: string | null;
+      pull_production_calls: boolean;
+    }>(
+      `select name, agent_platform, platform_agent_id, monitoring_api_key,
+              monitoring_api_key_hint, pull_production_calls
+         from agent order by name`,
+    );
+    expect(rows).toEqual([
+      {
+        name: "Back office",
+        agent_platform: null,
+        platform_agent_id: null,
+        monitoring_api_key: null,
+        monitoring_api_key_hint: null,
+        pull_production_calls: false,
+      },
+      {
+        name: "Front desk",
+        agent_platform: null,
+        platform_agent_id: null,
+        monitoring_api_key: null,
+        monitoring_api_key_hint: null,
+        pull_production_calls: false,
+      },
+    ]);
+    // Nothing is carried from the selected-agent rows: an installed agent is
+    // unbound and not pulling until a person pastes a key onto it.
+    const gone = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'agent'
+          and column_name in ('description', 'revision')`,
+    );
+    expect(gone.rows).toEqual([]);
+  });
+
+  it("empties the transient call state it re-keys to the agent", async () => {
+    const { rows } = await client.query<{ count: string }>(
+      "select count(*)::text as count from retell_call_retry",
+    );
+    // Minutes of retry budget and a marker that expires in fifteen, both
+    // naming a row that stops existing here. The poller rebuilds what it
+    // still needs on its next turn.
+    expect(rows).toEqual([{ count: "0" }]);
+    const keyed = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns
+        where table_schema = 'public' and table_name = 'retell_call_retry'
+          and column_name in ('agent_id', 'retell_monitored_agent_id')`,
+    );
+    expect(keyed.rows.map((row) => row.column_name)).toEqual(["agent_id"]);
+  });
+
+  it("refuses a switch on that is not a whole binding", async () => {
+    const halfBound = newId("agt");
+    await client.query(
+      `insert into agent (id, organization_id, project_id, name)
+       values ($1, $2, $3, 'Half bound')`,
+      [halfBound, organizationId, projectId],
+    );
+    await expect(
+      client.query(
+        `update agent set agent_platform = 'retell',
+            platform_agent_id = 'agent_half', pull_production_calls = true
+          where id = $1`,
+        [halfBound],
+      ),
+    ).rejects.toMatchObject({ constraint: "agent_pull_needs_binding" });
+    // The key and its hint travel together, whichever way round they are set.
+    await expect(
+      client.query(
+        `update agent set agent_platform = 'retell', monitoring_api_key = 'sealed'
+          where id = $1`,
+        [halfBound],
+      ),
+    ).rejects.toMatchObject({ constraint: "agent_monitoring_key_hint_agrees" });
+  });
+
+  it("lets only one switched-on agent name one platform agent", async () => {
+    const pulling = newId("agt");
+    const second = newId("agt");
+    for (const [id, name] of [
+      [pulling, "Pulling"],
+      [second, "Second"],
+    ]) {
+      await client.query(
+        `insert into agent
+           (id, organization_id, project_id, name, agent_platform,
+            platform_agent_id, monitoring_api_key, monitoring_api_key_hint)
+         values ($1, $2, $3, $4, 'retell', 'agent_shared', 'sealed', 'key1')`,
+        [id, organizationId, projectId, name],
+      );
+    }
+    // Both may name it while stopped: the index is partial, so it only ever
+    // speaks about the agents actually pulling.
+    await client.query(
+      "update agent set pull_production_calls = true where id = $1",
+      [pulling],
+    );
+    await expect(
+      client.query(
+        "update agent set pull_production_calls = true where id = $1",
+        [second],
+      ),
+    ).rejects.toMatchObject({ constraint: "agent_pulled_platform_agent_unique" });
   });
 });

@@ -643,15 +643,15 @@ function supportedProductionEndModality(
 ): "chat" | "voice" | undefined {
   if (span.source !== "production" || !span.endsTrace) return undefined;
   if (span.agentPlatform === "retell") {
-    if (span.connectionKind === "retell_chat_api") return "chat";
-    if (span.connectionKind === "" || span.connectionKind === "phone_number") {
+    if (span.connectionType === "retell_chat_api") return "chat";
+    if (span.connectionType === "" || span.connectionType === "phone_number") {
       return "voice";
     }
     return undefined;
   }
   if (
     span.agentPlatform === "livekit_agents" &&
-    (span.connectionKind === "" || span.connectionKind === "livekit_room")
+    (span.connectionType === "" || span.connectionType === "livekit_room")
   ) {
     return "voice";
   }

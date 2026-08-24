@@ -375,7 +375,7 @@ async function register(
   check(first(ran.said, "registration") === "created", "the registration was a fresh one");
   check(first(ran.said, "agent_platform") === "retell", "the agent platform is Retell");
   check(
-    first(ran.said, "connection_kind") === "retell_chat_api",
+    first(ran.said, "connection_type") === "retell_chat_api",
     "the connection uses the Retell chat API",
   );
   check(

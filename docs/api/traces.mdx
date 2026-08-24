@@ -184,8 +184,8 @@ curl "https://your-egma-instance/v1/traces?from=2026-08-01T00:00:00Z&to=2026-08-
   The deployment environment reported by the emitter, e.g. `"production"`.
 </ResponseField>
 
-<ResponseField name="connectionKind" type="string">
-  A connection kind only when the emitter explicitly supplied one. Egma does not infer a production connection from an agent platform.
+<ResponseField name="connectionType" type="string">
+  A connection type only when the emitter explicitly supplied one. Egma does not infer a production connection from an agent platform.
 </ResponseField>
 
 <ResponseField name="providerCallId" type="string">

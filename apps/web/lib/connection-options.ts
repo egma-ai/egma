@@ -57,7 +57,7 @@ export function optionNamed(
   catalog: ConnectionOptionCatalog | null,
   connection: {
     readonly agentPlatform: string | null;
-    readonly connectionKind: string;
+    readonly connectionType: string;
     readonly accessVariant: string;
     readonly modality: string;
   },
@@ -65,7 +65,7 @@ export function optionNamed(
   return catalog?.items.find(
     (option) =>
       option.agentPlatform === connection.agentPlatform &&
-      option.connectionKind === connection.connectionKind &&
+      option.connectionType === connection.connectionType &&
       option.accessVariant === connection.accessVariant &&
       option.modality === connection.modality,
   );
@@ -84,7 +84,7 @@ export function candidatesForOption(
   return agent.connectionCandidates.filter(
     (candidate) =>
       candidate.agentPlatform === option.agentPlatform &&
-      candidate.connectionKind === option.connectionKind &&
+      candidate.connectionType === option.connectionType &&
       candidate.accessVariant === option.accessVariant &&
       candidate.modality === option.modality,
   );

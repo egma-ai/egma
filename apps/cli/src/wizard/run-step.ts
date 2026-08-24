@@ -143,7 +143,7 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
   });
 
   if (answer.kind === "refused") {
-    // egma's own sentence, and only egma's. A connection kind whose adapter
+    // egma's own sentence, and only egma's. A connection type whose adapter
     // has not shipped is the case this exists for: the run can never happen,
     // egma said so at creation, and a wizard that softened that into "egma
     // could not start your run" would be hiding the one fact that tells the

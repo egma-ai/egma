@@ -86,7 +86,7 @@ function simulationSpan(
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     runId: claim.runId,
     agentId: claim.agentId,
     agentVersionId: "",
@@ -175,7 +175,7 @@ describe("run grading progress", () => {
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_progress" },
@@ -272,7 +272,7 @@ describe("run grading progress", () => {
       name: "Skewed provider clock",
       connection: {
         agentPlatform: "retell",
-        connectionKind: "retell_chat_api",
+        connectionType: "retell_chat_api",
         accessVariant: "retell_chat_api.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_skewed_clock" },

@@ -27,7 +27,7 @@ export type ReachableConnection = {
   readonly id: string;
   readonly agentId: string;
   readonly agentPlatform: string | null;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly accessVariant: string;
   readonly modality: string;
   readonly productLabel: string;
@@ -66,8 +66,8 @@ export type RunControls = {
   simulationsOf(runId?: string): readonly SeededSimulation[];
   advance(step: AdvanceStep): void;
   setGrading(step: GradingStep): void;
-  noAdapterFor(connectionKind: string): void;
-  noAdapterMessage(connectionKind: string): string;
+  noAdapterFor(connectionType: string): void;
+  noAdapterMessage(connectionType: string): string;
 };
 
 type StoredRun = Omit<SeededRun, "status"> & {
@@ -125,12 +125,11 @@ function bearer(request: FixtureRequest): string {
   const value = request.headers.authorization ?? "";
   return value.startsWith("Bearer ") ? value.slice(7) : "";
 }
-
 export function noAdapterMessage(
-  connectionKind: string,
+  connectionType: string,
   conductable: readonly string[],
 ): string {
-  return `Egma has no simulator adapter for a ${connectionKind} connection yet, so it will not start a run it cannot conduct. Run this suite over a connection Egma conducts today: ${conductable.join(", ")}.`;
+  return `Egma has no simulator adapter for a ${connectionType} connection yet, so it will not start a run it cannot conduct. Run this suite over a connection Egma conducts today: ${conductable.join(", ")}.`;
 }
 
 export function runRoutes(options: {
@@ -171,7 +170,7 @@ export function runRoutes(options: {
         suiteName: "Fixture suite",
         suiteDeleted: false,
         agentPlatform: connection?.agentPlatform ?? null,
-        connectionKind: connection?.connectionKind ?? "",
+        connectionType: connection?.connectionType ?? "",
         accessVariant: connection?.accessVariant ?? "",
         modality: connection?.modality ?? "voice",
         productLabel: connection?.productLabel ?? "",
@@ -276,7 +275,7 @@ export function runRoutes(options: {
       },
       connectionSnapshot: {
         agentPlatform: connection?.agentPlatform ?? null,
-        connectionKind: connection?.connectionKind ?? "",
+        connectionType: connection?.connectionType ?? "",
         accessVariant: connection?.accessVariant ?? "",
         modality: connection?.modality ?? "voice",
         topology: "fixture",
@@ -329,8 +328,8 @@ export function runRoutes(options: {
     if (connection === null || (text(said.agentId) !== "" && text(said.agentId) !== connection.agentId)) {
       return refuse(404, "not_found", "there is no matching active connection");
     }
-    if (!conductable().includes(connection.connectionKind)) {
-      return refuse(422, "no_adapter", noAdapterMessage(connection.connectionKind, conductable()));
+    if (!conductable().includes(connection.connectionType)) {
+      return refuse(422, "no_adapter", noAdapterMessage(connection.connectionType, conductable()));
     }
     const versions = options.testsInSuite(suiteId);
     if (versions.length === 0) return refuse(422, "empty_suite", "an empty suite cannot start a run");
@@ -566,10 +565,10 @@ export function runRoutes(options: {
         simulation.combinedScore = step.combinedScore;
       }
     },
-    noAdapterFor(connectionKind) {
-      withoutAdapter.add(connectionKind);
+    noAdapterFor(connectionType) {
+      withoutAdapter.add(connectionType);
     },
-    noAdapterMessage: (connectionKind) => noAdapterMessage(connectionKind, conductable()),
+    noAdapterMessage: (connectionType) => noAdapterMessage(connectionType, conductable()),
   };
   return { group, controls };
 }
@@ -602,7 +601,7 @@ export function runControlRoutes(controls: () => RunControls): RouteGroup {
         method: "POST",
         path: "/fixture/runs/no-adapter",
         handle: (request) => {
-          controls().noAdapterFor(text(request.body?.connectionKind));
+          controls().noAdapterFor(text(request.body?.connectionType));
           return { status: 200, body: { done: true } };
         },
       },

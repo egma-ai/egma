@@ -237,7 +237,7 @@ const simulationSchema = {
       type: "object",
       properties: {
         agentPlatform: nullable(stringSchema),
-        connectionKind: stringSchema,
+        connectionType: stringSchema,
         accessVariant: stringSchema,
         modality: { type: "string", enum: ["voice", "chat"] },
         topology: stringSchema,
@@ -246,7 +246,7 @@ const simulationSchema = {
       },
       required: [
         "agentPlatform",
-        "connectionKind",
+        "connectionType",
         "accessVariant",
         "modality",
         "topology",

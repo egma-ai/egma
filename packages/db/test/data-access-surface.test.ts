@@ -100,10 +100,10 @@ const WORK_DISPATCHING = [
   "resolveSimulationStanding",
   "sweepOrphanedSimulations",
   "watchGradingWork",
-  // The poller names no customer. It claims the next due selected agent and
+  // The poller names no customer. It claims the next due pulled agent and
   // receives the context narrowed to that row. Every later update and trace
   // write requires that context.
-  "claimDueRetellMonitoringAgent",
+  "claimDueMonitoringPull",
   // One claim per deployment drains the shared durable-ingestion prefix.
   "openDrainOwnership",
 ];
@@ -143,15 +143,13 @@ const CONTEXT_REQUIRING = [
   "cancelRun",
   "changeRole",
   "completeSimulation",
-  "configureLiveKitMonitoring",
-  "configureRetellMonitoring",
   // The kind of one connection, by its id alone — the only connection read
   // that does not name an agent. It exists for the deployment gate in front of
   // run creation, which is handed a connection id and no agent id and has to
   // know whether a phone call is what this run would place. It answers a kind
   // and nothing else, so what this widening lets out is a word from a closed
   // set and never a config or a credential.
-  "connectionKindOf",
+  "connectionTypeOf",
   // What the trace store already holds, asked about a batch at a time and
   // answered without any evidence in it: which spans are committed and what
   // each of their fingerprints is, and which of a list of trace ids exist.
@@ -193,9 +191,9 @@ const CONTEXT_REQUIRING = [
   // dispatch failure is the platform's confession, not a report anybody
   // files.
   "failSimulationDispatch",
-  "failRetellMonitoringTarget",
+  "failMonitoringPull",
   "finishGradingJob",
-  "finishRetellMonitoringScan",
+  "finishMonitoringScan",
   "getAgent",
   "getConnection",
   "getExecutableGraderDefinition",
@@ -222,7 +220,6 @@ const CONTEXT_REQUIRING = [
   "listGraderDefinitions",
   "listGradingJobsForSimulation",
   "listMembers",
-  "listMonitoringSetups",
   "listTestVersions",
   "listMockTools",
   "listPendingInvitations",
@@ -251,6 +248,7 @@ const CONTEXT_REQUIRING = [
   // route. Startup reconciles that deployment-owned route from a complete
   // environment bundle and can name no organization or project.
   "reconcileDeploymentCarrierSettings",
+  "readAgentPullState",
   "isProjectOfOrganization",
   "projectOfOrganizationState",
   // The immutable plan receipt recorded for one production trace.
@@ -264,27 +262,29 @@ const CONTEXT_REQUIRING = [
   "reconcileGraderCatalog",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
-  "recordProductionEvidenceReceived",
   "recordProductionGradingPlan",
   // The durable drainer's grading handoffs after evidence is query-visible.
   // A completed simulation row authorizes one; a supported explicit production
   // end authorizes the other. Neither infers completion from an ordinary span.
   "recordProductionTraces",
   "recordSimulationTraces",
-  // Poll progress belongs to the selected Monitoring agent, never to a
+  // Poll progress belongs to the pulled agent, never to a
   // simulation connection.
-  "checkpointRetellMonitoringPage",
+  "checkpointMonitoringPage",
   "deleteRetellCallRetry",
+  "disablePullProductionCalls",
   "dueRetellCallRetries",
+  "enablePullProductionCalls",
+  "recordPulledCallReceived",
   "recordRetellCallAttempt",
   "sweepExpiredRetellCallMarkers",
   "transientRetellCallState",
   // Register one provider-backed agent and its first connection as one write.
   "registerAgent",
+  "registerAgentPullingProductionCalls",
   "regradeTrace",
   "requestGrading",
-  "recoverRetellMonitoringSetup",
-  "releaseRetellMonitoringLease",
+  "releaseMonitoringLease",
   "releaseGradingJob",
   "releaseSimulationClaim",
   "removeMember",
@@ -294,9 +294,8 @@ const CONTEXT_REQUIRING = [
   // shape's terms.
   "restoreAgent",
   "restoreConnection",
-  "removeMonitoringSetup",
   "renameTestSuite",
-  "renewRetellMonitoringLease",
+  "renewMonitoringLease",
   "runAlreadyStartedFor",
   // The same translation for a mock tool's scope: names off a reviewed file
   // turned into the agents it applies to. It reads agents and nothing else, and
@@ -361,7 +360,7 @@ const CONTEXT_REQUIRING = [
   // definition versions. Future policy edits cannot change that recorded plan.
   "writeGradingPlan",
   "writePlatformSettings",
-  "yieldRetellMonitoringLease",
+  "yieldMonitoringLease",
 ];
 
 /**
@@ -513,7 +512,7 @@ const VALUES = [
   // field shapes, credential rule, and the adapter facts. Never a gate, a hint
   // function, refusal sentence, or credential.
   "connectionOptionMetadata",
-  "connectionKindUsesPlatformCarrier",
+  "connectionTypeUsesPlatformCarrier",
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
@@ -541,7 +540,7 @@ const READ_LIMITS = [
   "MAXIMUM_WINDOW_MILLISECONDS",
 ];
 
-const THE_MONITORED_PLATFORMS = ["MONITORING_PLATFORMS"];
+const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
 const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS"];
 const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
@@ -648,7 +647,7 @@ describe("the data-access module's surface", () => {
         ...PERMISSION,
         ...VALUES,
         ...READ_LIMITS,
-        ...THE_MONITORED_PLATFORMS,
+        ...THE_AGENT_PLATFORMS,
         ...THE_GRADING_BUDGET,
         ...THE_RETELL_BUDGET,
         ...THE_FOLD,

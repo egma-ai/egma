@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
+import { asListInstant } from "../lib/instants.ts";
 import type { Me } from "../lib/me.ts";
 import { COLUMNS, LIST, QUIET } from "../lib/transcript-copy.ts";
 import type { Facts, Listed } from "../lib/transcripts.ts";
@@ -73,7 +74,7 @@ const FACTS: Facts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connectionKind: "",
+  connectionType: "",
   providerCallId: "egma-fixture-capture-1",
   agentPlatform: "livekit_agents",
   platformAgentId: "",
@@ -346,7 +347,15 @@ describe("what the Monitoring list shows", () => {
     const table = await screen.findByRole("table", { name: LIST.tableLabel });
     const link = within(table).getAllByRole("link")[0];
     const href = link?.getAttribute("href") ?? "";
-    const started = within(link as HTMLAnchorElement).getByText("5 minutes ago");
+    /*
+     * The exchange's own moment, absolute and to the second. A list column is
+     * an absolute short date (ticket 09, item a): a column of ages cannot be
+     * scanned, and two exchanges a minute apart read the same for the whole of
+     * the first hour. The precision this column has always had is kept.
+     */
+    const started = within(link as HTMLAnchorElement).getByText(
+      asListInstant(startedAt, "second"),
+    );
 
     expect(started.closest("time")?.dateTime).toBe(startedAt);
     expect(started.closest("time")?.title).toMatch(
@@ -503,11 +512,13 @@ describe("what a quiet Monitoring page says", () => {
     expect(guidance()).toEqual(["set-up-capture"]);
     expect(probed(asked)).toHaveLength(1);
 
+    // The one action this page offers leads to the start-monitoring flow.
+    // There is no monitoring setup object to open any more (ADR-0015).
     expect(
       screen
-        .getByRole("link", { name: QUIET.setUp.action })
+        .getByRole("link", { name: LIST.startMonitoring })
         .getAttribute("href"),
-    ).toBe("/projects/prj_2/monitoring/setup");
+    ).toBe("/projects/prj_2/monitoring/start");
   });
 
   /**

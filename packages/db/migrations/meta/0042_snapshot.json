@@ -1,5 +1,5 @@
 {
-  "id": "d5a1da49-0c5b-46bb-a29b-4e00224ded75",
+  "id": "5c97cfca-9954-4a6e-bcbb-c482935af621",
   "prevId": "007bb90d-f166-42a5-a258-ae8bbe0113a1",
   "version": "7",
   "dialect": "postgresql",
@@ -1734,17 +1734,36 @@
           "primaryKey": false,
           "notNull": true
         },
-        "description": {
-          "name": "description",
+        "agent_platform": {
+          "name": "agent_platform",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
+        "platform_agent_id": {
+          "name": "platform_agent_id",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "monitoring_api_key": {
+          "name": "monitoring_api_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monitoring_api_key_hint": {
+          "name": "monitoring_api_key_hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pull_production_calls": {
+          "name": "pull_production_calls",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "archived_at": {
           "name": "archived_at",
@@ -1817,6 +1836,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "agent_pulled_platform_agent_unique": {
+          "name": "agent_pulled_platform_agent_unique",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_platform",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "platform_agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"agent\".\"pull_production_calls\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1878,6 +1925,22 @@
         "agent_id_prefix": {
           "name": "agent_id_prefix",
           "value": "\"agent\".\"id\" ~ '^agt_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "agent_platform_allowed": {
+          "name": "agent_platform_allowed",
+          "value": "\"agent\".\"agent_platform\" in ('retell', 'livekit_agents')"
+        },
+        "agent_monitoring_key_hint_agrees": {
+          "name": "agent_monitoring_key_hint_agrees",
+          "value": "(\"agent\".\"monitoring_api_key\" is null) = (\"agent\".\"monitoring_api_key_hint\" is null)"
+        },
+        "agent_monitoring_key_needs_platform": {
+          "name": "agent_monitoring_key_needs_platform",
+          "value": "\"agent\".\"monitoring_api_key\" is null or \"agent\".\"agent_platform\" is not null"
+        },
+        "agent_pull_needs_binding": {
+          "name": "agent_pull_needs_binding",
+          "value": "\"agent\".\"pull_production_calls\" = false or (\"agent\".\"agent_platform\" is not null and \"agent\".\"platform_agent_id\" is not null and \"agent\".\"monitoring_api_key\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -1916,14 +1979,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "agent_platform": {
-          "name": "agent_platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "connection_kind": {
-          "name": "connection_kind",
+        "connection_type": {
+          "name": "connection_type",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -1969,12 +2026,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
         },
         "archived_at": {
           "name": "archived_at",
@@ -2131,13 +2182,9 @@
           "name": "connection_id_prefix",
           "value": "\"connection\".\"id\" ~ '^con_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "connection_agent_platform_allowed": {
-          "name": "connection_agent_platform_allowed",
-          "value": "\"connection\".\"agent_platform\" in ('retell', 'livekit_agents')"
-        },
-        "connection_kind_allowed": {
-          "name": "connection_kind_allowed",
-          "value": "\"connection\".\"connection_kind\" in ('retell_chat_api', 'phone_number', 'livekit_room')"
+        "connection_type_allowed": {
+          "name": "connection_type_allowed",
+          "value": "\"connection\".\"connection_type\" in ('retell_chat_api', 'phone_number', 'livekit_room')"
         },
         "connection_access_variant_allowed": {
           "name": "connection_access_variant_allowed",
@@ -2158,8 +2205,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.monitoring_setup": {
-      "name": "monitoring_setup",
+    "public.monitoring_state": {
+      "name": "monitoring_state",
       "schema": "",
       "columns": {
         "id": {
@@ -2168,407 +2215,8 @@
           "primaryKey": true,
           "notNull": true
         },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "agent_platform": {
-          "name": "agent_platform",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "strategy": {
-          "name": "strategy",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "credentials": {
-          "name": "credentials",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "credentials_hint": {
-          "name": "credentials_hint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "health_state": {
-          "name": "health_state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'healthy'"
-        },
-        "blocked_until": {
-          "name": "blocked_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "failure_started_at": {
-          "name": "failure_started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "consecutive_failures": {
-          "name": "consecutive_failures",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_error_at": {
-          "name": "last_error_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_recovered_at": {
-          "name": "last_recovered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_received_at": {
-          "name": "last_received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "monitoring_setup_project_idx": {
-          "name": "monitoring_setup_project_idx",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "monitoring_setup_organization_id_organization_id_fk": {
-          "name": "monitoring_setup_organization_id_organization_id_fk",
-          "tableFrom": "monitoring_setup",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "monitoring_setup_created_by_user_id_fk": {
-          "name": "monitoring_setup_created_by_user_id_fk",
-          "tableFrom": "monitoring_setup",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "monitoring_setup_project_organization_fk": {
-          "name": "monitoring_setup_project_organization_fk",
-          "tableFrom": "monitoring_setup",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "monitoring_setup_project_platform_unique": {
-          "name": "monitoring_setup_project_platform_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "project_id",
-            "agent_platform"
-          ]
-        },
-        "monitoring_setup_id_tenant_unique": {
-          "name": "monitoring_setup_id_tenant_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "project_id",
-            "organization_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "monitoring_setup_id_prefix": {
-          "name": "monitoring_setup_id_prefix",
-          "value": "\"monitoring_setup\".\"id\" ~ '^mns_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "monitoring_setup_platform_allowed": {
-          "name": "monitoring_setup_platform_allowed",
-          "value": "\"monitoring_setup\".\"agent_platform\" in ('retell', 'livekit_agents')"
-        },
-        "monitoring_setup_strategy_allowed": {
-          "name": "monitoring_setup_strategy_allowed",
-          "value": "\"monitoring_setup\".\"strategy\" in ('retell_api_polling', 'livekit_otlp')"
-        },
-        "monitoring_setup_health_allowed": {
-          "name": "monitoring_setup_health_allowed",
-          "value": "\"monitoring_setup\".\"health_state\" in ('healthy', 'invalid_credential', 'rate_limited', 'provider_unavailable')"
-        },
-        "monitoring_setup_credentials_hint_agrees": {
-          "name": "monitoring_setup_credentials_hint_agrees",
-          "value": "(\"monitoring_setup\".\"credentials\" is null) = (\"monitoring_setup\".\"credentials_hint\" is null)"
-        },
-        "monitoring_setup_platform_strategy_agrees": {
-          "name": "monitoring_setup_platform_strategy_agrees",
-          "value": "(\"monitoring_setup\".\"agent_platform\" = 'retell' and \"monitoring_setup\".\"strategy\" = 'retell_api_polling' and \"monitoring_setup\".\"credentials\" is not null) or (\"monitoring_setup\".\"agent_platform\" = 'livekit_agents' and \"monitoring_setup\".\"strategy\" = 'livekit_otlp' and \"monitoring_setup\".\"credentials\" is null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.retell_call_retry": {
-      "name": "retell_call_retry",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "retell_monitored_agent_id": {
-          "name": "retell_monitored_agent_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider_call_id": {
-          "name": "provider_call_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "error_kind": {
-          "name": "error_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "last_attempt_at": {
-          "name": "last_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "import_generation": {
-          "name": "import_generation",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "retell_call_retry_due_idx": {
-          "name": "retell_call_retry_due_idx",
-          "columns": [
-            {
-              "expression": "retell_monitored_agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "next_attempt_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"retell_call_retry\".\"next_attempt_at\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "retell_call_retry_organization_id_organization_id_fk": {
-          "name": "retell_call_retry_organization_id_organization_id_fk",
-          "tableFrom": "retell_call_retry",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "retell_call_retry_project_organization_fk": {
-          "name": "retell_call_retry_project_organization_fk",
-          "tableFrom": "retell_call_retry",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "retell_call_retry_agent_tenant_fk": {
-          "name": "retell_call_retry_agent_tenant_fk",
-          "tableFrom": "retell_call_retry",
-          "tableTo": "retell_monitored_agent",
-          "columnsFrom": [
-            "retell_monitored_agent_id",
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id",
-            "organization_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "retell_call_retry_project_call_unique": {
-          "name": "retell_call_retry_project_call_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "project_id",
-            "provider_call_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "retell_call_retry_id_prefix": {
-          "name": "retell_call_retry_id_prefix",
-          "value": "\"retell_call_retry\".\"id\" ~ '^rcr_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "retell_call_retry_one_schedule": {
-          "name": "retell_call_retry_one_schedule",
-          "value": "(\"retell_call_retry\".\"next_attempt_at\" is null) <> (\"retell_call_retry\".\"expires_at\" is null)"
-        },
-        "retell_call_retry_attempts_bounded": {
-          "name": "retell_call_retry_attempts_bounded",
-          "value": "\"retell_call_retry\".\"attempts\" between 1 and 4"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.retell_monitored_agent": {
-      "name": "retell_monitored_agent",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "monitoring_setup_id": {
-          "name": "monitoring_setup_id",
+        "agent_id": {
+          "name": "agent_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
@@ -2584,25 +2232,6 @@
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
-        },
-        "platform_agent_id": {
-          "name": "platform_agent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "platform_agent_name": {
-          "name": "platform_agent_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'importing'"
         },
         "scan_kind": {
           "name": "scan_kind",
@@ -2679,6 +2308,12 @@
           "notNull": true,
           "default": 0
         },
+        "failure_started_at": {
+          "name": "failure_started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "last_error_kind": {
           "name": "last_error_kind",
           "type": "text",
@@ -2697,8 +2332,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "last_call_received_at": {
-          "name": "last_call_received_at",
+        "last_received_at": {
+          "name": "last_received_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -2719,8 +2354,8 @@
         }
       },
       "indexes": {
-        "retell_monitored_agent_due_idx": {
-          "name": "retell_monitored_agent_due_idx",
+        "monitoring_state_due_idx": {
+          "name": "monitoring_state_due_idx",
           "columns": [
             {
               "expression": "next_poll_at",
@@ -2740,8 +2375,8 @@
           "method": "btree",
           "with": {}
         },
-        "retell_monitored_agent_project_idx": {
-          "name": "retell_monitored_agent_project_idx",
+        "monitoring_state_project_idx": {
+          "name": "monitoring_state_project_idx",
           "columns": [
             {
               "expression": "project_id",
@@ -2757,9 +2392,9 @@
         }
       },
       "foreignKeys": {
-        "retell_monitored_agent_organization_id_organization_id_fk": {
-          "name": "retell_monitored_agent_organization_id_organization_id_fk",
-          "tableFrom": "retell_monitored_agent",
+        "monitoring_state_organization_id_organization_id_fk": {
+          "name": "monitoring_state_organization_id_organization_id_fk",
+          "tableFrom": "monitoring_state",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -2770,9 +2405,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "retell_monitored_agent_project_organization_fk": {
-          "name": "retell_monitored_agent_project_organization_fk",
-          "tableFrom": "retell_monitored_agent",
+        "monitoring_state_project_organization_fk": {
+          "name": "monitoring_state_project_organization_fk",
+          "tableFrom": "monitoring_state",
           "tableTo": "project",
           "columnsFrom": [
             "project_id",
@@ -2785,18 +2420,433 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "retell_monitored_agent_setup_tenant_fk": {
-          "name": "retell_monitored_agent_setup_tenant_fk",
-          "tableFrom": "retell_monitored_agent",
-          "tableTo": "monitoring_setup",
+        "monitoring_state_agent_project_fk": {
+          "name": "monitoring_state_agent_project_fk",
+          "tableFrom": "monitoring_state",
+          "tableTo": "agent",
           "columnsFrom": [
-            "monitoring_setup_id",
+            "agent_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "monitoring_state_agent_unique": {
+          "name": "monitoring_state_agent_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "agent_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "monitoring_state_id_prefix": {
+          "name": "monitoring_state_id_prefix",
+          "value": "\"monitoring_state\".\"id\" ~ '^mst_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "monitoring_state_scan_kind_allowed": {
+          "name": "monitoring_state_scan_kind_allowed",
+          "value": "\"monitoring_state\".\"scan_kind\" in ('historical_import', 'regular')"
+        },
+        "monitoring_state_scan_agrees": {
+          "name": "monitoring_state_scan_agrees",
+          "value": "(\"monitoring_state\".\"scan_kind\" is null and \"monitoring_state\".\"scan_from\" is null and \"monitoring_state\".\"scan_through\" is null and \"monitoring_state\".\"pagination_key\" is null) or (\"monitoring_state\".\"scan_kind\" is not null and \"monitoring_state\".\"scan_from\" is not null and \"monitoring_state\".\"scan_through\" is not null)"
+        },
+        "monitoring_state_lease_agrees": {
+          "name": "monitoring_state_lease_agrees",
+          "value": "(\"monitoring_state\".\"lease_owner\" is null) = (\"monitoring_state\".\"lease_expires_at\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.retell_call_retry": {
+      "name": "retell_call_retry",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_call_id": {
+          "name": "provider_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "error_kind": {
+          "name": "error_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "last_attempt_at": {
+          "name": "last_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "import_generation": {
+          "name": "import_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "retell_call_retry_due_idx": {
+          "name": "retell_call_retry_due_idx",
+          "columns": [
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"retell_call_retry\".\"next_attempt_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "retell_call_retry_organization_id_organization_id_fk": {
+          "name": "retell_call_retry_organization_id_organization_id_fk",
+          "tableFrom": "retell_call_retry",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "retell_call_retry_project_organization_fk": {
+          "name": "retell_call_retry_project_organization_fk",
+          "tableFrom": "retell_call_retry",
+          "tableTo": "project",
+          "columnsFrom": [
             "project_id",
             "organization_id"
           ],
           "columnsTo": [
             "id",
+            "organization_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "retell_call_retry_agent_project_fk": {
+          "name": "retell_call_retry_agent_project_fk",
+          "tableFrom": "retell_call_retry",
+          "tableTo": "agent",
+          "columnsFrom": [
+            "agent_id",
+            "project_id"
+          ],
+          "columnsTo": [
+            "id",
+            "project_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "retell_call_retry_project_call_unique": {
+          "name": "retell_call_retry_project_call_unique",
+          "nullsNotDistinct": false,
+          "columns": [
             "project_id",
+            "provider_call_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "retell_call_retry_id_prefix": {
+          "name": "retell_call_retry_id_prefix",
+          "value": "\"retell_call_retry\".\"id\" ~ '^rcr_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "retell_call_retry_one_schedule": {
+          "name": "retell_call_retry_one_schedule",
+          "value": "(\"retell_call_retry\".\"next_attempt_at\" is null) <> (\"retell_call_retry\".\"expires_at\" is null)"
+        },
+        "retell_call_retry_attempts_bounded": {
+          "name": "retell_call_retry_attempts_bounded",
+          "value": "\"retell_call_retry\".\"attempts\" between 1 and 4"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.grader": {
+      "name": "grader",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "required": {
+          "name": "required",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'simulations'"
+        },
+        "production_sample_rate": {
+          "name": "production_sample_rate",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 100
+        },
+        "production_sample_accumulator": {
+          "name": "production_sample_accumulator",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "current_version_id": {
+          "name": "current_version_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "grader_organization_id_project_id_idx": {
+          "name": "grader_organization_id_project_id_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"grader\".\"deleted_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "grader_library_id_idx": {
+          "name": "grader_library_id_idx",
+          "columns": [
+            {
+              "expression": "library_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "grader_organization_id_organization_id_fk": {
+          "name": "grader_organization_id_organization_id_fk",
+          "tableFrom": "grader",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "grader_library_id_grader_library_id_fk": {
+          "name": "grader_library_id_grader_library_id_fk",
+          "tableFrom": "grader",
+          "tableTo": "grader_library",
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "grader_current_version_id_grader_version_id_fk": {
+          "name": "grader_current_version_id_grader_version_id_fk",
+          "tableFrom": "grader",
+          "tableTo": "grader_version",
+          "columnsFrom": [
+            "current_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "grader_created_by_user_id_fk": {
+          "name": "grader_created_by_user_id_fk",
+          "tableFrom": "grader",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "grader_project_organization_fk": {
+          "name": "grader_project_organization_fk",
+          "tableFrom": "grader",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
             "organization_id"
           ],
           "onDelete": "cascade",
@@ -2805,51 +2855,38 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "retell_monitored_agent_setup_platform_agent_unique": {
-          "name": "retell_monitored_agent_setup_platform_agent_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "monitoring_setup_id",
-            "platform_agent_id"
-          ]
-        },
-        "retell_monitored_agent_id_tenant_unique": {
-          "name": "retell_monitored_agent_id_tenant_unique",
+        "grader_id_library_id_unique": {
+          "name": "grader_id_library_id_unique",
           "nullsNotDistinct": false,
           "columns": [
             "id",
-            "project_id",
-            "organization_id"
+            "library_id"
           ]
         }
       },
       "policies": {},
       "checkConstraints": {
-        "retell_monitored_agent_id_prefix": {
-          "name": "retell_monitored_agent_id_prefix",
-          "value": "\"retell_monitored_agent\".\"id\" ~ '^rma_[0-9A-HJKMNP-TV-Z]{26}$'"
+        "grader_id_prefix": {
+          "name": "grader_id_prefix",
+          "value": "\"grader\".\"id\" ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "retell_monitored_agent_state_allowed": {
-          "name": "retell_monitored_agent_state_allowed",
-          "value": "\"retell_monitored_agent\".\"state\" in ('importing', 'active', 'degraded')"
+        "grader_scope_allowed": {
+          "name": "grader_scope_allowed",
+          "value": "\"grader\".\"scope\" in ('simulations', 'production', 'both')"
         },
-        "retell_monitored_agent_scan_kind_allowed": {
-          "name": "retell_monitored_agent_scan_kind_allowed",
-          "value": "\"retell_monitored_agent\".\"scan_kind\" in ('historical_import', 'regular')"
+        "grader_production_sample_rate_is_a_percentage": {
+          "name": "grader_production_sample_rate_is_a_percentage",
+          "value": "\"grader\".\"production_sample_rate\" between 0 and 100"
         },
-        "retell_monitored_agent_scan_agrees": {
-          "name": "retell_monitored_agent_scan_agrees",
-          "value": "(\"retell_monitored_agent\".\"scan_kind\" is null and \"retell_monitored_agent\".\"scan_from\" is null and \"retell_monitored_agent\".\"scan_through\" is null and \"retell_monitored_agent\".\"pagination_key\" is null) or (\"retell_monitored_agent\".\"scan_kind\" is not null and \"retell_monitored_agent\".\"scan_from\" is not null and \"retell_monitored_agent\".\"scan_through\" is not null)"
-        },
-        "retell_monitored_agent_lease_agrees": {
-          "name": "retell_monitored_agent_lease_agrees",
-          "value": "(\"retell_monitored_agent\".\"lease_owner\" is null) = (\"retell_monitored_agent\".\"lease_expires_at\" is null)"
+        "grader_production_sample_accumulator_is_a_remainder": {
+          "name": "grader_production_sample_accumulator_is_a_remainder",
+          "value": "\"grader\".\"production_sample_accumulator\" between 0 and 99"
         }
       },
       "isRLSEnabled": false
     },
-    "public.grader_definition": {
-      "name": "grader_definition",
+    "public.grader_library": {
+      "name": "grader_library",
       "schema": "",
       "columns": {
         "id": {
@@ -2888,14 +2925,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "scope_editable": {
-          "name": "scope_editable",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "current_definition_version": {
-          "name": "current_definition_version",
+        "version": {
+          "name": "version",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -2917,8 +2948,8 @@
         }
       },
       "indexes": {
-        "grader_definition_predefined_name_unique": {
-          "name": "grader_definition_predefined_name_unique",
+        "grader_library_predefined_name_unique": {
+          "name": "grader_library_predefined_name_unique",
           "columns": [
             {
               "expression": "name",
@@ -2928,13 +2959,13 @@
             }
           ],
           "isUnique": true,
-          "where": "\"grader_definition\".\"organization_id\" is null",
+          "where": "\"grader_library\".\"organization_id\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
         },
-        "grader_definition_organization_id_project_id_idx": {
-          "name": "grader_definition_organization_id_project_id_idx",
+        "grader_library_organization_id_project_id_idx": {
+          "name": "grader_library_organization_id_project_id_idx",
           "columns": [
             {
               "expression": "organization_id",
@@ -2956,9 +2987,9 @@
         }
       },
       "foreignKeys": {
-        "grader_definition_organization_id_organization_id_fk": {
-          "name": "grader_definition_organization_id_organization_id_fk",
-          "tableFrom": "grader_definition",
+        "grader_library_organization_id_organization_id_fk": {
+          "name": "grader_library_organization_id_organization_id_fk",
+          "tableFrom": "grader_library",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -2969,9 +3000,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "grader_definition_project_organization_fk": {
-          "name": "grader_definition_project_organization_fk",
-          "tableFrom": "grader_definition",
+        "grader_library_project_organization_fk": {
+          "name": "grader_library_project_organization_fk",
+          "tableFrom": "grader_library",
           "tableTo": "project",
           "columnsFrom": [
             "project_id",
@@ -2984,16 +3015,16 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "grader_definition_current_version_fk": {
-          "name": "grader_definition_current_version_fk",
-          "tableFrom": "grader_definition",
-          "tableTo": "grader_definition_version",
+        "grader_library_current_version_fk": {
+          "name": "grader_library_current_version_fk",
+          "tableFrom": "grader_library",
+          "tableTo": "grader_library_version",
           "columnsFrom": [
             "id",
-            "current_definition_version"
+            "version"
           ],
           "columnsTo": [
-            "definition_id",
+            "library_id",
             "version"
           ],
           "onDelete": "no action",
@@ -3004,27 +3035,27 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "grader_definition_id_prefix": {
-          "name": "grader_definition_id_prefix",
-          "value": "\"grader_definition\".\"id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        "grader_library_id_prefix": {
+          "name": "grader_library_id_prefix",
+          "value": "\"grader_library\".\"id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "grader_definition_type_allowed": {
-          "name": "grader_definition_type_allowed",
-          "value": "\"grader_definition\".\"type\" in ('llm_as_judge', 'code')"
+        "grader_library_type_allowed": {
+          "name": "grader_library_type_allowed",
+          "value": "\"grader_library\".\"type\" in ('llm_as_judge', 'code')"
         },
-        "grader_definition_tenancy_is_whole_or_egmas": {
-          "name": "grader_definition_tenancy_is_whole_or_egmas",
-          "value": "(\"grader_definition\".\"organization_id\" is null) = (\"grader_definition\".\"project_id\" is null)"
+        "grader_library_tenancy_is_whole_or_egmas": {
+          "name": "grader_library_tenancy_is_whole_or_egmas",
+          "value": "(\"grader_library\".\"organization_id\" is null) = (\"grader_library\".\"project_id\" is null)"
         }
       },
       "isRLSEnabled": false
     },
-    "public.grader_definition_version": {
-      "name": "grader_definition_version",
+    "public.grader_library_version": {
+      "name": "grader_library_version",
       "schema": "",
       "columns": {
-        "definition_id": {
-          "name": "definition_id",
+        "library_id": {
+          "name": "library_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
@@ -3041,14 +3072,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "parameter_contract": {
-          "name": "parameter_contract",
+        "params": {
+          "name": "params",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
-        "output_contract": {
-          "name": "output_contract",
+        "output_definition": {
+          "name": "output_definition",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
@@ -3065,8 +3096,93 @@
           "primaryKey": false,
           "notNull": false
         },
-        "modalities": {
-          "name": "modalities",
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "grader_library_version_library_id_grader_library_id_fk": {
+          "name": "grader_library_version_library_id_grader_library_id_fk",
+          "tableFrom": "grader_library_version",
+          "tableTo": "grader_library",
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "grader_library_version_library_id_version_pk": {
+          "name": "grader_library_version_library_id_version_pk",
+          "columns": [
+            "library_id",
+            "version"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "grader_library_version_library_id_prefix": {
+          "name": "grader_library_version_library_id_prefix",
+          "value": "\"grader_library_version\".\"library_id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
+        },
+        "grader_library_version_source_code_within_budget": {
+          "name": "grader_library_version_source_code_within_budget",
+          "value": "\"grader_library_version\".\"source_code\" is null or octet_length(\"grader_library_version\".\"source_code\") <= 262144"
+        },
+        "grader_library_version_source_code_columns_agree": {
+          "name": "grader_library_version_source_code_columns_agree",
+          "value": "(\"grader_library_version\".\"source_code\" is null) = (\"grader_library_version\".\"source_code_language\" is null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.grader_version": {
+      "name": "grader_version",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "grader_id": {
+          "name": "grader_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "text COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "library_version": {
+          "name": "library_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "config": {
+          "name": "config",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
@@ -3074,6 +3190,12 @@
         "judge_model": {
           "name": "judge_model",
           "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
@@ -3087,231 +3209,70 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "grader_definition_version_definition_id_grader_definition_id_fk": {
-          "name": "grader_definition_version_definition_id_grader_definition_id_fk",
-          "tableFrom": "grader_definition_version",
-          "tableTo": "grader_definition",
+        "grader_version_created_by_user_id_fk": {
+          "name": "grader_version_created_by_user_id_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "user",
           "columnsFrom": [
-            "definition_id"
+            "created_by"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "cascade",
+          "onDelete": "set null",
           "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "grader_definition_version_definition_id_version_pk": {
-          "name": "grader_definition_version_definition_id_version_pk",
-          "columns": [
-            "definition_id",
+        },
+        "grader_version_library_version_fk": {
+          "name": "grader_version_library_version_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "grader_library_version",
+          "columnsFrom": [
+            "library_id",
+            "library_version"
+          ],
+          "columnsTo": [
+            "library_id",
             "version"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "grader_definition_version_definition_id_prefix": {
-          "name": "grader_definition_version_definition_id_prefix",
-          "value": "\"grader_definition_version\".\"definition_id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "grader_definition_version_version_is_positive": {
-          "name": "grader_definition_version_version_is_positive",
-          "value": "\"grader_definition_version\".\"version\" >= 1"
-        },
-        "grader_definition_version_modalities_allowed": {
-          "name": "grader_definition_version_modalities_allowed",
-          "value": "\"grader_definition_version\".\"modalities\" in (\n        '[\"chat\"]'::jsonb,\n        '[\"voice\"]'::jsonb,\n        '[\"chat\", \"voice\"]'::jsonb,\n        '[\"voice\", \"chat\"]'::jsonb\n      )"
-        },
-        "grader_definition_version_source_code_columns_agree": {
-          "name": "grader_definition_version_source_code_columns_agree",
-          "value": "(\"grader_definition_version\".\"source_code\" is null) = (\"grader_definition_version\".\"source_code_language\" is null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.project_grader": {
-      "name": "project_grader",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "grader_definition_id": {
-          "name": "grader_definition_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scope": {
-          "name": "scope",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pass_threshold": {
-          "name": "pass_threshold",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "archived_at": {
-          "name": "archived_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "project_grader_active_definition_unique": {
-          "name": "project_grader_active_definition_unique",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "grader_definition_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"project_grader\".\"archived_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "project_grader_organization_id_project_id_idx": {
-          "name": "project_grader_organization_id_project_id_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"project_grader\".\"archived_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "project_grader_definition_id_idx": {
-          "name": "project_grader_definition_id_idx",
-          "columns": [
-            {
-              "expression": "grader_definition_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "project_grader_organization_id_organization_id_fk": {
-          "name": "project_grader_organization_id_organization_id_fk",
-          "tableFrom": "project_grader",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "project_grader_grader_definition_id_grader_definition_id_fk": {
-          "name": "project_grader_grader_definition_id_grader_definition_id_fk",
-          "tableFrom": "project_grader",
-          "tableTo": "grader_definition",
-          "columnsFrom": [
-            "grader_definition_id"
-          ],
-          "columnsTo": [
-            "id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "project_grader_project_organization_fk": {
-          "name": "project_grader_project_organization_fk",
-          "tableFrom": "project_grader",
-          "tableTo": "project",
+        "grader_version_grader_library_fk": {
+          "name": "grader_version_grader_library_fk",
+          "tableFrom": "grader_version",
+          "tableTo": "grader",
           "columnsFrom": [
-            "project_id",
-            "organization_id"
+            "grader_id",
+            "library_id"
           ],
           "columnsTo": [
             "id",
-            "organization_id"
+            "library_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "grader_version_grader_id_version_unique": {
+          "name": "grader_version_grader_id_version_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "grader_id",
+            "version"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
-        "project_grader_id_prefix": {
-          "name": "project_grader_id_prefix",
-          "value": "\"project_grader\".\"id\" ~ '^grd_[0-9A-HJKMNP-TV-Z]{26}$'"
+        "grader_version_id_prefix": {
+          "name": "grader_version_id_prefix",
+          "value": "\"grader_version\".\"id\" ~ '^grv_[0-9A-HJKMNP-TV-Z]{26}$'"
         },
-        "project_grader_scope_is_closed_object": {
-          "name": "project_grader_scope_is_closed_object",
-          "value": "jsonb_typeof(\"project_grader\".\"scope\") is not distinct from 'object'\n        and (\"project_grader\".\"scope\" - array['simulations', 'production']::text[])\n          is not distinct from '{}'::jsonb\n        and \"project_grader\".\"scope\" ?& array['simulations', 'production']::text[]\n        and jsonb_typeof(\"project_grader\".\"scope\"->'simulations') is not distinct from 'array'\n        and (\n          \"project_grader\".\"scope\"->'production' = 'null'::jsonb\n          or jsonb_typeof(\"project_grader\".\"scope\"->'production') is not distinct from 'object'\n        )"
-        },
-        "project_grader_pass_threshold_is_normalized": {
-          "name": "project_grader_pass_threshold_is_normalized",
-          "value": "\"project_grader\".\"pass_threshold\" between 0 and 1"
+        "grader_version_judge_model_allowed": {
+          "name": "grader_version_judge_model_allowed",
+          "value": "\"grader_version\".\"judge_model\" is null or \"grader_version\".\"judge_model\" = jsonb_build_object('provider', 'openai', 'model', 'gpt-4o-mini')"
         }
       },
       "isRLSEnabled": false
@@ -4576,6 +4537,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "verdict": {
+          "name": "verdict",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "reason": {
           "name": "reason",
           "type": "text",
@@ -4677,11 +4644,19 @@
         },
         "run_event_run_shape": {
           "name": "run_event_run_shape",
-          "value": "\"run_event\".\"kind\" <> 'run'\n        or (\"run_event\".\"simulation_id\" is null\n          and \"run_event\".\"reason\" is null\n          and \"run_event\".\"status\" in ('pending', 'running', 'completed', 'canceled'))"
+          "value": "\"run_event\".\"kind\" <> 'run'\n        or (\"run_event\".\"simulation_id\" is null\n          and \"run_event\".\"verdict\" is null and \"run_event\".\"reason\" is null\n          and \"run_event\".\"status\" in ('pending', 'running', 'completed', 'canceled'))"
         },
         "run_event_simulation_shape": {
           "name": "run_event_simulation_shape",
           "value": "\"run_event\".\"kind\" <> 'simulation'\n        or (\"run_event\".\"simulation_id\" is not null\n          and \"run_event\".\"status\" in ('queued', 'claimed', 'running', 'completed', 'failed', 'canceled'))"
+        },
+        "run_event_verdict_allowed": {
+          "name": "run_event_verdict_allowed",
+          "value": "\"run_event\".\"verdict\" is null or \"run_event\".\"verdict\" in ('passed', 'failed', 'skipped', 'errored')"
+        },
+        "run_event_verdict_agrees": {
+          "name": "run_event_verdict_agrees",
+          "value": "\"run_event\".\"verdict\" is null\n        or (\"run_event\".\"status\" = 'completed' and \"run_event\".\"verdict\" in ('passed', 'failed', 'skipped'))\n        or (\"run_event\".\"status\" = 'failed' and \"run_event\".\"verdict\" = 'errored')\n        or (\"run_event\".\"status\" = 'canceled' and \"run_event\".\"verdict\" = 'skipped')"
         },
         "run_event_reason_agrees": {
           "name": "run_event_reason_agrees",
@@ -5504,27 +5479,33 @@
         },
         "trace_id": {
           "name": "trace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "trace_started_at": {
-          "name": "trace_started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "run_id": {
-          "name": "run_id",
           "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
-        "entries": {
-          "name": "entries",
-          "type": "jsonb",
+        "first_span_at": {
+          "name": "first_span_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "last_span_at": {
+          "name": "last_span_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "root_closed_at": {
+          "name": "root_closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "status": {
           "name": "status",
@@ -5550,13 +5531,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "sequence_base": {
-          "name": "sequence_base",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
         "attempts": {
           "name": "attempts",
           "type": "integer",
@@ -5567,6 +5541,12 @@
         "last_error": {
           "name": "last_error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "regrade_grader_id": {
+          "name": "regrade_grader_id",
+          "type": "text COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
@@ -5637,6 +5617,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "grading_job_regrade_grader_id_grader_id_fk": {
+          "name": "grading_job_regrade_grader_id_grader_id_fk",
+          "tableFrom": "grading_job",
+          "tableTo": "grader",
+          "columnsFrom": [
+            "regrade_grader_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "grading_job_project_organization_fk": {
           "name": "grading_job_project_organization_fk",
           "tableFrom": "grading_job",
@@ -5694,19 +5687,27 @@
         },
         "grading_job_status_allowed": {
           "name": "grading_job_status_allowed",
-          "value": "\"grading_job\".\"status\" in ('pending', 'claimed', 'abandoned')"
+          "value": "\"grading_job\".\"status\" in ('pending', 'claimed', 'graded', 'abandoned')"
         },
         "grading_job_source_allowed": {
           "name": "grading_job_source_allowed",
           "value": "\"grading_job\".\"source\" in ('simulation', 'production')"
         },
-        "grading_job_source_names_its_control_record": {
-          "name": "grading_job_source_names_its_control_record",
-          "value": "case \"grading_job\".\"source\"\n        when 'simulation' then \"grading_job\".\"simulation_id\" is not null and \"grading_job\".\"run_id\" is not null\n        when 'production' then \"grading_job\".\"simulation_id\" is null and \"grading_job\".\"run_id\" is null\n        else false\n      end"
+        "grading_job_source_names_its_conversation": {
+          "name": "grading_job_source_names_its_conversation",
+          "value": "case \"grading_job\".\"source\"\n        when 'simulation' then \"grading_job\".\"simulation_id\" is not null and \"grading_job\".\"trace_id\" is null\n        when 'production' then \"grading_job\".\"trace_id\" is not null and \"grading_job\".\"simulation_id\" is null\n        else false\n      end"
         },
-        "grading_job_entries_are_a_nonempty_list": {
-          "name": "grading_job_entries_are_a_nonempty_list",
-          "value": "jsonb_typeof(\"grading_job\".\"entries\") = 'array'\n        and jsonb_array_length(\"grading_job\".\"entries\") > 0"
+        "grading_job_production_carries_its_trace_times": {
+          "name": "grading_job_production_carries_its_trace_times",
+          "value": "(\"grading_job\".\"source\" = 'production') = (\"grading_job\".\"first_span_at\" is not null\n        and \"grading_job\".\"last_span_at\" is not null\n        and \"grading_job\".\"last_seen_at\" is not null)"
+        },
+        "grading_job_only_a_trace_closes_a_root": {
+          "name": "grading_job_only_a_trace_closes_a_root",
+          "value": "\"grading_job\".\"root_closed_at\" is null or \"grading_job\".\"source\" = 'production'"
+        },
+        "grading_job_trace_times_run_forwards": {
+          "name": "grading_job_trace_times_run_forwards",
+          "value": "\"grading_job\".\"first_span_at\" is null or \"grading_job\".\"first_span_at\" <= \"grading_job\".\"last_span_at\""
         },
         "grading_job_claim_columns_agree": {
           "name": "grading_job_claim_columns_agree",
@@ -5720,17 +5721,17 @@
           "name": "grading_job_claimed_shape",
           "value": "\"grading_job\".\"status\" <> 'claimed'\n        or (\"grading_job\".\"claimed_at\" is not null and \"grading_job\".\"finished_at\" is null)"
         },
-        "grading_job_abandoned_shape": {
-          "name": "grading_job_abandoned_shape",
-          "value": "(\"grading_job\".\"status\" = 'abandoned') = (\"grading_job\".\"finished_at\" is not null)"
-        },
-        "grading_job_sequence_base_is_counted": {
-          "name": "grading_job_sequence_base_is_counted",
-          "value": "\"grading_job\".\"sequence_base\" >= 0"
+        "grading_job_finished_is_terminal": {
+          "name": "grading_job_finished_is_terminal",
+          "value": "(\"grading_job\".\"finished_at\" is null)\n        = (\"grading_job\".\"status\" not in ('graded', 'abandoned'))"
         },
         "grading_job_attempts_are_counted": {
           "name": "grading_job_attempts_are_counted",
           "value": "\"grading_job\".\"attempts\" >= 0"
+        },
+        "grading_job_only_outstanding_work_is_narrowed": {
+          "name": "grading_job_only_outstanding_work_is_narrowed",
+          "value": "\"grading_job\".\"regrade_grader_id\" is null\n        or \"grading_job\".\"status\" in ('pending', 'claimed')"
         }
       },
       "isRLSEnabled": false

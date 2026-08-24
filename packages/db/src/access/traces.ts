@@ -190,7 +190,7 @@ export type TraceFacts = {
   readonly source: string;
   readonly emitter: string;
   readonly environment: string;
-  readonly connectionKind: string;
+  readonly connectionType: string;
   readonly providerCallId: string;
   readonly agentPlatform: string;
   readonly platformAgentId: string;
@@ -773,7 +773,7 @@ function factsOf(traceId: string, row: SummaryRow): TraceFacts {
     source: row.source,
     emitter: row.emitter,
     environment: row.environment,
-    connectionKind: row.connection_type,
+    connectionType: row.connection_type,
     providerCallId: row.provider_call_id,
     agentPlatform: row.agent_platform,
     platformAgentId: row.platform_agent_id,

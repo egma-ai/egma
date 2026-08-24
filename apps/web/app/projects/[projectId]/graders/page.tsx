@@ -184,11 +184,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
 
   return (
     <ProductPage wide>
-      <PageHeader
-        eyebrow="Project"
-        title="Graders"
-        lead="Graders assign normalized scores. Expected behaviors grades every completed simulation in this project."
-      />
+      <PageHeader title="Graders" />
       <PageBody>{body()}</PageBody>
     </ProductPage>
   );

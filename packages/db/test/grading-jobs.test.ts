@@ -77,7 +77,7 @@ function productionSpan(overrides: Partial<NewSpan> = {}): NewSpan {
     platformAgentId: "agent-under-test",
     platformAgentName: "Support",
     platformAgentVersion: "",
-    connectionKind: "livekit_room",
+    connectionType: "livekit_room",
     runId: "",
     agentId: "",
     agentVersionId: "",
@@ -391,7 +391,7 @@ describe("the durable production handoff", () => {
       traceId,
       spanId: "6666666666666666",
       agentPlatform: "another_platform",
-      connectionKind: "another_connection",
+      connectionType: "another_connection",
       endsTrace: true,
     });
     await appendSpans(auth, [unsupported]);

@@ -1,7 +1,7 @@
 import {
   cancelRun,
-  connectionKindOf,
-  connectionKindUsesPlatformCarrier,
+  connectionTypeOf,
+  connectionTypeUsesPlatformCarrier,
   getAgent,
   getConnection,
   getRun,
@@ -79,7 +79,6 @@ function unknownKey(
   const key = Object.keys(value).find((one) => !allowed.includes(one));
   return key === undefined ? undefined : `${noun} has no key "${key}"`;
 }
-
 function expectedVersions(
   value: unknown,
 ): readonly ExpectedTestVersion[] | string | undefined {
@@ -165,12 +164,12 @@ function describedHeader(
     agentId: run.agentId,
     connectionId: run.connectionId,
     agentPlatform: run.connectionSnapshot.agentPlatform,
-    connectionKind: run.connectionSnapshot.connectionKind,
+    connectionType: run.connectionSnapshot.connectionType,
     accessVariant: run.connectionSnapshot.accessVariant,
     modality: run.connectionSnapshot.modality,
     productLabel: productLabelOf(
       run.connectionSnapshot.agentPlatform,
-      run.connectionSnapshot.connectionKind,
+      run.connectionSnapshot.connectionType,
       run.connectionSnapshot.accessVariant,
       run.connectionSnapshot.modality,
     ),
@@ -411,8 +410,8 @@ export async function runRoutes(
 
       const carrier = phoneReadiness(await platformFacts());
       if (carrier.state !== "ready") {
-        const kind = await connectionKindOf(acting.auth, connectionId);
-        if (kind !== undefined && connectionKindUsesPlatformCarrier(kind)) {
+        const kind = await connectionTypeOf(acting.auth, connectionId);
+        if (kind !== undefined && connectionTypeUsesPlatformCarrier(kind)) {
           return phoneSetupRequired(
             reply,
             phoneSetupRequiredMessage(carrier),
@@ -503,7 +502,7 @@ export async function runRoutes(
         ...header,
         connectionSnapshot: {
           agentPlatform: run.connectionSnapshot.agentPlatform,
-          connectionKind: run.connectionSnapshot.connectionKind,
+          connectionType: run.connectionSnapshot.connectionType,
           accessVariant: run.connectionSnapshot.accessVariant,
           modality: run.connectionSnapshot.modality,
           topology: run.connectionSnapshot.topology,

@@ -1,6 +1,6 @@
 import type {
   NewSpan,
-  RetellMonitoringTarget,
+  MonitoringPullTarget,
   TransientRetellCall,
 } from "@egma/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IngestionUnavailableError } from "../src/ingestion/accept.ts";
 import {
   acceptedIdentities,
+  RETELL_HYDRATION_CONCURRENCY,
   runRetellProductionIngestion,
   startRetellProductionIngestion,
   type RetellCommittedLookup,
@@ -31,9 +32,8 @@ const AUTH = {
   via: "monitoring",
 } as const;
 
-const TARGET: RetellMonitoringTarget = {
-  setupId: "mns_ingestion_test",
-  monitoredAgentId: "rma_ingestion_test",
+const TARGET: MonitoringPullTarget = {
+  agentId: "rma_ingestion_test",
   platformAgentId: "agent-secret-id-must-not-be-logged",
   platformAgentName: "Private agent name must not be logged",
   apiKey: "retell-key-must-not-be-logged",
@@ -44,7 +44,7 @@ const TARGET: RetellMonitoringTarget = {
   seenPaginationKeys: [],
   importGeneration: 1,
   hasTransientCallState: false,
-  setupConsecutiveFailures: 0,
+  consecutiveFailures: 0,
   leaseOwner: "lease-secret-must-not-be-logged",
   leaseExpiresAt: new Date("2026-08-19T12:01:30.000Z"),
   auth: AUTH,
@@ -123,7 +123,7 @@ type StoreChanges = Partial<RetellProductionIngestionStore>;
 
 function store(
   recorded: StoreRecord,
-  target: RetellMonitoringTarget | undefined = TARGET,
+  target: MonitoringPullTarget | undefined = TARGET,
   changes: StoreChanges = {},
 ): RetellProductionIngestionStore {
   let offered = false;
@@ -133,36 +133,33 @@ function store(
       (row.expiresAt !== null && row.expiresAt > now));
 
   return {
-    async claimDueRetellMonitoringAgent() {
+    async claimDueMonitoringPull() {
       recorded.claims += 1;
       if (offered || target === undefined) return undefined;
       offered = true;
       return { ...target, hasTransientCallState: recorded.rows.size > 0 };
     },
-    async renewRetellMonitoringLease() {
+    async renewMonitoringLease() {
       recorded.renewals += 1;
       return true;
     },
-    async checkpointRetellMonitoringPage(_auth, _target, checkpoint) {
+    async checkpointMonitoringPage(_auth, _target, checkpoint) {
       recorded.checkpoints.push(checkpoint);
       return true;
     },
-    async yieldRetellMonitoringLease(_auth, _target, input) {
+    async yieldMonitoringLease(_auth, _target, input) {
       recorded.yields.push(input.retryAt);
       return true;
     },
-    async finishRetellMonitoringScan(_auth, _target, options) {
+    async finishMonitoringScan(_auth, _target, options) {
       recorded.finishes.push(options?.pollMilliseconds ?? -1);
       return true;
     },
-    async failRetellMonitoringTarget(_auth, _target, input) {
+    async failMonitoringPull(_auth, _target, input) {
       recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
       return { changed: true, failures: 1, startedAt: input.now ?? BASE };
     },
-    async recoverRetellMonitoringSetup() {
-      return { recovered: false };
-    },
-    async releaseRetellMonitoringLease(_auth, _target, input) {
+    async releaseMonitoringLease(_auth, _target, input) {
       recorded.releases.push(input.errorKind);
     },
     async transientRetellCallState(_auth, input) {
@@ -212,7 +209,7 @@ function store(
       });
       return { recorded: true, attempts, dropped, changed: attempts === 1 };
     },
-    async deleteRetellCallRetry(_auth, _target, input) {
+    async deleteRetellCallRetry(_auth, input) {
       recorded.deletes.push(input.providerCallId);
       recorded.rows.delete(input.providerCallId);
     },
@@ -266,6 +263,65 @@ function provider(
       return { kind: "call", call: hydrated(callId) };
     },
     ...changes,
+  };
+}
+
+/** One page of listed summaries, wide enough to say something about a wave. */
+function page(size: number, prefix: string): RetellCall[] {
+  return Array.from({ length: size }, (_unused, index) =>
+    summary(`${prefix}_${index}`),
+  );
+}
+
+/**
+ * Hydrations a test can hold open, so overlap is observed and never timed.
+ *
+ * Each call reports itself open and waits; the one that brings the count to
+ * `together` releases them all. A page read one call at a time never brings the
+ * count that high, so the escape timer is there to make that a plain assertion
+ * failure rather than a hung test.
+ */
+function heldHydrations(together: number) {
+  const started: string[] = [];
+  const finished: string[] = [];
+  let open = 0;
+  let mostOpen = 0;
+  let waves = 0;
+  let openWhenFirstFinished = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    started,
+    finished,
+    /** The most hydrations open at one instant. */
+    get mostOpen(): number {
+      return mostOpen;
+    },
+    /** How many times the count rose from none open: one per wave. */
+    get waves(): number {
+      return waves;
+    },
+    /** How many were still open when the first of them finished. */
+    get openWhenFirstFinished(): number {
+      return openWhenFirstFinished;
+    },
+    async hold(callId: string): Promise<void> {
+      if (open === 0) waves += 1;
+      open += 1;
+      started.push(callId);
+      mostOpen = Math.max(mostOpen, open);
+      if (open >= together) release();
+      await Promise.race([
+        released,
+        new Promise<void>((resolve) => setTimeout(resolve, 50)),
+      ]);
+      if (finished.length === 0) openWhenFirstFinished = open;
+      open -= 1;
+      finished.push(callId);
+    },
   };
 }
 
@@ -350,7 +406,7 @@ function logger(): {
 }
 
 type MetricRecord = {
-  attempts: RetellMonitoringTarget["scanKind"][];
+  attempts: MonitoringPullTarget["scanKind"][];
   turns: RetellProductionIngestionMetricTurn[];
   lags: number[];
   providerFailures: string[];
@@ -647,7 +703,7 @@ describe("Retell production ingestion", () => {
     const recorded = record();
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         recorded.renewals += 1;
         return false;
       },
@@ -675,7 +731,7 @@ describe("Retell production ingestion", () => {
     let renewals = 0;
     let providerRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -710,7 +766,7 @@ describe("Retell production ingestion", () => {
     let listRequests = 0;
     let hydrationRequests = 0;
     const storage = store(recorded, TARGET, {
-      async renewRetellMonitoringLease() {
+      async renewMonitoringLease() {
         renewals += 1;
         return renewals === 1;
       },
@@ -906,7 +962,7 @@ describe("Retell production ingestion", () => {
   it("uses one setup-wide Retry-After gate without a repeated log", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
-      async failRetellMonitoringTarget(_auth, _target, input) {
+      async failMonitoringPull(_auth, _target, input) {
         recorded.failures.push({ kind: input.kind, retryAt: input.retryAt });
         return { changed: false, failures: 4, startedAt: BASE };
       },
@@ -941,12 +997,12 @@ describe("Retell production ingestion", () => {
     expect(observed.recorded.providerFailures).toEqual(["rate_limited"]);
   });
 
-  it("caps unavailable-provider backoff and logs only the health transition", async () => {
+  it("caps unavailable-provider backoff and logs only the class change", async () => {
     const recorded = record();
     const { log, events } = logger();
-    const failedManyTimes: RetellMonitoringTarget = {
+    const failedManyTimes: MonitoringPullTarget = {
       ...TARGET,
-      setupConsecutiveFailures: 20,
+      consecutiveFailures: 20,
     };
 
     await runRetellProductionIngestion({
@@ -972,36 +1028,6 @@ describe("Retell production ingestion", () => {
     expect(delay).toBeLessThanOrEqual(5 * 60_000);
     expect(events.warn).toHaveLength(1);
     expect(events.error).toHaveLength(0);
-  });
-
-  it("logs one recovery after a successful provider turn", async () => {
-    const recorded = record();
-    const { log, events } = logger();
-    const storage = store(recorded, TARGET, {
-      async recoverRetellMonitoringSetup() {
-        return {
-          recovered: true,
-          failures: 3,
-          startedAt: new Date(BASE.getTime() - 60_000),
-        };
-      },
-    });
-
-    await runRetellProductionIngestion({
-      log,
-      store: storage,
-      provider: provider(),
-      clock: () => BASE,
-    });
-
-    expect(events.info).toHaveLength(1);
-    expect(events.info[0]).toMatchObject({
-      "otel.event.name": "egma.monitoring.retell.health.recovered",
-      outage_duration_ms: 60_000,
-      failure_count: 3,
-    });
-    expect(events.warn).toEqual([]);
-    expect(events.error).toEqual([]);
   });
 
   it("blocks an invalid key until configuration changes and logs only its state change", async () => {
@@ -1126,11 +1152,11 @@ describe("Retell production ingestion", () => {
     expect(JSON.stringify(events)).not.toContain("different-private-agent-id");
   });
 
-  it("yields inside a large page without checkpointing past unprocessed calls", async () => {
+  it("reads a page's outstanding calls together rather than one at a time", async () => {
     const recorded = record();
-    const hydratedIds: string[] = [];
-    let advanced = 0;
-    const clock = () => new Date(BASE.getTime() + advanced);
+    const listed = page(8, "call_together");
+    const held = heldHydrations(listed.length);
+    const taken = acceptance();
     const { log } = logger();
 
     const result = await runRetellProductionIngestion({
@@ -1140,14 +1166,224 @@ describe("Retell production ingestion", () => {
         async listTerminalCalls() {
           return {
             kind: "calls",
-            calls: [summary("call_first"), summary("call_second")],
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // Every call in the page was open at the same instant, and not one of them
+    // had finished by the time the last one started: one wave, not eight.
+    expect(held.started).toHaveLength(listed.length);
+    expect(held.mostOpen).toBe(listed.length);
+    expect(held.openWhenFirstFinished).toBe(listed.length);
+    expect(held.waves).toBe(1);
+    expect(result).toMatchObject({
+      accepted: listed.length,
+      settled: 0,
+      pages: 1,
+    });
+    expect(taken.recorded.traceIds).toHaveLength(listed.length);
+    expect(recorded.finishes).toHaveLength(1);
+  });
+
+  it("never opens more of a page at once than the hydration ceiling", async () => {
+    const recorded = record();
+    const listed = page(RETELL_HYDRATION_CONCURRENCY + 4, "call_wide");
+    const held = heldHydrations(RETELL_HYDRATION_CONCURRENCY);
+    const taken = acceptance();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // A page wider than the ceiling is still read in full, and the burst egma
+    // offers the provider never grows past the ceiling.
+    expect(held.mostOpen).toBe(RETELL_HYDRATION_CONCURRENCY);
+    expect(held.started).toHaveLength(listed.length);
+    expect(result).toMatchObject({ accepted: listed.length, settled: 0 });
+    expect(recorded.finishes).toHaveLength(1);
+  });
+
+  it("keeps one call's failed hydration off the page-mates open beside it", async () => {
+    const recorded = record();
+    const listed = [
+      summary("call_beside_one"),
+      summary("call_broken"),
+      summary("call_beside_two"),
+      summary("call_beside_three"),
+    ];
+    const held = heldHydrations(listed.length);
+    const taken = acceptance();
+    const { log } = logger();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return callId === "call_broken"
+            ? { kind: "not-found" }
+            : { kind: "call", call: hydrated(callId) };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // All four were open together. The one that failed spent one attempt of its
+    // own budget and took a retry row; the other three landed.
+    expect(held.mostOpen).toBe(listed.length);
+    expect(result).toMatchObject({ accepted: 3, settled: 1, dropped: 0 });
+    expect(taken.recorded.traceIds).toEqual(
+      ["call_beside_one", "call_beside_two", "call_beside_three"].map((id) =>
+        traceIdFor(AUTH.projectId, id),
+      ),
+    );
+    expect(recorded.rows.get("call_broken")).toMatchObject({
+      attempts: 1,
+      errorKind: "provider_call_not_found",
+    });
+    expect(recorded.rows.get("call_broken")?.nextAttemptAt).not.toBeNull();
+    // Every listed identity has an answer, so the page advanced.
+    expect(recorded.finishes).toHaveLength(1);
+  });
+
+  it("counts a page-mate's durable answer when another answer ends the turn", async () => {
+    const recorded = record();
+    // Listed first, so the settle order meets the turn-ending answer before
+    // the page-mate whose retry row is already in the store.
+    const listed = [
+      summary("call_pauses_agent"),
+      summary("call_beside_durable"),
+    ];
+    const held = heldHydrations(listed.length);
+    const taken = acceptance();
+    const { log } = logger();
+    const observed = metricRecorder();
+
+    const result = await runRetellProductionIngestion({
+      log,
+      metrics: observed.metrics,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
+            hasMore: false,
+            paginationKey: null,
+          };
+        },
+        async hydrateRetellCall(_key, one) {
+          const callId = String(one["call_id"]);
+          await held.hold(callId);
+          return callId === "call_pauses_agent"
+            ? {
+                kind: "refused",
+                reason: "rate-limited",
+                status: 429,
+                retryAfterMilliseconds: 12_000,
+              }
+            : { kind: "not-found" };
+        },
+      }),
+      lookup: lookup({ windows: [], asked: [] }),
+      acceptance: taken.acceptance,
+      clock: () => BASE,
+    });
+
+    // Both were open together: the rate limit pauses the whole selected
+    // agent, and the page-mate's retry row was durable before the pause was
+    // acted on — so the turn's answer and its recorded metrics both carry the
+    // row the store holds.
+    expect(held.mostOpen).toBe(listed.length);
+    expect(recorded.rows.get("call_beside_durable")).toMatchObject({
+      attempts: 1,
+      errorKind: "provider_call_not_found",
+    });
+    expect(recorded.failures).toEqual([
+      { kind: "rate_limited", retryAt: new Date(BASE.getTime() + 12_000) },
+    ]);
+    expect(result).toMatchObject({
+      accepted: 0,
+      settled: 1,
+      dropped: 0,
+      stoppedBecause: "provider_failure",
+    });
+    expect(observed.recorded).toMatchObject({
+      turns: [
+        { outcome: "provider_failure", accepted: 0, settled: 1, dropped: 0 },
+      ],
+    });
+  });
+
+  it("yields inside a large page without checkpointing past unprocessed calls", async () => {
+    const recorded = record();
+    const hydratedIds: string[] = [];
+    let advanced = 0;
+    const clock = () => new Date(BASE.getTime() + advanced);
+    const { log } = logger();
+    // One call more than a single wave can hold, so the wall-time bound falls
+    // between the waves and leaves the page part-read.
+    const listed = page(RETELL_HYDRATION_CONCURRENCY + 1, "call_late");
+
+    const result = await runRetellProductionIngestion({
+      log,
+      store: store(recorded),
+      provider: provider({
+        async listTerminalCalls() {
+          return {
+            kind: "calls",
+            calls: listed,
             hasMore: true,
             paginationKey: "page-after-large-page",
           };
         },
-        async hydrateRetellCall(_key, listed) {
-          hydratedIds.push(String(listed["call_id"]));
-          return { kind: "call", call: hydrated(String(listed["call_id"])) };
+        async hydrateRetellCall(_key, one) {
+          hydratedIds.push(String(one["call_id"]));
+          return { kind: "call", call: hydrated(String(one["call_id"])) };
         },
       }),
       lookup: lookup({ windows: [], asked: [] }),
@@ -1161,7 +1397,10 @@ describe("Retell production ingestion", () => {
       maxTurnMilliseconds: 50,
     });
 
-    expect(hydratedIds).toEqual(["call_first"]);
+    expect(hydratedIds).toHaveLength(RETELL_HYDRATION_CONCURRENCY);
+    expect(hydratedIds).not.toContain(
+      `call_late_${RETELL_HYDRATION_CONCURRENCY}`,
+    );
     expect(recorded.checkpoints).toEqual([]);
     expect(recorded.yields).toHaveLength(1);
     expect(result.stoppedBecause).toBe("bounded_turn");
@@ -1230,7 +1469,7 @@ describe("the bounded Retell retry budget", () => {
 
     const turn = async (
       at: Date,
-      target: RetellMonitoringTarget = TARGET,
+      target: MonitoringPullTarget = TARGET,
     ): Promise<RetellProductionIngestionResult> =>
       runRetellProductionIngestion({
         log: heard.log,
@@ -1343,7 +1582,7 @@ describe("the bounded Retell retry budget", () => {
     expect(dropped[0]).toMatchObject({
       organization_id: AUTH.organizationId,
       project_id: AUTH.projectId,
-      retell_monitored_agent_id: TARGET.monitoredAgentId,
+      agent_id: TARGET.agentId,
       provider_call_id: "call_that_will_not_hydrate",
       error_kind: "provider_call_not_found",
       automatic_retries: 3,
@@ -1406,7 +1645,7 @@ describe("the bounded Retell retry budget", () => {
     // never the setup door.
     world.succeed();
     world.recorded.rows.clear();
-    const reimport: RetellMonitoringTarget = {
+    const reimport: MonitoringPullTarget = {
       ...TARGET,
       scanKind: "historical_import",
       importGeneration: 2,
@@ -1438,7 +1677,7 @@ describe("the bounded Retell retry budget", () => {
     expect(world.recorded.rows.size).toBe(1);
 
     world.succeed();
-    const reimport: RetellMonitoringTarget = {
+    const reimport: MonitoringPullTarget = {
       ...TARGET,
       scanKind: "historical_import",
       importGeneration: 2,

@@ -69,12 +69,11 @@ export const ID_PREFIXES = [
    */
   "rev",
   /**
-   * One project's setup for bringing production evidence in from an agent
-   * platform. This is separate from the connections used by simulations.
+   * One agent's monitoring state: the machine notebook the poller keeps —
+   * cursor, window, lease and retry clock. Its own identity because nobody
+   * edits it and it is created by the pull switch, not by a person.
    */
-  "mns",
-  /** One Retell voice agent selected inside a Retell Monitoring setup. */
-  "rma",
+  "mst",
   /**
    * One Retell call whose fetch or normalization failed: the short-lived row
    * holding its bounded retry budget, and then the identity-only marker that

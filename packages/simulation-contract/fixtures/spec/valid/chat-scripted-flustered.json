@@ -4,7 +4,7 @@
   "modality": "chat",
   "connection": {
     "agent_platform": null,
-    "connection_kind": "scripted",
+    "connection_type": "scripted",
     "access_variant": "scripted.in_memory",
     "config": {
       "greeting": "Lakeside Dental scheduling, good afternoon. How can I help?",

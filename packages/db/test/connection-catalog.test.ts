@@ -150,14 +150,14 @@ describe("what a browser is told about a simulation connection", () => {
       expect.arrayContaining([
         expect.objectContaining({
           agentPlatform: "retell",
-          connectionKind: "phone_number",
+          connectionType: "phone_number",
           accessVariant: "phone_number.public_e164",
           modality: "voice",
           productLabel: "Retell phone",
         }),
         expect.objectContaining({
           agentPlatform: null,
-          connectionKind: "phone_number",
+          connectionType: "phone_number",
           accessVariant: "phone_number.public_e164",
           modality: "voice",
           productLabel: "Phone number",
@@ -175,7 +175,7 @@ describe("what a browser is told about a simulation connection", () => {
         "voice",
       ),
     ).toThrow(
-      "agent platform, connection kind, access variant, and modality do not form a supported simulation connection",
+      "agent platform, connection type, access variant, and modality do not form a supported simulation connection",
     );
   });
 });

@@ -54,7 +54,7 @@ const FACTS: Facts = {
   source: "production",
   emitter: "agent",
   environment: "default",
-  connectionKind: "",
+  connectionType: "",
   providerCallId: "egma-fixture-capture-1",
   agentPlatform: "livekit_agents",
   platformAgentId: "",

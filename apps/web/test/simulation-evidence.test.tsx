@@ -180,7 +180,7 @@ function evidence(overrides: Record<string, unknown> = {}) {
     connection: { id: "con_1", name: "retell-staging", archived: false },
     connectionSnapshot: {
       agentPlatform: "retell",
-      connectionKind: "phone_number",
+      connectionType: "phone_number",
       accessVariant: "phone_number.public_e164",
       modality: "voice",
       topology: "egma-dials-in",

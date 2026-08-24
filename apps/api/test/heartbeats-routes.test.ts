@@ -51,7 +51,7 @@ const RESCHEDULING = {
 
 const RETELL = {
   agentPlatform: "retell",
-  connectionKind: "retell_chat_api",
+  connectionType: "retell_chat_api",
   accessVariant: "retell_chat_api.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },

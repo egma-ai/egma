@@ -4,7 +4,7 @@ sidebarTitle: "Retell"
 description: "Connect Retell chat and voice agents for simulations, then set up production voice monitoring with Retell API polling."
 ---
 
-Retell is an **agent platform**. It is not one connection kind. Egma supports
+Retell is an **agent platform**. It is not one connection type. Egma supports
 two Retell simulation paths and one separate production Monitoring strategy:
 
 | Purpose | Retell agent | Egma path |
@@ -40,7 +40,7 @@ Retell chat agent ID and a sealed API key.
 
 ```text
 agent_platform: retell
-connection_kind: retell_chat_api
+connection_type: retell_chat_api
 access_variant: retell_chat_api.api_key
 product_label: Retell chat
 connection_modality: chat
@@ -55,7 +55,7 @@ agent ID because the phone adapter needs neither to place the simulation call.
 
 ```text
 agent_platform: retell
-connection_kind: phone_number
+connection_type: phone_number
 access_variant: phone_number.public_e164
 product_label: Retell phone
 connection_modality: voice
@@ -109,38 +109,52 @@ agent and its routed numbers. If your local prompt differs from Retell,
 `egma connect` prints `drift: yes` and says which version grounds the tests. It
 does not block the connection.
 
-## Set up Retell production Monitoring
+## Start monitoring a Retell agent
 
-Simulation setup and a monitoring source are separate. A simulation connection
-tells Egma how to contact an agent during a test. Retell Monitoring tells Egma
-which real production calls to import after they finish.
+Simulation and monitoring are separate jobs with separate keys. A simulation
+connection tells Egma how to contact an agent during a test. Monitoring tells
+Egma to import that agent's real production calls after they finish.
 
-Open **Monitoring → Set up monitoring**, then:
+Monitoring is a switch on the agent. Open **Monitoring → Start monitoring**,
+then:
 
-1. Choose **Retell**.
+1. Choose the Egma agent you want to watch, or leave the selector on
+   **Register agents from the Retell account**.
 2. Enter one Retell platform API key.
-3. Load the Retell voice agents that key can read.
-4. Select one or more voice agents.
-5. Start Monitoring.
+3. Select **List Retell agents**.
+4. Choose which Retell agent your Egma agent is, and tick any others you want
+   Egma to watch. Ticking a Retell agent that Egma does not know registers it
+   as an agent.
+5. Select **Start monitoring**.
 
 The key needs Retell **Agent Read** permission for discovery and **Monitor or
-History Read** permission for call history. Egma checks both before it stores
-the key. It stores the key once, sealed, and never returns it.
+History Read** permission for call history. Egma seals it on each agent it
+starts and never returns it. It is a monitoring key, kept apart from any key a
+connection holds for simulations, so Egma asks for it even when a connection on
+the same agent already stores one for the same Retell account.
 
-For each selected voice agent, Egma:
+One Egma agent watches one Retell agent. A tick that would make a second Egma
+agent watch the same Retell agent is refused, and the message names the agent
+already watching it. The ticks beside it still start.
+
+For each watched agent, Egma:
 
 - imports the previous 30 days;
 - checks for new terminal calls about every 30 seconds;
 - rereads a five-minute overlap on every check, so a call Retell exposes a
   little late is still found;
 - shows one production conversation per Retell call in the project, even when an
-  import page or historical window is retried;
-- shows import, last received, invalid-credential, rate-limit,
-  provider-unavailable, and degraded-call state on the setup page.
+  import page or historical window is retried.
 
-Select the agent again to ask for another 30-day import. That is the only way
-to reach further back than the five-minute overlap, and it is deliberately your
-decision rather than a scheduled rescan of your Retell history.
+There is no daily rescan of your Retell history. The five-minute overlap is the
+whole late-arrival net.
+
+Open the agent to see whether its switch is on, which Retell agent it is bound
+to, the last characters of the key it uses, and when a production call last
+arrived. **Stop pulling** turns the switch off; every conversation already
+imported stays, and so do the binding and the key. Starting again is a new
+observation from that moment, so Egma does not go back for the calls that
+happened while the switch was off.
 
 If Retell cannot supply one complete call, Egma tries again automatically a few
 times and then gives up on that call. It records the loss in its own logs and
@@ -157,7 +171,7 @@ The Retell endpoints have independent versions:
 
 | Purpose | Retell endpoint |
 |---|---|
-| List agents for setup | `POST /v2/list-agents` |
+| List agents when you start monitoring | `POST /v2/list-agents` |
 | List phone numbers for simulation setup | paginated `GET /v2/list-phone-numbers` |
 | List completed conversations for Monitoring | `POST /v3/list-calls` |
 | Read one complete conversation | `GET /v2/get-call/{call_id}` |

@@ -96,7 +96,7 @@ function runHeader(overrides: Record<string, unknown> = {}) {
     agentId: "agt_1",
     connectionId: "con_1",
     agentPlatform: "retell",
-    connectionKind: "retell_chat_api",
+    connectionType: "retell_chat_api",
     accessVariant: "retell_chat_api.api_key",
     modality: "chat",
     productLabel: "Retell chat",
@@ -122,7 +122,7 @@ function runDetail(overrides: Record<string, unknown> = {}) {
     ...runHeader(),
     connectionSnapshot: {
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       topology: "hosted-broker",

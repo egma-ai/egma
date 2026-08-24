@@ -14,7 +14,6 @@ let api: TestApi;
 afterEach(async () => {
   await api?.close();
 });
-
 describe("one run waiting for trace grades", () => {
   it("reports grading progress without inventing a quality result", async () => {
     api = await createApi("run_grading_progress", { traceStore: true });

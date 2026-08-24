@@ -90,14 +90,14 @@ async function seedAgent(
   connection: string,
 ): Promise<void> {
   await db.sql(
-    `insert into agent (id, organization_id, project_id, name, revision)
-     values ($1, $2, $3, $1, 'rev_00000000000000000000000001')`,
+    `insert into agent (id, organization_id, project_id, name)
+     values ($1, $2, $3, $1)`,
     [id, acme.organization, projectId],
   );
   await db.sql(
     `insert into connection
-       (id, organization_id, project_id, agent_id, name, agent_platform, connection_kind, access_variant, modality, topology, config, revision)
-     values ($1, $2, $3, $4, $1, 'retell', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}'::jsonb, 'rev_00000000000000000000000001')`,
+       (id, organization_id, project_id, agent_id, name, connection_type, access_variant, modality, topology, config)
+     values ($1, $2, $3, $4, $1, 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', '{}'::jsonb)`,
     [connection, acme.organization, projectId, id],
   );
 }
@@ -170,7 +170,7 @@ async function insertRun(overrides: RunOverrides = {}): Promise<string> {
     triggered_via: "manual",
     connection_snapshot: JSON.stringify({
       agentPlatform: "retell",
-      connectionKind: "retell_chat_api",
+      connectionType: "retell_chat_api",
       accessVariant: "retell_chat_api.api_key",
       modality: "chat",
       topology: "hosted-broker",

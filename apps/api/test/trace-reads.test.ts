@@ -237,12 +237,12 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
     expect(trace?.endedAt).toBe("2026-08-02T18:05:53.776865Z");
   });
 
-  it("says which platform produced it without inventing a connection kind", async () => {
+  it("says which platform produced it without inventing a connection type", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.source).toBe("production");
     expect(trace?.emitter).toBe("agent");
     expect(trace?.environment).toBe("default");
-    expect(trace?.connectionKind).toBe("");
+    expect(trace?.connectionType).toBe("");
     expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
     expect(trace?.agentPlatform).toBe("livekit_agents");
     expect(trace?.platformAgentId).toBe("");
@@ -661,7 +661,7 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
       platformAgentId: "",
       platformAgentName: "",
       platformAgentVersion: "",
-      connectionKind: "livekit",
+      connectionType: "livekit",
       runId: "",
       agentId: "",
       agentVersionId: "",
@@ -697,7 +697,7 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
         spanId: "5100000000000001",
         source: "simulation",
         emitter: "egma-runtime",
-        connectionKind: "",
+        connectionType: "",
         runId: "run_01JQZ0000000000000000000AA",
         agentId: "agt_01JQZ0000000000000000000AA",
       }),
@@ -707,7 +707,7 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
         parentSpanId: "5100000000000001",
         source: "simulation",
         emitter: "egma-runtime",
-        connectionKind: "",
+        connectionType: "",
         runId: "run_01JQZ0000000000000000000AA",
         agentId: "agt_01JQZ0000000000000000000AA",
         name: "turn_response_latency",
@@ -726,7 +726,7 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
         spanId: "5200000000000001",
         name: "retell_call",
         kind: "conversation",
-        connectionKind: "retell",
+        connectionType: "retell",
         providerCallId: "call_wire",
         payload: JSON.stringify({
           call_id: "call_wire",

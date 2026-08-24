@@ -131,13 +131,21 @@ describe("the development design proof", () => {
     /*
      * These are class assertions rather than colour assertions because jsdom
      * loads no stylesheet. What they guard is the mapping: the primary action
-     * asks for the theme's `primary`, and `tailwind-theme.css` is what makes
-     * `primary` mean Deep Ember. The colours themselves are proved in a real
-     * browser, by reading the computed value back off the element.
+     * asks for the theme's `primary-wash` fill and `primary` ink, and
+     * `tailwind-theme.css` is what makes those mean Ember Wash and Deep Ember.
+     * The colours themselves are proved in a real browser, by reading the
+     * computed value back off the element.
+     *
+     * **The primary is the wash button as of 2026-08-23.** It used to be a
+     * Deep Ember block with white text; the developer retired that looking at
+     * the Paper boards, so a filled fill here would be the old rule coming
+     * back rather than a passing test.
      */
     const start = screen.getByRole("button", { name: "Start run" });
     expect(start.getAttribute("data-slot")).toBe("button");
-    expect(start.className).toContain("bg-primary");
+    expect(start.className).toContain("bg-primary-wash");
+    expect(start.className).toContain("text-primary");
+    expect(start.className).not.toContain("text-primary-foreground");
     expect(start.className).toContain("rounded-button");
 
     /* The secondary action is the outlined kind, never a filled grey one. */
@@ -154,17 +162,63 @@ describe("the development design proof", () => {
       .getAllByText("Passed")
       .filter((node) => node.getAttribute("data-slot") === "badge");
     /*
-     * Two of them and one component: the chip block on the base panel, and the
-     * same chip beside a result in the project-context panel. That second one
-     * was the CSS Modules chip until the mop-up, so every match is read rather
-     * than only the first.
+     * Three of them and one component: the chip block on the base panel, the
+     * same chip beside a result in the project-context panel, and the same
+     * chip again inside the dark-theme frame. The second was the CSS Modules
+     * chip until the mop-up and the third is what proves the component carries
+     * both themes, so every match is read rather than only the first.
      */
-    expect(chips).toHaveLength(2);
+    expect(chips).toHaveLength(3);
     for (const chip of chips) {
       expect(chip.className).toContain("border-success-border");
       expect(chip.className).not.toContain("brand");
       expect(chip.className).not.toContain("primary");
     }
+  });
+
+  /**
+   * The side sheet: the surface the boards create, read and edit one record in.
+   *
+   * It is asserted on the slot its motion is keyed to, exactly as the dialog
+   * below is, and on the three things a form panel has to have — a title, a
+   * body to fill in, and a footer with the answer and the way out.
+   */
+  it("opens the side sheet on the slot its motion is keyed to", () => {
+    render(<DesignSystemProof />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open connection" }));
+
+    const sheet = screen.getByRole("dialog", { name: "phone" });
+    expect(sheet.getAttribute("data-slot")).toBe("sheet-content");
+    expect(within(sheet).getByLabelText("Phone number")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Save connection" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Delete" })).toBeTruthy();
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "phone" })).toBeNull();
+  });
+
+  /**
+   * Both themes, on one page, at the same time.
+   *
+   * `DESIGN.md`: "Every shared component must support light and dark themes."
+   * The frame carries `data-theme="dark"`, which is the attribute the theme
+   * binds its dark values to, so what is inside it is drawn on the dark tokens
+   * while the page around it stays light.
+   */
+  it("draws the shared components on the dark tokens beside the light ones", () => {
+    render(<DesignSystemProof />);
+
+    const dark = screen.getByRole("region", {
+      name: "Dark theme component preview",
+    });
+    expect(dark.getAttribute("data-theme")).toBe("dark");
+    expect(
+      within(dark).getByRole("button", { name: "Connect an agent" }).className,
+    ).toContain("bg-primary-wash");
+    expect(
+      within(dark).getByRole("table", { name: "Proof agents in dark theme" }),
+    ).toBeTruthy();
   });
 
   it("opens the base dialog on the slot its motion is keyed to", () => {

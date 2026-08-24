@@ -4,10 +4,10 @@ sidebarTitle: "Telemetry"
 description: "Set up platform-specific production monitoring, then read real conversations as transcripts, metrics, and grades."
 ---
 
-Egma receives real production conversations through a platform-specific
-**monitoring source**. Retell uses API polling after a voice conversation
-finishes. LiveKit Agents uses OpenTelemetry from the running Python agent
-process.
+Egma receives real production conversations two ways, and which one depends on
+the agent platform. Retell is **pulled**: Egma polls Retell for an agent whose
+switch is on, after each voice conversation finishes. LiveKit Agents is
+**pushed**: the running Python agent process sends OpenTelemetry to Egma.
 
 Both paths produce the same Egma conversation record. Egma shows a structured
 transcript, tool evidence, supported measures, and production grader work when
@@ -19,17 +19,21 @@ grader selects simulations only, so it does not grade production traffic.
 
 ## How it works
 
-Open **Monitoring → Set up monitoring** and choose the agent platform.
+Production evidence reaches Egma in one of two ways, and which one depends on
+the agent platform.
 
-- **Retell:** enter one platform API key and select the Retell voice agents to
-  monitor. Egma imports 30 days of call history and then polls about every 30
-  seconds. See [Retell](/integrations/retell).
-- **LiveKit Agents:** install the Egma Python SDK and call
+- **Retell is pulled.** Open **Monitoring → Start monitoring**, enter one Retell
+  platform API key, and choose which Retell agent your Egma agent is. Egma seals
+  the key on that agent, turns on its **pull production calls** switch, imports
+  the previous 30 days, and then polls about every 30 seconds. The switch lives
+  on the agent, so each agent is started and stopped on its own. See
+  [Retell](/integrations/retell).
+- **LiveKit Agents is pushed.** Install the Egma Python SDK and call
   `monitor_livekit(ctx)` before `AgentSession.start`. The worker sends OTLP to
-  `POST /v1/traces`.
+  `POST /v1/traces`. There is nothing to switch on: the conversations appear as
+  soon as the worker sends them.
 
-See [Monitoring API](/api/monitoring) for the project source, health, and
-exact Retell retry contracts.
+See [Monitoring API](/api/monitoring) for the start and stop doors.
 
 Egma stores the resulting spans and shows each production conversation under
 **Monitoring** at `/projects/{projectId}/monitoring/transcripts`. A project
@@ -97,7 +101,7 @@ The same helper works for customer-hosted and LiveKit Cloud-hosted Python agents
 
 The API key you use for customer OTLP production export must be **project-scoped**. Egma rejects an organization-wide key before it decodes or stores the request body. Organization-wide keys can still use the trace read APIs to query across the organization.
 
-To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If nothing is appearing under **Monitoring**, first check the monitoring source state and then widen the transcript time window.
+To mint a project-scoped key, open **Settings → API keys** in the dashboard and create a key there; every row states its scope. If nothing is appearing under **Monitoring**, first open the agent and check its **pull production calls** switch, then widen the transcript time window.
 
 ## Querying traces
 

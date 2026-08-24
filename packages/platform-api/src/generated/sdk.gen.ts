@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ConfigureLiveKitMonitoringErrors, ConfigureLiveKitMonitoringResponses, ConfigureRetellMonitoringErrors, ConfigureRetellMonitoringResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteMonitoringSourceErrors, DeleteMonitoringSourceResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListMonitoringSourcesErrors, ListMonitoringSourcesResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, ArchivePersonaErrors, ArchivePersonaResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateInvitationErrors, CreateInvitationResponses, CreateMockToolErrors, CreateMockToolResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeleteMockToolErrors, DeleteMockToolResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListMockToolsErrors, ListMockToolsResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RestorePersonaErrors, RestorePersonaResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, SetDefaultPersonaErrors, SetDefaultPersonaResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateMockToolErrors, UpdateMockToolResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -98,11 +98,10 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
-    description?: string;
     connection?: {
         name?: string;
         agentPlatform: 'retell' | 'livekit_agents' | null;
-        connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
         accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
         environment?: string;
@@ -126,7 +125,6 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'name' },
-                { in: 'body', key: 'description' },
                 { in: 'body', key: 'connection' }
             ] }]);
     return (options?.client ?? client).post<RegisterAgentResponses, RegisterAgentErrors, ThrowOnError>({
@@ -178,15 +176,11 @@ export const updateAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
     name?: string;
-    description?: string | null;
-    expectedRevision?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'name' },
-                { in: 'body', key: 'description' },
-                { in: 'body', key: 'expectedRevision' }
+                { in: 'body', key: 'name' }
             ] }]);
     return (options?.client ?? client).patch<UpdateAgentResponses, UpdateAgentErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -213,7 +207,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     projectId?: string;
     name?: string;
     agentPlatform: 'retell' | 'livekit_agents' | null;
-    connectionKind: 'retell_chat_api' | 'phone_number' | 'livekit_room';
+    connectionType: 'retell_chat_api' | 'phone_number' | 'livekit_room';
     accessVariant: 'retell_chat_api.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
     modality: 'voice' | 'chat';
     environment?: string;
@@ -235,7 +229,7 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'query', key: 'projectId' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'agentPlatform' },
-                { in: 'body', key: 'connectionKind' },
+                { in: 'body', key: 'connectionType' },
                 { in: 'body', key: 'accessVariant' },
                 { in: 'body', key: 'modality' },
                 { in: 'body', key: 'environment' },
@@ -266,12 +260,14 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
 export const archiveAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
-    expectedRevision?: string;
+    body?: {
+        [key: string]: never;
+    };
 }, options?: Options<never, ThrowOnError>): RequestResult<ArchiveAgentResponses, ArchiveAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' }
+                { key: 'body', map: 'body' }
             ] }]);
     return (options?.client ?? client).post<ArchiveAgentResponses, ArchiveAgentErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -296,13 +292,11 @@ export const archiveAgent = <ThrowOnError extends boolean = false>(parameters: {
 export const restoreAgent = <ThrowOnError extends boolean = false>(parameters: {
     agentId: string;
     projectId?: string;
-    expectedRevision?: string;
     name?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<RestoreAgentResponses, RestoreAgentErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' },
                 { in: 'body', key: 'name' }
             ] }]);
     return (options?.client ?? client).post<RestoreAgentResponses, RestoreAgentErrors, ThrowOnError>({
@@ -362,7 +356,6 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
     credentials?: {
         [key: string]: unknown;
     };
-    expectedRevision?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
@@ -371,8 +364,7 @@ export const updateConnection = <ThrowOnError extends boolean = false>(parameter
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'environment' },
                 { in: 'body', key: 'config' },
-                { in: 'body', key: 'credentials' },
-                { in: 'body', key: 'expectedRevision' }
+                { in: 'body', key: 'credentials' }
             ] }]);
     return (options?.client ?? client).patch<UpdateConnectionResponses, UpdateConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -398,13 +390,15 @@ export const archiveConnection = <ThrowOnError extends boolean = false>(paramete
     agentId: string;
     connectionId: string;
     projectId?: string;
-    expectedRevision?: string;
+    body?: {
+        [key: string]: never;
+    };
 }, options?: Options<never, ThrowOnError>): RequestResult<ArchiveConnectionResponses, ArchiveConnectionErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'agentId' },
                 { in: 'path', key: 'connectionId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' }
+                { key: 'body', map: 'body' }
             ] }]);
     return (options?.client ?? client).post<ArchiveConnectionResponses, ArchiveConnectionErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -430,7 +424,6 @@ export const restoreConnection = <ThrowOnError extends boolean = false>(paramete
     agentId: string;
     connectionId: string;
     projectId?: string;
-    expectedRevision?: string;
     name?: string;
     credential?: {
         choice: 'replace';
@@ -445,7 +438,6 @@ export const restoreConnection = <ThrowOnError extends boolean = false>(paramete
                 { in: 'path', key: 'agentId' },
                 { in: 'path', key: 'connectionId' },
                 { in: 'query', key: 'projectId' },
-                { in: 'body', key: 'expectedRevision' },
                 { in: 'body', key: 'name' },
                 { in: 'body', key: 'credential' }
             ] }]);
@@ -832,25 +824,6 @@ export const updateMockTool = <ThrowOnError extends boolean = false>(parameters:
 };
 
 /**
- * List monitoring sources
- */
-export const listMonitoringSources = <ThrowOnError extends boolean = false>(parameters?: {
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ListMonitoringSourcesResponses, ListMonitoringSourcesErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).get<ListMonitoringSourcesResponses, ListMonitoringSourcesErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/monitoring',
-        ...options,
-        ...params
-    });
-};
-
-/**
  * Discover Retell voice agents
  */
 export const discoverRetellVoiceAgents = <ThrowOnError extends boolean = false>(parameters: {
@@ -876,28 +849,31 @@ export const discoverRetellVoiceAgents = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Configure Retell monitoring
+ * Start pulling an agent's production calls
  */
-export const configureRetellMonitoring = <ThrowOnError extends boolean = false>(parameters: {
+export const startMonitoring = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
+    agentPlatform: 'retell';
     apiKey: string;
-    agents: Array<{
-        id: string;
-        name: string;
+    watch: Array<{
+        platformAgentId: string;
+        name?: string;
+        agentId?: string;
     }>;
-}, options?: Options<never, ThrowOnError>): RequestResult<ConfigureRetellMonitoringResponses, ConfigureRetellMonitoringErrors, ThrowOnError> => {
+}, options?: Options<never, ThrowOnError>): RequestResult<StartMonitoringResponses, StartMonitoringErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
+                { in: 'body', key: 'agentPlatform' },
                 { in: 'body', key: 'apiKey' },
-                { in: 'body', key: 'agents' }
+                { in: 'body', key: 'watch' }
             ] }]);
-    return (options?.client ?? client).put<ConfigureRetellMonitoringResponses, ConfigureRetellMonitoringErrors, ThrowOnError>({
+    return (options?.client ?? client).post<StartMonitoringResponses, StartMonitoringErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',
                 name: 'egma.session_token',
                 type: 'apiKey'
             }],
-        url: '/v1/monitoring/retell',
+        url: '/v1/monitoring/start',
         ...options,
         ...params,
         headers: {
@@ -909,41 +885,34 @@ export const configureRetellMonitoring = <ThrowOnError extends boolean = false>(
 };
 
 /**
- * Configure LiveKit Agents monitoring
+ * Stop pulling an agent's production calls
  */
-export const configureLiveKitMonitoring = <ThrowOnError extends boolean = false>(parameters?: {
+export const stopMonitoring = <ThrowOnError extends boolean = false>(parameters: {
+    agentId: string;
     projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<ConfigureLiveKitMonitoringResponses, ConfigureLiveKitMonitoringErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).put<ConfigureLiveKitMonitoringResponses, ConfigureLiveKitMonitoringErrors, ThrowOnError>({
+    body?: {
+        [key: string]: never;
+    };
+}, options?: Options<never, ThrowOnError>): RequestResult<StopMonitoringResponses, StopMonitoringErrors, ThrowOnError> => {
+    const params = buildClientParams([parameters], [{ args: [
+                { in: 'path', key: 'agentId' },
+                { in: 'query', key: 'projectId' },
+                { key: 'body', map: 'body' }
+            ] }]);
+    return (options?.client ?? client).post<StopMonitoringResponses, StopMonitoringErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
                 in: 'cookie',
                 name: 'egma.session_token',
                 type: 'apiKey'
             }],
-        url: '/v1/monitoring/livekit-agents',
+        url: '/v1/monitoring/agents/{agentId}/stop',
         ...options,
-        ...params
-    });
-};
-
-/**
- * Delete a monitoring source
- */
-export const deleteMonitoringSource = <ThrowOnError extends boolean = false>(parameters: {
-    platform: string;
-    projectId?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<DeleteMonitoringSourceResponses, DeleteMonitoringSourceErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [{ in: 'path', key: 'platform' }, { in: 'query', key: 'projectId' }] }]);
-    return (options?.client ?? client).delete<DeleteMonitoringSourceResponses, DeleteMonitoringSourceErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/monitoring/{platform}',
-        ...options,
-        ...params
+        ...params,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options?.headers,
+            ...params.headers
+        }
     });
 };
 

@@ -74,9 +74,17 @@ const radioItemVariants = cva(
          * radio. The target grows on a pseudo-element so nothing moves around
          * it, and a mouse sees no change at all.
          */
+        /*
+         * **The one place a circle survived the 0px ruling, with the avatar.**
+         * A radio button is round the way an avatar is round: the shape is
+         * what tells it apart from a checkbox, in every operating system a
+         * person has ever used. So it says `rounded-full`, which is Tailwind's
+         * own and not one of egma's four component radii. Called out in the
+         * pull request for the developer to overrule.
+         */
         dot: [
           "relative grid size-[18px] place-items-center",
-          "rounded-chip border border-input bg-surface",
+          "rounded-full border border-input bg-surface",
           "pointer-coarse:before:absolute pointer-coarse:before:top-1/2 pointer-coarse:before:left-1/2",
           "pointer-coarse:before:size-(--tap-target) pointer-coarse:before:-translate-x-1/2",
           "pointer-coarse:before:-translate-y-1/2 pointer-coarse:before:content-['']",
@@ -88,7 +96,7 @@ const radioItemVariants = cva(
            * sits on the strip rather than over its edge.
            */
           "inline-flex h-[calc(var(--control-md)-6px)] items-center px-4",
-          "rounded-[calc(var(--radius-sm)-1px)] border-0 bg-transparent",
+          "border-0 bg-transparent",
           "text-sm whitespace-nowrap text-muted-foreground",
           /* A real target on a coarse pointer, without growing what a mouse gets. */
           "pointer-coarse:min-h-(--tap-target)",
@@ -125,7 +133,7 @@ function RadioGroupItem({
         <RadioGroupPrimitive.Indicator
           data-slot="radio-group-indicator"
           /* Ember, which `DESIGN.md` names for focus, icons, marks and edges. */
-          className="size-2 rounded-chip bg-brand"
+          className="size-2 rounded-full bg-brand"
         />
       )}
     </RadioGroupPrimitive.Item>

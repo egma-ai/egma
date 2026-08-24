@@ -57,7 +57,16 @@ export class AgentWriteRefusedError extends Error {
  * - `name_taken` — a living agent in the project, or a living connection on
  *   the agent, already holds the name.
  */
-export type AgentWriteRefusal = "not_admitted" | "needs_a_name" | "name_taken";
+export type AgentWriteRefusal =
+  | "not_admitted"
+  | "needs_a_name"
+  | "name_taken"
+  /**
+   * The payload named one platform and the connection would be represented
+   * under another — its agent's. Its own refusal because the caller's next
+   * move is specific: send the agent's platform, or leave it out.
+   */
+  | "platform_contradicts_agent";
 
 /**
  * A run was turned away, and which rule turned it away travels beside the
@@ -687,7 +696,7 @@ export class ConnectionRestoreRefusedError extends Error {
   /** Whichever of the two the sentence named, for a layer that has to relay it. */
   readonly connectionId: string | undefined;
   readonly agentId: string | undefined;
-  readonly connectionKind: string | undefined;
+  readonly connectionType: string | undefined;
 
   constructor(
     reason: ConnectionRestoreRefusal,
@@ -695,7 +704,7 @@ export class ConnectionRestoreRefusedError extends Error {
     named: {
       readonly connectionId?: string;
       readonly agentId?: string;
-      readonly connectionKind?: string;
+      readonly connectionType?: string;
     } = {},
   ) {
     super(message);
@@ -703,7 +712,7 @@ export class ConnectionRestoreRefusedError extends Error {
     this.reason = reason;
     this.connectionId = named.connectionId;
     this.agentId = named.agentId;
-    this.connectionKind = named.connectionKind;
+    this.connectionType = named.connectionType;
   }
 }
 

@@ -22,7 +22,6 @@ export const LIVEKIT_TOKEN_ENDPOINT_VARIANT =
 type CommonRegistration = {
   /** The agent's name in Egma. */
   readonly name: string;
-  readonly description?: string | undefined;
   readonly project?: string | undefined;
   /** Omit and the platform chooses `livekit-1`. */
   readonly connectionName?: string | undefined;
@@ -97,16 +96,13 @@ export function connectLiveKit(
 
   const registration: Registration = {
     name: input.name.trim(),
-    ...(input.description === undefined
-      ? {}
-      : { description: input.description.trim() }),
     ...(input.project === undefined ? {} : { project: input.project }),
     connection: {
       ...(input.connectionName === undefined
         ? {}
         : { name: input.connectionName.trim() }),
       agentPlatform: "livekit_agents",
-      connectionKind: "livekit_room",
+      connectionType: "livekit_room",
       accessVariant: input.variant,
       modality: "voice",
       ...(input.environment === undefined

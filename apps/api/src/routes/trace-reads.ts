@@ -262,7 +262,7 @@ function describedFacts(facts: TraceFacts): Record<string, unknown> {
     source: facts.source,
     emitter: facts.emitter,
     environment: facts.environment,
-    connectionKind: facts.connectionKind,
+    connectionType: facts.connectionType,
     providerCallId: facts.providerCallId,
     agentPlatform: facts.agentPlatform,
     platformAgentId: facts.platformAgentId,

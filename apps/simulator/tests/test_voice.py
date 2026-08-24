@@ -1369,7 +1369,7 @@ def test_assembling_a_spec_with_no_plug_refuses_before_anything_happens(
     tmp_path: Path,
 ):
     document = loopback_spec("sim-unplugged")
-    document["connection"]["connection_kind"] = "some-connection-nobody-wrote"
+    document["connection"]["connection_type"] = "some-connection-nobody-wrote"
     with pytest.raises(PlugError, match="some-connection-nobody-wrote"):
         assemble(
             SimulationSpec.from_document(document),
