@@ -1698,6 +1698,10 @@ export type ListGradersErrors = {
      */
     403: Refusal;
     /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
      * The request rate limit was reached.
      */
     429: Refusal;

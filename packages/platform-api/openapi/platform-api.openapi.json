@@ -6953,6 +6953,16 @@
               }
             }
           },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
           "429": {
             "description": "The request rate limit was reached.",
             "headers": {

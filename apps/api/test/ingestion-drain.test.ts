@@ -1140,17 +1140,17 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     await setup.sql("begin");
     await setup.sql(
       `insert into grader_definition
-         (id, name, description, type, scope_editable, current_definition_version)
+         (id, name, description, scope_editable, current_definition_version)
        values ($1, 'Production voice fixture', 'Grades completed voice traces',
-               'code', true, 1)`,
+               true, 1)`,
       [productionDefinitionId],
     );
     await setup.sql(
       `insert into grader_definition_version
-         (definition_id, version, prompt, parameter_contract, output_contract,
-          source_code, source_code_language, modalities, judge_model)
-       values ($1, 1, null, '[]'::jsonb, '{}'::jsonb,
-               'return 1', 'javascript', '["voice"]'::jsonb, null)`,
+         (definition_id, version, type, prompt, parameter_contract,
+          output_contract, modalities, judge_model)
+       values ($1, 1, 'code', null, '[]'::jsonb, '{}'::jsonb,
+               '["voice"]'::jsonb, null)`,
       [productionDefinitionId],
     );
     await setup.sql("commit");
@@ -1158,10 +1158,10 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
     await api.database.sql(
       `insert into project_grader
          (id, organization_id, project_id, grader_definition_id, scope,
-          pass_threshold)
+          parameter_values, pass_threshold)
        values ($1, $2, $3, $4,
                '{"simulations":[],"production":{"sample_percent":100}}'::jsonb,
-               0.7)`,
+               '{}'::jsonb, 0.7)`,
       [
         productionProjectGraderId,
         acme.organizationId,

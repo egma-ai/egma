@@ -45,6 +45,7 @@ export const graderOperations = {
       400: refusalResponse,
       401: refusalResponse,
       403: refusalResponse,
+      422: refusalResponse,
       429: rateLimitResponse,
     },
   }),
