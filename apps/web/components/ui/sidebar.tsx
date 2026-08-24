@@ -72,13 +72,10 @@ function SidebarProvider({
 }
 
 /**
- * The bar the Egma wordmark stands in, at the very top.
+ * The organization bar at the very top of the signed-in sidebar.
  *
- * **The wordmark is here because the developer put it here**, on 2026-08-23,
- * looking at the boards: "our logo, not the organization's". `DESIGN.md` used
- * to say the signed-in sidebar does not repeat the full logo and asked for
- * explicit approval to change that; the instruction *is* the approval, and
- * `DESIGN.md` records it as such.
+ * The approved Paper refinement puts the Egma mark, organization name, plan
+ * and arrows in this row. The project is a separate control below it.
  *
  * 56px tall over a hairline, which is exactly the topbar beside it (`73A-0`
  * and `71V-0` are both 56). The two bars line up across the whole application
@@ -100,11 +97,10 @@ function SidebarBrand({ className, ...props }: ComponentProps<"div">) {
 }
 
 /**
- * The topmost slot, which holds the organization and project switcher.
+ * The slot under the organization bar, which holds the project switcher.
  *
- * `min-w-0` is the load-bearing part: the switcher names an organization and a
- * project, and a long name in a 224px column has to be allowed to shrink rather
- * than push the bar wider than the grid column it is in.
+ * `min-w-0` is the load-bearing part: a long project name in a 224px column has
+ * to shrink rather than push the bar wider than the grid column it is in.
  */
 function SidebarHeader({ className, ...props }: ComponentProps<"div">) {
   return (

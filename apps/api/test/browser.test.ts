@@ -806,11 +806,16 @@ describe("what a project recorded in production", () => {
       const account = sidebar.locator('button[aria-label^="Account"]');
       await account.waitFor({ state: "visible" });
 
-      // Where you are, without having to open anything: the organization and
-      // the project, on one compact control that is there with one project.
+      // Where you are, without having to open anything: organization and
+      // project are two clear controls, both present with one project.
+      const organization = sidebar.locator(
+        'button[aria-label^="Open organization menu for"]',
+      );
+      await organization.waitFor({ state: "visible" });
+      await expect.poll(() => organization.innerText()).toMatch(/acme/i);
       const selector = sidebar.locator('button[aria-label^="Organization"]');
       await selector.waitFor({ state: "visible" });
-      await expect.poll(() => selector.innerText()).toMatch(/acme/i);
+      await expect.poll(() => selector.innerText()).toMatch(/project/i);
 
       // From here on, changing the page must not replace or empty the shell.
       // The old page-owned shell stayed in one document but still remounted,
@@ -907,20 +912,6 @@ describe("what a project recorded in production", () => {
           .getByRole("link", { name: "Simulation runs", exact: true })
           .count(),
       ).toBe(0);
-      /*
-       * **There is a way home in this bar, and it is the wordmark.**
-       *
-       * This line used to say there was none, from the time the bar held six
-       * navigation rows and nothing else. The developer put the Egma wordmark
-       * at the top of the sidebar on 2026-08-23 — "our logo, not the
-       * organization's" — and it links to the product root, so the assertion is
-       * now about what that link is rather than that it is absent. What must
-       * stay absent is a *navigation row* called Home: the bar names areas, and
-       * a row pointing at the root would be a seventh area that is not one.
-       */
-      expect(
-        await sidebar.getByRole("link", { name: "Egma home", exact: true }).getAttribute("href"),
-      ).toBe("/");
       expect(
         await sidebar.getByRole("link", { name: "Home", exact: true }).count(),
       ).toBe(0);
@@ -3538,19 +3529,9 @@ describe("the complete product, walked in order in a second project", () => {
                * whole of `NAVIGATION_GROUPS` — Agents, Graders, Tests,
                * Personas, Runs, Transcripts — and a row added or dropped
                * should be a decision somebody takes here on purpose.
-               *
-               * **Seven links, and the seventh is not a row.** The Egma
-               * wordmark at the top of the bar is a link to the product root
-               * (`/`), added on 2026-08-23 by the developer's ruling. It is
-               * separated out rather than counted in, so this stays a count of
-               * the navigation and the brand link stays named.
                */
-              const home = addresses.filter((one) => one === "/");
-              expect(home, addresses.join(", ")).toHaveLength(1);
-              expect(
-                addresses.filter((one) => one !== "/").length,
-                addresses.join(", "),
-              ).toBe(6);
+              expect(addresses, addresses.join(", ")).toHaveLength(6);
+              expect(addresses, addresses.join(", ")).not.toContain("/");
               for (const address of addresses) {
                 expect(address, address).not.toContain("simulations");
               }
@@ -4352,13 +4333,9 @@ describe("the complete product, walked in order in a second project", () => {
         // the first Tab is the first focusable thing on the page. Clicking a
         // corner would make the answer depend on what is drawn there.
         //
-        // **The wordmark is the first stop, and the switcher is the second.**
-        // The bar's topmost thing is the Egma wordmark in a bar of its own,
-        // linking to the product root (`DESIGN.md`, Shell; the developer's
-        // ruling of 2026-08-23). The topmost *control* is still the switcher,
-        // which is the line under it.
+        // Organization is the first control and Project is the second.
         await walk.keyboard.press("Tab");
-        expect(await focused()).toBe("Egma home");
+        expect(await focused()).toMatch(/^Open organization menu for/u);
         await walk.keyboard.press("Tab");
         expect(await focused()).toMatch(/^Organization/u);
         await walk.keyboard.press("Tab");
