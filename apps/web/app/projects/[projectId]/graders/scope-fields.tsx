@@ -24,22 +24,31 @@ import {
 import { Menu } from "../../../../ui/menu.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
 
-type ScopeOption = {
-  readonly kind: "test_suite" | "test";
+type ScopeTestOption = {
+  readonly kind: "test";
   readonly id: string;
   readonly name: string;
-  readonly suiteName: string;
 };
+
+type ScopeSuiteOption = {
+  readonly kind: "test_suite";
+  readonly id: string;
+  readonly name: string;
+  readonly tests: readonly ScopeTestOption[];
+};
+
+type ScopeOption = ScopeSuiteOption | ScopeTestOption;
+type ScopeRowOption = Pick<ScopeOption, "kind" | "id" | "name">;
 
 type OptionsState =
   | { readonly status: "loading" }
   | { readonly status: "failed"; readonly message: string }
-  | { readonly status: "ready"; readonly options: readonly ScopeOption[] };
+  | { readonly status: "ready"; readonly options: readonly ScopeSuiteOption[] };
 
 async function readScopeOptions(projectId: string): Promise<
   | { readonly status: "signed-out" }
   | { readonly status: "failed"; readonly message: string }
-  | { readonly status: "ready"; readonly options: readonly ScopeOption[] }
+  | { readonly status: "ready"; readonly options: readonly ScopeSuiteOption[] }
 > {
   const suites = [] as Array<{ readonly id: string; readonly name: string }>;
   let suiteToken: string | undefined;
@@ -63,14 +72,9 @@ async function readScopeOptions(projectId: string): Promise<
     suiteToken = answer.value.nextPageToken ?? undefined;
   } while (suiteToken !== undefined);
 
-  const options: ScopeOption[] = [];
+  const options: ScopeSuiteOption[] = [];
   for (const suite of suites) {
-    options.push({
-      kind: "test_suite",
-      id: suite.id,
-      name: suite.name,
-      suiteName: suite.name,
-    });
+    const tests: ScopeTestOption[] = [];
     let testToken: string | undefined;
     do {
       const answer = await platformAnswer(
@@ -88,16 +92,21 @@ async function readScopeOptions(projectId: string): Promise<
       if (answer.status !== "ready") {
         return { status: "failed", message: answer.refusal.message };
       }
-      options.push(
+      tests.push(
         ...answer.value.tests.map((test) => ({
           kind: "test" as const,
           id: test.id,
           name: test.name,
-          suiteName: suite.name,
         })),
       );
       testToken = answer.value.nextPageToken ?? undefined;
     } while (testToken !== undefined);
+    options.push({
+      kind: "test_suite",
+      id: suite.id,
+      name: suite.name,
+      tests,
+    });
   }
 
   return { status: "ready", options };
@@ -141,24 +150,31 @@ function ScopePicker({
   }, [projectId]);
 
   const available = state.status === "ready" ? state.options : [];
-  const visible = available.filter((option) => {
-    const needle = search.trim().toLocaleLowerCase();
-    return (
+  const flatAvailable = available.flatMap((suite) => [suite, ...suite.tests]);
+  const needle = search.trim().toLocaleLowerCase();
+  const visible = available.flatMap((suite) => {
+    const suiteMatches =
       needle === "" ||
-      option.name.toLocaleLowerCase().includes(needle) ||
-      option.suiteName.toLocaleLowerCase().includes(needle) ||
-      option.kind.replace("_", " ").includes(needle)
-    );
+      suite.name.toLocaleLowerCase().includes(needle) ||
+      "test suite".includes(needle);
+    const tests = suiteMatches
+      ? suite.tests
+      : suite.tests.filter(
+          (test) =>
+            test.name.toLocaleLowerCase().includes(needle) ||
+            "test".includes(needle),
+        );
+    return suiteMatches || tests.length > 0 ? [{ suite, tests }] : [];
   });
   const unavailable = chosen.filter(
     (selector) =>
-      !available.some(
+      !flatAvailable.some(
         (option) => option.kind === selector.kind && option.id === selector.id,
       ),
   );
   const named = chosen
     .map((selector) =>
-      available.find(
+      flatAvailable.find(
         (option) => option.kind === selector.kind && option.id === selector.id,
       ),
     )
@@ -170,7 +186,7 @@ function ScopePicker({
         ? named.map((option) => option.name).join(", ")
         : `${String(chosen.length)} selected`;
 
-  function toggle(kind: "test_suite" | "test", id: string): void {
+  function toggleUnavailable(kind: "test_suite" | "test", id: string): void {
     const selected = chosenKeys.has(`${kind}:${id}`);
     onChange(
       selected
@@ -178,6 +194,58 @@ function ScopePicker({
             (selector) => selector.kind !== kind || selector.id !== id,
           )
         : [...chosen, { kind, id }],
+    );
+  }
+
+  function withoutSuiteSelection(suite: ScopeSuiteOption) {
+    const testIds = new Set(suite.tests.map((test) => test.id));
+    return chosen.filter(
+      (selector) =>
+        !(
+          (selector.kind === "test_suite" && selector.id === suite.id) ||
+          (selector.kind === "test" && testIds.has(selector.id))
+        ),
+    );
+  }
+
+  function suiteSelection(suite: ScopeSuiteOption): boolean | "mixed" {
+    if (chosenKeys.has(`test_suite:${suite.id}`)) return true;
+    return suite.tests.some((test) => chosenKeys.has(`test:${test.id}`))
+      ? "mixed"
+      : false;
+  }
+
+  function toggleSuite(suite: ScopeSuiteOption): void {
+    const selected = chosenKeys.has(`test_suite:${suite.id}`);
+    const remaining = withoutSuiteSelection(suite);
+    onChange(
+      selected
+        ? remaining
+        : [...remaining, { kind: "test_suite", id: suite.id }],
+    );
+  }
+
+  function toggleTest(suite: ScopeSuiteOption, testId: string): void {
+    const suiteSelected = chosenKeys.has(`test_suite:${suite.id}`);
+    const selectedTestIds = new Set(
+      suite.tests
+        .filter((test) => chosenKeys.has(`test:${test.id}`))
+        .map((test) => test.id),
+    );
+    if (suiteSelected) {
+      for (const test of suite.tests) selectedTestIds.add(test.id);
+    }
+    if (selectedTestIds.has(testId)) selectedTestIds.delete(testId);
+    else selectedTestIds.add(testId);
+
+    const remaining = withoutSuiteSelection(suite);
+    onChange(
+      [
+        ...remaining,
+        ...suite.tests
+          .filter((test) => selectedTestIds.has(test.id))
+          .map((test) => ({ kind: "test" as const, id: test.id })),
+      ],
     );
   }
 
@@ -246,23 +314,49 @@ function ScopePicker({
                       kind: selector.kind,
                       id: selector.id,
                       name: selector.id,
-                      suiteName: "Unavailable",
                     }}
                     selected
                     unavailable
                     disabled={disabled}
-                    onClick={() => toggle(selector.kind, selector.id)}
+                    onClick={() =>
+                      toggleUnavailable(selector.kind, selector.id)
+                    }
                   />
                 ))}
-                {visible.map((option) => (
-                  <ScopeOptionRow
-                    key={`${option.kind}:${option.id}`}
-                    option={option}
-                    selected={chosenKeys.has(`${option.kind}:${option.id}`)}
-                    disabled={disabled}
-                    onClick={() => toggle(option.kind, option.id)}
-                  />
-                ))}
+                {visible.map(({ suite, tests }) => {
+                  const selected = suiteSelection(suite);
+                  const suiteSelected = selected === true;
+                  return (
+                    <div
+                      key={suite.id}
+                      role="group"
+                      aria-label={`${suite.name} test suite`}
+                    >
+                      <ScopeOptionRow
+                        option={suite}
+                        selected={selected}
+                        disabled={disabled}
+                        onClick={() => toggleSuite(suite)}
+                      />
+                      {tests.length === 0 ? null : (
+                        <div className="ml-5 border-l border-border pl-3">
+                          {tests.map((test) => (
+                            <ScopeOptionRow
+                              key={test.id}
+                              option={test}
+                              selected={
+                                suiteSelected ||
+                                chosenKeys.has(`test:${test.id}`)
+                              }
+                              disabled={disabled}
+                              onClick={() => toggleTest(suite, test.id)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </>
             )}
           </div>
@@ -289,8 +383,8 @@ function ScopeOptionRow({
   disabled,
   onClick,
 }: {
-  readonly option: ScopeOption;
-  readonly selected: boolean;
+  readonly option: ScopeRowOption;
+  readonly selected: boolean | "mixed";
   readonly unavailable?: boolean;
   readonly disabled: boolean;
   readonly onClick: () => void;
@@ -300,8 +394,9 @@ function ScopeOptionRow({
       className={cn(
         "grid w-full min-h-(--tap-target) grid-cols-[var(--space-5)_minmax(0,1fr)_auto]",
         "items-center gap-3 rounded-button border-0 bg-transparent px-3 py-2",
-        "cursor-pointer text-left text-sm text-foreground aria-checked:bg-selected",
+        "cursor-pointer text-left text-sm text-foreground",
         "pointer-hover:not-disabled:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-60",
+        selected !== false && "bg-selected",
       )}
       type="button"
       role="checkbox"
@@ -315,17 +410,12 @@ function ScopeOptionRow({
         className="grid size-(--space-5) place-items-center rounded-button border border-border-strong text-brand"
         aria-hidden="true"
       >
-        {selected ? "✓" : ""}
+        {selected === true ? "✓" : selected === "mixed" ? "−" : ""}
       </span>
       <span className="min-w-0">
         <span className={cn("block truncate", unavailable && "text-faint")}>
           {option.name}
         </span>
-        {option.kind === "test" ? (
-          <span className="block truncate text-xs text-faint">
-            {option.suiteName}
-          </span>
-        ) : null}
       </span>
       <Badge variant={unavailable ? "warning" : "neutral"} shape="count">
         {unavailable

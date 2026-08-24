@@ -7,12 +7,15 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import GradersPage from "../app/projects/[projectId]/graders/page.tsx";
+import { ScopeFields } from "../app/projects/[projectId]/graders/scope-fields.tsx";
 import {
   EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
   type GraderLibraryEntry,
+  type ProjectGraderScope,
   type ProjectGrader,
 } from "../lib/graders.ts";
 import type { Me } from "../lib/me.ts";
@@ -243,6 +246,20 @@ async function openRowMenu(name: string, item: string): Promise<void> {
   fireEvent.click(await screen.findByRole("menuitem", { name: item }));
 }
 
+function ScopeHarness() {
+  const [scope, setScope] = useState<ProjectGraderScope>({
+    simulations: [],
+    production: null,
+  });
+
+  return (
+    <>
+      <ScopeFields projectId="prj_1" scope={scope} onChange={setScope} />
+      <output aria-label="Selected grader scope">{JSON.stringify(scope)}</output>
+    </>
+  );
+}
+
 beforeEach(() => {
   routed.pathname = "/projects/prj_1/graders";
   routed.projectId = "prj_1";
@@ -263,6 +280,123 @@ afterEach(() => {
 });
 
 describe("the project Graders surface", () => {
+  it("nests tests under their suite and stores one suite selector when the suite is chosen", async () => {
+    apiAnswers({
+      "GET /v1/test-suites": {
+        status: 200,
+        body: {
+          testSuites: [
+            {
+              id: "ste_1",
+              projectId: "prj_1",
+              name: "Northside Ford",
+              ...DATES,
+            },
+          ],
+          nextPageToken: null,
+        },
+      },
+      "GET /v1/tests": {
+        status: 200,
+        body: {
+          tests: [
+            {
+              id: "tst_booking",
+              projectId: "prj_1",
+              suiteId: "ste_1",
+              name: "Books service",
+              description: null,
+              version: 1,
+              versionId: "tstv_booking",
+              scenario: "The caller books service.",
+              expectedBehaviors: ["Offers an available time"],
+              personas: [],
+              overrideCount: 0,
+              revision: "rev_booking",
+              ...DATES,
+            },
+            {
+              id: "tst_cancel",
+              projectId: "prj_1",
+              suiteId: "ste_1",
+              name: "Cancels service",
+              description: null,
+              version: 1,
+              versionId: "tstv_cancel",
+              scenario: "The caller cancels service.",
+              expectedBehaviors: ["Confirms the cancellation"],
+              personas: [],
+              overrideCount: 0,
+              revision: "rev_cancel",
+              ...DATES,
+            },
+          ],
+          nextPageToken: null,
+        },
+      },
+    });
+    render(<ScopeHarness />);
+
+    fireEvent.click(screen.getByLabelText("Grades simulations"));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Choose test suites and tests",
+      }),
+    );
+
+    const picker = await screen.findByRole("dialog", {
+      name: "Choose test suites and tests",
+    });
+    const suiteGroup = within(picker).getByRole("group", {
+      name: "Northside Ford test suite",
+    });
+    const suite = within(suiteGroup).getByRole("checkbox", {
+      name: "Northside Ford, test suite",
+    });
+    const booking = within(suiteGroup).getByRole("checkbox", {
+      name: "Books service, test",
+    });
+    const cancellation = within(suiteGroup).getByRole("checkbox", {
+      name: "Cancels service, test",
+    });
+
+    fireEvent.click(suite);
+    expect(suite.getAttribute("aria-checked")).toBe("true");
+    expect(booking.getAttribute("aria-checked")).toBe("true");
+    expect(cancellation.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Selected grader scope").textContent).toBe(
+      JSON.stringify({
+        simulations: [{ kind: "test_suite", id: "ste_1" }],
+        production: null,
+      }),
+    );
+
+    fireEvent.click(booking);
+    expect(suite.getAttribute("aria-checked")).toBe("mixed");
+    expect(booking.getAttribute("aria-checked")).toBe("false");
+    expect(cancellation.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Selected grader scope").textContent).toBe(
+      JSON.stringify({
+        simulations: [{ kind: "test", id: "tst_cancel" }],
+        production: null,
+      }),
+    );
+
+    fireEvent.click(booking);
+    expect(suite.getAttribute("aria-checked")).toBe("mixed");
+    expect(booking.getAttribute("aria-checked")).toBe("true");
+    expect(cancellation.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Selected grader scope").textContent).toBe(
+      JSON.stringify({
+        simulations: [
+          { kind: "test", id: "tst_booking" },
+          { kind: "test", id: "tst_cancel" },
+        ],
+        production: null,
+      }),
+    );
+  });
+
   it("separates active project policy from the grader library without repeated headings", async () => {
     const { asked } = apiAnswers(standardAnswers());
     render(<GradersPage />);
