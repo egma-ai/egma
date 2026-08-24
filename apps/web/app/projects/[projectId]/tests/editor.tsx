@@ -226,8 +226,8 @@ function RowIndex({ index }: { readonly index: number }) {
  * **There is nothing to say per sentence, so there is no second column.** Every
  * expected behavior has to hold — that is what makes a test falsifiable — so
  * the question "what happens if this one fails" has one answer for the whole
- * list and does not belong on any row. How loudly a *grader* speaks is the
- * running copy's `required` flag, set where the copy is, once.
+ * list and does not belong on any row. How a grader applies belongs to the
+ * project grader scope, not to one expected-behavior sentence.
  *
  * The box grows with what is typed rather than starting four lines tall: a
  * behavior is a sentence, and four empty lines per statement is what turned a

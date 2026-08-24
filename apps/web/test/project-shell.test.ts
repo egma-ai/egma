@@ -102,17 +102,12 @@ describe("the product navigation", () => {
    * under test would make this assertion agree with whatever the module says
    * today.
    *
-   * Five are the addresses the flat bar offered, unmoved by the regroup: the
-   * groups are presentation, and a person who copied one of those links opens
-   * the same page afterwards. Graders is the sixth and it points one step
-   * deeper now, the way Monitoring already did — its strip leads with Running,
-   * and the bar opens the tab the strip leads with. The library did not move
-   * and `/projects/prj_2/graders` still opens it; this list says where the bar
-   * points.
+   * The groups are presentation. Each expected address is written out so the
+   * test cannot copy a wrong address from the module under test.
    */
   const BAR_HREFS = [
     "/projects/prj_2/agents",
-    "/projects/prj_2/graders/running",
+    "/projects/prj_2/graders",
     "/projects/prj_2/monitoring/transcripts",
     "/projects/prj_2/personas",
     "/projects/prj_2/runs",
@@ -268,15 +263,8 @@ describe("the product navigation", () => {
     expect(activeSectionIn("/projects/prj_2/settings/people")).toBeNull();
   });
 
-  /**
-   * The section a grader screen is under, read out of the address like every
-   * other. The running-copies screen is a second page inside the same section
-   * rather than a section of its own, so the item stays lit while somebody is
-   * on it — which is the whole reason the two are tabs.
-   */
-  it("keeps both grader screens under one navigation item", () => {
+  it("keeps the grader page under its navigation item", () => {
     expect(activeSectionIn("/projects/prj_1/graders")).toBe("graders");
-    expect(activeSectionIn("/projects/prj_1/graders/running")).toBe("graders");
   });
 
   it("has no item for a simulation, which is evidence reached from its run", () => {

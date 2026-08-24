@@ -86,22 +86,20 @@ const FACTS: Facts = {
 
 const ONE_ROW: Listed = { ...FACTS, preview: "I need to move my appointment" };
 
-/** A running grader, at whichever scope the case under test needs. */
-function grader(scope: string) {
+/** A project grader, with or without production in its scope. */
+function grader(scope: "simulations" | "both") {
   return {
     id: "grd_1",
-    libraryId: "gld_1",
     projectId: "prj_2",
-    name: "Expected behaviors",
-    description: null,
-    type: "llm_as_judge",
-    required: true,
-    scope,
-    productionSampleRate: 100,
-    version: 1,
-    versionId: "grv_1",
-    config: null,
-    judgeModel: null,
+    graderDefinitionId: "grl_expected",
+    name: "expected_behaviors",
+    description: "Grades a completed simulation against its expected behaviors.",
+    scopeEditable: false,
+    scope: {
+      simulations: [{ kind: "all" }],
+      production: scope === "both" ? { samplePercent: 100 } : null,
+    },
+    passThreshold: 1,
     createdAt: "2026-08-01T00:00:00.000000Z",
     updatedAt: "2026-08-01T00:00:00.000000Z",
   };
@@ -617,7 +615,7 @@ describe("what a quiet Monitoring page says", () => {
       name: QUIET.unwatched.graders,
     });
     expect(guidance()).toEqual(["nothing-watches-production"]);
-    expect(graders.getAttribute("href")).toBe("/projects/prj_2/graders/running");
+    expect(graders.getAttribute("href")).toBe("/projects/prj_2/graders");
     expect(screen.getByText(QUIET.unwatched.lead)).toBeDefined();
     // The rows are still the page. Guidance sits above them rather than
     // replacing them.

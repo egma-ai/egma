@@ -14,7 +14,7 @@ import { useDraftNavigation } from "./draft-navigation.tsx";
 import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
 
 /**
- * Where you are working: the organization, and the project inside it.
+ * The project where you are working.
  *
  * **It is on screen even when there is one project.** An earlier rule hid a
  * level with one thing in it as clutter. It is not clutter — it is the answer
@@ -28,26 +28,18 @@ import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
  * work because they always did — they restore an address, and an address is the
  * whole of the state.
  *
- * The organization is shown and is not a choice: one person belongs to one
- * organization in this version, and offering a menu of one would suggest
- * otherwise.
+ * Organization identity now has its own control in the shell. It is still
+ * passed here because the chooser names the organization whose projects it
+ * lists, but it is no longer repeated in this trigger.
  */
 
 /**
- * The trigger: two lines, no card, and no mark.
+ * The trigger: an explicit label over the current project.
  *
- * **The card went when the wordmark arrived.** It used to carry a square with
- * the organization's initial, a quiet "ORGANIZATION" eyebrow, the organization
- * name and the project under it — four things, because the top of the bar had
- * to answer *which Egma is this* on its own. It does not any more: the
- * wordmark bar above says the product, so this block says the two things left,
- * and the boards draw them as plain type on the sidebar's own surface
- * (`734-0`).
- *
- * The **organization is the eyebrow** now and the **project is the primary
- * line** — the developer's ruling of 2026-08-23, and the right way round: the
- * project is what a person changes and the organization is the one thing they
- * cannot. 12px for the eyebrow and 14px for the name, both read off the board.
+ * The word **Project** stays visible even when there is only one. Organization
+ * and project are different scopes, so a quiet label is the small amount of
+ * copy that prevents the current project's name from being mistaken for an
+ * organization. The organization sits in the bar above it.
  *
  * **This is a restyle of the trigger and nothing else.** Search, the keyboard
  * path, Escape, focus return, the unsaved-work guard and the origin-aware open
@@ -141,14 +133,10 @@ export function ProjectSelector({
       panelRole="dialog"
       trigger={
         <>
-          {/*
-           * The organization, quiet and above. It is not a choice — one person
-           * belongs to one organization in this version — so it is a label
-           * rather than something with a control on it.
-           */}
+          {/* The mobile row has no room for a second line. */}
           {compact ? null : (
             <span className="block overflow-hidden text-2xs leading-(--line-normal) text-ellipsis whitespace-nowrap text-faint">
-              {organizationName}
+              Project
             </span>
           )}
           <span className="flex min-w-0 items-center justify-between gap-2">

@@ -7,220 +7,271 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import GraderLibraryPage from "../app/projects/[projectId]/graders/page.tsx";
-import RunningGradersPage from "../app/projects/[projectId]/graders/running/page.tsx";
-import * as libraryCopy from "../lib/grader-library-copy.ts";
-import * as runningCopy from "../lib/grader-running-copy.ts";
-import type { LibraryEntry, RunningGrader } from "../lib/graders.ts";
+import GradersPage from "../app/projects/[projectId]/graders/page.tsx";
+import { ScopeFields } from "../app/projects/[projectId]/graders/scope-fields.tsx";
+import {
+  EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
+  type GraderLibraryEntry,
+  type ProjectGraderScope,
+  type ProjectGrader,
+} from "../lib/graders.ts";
 import type { Me } from "../lib/me.ts";
-import { graderTabsFor } from "../lib/presentation.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
-/**
- * The two grader screens of one project, rendered and driven the way somebody
- * with a keyboard drives them.
- *
- * They replace two source-reading tests that held `main`'s organization-wide
- * pages to rendering their copy file. Those pages are gone, and so is that kind
- * of proof: nothing here asserts that a component exists or that a source file
- * contains a string. Every test puts the API's real answers in front of a real
- * component and reads what the DOM then says.
- *
- * **The claim these files exist to defend is the one the old pair could not
- * make: the project in the address is the project acted on.** The pages that
- * came in from `main` carried no project at all — they read the shelf without
- * one and posted Use without one — so on this shell the API resolved a project
- * for itself and a person with three projects switched a grader on in whichever
- * came first, with nothing on screen saying so. So the first thing asked of
- * every read and every write here is which project it named.
- *
- * The vocabulary check the deleted pair carried survives, at the bottom, over
- * the copy modules both screens render from. It is the one assertion worth
- * keeping about a source file: a word that should never be typed fails the
- * build rather than shipping in a heading.
+/*
+ * The page must keep a controlled sheet mounted while Radix finishes its exit.
+ * jsdom has no stylesheet, so this gives Radix the same animation names that
+ * the product theme gives the real sheet.
  */
+function withClosingSheetAnimation(): void {
+  const real = window.getComputedStyle.bind(window);
+  vi.stubGlobal(
+    "getComputedStyle",
+    (element: Element, pseudo?: string | null) => {
+      const styles = real(element, pseudo);
+      const slot =
+        element instanceof HTMLElement ? (element.dataset.slot ?? "") : "";
+      if (!slot.startsWith("sheet-")) return styles;
+      return new Proxy(styles, {
+        get(target, key, receiver) {
+          if (key !== "animationName") {
+            return Reflect.get(target, key, receiver);
+          }
+          const closed = (element as HTMLElement).dataset.state === "closed";
+          return slot === "sheet-overlay"
+            ? closed
+              ? "egma-fade-out"
+              : "egma-fade-in"
+            : closed
+              ? "egma-sheet-out"
+              : "egma-sheet-in";
+        },
+      });
+    },
+  );
+}
+
+function finishSheetExit(surface: HTMLElement): void {
+  const ended = new Event("animationend", { bubbles: false });
+  Object.defineProperty(ended, "animationName", {
+    value:
+      surface.dataset.slot === "sheet-overlay"
+        ? "egma-fade-out"
+        : "egma-sheet-out",
+  });
+  fireEvent(surface, ended);
+}
 
 const routed = vi.hoisted(() => ({
-  push: vi.fn(),
   pathname: "/projects/prj_1/graders",
   projectId: "prj_1",
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => routed.pathname,
-  useRouter: () => ({ push: routed.push, replace: vi.fn(), back: vi.fn() }),
   useParams: () => ({ projectId: routed.projectId }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }));
 
 vi.mock("next/link", () => ({
-  default: ({
-    href,
-    children,
-    ...rest
-  }: {
-    href: string;
-    children: unknown;
-  }) => <a href={href} {...rest}>{children as never}</a>,
+  default: ({ href, children, ...rest }: { href: string; children: unknown }) => (
+    <a href={href} {...rest}>
+      {children as never}
+    </a>
+  ),
 }));
 
 vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
 
-const PROJECTS = [
-  { id: "prj_1", name: "Default", slug: "default" },
-  { id: "prj_2", name: "Outbound", slug: "outbound" },
-];
-
 function meWith(role: string): Me {
   return {
     user: { id: "usr_1", email: "ada@acme.example" },
     organizations: [{ id: "org_1", name: "Acme", slug: "acme", role }],
-    projects: PROJECTS,
+    projects: [{ id: "prj_1", name: "Default", slug: "default" }],
   };
 }
 
 function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
+  return new Response(status === 204 ? undefined : JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: status === 204 ? undefined : { "content-type": "application/json" },
   });
 }
 
-type Stubbed = { status: number; body: unknown } | "never";
+type Stubbed = { readonly status: number; readonly body: unknown };
 
-/** Whatever egma is standing in for, keyed by method and path. */
-function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
-  readonly asked: { method: string; path: string; body: unknown }[];
+function apiAnswers(answers: Record<string, Stubbed | Stubbed[]>): {
+  readonly asked: {
+    readonly method: string;
+    readonly path: string;
+    readonly body: unknown;
+  }[];
 } {
-  const seen: Record<string, number> = {};
+  const turns: Record<string, number> = {};
   const asked: { method: string; path: string; body: unknown }[] = [];
-
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: FetchInput, init?: RequestInit) => {
       const request = await observeRequest(input, init);
-      const { address: at, method } = request;
-      const key = `${method} ${at.pathname}`;
+      const key = `${request.method} ${request.address.pathname}`;
       asked.push({
-        method,
-        path: `${at.pathname}${at.search}`,
+        method: request.method,
+        path: `${request.address.pathname}${request.address.search}`,
         body: request.body,
       });
-
       const held = answers[key];
       if (held === undefined) throw new Error(`nothing stubbed for ${key}`);
-
-      const turn = seen[key] ?? 0;
-      seen[key] = turn + 1;
+      const at = turns[key] ?? 0;
+      turns[key] = at + 1;
       const answer = Array.isArray(held)
-        ? ((held[Math.min(turn, held.length - 1)] ?? "never") as Stubbed)
-        : (held as Stubbed);
-
-      if (answer === "never") return new Promise<Response>(() => undefined);
+        ? (held[Math.min(at, held.length - 1)] as Stubbed)
+        : held;
       return json(answer.status, answer.body);
     }),
   );
-
   return { asked };
 }
 
-/** egma's own expected-behaviors entry: its Use form asks for nothing at all. */
-const BEHAVIORS: LibraryEntry = {
-  id: "grl_behaviors",
-  name: "expected_behaviors",
-  description: "Judges a simulation against its test's expected behaviors.",
-  type: "llm_as_judge",
-  owner: "egma",
-  projectId: null,
-  version: 1,
-  prompt: null,
-  params: [],
-  outputDefinition: null,
-  createdAt: "2026-08-15T10:00:00.000Z",
-  updatedAt: "2026-08-15T10:00:00.000Z",
+const DATES = {
+  createdAt: "2026-08-24T10:00:00.000Z",
+  updatedAt: "2026-08-24T10:00:00.000Z",
 };
 
-/** egma's latency entry: a measure from the catalog, and a bound. */
-const LATENCY: LibraryEntry = {
-  id: "grl_latency",
-  name: "latency",
-  description: "Fails when a measured latency is over the bound.",
-  type: "code",
+const EXPECTED: ProjectGrader = {
+  id: "grd_expected",
+  projectId: "prj_1",
+  graderDefinitionId: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
+  name: "expected_behaviors",
+  description: "Grades a completed simulation against its expected behaviors.",
   owner: "egma",
-  projectId: null,
-  version: 1,
-  prompt: null,
-  params: [
+  type: "llm_as_judge",
+  modalities: ["chat", "voice"],
+  scopeEditable: false,
+  removable: false,
+  scope: { simulations: [{ kind: "all" }], production: null },
+  settings: {},
+  passThreshold: 1,
+  ...DATES,
+};
+
+const LATENCY: ProjectGrader = {
+  id: "grd_latency",
+  projectId: "prj_1",
+  graderDefinitionId: "grl_latency",
+  name: "Response latency",
+  description: "Grades the average response time for a trace.",
+  owner: "egma",
+  type: "code",
+  modalities: ["chat", "voice"],
+  scopeEditable: true,
+  removable: true,
+  scope: { simulations: [{ kind: "all" }], production: null },
+  settings: { maximum_average_response_time_ms: 3_000 },
+  passThreshold: 1,
+  ...DATES,
+};
+
+const EXPECTED_DEFINITION: GraderLibraryEntry = {
+  id: EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID,
+  name: "expected_behaviors",
+  description: "Grades a completed simulation against its expected behaviors.",
+  owner: "egma",
+  type: "llm_as_judge",
+  scopeEditable: false,
+  currentDefinitionVersion: 1,
+  modalities: ["chat", "voice"],
+  gradingInstructions: null,
+  requiredEvidence: ["transcript", "test_expected_behaviors"],
+  settingDefinitions: [],
+  activeProjectGraderId: EXPECTED.id,
+  ...DATES,
+};
+
+const LATENCY_DEFINITION: GraderLibraryEntry = {
+  id: "grl_latency",
+  name: "Response latency",
+  description: "Grades the average response time for a trace.",
+  owner: "egma",
+  type: "code",
+  scopeEditable: true,
+  currentDefinitionVersion: 1,
+  modalities: ["chat", "voice"],
+  gradingInstructions: null,
+  requiredEvidence: ["turn_response_latency"],
+  settingDefinitions: [
     {
-      name: "metric",
-      label: "Measure",
-      kind: "choice",
-      means: "Which measure to hold to a bound.",
-      options: [
-        {
-          value: "turn_response_latency",
-          label: "Response latency",
-          means: "How long the agent took to answer.",
-          unit: "ms",
-        },
-        {
-          value: "turn_count",
-          label: "Turns",
-          means: "How many turns it took.",
-          unit: "turns",
-        },
-      ],
-    },
-    {
-      name: "bound",
-      label: "Bound",
-      kind: "number",
-      means: "The most this measure may be.",
+      key: "maximum_average_response_time_ms",
+      label: "Maximum average response time",
+      valueType: "integer",
+      defaultValue: 3_000,
+      unit: "milliseconds",
+      minimum: 1,
+      maximum: null,
     },
   ],
-  outputDefinition: null,
-  createdAt: "2026-08-15T10:00:00.000Z",
-  updatedAt: "2026-08-15T10:00:00.000Z",
+  activeProjectGraderId: null,
+  ...DATES,
 };
 
-const SEEDED: RunningGrader = {
-  id: "grd_1",
-  libraryId: "grl_behaviors",
-  projectId: "prj_1",
-  name: "expected_behaviors",
-  description: null,
-  type: "llm_as_judge",
-  required: true,
-  scope: "simulations",
-  productionSampleRate: 0,
-  version: 1,
-  versionId: "grv_1",
-  config: { assertions: [] },
-  judgeModel: null,
-  createdAt: "2026-08-15T10:00:00.000Z",
-  updatedAt: "2026-08-15T10:00:00.000Z",
-};
+function standardAnswers(
+  role = "admin",
+  graders: readonly ProjectGrader[] = [EXPECTED],
+  library: readonly GraderLibraryEntry[] = [
+    EXPECTED_DEFINITION,
+    LATENCY_DEFINITION,
+  ],
+): Record<string, Stubbed | Stubbed[]> {
+  return {
+    "GET /api/me": { status: 200, body: meWith(role) },
+    "GET /v1/graders": {
+      status: 200,
+      body: { graders, nextPageToken: null },
+    },
+    "GET /v1/grader-library": {
+      status: 200,
+      body: { graderLibraryEntries: library, nextPageToken: null },
+    },
+  };
+}
 
-const DIAGNOSTIC: RunningGrader = {
-  ...SEEDED,
-  id: "grd_2",
-  libraryId: "grl_latency",
-  name: "latency",
-  type: "code",
-  required: false,
-  scope: "both",
-  productionSampleRate: 10,
-  config: { assertions: [{ metric: "turn_response_latency", bound: 2000 }] },
-};
+async function openRowMenu(name: string, item: string): Promise<void> {
+  fireEvent.click(
+    await screen.findByRole("button", { name: `Open the menu for ${name}` }),
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
+function ScopeHarness() {
+  const [scope, setScope] = useState<ProjectGraderScope>({
+    simulations: [],
+    production: null,
+  });
+
+  return (
+    <>
+      <ScopeFields projectId="prj_1" scope={scope} onChange={setScope} />
+      <output aria-label="Selected grader scope">{JSON.stringify(scope)}</output>
+    </>
+  );
+}
 
 beforeEach(() => {
-  routed.push.mockReset();
   routed.pathname = "/projects/prj_1/graders";
   routed.projectId = "prj_1";
   vi.stubGlobal("scrollTo", vi.fn());
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
 });
 
 afterEach(() => {
@@ -228,1463 +279,595 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/* ------------------------------------------------------------------------ */
-
-describe("the grader library, in one project", () => {
-  it("names its project in the read, and says what each entry is and whose", async () => {
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/grader-library": {
-        status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
-      },
-    });
-    render(<GraderLibraryPage />);
-
-    // Once, because the table changes layout without cloning the row.
-    expect(await screen.findAllByText("Expected behaviors")).toHaveLength(1);
-    expect(asked.map((one) => one.path)).toContain(
-      "/v1/grader-library?projectId=prj_1",
-    );
-
-    // The stored words turned into the ones a person reads, and never shown raw.
-    expect(screen.getAllByText("Model judged")).not.toHaveLength(0);
-    expect(screen.getAllByText("Computed")).not.toHaveLength(0);
-    expect(screen.queryByText("llm_as_judge")).toBeNull();
-    expect(screen.queryByText("expected_behaviors")).toBeNull();
-
-    // The owner word is the approved identity, and the stored key is never what
-    // a person is shown. `grader-library.test.ts` held this against the copy
-    // module and was deleted with the organization-wide pages it read; the
-    // claim is stronger here, because a rendering is what a person meets.
-    expect(screen.getAllByText("Egma")).not.toHaveLength(0);
-    expect(screen.queryByText("egma")).toBeNull();
-  });
-
-  /**
-   * The whole reason these screens moved under the project. Pressing Use on a
-   * page with no project in its address posted a body with no project in it,
-   * and the copy landed wherever the API resolved — which for a person with
-   * three projects is whichever came first in their list.
-   */
-  it("puts the running copy on the project in the address", async () => {
-    routed.projectId = "prj_2";
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/grader-library": {
-        status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
-      },
-      "POST /v1/graders": { status: 201, body: SEEDED },
-    });
-    render(<GraderLibraryPage />);
-
-    fireEvent.click((await screen.findAllByRole("button", { name: "Use" }))[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
-
-    expect(
-      (await screen.findByRole("status")).textContent,
-    ).toContain("Expected behaviors is running on this project now");
-    // **In the address, which is what this case is named for.** It used to
-    // assert the project in the *body* under exactly this name — the page said
-    // one thing and its test agreed with the other, which is how a spelling
-    // nobody meant survives a review.
-    const written = asked.find((one) => one.method === "POST");
-    expect(written?.path).toBe("/v1/graders?projectId=prj_2");
-    expect(written?.body).toEqual({
-      libraryId: "grl_behaviors",
-      required: true,
-    });
-  });
-
-  /**
-   * The form is the entry's own declaration rendered, so an entry that asks
-   * nothing draws no controls and an entry that asks for a measure draws the
-   * measures egma actually computes — never a list typed into this page.
-   */
-  it("draws the form from the entry, and sends a number as a number", async () => {
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /v1/grader-library": {
-        status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
-      },
-      "POST /v1/graders": { status: 201, body: DIAGNOSTIC },
-    });
-    render(<GraderLibraryPage />);
-
-    const pressed = await screen.findAllByRole("button", { name: "Use" });
-    // The table's row for Latency is the second of the two entries.
-    fireEvent.click(pressed[1]!);
-
-    fireEvent.change(screen.getByLabelText("Bound"), {
-      target: { value: "2000" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
-
-    await screen.findByRole("status");
-    expect(asked.find((one) => one.method === "POST")?.path).toBe(
-      "/v1/graders?projectId=prj_1",
-    );
-    expect(asked.find((one) => one.method === "POST")?.body).toEqual({
-      libraryId: "grl_latency",
-      required: true,
-      params: { metric: "turn_response_latency", bound: 2000 },
-    });
-  });
-
-  it("asks nothing for an entry that declares no parameters", async () => {
+describe("the project Graders surface", () => {
+  it("nests tests under their suite and stores one suite selector when the suite is chosen", async () => {
     apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /v1/grader-library": {
+      "GET /v1/test-suites": {
         status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
-      },
-    });
-    render(<GraderLibraryPage />);
-
-    fireEvent.click((await screen.findAllByRole("button", { name: "Use" }))[0]!);
-    expect(screen.getByText(libraryCopy.USE.asksNothing)).toBeTruthy();
-    expect(screen.queryByLabelText("Bound")).toBeNull();
-  });
-
-  /**
-   * The refusal's own sentence, kept and never paraphrased — and the form still
-   * holding what was typed into it, so a second attempt is one keystroke rather
-   * than an afternoon.
-   */
-  /**
-   * Use is a row control, and the table has to be told so.
-   *
-   * `action: true` is what lets a cell out of the one-line ellipsis every other
-   * cell gets. That ellipsis is `overflow: hidden`, and an outline is clipped by
-   * an ancestor's overflow — so before this the Ember focus ring on Use was cut
-   * off on every side. The same flag puts the control at the trailing edge,
-   * which is the visible half of the change.
-   *
-   * Both halves are asserted, because they fail apart: the attribute is the
-   * column saying what it is, and the class is the table acting on it. A class
-   * assertion for the reason `design-system.test.tsx` writes down — jsdom loads
-   * no stylesheet, so what is guarded is the mapping.
-   */
-  it("marks the Use column as a row control, at the trailing edge", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/grader-library": {
-        status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
-      },
-    });
-    render(<GraderLibraryPage />);
-
-    const used = (await screen.findAllByRole("button", { name: "Use" }))[0]!;
-    const cell = used.closest("td");
-    expect(cell).not.toBeNull();
-    expect(cell?.dataset.action).toBe("true");
-    /*
-     * **The trailing edge is a fixed lane now, not an alignment.** The Paper
-     * boards give every row the same 48px slot at its end — present whether or
-     * not that row has a control in it — so the controls line up in one column
-     * down the table instead of each floating to the right of whatever text
-     * came before it. `--table-action-width` is the lane and the cell centres
-     * its control in it, so the class that says so is `text-center` rather
-     * than the `text-right` this used to read. What the case is about has not
-     * moved: the row's control is at the row's trailing edge.
-     */
-    expect(cell?.className).toContain("data-[action=true]:text-center");
-    expect(cell?.className).toContain("data-[action=true]:px-0");
-  });
-
-  it("shows a refused Use without clearing the form", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("member") },
-      "GET /v1/grader-library": {
-        status: 200,
-        body: { graderLibraryEntries: [LATENCY], nextPageToken: null },
-      },
-      "POST /v1/graders": {
-        status: 422,
         body: {
-          error: "unprocessable",
-          message: "Egma does not compute a measure called that.",
+          testSuites: [
+            {
+              id: "ste_1",
+              projectId: "prj_1",
+              name: "Northside Ford",
+              ...DATES,
+            },
+          ],
+          nextPageToken: null,
+        },
+      },
+      "GET /v1/tests": {
+        status: 200,
+        body: {
+          tests: [
+            {
+              id: "tst_booking",
+              projectId: "prj_1",
+              suiteId: "ste_1",
+              name: "Books service",
+              description: null,
+              version: 1,
+              versionId: "tstv_booking",
+              scenario: "The caller books service.",
+              expectedBehaviors: ["Offers an available time"],
+              personas: [],
+              overrideCount: 0,
+              revision: "rev_booking",
+              ...DATES,
+            },
+            {
+              id: "tst_cancel",
+              projectId: "prj_1",
+              suiteId: "ste_1",
+              name: "Cancels service",
+              description: null,
+              version: 1,
+              versionId: "tstv_cancel",
+              scenario: "The caller cancels service.",
+              expectedBehaviors: ["Confirms the cancellation"],
+              personas: [],
+              overrideCount: 0,
+              revision: "rev_cancel",
+              ...DATES,
+            },
+          ],
+          nextPageToken: null,
         },
       },
     });
-    render(<GraderLibraryPage />);
-
-    fireEvent.click((await screen.findAllByRole("button", { name: "Use" }))[0]!);
-    fireEvent.change(screen.getByLabelText("Bound"), {
-      target: { value: "2000" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Start judging" }));
-
-    expect(
-      await screen.findByText("Egma does not compute a measure called that."),
-    ).toBeTruthy();
-    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
-      "2000",
-    );
-  });
-
-  /**
-   * A viewer sees the act and is told plainly that it is not theirs. The server
-   * refuses their write either way, which is where the boundary actually is;
-   * this is the courtesy, and it is never the lock.
-   */
-  it("leaves Use inert for a viewer, with the reason beside it", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /v1/grader-library": {
-        status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
-      },
-    });
-    render(<GraderLibraryPage />);
-
-    const used = (await screen.findAllByRole("button", { name: "Use" }))[0]!;
-    expect((used as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getAllByText(libraryCopy.USE.notYours("viewer"))).not.toHaveLength(
-      0,
-    );
-  });
-
-  it("says a project that is not available here is not available", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/grader-library": {
-        status: 404,
-        body: {
-          error: "not_found",
-          message: "There is no project prj_1 available.",
-        },
-      },
-    });
-    render(<GraderLibraryPage />);
-
-    expect(await screen.findByText("Not available here")).toBeTruthy();
-  });
-});
-
-/* ------------------------------------------------------------------------ */
-
-/**
- * The shelf, as the running screen reads it: what each copy's entry asks for.
- *
- * Every case on that screen stubs it, because the page holds the copies and
- * their entries as one state — a page with the copies and not yet the shelf
- * would draw an edit form with no controls in it, which reads as a grader that
- * asks nothing rather than as a page still loading.
- */
-const SHELF = {
-  status: 200,
-  body: { graderLibraryEntries: [BEHAVIORS, LATENCY], nextPageToken: null },
-} as const;
-
-/**
- * One running copy's acts, reached the way somebody reaches them: through the
- * ⋮ at the end of its row.
- *
- * **Both acts moved into that menu on 2026-08-23**, so that the trailing lane
- * on this list is the same 48px slot every list in the product ends with. Two
- * buttons drawn in the cell had pushed it out to 156px, which is the one place
- * the lane went crooked. `index` is the row, in the order the answer lists the
- * copies in.
- */
-async function rowMenus(): Promise<HTMLElement[]> {
-  return screen.findAllByRole("button", { name: /^Actions for /u });
-}
-
-/** One row's menu, opened. */
-async function openRowMenu(index: number): Promise<HTMLElement> {
-  fireEvent.click((await rowMenus())[index]!);
-  return screen.findByRole("menu");
-}
-
-/** One row's act, opened and pressed. */
-async function press(index: number, act: string): Promise<void> {
-  const menu = await openRowMenu(index);
-  fireEvent.click(within(menu).getByRole("menuitem", { name: act }));
-}
-
-describe("the running graders of one project", () => {
-  it("names its project in both reads, and says where each copy applies and whether it blocks", async () => {
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    expect(await screen.findAllByText("Expected behaviors")).toHaveLength(1);
-    expect(asked.map((one) => one.path)).toContain(
-      "/v1/graders?projectId=prj_1",
-    );
-    // The shelf beside the copies, and in the same project: a copy's form is
-    // its entry's declaration rendered, and this page cannot draw one without
-    // having read the entry.
-    expect(asked.map((one) => one.path)).toContain(
-      "/v1/grader-library?projectId=prj_1",
-    );
-
-    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
-    expect(
-      within(breadcrumb)
-        .getByRole("link", { name: "Graders" })
-        .getAttribute("href"),
-    ).toBe("/projects/prj_1/graders");
-    /*
-     * **And nothing after it.** A trail's last step is the page it is on, and
-     * `PageHeader` draws the trail and the heading in one 56px bar — so the
-     * shell takes that step off and the heading beside it is what says where
-     * somebody is (ui-refresh ticket 09, item c). Before the rule this bar
-     * read "Graders / Running   Running graders".
-     */
-    expect(within(breadcrumb).queryByText(runningCopy.RUNNING.title)).toBeNull();
-    expect(within(breadcrumb).queryByText("Running")).toBeNull();
-    expect(
-      screen.getByRole("heading", { name: runningCopy.RUNNING.title }),
-    ).toBeTruthy();
-
-    // What `required` decides, rather than the flag's own value.
-    expect(screen.getAllByText("Blocks")).not.toHaveLength(0);
-    expect(screen.getAllByText("Diagnostic")).not.toHaveLength(0);
-    // A copy with nothing to fill in is complete, and says what it judges.
-    expect(screen.getAllByText(runningCopy.CONFIG.fromTheTest)).not.toHaveLength(
-      0,
-    );
-    // Live traffic is sampled, and the share is the number that decides the bill.
-    expect(screen.getAllByText(/10%/)).not.toHaveLength(0);
-  });
-
-  /**
-   * Switching a copy off is deleting the row that was judging, because there is
-   * no enable flag and no scope meaning nowhere — so it is one of the two acts
-   * on this screen, and it names the project it is taken in.
-   */
-  it("switches a copy off, in the project in the address, and reads the list again", async () => {
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": [
-        { status: 200, body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null } },
-        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
-      ],
-      "GET /v1/grader-library": SHELF,
-      "DELETE /v1/graders/grd_2": {
-        status: 200,
-        body: {
-          id: "grd_2",
-          name: "latency",
-          deletedAt: "2026-08-15T12:00:00.000Z",
-        },
-      },
-    });
-    render(<RunningGradersPage />);
-
-    // The table's rows are in answer order, so Latency's is the second.
-    await press(1, "Switch off");
-    fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
-
-    expect((await screen.findByRole("status")).textContent).toContain(
-      "Latency is switched off",
-    );
-    expect(asked.map((one) => one.path)).toContain(
-      "/v1/graders/grd_2?projectId=prj_1",
-    );
-    // Read again rather than edited here: what judges this project is the
-    // server's answer, and there are two reads of the list for one switch-off.
-    expect(
-      asked.filter((one) => one.path === "/v1/graders?projectId=prj_1"),
-    ).toHaveLength(2);
-  });
-
-  /**
-   * **What stays is the sentence that makes the button pressable**, and it is
-   * shown before the act rather than after it. A team whose grader is failing
-   * every run must not be asked to trade away the runs they have already read
-   * in order to stop it.
-   */
-  it("says what stops and, in its own sentence, what stays", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Switch off");
-
-    expect(screen.getByText(runningCopy.SWITCH_OFF.stops)).toBeTruthy();
-    expect(screen.getByText(runningCopy.SWITCH_OFF.keeps)).toBeTruthy();
-    expect(screen.getByText(runningCopy.SWITCH_OFF.again)).toBeTruthy();
-    // Not the last one, so the sentence about a project judged by nothing is
-    // not said — it is a warning about what this press would do, not a fact
-    // about switching graders off in general.
-    expect(screen.queryByText(runningCopy.SWITCH_OFF.theLastOne)).toBeNull();
-  });
-
-  /**
-   * A project may end up judged by nothing — the run door allows it — so
-   * switching the last copy off is warned about and never refused.
-   */
-  it("warns before the last copy goes, and does not refuse it", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": [
-        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
-        { status: 200, body: { graders: [], nextPageToken: null } },
-      ],
-      "GET /v1/grader-library": SHELF,
-      "DELETE /v1/graders/grd_1": {
-        status: 200,
-        body: {
-          id: "grd_1",
-          name: "Expected behaviors",
-          deletedAt: "2026-08-15T12:00:00.000Z",
-        },
-      },
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Switch off");
-    expect(screen.getByText(runningCopy.SWITCH_OFF.theLastOne)).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
-
-    // Gone, and the page says what that means rather than pretending a project
-    // with no graders is a project that has not finished setting up.
-    expect(
-      await screen.findByText("Nothing is judging this project"),
-    ).toBeTruthy();
-    expect(screen.getByText(runningCopy.RUNNING.empty)).toBeTruthy();
-  });
-
-  it("keeps the confirmation open and shows a refused switch-off", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-      "DELETE /v1/graders/grd_1": {
-        status: 403,
-        body: {
-          error: "not_permitted",
-          message: "Your viewer role cannot author definitions.",
-        },
-      },
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Switch off");
-    fireEvent.click(screen.getByRole("button", { name: "Switch it off" }));
-
-    expect(
-      await screen.findByText("Your viewer role cannot author definitions."),
-    ).toBeTruthy();
-    // Still there to try again, and the row is still in the list.
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getAllByText("Expected behaviors")).not.toHaveLength(0);
-  });
-
-  it("leaves both acts inert for a viewer, with the reason beside them", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("viewer") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    // Both acts are offered in the row's menu and both are inert, with the
-    // reason for each written into the panel where a keyboard reaches it.
-    const menu = await openRowMenu(0);
-    const off = within(menu).getByRole("menuitem", { name: "Switch off" });
-    const edit = within(menu).getByRole("menuitem", { name: "Edit" });
-
-    expect((off as HTMLButtonElement).disabled).toBe(true);
-    expect((edit as HTMLButtonElement).disabled).toBe(true);
-    expect(
-      within(menu).getByText(runningCopy.SWITCH_OFF.notYours("viewer")),
-    ).toBeTruthy();
-    expect(
-      within(menu).getByText(runningCopy.EDIT.notYours("viewer")),
-    ).toBeTruthy();
-  });
-});
-
-/* ------------------------------------------------------------------------ */
-
-/**
- * Editing a running copy: the act that stops pressing **Use** being a one-way
- * door.
- *
- * A developer who pressed Use on latency and typed a bound too tight used to
- * live with it — every run red for ever, and the only way out a hand-written
- * update against Postgres.
- */
-describe("changing a running copy", () => {
-  it("connects each row's Edit to the editor and moves focus to its heading", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    /*
-     * **The row's ⋮ is what the reading position comes back to**, and it is
-     * the whole of the relationship now that Edit is an item inside it. The ⋮
-     * carries no `aria-expanded` for the editor: a menu's `aria-expanded` is
-     * about the menu, and claiming it was about the editor would say the panel
-     * is inside the panel that opened it. The editor is named after the copy
-     * and takes the focus; closing it hands the focus back to the row.
-     */
-    const menus = await rowMenus();
-    expect(menus[1]!.getAttribute("aria-expanded")).toBe("false");
-
-    await press(1, "Edit");
-
-    const editor = screen.getByRole("region", { name: "Edit Latency" });
-    const heading = within(editor).getByRole("heading", {
-      name: "Edit Latency",
-    });
-    expect(editor.id).toBe("grader-editor-grd_2");
-    expect(document.activeElement).toBe(heading);
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(document.activeElement).toBe(menus[1]);
-  });
-
-  /**
-   * **The edit form is the Use form's controls, filled in with what this copy
-   * holds.** What a grader asks for is the library entry's own declaration, and
-   * both forms render that one list through one component — so a bound opens
-   * showing the bound this copy judges by, and a measure opens on the measure
-   * it chose, rather than on the first option of a fresh form.
-   */
-  it("opens on what this copy holds, from its entry's own declaration", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    // Latency's row is the second, and it is the one with values to fill in.
-    await press(1, "Edit");
-
-    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
-      "2000",
-    );
-    expect((screen.getByLabelText("Measure") as HTMLSelectElement).value).toBe(
-      "turn_response_latency",
-    );
-    // The live settings, which only a copy that already exists can have.
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Latency",
-    );
-    expect(
-      (screen.getByLabelText("Can fail a run") as HTMLInputElement).checked,
-    ).toBe(false);
-  });
-
-  /**
-   * **Opening a second copy's form over the first draws the second copy**, and
-   * the key is what makes that true.
-   *
-   * React keeps a component's state across a re-render when only its props
-   * change, so a form opened on one grader and then pointed at another would
-   * hold the first grader's answers under the second grader's controls. It is
-   * the failure the Use form has a real-browser walk for, one screen along —
-   * and here it is worse, because these forms open already filled in: the
-   * second copy's bound would read as the first copy's, and saving would write
-   * a number nobody typed.
-   */
-  it("draws the second copy's own values when a form is opened over another", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    // The copy whose assertions are each test's own sentences: it asks nothing.
-    await press(0, "Edit");
-    expect(screen.getByText(runningCopy.EDIT.asksNothing)).toBeTruthy();
-
-    // And now the other one, without closing the first.
-    await press(1, "Edit");
-
-    expect(screen.getByText(runningCopy.EDIT.title("Latency"))).toBeTruthy();
-    expect(screen.queryByText(runningCopy.EDIT.asksNothing)).toBeNull();
-    // Its own filled-in values, not an empty form and not the first copy's.
-    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
-      "2000",
-    );
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Latency",
-    );
-  });
-
-  it("keeps a changed copy when another Edit or Cancel is declined", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-    fireEvent.change(screen.getByLabelText("Name"), {
-      target: { value: "Draft behavior grader" },
-    });
-
-    await press(1, "Edit");
-    expect(screen.getByRole("dialog").textContent).toContain(
-      "Leave without saving?",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(screen.getByRole("region", {
-      name: "Edit Expected behaviors",
-    })).toBeTruthy();
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Draft behavior grader",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Draft behavior grader",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByRole("region", {
-      name: "Edit Expected behaviors",
-    })).toBeNull();
-  });
-
-  it("protects a changed copy from grader links, product links, project changes, and unload", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.description), {
-      target: { value: "Keep this draft" },
-    });
-
-    const leaving = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(leaving);
-    expect(leaving.defaultPrevented).toBe(true);
-
-    const graderViews = screen.getByRole("navigation", {
-      name: "Grader views",
-    });
-    const library = within(graderViews).getByRole("link", { name: "Library" });
-    const tabClick = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    fireEvent(library, tabClick);
-    expect(tabClick.defaultPrevented).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-
-    const product = screen.getByRole("navigation", {
-      name: "Product navigation",
-    });
-    const agents = within(product).getByRole("link", { name: "Agents" });
-    const productClick = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    fireEvent(agents, productClick);
-    expect(productClick.defaultPrevented).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-
-    const selectors = await screen.findAllByRole("button", {
-      name: /^Organization Acme, project Default\./,
-    });
-    fireEvent.click(selectors[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
-    expect(routed.push).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog").textContent).toContain(
-      "Leave without saving?",
-    );
-    expect(
-      (screen.getByLabelText(
-        runningCopy.EDIT.description,
-      ) as HTMLInputElement).value,
-    ).toBe("Keep this draft");
-  });
-
-  it("keeps the editor and its navigation guard in place while Save is in flight", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-      "PATCH /v1/graders/grd_1": "never",
-    });
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirm);
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.description), {
-      target: { value: "Saving this note" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(
-      await screen.findByRole("button", { name: runningCopy.EDIT.submitting }),
-    ).toBeTruthy();
-    expect(screen.getByLabelText("Name").matches(":disabled")).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    // Every row's acts are inert while the write is in flight, offered in the
-    // menu and refusing the press. The menu is closed again afterwards, so the
-    // navigation checks below run against the page rather than over a panel.
-    const busy = await openRowMenu(1);
-    for (const act of ["Edit", "Switch off"]) {
-      expect(
-        (within(busy).getByRole("menuitem", { name: act }) as HTMLButtonElement)
-          .disabled,
-        act,
-      ).toBe(true);
-    }
-    fireEvent.click((await rowMenus())[1]!);
-
-    const leaving = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(leaving);
-    expect(leaving.defaultPrevented).toBe(true);
-
-    const graderViews = screen.getByRole("navigation", {
-      name: "Grader views",
-    });
-    const library = within(graderViews).getByRole("link", { name: "Library" });
-    const linkClick = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    library.dispatchEvent(linkClick);
-    expect(linkClick.defaultPrevented).toBe(true);
-
-    const selectors = await screen.findAllByRole("button", {
-      name: /^Organization Acme, project Default\./,
-    });
-    fireEvent.click(selectors[0]!);
-    fireEvent.click(screen.getByRole("button", { name: "Outbound" }));
-    expect(routed.push).not.toHaveBeenCalled();
-    expect(confirm).not.toHaveBeenCalled();
-    expect(screen.getByRole("region", {
-      name: "Edit Expected behaviors",
-    })).toBeTruthy();
-  });
-
-  /**
-   * **A number is sent as a number**, at the edge that knows the control was
-   * numeric — and the project rides in the body, because an edit lands on
-   * exactly one project and never on whichever the credential happens to act in.
-   */
-  it("sends one body carrying both kinds of change, in the project in the address", async () => {
-    routed.projectId = "prj_2";
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": [
-        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
-        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
-      ],
-      "GET /v1/grader-library": SHELF,
-      "PATCH /v1/graders/grd_2": {
-        status: 200,
-        body: { ...DIAGNOSTIC, config: { assertions: [{ bound: 1200 }] } },
-      },
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-    fireEvent.change(screen.getByLabelText("Bound"), {
-      target: { value: "1200" },
-    });
-    fireEvent.click(screen.getByLabelText("Can fail a run"));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await screen.findByRole("status");
-    const written = asked.find((one) => one.method === "PATCH");
-    expect(written?.path).toBe("/v1/graders/grd_2?projectId=prj_2");
-    expect(written?.body).toEqual({
-      name: "latency",
-      // Null rather than the empty string: emptying a note is a real intent and
-      // the platform reads null as exactly that.
-      description: null,
-      scope: "both",
-      required: true,
-      productionSampleRate: 10,
-      params: { metric: "turn_response_latency", bound: 1200 },
-    });
-  });
-
-  /**
-   * **The claim after a save is the narrow one.** "What has already been judged
-   * is unchanged" is true of the verdict rows and false of the runs they add up
-   * to — and it would be shown at the exact moment somebody had turned
-   * `required` off, which is when it is most wrong.
-   */
-  it("claims only that no verdict was rewritten, and reads the list again", async () => {
-    const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": [
-        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
-        { status: 200, body: { graders: [SEEDED], nextPageToken: null } },
-      ],
-      "GET /v1/grader-library": SHELF,
-      "PATCH /v1/graders/grd_1": { status: 200, body: SEEDED },
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-      "Expected behaviors",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    const said = (await screen.findByRole("status")).textContent ?? "";
-    expect(said).toContain("no verdict it has already written was rewritten");
-    expect(said.toLowerCase()).not.toContain("nothing already judged");
-    expect(
-      asked.filter((one) => one.path === "/v1/graders?projectId=prj_1"),
-    ).toHaveLength(2);
-    expect(asked.find((one) => one.method === "PATCH")?.body).toMatchObject({
-      name: "expected_behaviors",
-    });
-  });
-
-  /**
-   * An entry that asks nothing draws no controls, and says so rather than
-   * showing an empty form somebody would read as a page that failed to load.
-   */
-  it("asks nothing of a copy whose assertions are the test's own sentences", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-
-    expect(screen.getByText(runningCopy.EDIT.asksNothing)).toBeTruthy();
-    expect(screen.queryByLabelText("Bound")).toBeNull();
-    // And the live settings are still there, because they belong to the copy
-    // rather than to what it asks for.
-    expect(screen.getByLabelText("Applies to")).toBeTruthy();
-  });
-
-  it("keeps the running list beside a grouped editor and shows sampling only for live traffic", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-
-    const editor = screen.getByRole("region", {
-      name: "Edit Expected behaviors",
-    });
-    expect(
-      screen.getByRole("table", {
-        name: "The graders running in this project",
+    render(<ScopeHarness />);
+
+    fireEvent.click(screen.getByLabelText("Grades simulations"));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Choose test suites and tests",
       }),
-    ).toBeTruthy();
-    for (const group of [
-      runningCopy.EDIT.groups.general,
-      runningCopy.EDIT.groups.logic,
-      runningCopy.EDIT.groups.applicability,
-      runningCopy.EDIT.groups.impact,
-    ]) {
-      expect(within(editor).getByRole("group", { name: group })).toBeTruthy();
-    }
+    );
 
-    expect(within(editor).queryByLabelText(runningCopy.EDIT.sampleRate)).toBeNull();
-    fireEvent.change(within(editor).getByLabelText(runningCopy.EDIT.scope), {
-      target: { value: "production" },
+    const picker = await screen.findByRole("dialog", {
+      name: "Choose test suites and tests",
     });
-    expect(within(editor).getByLabelText(runningCopy.EDIT.sampleRate)).toBeTruthy();
+    const suiteGroup = within(picker).getByRole("group", {
+      name: "Northside Ford test suite",
+    });
+    const suite = within(suiteGroup).getByRole("checkbox", {
+      name: "Northside Ford, test suite",
+    });
+    const booking = within(suiteGroup).getByRole("checkbox", {
+      name: "Books service, test",
+    });
+    const cancellation = within(suiteGroup).getByRole("checkbox", {
+      name: "Cancels service, test",
+    });
+
+    fireEvent.click(suite);
+    expect(suite.getAttribute("aria-checked")).toBe("true");
+    expect(booking.getAttribute("aria-checked")).toBe("true");
+    expect(cancellation.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Selected grader scope").textContent).toBe(
+      JSON.stringify({
+        simulations: [{ kind: "test_suite", id: "ste_1" }],
+        production: null,
+      }),
+    );
+
+    fireEvent.click(booking);
+    expect(suite.getAttribute("aria-checked")).toBe("mixed");
+    expect(booking.getAttribute("aria-checked")).toBe("false");
+    expect(cancellation.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Selected grader scope").textContent).toBe(
+      JSON.stringify({
+        simulations: [{ kind: "test", id: "tst_cancel" }],
+        production: null,
+      }),
+    );
+
+    fireEvent.click(booking);
+    expect(suite.getAttribute("aria-checked")).toBe("mixed");
+    expect(booking.getAttribute("aria-checked")).toBe("true");
+    expect(cancellation.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByLabelText("Selected grader scope").textContent).toBe(
+      JSON.stringify({
+        simulations: [
+          { kind: "test", id: "tst_booking" },
+          { kind: "test", id: "tst_cancel" },
+        ],
+        production: null,
+      }),
+    );
   });
 
-  /**
-   * **The controls the real-browser walk drives, by the handles it drives them
-   * by.**
-   *
-   * That walk is the only proof that an edit survives the round trip, and it
-   * reaches these controls by their identifiers and their types rather than by
-   * their labels — `#edit-required`, `#edit-sample-rate`, and "the number field
-   * that is not the sample rate", which is how it names the entry's own bound
-   * without naming a measure. Those handles are a contract between two files
-   * and nothing else holds them, so a rename here would show up as a browser
-   * case timing out ten minutes into a lane rather than as a failure naming
-   * what moved.
-   *
-   * The types are the other half, and the reason this reads them rather than
-   * trusting the prop: a numeric parameter has to wear a numeric control, or a
-   * bound is typed on a phone keyboard with no digits on it.
-   */
-  it("gives the edit controls the handles the browser walk reaches them by", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-    });
-    render(<RunningGradersPage />);
+  it("separates active project policy from the grader library without repeated headings", async () => {
+    const { asked } = apiAnswers(standardAnswers());
+    render(<GradersPage />);
 
-    await press(0, "Edit");
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Active graders" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Grader library" })).toBeTruthy();
+    expect(screen.getAllByText("Active graders")).toHaveLength(1);
+    expect(screen.queryByText(/what active means/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /add predefined grader/i })).toBeNull();
+    expect(screen.getByText("All simulations · Production off")).toBeTruthy();
 
-    // The panel names the copy, which is what the walk waits on before it
-    // touches anything.
-    expect(screen.getByText(runningCopy.EDIT.title("Latency"))).toBeTruthy();
-
-    const required = document.querySelector("#edit-required");
-    const rate = document.querySelector("#edit-sample-rate");
-    expect((required as HTMLInputElement | null)?.type).toBe("checkbox");
-    expect((rate as HTMLInputElement | null)?.type).toBe("number");
-
-    // Exactly one other number field, and it is the entry's own — a bound is a
-    // number because the catalog says the parameter is one.
-    const numbers = [
-      ...document.querySelectorAll('form input[type="number"]'),
-    ].filter((one) => one.id !== "edit-sample-rate");
-    expect(numbers).toHaveLength(1);
-    expect((numbers[0] as HTMLInputElement).value).toBe("2000");
+    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
+    expect(await screen.findByText("Response latency")).toBeTruthy();
+    expect(screen.getAllByText("Grader library")).toHaveLength(1);
+    expect(screen.getByText("Available")).toBeTruthy();
+    expect(asked.map((one) => one.path)).toEqual(
+      expect.arrayContaining([
+        "/v1/graders?projectId=prj_1",
+        "/v1/grader-library?projectId=prj_1",
+      ]),
+    );
   });
 
-  /**
-   * **An emptied sample-rate box is not a rate of nought.**
-   *
-   * `Number("")` is `0`, and `0` is a perfectly good share of live traffic — so
-   * a cleared box sent as a number would be written as *stop judging live
-   * traffic*, accepted by the door, and reported back as saved. Nothing on the
-   * far side can catch it: the value is in range and the request is well
-   * formed. Leaving the key out is what the door reads as "keep what is there",
-   * and it is the same rule the entry's own values already follow.
-   */
-  it("leaves the sample rate out when the box says nothing, rather than sending nought", async () => {
+  it("loads every page of active graders and the grader library", async () => {
     const { asked } = apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
+      ...standardAnswers(),
       "GET /v1/graders": [
-        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
-        { status: 200, body: { graders: [DIAGNOSTIC], nextPageToken: null } },
+        {
+          status: 200,
+          body: { graders: [EXPECTED], nextPageToken: "active_page_2" },
+        },
+        {
+          status: 200,
+          body: { graders: [LATENCY], nextPageToken: null },
+        },
       ],
-      "GET /v1/grader-library": SHELF,
-      "PATCH /v1/graders/grd_2": { status: 200, body: DIAGNOSTIC },
-    });
-    render(<RunningGradersPage />);
-
-    await press(0, "Edit");
-    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.sampleRate), {
-      target: { value: "" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await screen.findByRole("status");
-    const written = asked.find((one) => one.method === "PATCH");
-    expect(written?.body).not.toHaveProperty("productionSampleRate");
-  });
-
-  /** The refusal's own sentence, kept, with the typing still on screen. */
-  it("shows a refused edit without clearing the form", async () => {
-    apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-      "PATCH /v1/graders/grd_2": {
-        status: 422,
-        body: {
-          error: "unprocessable",
-          message: "Egma does not compute a measure called that.",
+      "GET /v1/grader-library": [
+        {
+          status: 200,
+          body: {
+            graderLibraryEntries: [EXPECTED_DEFINITION],
+            nextPageToken: "library_page_2",
+          },
         },
-      },
+        {
+          status: 200,
+          body: {
+            graderLibraryEntries: [LATENCY_DEFINITION],
+            nextPageToken: null,
+          },
+        },
+      ],
     });
-    render(<RunningGradersPage />);
+    render(<GradersPage />);
 
-    await press(0, "Edit");
-    fireEvent.change(screen.getByLabelText("Bound"), {
-      target: { value: "1200" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    expect(await screen.findByText("Response latency")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    expect(await screen.findByText("Response latency")).toBeTruthy();
 
-    expect(
-      await screen.findByText("Egma does not compute a measure called that."),
-    ).toBeTruthy();
-    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
-      "1200",
+    expect(asked.map((one) => one.path)).toEqual(
+      expect.arrayContaining([
+        "/v1/graders?projectId=prj_1&pageToken=active_page_2",
+        "/v1/grader-library?projectId=prj_1&pageToken=library_page_2",
+      ]),
     );
   });
 
-  /**
-   * **Everything that means "for the open row" is cleared when a different row
-   * opens** — the typed value and the refusal alike.
-   *
-   * The form is drawn once, under the table, for whichever row is open, because
-   * a form inside a cell would be drawn twice: the table draws every row once
-   * for the wide layout and once for the narrow one, and two fields over one
-   * piece of state means the browser focuses the one nobody can see. Drawing it
-   * once makes its state shared by every row, and the button that opens a row
-   * changes *which* row is open and nothing else.
-   *
-   * That is the shape the judge-credentials page was bitten twice by. A key
-   * typed for one credential stayed in the field when somebody opened another,
-   * so Save sent the first one's key to the second — rotating the wrong
-   * credential to a key its owner never chose. And clearing the field did not
-   * clear the *retry* a failed rotation leaves behind, which read the field as
-   * it stood when it was pressed. Two defects, and the fix for the first left
-   * the second passing.
-   *
-   * Here both are one mechanism: `EditForm` is keyed by the running copy, so
-   * opening another row is a different component with its own initial state
-   * rather than the same component pointed somewhere new. This holds the
-   * mechanism rather than the convention — take the key off and the second copy
-   * opens showing the first copy's typed bound, and the refusal about a save
-   * nobody can see any more is still on screen above it.
-   */
-  it("clears a typed value and a refusal when a different row opens", async () => {
+  it("keeps a refusal from a later page instead of showing a partial list", async () => {
     apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/graders": {
-        status: 200,
-        body: { graders: [SEEDED, DIAGNOSTIC], nextPageToken: null },
-      },
-      "GET /v1/grader-library": SHELF,
-      "PATCH /v1/graders/grd_2": {
-        status: 422,
-        body: {
-          error: "unprocessable",
-          message: "Egma does not compute a measure called that.",
+      ...standardAnswers(),
+      "GET /v1/graders": [
+        {
+          status: 200,
+          body: { graders: [EXPECTED], nextPageToken: "active_page_2" },
         },
+        {
+          status: 403,
+          body: {
+            error: "forbidden",
+            message: "The next page could not be read.",
+          },
+        },
+      ],
+    });
+    render(<GradersPage />);
+
+    expect(await screen.findByText("The next page could not be read.")).toBeTruthy();
+    expect(screen.queryByText("Expected behaviors")).toBeNull();
+  });
+
+  it("uses the stable definition id to label only Egma's Expected behaviors grader", async () => {
+    const collision: ProjectGrader = {
+      ...EXPECTED,
+      id: "grd_collision",
+      graderDefinitionId: "grl_collision",
+      owner: "organization",
+      scopeEditable: true,
+      removable: true,
+    };
+    const collisionDefinition: GraderLibraryEntry = {
+      ...EXPECTED_DEFINITION,
+      id: "grl_collision",
+      owner: "organization",
+      scopeEditable: true,
+      gradingInstructions: "Check the organization's custom behavior.",
+      activeProjectGraderId: collision.id,
+    };
+    apiAnswers({
+      ...standardAnswers(
+        "admin",
+        [EXPECTED, collision],
+        [EXPECTED_DEFINITION, collisionDefinition],
+      ),
+      "GET /v1/grader-library/grl_collision": {
+        status: 200,
+        body: collisionDefinition,
       },
     });
-    render(<RunningGradersPage />);
+    render(<GradersPage />);
 
-    // The second row is the one with values to type into: a measure, a bound,
-    // and a share of live traffic, because it applies to both.
-    await press(1, "Edit");
-    fireEvent.change(screen.getByLabelText("Bound"), {
-      target: { value: "50" },
-    });
-    fireEvent.change(screen.getByLabelText(runningCopy.EDIT.sampleRate), {
-      target: { value: "99" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
+    expect(screen.getByText("expected_behaviors")).toBeTruthy();
+    await openRowMenu("expected_behaviors", "View and edit");
     expect(
-      await screen.findByText("Egma does not compute a measure called that."),
+      await screen.findByRole("dialog", { name: "expected_behaviors" }),
     ).toBeTruthy();
+  });
 
-    /*
-      The refusal appearing is not the write settling as far as *this page* is
-      concerned. The editor tells the page whether leaving would lose anything,
-      and it does so from an effect — so for one commit after the sentence is on
-      screen the page still believes a write is in flight and every Edit button
-      is still disabled. A press then does nothing at all, and the assertion
-      below would fail on a missing dialog while naming neither.
-
-      So the wait is on the control about to be pressed, rather than on
-      something near it.
-    */
-    const other = within(await openRowMenu(0)).getByRole("menuitem", {
-      name: "Edit",
+  it("keeps all three grader sheets mounted until their close motion ends", async () => {
+    withClosingSheetAnimation();
+    apiAnswers({
+      ...standardAnswers(),
+      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
+        status: 200,
+        body: EXPECTED_DEFINITION,
+      },
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: LATENCY_DEFINITION,
+      },
     });
+    render(<GradersPage />);
+
+    async function closeAfterMotion(name: string): Promise<void> {
+      const sheet = await screen.findByRole("dialog", { name });
+      const overlay = document.querySelector<HTMLElement>(
+        '[data-slot="sheet-overlay"]',
+      );
+      const closeButtons = within(sheet).getAllByRole("button", {
+        name: "Close",
+      });
+      const close = closeButtons.at(-1);
+      if (close === undefined) throw new Error("the sheet has no close button");
+      fireEvent.click(close);
+      expect(sheet.dataset.state).toBe("closed");
+      expect(document.body.contains(sheet)).toBe(true);
+      finishSheetExit(sheet);
+      if (overlay !== null) finishSheetExit(overlay);
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name })).toBeNull();
+      });
+    }
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create custom grader" }),
+    );
+    await closeAfterMotion("Create custom grader");
+
+    await openRowMenu("Expected behaviors", "View and edit");
+    await closeAfterMotion("Expected behaviors");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
+    await openRowMenu("Response latency", "View details");
+    await closeAfterMotion("Response latency");
+  });
+
+  it("shows library details before Use and converts Response latency seconds to milliseconds", async () => {
+    const used = { ...LATENCY, scope: { simulations: [], production: null } };
+    const { asked } = apiAnswers({
+      ...standardAnswers(),
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: LATENCY_DEFINITION,
+      },
+      "POST /v1/grader-library/grl_latency/use": {
+        status: 201,
+        body: used,
+      },
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
+    await openRowMenu("Response latency", "View details");
+
+    const details = await screen.findByRole("dialog", { name: "Response latency" });
+    expect(within(details).getByText("turn response latency")).toBeTruthy();
+    expect(within(details).queryByLabelText("Maximum average response time")).toBeNull();
+    fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
+
+    const maximum = within(details).getByLabelText("Maximum average response time");
+    expect((maximum as HTMLInputElement).value).toBe("3");
+    fireEvent.change(maximum, { target: { value: "2.5" } });
+    fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
+
     await waitFor(() => {
-      expect((other as HTMLButtonElement).disabled).toBe(false);
+      expect(asked.find((one) => one.method === "POST")).toEqual({
+        method: "POST",
+        path: "/v1/grader-library/grl_latency/use?projectId=prj_1",
+        body: {
+          scope: { simulations: [], production: null },
+          settings: { maximum_average_response_time_ms: 2_500 },
+          passThreshold: 1,
+        },
+      });
     });
-
-    // Another row, over the top of a form that has been typed into and refused.
-    fireEvent.click(other);
-    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
-
-    const behaviors = screen.getByRole("region", {
-      name: "Edit Expected behaviors",
-    });
-    // This entry asks for nothing, so a Bound on screen could only be the other
-    // row's — and the refusal was about a save on the other row.
-    expect(within(behaviors).queryByLabelText("Bound")).toBeNull();
-    expect(
-      screen.queryByText("Egma does not compute a measure called that."),
-    ).toBeNull();
-
-    // And back, which is where the field would show the typed value if the
-    // state were the page's rather than the open row's.
-    await press(1, "Edit");
-    expect((screen.getByLabelText("Bound") as HTMLInputElement).value).toBe(
-      "2000",
-    );
-    expect(
-      (screen.getByLabelText(
-        runningCopy.EDIT.sampleRate,
-      ) as HTMLInputElement).value,
-    ).toBe("10");
-    expect(
-      screen.queryByText("Egma does not compute a measure called that."),
-    ).toBeNull();
   });
-});
 
-/* ------------------------------------------------------------------------ */
-
-describe("the strip between the two screens", () => {
-  /**
-   * Running leads now. The shelf is read once and switched on; what is judging
-   * this project right now is the question a person comes back with. Both
-   * addresses are unmoved — only the order they are offered in changed.
-   */
-  it("carries the project in both addresses, and leads with Running", () => {
-    expect(graderTabsFor("prj_7")).toEqual([
-      {
-        id: "running",
-        label: "Running",
-        href: "/projects/prj_7/graders/running",
+  it("creates only an LLM judge with Grading instructions and no mechanism picker", async () => {
+    const customDefinition: GraderLibraryEntry = {
+      ...LATENCY_DEFINITION,
+      id: "grl_custom",
+      name: "Polite resolution",
+      description: null,
+      owner: "organization",
+      type: "llm_as_judge",
+      gradingInstructions: "The agent stays polite and resolves the request.",
+      requiredEvidence: ["transcript"],
+      settingDefinitions: [],
+      activeProjectGraderId: "grd_custom",
+    };
+    const customGrader: ProjectGrader = {
+      ...EXPECTED,
+      id: "grd_custom",
+      graderDefinitionId: "grl_custom",
+      name: "Polite resolution",
+      owner: "organization",
+      scopeEditable: true,
+      removable: true,
+      scope: { simulations: [], production: null },
+    };
+    const { asked } = apiAnswers({
+      ...standardAnswers(),
+      "POST /v1/grader-library/custom": {
+        status: 201,
+        body: { definition: customDefinition, grader: customGrader },
       },
-      { id: "library", label: "Library", href: "/projects/prj_7/graders" },
-    ]);
+    });
+    render(<GradersPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Create custom grader" }));
+
+    const sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
+    expect(within(sheet).getByLabelText("Grading instructions")).toBeTruthy();
+    for (const absent of ["Type", "Model", "Output type", "Code"]) {
+      expect(within(sheet).queryByLabelText(absent)).toBeNull();
+    }
+    fireEvent.change(within(sheet).getByLabelText("Name"), {
+      target: { value: "Polite resolution" },
+    });
+    fireEvent.change(within(sheet).getByLabelText("Grading instructions"), {
+      target: {
+        value: "The agent stays polite and resolves the request.",
+      },
+    });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Create grader" }));
+
+    await waitFor(() => {
+      expect(asked.find((one) => one.method === "POST")).toEqual({
+        method: "POST",
+        path: "/v1/grader-library/custom?projectId=prj_1",
+        body: {
+          name: "Polite resolution",
+          description: null,
+          gradingInstructions:
+            "The agent stays polite and resolves the request.",
+          modalities: ["chat", "voice"],
+          scope: { simulations: [], production: null },
+          passThreshold: 1,
+        },
+      });
+    });
   });
 
-  it("is a compact route navigation with the current view named", async () => {
+  it("resets unsaved custom-grader scope before the sheet reopens", async () => {
+    apiAnswers(standardAnswers());
+    render(<GradersPage />);
+    const create = await screen.findByRole("button", {
+      name: "Create custom grader",
+    });
+    fireEvent.click(create);
+
+    let sheet = await screen.findByRole("dialog", {
+      name: "Create custom grader",
+    });
+    fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
+    fireEvent.click(within(sheet).getByLabelText("All simulations"));
+    expect(
+      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Create custom grader" }),
+      ).toBeNull();
+    });
+
+    fireEvent.click(create);
+    sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
+    await waitFor(() => {
+      expect(
+        (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+          .checked,
+      ).toBe(false);
+    });
+    expect(within(sheet).queryByLabelText("All simulations")).toBeNull();
+  });
+
+  it("restores an active grader's saved scope when its sheet reopens", async () => {
+    const activeLatencyDefinition = {
+      ...LATENCY_DEFINITION,
+      activeProjectGraderId: LATENCY.id,
+    };
     apiAnswers({
-      "GET /api/me": { status: 200, body: meWith("admin") },
-      "GET /v1/grader-library": {
+      ...standardAnswers("admin", [EXPECTED, LATENCY], [
+        EXPECTED_DEFINITION,
+        activeLatencyDefinition,
+      ]),
+      "GET /v1/grader-library/grl_latency": {
         status: 200,
-        body: { graderLibraryEntries: [BEHAVIORS], nextPageToken: null },
+        body: activeLatencyDefinition,
       },
     });
-    render(<GraderLibraryPage />);
+    render(<GradersPage />);
+    await openRowMenu("Response latency", "View and edit");
 
-    const views = await screen.findByRole("navigation", {
-      name: "Grader views",
-    });
-    const library = within(views).getByRole("link", { name: "Library" });
-    const running = within(views).getByRole("link", { name: "Running" });
-    expect(library.getAttribute("aria-current")).toBe("page");
-    expect(running.getAttribute("aria-current")).toBeNull();
-    expect(library.getAttribute("href")).toBe("/projects/prj_1/graders");
-    expect(running.getAttribute("href")).toBe(
-      "/projects/prj_1/graders/running",
-    );
-  });
-});
-
-/* ------------------------------------------------------------------------ */
-
-/**
- * The banned list, as the domain model writes it, for these two screens.
- *
- * `evaluator`, `scorer` and `eval` are the words somebody arriving from another
- * product would type here first, which is exactly why these are the screens
- * that check for them. `dimension` and `gate` are the redesign's own
- * retirements — the verdict store's old column name, and the word considered
- * for the must-pass flag and not chosen. `built-in` is the old name for what is
- * now a predefined grader.
- *
- * `assertion` is deliberately **not** here. It was un-banned by the same
- * redesign that built these screens and is now the canonical word for one
- * 0-or-1 decision inside a grader — the ban that stands is narrower: an
- * assertion is never a grader.
- */
-const NEVER_SAID = [
-  "eval",
-  "evaluation",
-  "evaluator",
-  "scorer",
-  "dimension",
-  "gate",
-  "built-in",
-  "digital human",
-  "trace",
-  "span",
-  "conversation",
-  "caller",
-  "experiment",
-  "batch",
-];
-
-/** Every string a copy module can put in front of somebody. */
-function everySentence(said: unknown): string[] {
-  if (typeof said === "string") return [said];
-  if (typeof said === "function") {
-    // The ones that take something, asked at both the singular and the plural.
-    const asked = said as (one: never) => unknown;
-    return [1, 2]
-      .flatMap((count) => {
-        try {
-          return [asked(count as never), asked(String(count) as never)];
-        } catch {
-          return [];
-        }
-      })
-      .filter((one): one is string => typeof one === "string");
-  }
-  if (typeof said === "object" && said !== null) {
-    return Object.values(said).flatMap(everySentence);
-  }
-  return [];
-}
-
-/**
- * The two sentences the screens must not shorten, held against the copy modules
- * themselves.
- *
- * These are claims about words rather than about behaviour, which is why they
- * are read off the module instead of out of the DOM: what is being defended is
- * that a future edit cannot quietly make one of them shorter and truer-sounding.
- */
-describe("what the two acts promise", () => {
-  /**
-   * An edit is two acts wearing one verb, and only one of them touches what a
-   * verdict was decided by. Somebody who did not know that would read a
-   * tightened bound as a rewriting of history.
-   */
-  it("says that changing a value starts a version", () => {
-    expect(runningCopy.EDIT.lead.toLowerCase()).toContain("version");
-  });
-
-  /**
-   * **`required` is the one live setting that reaches a page about the past.**
-   * It rewrites no verdict; it moves this grader's rows between the lane that
-   * decides a run and the lane that only reports, and the fold runs at read
-   * time — so a run that failed on this grader alone reads as passed from the
-   * moment the flag turns. Both positions have to say so, because turning it
-   * either way has the same reach.
-   */
-  it("says that turning the required flag round re-counts runs already read", () => {
-    expect(runningCopy.EDIT.requiredOn).toContain("cannot pass");
-    expect(runningCopy.EDIT.requiredOff.toLowerCase()).toContain("diagnostic");
-
-    for (const said of [
-      runningCopy.EDIT.requiredOn,
-      runningCopy.EDIT.requiredOff,
-    ]) {
-      expect(said.toLowerCase()).toContain("rewrites no verdict");
-      expect(said.toLowerCase()).toContain("add up to");
-    }
-  });
-
-  /** And the sentence after a save claims that and nothing wider. */
-  it("claims only that no verdict was rewritten, never that nothing changed", () => {
-    const saved = runningCopy.EDIT.saved("Latency").toLowerCase();
-    expect(saved).toContain("verdict");
-    expect(saved).not.toContain("is unchanged");
-    expect(saved).not.toContain("nothing already judged");
-  });
-
-  /**
-   * **Switching off has to say what stays, not only what stops.** It is the off
-   * switch — there is no enable flag and no scope meaning nowhere — so the
-   * button removes a project's judging, and the fear it raises is about the
-   * runs already read. Every verdict the copy wrote stays readable because its
-   * versions outlive it.
-   */
-  it("says plainly that what a switched-off grader already judged is unchanged", () => {
-    expect(runningCopy.SWITCH_OFF.stops).toBeTruthy();
-    expect(runningCopy.SWITCH_OFF.keeps.toLowerCase()).toContain(
-      "already judged",
-    );
+    let sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
     expect(
-      runningCopy.SWITCH_OFF.done("Latency").toLowerCase(),
-    ).toContain("already judged");
-    // And what pressing it cannot be undone into, since there is no other
-    // switch to put it back with.
-    expect(runningCopy.SWITCH_OFF.again).toContain("Use");
-  });
-});
-
-/* ------------------------------------------------------------------------ */
-
-/**
- * The one claim about these files a rendering cannot make: that the measure
- * catalog is **not** in them.
- *
- * Every other case here drives a component and reads the DOM. This one reads
- * the source, because what is being defended is an absence — a form that named
- * a measure itself would render exactly the same today and go stale the first
- * time egma's catalog changed. Both forms draw from the entry's declaration
- * through one component, so a parameter that learns a new kind of control
- * learns it once.
- */
-describe("what the two forms are drawn from", () => {
-  const WEB = `${import.meta.dirname}/../`;
-
-  it("names no measure of its own, in either form", async () => {
-    const { readFile } = await import("node:fs/promises");
-
-    for (const file of [
-      "app/projects/[projectId]/graders/use-form.tsx",
-      "app/projects/[projectId]/graders/running/edit-form.tsx",
-    ]) {
-      const source = await readFile(`${WEB}${file}`, "utf8");
-
-      // The comments are read past on purpose: prose explaining why the list is
-      // not here is the opposite of the list being here.
-      const rendered = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
-      for (const named of [
-        "turn_response_latency",
-        "first_response_latency",
-        "milliseconds",
-        "latency",
-      ]) {
-        expect(rendered, `${file} names ${named} itself`).not.toContain(named);
-      }
-    }
-  });
-
-  /**
-   * And the edit form is the Use form's controls rather than a second copy of
-   * them: one reading of the entry's declaration, in one component.
-   */
-  it("draws the edit form through the component Use is drawn with", async () => {
-    const { readFile } = await import("node:fs/promises");
-    const form = await readFile(
-      `${WEB}app/projects/[projectId]/graders/running/edit-form.tsx`,
-      "utf8",
-    );
-
-    expect(form).toContain("EntryFields");
-    expect(form).toContain('from "../use-form.tsx"');
-  });
-});
-
-/**
- * **Nothing in either copy file is a sentence its screen cannot reach**, which
- * is the rule both modules state about themselves and nothing enforced.
- *
- * A word nobody renders is worse than no word at all: the banned-list check
- * below reads it, so the file goes on reading as a screen whose whole
- * vocabulary is checked while part of that vocabulary is not on any screen. It
- * is also how copy written for a different shell survives a merge — two
- * `unreachable` sentences arrived with the edit-and-delete work, written for a
- * page that did its own fetching, and on this shell a refusal keeps the API's
- * own sentence and neither could ever be shown.
- *
- * Only the objects a screen addresses by name. `SCOPES` and `TYPES`
- * are lookup tables read with a stored word as the key — `SCOPES[copy.scope]` —
- * so no source file names their keys and none ever will. They are declared
- * `Readonly<Record<string, string>>` rather than `as const`, which is exactly
- * the difference, so the rule reads it off the declaration rather than holding
- * a list of exceptions.
- */
-describe("what both screens can reach", () => {
-  const WEB = `${import.meta.dirname}/../`;
-
-  /** Every `.ts`/`.tsx` file a screen is built from. */
-  async function everySource(): Promise<string> {
-    const { readdir, readFile } = await import("node:fs/promises");
-    const found: string[] = [];
-
-    async function walk(dir: string): Promise<void> {
-      for (const one of await readdir(dir, { withFileTypes: true })) {
-        if (one.name === "node_modules" || one.name === ".next") continue;
-        const at = `${dir}/${one.name}`;
-        if (one.isDirectory()) await walk(at);
-        else if (at.endsWith(".ts") || at.endsWith(".tsx")) found.push(at);
-      }
-    }
-
-    await walk(`${WEB}app`);
-    await walk(`${WEB}ui`);
-    return (await Promise.all(found.map((at) => readFile(at, "utf8")))).join(
-      "\n",
-    );
-  }
-
-  for (const file of ["grader-library-copy.ts", "grader-running-copy.ts"]) {
-    it(`renders every word ${file} holds`, async () => {
-      const { readFile } = await import("node:fs/promises");
-      const copy = await readFile(`${WEB}lib/${file}`, "utf8");
-      const source = await everySource();
-
-      const unrendered: string[] = [];
-      for (const [, constant, body] of copy.matchAll(
-        /export const (\w+) = \{([\s\S]*?)\n\} as const;/g,
-      )) {
-        for (const [, key] of (body ?? "").matchAll(/^ {2}(\w+):/gm)) {
-          if (!source.includes(`${constant ?? ""}.${key ?? ""}`)) {
-            unrendered.push(`${constant ?? ""}.${key ?? ""}`);
-          }
-        }
-      }
-
-      // A guard on the guard: a copy file rewritten out of this shape would
-      // find nothing and pass while saying nothing.
-      expect(copy).toContain("} as const;");
-      // Named rather than counted: the fix is to delete the line or render it,
-      // and a bare count sends somebody hunting for which.
-      expect(unrendered).toEqual([]);
+      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Response latency" }))
+        .toBeNull();
     });
-  }
-});
 
-describe("the words both screens say", () => {
-  for (const [where, module] of [
-    ["the library screen", libraryCopy],
-    ["the running-graders screen", runningCopy],
-  ] as const) {
-    it(`says nothing the domain model bans, on ${where}`, () => {
-      const sentences = everySentence(module);
-      expect(sentences.length).toBeGreaterThan(10);
-
-      for (const sentence of sentences) {
-        for (const banned of NEVER_SAID) {
-          expect(
-            sentence.toLowerCase().includes(banned),
-            `"${sentence}" says "${banned}"`,
-          ).toBe(false);
-        }
-      }
+    await openRowMenu("Response latency", "View and edit");
+    sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    await waitFor(() => {
+      expect(
+        (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+          .checked,
+      ).toBe(true);
     });
-  }
+    expect(
+      within(sheet)
+        .getByRole("radio", { name: "All simulations" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("keeps Expected behaviors scope fixed and lets the project edit only its threshold", async () => {
+    const changed = { ...EXPECTED, passThreshold: 0.8 };
+    const { asked } = apiAnswers({
+      ...standardAnswers(),
+      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
+        status: 200,
+        body: EXPECTED_DEFINITION,
+      },
+      "PATCH /v1/graders/grd_expected": { status: 200, body: changed },
+    });
+    render(<GradersPage />);
+    await openRowMenu("Expected behaviors", "View and edit");
+
+    const sheet = await screen.findByRole("dialog", { name: "Expected behaviors" });
+    expect(within(sheet).getByText("Fixed by Egma")).toBeTruthy();
+    expect(within(sheet).getByText("Grades all simulations")).toBeTruthy();
+    expect(within(sheet).queryByRole("button", { name: "Remove grader" })).toBeNull();
+    fireEvent.change(within(sheet).getByLabelText("Pass threshold"), {
+      target: { value: "0.8" },
+    });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(asked.find((one) => one.method === "PATCH")).toEqual({
+        method: "PATCH",
+        path: "/v1/graders/grd_expected?projectId=prj_1",
+        body: { settings: {}, passThreshold: 0.8 },
+      });
+    });
+  });
+
+  it("keeps clearing scope separate from removing an optional grader", async () => {
+    const activeLatencyDefinition = {
+      ...LATENCY_DEFINITION,
+      activeProjectGraderId: LATENCY.id,
+    };
+    const cleared = {
+      ...LATENCY,
+      scope: { simulations: [], production: null },
+    };
+    const { asked } = apiAnswers({
+      ...standardAnswers("admin", [EXPECTED, LATENCY], [
+        EXPECTED_DEFINITION,
+        activeLatencyDefinition,
+      ]),
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: activeLatencyDefinition,
+      },
+      "PATCH /v1/graders/grd_latency": { status: 200, body: cleared },
+      "DELETE /v1/graders/grd_latency": { status: 204, body: null },
+    });
+    render(<GradersPage />);
+    await openRowMenu("Response latency", "View and edit");
+
+    let sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(asked.find((one) => one.method === "PATCH")?.body).toEqual({
+        scope: { simulations: [], production: null },
+        settings: { maximum_average_response_time_ms: 3_000 },
+        passThreshold: 1,
+      });
+    });
+    expect(asked.some((one) => one.method === "DELETE")).toBe(false);
+
+    await openRowMenu("Response latency", "View and edit");
+    sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Remove grader" }));
+    const confirmation = await screen.findByRole("dialog", {
+      name: "Remove Response latency?",
+    });
+    fireEvent.click(
+      within(confirmation).getByRole("button", { name: "Remove grader" }),
+    );
+    await waitFor(() => {
+      expect(asked.find((one) => one.method === "DELETE")).toEqual({
+        method: "DELETE",
+        path: "/v1/graders/grd_latency?projectId=prj_1",
+        body: undefined,
+      });
+    });
+  });
+
+  it("lets a viewer inspect both tabs but not change project policy", async () => {
+    apiAnswers({
+      ...standardAnswers("viewer"),
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: LATENCY_DEFINITION,
+      },
+    });
+    render(<GradersPage />);
+
+    const create = await screen.findByRole("button", {
+      name: "Create custom grader",
+    });
+    expect((create as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
+    await openRowMenu("Response latency", "View details");
+    const details = await screen.findByRole("dialog", { name: "Response latency" });
+    expect(within(details).getByText("Grades the average response time for a trace.")).toBeTruthy();
+    expect(
+      (within(details).getByRole("button", {
+        name: "Use in project",
+      }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
 });

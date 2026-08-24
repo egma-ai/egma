@@ -4,7 +4,7 @@ sidebarTitle: "Introduction"
 description: "Understand what Egma is, how simulation testing and production monitoring work, and which voice agent platforms it integrates with out of the box."
 ---
 
-Egma is an open-source platform that helps teams gain trust in the voice agents they ship to production. It combines simulation testing — where a synthetic persona holds real conversations with your agent before any customer does — with platform-specific production monitoring and automatic grading. The result is a continuous feedback loop: test before you ship, observe after you ship, and let verdicts tell you precisely what changed.
+Egma is an open-source platform that helps teams gain trust in the voice agents they ship to production. It combines simulation testing — where a synthetic persona holds real conversations with your agent before any customer does — with platform-specific production monitoring and automatic grading. The result is a continuous feedback loop: test before you ship, observe after you ship, and compare trace grades when behavior changes.
 
 ## What Egma is for
 
@@ -12,11 +12,11 @@ Voice agents are hard to test with unit tests alone. The behavior that matters e
 
 **Simulation testing** lets you group Markdown scenarios into test suites, then
 run one complete suite as real conversations against your agent. The simulator
-conducts each test and produces a recording and a transcript. The grader reads
-both and writes a verdict for every expected behavior you listed — `passed`,
-`failed`, `skipped`, or `errored` — with a rationale and cited turns.
+conducts each test and produces a recording and a transcript. The Expected
+behaviors grader checks each behavior statement, keeps its evidence in the
+details, and returns one normalized score for the completed simulation.
 
-**Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit Agents, the Egma Python SDK configures OpenTelemetry export inside the running agent. Both paths produce production conversation records. Egma shows a transcript, measures, and grader verdicts when the evidence supports them. Simulation recordings stay with the run that Egma conducted.
+**Production monitoring** starts with the agent platform. For Retell voice agents, Egma polls the selected agents after conversations finish. For LiveKit Agents, the Egma Python SDK configures OpenTelemetry export inside the running agent. Both paths produce production conversation records. Egma shows a transcript, observed metrics, and grades when a project grader applies. Simulation recordings stay with the run that Egma conducted.
 
 ## How it works
 
@@ -24,7 +24,12 @@ Egma is organized around three internal services that you never configure direct
 
 **The simulator** conducts conversations. It claims test work from the control plane, picks up the persona and scenario for each test, and holds a real exchange with your agent — through a Retell Chat connection, a LiveKit room, or a Phone connection over a SIP trunk. It streams every turn, tool call, and timing as OpenTelemetry spans to Egma's own ingest, so simulated and production conversations land in the same store and are read by the same tools.
 
-**The grader** judges conversations. The moment a simulation finishes — or the moment a production call's telemetry goes quiet — the grader claims it, reads the transcript, resolves the graders that apply to it, and writes one verdict row per expected behavior. It runs on its own and scales horizontally — more throughput is simply more copies running in parallel, with nothing in front of them.
+**The grader** grades completed traces. A simulation is eligible after it
+finishes and its trace evidence is visible. A production trace is eligible only
+after a supported platform reports its explicit conversation-end event and the
+evidence is visible. One temporary job holds all selected project graders for
+that trace. Each grader writes one grade. More workers can claim separate jobs
+in parallel.
 
 **Production ingestion** receives evidence two ways. Egma pulls: for an agent whose **pull production calls** switch is on, it reads that agent's completed conversations from Retell with the agent's own key and removes access tokens and authentication header values before storage. Or the agent pushes: a LiveKit Agents worker sends spans through Egma's OTLP endpoint with a project API key. Both paths meet in the same trace store, transcript reader, measure code, and production grading path.
 
@@ -47,6 +52,6 @@ agent's completed conversations for as long as the agent's switch is on.
     Run your first simulation test in under ten minutes using the Egma CLI wizard.
   </Card>
   <Card title="Core concepts" icon="layer-group" href="/concepts">
-    Agents, connections, test suites, tests, runs, simulations, personas, and verdicts — defined precisely.
+    Agents, connections, test suites, tests, runs, simulations, personas, metrics, and grades — defined precisely.
   </Card>
 </CardGroup>

@@ -1,527 +1,273 @@
 import {
-  appendVerdicts,
-  getGrader,
+  appendGrades,
   getSimulation,
-  pinnedSimulationGraders,
-  readTrace,
+  getSimulationTestVersion,
   MAXIMUM_WINDOW_MILLISECONDS,
   MOST_GRADING_ATTEMPTS,
-  type AuthContext,
-  type ExecutableGrader,
+  readTrace,
+  type FrozenGradingEntry,
   type GradingClaim,
   type GradingSource,
-  type NewVerdict,
-  type Simulation,
-  type TimeWindow,
+  type NewGrade,
   type TraceDetail,
 } from "@egma/db";
 import type {
   ProviderCredentialBundle,
   ProviderCredentialSource,
 } from "@egma/provider-credentials";
-import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 import {
   conversationOfSimulation,
-  evidenceIsStillArriving,
   conversationOfTrace,
+  evidenceIsStillArriving,
   type Conversation,
 } from "./conversation.ts";
-import {
-  couldNotJudge,
-  execute,
-  type Judging,
-  type Judgment,
-  type Reading,
-} from "./graders/index.ts";
+import { execute, type GraderResult, type Reading } from "./graders/index.ts";
 import {
   JUDGE_MAKERS,
   judgeFor,
   type AskableJudge,
   type JudgeMakers,
 } from "./judge/index.ts";
-import { applicableProductionGraders } from "./resolve.ts";
 
-/**
- * One claimed job, judged end to end: read the conversation, resolve the graders
- * that apply to it, execute each, write the verdict rows.
- *
- * Four steps and no fifth. Nothing here decides an overall answer for the
- * conversation or for its run — there is no such row anywhere, by design, and
- * the fold works one out at read time from exactly the rows this wrote.
- *
- * **The source decides the first two steps and nothing after them.** Both are
- * read from their spans; what differs is what egma knows besides. A simulation
- * names its own row, which says whose conversation it was and how the simulator
- * said it ended, and it is judged by the project's copies scoped to simulations;
- * a production trace has no row and is judged by the project's production-scoped
- * copies, sampled. Neither resolution reads a test: which graders apply is the
- * copies' own scope and nothing else. From the moment a `Conversation` and a
- * grader list exist there is one path — one executor seam, one verdict row
- * builder, one write — because a second judging path would be a second set of
- * answers that could one day disagree about the same agent.
- *
- * **The verdicts are written in one call.** A conversation's judgments land
- * together or not at all as far as any reader is concerned, and a job that fails
- * before the write is released and judged again from the beginning — which is
- * safe precisely because writing the same judgment twice at the same grader
- * version replaces rather than doubles.
- *
- * **Every grader is a resolved copy, including the expected-behaviors one.** It
- * used to stand beside the list as a second branch of the fan-out, because it
- * was never a row and could not be resolved. Every project is seeded with an
- * active copy of it now, so there is one fan-out, one executor seam and one
- * verdict row builder — and the rows it writes name a real grader and a real
- * version instead of a sentinel string. It stays simulations-only by its scope
- * rather than by a branch here, which is the same fact said where a person can
- * change it.
- *
- * **The definition comes from the pinned grader version.** Runtime joins the
- * Library identity's DB-guarded stable type, but never follows its mutable
- * current-definition pointer. A catalog change mints and promotes a new grader
- * version for future work; an existing run keeps the exact revision it pinned.
- *
- * **A claim reopened for one grader judges that grader and nothing else.**
- * Somebody who fixed one grader asked for one grader's judgment, and every other
- * judge call on the conversation would be money they did not agree to spend —
- * which is the whole reason the narrowing exists rather than a nicety of it.
- */
-
-/** What judging one conversation came to. */
+/** What grading one claimed trace durably appended. */
 export type Graded = {
   readonly source: GradingSource;
-  /** The conversation, as the verdict rows file it. */
   readonly traceId: string;
-  /** How many graders applied — including the ones that could not score. */
   readonly graders: number;
-  readonly verdicts: number;
+  readonly grades: number;
 };
 
-/** Why a job could not be judged, when it could not be. */
+/** A queue row that cannot be reconciled with its frozen evidence. */
 export class NotGradable extends Error {}
 
 export type GradeOptions = {
-  /** Reads the current deployment bundle only when a resolved grader needs it. */
   readonly providerCredentials: ProviderCredentialSource;
-  /**
-   * How each judge provider is spoken to. The default speaks to the real ones;
-   * a test hands over a scripted judge, which is what lets the whole engine
-   * suite run with no key and no network.
-   */
   readonly makers?: JudgeMakers | undefined;
 };
 
-/** A conversation and the graders that judge it: what a source resolves to. */
 type Resolved = {
   readonly conversation: Conversation;
-  readonly graders: readonly ExecutableGrader[];
-  /**
-   * The simulation the conversation came from, when it came from one — what a
-   * grader whose assertions live on the test goes and reads. A production trace
-   * resolves to none, which is the same fact as "there is no test here".
-   */
   readonly simulationId: string | undefined;
 };
 
 /**
- * The graders this production claim judges with: the one it was reopened for,
- * or everything that applies to the conversation.
+ * Execute the whole frozen plan carried by one claim.
  *
- * **A narrowed claim never asks what applies**, which is why the ordinary
- * resolution is passed as something to call rather than as a list. Resolving a
- * production trace's graders advances each one's sampling accumulator, and a
- * deliberate re-grade must not spend other graders' turns to answer a question
- * about one of them.
- *
- * **The named grader judges whatever its scope says**: naming it *is* the
- * scoping decision, made once by the person who asked for this re-grade rather
- * than standing policy about where the grader usually applies. Sampling is not
- * asked either — a re-grade somebody typed is not traffic egma did not cause.
- *
- * A grader that has gone between the ask and the claim — deleted in the minutes
- * the job sat in the queue — judges nothing, and the job finishes having written
- * nothing. That is the honest answer in both directions: it must not widen back
- * to every grader, which would spend exactly what the narrowing was asked to
- * save.
+ * Store reads, provider credentials, and the final ClickHouse append are
+ * whole-job infrastructure. A failure there retries the job. One grader that
+ * cannot return a valid score becomes one null-score error grade and does not
+ * stop its siblings.
  */
-async function productionGraders(
-  claim: GradingClaim,
-  whatApplies: () => Promise<readonly ExecutableGrader[]>,
-): Promise<readonly ExecutableGrader[]> {
-  const { regradeGraderId } = claim;
-  if (regradeGraderId === null) return whatApplies();
-
-  const named = await getGrader(claim.auth, regradeGraderId);
-  return named === undefined ? [] : [named];
-}
-
 export async function gradeClaim(
   claim: GradingClaim,
   options: GradeOptions,
 ): Promise<Graded> {
-  const { conversation, graders, simulationId } =
-    claim.source === "production"
-      ? await theProductionTrace(claim)
-      : await theSimulation(claim);
-
-  const credentials = graders.some(
-    (grader) => grader.definition.type === "llm_as_judge",
+  const resolved = await resolveConversation(claim);
+  const credentials = claim.entries.some(
+    (entry) => entry.definition.type === "llm_as_judge",
   )
     ? await options.providerCredentials.load()
     : {};
-  const makers = options.makers ?? JUDGE_MAKERS;
-  const judges = judgesFor(graders, credentials, makers);
+  const judges = judgesFor(
+    claim.entries,
+    credentials,
+    options.makers ?? JUDGE_MAKERS,
+  );
+  const reading = readingFor(claim, resolved.simulationId);
 
-  // What every grader that judges is handed besides the conversation: the
-  // simulation to read a test off, and whose it is.
-  const reading: Reading = { auth: claim.auth, simulationId };
+  const rows = await Promise.all(claim.entries.map(async (entry) => {
+    const result = await resultOf(entry, resolved.conversation, reading, judges);
+    return gradeRow(claim, entry, result);
+  }));
 
-  // In parallel, and not because today's computed graders are slow — they are
-  // instant. Because a judged grader is one model call per assertion, and
-  // wall-clock for a conversation with five checks should be one call rather
-  // than five.
-  const rows = (
-    await Promise.all(
-      graders.map(async (grader) =>
-        (
-          await judgmentsOf(grader, {
-            conversation,
-            judging: {
-              judge: judges.get(grader.versionId) ?? null,
-            },
-            reading,
-          })
-        ).map((judgment) => verdictRow(grader, conversation, judgment)),
-      ),
-    )
-  ).flat();
-
-  await appendVerdicts(claim.auth, rows);
-
+  // One append after every grader has answered. A store failure therefore
+  // retries the whole frozen plan, while ClickHouse keeps every completed retry
+  // as history and the read path chooses the latest result per project grader.
+  await appendGrades(claim.auth, rows);
   return {
-    source: conversation.source,
-    traceId: conversation.traceId,
-    graders: graders.length,
-    verdicts: rows.length,
+    source: claim.source,
+    traceId: claim.traceId,
+    graders: claim.entries.length,
+    grades: rows.length,
   };
 }
 
-/**
- * Resolve every selected model before any executor runs or verdict is written.
- * A missing provider key therefore fails the claimed job as one unit instead
- * of turning a deployment fault into durable `errored` verdicts.
- */
+function readingFor(claim: GradingClaim, simulationId: string | undefined): Reading {
+  let held: Promise<readonly string[]> | undefined;
+  return {
+    expectedBehaviors(): Promise<readonly string[]> {
+      if (simulationId === undefined) return Promise.resolve([]);
+      held ??= (async () => {
+        const version = await getSimulationTestVersion(claim.auth, simulationId);
+        if (version === undefined) {
+          throw new Error(
+            `simulation ${simulationId} has no readable frozen test version`,
+          );
+        }
+        return version.expectedBehaviors;
+      })();
+      return held;
+    },
+  };
+}
+
+async function resultOf(
+  entry: FrozenGradingEntry,
+  conversation: Conversation,
+  reading: Reading,
+  judges: ReadonlyMap<string, AskableJudge>,
+): Promise<GraderResult> {
+  try {
+    const result = await execute({
+      definition: entry.definition,
+      parameterValues: entry.parameterValues,
+      conversation,
+      judging: { judge: judges.get(entry.projectGraderId) ?? null },
+      reading,
+    });
+    if (result.score === null) {
+      if (typeof result.details.error !== "string" || result.details.error.trim() === "") {
+        throw new Error("returned a null score without an error explanation");
+      }
+      return result;
+    }
+    if (!Number.isFinite(result.score) || result.score < 0 || result.score > 1) {
+      throw new Error(`returned score ${result.score}, outside 0 through 1`);
+    }
+    return result;
+  } catch (error) {
+    return {
+      score: null,
+      details: {
+        error: `this grader could not produce a score: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      },
+    };
+  }
+}
+
+/** Resolve every selected model before any executor starts. */
 function judgesFor(
-  graders: readonly ExecutableGrader[],
+  entries: readonly FrozenGradingEntry[],
   credentials: ProviderCredentialBundle,
   makers: JudgeMakers,
 ): ReadonlyMap<string, AskableJudge> {
-  const resolved = new Map<string, AskableJudge>();
-  for (const grader of graders) {
-    if (grader.definition.type === "code") continue;
-    if (grader.judgeModel === null) {
+  const judges = new Map<string, AskableJudge>();
+  for (const entry of entries) {
+    if (entry.definition.type === "code") continue;
+    if (entry.definition.judgeModel === null) {
       throw new Error(
-        `model-judged grader version ${grader.versionId} has no judge model`,
+        `model-judged definition ${entry.graderDefinitionId} version ${entry.graderDefinitionVersion} has no judge model`,
       );
     }
-    resolved.set(
-      grader.versionId,
-      judgeFor(grader.judgeModel, credentials, makers),
+    judges.set(
+      entry.projectGraderId,
+      judgeFor(entry.definition.judgeModel, credentials, makers),
     );
   }
-  return resolved;
+  return judges;
 }
 
-/**
- * A finished simulation: its own row for what egma knows about conducting it,
- * and its spans for the conversation.
- *
- * The row is read first because it is what says this simulation exists, whose
- * it is and when it ran — and the window comes off those two moments, because
- * the trace store is filed by the minute a span started in and a read naming
- * only an id would have nothing to prune with.
- *
- * A trace that comes back absent is not an error here, and that is the
- * difference from the production path: a production job was written *by* the
- * spans arriving, so their absence means telemetry has gone, while a
- * simulation's job is written by the transaction that landed it and can
- * legitimately reach a conversation whose spans never came. What to do about it
- * is the reading order's decision, made in one place; this only goes and asks.
- */
-async function theSimulation(claim: GradingClaim): Promise<Resolved> {
+function gradeRow(
+  claim: GradingClaim,
+  entry: FrozenGradingEntry,
+  result: GraderResult,
+): NewGrade {
+  return {
+    source: claim.source,
+    traceId: claim.traceId,
+    traceStartedAtMicroseconds: BigInt(claim.traceStartedAt.getTime()) * 1_000n,
+    runId: claim.runId ?? "",
+    projectGraderId: entry.projectGraderId,
+    graderDefinitionId: entry.graderDefinitionId,
+    graderDefinitionVersion: entry.graderDefinitionVersion,
+    score: result.score,
+    details: result.details,
+    graderPassThreshold: entry.graderPassThreshold,
+    gradingSequence: claim.sequenceBase + claim.attempts,
+    gradedAtMicroseconds: gradedNow(),
+  };
+}
+
+async function resolveConversation(claim: GradingClaim): Promise<Resolved> {
+  if (claim.source === "production") {
+    const trace = await traceFor(claim);
+    if (trace === undefined) {
+      throw new NotGradable(
+        `production trace ${claim.traceId} is no longer readable in its frozen window`,
+      );
+    }
+    return { conversation: conversationOfTrace(trace), simulationId: undefined };
+  }
   if (claim.simulationId === null) {
-    throw new NotGradable(
-      `grading job ${claim.id} says it is a simulation's and names none`,
-    );
+    throw new NotGradable(`simulation grading job ${claim.id} names no simulation`);
   }
-
   const simulation = await getSimulation(claim.auth, claim.simulationId);
-  if (simulation === undefined) {
+  if (simulation === undefined || simulation.status !== "completed") {
     throw new NotGradable(
-      `simulation ${claim.simulationId} is not reachable from the job that names it`,
+      `simulation ${claim.simulationId} is not a completed trace the job can read`,
+    );
+  }
+  if (claim.runId === null || claim.runId !== simulation.runId) {
+    throw new NotGradable(
+      `grading job ${claim.id} does not name simulation ${simulation.id}'s run`,
     );
   }
 
-  const trace = await theSimulationsTrace(claim.auth, simulation);
+  const trace = await traceFor(claim);
+  if (trace !== undefined && trace.runId !== claim.runId) {
+    throw new NotGradable(
+      `trace ${trace.traceId} does not carry its frozen simulation run`,
+    );
+  }
 
-  // **Ask again rather than answer now.** A conversation whose record is not
-  // all here yet would be judged as one egma could not read, and that verdict
-  // is permanent — so the claim is declined, the job goes back, and the next
-  // attempt looks again. The budget is what makes the waiting end: on the last
-  // attempt the answer below is written from whatever did arrive, so a
-  // conversation whose evidence never comes still gets the same list of checks
-  // a reader would have seen either way, and no job is abandoned for waiting.
+  // A simulation can reach its terminal row before accepted evidence becomes
+  // readable. Ask again while the retry budget remains. On the final attempt,
+  // write error grades from the missing or partial conversation instead of
+  // abandoning work that can no longer improve.
   if (
     evidenceIsStillArriving(simulation, trace) &&
     claim.attempts < MOST_GRADING_ATTEMPTS
   ) {
     throw new NotGradable(
       `simulation ${simulation.id} is complete and egma does not hold all of ` +
-        `its conversation yet, so there is nothing to judge on attempt ` +
+        `its conversation yet, so there is nothing to grade on attempt ` +
         `${claim.attempts} of ${MOST_GRADING_ATTEMPTS}`,
     );
   }
 
   return {
     conversation: conversationOfSimulation(simulation, trace),
-    graders: await (async () => {
-      const pinned = await pinnedSimulationGraders(claim.auth, simulation.id);
-      if (pinned === undefined) {
-        throw new NotGradable(
-          `simulation ${simulation.id} has no reachable grading plan`,
-        );
-      }
-      // A narrowed re-grade chooses one identity from the run's own frozen
-      // list. It never follows that identity's current-version pointer: the
-      // plan's immutable version id is the only semantic source for this run.
-      return claim.regradeGraderId === null
-        ? pinned
-        : pinned.filter((grader) => grader.id === claim.regradeGraderId);
-    })(),
     simulationId: simulation.id,
   };
 }
 
-/**
- * The spans this simulation streamed, or nothing at all if none did.
- *
- * **The trace id is derived, never stored.** A simulation's spans are filed
- * under the 128 bits its own id carries, because an OpenTelemetry trace id is
- * fixed-width binary and cannot hold one of egma's identifiers. The derivation
- * is a term of the span contract and lives there, in one place, so that the
- * simulator authoring a span and this query going to find it can never fall out
- * of step. The verdict rows still file under the simulation id: the product's
- * word for this conversation is unchanged, and only the query knows the other
- * form.
- */
-async function theSimulationsTrace(
-  auth: AuthContext,
-  simulation: Simulation,
+async function traceFor(
+  claim: GradingClaim,
 ): Promise<TraceDetail | undefined> {
-  const traceId = traceIdOfSimulation(simulation.id);
-  // Unreachable: every simulation id egma reads is one egma minted. Answered
-  // rather than asserted, because a grading service is not the place to throw
-  // over an id that came out of its own database.
-  if (traceId === undefined) return undefined;
-
-  return readTrace(auth, traceId, { window: whenItRan(simulation) });
-}
-
-/**
- * How wide a window a simulation's spans are looked for in.
- *
- * Five minutes at each end, which is not rounding slack. The row's two moments
- * are the *simulator's* own, reported over the wire and written onto the row
- * where they could be true — so the two clocks are different machines' — and
- * where a report carried neither, the landing stamped its own arrival instead,
- * which is later than the conversation by however long delivery took. A span
- * that fell outside the window would be a hole in a transcript nobody could
- * see, and the sort key prunes by the minute, so a generous cushion costs
- * almost nothing to read.
- */
-const A_GENEROUS_CUSHION_MICROSECONDS = 5n * 60n * 1_000_000n;
-
-function whenItRan(simulation: Simulation): TimeWindow {
-  // A row that never started is bracketed by its own creation, which is
-  // certainly before anything the simulator stamped; one that never landed by
-  // now, which is certainly after.
-  const began = BigInt((simulation.startedAt ?? simulation.createdAt).getTime());
-  const ended = BigInt((simulation.endedAt ?? new Date()).getTime());
-
-  const from =
-    (began < ended ? began : ended) * 1_000n - A_GENEROUS_CUSHION_MICROSECONDS;
-  const to =
-    (began < ended ? ended : began) * 1_000n + A_GENEROUS_CUSHION_MICROSECONDS;
-
-  // The store refuses a window wider than its cap rather than narrowing one, so
-  // a row that sat queued for longer than that is narrowed here — from the end,
-  // which is where the conversation was.
-  const widest = BigInt(MAXIMUM_WINDOW_MILLISECONDS) * 1_000n;
-  return { from: to - from > widest ? to - widest : from, to };
-}
-
-/**
- * A production trace, read from its spans — the settled production read path.
- *
- * The window comes off the job the ingest door wrote, because the trace store is
- * filed by the minute a span started in and a read naming only a trace id would
- * have nothing to prune with. It is widened by a second at each end: those two
- * instants travel as timestamps, which hold milliseconds, while the store holds
- * microseconds — so a bound copied across exactly could land a few hundred
- * microseconds inside the conversation and clip the first or last span off the
- * transcript. A second is far more than that rounding and far less than the gap
- * to anything else worth reading.
- */
-async function theProductionTrace(claim: GradingClaim): Promise<Resolved> {
-  const { traceId, firstSpanAt, lastSpanAt } = claim;
-  if (traceId === null || firstSpanAt === null || lastSpanAt === null) {
-    throw new NotGradable(
-      `grading job ${claim.id} says it is a production trace's and does not say which`,
-    );
-  }
-
-  const A_SECOND_IN_MICROSECONDS = 1_000_000n;
-  const trace = await readTrace(claim.auth, traceId, {
-    window: {
-      from: BigInt(firstSpanAt.getTime()) * 1_000n - A_SECOND_IN_MICROSECONDS,
-      to: BigInt(lastSpanAt.getTime()) * 1_000n + A_SECOND_IN_MICROSECONDS,
-    },
+  const cushion = 1_000_000n;
+  const from = BigInt(claim.traceStartedAt.getTime()) * 1_000n - cushion;
+  const to = from + BigInt(MAXIMUM_WINDOW_MILLISECONDS) * 1_000n;
+  const trace = await readTrace(claim.auth, claim.traceId, {
+    window: { from, to },
   });
-
   if (trace === undefined) {
-    // Not a race: the spans were stored before the job that names them was
-    // written. This is telemetry that has gone from the store — a retention
-    // window that passed, a store restored without it — and saying so is better
-    // than writing `errored` rows about an agent that did nothing wrong.
+    return undefined;
+  }
+  if (trace.source !== claim.source) {
     throw new NotGradable(
-      `trace ${traceId} holds no spans in the window its job recorded`,
+      `trace ${claim.traceId} is ${trace.source}, not ${claim.source}`,
     );
   }
-
-  return {
-    conversation: conversationOfTrace(trace),
-    graders: await productionGraders(claim, () =>
-      applicableProductionGraders(claim.auth),
-    ),
-    simulationId: undefined,
-  };
+  return trace;
 }
 
-/**
- * What one grader says about this conversation.
- *
- * **A conversation with nothing to judge is `errored` too, and the executor
- * decides the shape of that answer.** Either it never happened — the agent never
- * joined, the line was never answered, egma's own runtime broke — or it happened
- * and egma cannot read it, because its spans never arrived and no column holds
- * it. Both are things that went wrong on egma's side of the glass, and the one
- * thing a test product must never do is score them as the agent behaving badly.
- *
- * That decision is inside the executors rather than in front of them because how
- * many rows it is depends on what the grader's assertions are: the
- * expected-behaviors grader names one per behavior and writes one `errored` row
- * per behavior, so a page shows the same list whether the conversation happened
- * or not, while a grader that makes one check writes one. Every executor is
- * handed `nothingToJudgeBecause` on the conversation and is held to it by a
- * test.
- *
- * **A grader that falls over answers under its own keys too**, which is the same
- * rule one step further out. A verdict is counted once per conversation, grader
- * and assertion key, and that identity does not span the grader version — so a
- * row filed under a key the executor never writes can never be superseded. It
- * would outrank every `passed` beside it forever and no re-grade could reach it,
- * and a test that failed once could never pass again. So the reason is handed to
- * the same grader to spread across the same keys.
- *
- * **If even that cannot be answered, nothing is written and the throw escapes.**
- * A grader egma cannot describe is one it must stay silent about rather than
- * file a row it can never correct; the job is released and judged again from the
- * beginning, which is what the attempt count is for.
- */
-export async function judgmentsOf(
-  grader: ExecutableGrader,
-  execution: {
-    readonly conversation: Conversation;
-    readonly judging: Judging;
-    readonly reading: Reading;
-  },
-): Promise<readonly Judgment[]> {
-  // The definition and the copy's filled-in values, and nothing about whose
-  // grader this is or what it is called: an executor that could see any of that
-  // could be written to answer with it.
-  const asked = {
-    definition: grader.definition,
-    config: grader.config,
-    conversation: execution.conversation,
-    judging: execution.judging,
-    reading: execution.reading,
-  };
-
-  try {
-    return await execute(asked);
-  } catch (error) {
-    // One grader falling over is one `errored` row per check it makes, not a
-    // conversation with no verdicts on it. Every other grader's judgment still
-    // lands, and these say out loud that egma could not make the check — which
-    // is the whole reason `errored` is a word separate from `failed`.
-    return await couldNotJudge(
-      asked,
-      `this check could not be made: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-/**
- * One judgment, as the row that records it.
- *
- * **The copy names itself now.** A verdict row used to carry the string
- * `expected_behaviors` where a grader id belongs, because the built-in was never
- * a row; every project runs a copy of the library entry instead, so every row
- * this writes names a real grader and the version that decided it — which is
- * what keeps the row interpretable after the grader is tightened, since the
- * values it was decided by are frozen behind that id. A production re-grade can
- * use the copy's current version. A simulation re-grade follows the run plan and
- * uses the same pinned version again.
- */
-function verdictRow(
-  grader: ExecutableGrader,
-  conversation: Conversation,
-  judgment: Judgment,
-): NewVerdict {
-  return {
-    traceId: conversation.traceId,
-    graderId: grader.id,
-    graderVersionId: grader.versionId,
-    assertion: judgment.assertion,
-    source: conversation.source,
-    verdict: judgment.verdict,
-    score: judgment.score,
-    rationale: judgment.rationale,
-    citedSpanIds: judgment.citedSpanIds,
-    runId: conversation.runId,
-    agentId: conversation.agentId,
-    // Empty, and honestly so: egma does not version agents yet, and a made-up
-    // value would make "how did v7 do against v8" answer with nonsense the day
-    // versions arrive.
-    agentVersionId: "",
-    judgedAtMicroseconds: judgedNow(),
-  };
-}
-
-/**
- * When the judgment was made, in microseconds, and never twice the same.
- *
- * The clock is what the store keeps rows by: a re-run of the identical judgment
- * replaces the one before it only if it is stamped later. `Date.now` moves in
- * milliseconds and a re-grade of a small run is faster than that, so two
- * judgments could land on one instant and the store would be free to keep
- * either. The counter makes the stamp strictly increasing inside a process
- * without letting it run ahead of the clock by more than the judgments it
- * actually made.
- */
+/** Preserve completion order inside one worker; the job sequence orders workers. */
 let lastStamp = 0n;
-function judgedNow(): bigint {
-  const now = BigInt(Date.now()) * 1000n;
+function gradedNow(): bigint {
+  const now = BigInt(Date.now()) * 1_000n;
   lastStamp = now > lastStamp ? now : lastStamp + 1n;
   return lastStamp;
 }

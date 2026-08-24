@@ -35,14 +35,12 @@ function claimAttributes(
     ...(claim.simulationId === null
       ? {}
       : { "egma.simulation_id": claim.simulationId }),
-    ...(claim.traceId === null
-      ? {}
-      : { "egma.production_trace_id": claim.traceId }),
+    "egma.trace_id": claim.traceId,
   };
 }
 
 /**
- * The service: claim, judge, finish, and wait to be woken.
+ * The service: claim, grade, finish, and wait to be woken.
  *
  * **Every arrow points out.** It listens on nothing, publishes no port and has
  * no inbound surface at all — it dials Postgres and the trace store and nothing
@@ -51,20 +49,14 @@ function claimAttributes(
  * front of them. That is the dispatch shape the simulator proved, on the other
  * side of the wire.
  *
- * **Nothing here is on a timer that a verdict has to wait for.** A conversation
- * ending raises a notification — inside the transaction that ends a simulation,
- * or at the door when a trace's root span closes — this wakes, and it claims.
- * The interval below is the backstop for a notification nobody was listening for
- * — a copy restarting, a connection that dropped — and no verdict's latency
- * depends on it in the ordinary case. There is no latency promise anywhere in
- * this product, and this is what makes the absence of one honest rather than
- * convenient.
+ * **Nothing here waits for a polling interval.** `requestGrading` raises a
+ * notification only after completion and query-visible evidence agree. The
+ * interval below is only a backstop for a notification nobody heard during a
+ * restart or dropped connection. The durable Postgres row is still the truth.
  *
- * **One conversation does wait on the clock, and only one.** A production trace
- * whose exporter never closes a root span has no ending anybody can be woken by,
- * so it is judged once it has been quiet longer than the idle window. That is
- * the pass below finding it, because the completing event is the absence of
- * events and there is nothing else that could.
+ * Production work reaches this service only after a supported platform states
+ * that the conversation ended and ingestion states that its evidence is
+ * query-visible. A root span or silence never creates work here.
  */
 export type Service = {
   /** Runs until `stop` is called; resolves when the last job has landed. */
@@ -83,11 +75,11 @@ export type ServiceOptions = {
    */
   readonly onIdle?: (() => void) | undefined;
   /**
-   * How each judge provider is spoken to. Absent means the real ones — which is
-   * every deployment. **The judge is a seam**, and this is it: a test hands over
-   * a scripted judge that answers deterministically from memory, so per-behavior
-   * fan-out, the skipped denominator and one-call-failed-and-its-siblings-did-not
-   * are all asserted with no key and no network anywhere under them.
+   * How each model-grading provider is spoken to. Absent means the real ones —
+   * which is every deployment. This is the provider seam: a test hands over a
+   * scripted implementation that answers deterministically from memory, so
+   * per-behavior fan-out, score normalization, and one failed call beside
+   * successful siblings are all asserted with no key and no network.
    */
   readonly makers?: JudgeMakers | undefined;
 };
@@ -99,11 +91,11 @@ export type ServiceOptions = {
  * A still-arriving claim is held before it is claimable again, rather than
  * released at once: without the hold a run whose simulations all land together
  * would spend its whole retry budget in one hot burst — the capacity shortcut
- * re-claiming the instant every copy declines — and write a permanent verdict
- * during the exact cold start the retry exists to survive. The hold is the sweep
- * interval, so the retries fall on the clock the backstop already runs on; the
- * job is claimed throughout it, so no other copy takes it either, and it is
- * released to the queue only once the hold is over.
+ * re-claiming the instant every worker declines — and write durable error
+ * grades during the exact cold start the retry exists to survive. The hold is
+ * the sweep interval, so the retries fall on the clock the backstop already
+ * runs on; the job is claimed throughout it, so no other worker takes it, and
+ * it is released to the queue only once the hold is over.
  */
 type Pacing = {
   /** Resolve after the backoff, or at once when the service is stopping. */
@@ -187,7 +179,6 @@ export function startService(options: ServiceOptions): Service {
           claimant: config.claimant,
           capacity: config.capacity,
           leaseSeconds: config.leaseSeconds,
-          idleSeconds: config.traceIdleSeconds,
         });
       } catch (error) {
         // The control plane is unreachable or refused. Say so once and wait;
@@ -232,14 +223,14 @@ export function startService(options: ServiceOptions): Service {
 }
 
 /**
- * One job, held and judged.
+ * One job, held and graded.
  *
- * The heartbeat runs beside the judging rather than after it, because judging
- * will one day be several model calls and a copy that only said it was alive
- * when it finished would lose every long job it started. A copy that fails
+ * The heartbeat runs beside grading rather than after it, because grading will
+ * one day be several model calls and a worker that only said it was alive when
+ * it finished would lose every long job it started. A worker that fails
  * releases the job at once with the reason on it: the queue does not have to
  * wait out a silence that is not happening, and the attempt is already counted
- * so a conversation that breaks three copies is abandoned rather than retried
+ * so a conversation that breaks three workers is abandoned rather than retried
  * forever.
  */
 async function holdAndGrade(
@@ -295,19 +286,26 @@ async function gradeHeldClaim(
       providerCredentials: options.providerCredentials,
       ...(options.makers === undefined ? {} : { makers: options.makers }),
     });
-    // The verdicts are written before the job is finished, in that order and
-    // not the other way round. Between the two this copy could lose the job to
-    // an expired lease, and another copy would judge the same conversation
-    // again — which costs nothing, because the same judgment at the same grader
-    // version replaces rather than doubles. Finishing first would risk the
-    // opposite: a job marked judged with nothing written under it.
-    await finishGradingJob(claim.auth, claim.id, config.claimant);
+    // The grades are written before the temporary job is deleted, in that order and
+    // not the other way round. Between the two this worker could lose the job to
+    // an expired lease, and another worker could grade the same conversation
+    // again. Each retry appends history; the read path picks the latest result
+    // for each project grader. Deleting first would risk the opposite: no work
+    // row and no durable grade.
+    const finished = await finishGradingJob(
+      claim.auth,
+      claim.id,
+      config.claimant,
+    );
+    if (finished === undefined) {
+      throw new Error(`grading job ${claim.id} was no longer held at cleanup`);
+    }
     log.info(
       platformEvent("egma.grading_job.finished", {
         ...about,
         "egma.outcome": "succeeded",
         grader_count: graded.graders,
-        verdict_count: graded.verdicts,
+        grade_count: graded.grades,
       }),
       "grading job finished",
     );

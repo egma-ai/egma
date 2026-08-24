@@ -14,20 +14,20 @@
  * page would have called), the provider key, the choice of agent when the
  * account holds several, and the keystroke at the gate.
  *
- * **The walk ends where the verdict would begin, and that is stated rather
- * than hidden.** Nothing on this machine claims a simulation yet, so no verdict
+ * **The walk ends where the first trace result would begin, and that is stated
+ * rather than hidden.** Nothing on this machine claims a simulation yet, so no result
  * lands: the run stays pending and every simulation stays queued. The wizard
- * waits for the first verdict, so this check closes the window itself once the
+ * waits for the first terminal grading state, so this check closes the window itself once the
  * run is live and the screen is drawn from it. That is a thing the product
  * means rather than a way around it — the run carries on on the platform, and
  * closing a terminal over a live run is how a developer leaves. What this
- * asserts in place of a verdict is that no verdict arrived: the feed is open,
+ * asserts in place of a result is that no grading state arrived: the feed is open,
  * empty and not done. The grader and the test-to-simulation bridge are what
- * land the rest, and when they do the first verdict comes through the same feed
+ * land the rest, and when they do the first result comes through the same reads
  * the wizard is already following, with nothing here to change.
  *
  * **The skill offer is never reached**, because the wizard asks it after the
- * first verdict. Nothing here can therefore write outside the repository at
+ * first result. Nothing here can therefore write outside the repository at
  * all, and this checks that: the developer's own skill file is exactly as it
  * was before the run.
  *
@@ -592,7 +592,7 @@ async function walkOnce(options: {
     if (held === null) throw new Error("the walk stored no key for the platform it signed in to");
     secrets.push(held.key);
 
-    // What arrives in place of a verdict, asked while the wizard is still
+    // What arrives in place of a trace result, asked while the wizard is still
     // following: nothing at all. Nothing on this machine claims a simulation,
     // so the feed is open, empty and not finished — and the wizard would wait
     // at this screen for as long as it was left to.
@@ -604,13 +604,13 @@ async function walkOnce(options: {
     const arrived = Array.isArray(feed.body.events) ? (feed.body.events as unknown[]) : ["?"];
     check(
       arrived.length === 0 && feed.body.done === false,
-      `no verdict arrived while the wizard followed: the feed is open, empty and not done (${arrived.length} events)`,
+      `no trace result arrived while the wizard followed: the feed is open, empty and not done (${arrived.length} events)`,
     );
 
     // And the window is closed over a live run, which is what a developer does
     // when they have seen enough: the suite carries on on egma, the exit line
     // still says where to open it, and nothing was installed because the offer
-    // comes after the first verdict and the first verdict is what waits.
+    // comes after the first result and terminal grading is what waits.
     terminal.write("\u0003");
 
     const exitCode = await Promise.race([
@@ -834,15 +834,15 @@ async function assertWhatLanded(options: {
   );
   // What waits, stated as a check rather than as a comment: nothing claims a
   // simulation on this machine, so the run is still pending and not one
-  // simulation has been judged. The day the grader and the bridge land, these
+  // simulation has grading state. The day the grader and the bridge land, these
   // two lines are the ones that change.
   check(
     run.body.status === "pending",
     `the run is pending, because nothing conducts a simulation yet (${String(run.body.status)})`,
   );
   check(
-    inTheRun.every((one) => one.status === "queued" && one.verdict === null),
-    `every simulation is queued and unjudged (${inTheRun.filter((one) => one.status === "queued").length} of ${inTheRun.length})`,
+    inTheRun.every((one) => one.status === "queued" && one.gradingState === null),
+    `every simulation is queued with no grading state (${inTheRun.filter((one) => one.status === "queued").length} of ${inTheRun.length})`,
   );
 
   /* the block it left in scrollback, each line whole */
@@ -855,9 +855,9 @@ async function assertWhatLanded(options: {
   check(address.startsWith("http"), `the run came back with an address (${address})`);
   check(
     lines.some((line) =>
-      line.startsWith(`✓ Your first run is live — ${inTheRun.length} simulations, none graded yet.`),
+      line.startsWith(`✓ Your first run is live — no simulation result is ready yet (${inTheRun.length} total).`),
     ),
-    "the headline says the run is live, and says plainly that nothing is graded yet",
+    "the headline says the run is live, and says plainly that no result is ready yet",
   );
   check(lines.includes(address), "the results address is a line, and the whole of it");
   check(
@@ -877,7 +877,7 @@ async function assertWhatLanded(options: {
     "the handoff sentence survived whole",
   );
   // Nothing about the skill is in what survived, because the offer comes after
-  // the first verdict and the first verdict is what waits. A line about it
+  // the first result and terminal grading is what waits. A line about it
   // here would mean the wizard had offered something this walk never reached.
   check(
     !lines.some((line) => line.includes("Egma skill")),
@@ -1074,12 +1074,12 @@ async function main(): Promise<void> {
   say("  egma, started a run over them, and followed it live, with the");
   say("  files in the repository and nothing written outside it.");
   say("");
-  say("  What is not proven here, and is not faked: the verdict. Nothing");
+  say("  What is not proven here, and is not faked: a trace result. Nothing");
   say("  claims a simulation on this machine, so the run stays pending and");
   say("  every simulation stays queued. When the grader and the");
-  say("  test-to-simulation bridge land, the first verdict arrives through");
-  say("  the feed this walk was already following, and the wizard's last");
-  say("  two screens — the offer and the graded exit line — are what this");
+  say("  test-to-simulation bridge land, terminal grading arrives through");
+  say("  the reads this walk was already following, and the wizard's last");
+  say("  two screens — the offer and the result exit line — are what this");
   say("  check gains.");
   say(RULE);
 }

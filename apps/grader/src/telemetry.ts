@@ -50,9 +50,8 @@ if (environment.EGMA_TELEMETRY?.trim().toLowerCase() === "on") {
 
     const sdk = new NodeSDK({
       instrumentations: [
-        // The claim loop's calls to the stores, and the judge calls a
-        // grading replays to the provider — which is where a slow verdict's
-        // time goes.
+        // The claim loop's calls to the stores, and the model calls grading
+        // sends to the provider — which is where a slow grade's time goes.
         new http.HttpInstrumentation(),
         new undici.UndiciInstrumentation(),
         new pg.PgInstrumentation(),

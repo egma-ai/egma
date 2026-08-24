@@ -9,7 +9,7 @@ import {
   connectClickHouse,
   disconnect,
   disconnectClickHouse,
-  seedGraderLibrary,
+  reconcileGraderCatalog,
   seedPersonaLibrary,
   seedPlatformSettings,
 } from "@egma/db";
@@ -228,7 +228,7 @@ export async function startInstance(
   // can point at them — what the real entry point writes after migrations and
   // before it serves a request.
   await seedPersonaLibrary();
-  await seedGraderLibrary();
+  await reconcileGraderCatalog();
   if (options.platformSettings !== undefined) {
     await seedPlatformSettings(options.platformSettings);
   }

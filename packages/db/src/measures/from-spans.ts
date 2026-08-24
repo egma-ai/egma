@@ -14,13 +14,13 @@ import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
  * the agent platform reported about its own conversation comes last. Every step
  * of the chain is absolute — nothing is averaged with anything and nothing is
  * appended to anything — and every number says which step it came from, because
- * a developer reading a verdict is entitled to know whether egma watched it
+ * a developer reading a grade is entitled to know whether egma watched it
  * happen or was told about it.
  *
  * **One computation, and that is the whole reason this file exists.** The
  * metrics display reads through it and so does the grader that bounds a
  * measure, for a simulation and for a production trace alike. So the number a
- * developer sees on a page and the number a verdict row was decided by are the
+ * developer sees on a page and the number a metric-based grader receives are the
  * same arithmetic over the same rows — not two readers that agree today and
  * drift the week somebody fixes one of them. A second implementation anywhere
  * would be a second answer about one conversation, with no stored number to
@@ -42,12 +42,12 @@ import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
  * (`packages/simulation-contract/measure-catalog.md`), the rule is one of a
  * closed list, and the switch below is exhaustive — so a measure whose rule
  * nothing implements stops the TypeScript build rather than shipping as a
- * grader that is silently `skipped` forever.
+ * metric that silently disappears forever.
  *
  * It reaches nothing: rows a caller already fetched go in, arithmetic comes
  * out. So it takes no `AuthContext` and is exported from the package's entry
- * point rather than from the data-access surface, exactly as the verdict fold
- * is, and for the same reason.
+ * point rather than from the data-access surface because it is pure and needs
+ * no tenancy boundary.
  */
 
 /**
@@ -107,7 +107,7 @@ export type MeasuredFromSpans = {
    * rides the answer instead of sitting in the catalog: the same measure is
    * timed on a simulation, derived on a stock LiveKit call, and reported on a
    * Retell one. A page saying where a number came from is the difference
-   * between a verdict a developer trusts and one they have to go and check —
+   * between a grade a developer trusts and one they have to go and check —
    * and `reported` is the value that most needs saying out loud, because a
    * platform's measurement of its own agent is a different kind of evidence
    * from egma's observation of it.
@@ -132,8 +132,9 @@ export type MeasuredFromSpans = {
    *
    * Never empty: a measure this conversation did not take is **absent** from
    * the answer rather than present with nothing in it. That is what lets a
-   * grader tell "measured, and here it is" from "not measured here", and the
-   * second of those is a `skipped` check rather than a failed one.
+   * grader tell "measured, and here it is" from "not measured here". A grader
+   * that requires the absent metric can then return an error, never a false
+   * score.
    */
   readonly samples: readonly Sample[];
 };
@@ -145,7 +146,7 @@ export type MeasuredFromSpans = {
  * recognises egma's vocabulary by the emitting scope and files those spans as
  * `timing`; a provider's own span that happens to be called
  * `turn_response_latency` is filed as whatever it is. Reading the name alone
- * would let another framework's bookkeeping become a measurement egma judges an
+ * would let another framework's bookkeeping become a measurement Egma grades an
  * agent against.
  */
 const TIMING = "timing";
@@ -219,11 +220,11 @@ export function measuresFromSpans(
     }
     // **And the platform's own numbers are last, for the same reason and by the
     // same absolute rule.** egma watching the conversation outranks the
-    // platform grading its own homework, so a measure egma timed or derived is
+    // platform measuring its own homework, so a measure egma timed or derived is
     // never joined by what the platform said about it: one answer per measure,
     // never averaged and never appended. Last is not least — for a Retell trace
     // it is the only source there is, and the whole difference between a
-    // production conversation with a verdict and one with a polite silence.
+    // production conversation with this metric and one with a polite silence.
     if (reported === undefined) continue;
     const said = reportedSamplesOf(cataloged, reported);
     if (said.length === 0) continue;
@@ -248,10 +249,9 @@ export function measuresFromSpans(
  * conversation that was bad once, and a check that says otherwise is a check
  * nobody should believe.
  *
- * The eight aggregations the catalog names are what this becomes when a grader
- * can ask for one. Nothing asks today: the **Use** form has a measure and a
- * bound and no third control, so the reduction is the strictest one rather than
- * a default somebody could mistake for a choice they made.
+ * The metric display uses this strict reduction today. A future grader can pin
+ * another reduction in its own immutable definition instead of changing this
+ * observed metric after old grades were recorded.
  *
  * Ties keep the earliest sample, so two readings of one trace cite one span.
  *
@@ -266,6 +266,31 @@ export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
     if (worst === undefined || sample.value > worst.value) worst = sample;
   }
   return worst;
+}
+
+/**
+ * The arithmetic mean of a measure's samples.
+ *
+ * Response latency is the first grader whose immutable definition asks for a
+ * mean rather than the strict worst sample shown by the metric display. The
+ * reduction still lives here so the grader does not become a second reader of
+ * the measurement series.
+ *
+ * `undefined` means the series is empty or contains a value that cannot be a
+ * measurement. A grader must report that as an error, never turn it into zero.
+ */
+export function arithmeticMeanOf(
+  measured: MeasuredFromSpans,
+): number | undefined {
+  let total = 0;
+  let count = 0;
+  for (const sample of measured.samples) {
+    if (!Number.isFinite(sample.value) || sample.value < 0) return undefined;
+    total += sample.value;
+    count += 1;
+  }
+  if (count === 0 || !Number.isFinite(total)) return undefined;
+  return total / count;
 }
 
 /**
@@ -330,7 +355,7 @@ function samplesOf(
       // terminal transition, where the simulation row keeps it — and deriving
       // it here a second way would be a second answer about one conversation.
       // A grader may not name such a measure at all; the write door refuses it,
-      // so this arm is what a display asks and never what a verdict rests on.
+      // so this arm is what a display asks and no current grader uses.
       return [];
     }
   }
@@ -351,9 +376,8 @@ function samplesOf(
  * milliseconds would hand a grader a conversation that answered in two
  * milliseconds, and a two-second bound would pass what it exists to fail. A
  * number in the wrong unit is worse than no number, so such a measurement is
- * skipped in silence and the measure comes back absent — which is a `skipped`
- * check rather than a false pass, and the difference the verdict vocabulary is
- * built on. Converting it instead would be egma inventing a fact about a unit
+ * omitted and the measure comes back absent. A grader that requires it returns
+ * an error rather than a false pass. Converting it instead would be Egma inventing a fact about a unit
  * nobody in this repository declared.
  *
  * **A platform-prefixed name never matches**, because no catalog measure is
@@ -363,7 +387,7 @@ function samplesOf(
  *
  * **Every sample cites the root span the block rode in on.** These numbers
  * describe the whole conversation and happened at no single moment inside it,
- * so the root is the only span that can honestly be pointed at — and a verdict
+ * so the root is the only span that can honestly be pointed at — and a grade
  * citing it opens the trace the measurement is about rather than a turn picked
  * to look precise.
  *
@@ -420,10 +444,10 @@ function reportedSamplesOf(
  *
  * **Why derive at all.** A team points a stock LiveKit agent at egma and
  * watches real conversations arrive, and the one question monitoring exists to
- * answer — is my agent answering fast enough — was `skipped` on every one of
+ * answer — how fast is my agent answering — was absent on every one of
  * them, because the framework times its turns in its own vocabulary and egma
  * only read its own. The durations were there the whole time. Reading them is
- * what turns a polite silence into a verdict.
+ * what turns a polite silence into an observed metric.
  *
  * **Read time, not write time.** Nothing new is stored and the door still
  * writes exactly what arrived, so every conversation already in the store gains

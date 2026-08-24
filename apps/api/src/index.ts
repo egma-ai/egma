@@ -4,12 +4,11 @@ import {
   disconnect,
   disconnectClickHouse,
   reconcileDeploymentCarrierSettings,
+  reconcileGraderCatalog,
   runClickHouseMigrations,
   runMigrations,
-  seedGraderLibrary,
   seedPersonaLibrary,
   seedPlatformSettings,
-  seedRunningGraders,
 } from "@egma/db";
 
 import { loadConfig } from "./config.ts";
@@ -98,24 +97,12 @@ const personaShelf = await seedPersonaLibrary();
 // migrations because it writes rows, and before the first request because a
 // project reading its Library a second later has to find them there.
 //
-// An upsert keyed by fixed identifiers, so this is free on every boot after the
-// first. A release that changes an executable definition creates one immutable
-// shared revision and promotes each active copy to a new grader version that
-// points at it. Old run plans keep their exact revision. A release that changed
-// nothing writes nothing at all — not even `updated_at`.
-const shelved = await seedGraderLibrary();
-
-// And the other half of it: a shelf full of definitions judges nothing until a
-// project is running a copy of one. Every project created from now on is born
-// with the `expected_behaviors` copy inside the transaction that creates it;
-// this writes it into every project made before that was true, so no project —
-// new or old — runs unjudged.
-//
-// After the seeding above, because the copy points at the entry and the foreign
-// key means it. Idempotent for a reason stronger than the upsert's: it asks
-// whether a project has ever *had* a copy, so a team that switched theirs off
-// keeps it off across every restart.
-const judging = await seedRunningGraders();
+// Reconciliation is keyed by stable definition identifiers. A release that
+// changes executable logic creates one immutable shared definition version and
+// moves only the shared current pointer. Future runs pin it; old run plans keep
+// their exact version. Project rows keep only scope and pass threshold. A
+// release that changed nothing writes nothing at all — not even `updated_at`.
+const graderCatalog = await reconcileGraderCatalog();
 
 const { app } = buildApi({
   config,
@@ -187,21 +174,24 @@ if (personaShelf.length > 0) {
     "Egma-provided personas were written to the library",
   );
 }
-if (shelved.length > 0) {
+if (graderCatalog.definitions.length > 0) {
   // The names and the versions: what is worth saying is which of egma's own
   // graders this release put on the shelf or moved, and a version of 1 is one
   // that arrived while anything higher is one whose definition changed.
   app.log.info(
-    { graders: shelved },
+    { graders: graderCatalog.definitions },
     "Predefined graders were written to the library",
   );
 }
-if (judging.length > 0) {
-  // The projects, never anything a customer wrote: what is worth saying is that
-  // projects which had no mandatory grading now have it, and which ones.
+if (graderCatalog.projectGraders.length > 0) {
+  // The projects, never anything a customer wrote: what is worth saying is
+  // that projects which lacked their protected Expected behaviors policy now
+  // have it, and which ones.
   app.log.info(
-    { projects: judging.map((copy) => copy.projectId) },
-    "Egma's expected-behaviors grader was switched on in projects that had never had it",
+    {
+      projects: graderCatalog.projectGraders.map((grader) => grader.projectId),
+    },
+    "Egma's Expected behaviors grader was added to existing projects",
   );
 }
 app.log.info(

@@ -3,20 +3,18 @@
  * and read back by the function directly beneath the one that writes it.
  *
  * **Both halves live here because a key is a round trip.** The engine mints one
- * when it writes a verdict row; a page parses one back when it goes to fetch the
+ * when it records nested assertion details; a page parses one back when it fetches the
  * words behind it. Those are different processes in different packages, and for
  * a while they were also different files that each knew the spelling
  * `behavior_<n>` — which is a format nothing held together, free to be improved
- * on one side and left alone on the other. A verdict row is permanent, so a fork
+ * on one side and left alone on the other. A grade row is permanent, so a fork
  * there is not a bug that gets noticed: it is a page that quietly stops
  * resolving last month's rows.
  *
- * **The key is a position, one-based, and never content.** The fold counts one
- * assertion once per grader and prefers the latest grading of it, so a key
- * derived from what a person typed would make an edited sentence a *second*
- * assertion, counted beside the first forever with no later grading able to
- * supersede it. Positions are stable exactly as far as they need to be: a
- * conversation is judged against the frozen test version it was executed
+ * **The key is a position, one-based, and never content.** One grade row can
+ * hold several assertion details, so a key derived from what a person typed
+ * would stop matching after the sentence changed. Positions are stable exactly
+ * as far as they need to be: a conversation is graded against the frozen test version it was executed
  * against, so within one version position 3 is the same sentence forever.
  */
 
@@ -24,7 +22,7 @@
 const BEHAVIOR_KEY = /^behavior_(\d+)$/u;
 
 /**
- * What a verdict row files the behavior at this index under.
+ * What one nested assertion detail files the behavior at this index under.
  *
  * @param at The behavior's index in the version's list, counting from nought.
  */

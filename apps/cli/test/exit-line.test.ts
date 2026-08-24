@@ -34,7 +34,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
-    graded: 3,
+    resultsReady: 3,
     total: 12,
     skill: {
       kind: "installed",
@@ -46,7 +46,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
-    graded: 3,
+    resultsReady: 3,
     total: 12,
     skill: {
       kind: "installed",
@@ -58,14 +58,14 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
-    graded: 12,
+    resultsReady: 12,
     total: 12,
     skill: { kind: "skipped", drivenAgentName: "Claude Code" },
   },
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
-    graded: 0,
+    resultsReady: 0,
     total: 12,
     skill: { kind: "not-offered" },
   },
@@ -367,13 +367,13 @@ describe("the exit line", () => {
     const lines = exitLines({
       kind: "run-started",
       resultsUrl: RESULTS_URL,
-      graded: 3,
+      resultsReady: 3,
       total: 12,
       skill: { kind: "skipped", drivenAgentName: "Claude Code" },
     });
 
     expect(lines).toEqual([
-      "✓ Your first run is live — 3 of 12 graded so far.",
+      "✓ Your first run is live — 3 of 12 simulation results ready.",
       "",
       RESULTS_URL,
       "",
@@ -400,7 +400,7 @@ describe("the exit line", () => {
     const lines = exitLines({
       kind: "run-started",
       resultsUrl: RESULTS_URL,
-      graded: 1,
+      resultsReady: 1,
       total: 12,
       skill: { kind: "not-offered" },
     });
@@ -413,20 +413,20 @@ describe("the exit line", () => {
     expect(new URL(address).pathname).toMatch(/^\/runs\/run_[0-9A-HJKMNP-TV-Z]{26}$/u);
   });
 
-  it("counts what has been graded honestly, however far the suite got", () => {
-    const of = (graded: number, total: number): string =>
+  it("counts terminal trace results honestly, however far the suite got", () => {
+    const of = (resultsReady: number, total: number): string =>
       buildExitLine({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
-        graded,
+        resultsReady,
         total,
         skill: { kind: "not-offered" },
       });
 
-    expect(of(3, 12)).toBe("✓ Your first run is live — 3 of 12 graded so far.");
-    expect(of(12, 12)).toBe("✓ Your first run is live — all 12 graded.");
-    expect(of(0, 12)).toBe("✓ Your first run is live — 12 simulations, none graded yet.");
-    expect(of(0, 1)).toBe("✓ Your first run is live — 1 simulation, none graded yet.");
+    expect(of(3, 12)).toBe("✓ Your first run is live — 3 of 12 simulation results ready.");
+    expect(of(12, 12)).toBe("✓ Your first run is live — all 12 simulation results are ready.");
+    expect(of(0, 12)).toBe("✓ Your first run is live — no simulation result is ready yet (12 total).");
+    expect(of(0, 1)).toBe("✓ Your first run is live — no simulation result is ready yet (1 total).");
   });
 
   /** Never silent, in either direction, and it has to outlive the screen. */
@@ -435,7 +435,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
-        graded: 1,
+        resultsReady: 1,
         total: 12,
         skill: {
           kind: "installed",
@@ -454,7 +454,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
-        graded: 1,
+        resultsReady: 1,
         total: 12,
         skill: {
           kind: "installed",
@@ -482,7 +482,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
-        graded: 1,
+        resultsReady: 1,
         total: 12,
         skill: { kind: "skipped", drivenAgentName: "Codex" },
       }),
@@ -494,7 +494,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
-        graded: 1,
+        resultsReady: 1,
         total: 12,
         skill: { kind: "not-offered" },
       }),

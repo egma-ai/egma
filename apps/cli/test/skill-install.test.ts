@@ -323,19 +323,21 @@ describe("the skill that teaches a coding agent to drive egma", () => {
   });
 
   /**
-   * The rule that matters most in a file a model reads unsupervised: a test
-   * that could not run is not a test that failed, and an agent that reported
+   * The rule that matters most in a file a model reads unsupervised: a state
+   * that could not be graded is not a low score, and an agent that reported
    * one as the other would send the developer hunting a bug that is not there.
    */
-  it("names all four verdicts and forbids folding them into three", () => {
+  it("keeps grade results, combined scores, and operational state separate", () => {
     const content = drivingSkill();
 
-    for (const verdict of ["passed", "failed", "skipped", "errored"]) {
-      expect(content).toContain(verdict);
+    for (const state of ["not_requested", "pending", "running", "complete", "error"]) {
+      expect(content).toContain(state);
     }
-    expect(content.replace(/\s+/gu, " ")).toContain(
-      "Never report `skipped` or `errored` as `failed`.",
-    );
+    expect(content).toContain("normalized score");
+    expect(content).toContain("pass threshold");
+    expect(content).toContain("combined score");
+    expect(content).toContain("A low score does not make `egma run` fail");
+    expect(content).toContain("Do not call it skipped");
   });
 
   /**
@@ -349,7 +351,9 @@ describe("the skill that teaches a coding agent to drive egma", () => {
   it("uses the words egma uses, because this is the text that stays behind", () => {
     const content = drivingSkill()
       .replaceAll(SCENARIO_HEADING, "")
-      .replaceAll(LIVEKIT_SESSION_OBJECT, "");
+      .replaceAll(LIVEKIT_SESSION_OBJECT, "")
+      // `call` is an ordinary verb here, not the banned noun for a simulation.
+      .replace("Do not call it skipped.", "");
 
     for (const banned of BANNED) {
       expect({ banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({

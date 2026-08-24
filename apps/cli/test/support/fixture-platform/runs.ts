@@ -1,5 +1,7 @@
 /** Current complete-suite run fixture contract with bounded simulation pages. */
 
+import type { GetSimulationResponse } from "@egma/platform-api/client";
+
 import { CONDUCTABLE_KINDS } from "./agents.ts";
 import { given, newId, NOT_AUTHENTICATED, refuse, text } from "./reading.ts";
 import type { FixtureTestVersion } from "./tests.ts";
@@ -12,8 +14,14 @@ export type SimulationStatus =
   | "completed"
   | "failed"
   | "canceled";
-export type Verdict = "passed" | "failed" | "skipped" | "errored";
+export type GradingState =
+  | "not_requested"
+  | "pending"
+  | "running"
+  | "complete"
+  | "error";
 export type RunStatus = "pending" | "running" | "completed" | "canceled";
+export type FixtureGrade = GetSimulationResponse["grades"][number];
 
 export type ReachableConnection = {
   readonly id: string;
@@ -29,14 +37,15 @@ export type AdvanceStep = {
   readonly run?: string;
   readonly simulation: string;
   readonly status: SimulationStatus;
-  readonly verdict?: Verdict;
+  readonly gradingState?: GradingState;
   readonly reason?: string;
 };
-export type GradeStep = {
+export type GradingStep = {
   readonly run?: string;
   readonly simulation: string;
-  readonly verdict: Verdict;
-  readonly reason?: string;
+  readonly state: GradingState;
+  readonly grades?: readonly FixtureGrade[];
+  readonly combinedScore?: number | null;
 };
 export type SeededRun = {
   readonly id: string;
@@ -50,13 +59,13 @@ export type SeededSimulation = {
   readonly testName: string;
   readonly personaName: string;
   readonly status: SimulationStatus;
-  readonly verdict: Verdict | null;
+  readonly gradingState: GradingState | null;
 };
 export type RunControls = {
   readonly runs: readonly SeededRun[];
   simulationsOf(runId?: string): readonly SeededSimulation[];
   advance(step: AdvanceStep): void;
-  grade(step: GradeStep): void;
+  setGrading(step: GradingStep): void;
   noAdapterFor(connectionType: string): void;
   noAdapterMessage(connectionType: string): string;
 };
@@ -74,7 +83,9 @@ type StoredSimulation = SeededSimulation & {
   readonly personaId: string;
   reason: string | null;
   status: SimulationStatus;
-  verdict: Verdict | null;
+  gradingState: GradingState | null;
+  grades: FixtureGrade[];
+  combinedScore: number | null;
 };
 type StoredEvent =
   | {
@@ -91,7 +102,6 @@ type StoredEvent =
       readonly testName: string;
       readonly personaName: string;
       readonly status: SimulationStatus;
-      readonly verdict: Verdict | null;
       readonly reason: string | null;
     };
 type StoredEventInput = StoredEvent extends infer Event
@@ -101,6 +111,7 @@ type StoredEventInput = StoredEvent extends infer Event
   : never;
 
 const TERMINAL: readonly SimulationStatus[] = ["completed", "failed", "canceled"];
+const TERMINAL_GRADING: readonly GradingState[] = ["not_requested", "complete", "error"];
 const NEXT: Readonly<Record<SimulationStatus, readonly SimulationStatus[]>> = {
   queued: ["claimed", "canceled"],
   claimed: ["running", "failed", "canceled"],
@@ -114,7 +125,6 @@ function bearer(request: FixtureRequest): string {
   const value = request.headers.authorization ?? "";
   return value.startsWith("Bearer ") ? value.slice(7) : "";
 }
-
 export function noAdapterMessage(
   connectionType: string,
   conductable: readonly string[],
@@ -149,14 +159,12 @@ export function runRoutes(options: {
       const connection = options.connectionById(run.connectionId);
       const mine = simulationsIn(run.id);
       const finished = mine.filter((one) => TERMINAL.includes(one.status));
-      const graded = mine.filter((one) => one.verdict !== null);
-      const verdictCounts = {
-        passed: graded.filter((one) => one.verdict === "passed").length,
-        failed: graded.filter((one) => one.verdict === "failed").length,
-        skipped: graded.filter((one) => one.verdict === "skipped").length,
-        errored: graded.filter((one) => one.verdict === "errored").length,
-        total: graded.length,
-      };
+      const gradable = mine.filter(
+        (one) => one.status === "completed" && one.gradingState !== "not_requested",
+      );
+      const graded = gradable.filter(
+        (one) => one.gradingState !== null && TERMINAL_GRADING.includes(one.gradingState),
+      );
       return {
         projectId: options.projectId,
         suiteName: "Fixture suite",
@@ -179,12 +187,8 @@ export function runRoutes(options: {
           canceled: mine.filter((one) => one.status === "canceled").length,
         },
         finishedCount: finished.length,
-        gradableCount: finished.length,
+        gradableCount: gradable.length,
         gradedCount: graded.length,
-        verdict: null,
-        score: null,
-        verdictCounts,
-        counts: verdictCounts,
         createdAt: "2026-01-01T00:00:00.000Z",
         startedAt: null,
         finishedAt: null,
@@ -214,14 +218,86 @@ export function runRoutes(options: {
       personaName: simulation.personaName,
       personaVersionId: simulation.personaId,
       status: simulation.status,
-      grading: simulation.verdict === null ? "pending" : "graded",
-      verdict: simulation.verdict,
-      score: null,
-      counts: null,
+      gradingState: simulation.gradingState,
       reason: simulation.reason,
       modality: connection?.modality ?? "voice",
       hasRecording: false,
       mockToolCoverage: null,
+    };
+  };
+  const simulationDetailOut = (
+    simulation: StoredSimulation,
+  ): Record<string, unknown> => {
+    const run = runById(simulation.runId);
+    const connection =
+      run === undefined ? null : options.connectionById(run.connectionId);
+    const version =
+      run === undefined
+        ? null
+        : (options
+            .testsInSuite(run.suiteId)
+            .find((one) => one.id === simulation.testVersionId) ?? null);
+    return {
+      ...simulationOut(simulation),
+      projectId: options.projectId,
+      runId: simulation.runId,
+      runName: run?.name ?? null,
+      grades: simulation.grades,
+      gradeHistory: [],
+      combinedScore: simulation.combinedScore,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      startedAt: null,
+      endedAt: simulation.status === "completed" ? "2026-01-01T00:01:00.000Z" : null,
+      providerReference: null,
+      measures: {},
+      test: {
+        id: simulation.testId,
+        versionId: simulation.testVersionId,
+        name: simulation.testName,
+        scenario: version?.scenario ?? null,
+        expectedBehaviors: version?.expectedBehaviors ?? null,
+      },
+      persona: {
+        id: simulation.personaId,
+        name: simulation.personaName,
+        versionId: simulation.personaId,
+        traits: null,
+      },
+      agent: {
+        id: run?.agentId ?? "",
+        name: null,
+        archived: false,
+      },
+      connection: {
+        id: run?.connectionId ?? "",
+        name: null,
+        archived: false,
+      },
+      connectionSnapshot: {
+        agentPlatform: connection?.agentPlatform ?? null,
+        connectionType: connection?.connectionType ?? "",
+        accessVariant: connection?.accessVariant ?? "",
+        modality: connection?.modality ?? "voice",
+        topology: "fixture",
+        environment: null,
+        config: {},
+      },
+      mockTools: { defaults: [], overrides: [] },
+      gradingPlan:
+        simulation.grades.length === 0
+          ? null
+          : {
+              state: "run_start",
+              capturedAt: "2026-01-01T00:00:00.000Z",
+              items: simulation.grades.map((grade) => ({
+                projectGraderId: grade.projectGraderId,
+                graderDefinitionId: grade.graderDefinitionId,
+                graderDefinitionVersion: grade.graderDefinitionVersion,
+                graderName: grade.graderName,
+                passThreshold: grade.passThreshold,
+              })),
+            },
+      transcript: null,
     };
   };
   const expectedSet = (value: unknown): readonly { readonly testId: string; readonly versionId: string }[] | null => {
@@ -310,8 +386,10 @@ export function runRoutes(options: {
           personaName: persona.name,
           testVersionId: version.id,
           status: "queued",
-          verdict: null,
+          gradingState: null,
           reason: null,
+          grades: [],
+          combinedScore: null,
         });
       }
     }
@@ -330,7 +408,7 @@ export function runRoutes(options: {
       event({ runId: run.id, kind: "run", status: run.status });
     }
   };
-  const find = (step: AdvanceStep | GradeStep): StoredSimulation => {
+  const find = (step: AdvanceStep | GradingStep): StoredSimulation => {
     const run = step.run === undefined ? runs.at(-1) : runById(step.run);
     if (run === undefined) throw new Error("no run has been created on this fixture");
     const found = simulationsIn(run.id).find(
@@ -374,6 +452,19 @@ export function runRoutes(options: {
       },
       {
         method: "GET",
+        path: "/v1/simulations/:simulationId",
+        handle: (request) =>
+          behind(request, () => {
+            const simulation = simulations.find(
+              (one) => one.id === (request.params.simulationId ?? ""),
+            );
+            return simulation === undefined
+              ? refuse(404, "not_found", "no simulation of yours has that id")
+              : { status: 200, body: simulationDetailOut(simulation) };
+          }),
+      },
+      {
+        method: "GET",
         path: "/v1/runs/:runId/events",
         handle: (request) =>
           behind(request, () => {
@@ -400,12 +491,18 @@ export function runRoutes(options: {
                         testName: one.testName,
                         personaName: one.personaName,
                         status: one.status,
-                        verdict: one.verdict,
                         reason: one.reason,
                       },
                 ),
                 next: mine.at(-1)?.seq ?? after,
-                done: run.status === "completed" || run.status === "canceled",
+                done:
+                  (run.status === "completed" || run.status === "canceled") &&
+                  simulationsIn(run.id).every(
+                    (one) =>
+                      one.status !== "completed" ||
+                      (one.gradingState !== null &&
+                        TERMINAL_GRADING.includes(one.gradingState)),
+                  ),
               },
             };
           }),
@@ -432,7 +529,7 @@ export function runRoutes(options: {
             testName: one.testName,
             personaName: one.personaName,
             status: one.status,
-            verdict: one.verdict,
+            gradingState: one.gradingState,
           }));
     },
     advance(step) {
@@ -441,7 +538,10 @@ export function runRoutes(options: {
         throw new Error(`simulation ${simulation.id} may not move from ${simulation.status} to ${step.status}`);
       }
       simulation.status = step.status;
-      simulation.verdict = step.verdict ?? null;
+      simulation.gradingState =
+        step.status === "completed"
+          ? (step.gradingState ?? "pending")
+          : null;
       simulation.reason = step.reason ?? null;
       event({
         runId: simulation.runId,
@@ -450,26 +550,20 @@ export function runRoutes(options: {
         testName: simulation.testName,
         personaName: simulation.personaName,
         status: simulation.status,
-        verdict: simulation.verdict,
         reason: simulation.reason,
       });
       settle(runById(simulation.runId)!);
     },
-    grade(step) {
+    setGrading(step) {
       const simulation = find(step);
-      if (!TERMINAL.includes(simulation.status)) throw new Error("only a finished simulation can be graded");
-      simulation.verdict = step.verdict;
-      simulation.reason = step.reason ?? simulation.reason;
-      event({
-        runId: simulation.runId,
-        kind: "simulation",
-        simulationId: simulation.id,
-        testName: simulation.testName,
-        personaName: simulation.personaName,
-        status: simulation.status,
-        verdict: simulation.verdict,
-        reason: simulation.reason,
-      });
+      if (simulation.status !== "completed") {
+        throw new Error("only a completed trace has grading state");
+      }
+      simulation.gradingState = step.state;
+      if (step.grades !== undefined) simulation.grades = [...step.grades];
+      if (step.combinedScore !== undefined) {
+        simulation.combinedScore = step.combinedScore;
+      }
     },
     noAdapterFor(connectionType) {
       withoutAdapter.add(connectionType);
@@ -492,7 +586,9 @@ export function runControlRoutes(controls: () => RunControls): RouteGroup {
               ...(typeof request.body?.run === "string" ? { run: request.body.run } : {}),
               simulation: text(request.body?.simulation),
               status: text(request.body?.status) as SimulationStatus,
-              ...(typeof request.body?.verdict === "string" ? { verdict: request.body.verdict as Verdict } : {}),
+              ...(typeof request.body?.gradingState === "string"
+                ? { gradingState: request.body.gradingState as GradingState }
+                : {}),
               ...(typeof request.body?.reason === "string" ? { reason: request.body.reason } : {}),
             });
             return { status: 200, body: { done: true } };

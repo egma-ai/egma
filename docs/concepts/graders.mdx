@@ -1,112 +1,101 @@
 ---
-title: "Graders: LLM-Based Judges for Voice Agent Behavior"
+title: "Graders and scores"
 sidebarTitle: "Graders"
-description: "Learn how Egma's LLM-based graders judge conversations, how to configure params and scope, and the difference between required and diagnostic graders."
+description: "Understand how Egma turns trace evidence into individual grades and a display-only combined score."
 ---
 
-A **grader** reads a completed simulation and judges it against the expected behaviors in your tests. After each simulation ends, the grader reads it turn by turn and writes one verdict per expected behavior. Each verdict carries a rationale, the turns it cites, and the grader that produced it. The same grading engine works with simulation transcripts and production telemetry.
+A **metric** is an observed fact. Duration and latency are metrics. They describe
+what happened and do not decide whether the behavior was good.
 
-## The Grader Library
+A **grader** uses trace evidence, test values, or metrics to assign one
+normalized score from `0` through `1` to a completed trace. One completed
+grader result is a **grade**. The grade keeps its score, details, frozen pass
+threshold, and time.
 
-Egma ships a library of predefined graders, accessible at **Graders** in your dashboard, under the project you are working in (`/projects/:projectId/graders`). Each library entry defines a type of judgment — expected behaviors, latency, tool calls, and so on — along with the form of parameters it accepts.
+## Expected behaviors
 
-You activate a grader for your project by pressing **Use** on a library entry. This creates a **project grader**: a copy of that library entry with your chosen parameters, scope, and settings. Your project can have multiple copies of the same library entry, each configured differently.
+Egma automatically adds the **Expected behaviors** grader to every project. It
+is the only predefined grader in the current product. Its fixed scope selects
+all simulations and no production traces. You cannot change this scope or
+remove the grader. You can change its individual pass threshold.
 
-<Note>
-A grader is always a copy of a library entry. There is no blank-form authoring surface. This keeps every grader anchored to a well-defined judgment type with documented behavior.
-</Note>
+Expected behaviors reads the completed simulation and the behavior statements
+from the exact test version used by that simulation. It evaluates each statement
+independently. The statement results stay inside the grade's assertion details,
+and the grader returns one top-level score:
 
-## Project graders
-
-Once you press **Use**, the grader is active for your project. You can list your running graders at `GET /v1/graders`.
-
-Each project grader carries these configurable fields:
-
-| Field | Description |
-|---|---|
-| `name` | What your project calls this copy of the grader. Defaults to the library entry's name. |
-| `params` | The filled-in form values for this grader — for example, `{ "metric": "turn_response_latency", "bound": 2000 }`. Read the library entry to see what it asks for; some ask for nothing. |
-| `scope` | Where this grader judges: `simulations`, `production`, or `both`. |
-| `required` | Whether this grader is blocking (`true`) or diagnostic (`false`). |
-| `productionSampleRate` | What share of live production traffic this grader judges, as a whole percentage 0–100. |
-
-## Required vs. diagnostic graders
-
-The `required` flag is the most important grader setting. It controls whether a grader's verdict can fail a test.
-
-<CardGroup cols={2}>
-  <Card title="Required (blocking)" icon="lock">
-    A `required: true` grader can fail a test. If this grader writes a `failed` verdict for any expected behavior, the simulation's overall verdict is `failed`. Use this for the behaviors your agent must always get right.
-  </Card>
-  <Card title="Diagnostic (non-blocking)" icon="magnifying-glass">
-    A `required: false` grader reports its findings but never fails a test. Its verdicts appear in a separate diagnostic lane in the results. Use this to observe a behavior you are not yet ready to enforce.
-  </Card>
-</CardGroup>
-
-<Tip>
-Switching a grader from required to diagnostic (or back) takes effect immediately across all historical runs. The verdicts themselves do not change — only what they add up to changes, through the fold Egma computes at read time. A run that failed on a grader alone reads as passed the moment you set it to diagnostic.
-</Tip>
-
-## Grader versioning
-
-Graders are versioned, but what triggers a new version depends on which field changes:
-
-| Change | Effect |
-|---|---|
-| `params` updated | A new `versionId` is minted. The previous version is preserved. |
-| `scope`, `required`, `name`, `description`, or `productionSampleRate` updated | Written in place. No new version. Previous verdicts are unaffected. |
-
-This distinction matters for auditability. The `params` fields are what a verdict was *decided by* — changing them should not retroactively alter the meaning of past results, so a new version is the right answer. The other fields say *where* and *how loudly* a grader applies, and those are live settings rather than historical facts.
-
-Every verdict row references the specific grader `versionId` that produced it, so you can always trace back to the exact configuration that judged a given conversation.
-
-## Configuring graders
-
-### Via the dashboard
-
-Open **Graders** in the project you are configuring (`/projects/:projectId/graders`), find the library entry you want, and click **Use**. Fill in the params form, set the scope, and choose whether the grader is required or diagnostic.
-
-### Via the API
-
-Activate a grader with `POST /v1/graders`:
-
-```bash
-curl -X POST https://your-egma/v1/graders \
-  -H "Authorization: Bearer egma_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "libraryId": "grl_01K…",
-    "params": { "metric": "turn_response_latency", "bound": 2000 },
-    "scope": "simulations",
-    "required": true
-  }'
+```text
+passed assertions / total assertions = normalized grade score
 ```
 
-Edit an existing grader with `PATCH /v1/graders/:graderId`. Only the fields you include are updated:
+If an assertion cannot be graded, the top-level score is unavailable and the
+grade contains an error. Egma does not turn a grading error into a zero score.
 
-```bash
-curl -X PATCH https://your-egma/v1/graders/grd_01K… \
-  -H "Authorization: Bearer egma_..." \
-  -H "Content-Type: application/json" \
-  -d '{ "required": false }'
+## Individual results
+
+Each project grader has one pass threshold. Egma derives that grader's result
+from the frozen values on the grade:
+
+```text
+score >= pass threshold  → passed
+score < pass threshold   → failed
+no score                 → errored
 ```
 
-<Warning>
-Send `params` as a properly typed JSON object, not as a string. Send `required` as `true` or `false`, not as `"true"` or `"false"`. Egma refuses wrong types by name rather than silently coercing them — a mis-typed field would otherwise leave your grader configured differently from what you intended, with nothing in the response to say so.
-</Warning>
+This result describes one grader only. Egma does not assign an overall
+`passed` or `failed` result to a trace, test, test suite, or run.
 
-## Switching a grader off
+## Combined score
 
-Deleting a grader is the only way to turn it off. There is no enable/disable flag. From the moment a grader is deleted, it judges nothing in its scope. Use `DELETE /v1/graders/:graderId`.
+When at least one grader is selected and every selected grader has a score,
+Egma shows their unweighted arithmetic mean as the **combined score**. Each
+grader contributes one equal share.
 
-Deletion is a soft delete. Every verdict the grader already wrote remains readable and still references the version that produced it. An old run keeps its full meaning — you are not losing evidence, only stopping the grader from writing new verdicts going forward.
+The combined score is for comparison. Egma does not apply an overall threshold
+and does not turn it into pass or fail. If selected grading is pending or one
+grader errors, the combined score is unavailable.
 
-## Mock tools and grading
+## Scope and modality
 
-The `egma/mock-tools.md` file in your repository controls what Egma returns for your agent's tool calls during simulation. This is not a grader setting, but it is central to what graders are judging: the agent's behavior in a controlled world where tool responses are predictable.
+A project grader's scope says which future traces it grades. Simulation scope
+can select all tests, test suites, or individual tests. Production scope can
+select a stable percentage of eligible traces. A grader definition also states
+whether it supports chat, voice, or both.
 
-Individual tests can override the project-level mock tools by including a `## Mock tools` section in their own file. That override is versioned alongside the test — changing it mints a new test version — while the project's mock tools are unversioned and a push always replaces what was there.
+Several selectors can match the same trace, but one project grader still runs
+once. A scope or modality mismatch produces no grade row and is not pending
+grading work.
 
-<Tip>
-Use mock tools to test failure branches. Set a tool to return an error, and add an expected behavior that asserts your agent handles the failure gracefully. Then graders can evaluate whether the agent did the right thing in a situation that is hard to reproduce with a real backend.
-</Tip>
+Expected behaviors supports chat and voice. Egma can add other predefined
+graders later without copying their prompts or code into each project.
+
+## Stable history
+
+Egma maintains a shared definition for each predefined grader. When Egma
+improves that definition, it creates one new immutable definition version.
+Future work uses the new version. Existing runs keep the exact definition
+version and pass threshold they already selected.
+
+Trace and simulation reads return the latest grade from each project grader in
+`grades`. They return every grade, including older grades, in `gradeHistory`.
+The latest grade is current and contributes to the combined score.
+
+A simulation regrade runs the whole grader selection frozen for its completed
+trace, including the selected definition versions and pass thresholds. You
+cannot regrade only one grader. Each new grade is appended, so the earlier
+grades remain in `gradeHistory`.
+
+## Grading progress
+
+Grading state reports operational progress, not quality:
+
+- `not_requested` — no grader was selected.
+- `pending` — grading was requested but has not started.
+- `running` — a worker is grading the trace.
+- `complete` — all requested graders produced scores.
+- `error` — a grader errored or the grading work ended with a terminal system
+  error.
+
+A simulation that failed or was canceled before it produced a completed trace
+has no grading work to wait for. Simulation APIs return `null` for its grading
+state.

@@ -24,7 +24,11 @@ import {
   type KeyAsk,
   type Reach,
 } from "../retell/connect.ts";
-import { simulationLine } from "../run/lines.ts";
+import {
+  gradeProjectionLines,
+  gradingLine,
+  simulationLine,
+} from "../run/lines.ts";
 import type { RunView } from "../run/view.ts";
 import type { SkillPlaces } from "../skills/install.ts";
 import type { Detection } from "../wizard/detection.ts";
@@ -375,13 +379,37 @@ export class HeadlessUI implements WizardUI {
     );
     for (const row of run.rows) {
       const held = before.get(row.id);
-      if (held !== undefined && held.status === row.status && held.verdict === row.verdict) {
+      if (
+        held !== undefined &&
+        held.status === row.status &&
+        held.gradingState === row.gradingState &&
+        held.reason === row.reason &&
+        held.gradeProjection === row.gradeProjection
+      ) {
         continue;
       }
-      this.write(simulationLine(row));
-      if (row.verdict !== null && held?.verdict !== row.verdict) {
-        this.write(`verdict: ${row.name} ${row.persona} ${row.verdict}`);
-        if (row.first) this.write(`first-verdict: ${row.name} ${row.persona} ${row.verdict}`);
+      if (held === undefined || held.status !== row.status) {
+        this.write(simulationLine(row));
+      }
+      if (row.reason !== null && held?.reason !== row.reason) {
+        this.write(`reason: ${row.reason}`);
+      }
+      if (held?.gradingState !== row.gradingState) {
+        const grading = gradingLine(row);
+        if (grading !== null) this.write(grading);
+      }
+      if (
+        held?.gradeProjection !== row.gradeProjection &&
+        row.gradeProjection !== null
+      ) {
+        for (const line of gradeProjectionLines(row.gradeProjection)) this.write(line);
+      }
+      if (
+        row.firstResult &&
+        held?.firstResult !== true &&
+        row.gradingState !== null
+      ) {
+        this.write(`first-result: ${row.name} ${row.persona} ${row.gradingState}`);
       }
     }
     this.record.run = run;

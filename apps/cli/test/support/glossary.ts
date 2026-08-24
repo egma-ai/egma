@@ -27,7 +27,6 @@ export const BANNED = [
   /\bevaluations?\b/i,
   /\bevaluators?\b/i,
   /\bscorers?\b/i,
-  /\bassertions?\b/i,
   /\bcalls?\b/i,
   /\bcallers?\b/i,
   /\bconversations?\b/i,

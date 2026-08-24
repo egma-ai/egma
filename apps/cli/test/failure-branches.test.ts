@@ -114,7 +114,7 @@ async function walkWith(options: {
   const ui = new HeadlessUI({ answers: { reach: "text", ...(options.answers ?? {}) } });
 
   // A walk that gets as far as a suite ends in a run, and a run ends when
-  // verdicts arrive. Nothing here conducts a simulation, so the fixture is
+  // trace results arrive. Nothing here conducts a simulation, so the fixture is
   // given the one thing a platform with a simulator attached has. The branches
   // that never reach a run are unaffected by it.
   const grading = gradeEveryRun(platform);

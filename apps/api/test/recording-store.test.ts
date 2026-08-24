@@ -229,7 +229,10 @@ describe.skipIf(!storage.available)("resolving a run's recording end to end", ()
   it("hands a reader a link that fetches the audio", async () => {
     await running.put(A_REFERENCE, RECORDING);
 
-    api = await createApi("recording_end_to_end", { blob: running.store });
+    api = await createApi("recording_end_to_end", {
+      blob: running.store,
+      traceStore: true,
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const who = await standingOf(api.app, ada.cookie, "a terminal");
     const run = await aConductedRun(api.app, who, { reference: A_REFERENCE });

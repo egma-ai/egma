@@ -93,15 +93,15 @@ export type ExitReport =
   | { readonly kind: "tests-pushed"; readonly count: number }
   /**
    * The whole walk, done: the tests are on egma, a run of them is going, and
-   * verdicts have started arriving. The wizard does not wait for the rest —
-   * the run is on the platform and carries on without a terminal.
+   * one completed trace has terminal grading. The wizard does not wait for
+   * the rest; the run stays on the platform without this terminal.
    */
   | {
       readonly kind: "run-started";
       /** Where a person opens what happened. No token ever rides it. */
       readonly resultsUrl: string;
-      /** How many simulations had a verdict when the wizard closed. */
-      readonly graded: number;
+      /** How many completed traces had terminal grading when the wizard closed. */
+      readonly resultsReady: number;
       readonly total: number;
       /** What became of the skill offer, so skipping is never silent. */
       readonly skill: SkillOutcome;
@@ -271,14 +271,16 @@ function foundLine(framework: string | null, prompts: string | null): string {
 }
 
 /** The headline of the ending the walk exists for. */
-function runStartedLine(graded: number, total: number): string {
-  if (graded === 0) {
-    return `✓ Your first run is live — ${total} ${total === 1 ? "simulation" : "simulations"}, none graded yet.`;
+function runStartedLine(resultsReady: number, total: number): string {
+  if (resultsReady === 0) {
+    return `✓ Your first run is live — no simulation result is ready yet (${total} total).`;
   }
-  if (graded >= total) {
-    return `✓ Your first run is live — all ${total} graded.`;
+  if (resultsReady >= total) {
+    return total === 1
+      ? "✓ Your first run is live — its simulation result is ready."
+      : `✓ Your first run is live — all ${total} simulation results are ready.`;
   }
-  return `✓ Your first run is live — ${graded} of ${total} graded so far.`;
+  return `✓ Your first run is live — ${resultsReady} of ${total} simulation results ready.`;
 }
 
 /** Where the tests are now, and what to do to them next. */
@@ -300,7 +302,7 @@ export function buildExitLine(report: ExitReport): string {
     case "found-agent":
       return foundLine(report.framework, report.prompts);
     case "run-started":
-      return runStartedLine(report.graded, report.total);
+      return runStartedLine(report.resultsReady, report.total);
     case "connected":
       return `Egma connected your voice agent: ${report.agentName}, over ${report.connectionName}.`;
     case "tests-pushed":

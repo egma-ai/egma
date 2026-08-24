@@ -23,7 +23,6 @@ import {
   type RunSimulation,
   type RunSimulationPage,
   type SimulationStatusWord,
-  type VerdictWord,
 } from "../../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,7 +46,6 @@ import {
   RunProgress,
   RunStatus,
   SimulationStatus,
-  VerdictBadge,
 } from "../../../../../ui/run-status.tsx";
 import {
   AppShell,
@@ -58,14 +56,10 @@ import {
 } from "../../../../../ui/shell.tsx";
 
 /**
- * One run: what it froze, what happened, and what the graders made of it.
+ * One run: what it froze, what happened, and how far grading has got.
  *
- * **Four facts, kept apart, everywhere on this page.** The run's machinery, each
- * conversation's machinery, where the grading work stands, and the verdict. A
- * conversation egma could not conduct is `failed` and is egma's own problem,
- * not the agent's. And a verdict nobody has reached yet is blank rather
- * than red — pending grading drawn as failure is the single worst thing a page
- * like this can do.
+ * Execution state and grading state stay separate. Grade scores belong to each
+ * simulation trace. Egma does not create a run-level pass or fail result.
  *
  * **It follows the numbered feed rather than re-reading the run.** The run is
  * read once for its fixed context, and everything that moves afterwards arrives
@@ -134,7 +128,6 @@ const WHY = "block whitespace-normal text-sm text-muted-foreground";
 /** What one conversation's row shows after the feed has moved it. */
 type Moved = {
   readonly status: SimulationStatusWord;
-  readonly verdict: VerdictWord | null;
   readonly reason: RunSimulation["reason"];
 };
 
@@ -288,7 +281,6 @@ function RunDetailView({
           }
           now.set(event.simulationId, {
             status: event.status as SimulationStatusWord,
-            verdict: event.verdict ?? null,
             reason: event.reason ?? null,
           });
         }
@@ -307,9 +299,8 @@ function RunDetailView({
    * The follower itself: one page, then another, while anything is moving.
    *
    * When the feed says the run has finished, the run is read once more. The
-   * events carry each conversation's landing and its verdict, and the run's own
-   * final state and folded verdict live in the compact header summary. The last
-   * read turns "everything has landed" into the settled page.
+   * Events carry each conversation's execution state. The last read turns
+   * "everything has landed" into the settled page.
    */
   useEffect(() => {
     if (run === null || !stillMoving) return undefined;
@@ -465,7 +456,6 @@ function RunDetailView({
       : {
           ...one,
           status: change.status,
-          verdict: change.verdict ?? one.verdict,
           reason: change.reason ?? one.reason,
         };
   });
@@ -563,14 +553,8 @@ function RunDetailView({
               <dt>Grading</dt>
               <dd>
                 <span className="tabular-nums">
-                  {read.gradedCount} of {read.gradableCount} judged
+                  {read.gradedCount} of {read.gradableCount} graded
                 </span>
-              </dd>
-            </div>
-            <div className={FACT}>
-              <dt>Verdict</dt>
-              <dd>
-                <VerdictBadge verdict={read.verdict} compact />
               </dd>
             </div>
             <div className={FACT}>
@@ -752,7 +736,7 @@ function simulationColumns(
           <span className="min-w-0 [&_a]:[overflow-wrap:anywhere] [&_strong]:block [&_strong]:font-medium [&_strong]:text-foreground [&_strong]:[overflow-wrap:anywhere]">
             {/*
               The way in to this conversation's own evidence: what was said, when
-              each thing happened, what judged it and any later human correction.
+              each thing happened, which graders ran, and any later human grade.
               It is reached from here and from nowhere else — a conversation is a
               thing inside a run rather than a product area, so it is deliberately
               absent from the navigation.
@@ -788,13 +772,12 @@ function simulationColumns(
       key: "grading",
       header: "Grading",
       width: "14%",
-      cell: (one) => <GradingState grading={one.grading} compact />,
-    },
-    {
-      key: "verdict",
-      header: "Verdict",
-      width: "14%",
-      cell: (one) => <VerdictBadge verdict={one.verdict} compact />,
+      cell: (one) =>
+        one.gradingState === null ? (
+          <span className="text-sm text-muted-foreground">Not started</span>
+        ) : (
+          <GradingState grading={one.gradingState} compact />
+        ),
     },
   ];
 }
@@ -808,7 +791,7 @@ function SimulationReason({
   return (
     <span className={WHY}>
       {simulation.reason ?? "Egma could not conduct this simulation."} This is an
-      execution problem, not a failed grader verdict, and says nothing about the
+      execution problem, not a low grade, and says nothing about the
       agent.
     </span>
   );

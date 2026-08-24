@@ -222,7 +222,7 @@ describe("the organization and project selector", () => {
     );
 
     const trigger = screen.getByRole("button", { name: /^Organization Acme/ });
-    expect(trigger.textContent).toContain("Acme");
+    expect(trigger.textContent).toContain("Project");
     expect(trigger.textContent).toContain("Default");
 
     fireEvent.click(trigger);
@@ -590,7 +590,7 @@ describe("a binary choice", () => {
    * the page would look any different.
    */
   it("gives the checkbox a coarse-pointer target without growing its box", () => {
-    render(<Checkbox id="required-grader" checked onChange={() => undefined} />);
+    render(<Checkbox id="weekly-summary" checked onChange={() => undefined} />);
 
     const box = screen.getByRole("checkbox");
     expect(box.className).toContain("size-[18px]");
@@ -604,22 +604,22 @@ describe("a binary choice", () => {
   it("connects the field hint to the native checkbox", () => {
     render(
       <Field
-        label="Required"
-        htmlFor="required-grader"
-        hint="A required grader can stop the test from passing."
+        label="Send weekly summary"
+        htmlFor="weekly-summary"
+        hint="Email the project summary every Monday."
       >
         <Checkbox
-          id="required-grader"
+          id="weekly-summary"
           checked
           onChange={() => undefined}
         />
       </Field>,
     );
 
-    const checkbox = screen.getByRole("checkbox", { name: "Required" });
-    const hint = screen.getByText(
-      "A required grader can stop the test from passing.",
-    );
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Send weekly summary",
+    });
+    const hint = screen.getByText("Email the project summary every Monday.");
     expect(checkbox.getAttribute("aria-describedby")).toBe(hint.id);
   });
 });
@@ -1000,14 +1000,14 @@ describe("a dialog", () => {
     const pressed = vi.fn();
     render(
       <>
-        <button type="button" onClick={pressed}>Judge again</button>
+        <button type="button" onClick={pressed}>Grade again</button>
         <Dialog kind="sheet" title="Transcript and audio" onClose={vi.fn()}>
           <audio aria-label="Simulation recording" />
         </Dialog>
       </>,
     );
 
-    const behind = screen.getByRole("button", { name: "Judge again" });
+    const behind = screen.getByRole("button", { name: "Grade again" });
     expect(behind.closest("[aria-hidden='true']")).toBeNull();
 
     // The panel starts listening for a press outside on the task after it
@@ -1669,18 +1669,7 @@ describe("the role the shell shows", () => {
     expect(sessionReads).toHaveLength(2);
   });
 
-  /**
-   * The bar starts with the Egma wordmark, and the project context is under it.
-   *
-   * **This assertion was the other way round until 2026-08-23.** `DESIGN.md`
-   * kept the full logo out of the signed-in sidebar and asked for explicit
-   * approval to change that rule; the developer gave it, looking at the Paper
-   * boards — "our logo, not the organization's" — and `DESIGN.md` records the
-   * decision with its date. The organization did not disappear with the change:
-   * it moved into the eyebrow above the project name, which is what the second
-   * half of this case holds.
-   */
-  it("starts the signed-in sidebar with the Egma wordmark, then project context", () => {
+  it("keeps organization and project as two clear sidebar controls", () => {
     render(
       <AppShell initialMe={meWith("admin")}>
         <p>page</p>
@@ -1688,17 +1677,52 @@ describe("the role the shell shows", () => {
     );
 
     const sidebar = screen.getByRole("complementary");
-    const wordmark = within(sidebar).getByRole("img", { name: /egma/i });
-    expect(wordmark.getAttribute("src")).toBe("/brand/egma-wordmark.svg");
-    expect(
-      within(sidebar).getByRole("link", { name: "Egma home" }).getAttribute("href"),
-    ).toBe("/");
+    const organization = within(sidebar).getByRole("button", {
+      name: "Open organization menu for Acme",
+    });
+    expect(organization.querySelector("img")?.getAttribute("src")).toBe(
+      "/brand/egma-mark-light.svg",
+    );
+    expect(organization.textContent).toContain("Acme");
+    expect(organization.textContent).toContain("Free");
+    expect(organization.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
 
-    const firstControl = sidebar.querySelector("button");
-    expect(firstControl?.getAttribute("aria-label")).toMatch(/^Organization Acme/);
-    /* The organization is the eyebrow now; the project is the line you press. */
-    expect(within(sidebar).getByText("Acme")).toBeTruthy();
+    const project = within(sidebar).getByRole("button", {
+      name: /^Organization Acme, project Default/u,
+    });
+    expect(project.textContent).toContain("Project");
+    expect(project.textContent).toContain("Default");
+    expect(project.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+
+    fireEvent.click(organization);
+    const summary = within(
+      screen.getByRole("dialog", { name: "Open organization menu for Acme" }),
+    );
+    expect(summary.getByText("Free Plan")).toBeTruthy();
+    expect(summary.getByText("Admin")).toBeTruthy();
+    expect(summary.queryByText("Organization settings")).toBeNull();
   });
+
+  it.each(["admin", "member", "viewer"] as const)(
+    "keeps the bottom account avatar square for a %s",
+    (role) => {
+      render(
+        <AppShell initialMe={meWith(role)}>
+          <p>page</p>
+        </AppShell>,
+      );
+
+      const account = within(screen.getByRole("complementary")).getByRole(
+        "button",
+        { name: /^Account /u },
+      );
+      const avatar = account.querySelector('[data-slot="account-avatar"]');
+      expect(avatar?.classList.contains("rounded-none")).toBe(true);
+      expect(avatar?.classList.contains("rounded-full")).toBe(false);
+    },
+  );
 
   it("keeps navigation icons decorative and every label visible", () => {
     render(

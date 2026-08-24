@@ -27,9 +27,9 @@ Two things follow from that and shape everything below.
 **OpenTelemetry authors the record.** The process-wide SDK mints every span id,
 tracks parents, and serializes the export. Its one identity adapter gives a
 parentless simulation root the trace id already derived from the simulation id,
-so the conversation and its verdicts can find each other without a mapping. A
-retry replays the already-serialized bytes; conducting the same conversation
-again creates new span ids and therefore new evidence.
+so the simulation, conversation, and grades can find each other without a
+mapping. A retry replays the already-serialized bytes; conducting the same
+conversation again creates new span ids and therefore new evidence.
 
 **Timestamps say when the thing happened**, never when it was sent. A
 timing span is named for the measure it takes and its own duration *is*

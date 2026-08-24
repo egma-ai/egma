@@ -45,7 +45,7 @@ export function openaiJudge(judge: ResolvedJudge): Judge {
     const body = JSON.stringify({
       model: judge.model,
       // The lowest the API allows, because the same conversation and the same
-      // criterion should get the same verdict twice. It is not a guarantee —
+      // criterion should get the same answer twice. It is not a guarantee —
       // no model offers one — and it is the difference between a judgment that
       // usually reproduces and one that never does.
       temperature: 0,

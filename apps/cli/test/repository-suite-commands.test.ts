@@ -153,8 +153,9 @@ describe("complete repository suite commands", () => {
           testVersionId: VERSION_ID,
           personaName: "default-persona",
           status: "completed",
-          verdict: null,
+          gradingState: "pending",
           reason: null,
+          gradeProjection: null,
         },
       ],
     };
@@ -190,11 +191,20 @@ describe("complete repository suite commands", () => {
                 testVersionId: VERSION_ID,
                 personaName: "default-persona",
                 status: "completed",
-                verdict: "passed",
+                gradingState: "complete",
                 reason: null,
               },
             ],
             nextPageToken: null,
+          }),
+        );
+      }
+      if (url.endsWith("/v1/simulations/sim_one")) {
+        return new JsonResponse(
+          JSON.stringify({
+            grades: [],
+            combinedScore: null,
+            test: { expectedBehaviors: ["The agent books Tuesday."] },
           }),
         );
       }
@@ -208,11 +218,12 @@ describe("complete repository suite commands", () => {
       follower,
       fetchImpl,
       everyMs: 0,
-      onChange: (change) => changes.push(change.row.verdict ?? change.row.status),
+      onChange: (change) =>
+        changes.push(change.row.gradingState ?? change.row.status),
     });
 
     expect(ending).toBe("finished");
-    expect(changes).toEqual(["passed"]);
+    expect(changes).toEqual(["complete"]);
     expect(calls).toContain(`${URL}/v1/runs/run_one/simulations`);
   });
 
@@ -234,7 +245,7 @@ describe("complete repository suite commands", () => {
                     testVersionId: VERSION_ID,
                     personaName: "default-persona",
                     status: "queued",
-                    verdict: null,
+                    gradingState: null,
                     reason: null,
                   },
                 ],

@@ -108,7 +108,10 @@ async function aCustomerWhoHasRecorded(
 }> {
   api = await createApi(
     label,
-    options.store === false ? {} : { blob: A_BROWSERS_STORE },
+    {
+      traceStore: true,
+      ...(options.store === false ? {} : { blob: A_BROWSERS_STORE }),
+    },
   );
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const who = await standingOf(api.app, ada.cookie, "a terminal");

@@ -75,12 +75,11 @@ const radioItemVariants = cva(
          * it, and a mouse sees no change at all.
          */
         /*
-         * **The one place a circle survived the 0px ruling, with the avatar.**
-         * A radio button is round the way an avatar is round: the shape is
-         * what tells it apart from a checkbox, in every operating system a
-         * person has ever used. So it says `rounded-full`, which is Tailwind's
-         * own and not one of egma's four component radii. Called out in the
-         * pull request for the developer to overrule.
+         * **The one place a circle survives the 0px ruling.** A radio button's
+         * shape tells it apart from a checkbox in every operating system a
+         * person has used. So it says `rounded-full`, which is Tailwind's own
+         * and not one of egma's four component radii. Account avatars are
+         * square; this functional control remains the only exception.
          */
         dot: [
           "relative grid size-[18px] place-items-center",

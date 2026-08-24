@@ -359,8 +359,8 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       await showing(terminal, "3 tests generated", "[enter] run");
       terminal.write("\r");
 
-      // The run is on the platform, and nothing has judged anything: this is
-      // the developer stopping before the first verdict, which is the moment
+      // The run is on the platform, and no trace result is ready: this is
+      // the developer stopping before the first result, which is the moment
       // the wizard would otherwise have waited for.
       await showing(terminal, "run run_", "3 simulations", "queued");
       const started = platform.running.runs[0];
@@ -381,7 +381,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       const address = `${platform.url}/runs/${started?.id ?? ""}`;
 
       expect(lines).toEqual([
-        "✓ Your first run is live — 3 simulations, none graded yet.",
+        "✓ Your first run is live — no simulation result is ready yet (3 total).",
         address,
         "Tests are code now: egma/tests/ (committed). Edit them, then egma push.",
         'Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."',
@@ -395,7 +395,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       expect(platform.tests.tests).toHaveLength(3);
       expect(platform.running.simulationsOf()).toHaveLength(3);
       expect(
-        platform.running.simulationsOf().filter((one) => one.verdict !== null),
+        platform.running.simulationsOf().filter((one) => one.gradingState !== null),
       ).toHaveLength(0);
     } finally {
       await terminal.kill();

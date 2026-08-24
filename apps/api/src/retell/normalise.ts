@@ -469,7 +469,7 @@ const MILLISECONDS = "milliseconds";
 /**
  * A catalog name, refused if the catalog has stopped saying it.
  *
- * The measure catalog owns the names egma computes and judges by, and this
+ * The measure catalog owns the names egma computes and graders can use, and this
  * table is the one place a vendor's word is bound to one of them. A rename in
  * the catalog with no rename here would leave Retell's numbers stored under a
  * measure nothing reads — green, silent, and wrong, which is the exact failure
@@ -483,7 +483,7 @@ function catalogNamed(measure: string): string {
     throw new Error(
       `the measure catalog no longer names \`${measure}\`, so Retell's own ` +
         `measurements would be reported under a measure nothing computes or ` +
-        `judges — rename it here in the same breath as the catalog`,
+        `grades — rename it here in the same breath as the catalog`,
     );
   }
   return measure;
@@ -495,9 +495,9 @@ function catalogNamed(measure: string): string {
  *
  * **Same meaning, same name.** Retell's `e2e` is what the measure catalog calls
  * `turn_response_latency` — how long the agent took to answer — so it is
- * reported under the catalog's own name, and the day the measure module reads
- * this block a developer's existing latency grader judges Retell traffic with
- * nothing reconfigured. A stage the catalog has no counterpart for keeps a
+ * reported under the catalog's own name, so every reader sees the same metric
+ * for Retell and for traces Egma measures itself. A stage the catalog has no
+ * counterpart for keeps a
  * platform-prefixed name rather than a forced fit: the numbers are captured
  * now, surfaced when a display asks for them, and promoted to a catalog name
  * the day a second platform proves the general shape.
@@ -524,7 +524,7 @@ const REPORTED_LATENCY_MEASURES: readonly (readonly [
  * one contract for every platform, so the shared measure module — on the day it
  * reads this block — reads a single shape for all of them, and the next
  * platform is one more mapping table in its own normalizer rather than a second
- * parser under the arithmetic every verdict rests on.
+ * parser under the shared metric arithmetic.
  *
  * **The individual measurements, never the summary.** Each stage's `values` are
  * the measurements themselves, so "every measurement holds the bound, the worst

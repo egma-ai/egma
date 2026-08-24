@@ -106,8 +106,8 @@ smallest edit that completes the developer's request.
   user behavior when they matter to the task.
 - Keep transport details out of a behavioral test.
 
-An expected behavior is a product requirement, not a way to force a green
-verdict. Keep it strict when the requirement is real.
+An expected behavior is a product requirement, not a way to force a high
+grade score. Keep it strict when the requirement is real.
 
 ## Finish locally
 

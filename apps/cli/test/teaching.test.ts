@@ -151,14 +151,15 @@ describe("the deck", () => {
     const said = LEARN_CARDS.flatMap((card) => [card.heading, ...card.lines]).join(" ");
 
     // The glossary's spine: a test is executed as simulations inside a run, a
-    // metric measures, a grader judges, and a verdict is one of four.
+    // metric measures, and a grader returns a normalized score.
     expect(said).toContain("expected behaviors");
     expect(said).toContain("One execution of a selection of");
     expect(said).toContain("One test executed once inside a");
     expect(said).toContain("A metric measures");
-    expect(said).toContain("A grader judges");
-    expect(said).toContain("passed, failed, skipped,");
-    expect(said).toContain("errored");
+    expect(said).toContain("A grader assigns one score");
+    expect(said).toContain("one score");
+    expect(said).toContain("pass threshold");
+    expect(said).toContain("display-only combined score");
 
     // And none of the words the glossary bans, which is the half that matters:
     // a card teaching a near synonym teaches a developer to ask for something
@@ -193,7 +194,7 @@ describe("the pane, while the files land", () => {
     const script = await scriptFor(workspace, RELEASE_WRITING);
 
     // The gate is not the end of the walk any more: enter starts a run, and
-    // the wizard leaves once one verdict has landed. Exactly one is judged on
+    // the wizard leaves once one trace has terminal grading. Exactly one is ready on
     // each of the two platforms below, so the count in the ending is the same
     // number on both — a sweep that judged all three would leave "1 of 3" on
     // one run and "all 3" on the other, depending on which poll landed first.
@@ -285,7 +286,9 @@ describe("the pane, while the files land", () => {
         expect(report.kind).toBe("run-started");
         const address = report.kind === "run-started" ? report.resultsUrl : "";
         const written = exitLines(report).filter((line) => line !== "");
-        expect(written[0]).toBe("✓ Your first run is live — 1 of 3 graded so far.");
+        expect(written[0]).toBe(
+          "✓ Your first run is live — 1 of 3 simulation results ready.",
+        );
 
         // Line for line the same ending, and the same tests on egma either way.
         const here = `${platform.url}/runs/${platform.running.runs[0]?.id ?? ""}`;

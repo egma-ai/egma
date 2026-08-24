@@ -45,6 +45,8 @@ export type JudgeInput = {
 export type Turn = {
   /** One-based, matching the transcript as it is shown. */
   readonly at: number;
+  /** The real evidence span, when the incoming transcript names it. */
+  readonly spanId?: string;
   /** `agent`, `persona`, or whatever the simulator wrote. */
   readonly speaker: string;
   readonly text: string;
@@ -74,7 +76,7 @@ export type ToolCall = {
  * **Taken from the conversation rather than re-read out of it.** The shared
  * measure module computed these off the spans, and the words a judge reads are
  * that answer rendered — so the number in a prompt, the number on the metrics
- * display and the number a latency verdict rests on are one arithmetic, not
+ * display and the number a future metric-based grader rests on are one arithmetic, not
  * three readings that agree today.
  */
 export type Measure = {
@@ -82,24 +84,6 @@ export type Measure = {
   /** One sample, or the whole series when the measure was taken per turn. */
   readonly samples: readonly number[];
 };
-
-/**
- * How a judgment points at a turn.
- *
- * The verdict row's column is `cited_span_ids`, and what a judgment cites is a
- * turn's **position** rather than the id of the span it came on. That is
- * deliberate on both sources: a judge is shown a numbered transcript and
- * answers with the numbers it read, so a position is the one reference that is
- * the same thing in the text the judge saw and in the row the judgment lands
- * in — and it is still readable for a conversation whose spans have aged out of
- * the store. The prefix is what lets a reader tell the two kinds apart without
- * knowing when the row was written.
- */
-export const TURN_REFERENCE_PREFIX = "turn:";
-
-export function turnReference(at: number): string {
-  return `${TURN_REFERENCE_PREFIX}${at}`;
-}
 
 /**
  * The conversation, as the declared set. Everything defensive, because nothing
@@ -174,8 +158,10 @@ function turnsOf(transcript: unknown): readonly Turn[] {
     if (entry["kind"] !== undefined && entry["kind"] !== "turn") continue;
     const text = textOf(entry["text"]);
     if (text === undefined) continue;
+    const spanId = textOf(entry["span_id"]);
     said.push({
       at: said.length + 1,
+      ...(spanId === undefined ? {} : { spanId }),
       speaker: textOf(entry["speaker"]) ?? "unknown",
       text,
     });

@@ -55,7 +55,7 @@ deployment must not run on a credential every reader of this repository holds.
 
 **Your carrier route survives either way.** It lives in the platform database,
 so a restart brings it back. Persona versions own model and speech choices;
-grader versions own judge models. Provider credentials come from
+grader definition versions own grading models. Provider credentials come from
 `EGMA_OPENAI_API_KEY`, `EGMA_DEEPGRAM_API_KEY`, and
 `EGMA_CARTESIA_API_KEY` in the deployment environment.
 
@@ -102,7 +102,7 @@ after that arrives by invitation.
 ### Configuring it
 
 A started platform may not have a phone carrier route. `self-host up` reports
-that separately. First put the provider keys your persona and grader versions
+that separately. First put the provider keys your persona and grader definition versions
 use in `.env`. Then configure the optional carrier route:
 
 ```bash
@@ -297,11 +297,13 @@ on Retell one pasted key starts it, on LiveKit the coding agent adds the SDK's
 monitoring entry and Egma mints the project key its worker exports with.
 
 **What happens, said plainly.** The run is created and followed live, the
-simulator claims it and conducts the conversation, and the grader judges what
-it did. Verdicts arrive after the conversation ends — one per expected
-behaviour, each carrying its own rationale, the turns it cites and the judge
-that wrote it. Execution and grading are reported separately, because a run
-whose calls have all finished is not yet a run whose judgment is in.
+simulator claims it and conducts the conversation, and the grader service grades
+the completed trace. Each selected project grader returns one normalized score
+or one grading error. Expected behaviors keeps its sentence-by-sentence
+rationale and cited turns inside that one grade. Egma also shows the arithmetic
+mean of the available grader scores; that combined score is for display and is
+not an overall pass or fail result. Execution and grading are reported
+separately, because finished calls can still have grading work in progress.
 
 Everything before that is real, and the run you started is yours — at
 the address the terminal printed, with no token on it.
@@ -365,12 +367,20 @@ than by losing the first recording.
 
 ### The grader
 
-The other one judges conversations — the ones the simulator conducted and the
-ones a real caller had, with the same graders. A simulation reaching its end
-becomes claimable work in the same commit that ends it; a production
-conversation becomes claimable when its telemetry says it is over. The grader
-takes the work, reads the conversation, resolves the graders that apply to it,
-and writes one verdict row per judged assertion.
+The other service grades completed traces — both simulations and production
+conversations use the same queue, worker, and ClickHouse `grades` table. A
+simulation run freezes the applicable project graders, their shared definition
+versions, and their pass thresholds when the run is created. When one of its
+simulations completes and its trace is query-visible, one temporary Postgres
+job carries that frozen plan to the worker.
+
+A production trace has no run plan. A supported platform's explicit
+conversation-end event first passes through durable ingestion. After all of its
+spans are query-visible, Egma resolves project scope once and writes an immutable
+production grading-plan receipt, including an empty receipt when no grader was
+selected. A non-empty receipt creates the same kind of temporary whole-trace
+job. The worker appends one grade row per selected project grader; nested
+assertion evidence stays inside that row's `details` value.
 
 **It claims its work too**, on the same terms and for the same reasons: no
 `ports:`, no inbound surface, and more throughput is more copies —
@@ -378,19 +388,16 @@ and writes one verdict row per judged assertion.
 the two stores directly rather than through the API, so grading existing costs
 the request path nothing at all.
 
-**A conversation ending wakes it**, rather than an interval catching it later,
-so nothing here promises a latency and nothing here waits for one. For a
-production conversation that ending is the root span reaching the OTLP door: an
-exporter sends a span when the span *ends*, so the one span the whole
-conversation happened inside arriving is the conversation being over.
-`EGMA_GRADER_TRACE_IDLE_SECONDS` is the fallback for an exporter that never
-closes one, and `EGMA_GRADER_SWEEP_SECONDS` is the backstop under all of it, for
-the notification raised while every copy happened to be restarting.
+**A supported conversation-end event wakes the production path.** A generic
+root span or a period of silence does not start grading. Queue notification is
+only a wake-up hint; `EGMA_GRADER_SWEEP_SECONDS` finds committed work if a
+notification was missed while every worker was restarting.
 
-Each grader version owns the model used for its judgment. The worker resolves
-that version, then reads the current deployment provider credential when it
-claims the work. The run stores the grader-version pin, not a copied model or
-credential. `apps/grader/README.md` is the whole table.
+Each grader definition version owns the model used for grading. The worker
+reads the frozen definition version and project-grader threshold from the job,
+then reads the current deployment provider credential when it claims the work.
+Provider credentials are never copied into a grader definition, run plan, or
+receipt. `apps/grader/README.md` has the complete worker contract.
 
 ### Watching a simulator without a control plane
 
@@ -600,7 +607,7 @@ room's token.
 The public repository is the source for four Agent Skills:
 
 - `egma` operates the CLI, keeps repository tests in step with Egma, starts a
-  run, and reads its verdicts.
+  run, and reads its grades.
 - `find-voice-agent` maps a repository's voice-agent framework, prompts, tools,
   deployment path, and provider identifier location. Its provider references
   currently include Retell and LiveKit, and it recognizes Pipecat and Vapi.
@@ -708,11 +715,10 @@ collide.
 
 ```
 apps/api        Fastify API. Applies migrations on boot, then serves.
-apps/grader     The service that judges finished conversations: claims a
-                conversation the moment it ends, resolves the graders that
-                apply to it, executes them and writes verdict rows. Claims
-                its work, so it publishes nothing; scaled by running more
-                copies. See its README.
+apps/grader     The service that grades query-visible completed traces from a
+                frozen whole-trace plan and appends one grade per selected
+                project grader. Claims temporary work, so it publishes
+                nothing; scaled by running more copies. See its README.
 apps/simulator  The Python service that conducts simulations: claims specs
                 from the control plane, conducts each as a persona
                 conversing with the agent under test through a platform
@@ -922,7 +928,7 @@ curl -H "authorization: Bearer egma_sk_..." \
 
 **`GET /v1/traces/:traceId`** returns one trace as a transcript: `turns` in the
 order they were taken, each carrying the spans that happened inside it, and
-`spans` for everything top-level that is not a turn — the root span above all.
+`spans` for everything top-level that is not a turn — including the root span.
 It takes `from`, `to` and `projectId` on the same terms.
 
 It also carries **`simulationId`**: which simulation this trace is, when Egma
@@ -938,30 +944,26 @@ own spans. Each entry is `{measure, unit, samples, spanIds, worst, partial}` —
 the measure's name from
 [the measure catalog](packages/simulation-contract/measure-catalog.md), the unit
 that catalog counts it in, one sample per measurement in the order they were
-taken, the span each sample came off, and **`worst`**: the single measurement a
-grader holds against a bound, as `{value, spanId}`. A measure this exchange did
-not produce is **absent** rather than present with nothing in it, so an empty
+taken, the span each sample came off, and **`worst`**: the largest observed
+measurement, as `{value, spanId}`. A measure this exchange did not produce is
+**absent** rather than present with nothing in it, so an empty
   list means nothing was measured. Production conversations have measures only
   when their stored spans contain the timing evidence that measure needs.
 
-**`worst` is on the wire because the reduction is part of the answer.** A bound
-is held against one number, and which number that is — the worst measurement
-today, whichever aggregation a grader asks for later — is Egma's decision rather
-than yours to reproduce. Reducing the series yourself would be a second
-implementation of exactly the figure a verdict rests on: right for as long as
-both take the maximum, and wrong with nothing to warn you the day they differ.
+**`worst` is on the wire because the reduction is part of the observed fact.**
+Clients do not have to reproduce Egma's maximum calculation to show the same
+value. Latency is a metric here: it records behavior and does not by itself
+grade the conversation.
 
 **`partial` is true when the reading is a prefix.** A trace over the 10,000-span
 limit comes back as its first spans, so a worst measurement taken over it is the
 worst of the part Egma holds and not of the exchange — the slowest turn of a
-long call is as likely to be past the cut as before it. The grader refuses such a
-conversation outright and writes no verdict from it; this endpoint shows what
-there is and says what it is.
+long call is as likely to be past the cut as before it. This endpoint shows the
+available fact and marks it partial. A future grader that requires complete
+evidence must return a grading error instead of inventing a score.
 
-All of it is computed at read time by the same code a `latency` grader is judged
-through, so the number you read here and the number a verdict rests on are one
-piece of arithmetic and can never disagree. Nothing stores them: they are the
-spans in this response, reduced.
+All measures are computed at read time by one shared measure path. Nothing
+stores a second copy: they are the spans in this response, reduced.
 
 Five things about the contract are worth knowing before you build on it:
 

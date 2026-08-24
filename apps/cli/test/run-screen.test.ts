@@ -3,7 +3,7 @@
  * developer meets them on a real terminal.
  *
  * Everything after the gate is a promise about a screen: one line per
- * simulation moving, the first verdict marked where the eye is, three keys for
+ * simulation moving, the first terminal trace result marked, three keys for
  * the skill offer, and a block of plain text that survives the alternate screen
  * being thrown away. None of those can be checked without a terminal, so a
  * pseudo-terminal runs the built command and a headless terminal emulator reads
@@ -28,7 +28,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
-import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
+import {
+  startPlatform,
+  type FixtureGrade,
+  type Platform,
+} from "./support/fixture-platform/index.ts";
 import { chooseTesting, runInTerminal, showing, type TerminalRun } from "./support/pty.ts";
 import {
   CLI_ENTRY,
@@ -64,8 +68,43 @@ const ONE_AGENT: FakeRetellScript = {
   llms: [{ llm_id: "llm_0001", general_prompt: "You answer the order line.\n" }],
 };
 
-/** Three, so a first verdict can land while two are still moving. */
+/** Three, so a first result can be ready while two are still moving. */
 const TESTS = ["quoted-a-price", "lost-the-order-number", "open-on-sunday"] as const;
+
+const EXPECTED_BEHAVIORS = [
+  "confirms the new time back before finishing",
+  "checks that an afternoon next week is acceptable",
+  "keeps the existing booking until the new time is confirmed",
+  "states the day of the rescheduled cleaning",
+  "states the time of the rescheduled cleaning",
+  "does not create a second booking",
+  "explains what happens to the Thursday booking",
+] as const;
+
+const EXPECTED_BEHAVIORS_GRADE: FixtureGrade = {
+  projectGraderId: "pgr_expected_behaviors",
+  graderDefinitionId: "gdf_expected_behaviors",
+  graderDefinitionVersion: 1,
+  graderName: "expected_behaviors",
+  score: 0.86,
+  details: {
+    rationale: "Six of seven expected behaviors were present.",
+    assertions: EXPECTED_BEHAVIORS.map((behavior, at) => ({
+      key: `behavior_${String(at + 1)}`,
+      score: at === EXPECTED_BEHAVIORS.length - 1 ? 0 : 1,
+      rationale:
+        at === EXPECTED_BEHAVIORS.length - 1
+          ? "The transcript did not explain what happened to the Thursday booking."
+          : `The transcript supports: ${behavior}`,
+      ...(at === EXPECTED_BEHAVIORS.length - 1
+        ? {}
+        : { citedSpanIds: [`span_agent_${String(at + 1)}`] }),
+    })),
+  },
+  passThreshold: 0.62,
+  result: "passed",
+  gradedAt: "2026-01-01T00:01:00.000Z",
+};
 
 let platform: Platform;
 let workspace: Workspace;
@@ -103,7 +142,9 @@ function fileFor(name: string): string {
     "## Scenario",
     `Somebody rings the order line about ${name.replaceAll("-", " ")}.`,
     "## Expected behaviors",
-    "1. The agent says the workshop's name.",
+    ...EXPECTED_BEHAVIORS.map(
+      (behavior, at) => `${String(at + 1)}. ${behavior}`,
+    ),
     "",
   ].join("\n");
 }
@@ -124,7 +165,7 @@ function writes(name: string): FakeStep[] {
  * starts, and the name is what egma calls it — which is what decides where a
  * skill for it would go.
  */
-async function toTheRun(cols = 100): Promise<TerminalRun> {
+async function toTheRun(cols = 100, rows = 30): Promise<TerminalRun> {
   const script = await workspace.script({
     steps: [
       { kind: "say", text: "egma:found framework retell-sdk\n" },
@@ -167,6 +208,7 @@ async function toTheRun(cols = 100): Promise<TerminalRun> {
       EDITOR: "",
     }),
     cols,
+    rows,
   });
   terminal = run;
 
@@ -200,8 +242,8 @@ const SKILL_PATH = path.join(".claude", "skills", "egma", "SKILL.md");
 const SDK_SKILL_PATH = path.join(".claude", "skills", "integrate-egma-sdk", "SKILL.md");
 
 describe("the run screen", () => {
-  it("shows simulations moving, marks the first verdict, then leaves the run going", async () => {
-    const run = await toTheRun();
+  it("shows one Expected behaviors grade, its seven assertion details, and one combined score", async () => {
+    const run = await toTheRun(200, 45);
 
     // Every simulation is on screen the moment the run exists, queued.
     await showing(run, "run run_", `${TESTS.length} simulations`, TESTS[0], "queued");
@@ -222,27 +264,40 @@ describe("the run screen", () => {
     platform.running.advance({
       simulation: TESTS[0],
       status: "completed",
-      verdict: "passed",
+    });
+    await showing(run, `▶ ${TESTS[0]}`, "waiting to grade");
+    platform.running.setGrading({
+      simulation: TESTS[0],
+      state: "complete",
+      grades: [EXPECTED_BEHAVIORS_GRADE],
+      combinedScore: 0.86,
     });
     const landed = await showing(
       run,
-      `◼ ${TESTS[0]}`,
-      "passed",
-      `✓ First verdict: ${TESTS[0]} passed`,
-      "passed 1",
-      "waiting 2",
-      "The suite keeps running on Egma",
+      `First result: ${TESTS[0]}`,
+      "Combined score 0.86",
+      "Expected behaviors",
+      "score 0.86",
+      "pass threshold 0.62",
+      "Six of seven expected behaviors were present.",
+      "Assertion 01",
+      "Assertion 07",
+      EXPECTED_BEHAVIORS[0],
+      EXPECTED_BEHAVIORS[6],
+      "The transcript did not explain what happened to the Thursday booking.",
+      "Install 4 Egma skills into Claude Code",
+      ...OFFER_HINTS,
     );
-    expect(landed).toContain("passed 1");
-    expect(landed).toContain("waiting 2");
-    // The other two are still moving, and the screen says the suite is not
-    // waiting on this terminal.
-    expect(landed).toContain("The suite keeps running on Egma");
+    // The result stays visible while the final choice waits. It is not a frame
+    // that disappears before a developer can read it.
+    expect(landed).toContain(`First result: ${TESTS[0]}`);
+    expect(landed.match(/Assertion \d{2}/gu)).toHaveLength(7);
+    expect(landed).not.toMatch(/overall verdict|\bgate\b|\brequired\b|latency/iu);
 
     await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     const held = platform.running.simulationsOf();
-    expect(held.filter((one) => one.verdict !== null)).toHaveLength(1);
-    expect(held.filter((one) => one.verdict === null)).toHaveLength(2);
+    expect(held.filter((one) => one.gradingState === "complete")).toHaveLength(1);
+    expect(held.filter((one) => one.gradingState === null)).toHaveLength(2);
     expect(held.filter((one) => one.status === "running")).toHaveLength(1);
     expect(held.filter((one) => one.status === "queued")).toHaveLength(1);
   });
@@ -250,9 +305,9 @@ describe("the run screen", () => {
   /**
    * The execution states, on the screen a developer actually reads. A
    * simulation that stopped is not drawn as one that failed, and an execution
-   * failure is not counted as a failed grader verdict.
+   * failure is not counted as a grading result.
    */
-  it("draws each supported terminal execution state without inventing a failed verdict", async () => {
+  it("draws each terminal execution state without inventing a grading result", async () => {
     const run = await toTheRun();
     await showing(run, "run run_");
 
@@ -270,17 +325,15 @@ describe("the run screen", () => {
     });
     platform.running.advance({ simulation: TESTS[2], status: "canceled" });
 
-    const screen = await showing(
-      run,
-      TESTS[0],
-      "done",
-      TESTS[1],
-      "did not run",
-      TESTS[2],
-      "stopped",
-    );
-    expect(screen).toContain("failed 0");
-    expect(screen).toContain("waiting 3");
+    const screen = await showing(run, "execution 3/3 finished", "grading 0/1 terminal");
+    expect(screen).toContain(TESTS[0]);
+    expect(screen).toContain("waiting to grade");
+    expect(screen).toContain(TESTS[1]);
+    expect(screen).toContain("did not run");
+    expect(screen).toContain(TESTS[2]);
+    expect(screen).toContain("stopped");
+    expect(screen).toContain("execution 3/3 finished");
+    expect(screen).toContain("grading 0/1 terminal");
   });
 });
 
@@ -292,7 +345,7 @@ describe("the skill offer and what is left behind", () => {
    */
   const WIDE = 200;
 
-  /** The wizard, driven as far as the offer, with one verdict landed. */
+  /** The wizard, driven as far as the offer, with one result ready. */
   async function toTheOffer(): Promise<TerminalRun> {
     const run = await toTheRun(WIDE);
     await showing(run, "run run_");
@@ -302,8 +355,8 @@ describe("the skill offer and what is left behind", () => {
     platform.running.advance({
       simulation: TESTS[0],
       status: "completed",
-      verdict: "passed",
     });
+    platform.running.setGrading({ simulation: TESTS[0], state: "complete" });
 
     await showing(run, "Egma skills into Claude Code", ...OFFER_HINTS);
     return run;
