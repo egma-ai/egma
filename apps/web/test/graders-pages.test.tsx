@@ -547,6 +547,86 @@ describe("the project Graders surface", () => {
     });
   });
 
+  it("resets unsaved custom-grader scope before the sheet reopens", async () => {
+    apiAnswers(standardAnswers());
+    render(<GradersPage />);
+    const create = await screen.findByRole("button", {
+      name: "Create custom grader",
+    });
+    fireEvent.click(create);
+
+    let sheet = await screen.findByRole("dialog", {
+      name: "Create custom grader",
+    });
+    fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
+    fireEvent.click(within(sheet).getByLabelText("All simulations"));
+    expect(
+      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Create custom grader" }),
+      ).toBeNull();
+    });
+
+    fireEvent.click(create);
+    sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
+    await waitFor(() => {
+      expect(
+        (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+          .checked,
+      ).toBe(false);
+    });
+    expect(within(sheet).queryByLabelText("All simulations")).toBeNull();
+  });
+
+  it("restores an active grader's saved scope when its sheet reopens", async () => {
+    const activeLatencyDefinition = {
+      ...LATENCY_DEFINITION,
+      activeProjectGraderId: LATENCY.id,
+    };
+    apiAnswers({
+      ...standardAnswers("admin", [EXPECTED, LATENCY], [
+        EXPECTED_DEFINITION,
+        activeLatencyDefinition,
+      ]),
+      "GET /v1/grader-library/grl_latency": {
+        status: 200,
+        body: activeLatencyDefinition,
+      },
+    });
+    render(<GradersPage />);
+    await openRowMenu("Response latency", "View and edit");
+
+    let sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
+    expect(
+      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Response latency" }))
+        .toBeNull();
+    });
+
+    await openRowMenu("Response latency", "View and edit");
+    sheet = await screen.findByRole("dialog", { name: "Response latency" });
+    await waitFor(() => {
+      expect(
+        (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
+          .checked,
+      ).toBe(true);
+    });
+    expect(
+      within(sheet)
+        .getByRole("radio", { name: "All simulations" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
   it("keeps Expected behaviors scope fixed and lets the project edit only its threshold", async () => {
     const changed = { ...EXPECTED, passThreshold: 0.8 };
     const { asked } = apiAnswers({

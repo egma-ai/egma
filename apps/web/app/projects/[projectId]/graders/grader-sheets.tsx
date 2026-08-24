@@ -587,6 +587,7 @@ function EditGraderForm({
   readonly onRemove: () => void;
 }) {
   const [scope, setScope] = useState<ProjectGraderScope>(grader.scope);
+  const [scopeRevision, setScopeRevision] = useState(0);
   const [scopeValid, setScopeValid] = useState(true);
   const [settings, setSettings] = useState<SettingsDraft>(() =>
     initialSettings(entry.settingDefinitions, grader.settings),
@@ -606,6 +607,7 @@ function EditGraderForm({
     wasOpen.current = open;
     if (!reopened) return;
     setScope(grader.scope);
+    setScopeRevision((current) => current + 1);
     setScopeValid(true);
     setSettings(originalSettings);
     setThreshold(String(grader.passThreshold));
@@ -682,6 +684,7 @@ function EditGraderForm({
           <div className="flex flex-col gap-3 border-t border-border pt-5">
             <p className="m-0 text-sm font-medium text-foreground">Scope</p>
             <ScopeFields
+              key={scopeRevision}
               projectId={projectId}
               scope={scope}
               disabled={saving || !mayAuthor}
@@ -775,6 +778,7 @@ export function CreateCustomGraderSheet({
     "voice",
   ]);
   const [scope, setScope] = useState<ProjectGraderScope>(EMPTY_GRADER_SCOPE);
+  const [scopeRevision, setScopeRevision] = useState(0);
   const [scopeValid, setScopeValid] = useState(true);
   const [threshold, setThreshold] = useState("1");
   const [saving, setSaving] = useState(false);
@@ -786,6 +790,7 @@ export function CreateCustomGraderSheet({
     setInstructions("");
     setModalities(["chat", "voice"]);
     setScope(EMPTY_GRADER_SCOPE);
+    setScopeRevision((current) => current + 1);
     setScopeValid(true);
     setThreshold("1");
     setRefused(null);
@@ -928,6 +933,7 @@ export function CreateCustomGraderSheet({
             <div className="flex flex-col gap-3 border-t border-border pt-5">
               <p className="m-0 text-sm font-medium text-foreground">Scope</p>
               <ScopeFields
+                key={scopeRevision}
                 projectId={projectId}
                 scope={scope}
                 disabled={saving}
