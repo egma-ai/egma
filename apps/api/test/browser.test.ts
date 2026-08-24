@@ -2902,7 +2902,7 @@ describe("the complete product, walked in order in a second project", () => {
       );
       for (let at = 1; at < expectedBehaviors.length; at += 1) {
         await walk
-          .getByRole("button", { name: "Add expected behavior" })
+          .getByRole("button", { name: "Add a behavior" })
           .click();
       }
       for (const [at, behavior] of expectedBehaviors.entries()) {
