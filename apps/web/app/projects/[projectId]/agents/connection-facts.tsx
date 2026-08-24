@@ -77,17 +77,21 @@ export function ConnectionsOnRow({
 
   return (
     /*
-     * 20px between the links and 8px between rows of them, which is `6ZJ-0`.
-     * It wraps rather than clipping: a narrow window and the stacked mobile
-     * layout both give this cell less than the 360px the board measures, and a
-     * name cut in half is a name nobody can tell from its neighbour.
+     * 20px between the links, which is `6ZJ-0`, and one line however long the
+     * names are. **The cell never wraps.** A second line here makes one row
+     * taller than the rows above and below it, and a column of ragged rows is
+     * what makes a dense list hard to scan — the same reason the chip counts
+     * instead of listing. A long name is cut with an ellipsis and carries its
+     * full text in a tooltip, and the connection sheet behind the link says
+     * the whole name again.
      */
-    <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 whitespace-normal">
+    <span className="flex min-w-0 flex-nowrap items-center gap-x-5 whitespace-nowrap">
       {shown.map((one) => (
         <Link
-          className="w-fit flex-none text-foreground"
+          className="min-w-0 truncate text-foreground"
           href={hrefOf(one)}
           key={one.id}
+          title={one.name}
         >
           {one.name}
         </Link>
@@ -107,7 +111,7 @@ export function ConnectionsOnRow({
            * surface, and an underline inside that border reads as a second,
            * broken link rather than as one control.
            */}
-          <Link className="no-underline" href={agentHref}>
+          <Link className="flex-none no-underline" href={agentHref}>
             <span aria-hidden="true">{`+${String(overflow)}`}</span>
             <span className="sr-only">{`${String(overflow)} more connections`}</span>
           </Link>

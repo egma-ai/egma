@@ -2682,16 +2682,37 @@ describe("the complete product, walked in order in a second project", () => {
        */
       await walk.goto(at("agents"));
       await saysWithin(walk, "The Support line");
-      // The row's own name link is the agent's address, and it is the same one
-      // the panel landed on.
+      /*
+       * **The row names the agent as plain text, and its ⋮ is the way in.**
+       * This list is the one agent screen (`6ZJ-0`), so the name is a name
+       * rather than a link, and the underline on this row belongs to the
+       * connections alone. Open agent still carries the address the panel
+       * landed on.
+       */
       const named = walk
-        .getByRole("link", { name: "The Support line", exact: true })
+        .locator('table[aria-label="Agents in this project"] tbody tr')
+        .filter({ hasText: "The Support line" })
         .first();
       await named.waitFor();
       expect(
-        new URL((await named.getAttribute("href")) ?? "/", origin).toString(),
-        "the registered agent has a row that opens it",
+        await named
+          .getByRole("link", { name: "The Support line", exact: true })
+          .count(),
+        "the agent's name is not a link",
+      ).toBe(0);
+      await named
+        .getByRole("button", { name: "Actions for The Support line" })
+        .click();
+      const openAgent = walk.getByRole("menuitem", {
+        name: "Open agent",
+        exact: true,
+      });
+      await openAgent.waitFor();
+      expect(
+        new URL((await openAgent.getAttribute("href")) ?? "/", origin).toString(),
+        "the registered agent has a row whose menu opens it",
       ).toBe(agentAddress);
+      await walk.keyboard.press("Escape");
       // And the way in is named on the row, as a link that opens it over the
       // list rather than as four facts nobody can press.
       const connection = walk
@@ -4325,10 +4346,12 @@ describe("the complete product, walked in order in a second project", () => {
      * The case above stops at the sidebar, and stopping there is what left the
      * word *tables* in this criterion covered by nothing: a list whose rows
      * could not be reached by Tab would have passed every keyboard case in this
-     * file. A row's name is a link, so the promise is the ordinary one — Tab
-     * gets there, Enter follows it — and it has to hold past the page's own
-     * controls, one of which is a radio group whose whole design is that it
-     * costs a single Tab stop rather than one per option.
+     * file. A row's name is plain text now — the agents list is the one agent
+     * screen — so the row's own control is its ⋮, and the promise is the
+     * ordinary one: Tab gets to it, Enter opens it, Enter follows the way in
+     * it offers. It has to hold past the page's own controls, one of which is
+     * a radio group whose whole design is that it costs a single Tab stop
+     * rather than one per option.
      *
      * The presses are bounded and the trail is reported. "Press Tab until
      * something happens" with no bound is a test that hangs where it should
@@ -4344,15 +4367,17 @@ describe("the complete product, walked in order in a second project", () => {
 
         const trail: string[] = [];
         let reached = false;
-        for (let press = 0; press < 20 && !reached; press += 1) {
+        // The row's ⋮ sits after the connection links in the same row, so the
+        // bound allows for those stops as well as the page's own controls.
+        for (let press = 0; press < 30 && !reached; press += 1) {
           await walk.keyboard.press("Tab");
           const name = await focused();
           trail.push(name === "" ? "(nothing)" : name);
-          reached = name === "The Support line";
+          reached = name === "Actions for The Support line";
         }
         expect(reached, `the focus went ${trail.join(" → ")}`).toBe(true);
 
-        // It is the row's own link in the table, rather than a heading or a
+        // It is the row's own control in the table, rather than a heading or a
         // control that happens to carry the same words.
         expect(
           await walk.evaluate(() => {
@@ -4374,6 +4399,13 @@ describe("the complete product, walked in order in a second project", () => {
         expect(trail.filter((name) => name === "Active")).toEqual([]);
         expect(trail.filter((name) => name === "Archived")).toEqual([]);
 
+        // Enter opens the row's menu on its first item, and Enter again
+        // follows it to the agent this row is a row for.
+        await walk.keyboard.press("Enter");
+        await walk
+          .getByRole("menuitem", { name: "Open agent", exact: true })
+          .waitFor();
+        expect(await focused()).toBe("Open agent");
         await walk.keyboard.press("Enter");
         await walk.waitForURL(agentAddress);
         await saysWithin(walk, "The Support line");
