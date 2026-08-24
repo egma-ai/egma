@@ -150,37 +150,6 @@ export {
   type SnapshotEntry,
 } from "./mock-tools/resolve.ts";
 /**
- * The shared measure module: the catalog's numbers, computed from a
- * conversation's spans.
- *
- * Here for the fold's reason and on the fold's terms — it reaches nothing, takes
- * no context, and is handed spans a caller already read. Exported because it is
- * the **one** place a measure is worked out: the metrics display reads through
- * it and so does the grader that bounds one, for a simulation and a production
- * trace alike, so the number on a page and the number a verdict was decided by
- * are the same arithmetic. A second implementation in a query, in a page or in
- * the grading service would be a second answer about one conversation with
- * nothing stored to settle it against.
- */
-export {
-  everySpanIn,
-  measuresFromSpans,
-  worstSampleOf,
-  type MeasuredFromSpans,
-  type Sample,
-  type SpannedConversation,
-} from "./measures/from-spans.ts";
-export {
-  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
-  REPORTED_MEASUREMENTS_PAYLOAD_PATH,
-  REPORTED_MEASUREMENTS_VERSION,
-  reportedMeasurementsOf,
-  reportedMeasurementsPayload,
-  type ReportedMeasurement,
-  type ReportedMeasurements,
-} from "./measures/reported.ts";
-
-/**
  * The two catalogs a form is drawn from, and the readers that hold a key to
  * them.
  *

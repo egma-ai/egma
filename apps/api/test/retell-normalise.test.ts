@@ -1,4 +1,7 @@
-import { REPORTED_MEASUREMENTS_VERSION } from "@egma/db";
+
+import {
+  REPORTED_MEASUREMENTS_VERSION,
+} from "@egma/metrics";
 import { describe, expect, it } from "vitest";
 
 import {

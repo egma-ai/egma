@@ -1,4 +1,4 @@
-import { SPAN_DERIVED_MEASURE_CATALOG } from "@egma/simulation-contract";
+import { SPAN_DERIVED_MEASURE_CATALOG } from "@egma/metrics";
 
 import type { LibraryType } from "../schema/graders.ts";
 

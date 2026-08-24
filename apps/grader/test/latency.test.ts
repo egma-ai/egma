@@ -1,15 +1,16 @@
 import {
+  MEASURE_CATALOG,
+  SPAN_DERIVED_MEASURES,
+  type MeasuredFromSpans,
+} from "@egma/metrics";
+import {
   GRADER_LIBRARY_CATALOG,
   PREDEFINED_GRADERS,
   type AuthContext,
   type Grader,
   type GraderDefinitionSnapshot,
-  type MeasuredFromSpans,
 } from "@egma/db";
-import {
-  MEASURE_CATALOG,
-  SPAN_DERIVED_MEASURES,
-} from "@egma/simulation-contract";
+
 import { describe, expect, it } from "vitest";
 
 import type { Conversation } from "../src/conversation.ts";

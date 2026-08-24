@@ -1,5 +1,10 @@
 import { newId } from "@egma/ids";
 import {
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
+  reportedMeasurementsPayload,
+  type ReportedMeasurement,
+} from "@egma/metrics";
+import {
   appendSpans,
   claimSimulations,
   completeSimulation,
@@ -20,8 +25,6 @@ import {
   readVerdicts,
   recordProductionTraces,
   PREDEFINED_GRADERS,
-  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
-  reportedMeasurementsPayload,
   seedGraderLibrary,
   seedRunningGraders,
   startRun,
@@ -31,7 +34,6 @@ import {
   type ExpectedBehavior,
   type GradingJob,
   type NewSpan,
-  type ReportedMeasurement,
   type UseLibraryEntry,
   type RecordedVerdict,
   type Simulation,

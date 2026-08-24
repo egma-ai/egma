@@ -34,7 +34,7 @@ import { describe, expect, it } from "vitest";
 const REPOSITORY = path.resolve(import.meta.dirname, "..", "..", "..");
 
 /** The module every one of these rules exists to keep alone. */
-const THE_MODULE = "packages/db/src/measures/from-spans.ts";
+const THE_MODULE = "packages/metrics/src/from-spans.ts";
 
 /**
  * The page that prints a reduction it was handed, named once.

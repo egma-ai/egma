@@ -351,4 +351,4 @@ export function measureAccepts(
 
 /** Where the prose catalog lives, for a refusal that can point somebody at it. */
 export const MEASURE_CATALOG_DOCUMENT =
-  "packages/simulation-contract/measure-catalog.md";
+  "packages/metrics/measure-catalog.md";

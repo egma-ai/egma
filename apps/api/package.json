@@ -12,6 +12,7 @@
     "@aws-sdk/client-s3": "^3.1116.0",
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
+    "@egma/metrics": "workspace:*",
     "@egma/platform-api": "workspace:*",
     "@egma/provider-credentials": "workspace:*",
     "@egma/retell": "workspace:*",

@@ -76,7 +76,7 @@ beside its name**: the rule that says how it is computed from a conversation's
 spans, or that no span carries it at all.
 
 One shared measure module implements exactly those definitions
-(`packages/db/src/measures/from-spans.ts`), and it is the **only** computation
+(`packages/metrics/src/from-spans.ts`), and it is the **only** computation
 path for them. The metrics display reads through it and so does the `latency`
 grader, for a simulation and a production conversation alike — so the number on
 a screen and the number a verdict rests on are one piece of arithmetic and can

@@ -690,38 +690,6 @@ const THE_FOLD = [
 ];
 
 /**
- * The shared measure module, on the fold's exact terms: spans a caller already
- * read go in, the measure catalog's numbers come out, and it reaches nothing.
- *
- * Exported for the fold's reason too. A measure has to be worked out in exactly
- * one place — the metrics display reads through this and so does the grader that
- * bounds one — because no number is stored anywhere that a disagreement between
- * two readers could be settled against. `worstSampleOf` is on the surface for
- * the same reason as the arithmetic above it: the reduction to the one number a
- * bound is held against is part of the answer, not a caller's business.
- *
- * `everySpanIn` rides with them because the grading engine walks the same tree
- * for a conversation's tool calls, and two implementations of "every span, once"
- * is one of them quietly missing a list.
- */
-const THE_MEASURES = [
-  "everySpanIn",
-  "measuresFromSpans",
-  "worstSampleOf",
-  // The reported-measurements block: the one neutral shape between every
-  // platform's normalizer and the measure module. The writer half and the
-  // reader half cross this surface together because they are one contract —
-  // a normalizer embeds what `reportedMeasurementsOf` reads back — and the
-  // constants ride along so neither side ever spells the version or the
-  // payload path for itself.
-  "REPORTED_MEASUREMENTS_PAYLOAD_KEY",
-  "REPORTED_MEASUREMENTS_PAYLOAD_PATH",
-  "REPORTED_MEASUREMENTS_VERSION",
-  "reportedMeasurementsOf",
-  "reportedMeasurementsPayload",
-];
-
-/**
  * The two decisions about one span's evidence, taken on the fold's terms and
  * for the fold's reason: a record goes in, a fingerprint or a refusal comes
  * out, and neither reaches a store. There is no tenancy to stamp because there
@@ -771,7 +739,6 @@ describe("the data-access module's surface", () => {
         ...THE_GRADING_BUDGET,
         ...THE_RETELL_BUDGET,
         ...THE_FOLD,
-        ...THE_MEASURES,
         ...THE_MOCKED_WORLD,
         ...THE_PLATFORMS_SETTINGS,
         ...THE_GRADER_LIBRARY,

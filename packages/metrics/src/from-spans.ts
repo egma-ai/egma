@@ -1,9 +1,5 @@
-import {
-  MEASURE_CATALOG,
-  type CatalogedMeasure,
-} from "@egma/simulation-contract";
-
-import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
+import { MEASURE_CATALOG, type CatalogedMeasure } from "./measures.ts";
+import type { ReportedOnTrace, TraceSpan } from "./spans.ts";
 
 /**
  * The shared measure module: a conversation in, the measure catalog's numbers
@@ -39,7 +35,7 @@ import type { ReportedOnTrace, TraceSpan } from "../access/traces.ts";
  *
  * **The catalog decides what is computed and how.** Every measure carries its
  * span-level definition beside its name
- * (`packages/simulation-contract/measure-catalog.md`), the rule is one of a
+ * (`packages/metrics/measure-catalog.md`), the rule is one of a
  * closed list, and the switch below is exhaustive — so a measure whose rule
  * nothing implements stops the TypeScript build rather than shipping as a
  * grader that is silently `skipped` forever.
@@ -435,7 +431,7 @@ function reportedSamplesOf(
  * cannot read.
  *
  * Every rule below is written out beside its measure's name in
- * `packages/simulation-contract/measure-catalog.md`, plainly enough that two
+ * `packages/metrics/measure-catalog.md`, plainly enough that two
  * readers compute the same number from the same spans.
  */
 function derivedFromFrameworkSpans(
@@ -708,15 +704,20 @@ function byWhenItBegan(left: TimedSpan, right: TimedSpan): number {
  * countable on a conversation egma holds only part of.
  *
  * **Exported because the grading engine walks the same tree** for the tool calls
- * and for the span that closes a trace. It used to hold a copy of this,
+ * and for the span that closes a trace — generic over the span shape, because
+ * the walk cares only about the tree and a caller's spans carry more fields
+ * than this arithmetic reads. It used to hold a copy of this,
  * docstring and all, which is two implementations of "every span, once" — and
  * the day one of them learned about a third list, the other would quietly stop
  * seeing part of every conversation.
  */
-export function* everySpanIn(
-  conversation: SpannedConversation,
-): Generator<TraceSpan> {
-  const walk = function* (spans: readonly TraceSpan[]): Generator<TraceSpan> {
+export function* everySpanIn<Span extends { readonly spans: readonly Span[] }>(
+  conversation: {
+    readonly turns: readonly Span[];
+    readonly spans: readonly Span[];
+  },
+): Generator<Span> {
+  const walk = function* (spans: readonly Span[]): Generator<Span> {
     for (const span of spans) {
       yield span;
       yield* walk(span.spans);

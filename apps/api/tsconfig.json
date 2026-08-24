@@ -5,13 +5,30 @@
     "rootDir": "./src",
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [
-    { "path": "../../packages/platform-api" },
-    { "path": "../../packages/ids" },
-    { "path": "../../packages/provider-credentials" },
-    { "path": "../../packages/retell" },
-    { "path": "../../packages/db" },
-    { "path": "../../packages/simulation-contract" }
+    {
+      "path": "../../packages/db"
+    },
+    {
+      "path": "../../packages/ids"
+    },
+    {
+      "path": "../../packages/metrics"
+    },
+    {
+      "path": "../../packages/platform-api"
+    },
+    {
+      "path": "../../packages/provider-credentials"
+    },
+    {
+      "path": "../../packages/retell"
+    },
+    {
+      "path": "../../packages/simulation-contract"
+    }
   ]
 }

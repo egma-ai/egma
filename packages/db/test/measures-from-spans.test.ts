@@ -2,21 +2,22 @@ import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
-  measuresFromSpans,
   readTrace,
-  reportedMeasurementsPayload,
-  worstSampleOf,
   type AuthContext,
-  type MeasuredFromSpans,
   type NewSpan,
-  type ReportedMeasurement,
   type TraceDetail,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import {
   MEASURE_CATALOG,
+  measuresFromSpans,
+  reportedMeasurementsPayload,
   SPAN_DERIVED_MEASURES,
-} from "@egma/simulation-contract";
+  worstSampleOf,
+  type MeasuredFromSpans,
+  type ReportedMeasurement,
+} from "@egma/metrics";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {

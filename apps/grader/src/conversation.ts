@@ -1,12 +1,14 @@
 import {
-  everySpanIn,
-  measuresFromSpans,
-  type MeasuredFromSpans,
   type Simulation,
   type TraceDetail,
   type TraceSpan,
   type VerdictSource,
 } from "@egma/db";
+import {
+  everySpanIn,
+  measuresFromSpans,
+  type MeasuredFromSpans,
+} from "@egma/metrics";
 
 /**
  * The conversation, as a grader reads it.

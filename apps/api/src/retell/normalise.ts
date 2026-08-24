@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 
+import { type NewSpan } from "@egma/db";
 import {
+  catalogedMeasure,
+  isSpanDerivedMeasure,
   REPORTED_MEASUREMENTS_PAYLOAD_KEY,
   reportedMeasurementsPayload,
-  type NewSpan,
   type ReportedMeasurement,
-} from "@egma/db";
+} from "@egma/metrics";
 import { safeRetellProviderData } from "@egma/retell";
-import { catalogedMeasure, isSpanDerivedMeasure } from "@egma/simulation-contract";
 
 /**
  * One Retell call object, as spans. The single place that reading happens.

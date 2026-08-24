@@ -2,7 +2,8 @@ import { newId } from "@egma/ids";
 import {
   CATALOGED_MEASURES,
   SPAN_DERIVED_MEASURES,
-} from "@egma/simulation-contract";
+} from "@egma/metrics";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {

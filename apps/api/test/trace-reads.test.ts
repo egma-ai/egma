@@ -1,9 +1,11 @@
 import {
+  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
+  reportedMeasurementsPayload,
+} from "@egma/metrics";
+import {
   appendSpans,
   connectClickHouse,
   disconnectClickHouse,
-  REPORTED_MEASUREMENTS_PAYLOAD_KEY,
-  reportedMeasurementsPayload,
   type NewSpan,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";

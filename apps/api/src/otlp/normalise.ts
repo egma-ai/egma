@@ -1,5 +1,5 @@
 import type { NewSpan, SpanEmitter, SpanSource } from "@egma/db";
-import { SPAN_DERIVED_MEASURES } from "@egma/simulation-contract";
+import { SPAN_DERIVED_MEASURES } from "@egma/metrics";
 
 import type {
   OtlpAttribute,

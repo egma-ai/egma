@@ -5,7 +5,7 @@ import {
   MEASURE_CATALOG_DOCUMENT,
   MEASURE_CATALOG_VERSION,
   SPAN_DERIVED_MEASURES,
-} from "@egma/simulation-contract";
+} from "@egma/metrics";
 import { and, desc, eq, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";

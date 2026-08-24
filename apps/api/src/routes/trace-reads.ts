@@ -1,7 +1,5 @@
 import {
   listTraces,
-  measuresFromSpans,
-  worstSampleOf,
   MAXIMUM_LIST_LIMIT,
   NotPermittedError,
   readAssertionWords,
@@ -17,6 +15,7 @@ import {
   type TraceSpan,
   type TraceSummary,
 } from "@egma/db";
+import { measuresFromSpans, worstSampleOf } from "@egma/metrics";
 import { traceReadOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
 

@@ -1,4 +1,4 @@
-import { worstSampleOf, type MeasuredFromSpans } from "@egma/db";
+import { worstSampleOf, type MeasuredFromSpans } from "@egma/metrics";
 
 import type { Execution, Judgment } from "./contract.ts";
 

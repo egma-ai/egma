@@ -35,6 +35,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/metrics':
+        specifier: workspace:*
+        version: link:../../packages/metrics
       '@egma/platform-api':
         specifier: workspace:*
         version: link:../../packages/platform-api
@@ -133,6 +136,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../../packages/ids
+      '@egma/metrics':
+        specifier: workspace:*
+        version: link:../../packages/metrics
       '@egma/provider-credentials':
         specifier: workspace:*
         version: link:../../packages/provider-credentials
@@ -237,6 +243,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../ids
+      '@egma/metrics':
+        specifier: workspace:*
+        version: link:../metrics
       '@egma/simulation-contract':
         specifier: workspace:*
         version: link:../simulation-contract
@@ -265,6 +274,8 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/metrics: {}
+
   packages/platform-api:
     devDependencies:
       '@hey-api/openapi-ts':
@@ -287,6 +298,9 @@ importers:
       '@egma/ids':
         specifier: workspace:*
         version: link:../ids
+      '@egma/metrics':
+        specifier: workspace:*
+        version: link:../metrics
       ajv:
         specifier: ^8.17.1
         version: 8.20.0

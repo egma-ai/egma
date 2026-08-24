@@ -26,24 +26,3 @@ export {
   type BannedWordFound,
 } from "./vocabulary.ts";
 
-export {
-  catalogedMeasure,
-  isCatalogedMeasure,
-  isSpanDerivedMeasure,
-  measureAccepts,
-  CATALOGED_MEASURES,
-  MEASURE_AGGREGATIONS,
-  MEASURE_CATALOG,
-  MEASURE_CATALOG_DOCUMENT,
-  MEASURE_CATALOG_VERSION,
-  SPAN_DERIVED_MEASURE_CATALOG,
-  SPAN_DERIVED_MEASURES,
-  SPAN_RULES,
-  type CatalogedMeasure,
-  type MeasureAggregation,
-  type MeasureFromSpans,
-  type MeasureOrigin,
-  type MeasureShape,
-  type MeasureSource,
-  type SpanRule,
-} from "./measures.ts";
