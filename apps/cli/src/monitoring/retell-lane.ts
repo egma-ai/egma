@@ -111,6 +111,15 @@ export type WatchOptions = {
    * the same agent. Left out, the platform agent's own name is taken.
    */
   readonly agentName?: string | null | undefined;
+  /**
+   * The Egma agent to watch from, when the caller already knows which one.
+   *
+   * A repository that has been tested already holds an agent row, and the
+   * platform agent it reaches is not registered *as* that row — so discovery
+   * cannot see the connection between them. Naming it here is what stops a
+   * second row appearing in the roster for one voice agent.
+   */
+  readonly agentId?: string | null | undefined;
   /** How long to wait for the first conversation. Egma's own pace when omitted. */
   readonly waitMs?: number | undefined;
   readonly pollMs?: number | undefined;
@@ -196,7 +205,7 @@ export async function watchRetellAgent(
    * would be renaming somebody's agent because a second surface spells it
    * differently.
    */
-  const registered = chosen.registeredAgentId;
+  const registered = (options.agentId ?? "").trim() || chosen.registeredAgentId;
   const started = await startMonitoring(
     {
       agentPlatform: "retell",

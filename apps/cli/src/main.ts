@@ -30,6 +30,12 @@ import {
 import type { FolderCommandOptions } from "./commands/folder-verbs.ts";
 import { runInitCommand } from "./commands/init.ts";
 import { runLoginCommand } from "./commands/login.ts";
+import {
+  MONITORING_ACTIONS,
+  runMonitoringCommand,
+  unknownActionRefusal,
+  type MonitoringAction,
+} from "./commands/monitoring.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
 import { runRunCommand } from "./commands/run.ts";
@@ -86,7 +92,16 @@ async function wizardMachinery(): Promise<{
  * because a verb is what a coding agent types and a coding agent has no
  * keystroke to give.
  */
-export const VERBS = ["login", "connect", "init", "pull", "push", "run", "suite"] as const;
+export const VERBS = [
+  "login",
+  "connect",
+  "init",
+  "pull",
+  "push",
+  "run",
+  "suite",
+  "monitoring",
+] as const;
 
 /**
  * The Retell the CLI talks to, for a check that stands one in.
@@ -137,6 +152,12 @@ export type Invocation = {
   readonly connectionName: string | null;
   /** The only suite subcommand this CLI exposes. */
   readonly suiteAction: string | null;
+  /** Which of the three things `egma monitoring` does. */
+  readonly monitoringAction: string | null;
+  /** `--platform`: which platform runs this agent, when Egma cannot tell. */
+  readonly platformWord: string | null;
+  /** `--platform-agent`: which agent on the account to watch. */
+  readonly platformAgentId: string | null;
   /** A direct child under `egma/tests`, for suite create or run. */
   readonly suiteDirectory: string | null;
   /** Mutable suite display name on create, or optional run name. */
@@ -172,6 +193,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
   let agentName: string | null = null;
   let connectionName: string | null = null;
   let suiteAction: string | null = null;
+  let monitoringAction: string | null = null;
+  let platformWord: string | null = null;
+  let platformAgentId: string | null = null;
   let suiteDirectory: string | null = null;
   let name: string | null = null;
   let drivenAgentCommand: string[] = [];
@@ -205,8 +229,13 @@ export function parseArgs(argv: readonly string[]): Invocation {
     else if (argument === "--agent") agentName = argv[(index += 1)] ?? null;
     else if (argument === "--connection") connectionName = argv[(index += 1)] ?? null;
     else if (argument === "--name") name = argv[(index += 1)] ?? null;
+    else if (argument === "--platform") platformWord = argv[(index += 1)] ?? null;
+    else if (argument === "--platform-agent") platformAgentId = argv[(index += 1)] ?? null;
     else if (verb === null && isVerb(argument)) verb = argument;
     else if (verb === "suite" && suiteAction === null) suiteAction = argument;
+    else if (verb === "monitoring" && monitoringAction === null) {
+      monitoringAction = argument;
+    }
     else if (
       suiteDirectory === null &&
       (verb === "run" || (verb === "suite" && suiteAction === "create"))
@@ -235,6 +264,9 @@ export function parseArgs(argv: readonly string[]): Invocation {
     agentName,
     connectionName,
     suiteAction,
+    monitoringAction,
+    platformWord,
+    platformAgentId,
     suiteDirectory,
     name,
     drivenAgentCommand,
@@ -264,6 +296,18 @@ export function helpText(): string {
     "                           Create the platform suite, then its local manifest.",
     "  egma run <suite-directory> [options]",
     "                           Run the complete suite after an exact sync check.",
+    "  egma monitoring enable [options]",
+    "                           Start watching this agent's production traffic.",
+    "                           On Retell the account key comes in on standard",
+    "                           input, never as an argument. On LiveKit Egma",
+    "                           mints a project key and writes the two lines the",
+    "                           Egma SDK reads into .env when Git ignores it,",
+    "                           printing them either way.",
+    "  egma monitoring disable  Turn the switch off. Everything stored stays",
+    "                           stored: the conversations, the platform binding",
+    "                           and the sealed key.",
+    "  egma monitoring status   Print the switch, the binding, the key hint, and",
+    "                           when a production conversation last arrived.",
     "",
     "In a platform workspace — the directory your Egma deployment lives in,",
     "which is never your agent repository:",
@@ -319,7 +363,16 @@ export function helpText(): string {
     "                       folder's tests are for.",
     "  --connection <name>  With init: what to call the way Egma reaches it.",
     "  --name <name>        With suite create: the suite display name. With run:",
-    "                       an optional name for this run.",
+    "                       an optional name for this run. With monitoring",
+    "                       enable: what to call the agent Egma writes.",
+    "  --platform <retell|livekit>",
+    "                       With monitoring enable: which platform runs this",
+    "                       agent. Left out, Egma reads it from the agent's own",
+    "                       binding, or from the connections that reach it, and",
+    "                       refuses when it cannot tell.",
+    "  --platform-agent <id>",
+    "                       With monitoring enable on Retell: which agent on the",
+    "                       account to watch, when it holds more than one.",
     "  --headless           Run with no terminal and no keystroke: plain lines,",
     "                       and the task taken as already agreed to.",
     "  -h, --help           Print this.",
@@ -392,6 +445,23 @@ export function helpText(): string {
     "  run, tests, simulations, results, then one simulation: line per change,",
     "  one verdict: line per verdict, first-verdict: once, and the four counts",
     "  passed, failed, skipped, errored, plus pending and simulations.",
+    "",
+    "What egma monitoring prints, one fact per line:",
+    "  url, agent_name, platform, then either the agent it is now watching",
+    "  (agent_id, platform_agent_id, agent_registration, pull_production_calls,",
+    "  first_conversation) or, on LiveKit, what it wired (api_key, env_file, one",
+    "  env: line per environment line). status and disable print pull_production_calls,",
+    "  agent_platform, platform_agent_id, monitoring_key and last_received_at.",
+    "  A refusal adds refusal: with the reason and one reason: line per sentence.",
+    "",
+    "What egma monitoring answers with:",
+    "  0 done   1 nothing here to act on   2 the Retell key was refused",
+    "  3 no voice agents on that account",
+    "  4 Egma did not answer, or refused",
+    "  5 a choice only you can make was not made: which platform, or which agent",
+    "  6 no key given   7 not signed in to Egma",
+    "  8 Egma would not start watching, and said which rule refused it",
+    "  130 stopped part way",
     "",
     "What egma run answers with:",
     "  0 the run finished and nothing failed or errored",
@@ -764,6 +834,39 @@ async function runLogin(invocation: Invocation, access: PlatformAccess): Promise
   }
 }
 
+/**
+ * The monitoring verb: no terminal, no keystroke, no question — and the Retell
+ * key on standard input, never in an argument.
+ */
+async function runMonitoring(
+  invocation: Invocation,
+  access: PlatformAccess,
+  action: MonitoringAction,
+): Promise<number> {
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort("interrupt");
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
+  try {
+    return await runMonitoringCommand({
+      access,
+      cwd: path.resolve(invocation.cwd ?? process.cwd()),
+      action,
+      platform: invocation.platformWord,
+      platformAgentId: invocation.platformAgentId,
+      name: invocation.name,
+      signal: controller.signal,
+      stdin: process.stdin,
+      out: (line) => process.stdout.write(`${line}\n`),
+      fail: (line) => process.stderr.write(`${line}\n`),
+    });
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
 /** The connect verb: a key from a pipe or the environment, and plain lines. */
 async function runConnect(
   invocation: Invocation,
@@ -847,6 +950,16 @@ export async function main(argv: readonly string[]): Promise<void> {
   }
   if (invocation.version) {
     process.stdout.write(`${version()}\n`);
+    return;
+  }
+  if (
+    invocation.verb === "monitoring" &&
+    !(MONITORING_ACTIONS as readonly string[]).includes(invocation.monitoringAction ?? "")
+  ) {
+    process.stderr.write(
+      `${unknownActionRefusal(invocation.monitoringAction ?? "")}\n`,
+    );
+    process.exitCode = 1;
     return;
   }
   if (invocation.verb === "suite" && invocation.suiteAction !== "create") {
@@ -1004,6 +1117,14 @@ export async function main(argv: readonly string[]): Promise<void> {
       }
       if (invocation.verb === "connect") {
         process.exitCode = await runConnect(invocation, access);
+        return;
+      }
+      if (invocation.verb === "monitoring") {
+        process.exitCode = await runMonitoring(
+          invocation,
+          access,
+          invocation.monitoringAction as MonitoringAction,
+        );
         return;
       }
       // Only `init --url` reaches here: the flagless form was answered above.

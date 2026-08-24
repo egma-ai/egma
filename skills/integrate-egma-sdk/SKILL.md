@@ -96,11 +96,15 @@ Two rules:
    `AgentSession` is built.
 2. **Not awaited.** It is an ordinary function.
 
-It reads two environment variables in the process it runs in: where Egma is,
-and the project API key to reach it with. **Do not name them, do not set them,
-do not read them, and do not add them to any file.** Egma's own command writes
-them where they belong and prints them for the deployment environment; see the
-next section.
+It reads two environment variables in the process it runs in: `EGMA_URL`, where
+Egma is, and `EGMA_API_KEY`, the Egma project API key to reach it with.
+
+**Naming them is teaching; setting them is not yours to do.** Say what they are
+called when the developer needs to know — a worker built from a by-hand
+instruction that never says what to export crashes on start. Do not set them, do
+not read them, and do not add them to `.env` or to any other file. Egma's own
+command mints the key, writes the two lines where they belong, and prints them
+for the deployment environment; see the next section.
 
 ## Never touch `.env`
 
@@ -110,6 +114,11 @@ next section.
   environment file, with an editor, a shell command, or anything else.
 - **Never write** one, and never add a variable to one.
 - **Never print** a value read from one.
+
+Naming a variable is not reading one: `EGMA_URL` and `EGMA_API_KEY` may be
+written out as the names a worker needs, which is what the by-hand fallback
+above does. What is forbidden is opening the file, writing to it, or repeating a
+value that came out of it.
 
 Egma's own CLI writes the environment lines a monitored worker needs, with the
 developer's agreement, and refuses when the file is not ignored by Git. Work
@@ -140,6 +149,14 @@ Add the Egma SDK to your LiveKit worker by hand:
        from egma import monitor_livekit
 
        monitor_livekit(ctx)
+
+4. That entry reads two environment variables where the worker runs:
+
+       EGMA_URL        where Egma is
+       EGMA_API_KEY    an Egma project API key
+
+   `egma monitoring enable` mints the key and prints both lines. Do not add
+   them to a file yourself.
 ```
 
 Give the same block whether the repository has no worker you can identify, or
@@ -155,7 +172,7 @@ Read the changed file back and confirm each of these:
 - the monitoring entry is not awaited, and is the first statement of the
   entrypoint;
 - nothing else in the file changed;
-- no environment file was opened, written, or mentioned.
+- no environment file was opened or written.
 
 Report the file you edited and the one line you added to it. If the repository
 has a type checker or a linter the developer already runs, running it on the

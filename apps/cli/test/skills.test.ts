@@ -221,11 +221,18 @@ describe("Egma's instruction content", () => {
     // The monitoring entry, which ticket 02 reuses and this lane never adds.
     expect(sdk).toContain("monitor_livekit(ctx)");
     expect(sdk).toContain("ctx.connect()");
-    // The two environment variables are Egma's own command's to write. The
-    // skill says so and does not name them: a coding agent that knew the names
-    // is a coding agent that could put a live key in a committed file.
+    // The two environment variables are named, and writing them is still
+    // Egma's own command's job. Naming is teaching: a by-hand fallback that
+    // never said what to export would produce a worker that crashes on start,
+    // and knowing a variable's name is not the same as being allowed to put a
+    // live key in a file (founder decision, 2026-08-24).
+    expect(sdk).toContain("EGMA_URL");
+    expect(sdk).toContain("EGMA_API_KEY");
     expect(sdk.replace(/\s+/gu, " ")).toContain(
-      "Do not name them, do not set them, do not read them",
+      "Naming them is teaching; setting them is not yours to do",
+    );
+    expect(sdk.replace(/\s+/gu, " ")).toContain(
+      "do not add them to `.env` or to any other file",
     );
     // The rule that keeps a live credential away from a driven coding agent.
     expect(sdk.replace(/\s+/gu, " ")).toContain("Never touch `.env`");

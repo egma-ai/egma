@@ -153,8 +153,15 @@ export function refusedArgumentIn(argv: readonly string[]): string | null {
   return null;
 }
 
-/** Everything on standard input, or nothing at all when it is a terminal. */
-async function fromStdin(
+/**
+ * Everything on standard input, or nothing at all when it is a terminal.
+ *
+ * Exported because every verb that takes a secret takes it here and nowhere
+ * else. Arguments are readable by every process on the machine and are kept in
+ * shell history, so a second verb reading a key its own way would be a second
+ * chance to get that wrong.
+ */
+export async function fromStdin(
   stdin: (NodeJS.ReadableStream & { readonly isTTY?: boolean }) | undefined,
 ): Promise<string> {
   if (stdin === undefined || stdin.isTTY === true) return "";
