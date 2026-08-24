@@ -13,7 +13,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -491,6 +491,19 @@ describe("choosing monitoring on LiveKit", () => {
     const worker = await readFile(path.join(workspace.dir, "agent.py"), "utf8");
     expect(worker).toContain("monitor_livekit(ctx)");
 
+    // Monitoring wrote no committed folder at all: the platform is the one
+    // place the truth about monitoring lives.
+    await expect(
+      readFile(path.join(workspace.dir, "egma", "config.yaml"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    // The coding agent was told, in the dispatch itself, never to touch an
+    // environment file — the key is Egma's own code's to write.
+    const sent = await dispatched();
+    const edit = sent.find((task) => task.includes(MONITORING_EDIT_TASK)) ?? "";
+    expect(edit).toContain("Never open, write, or mention a `.env` file");
+    expect(edit).not.toContain(minted.secret);
+
     // The lines survive the screen, one to a line, for the deployment.
     expect(exitLines(report)).toContain(`export EGMA_API_KEY=${minted.secret}`);
     expect(buildExitLine(report)).toContain("Monitoring page");
@@ -649,6 +662,20 @@ describe("choosing both", () => {
     for (const name of await filesUnder(workspace.dir)) {
       const held = await readFile(path.join(workspace.dir, name), "utf8").catch(() => "");
       expect(held, `${name} holds the key`).not.toContain(KEY);
+    }
+
+    // Not in the coding agent's own output, which Egma keeps whole, and not in
+    // anything Egma sent it. The sweep is only worth its name if it really saw
+    // the task that writes the tests: that one carries what the provider is
+    // running, which is the one place a key could ride along.
+    const logFile = ui.record.drivenAgentLog as string;
+    try {
+      expect(await readFile(logFile, "utf8").catch(() => "")).not.toContain(KEY);
+      const sent = await dispatched();
+      expect(sent.some((task) => task.includes(GENERATE_TASK))).toBe(true);
+      expect(sent.join("\n")).not.toContain(KEY);
+    } finally {
+      await rm(logFile, { force: true });
     }
 
     // At Egma it rides one body per custody, sealed, and no address at all.
