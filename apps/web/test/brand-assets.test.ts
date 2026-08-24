@@ -12,8 +12,7 @@
  * A brand-asset migration exposed this gap: source could keep naming a deleted
  * image while component tests stayed green. This file is the guard that would
  * have reported the missing file. The public authentication Brand gives the
- * scan a real asset to hold; the signed-in shell intentionally starts with
- * project context and has no logo.
+ * scan a real asset to hold; the signed-in shell also uses the compact mark.
  *
  * It reads the source rather than a list, so an asset added tomorrow is
  * covered the day it is written, and it deliberately says nothing about which
@@ -96,7 +95,7 @@ describe("what the application asks the browser to fetch", () => {
 
   it("finds the brand asset the public authentication Brand draws", () => {
     // A guard that matches nothing passes for ever. The public Brand is where
-    // the logo belongs; the signed-in shell starts with project context.
+    // the full logo belongs; the signed-in shell uses the compact mark.
     const authentication = readFileSync(path.join(WEB, "app", "ui.tsx"), "utf8");
     expect(authentication).toContain("export function Brand()");
     const marks = [...authentication.matchAll(ASSET)]

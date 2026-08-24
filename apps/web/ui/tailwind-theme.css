@@ -196,10 +196,8 @@
    * one line in the same change.
    *
    * **A round *shape* is not a component corner and is not drawn from here.**
-   * An avatar is a circle and a radio button is a circle; both say
-   * `rounded-full`, which is Tailwind's own and untouched by this block. That
-   * is the whole exception, and it is written down so the next person does not
-   * read a circular avatar as a radius that escaped.
+   * A radio button stays circular because its shape distinguishes it from a
+   * checkbox. The account avatar is square with every other component.
    */
   --radius-sm: 0px;
   --radius-md: 0px;
