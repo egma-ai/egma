@@ -83,9 +83,12 @@ export {
  * the **one** place a measure is worked out: the metrics display reads through
  * it for simulation and production traces alike. A second implementation in a
  * query or page would be a second answer about one conversation with nothing
- * stored to settle it against.
+ * stored to settle it against. The shared reducers travel with the measures so
+ * a display and a grader cannot silently do different arithmetic over the same
+ * series.
  */
 export {
+  arithmeticMeanOf,
   everySpanIn,
   measuresFromSpans,
   worstSampleOf,

@@ -237,13 +237,13 @@ describe("reducing the measurements to one number", () => {
     /\bsamples\s*\.\s*(reduce|sort|toSorted)\b|\bsamples\s*\[|Math\.(max|min)\s*\(\s*\.\.\.[\w.]*samples/u;
 
   /**
-   * **Nobody, and the module least of all.** `worstSampleOf` walks the series
-   * once and keeps the largest, so it matches none of these idioms either —
-   * which is why the answer is an empty list rather than the module's name. The
-   * positive half is the case below: the reduction is one exported function.
+   * **Nobody, and the module least of all.** The shared reducers walk the series
+   * once, so they match none of these idioms either — which is why the answer is
+   * an empty list rather than the module's name. The positive half is the case
+   * below: every allowed reduction is an exported function in the one module.
    *
    * The module is filtered out rather than asserted absent, so that rewriting
-   * `worstSampleOf` as a `reduce` one day is an ordinary refactor and not a
+   * a shared reducer as a `reduce` one day is an ordinary refactor and not a
    * failing build.
    */
   it("happens nowhere by hand", async () => {
@@ -253,9 +253,12 @@ describe("reducing the measurements to one number", () => {
     expect(byHand).toEqual([]);
   });
 
-  it("is one function, defined once", async () => {
+  it("keeps every allowed reduction in the one module", async () => {
     expect(
       await filesMatching(/export function worstSampleOf\b/u),
+    ).toEqual([THE_MODULE]);
+    expect(
+      await filesMatching(/export function arithmeticMeanOf\b/u),
     ).toEqual([THE_MODULE]);
   });
 

@@ -269,6 +269,31 @@ export function worstSampleOf(measured: MeasuredFromSpans): Sample | undefined {
 }
 
 /**
+ * The arithmetic mean of a measure's samples.
+ *
+ * Response latency is the first grader whose immutable definition asks for a
+ * mean rather than the strict worst sample shown by the metric display. The
+ * reduction still lives here so the grader does not become a second reader of
+ * the measurement series.
+ *
+ * `undefined` means the series is empty or contains a value that cannot be a
+ * measurement. A grader must report that as an error, never turn it into zero.
+ */
+export function arithmeticMeanOf(
+  measured: MeasuredFromSpans,
+): number | undefined {
+  let total = 0;
+  let count = 0;
+  for (const sample of measured.samples) {
+    if (!Number.isFinite(sample.value) || sample.value < 0) return undefined;
+    total += sample.value;
+    count += 1;
+  }
+  if (count === 0 || !Number.isFinite(total)) return undefined;
+  return total / count;
+}
+
+/**
  * The timing spans this conversation holds, grouped by the measure they are
  * named for and ordered by when each was taken.
  *

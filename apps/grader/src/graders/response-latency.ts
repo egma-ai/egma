@@ -1,4 +1,7 @@
-import { MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER } from "@egma/db";
+import {
+  arithmeticMeanOf,
+  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+} from "@egma/db";
 
 import type { Execution, GraderResult } from "./contract.ts";
 
@@ -30,11 +33,10 @@ export function executeResponseLatency(execution: Execution): GraderResult {
   const measured = execution.conversation.measures.find(
     (one) => one.measure === RESPONSE_LATENCY_MEASURE,
   );
-  const samples = measured?.samples.map((sample) => sample.value) ?? [];
-  if (
-    samples.length === 0 ||
-    samples.some((sample) => !Number.isFinite(sample) || sample < 0)
-  ) {
+  const average = measured === undefined
+    ? undefined
+    : arithmeticMeanOf(measured);
+  if (average === undefined) {
     return {
       score: null,
       details: {
@@ -43,8 +45,6 @@ export function executeResponseLatency(execution: Execution): GraderResult {
     };
   }
 
-  const average = samples.reduce((sum, sample) => sum + sample, 0) /
-    samples.length;
   const passed = average <= maximum;
   return {
     score: passed ? 1 : 0,
