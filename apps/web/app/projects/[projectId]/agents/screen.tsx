@@ -212,22 +212,19 @@ export function AgentsScreen({
         primary: true,
         width: "260px",
         /*
-         * **The agent's name is plain text until a pointer is on it**, which
-         * is what `6ZJ-0` draws: only the connections are underlined, because
-         * the row itself is the way into the agent and the underline is what
-         * tells the two apart. The shared table underlines every cell link, so
-         * this is said here rather than there — the connection links in the
-         * next column keep it, and so do the connection names on the agent
-         * page.
+         * **The agent's name is plain text and nothing else**, which is what
+         * `6ZJ-0` draws. This list is the one agent screen: everything a
+         * person came here to read is already on the row, so the name names
+         * the agent rather than promising a second page behind it. Only the
+         * connections in the next column are links, and now the underline
+         * means one thing on this row — press this and a connection opens.
+         *
+         * **The agent page is still reached**, from the row's actions menu
+         * (Open agent) and from the connect flow, which lands on it. Both are
+         * deliberate steps rather than a whole-name target a pointer finds by
+         * accident.
          */
-        cell: (agent) => (
-          <Link
-            className="text-foreground no-underline pointer-hover:underline"
-            href={projectPath(projectId, "agents", agent.id)}
-          >
-            {agent.name}
-          </Link>
-        ),
+        cell: (agent) => agent.name,
       },
       {
         /*
@@ -394,7 +391,6 @@ export function AgentsScreen({
           columns={columns()}
           rows={items}
           keyOf={(agent) => agent.id}
-          stretchPrimaryLink
           {...(cursor === null
             ? {}
             : {
