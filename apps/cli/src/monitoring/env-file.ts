@@ -138,9 +138,15 @@ function refusalFor(answer: Exclude<IgnoreAnswer, "ignored">): string {
   );
 }
 
-/** One variable's line in a file, wherever the file writes it. */
+/**
+ * One variable's line in a file, in either form it is written in.
+ *
+ * `export NAME=` matters as much as `NAME=`: a `.env` that is sourced by a
+ * shell rather than read by a loader is written that way, and rewriting one
+ * form as the other would leave a file whose values stop reaching the process.
+ */
 function assignmentOf(variable: string): RegExp {
-  return new RegExp(`^\\s*(?:export\\s+)?${variable}\\s*=`, "u");
+  return new RegExp(`^(\\s*)(export\\s+)?${variable}\\s*=`, "u");
 }
 
 /**
@@ -192,8 +198,13 @@ export async function writeEnvFile(
       kept.push(line);
       continue;
     }
-    // In place, so the developer's own ordering survives a rotation.
-    kept.push(wanted[at] as string);
+    // In place, and in the form the line was already written in, so the
+    // developer's own ordering and their own loader both survive a rotation.
+    // A file that somehow holds two lines for one variable keeps two: they are
+    // now the same answer, and deleting a line nobody asked Egma to delete is
+    // worse than leaving a harmless repeat.
+    const shape = assignmentOf(variables[at] as string).exec(line);
+    kept.push(`${shape?.[1] ?? ""}${shape?.[2] ?? ""}${wanted[at] as string}`);
     replaced = true;
   }
   for (const [at, line] of wanted.entries()) {
@@ -204,7 +215,14 @@ export async function writeEnvFile(
   }
 
   try {
-    await writeFile(file, `${kept.join("\n")}\n`, "utf8");
+    /*
+     * Readable only by the developer, and only when Egma is the one creating
+     * the file. `mode` applies to a file this call brings into existence and is
+     * ignored for one that is already there — which is the whole of what is
+     * wanted: a live key Egma writes down lands private, and a `.env` the
+     * repository already had keeps whatever mode its owner gave it.
+     */
+    await writeFile(file, `${kept.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
   } catch (cause) {
     return {
       kind: "refused",

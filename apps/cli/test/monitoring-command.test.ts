@@ -13,7 +13,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -325,6 +325,39 @@ describe("egma monitoring enable, on LiveKit", () => {
     expect(env[0]).toBe("OTHER=kept");
     expect(env.filter((line) => line.startsWith("EGMA_URL="))).toHaveLength(1);
     expect(env[2]).toBe(`EGMA_API_KEY=${platform.keys.minted[1]?.secret ?? ""}`);
+  });
+
+  /**
+   * A `.env` a shell sources is written `export NAME=…`, and a rotation that
+   * quietly dropped the word would leave a file whose values stop reaching the
+   * process. The line keeps the shape it already had — and a file Egma creates
+   * lands readable only by its owner, because it holds a live credential.
+   */
+  it("keeps the form a line was already written in, and creates the file private", async () => {
+    await gitRepository([ENV_FILE_NAME]);
+    await writeFile(
+      path.join(workspace.dir, ENV_FILE_NAME),
+      "export EGMA_URL=https://stale.example\n",
+      "utf8",
+    );
+
+    const first = await egma(["monitoring", "enable", "--platform", "livekit"]);
+    expect(first.code).toBe(MONITORING_EXIT.done);
+
+    const env = (await readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8"))
+      .trimEnd()
+      .split("\n");
+    expect(env[0]).toBe(`export EGMA_URL=${platform.url}`);
+    expect(env[1]).toBe(`EGMA_API_KEY=${platform.keys.minted[0]?.secret ?? ""}`);
+  });
+
+  it("creates a new environment file readable only by its owner", async () => {
+    await gitRepository([ENV_FILE_NAME]);
+
+    await egma(["monitoring", "enable", "--platform", "livekit"]);
+
+    const mode = (await stat(path.join(workspace.dir, ENV_FILE_NAME))).mode & 0o777;
+    expect(mode & 0o077).toBe(0);
   });
 
   it("refuses to write the file Git does not ignore, and prints the lines", async () => {

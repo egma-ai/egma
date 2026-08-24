@@ -184,7 +184,13 @@ async function theRepositoryAgent(
 ): Promise<
   | { readonly kind: "agent"; readonly agent: AgentMonitoring }
   | { readonly kind: "none"; readonly name: string | null }
-  | { readonly kind: "refused"; readonly code: number; readonly reason: string }
+  | {
+      readonly kind: "refused";
+      readonly code: number;
+      /** The word the `status:` line says, so each refusal is its own. */
+      readonly status: string;
+      readonly reason: string;
+    }
 > {
   const config = await readConfig(folderPathsIn(options.cwd).config).catch(
     () => null,
@@ -203,6 +209,7 @@ async function theRepositoryAgent(
       return {
         kind: "refused",
         code: MONITORING_EXIT.nothingHere,
+        status: "no-agent",
         reason:
           `Egma has no agent ${agentId} in this project, and that is the agent ` +
           "this repository names. Check which project this machine is signed in to.",
@@ -211,6 +218,7 @@ async function theRepositoryAgent(
       return {
         kind: "refused",
         code: MONITORING_EXIT.notSignedIn,
+        status: "not-signed-in",
         reason: `This machine holds no Egma key for ${options.access.url}. Run egma login, then try again.`,
       };
     case "refused":
@@ -218,6 +226,7 @@ async function theRepositoryAgent(
       return {
         kind: "refused",
         code: MONITORING_EXIT.unreachable,
+        status: "failed",
         reason: read.reason,
       };
   }
@@ -253,32 +262,34 @@ export async function runMonitoringCommand(
 
   const held = await theRepositoryAgent(options, platform);
   if (held.kind === "refused") {
-    options.out("status: refused");
+    options.out(`status: ${held.status}`);
     options.out(`reason: ${held.reason}`);
     options.fail(held.reason);
     return held.code;
   }
 
-  // Reading and stopping both need an agent to act on. Starting does not: it
-  // can write the row it is about, which is what onboarding a repository that
-  // only ever pushes looks like.
-  if (held.kind === "none" && options.action !== "enable") {
-    options.out("status: no-agent");
-    options.fail(NO_AGENT_HERE);
-    return MONITORING_EXIT.nothingHere;
-  }
-
   const agent = held.kind === "agent" ? held.agent : null;
   if (agent !== null) options.out(`agent_name: ${agent.agentName}`);
 
+  // Reading and stopping both need an agent to act on. Starting does not: it
+  // can write the row it is about, which is what onboarding a repository that
+  // only ever pushes looks like.
+  const nothingHere = (): number => {
+    options.out("status: no-agent");
+    options.fail(NO_AGENT_HERE);
+    return MONITORING_EXIT.nothingHere;
+  };
+
   if (options.action === "status") {
-    sayMonitoring(options.out, agent as AgentMonitoring);
+    if (agent === null) return nothingHere();
+    sayMonitoring(options.out, agent);
     options.out("status: read");
     return MONITORING_EXIT.done;
   }
 
   if (options.action === "disable") {
-    const stopped = await stopMonitoring((agent as AgentMonitoring).agentId, platform);
+    if (agent === null) return nothingHere();
+    const stopped = await stopMonitoring(agent.agentId, platform);
     switch (stopped.kind) {
       case "stopped":
         // Everything stored stays stored: the transcripts, the binding and the
@@ -287,9 +298,7 @@ export async function runMonitoringCommand(
         options.out("status: disabled");
         return MONITORING_EXIT.done;
       case "not-found":
-        options.out("status: no-agent");
-        options.fail(NO_AGENT_HERE);
-        return MONITORING_EXIT.nothingHere;
+        return nothingHere();
       case "not-authenticated":
         options.out("status: not-signed-in");
         options.fail(
