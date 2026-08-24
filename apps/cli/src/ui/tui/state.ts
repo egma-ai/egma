@@ -22,6 +22,7 @@ import type {
   ConnectionAsk,
   DrivenAgent,
   GoalAsk,
+  MonitoringAgentOffer,
   PlatformNotice,
 } from "../wizard-ui.ts";
 
@@ -61,6 +62,12 @@ export type WizardState = {
   readonly keyAsk: KeyAsk | null;
   /** The agents a choice is open between, or `null` when none is. */
   readonly agentChoices: readonly RetellAgent[] | null;
+  /** The account's agents Egma could watch, or `null` when none is offered. */
+  readonly monitoringAgentChoices: readonly MonitoringAgentOffer[] | null;
+  /** What Egma is waiting to be allowed to write down, or `null`. */
+  readonly envConsent: string | null;
+  /** The developer has read that line and said write it. */
+  readonly envAgreed: boolean;
   /** The provider-safe ways currently offered. */
   readonly reachOptions: readonly Reach[] | null;
   /** The numbers a choice is open between, or `null` when none is. */
@@ -106,6 +113,9 @@ export function emptyState(): WizardState {
     loginCopied: false,
     keyAsk: null,
     agentChoices: null,
+    monitoringAgentChoices: null,
+    envConsent: null,
+    envAgreed: false,
     reachOptions: null,
     numberChoices: null,
     connectionAsk: null,

@@ -54,12 +54,24 @@ export type SkillOutcome =
 /**
  * The path to watching production traffic that needs no terminal, said once.
  *
- * Two endings point at it and they must not drift: the machine with no coding
- * agent on it, and a developer who asked for monitoring before the wizard could
- * do it. Both are told the same thing because it is the same thing.
+ * The machine with no coding agent on it is told this, because the wizard's own
+ * monitoring lane needs a coding agent on LiveKit and a terminal on both.
  */
 export const WEB_MONITORING_POINTER =
   "To watch production traffic, open Egma in your browser and start monitoring from its Monitoring page.";
+
+/**
+ * Where the conversations show up, said the one way.
+ *
+ * The web is iterating, so the pointer names Egma and its Monitoring page and
+ * never a screen's address — a line naming a path is a line that goes stale
+ * without anybody editing it.
+ */
+export function monitoringPointer(platformUrl: string | null): string {
+  return platformUrl === null
+    ? "Open Egma in your browser and watch them arrive on its Monitoring page."
+    : `Open Egma at ${platformUrl} and watch them arrive on its Monitoring page.`;
+}
 
 /** Why the wizard stopped, and what it can honestly say about it. */
 export type ExitReport =
@@ -93,6 +105,64 @@ export type ExitReport =
       readonly total: number;
       /** What became of the skill offer, so skipping is never silent. */
       readonly skill: SkillOutcome;
+      /**
+       * Which Egma to open for the production traffic this sitting also set up,
+       * or `null` when it set none up.
+       *
+       * The both lane ends with two promises kept, and a last screen that named
+       * only one of them would leave the developer to remember the other.
+       */
+      readonly monitoringUrl?: string | null | undefined;
+    }
+  /**
+   * Egma is watching a platform agent's production calls.
+   *
+   * `arrived` is proof rather than a promise: the flow waits briefly for the
+   * first imported conversation, and an account with nothing to import ends
+   * exactly as well — with a sentence that says so rather than one that implies
+   * something went wrong.
+   */
+  | {
+      readonly kind: "monitoring-started";
+      readonly agentName: string;
+      readonly arrived: boolean;
+      /** Whether this walk also wrote the agent's row into the roster. */
+      readonly registered: boolean;
+      readonly platformUrl: string | null;
+    }
+  /**
+   * A LiveKit worker is wired to push its production evidence.
+   *
+   * Nothing here waits: push is observed, never declared, so there is no switch
+   * to read back and no arrival to prove. The two lines are the deliverable and
+   * they are printed whether the `.env` write happened or not — a deployment
+   * needs them either way.
+   */
+  | {
+      readonly kind: "monitoring-wired";
+      readonly agentName: string;
+      /** The file the lines landed in, or `null` when Egma would not write it. */
+      readonly envFile: string | null;
+      /** Why Egma did not write it, when it did not. */
+      readonly envRefusal: string | null;
+      /** The two lines, for wherever this worker really runs. */
+      readonly lines: readonly string[];
+      /** Whether the coding agent's edit was found in the worker. */
+      readonly wired: boolean;
+      readonly platformUrl: string | null;
+    }
+  /**
+   * The platform refused to start watching, and said which rule refused it.
+   *
+   * A nonzero ending on purpose: the monitoring lane's deliverable is that
+   * watching is really on, so a walk that did not manage it must not answer a
+   * shell the way a walk that did answers. Two sentences survive — Egma's own
+   * about what to do, and the platform's own for whatever is reading.
+   */
+  | {
+      readonly kind: "monitoring-refused";
+      /** Egma's own sentence, then the platform's. */
+      readonly lines: readonly string[];
     }
   /**
    * The developer read the list and did not run them. Nothing was uploaded and
@@ -116,20 +186,6 @@ export type ExitReport =
     }
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
-  /**
-   * The developer asked egma to watch production traffic, and the wizard
-   * cannot yet.
-   *
-   * A successful ending rather than a failure: nothing was created, nothing is
-   * half-done, and the flow that can do it today is named. It is temporary —
-   * the monitoring lane replaces it — and it is honest while it stands.
-   */
-  | {
-      readonly kind: "monitoring-in-the-web";
-      readonly goal: Exclude<WizardGoal, "testing">;
-      /** Which egma to open, or `null` when this walk signed in to none. */
-      readonly platformUrl: string | null;
-    }
   /**
    * The repository has an egma folder already, so it is not a new one.
    *
@@ -272,21 +328,25 @@ export function buildExitLine(report: ExitReport): string {
         "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead. " +
         WEB_MONITORING_POINTER
       );
-    case "monitoring-in-the-web": {
-      const asked =
-        report.goal === "both"
-          ? "Egma cannot yet set up testing and production monitoring together from the terminal, so it set up neither."
-          : "Egma cannot yet set up production monitoring from the terminal, so it set nothing up.";
-      const where =
-        report.platformUrl === null
-          ? WEB_MONITORING_POINTER
-          : `To watch production traffic, open Egma at ${report.platformUrl} and start monitoring from its Monitoring page.`;
-      const again =
-        report.goal === "both"
-          ? " Run egma again and choose testing for the rest."
-          : " Run egma again and choose testing whenever you want tests as well.";
-      return `${asked} ${where}${again}`;
+    case "monitoring-started": {
+      const watching = `✓ Egma is watching ${report.agentName}'s production calls.`;
+      const what = report.arrived
+        ? "The first conversation has already arrived."
+        : "Nothing has arrived yet — Egma keeps asking, and conversations appear as they finish.";
+      return `${watching} ${what} ${monitoringPointer(report.platformUrl)}`;
     }
+    case "monitoring-wired": {
+      const wired = report.wired
+        ? `✓ ${report.agentName} pushes its production evidence to Egma.`
+        : `${report.agentName} is on Egma, and its worker still needs the monitoring line added by hand.`;
+      const where =
+        report.envFile === null
+          ? "Egma wrote no environment file, so put the lines below wherever this worker gets its environment."
+          : `Egma put the two lines in ${report.envFile}, and they are below for wherever this worker really runs.`;
+      return `${wired} ${where} ${monitoringPointer(report.platformUrl)}`;
+    }
+    case "monitoring-refused":
+      return `Egma did not start watching: ${oneLine(report.lines[0] ?? "")}`;
     case "already-onboarded": {
       const redo = `Delete or rename ${report.folder} and run egma again to redo setup`;
       return (
@@ -342,6 +402,30 @@ export function exitLines(report: ExitReport): readonly string[] {
       ? [buildExitLine(report)]
       : [buildExitLine(report), "", ...block];
   }
+  /*
+   * The two lines a monitored worker exports with, each alone on its own line.
+   *
+   * They carry a live credential and a developer copies them into a deployment
+   * environment, so they are printed after the screen comes down — where a
+   * terminal's triple-click takes one whole — rather than only on a screen the
+   * terminal throws away.
+   */
+  if (report.kind === "monitoring-wired") {
+    return [
+      buildExitLine(report),
+      "",
+      ...report.lines,
+      ...(report.envRefusal === null ? [] : ["", report.envRefusal]),
+    ];
+  }
+  // Egma's own sentence is the line; the platform's own rides under it, whole,
+  // for whatever is reading rather than looking.
+  if (report.kind === "monitoring-refused") {
+    const relayed = report.lines.slice(1);
+    return relayed.length === 0
+      ? [buildExitLine(report)]
+      : [buildExitLine(report), "", ...relayed];
+  }
   if (report.kind !== "run-started") return [buildExitLine(report)];
   return [
     buildExitLine(report),
@@ -350,6 +434,9 @@ export function exitLines(report: ExitReport): readonly string[] {
     // browser they approved this machine in is already signed in — which is
     // exactly why no token has to ride the address, and none ever does.
     report.resultsUrl,
+    ...(report.monitoringUrl == null
+      ? []
+      : ["", monitoringPointer(report.monitoringUrl)]),
     "",
     TESTS_ARE_CODE,
     HAND_YOUR_AGENT,

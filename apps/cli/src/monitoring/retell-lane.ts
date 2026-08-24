@@ -70,6 +70,8 @@ export type WatchOutcome =
       readonly kind: "watching";
       readonly agentId: string;
       readonly agentName: string;
+      /** Which project that agent row is in, for whatever reads it next. */
+      readonly projectId: string;
       readonly platformAgentId: string;
       /** Whether this commit brought the agent row into existence. */
       readonly created: boolean;
@@ -243,16 +245,17 @@ export async function watchRetellAgent(
   );
   options.say(WAITING_LINE);
 
-  const arrived = await untilSomethingArrives(options, watching.agentId);
+  const waited = await untilSomethingArrives(options, watching.agentId);
   if (options.signal.aborted) return { kind: "interrupted" };
 
   return {
     kind: "watching",
     agentId: watching.agentId,
     agentName: watching.agentName,
+    projectId: waited.projectId,
     platformAgentId: watching.platformAgentId,
     created: watching.created,
-    arrived,
+    arrived: waited.arrived,
   };
 }
 
@@ -267,18 +270,22 @@ export async function watchRetellAgent(
 async function untilSomethingArrives(
   options: WatchOptions,
   agentId: string,
-): Promise<boolean> {
+): Promise<{ readonly arrived: boolean; readonly projectId: string }> {
   const waitMs = options.waitMs ?? WAIT_MS;
   const pollMs = options.pollMs ?? POLL_MS;
   const until = Date.now() + waitMs;
+  // Read from the same answer the wait polls, because the first ask has it and
+  // a second request for one field would be a second thing to keep in step.
+  let projectId = "";
 
   for (;;) {
     const read = await readAgentMonitoring(agentId, options.platform);
-    if (options.signal.aborted) return false;
-    if (read.kind !== "monitoring") return false;
-    if (read.monitoring.lastReceivedAt !== null) return true;
-    if (Date.now() + pollMs > until) return false;
+    if (options.signal.aborted) return { arrived: false, projectId };
+    if (read.kind !== "monitoring") return { arrived: false, projectId };
+    projectId = read.monitoring.projectId;
+    if (read.monitoring.lastReceivedAt !== null) return { arrived: true, projectId };
+    if (Date.now() + pollMs > until) return { arrived: false, projectId };
     await pause(options, pollMs);
-    if (options.signal.aborted) return false;
+    if (options.signal.aborted) return { arrived: false, projectId };
   }
 }

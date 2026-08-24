@@ -268,6 +268,16 @@ export type ConnectOptions = {
    * platform with nothing in it, and must leave the repository the same way.
    */
   readonly beforeRegistering?: () => Promise<void>;
+  /**
+   * What Egma should call the agent, when the sitting has already settled it.
+   *
+   * One name threaded through a sitting that does monitoring and testing both:
+   * the row monitoring created holds this name, so registering under it finds
+   * that row and adds the connection to it rather than writing a second agent
+   * for one voice agent. Omitted, the Retell agent's own name is taken, which
+   * is what a testing-only walk does.
+   */
+  readonly agentName?: string | undefined;
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: RetellReach | undefined;
   readonly fetchImpl?: RegisterOptions["fetchImpl"];
@@ -516,7 +526,7 @@ async function register(
    */
   numbersOfTheAgent: () => Promise<readonly string[] | null>,
 ): Promise<Written | ConnectOutcome> {
-  const wanted = defaultAgentName(config.name);
+  const wanted = options.agentName?.trim() || defaultAgentName(config.name);
   const platform: RegisterOptions = {
     url: options.platform.url,
     key: options.platform.key,

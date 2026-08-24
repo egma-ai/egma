@@ -67,6 +67,14 @@ export type RunStepOptions = {
   /** The developer's home, for the global scope. Passed in, never assumed. */
   readonly home: string;
   readonly signal: AbortSignal;
+  /**
+   * Which Egma this sitting also set production monitoring up on, or omitted
+   * when it set none up.
+   *
+   * A sitting that did both ends with two promises kept, and a last screen that
+   * named only the graded run would leave the developer to remember the other.
+   */
+  readonly monitoringUrl?: string | undefined;
   /** How long between asks while following. egma's own default when omitted. */
   readonly everyMs?: number;
 };
@@ -228,6 +236,9 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
       total: stopped.total,
       // Never asked, so there is no answer to report.
       skill: { kind: "not-offered" },
+      ...(options.monitoringUrl === undefined
+        ? {}
+        : { monitoringUrl: options.monitoringUrl }),
     };
   }
 
@@ -254,5 +265,8 @@ export async function runStep(options: RunStepOptions): Promise<ExitReport> {
     graded: tally.graded,
     total: tally.total,
     skill,
+    ...(options.monitoringUrl === undefined
+      ? {}
+      : { monitoringUrl: options.monitoringUrl }),
   };
 }

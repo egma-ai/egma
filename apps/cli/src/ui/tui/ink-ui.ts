@@ -22,6 +22,7 @@ import type {
   DrivenAgent,
   GateId,
   GoalAsk,
+  MonitoringAgentOffer,
   PlatformNotice,
   WizardUI,
 } from "../wizard-ui.ts";
@@ -79,6 +80,14 @@ export class InkUI implements WizardUI {
 
   setAgentChoices(agents: readonly RetellAgent[] | null): void {
     this.store.setAgentChoices(agents);
+  }
+
+  setMonitoringAgentChoices(agents: readonly MonitoringAgentOffer[] | null): void {
+    this.store.setMonitoringAgentChoices(agents);
+  }
+
+  setEnvConsent(line: string | null): void {
+    this.store.setEnvConsent(line);
   }
 
   setReachOffer(offered: readonly Reach[] | null): void {

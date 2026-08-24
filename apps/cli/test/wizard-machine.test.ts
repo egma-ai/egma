@@ -128,31 +128,114 @@ describe("the goal, per platform", () => {
   });
 
   /**
-   * Watching production traffic is not built into the terminal yet, and the
-   * both lane starts with it. Both therefore stop at one honest terminal phase
-   * rather than running half of what the answer promised.
+   * One state for setting monitoring up, on both platforms.
+   *
+   * The work inside it forks — Retell pastes a key and starts watching, LiveKit
+   * has its worker edited and its key minted — but what follows is decided by
+   * the goal and never by the platform, which is why there is one state and not
+   * two.
    */
   it.each([
     { platform: "retell", goal: "monitoring" },
     { platform: "retell", goal: "both" },
     { platform: "livekit", goal: "monitoring" },
     { platform: "livekit", goal: "both" },
-  ] as const)("ends at monitoring-elsewhere for $goal on $platform", ({ platform, goal }) => {
+  ] as const)("sets monitoring up first for $goal on $platform", ({ platform, goal }) => {
     expect(move(askedTheGoal(platform), { type: "goal-chosen", goal })).toEqual({
-      phase: "monitoring-elsewhere",
+      phase: "monitoring-setup",
       platform,
       goal,
       codingAgentId: "claude",
     });
   });
 
-  it("does not leave the monitoring terminal", () => {
-    const state = move(askedTheGoal("retell"), { type: "goal-chosen", goal: "monitoring" });
+  /**
+   * Monitoring alone creates no connection, no suite and no tests, so the walk
+   * is over the moment watching is on.
+   */
+  it.each(["retell", "livekit"] as const)(
+    "ends the walk on %s when monitoring is the whole job",
+    (platform) => {
+      const state = move(askedTheGoal(platform), {
+        type: "goal-chosen",
+        goal: "monitoring",
+      });
+
+      expect(move(state, { type: "monitoring-ready" })).toEqual({
+        phase: "complete",
+        platform,
+        goal: "monitoring",
+        testCount: 0,
+        codingAgentId: "claude",
+      });
+    },
+  );
+
+  /** Both is monitoring first and then the whole testing lane, in one sitting. */
+  it("runs monitoring and then the whole testing lane on Retell", () => {
+    const state = move(askedTheGoal("retell"), { type: "goal-chosen", goal: "both" });
+
+    expect(
+      walk(state, [
+        { type: "monitoring-ready" },
+        { type: "connection-ready" },
+        { type: "tests-ready", count: 12 },
+        { type: "review-approved", count: 12 },
+        { type: "wizard-completed" },
+      ]),
+    ).toEqual(["connection-setup", "test-writing", "review", "run", "complete"]);
+  });
+
+  it("runs monitoring and then the whole testing lane on LiveKit", () => {
+    const state = move(askedTheGoal("livekit"), { type: "goal-chosen", goal: "both" });
+
+    expect(
+      walk(state, [
+        { type: "monitoring-ready" },
+        { type: "connection-ready" },
+        { type: "tests-ready", count: 12 },
+        { type: "mocks-ready" },
+        { type: "review-approved", count: 12 },
+        { type: "wizard-completed" },
+      ]),
+    ).toEqual([
+      "connection-setup",
+      "test-writing",
+      "mock-authoring",
+      "review",
+      "run",
+      "complete",
+    ]);
+  });
+
+  it("carries the goal through the both lane to the last screen", () => {
+    let state = move(askedTheGoal("retell"), { type: "goal-chosen", goal: "both" });
+    for (const event of [
+      { type: "monitoring-ready" },
+      { type: "connection-ready" },
+      { type: "tests-ready", count: 2 },
+      { type: "review-approved", count: 2 },
+      { type: "wizard-completed" },
+    ] as const) {
+      state = move(state, event);
+    }
+
+    expect(state).toEqual({
+      phase: "complete",
+      platform: "retell",
+      goal: "both",
+      testCount: 2,
+      codingAgentId: "claude",
+    });
+  });
+
+  it("will not start connection setup before monitoring is set up", () => {
+    const state = move(askedTheGoal("retell"), { type: "goal-chosen", goal: "both" });
     const result = transitionWizard(state, { type: "connection-ready" });
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected an invalid transition");
-    expect(result.error.phase).toBe("monitoring-elsewhere");
+    expect(result.error.phase).toBe("monitoring-setup");
   });
 
   it("offers exactly three answers, and no fourth", () => {

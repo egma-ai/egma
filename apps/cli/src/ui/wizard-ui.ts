@@ -11,6 +11,7 @@
  */
 
 import type { LoginPrompt } from "../platform/login.ts";
+import type { DiscoveredAgent } from "../platform/monitoring.ts";
 import type { RetellAgent, RetellNumber } from "../retell/client.ts";
 import type { KeyAsk, Reach } from "../retell/connect.ts";
 import type { RunView } from "../run/view.ts";
@@ -32,7 +33,7 @@ import type {
  * question for the same reason `begin` is: what is being given is agreement,
  * and a developer who does not agree closes the wizard instead of answering.
  */
-export type GateId = "begin" | "run-tests";
+export type GateId = "begin" | "run-tests" | "write-env";
 
 export type ConnectionAskId = `connection:${string}`;
 
@@ -89,6 +90,15 @@ export type AskId =
   | "retell-key"
   | "retell-agent"
   /**
+   * Which agent on the account Egma should watch.
+   *
+   * A different question from `retell-agent`, which asks which agent to
+   * *test*: this list carries what Egma already knows about each of them —
+   * whether it is registered here, and whether something already watches it —
+   * and picking an unregistered one registers it.
+   */
+  | "monitoring-agent"
+  /**
    * Text or phone: the one question whose answer decides what egma creates.
    *
    * A question and never a gate, and one egma never answers on the developer's
@@ -123,6 +133,16 @@ export type GoalAsk = {
   /** The answers on offer, in the order they are shown. */
   readonly goals: readonly WizardGoal[];
 };
+
+/**
+ * The account's agents, as the monitoring picker offers them.
+ *
+ * `registeredAgentName` and `pullProductionCalls` are the whole reason this is
+ * a picker rather than a list: a developer choosing which agent to watch is
+ * choosing among agents Egma may already know, and one that is already watched
+ * is a choice they want to see coming.
+ */
+export type MonitoringAgentOffer = DiscoveredAgent;
 
 /** What each answer to the goal question means, in one line each. */
 export const GOAL_LINES: Readonly<Record<WizardGoal, string>> = {
@@ -218,6 +238,26 @@ export interface WizardUI {
    * characters hidden or printed as two plain lines is the UI's business.
    */
   setKeyAsk(ask: KeyAsk | null): void;
+
+  /**
+   * The account's agents Egma could watch, while a choice among them is open,
+   * or `null` when there is no choice to make.
+   *
+   * Set only when there is more than one, exactly as the testing picker is.
+   * The list is Egma's own server-side discovery, which is the only one that
+   * knows which of these this project already registers.
+   */
+  setMonitoringAgentChoices(agents: readonly MonitoringAgentOffer[] | null): void;
+
+  /**
+   * What Egma is about to write into the repository, while it is waiting to be
+   * allowed to, or `null` when it is not waiting.
+   *
+   * A gate and not a question, because what is being given is agreement: a
+   * developer who does not want a live credential written into their working
+   * tree closes the wizard, and the lines are printed for them either way.
+   */
+  setEnvConsent(line: string | null): void;
 
   /**
    * The agents found on the provider's account, while a choice among them is

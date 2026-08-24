@@ -23,6 +23,8 @@ export type ScreenId =
   | "connection-field"
   | "retell-key"
   | "retell-agent"
+  | "monitoring-agent"
+  | "env-consent"
   | "reach"
   | "phone-number"
   | "existing-tests"

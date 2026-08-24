@@ -41,6 +41,7 @@ import {
   type DrivenAgent,
   type GateId,
   type GoalAsk,
+  type MonitoringAgentOffer,
   type PlatformNotice,
   type WizardUI,
 } from "./wizard-ui.ts";
@@ -61,6 +62,10 @@ export type HeadlessRecord = {
   keyAsks: KeyAsk[];
   /** The agents a choice was offered between, when one was. */
   agentChoices: RetellAgent[];
+  /** The account's agents a monitoring choice was offered between. */
+  monitoringAgentChoices: MonitoringAgentOffer[];
+  /** Every consent line the flow put up before writing a credential down. */
+  envConsents: string[];
   /** Whether the choice between text and phone was ever put to anybody. */
   reachOffered: boolean;
   /** The provider-safe options shown at that choice. */
@@ -103,6 +108,8 @@ export class HeadlessUI implements WizardUI {
     goalAsk: null,
     keyAsks: [],
     agentChoices: [],
+    monitoringAgentChoices: [],
+    envConsents: [],
     reachOffered: false,
     reachOptions: [],
     numberChoices: [],
@@ -216,6 +223,37 @@ export class HeadlessUI implements WizardUI {
     for (const agent of agents) {
       this.write(`retell_agent: ${agent.id} ${agent.name}`.trimEnd());
     }
+  }
+
+  /**
+   * The account's agents, printed with what Egma already knows about each.
+   *
+   * Printed even though nobody is here to answer, so the output says which
+   * agents were on offer and which of them Egma was already watching.
+   */
+  setMonitoringAgentChoices(agents: readonly MonitoringAgentOffer[] | null): void {
+    if (agents === null) return;
+    this.record.monitoringAgentChoices = [...agents];
+    for (const agent of agents) {
+      this.write(
+        `monitoring_agent: ${agent.platformAgentId} ${agent.name} ` +
+          `${agent.registeredAgentName ?? "unregistered"} ` +
+          `${agent.pullProductionCalls ? "watched" : "unwatched"}`,
+      );
+    }
+  }
+
+  /**
+   * The consent line, printed and then agreed to.
+   *
+   * Consent can be given in advance, and a run with nobody watching was given
+   * it in the command — so the line is on the record and the gate opens, which
+   * is what every other gate here does.
+   */
+  setEnvConsent(line: string | null): void {
+    if (line === null) return;
+    this.record.envConsents.push(line);
+    this.write(line);
   }
 
   /**

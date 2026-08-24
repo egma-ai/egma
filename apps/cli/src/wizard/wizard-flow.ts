@@ -9,12 +9,16 @@
  * task, dispatched to the developer's own coding agent, with every action it
  * takes shown as it happens.
  *
- * Two things end the walk before any of that. A repository that already has an
+ * The goal decides what the walk does. Testing is the lane above. Monitoring
+ * runs the monitoring step and ends there — no connection, no suite, no tests.
+ * Both runs monitoring first, says so, and carries one pasted key and one agent
+ * name into the testing lane, so a sitting that does both asks every shared
+ * question once and leaves one agent row behind rather than two.
+ *
+ * One thing ends the walk before any of it: a repository that already has an
  * egma folder is refused where it stands, because the wizard onboards new
  * repositories and a second setup would half-run into somebody's committed
- * files. And an answer to the goal question that asks for production traffic to
- * be watched creates nothing at all for now: that lane is not built into the
- * terminal yet, and the flow that can do it today is named instead.
+ * files.
  *
  * The last step is the only one that does not end when it is finished. It ends
  * when the developer has seen a verdict, which is the whole point of the ten
@@ -44,6 +48,10 @@ import type { ConnectOptions } from "../retell/connect.ts";
 import { homeIn } from "../skills/install.ts";
 import type { WizardUI } from "../ui/wizard-ui.ts";
 import { connectionSetupStep } from "./connection-setup-step.ts";
+import {
+  monitoringSetupStep,
+  type MonitoringSetup,
+} from "./monitoring-setup-step.ts";
 import {
   agentPlatformIn,
   agentPlatformLabel,
@@ -98,6 +106,12 @@ type WizardFlowBaseOptions = {
   readonly home?: string;
   /** How long between asks while following a run. egma's default when omitted. */
   readonly runPollMs?: number;
+  /**
+   * How long the monitoring lane waits for the first imported conversation,
+   * and how often it asks. Egma's own pace when omitted.
+   */
+  readonly monitoringWaitMs?: number;
+  readonly monitoringPollMs?: number;
 };
 
 export type WizardCodingAgent =
@@ -405,17 +419,52 @@ async function runWizardWithAgent(
   const goal = goalFrom(said ?? null);
   advance({ type: "goal-chosen", goal });
 
-  // Watching production traffic is not built into the terminal yet, and the
-  // both lane starts with it. Neither is half-run: nothing is created, and the
-  // developer is sent to the one flow that can do it today.
+  /*
+   * Monitoring first, for both goals that want it.
+   *
+   * The order is a promise rather than a preference: Retell's historical import
+   * and a LiveKit worker's own export both take time on the server side, so
+   * starting them before the tests are written is what makes a sitting that
+   * does both end with Monitoring already filling. What the step leaves behind
+   * is what stops the second half being a second sitting — one pasted key, one
+   * chosen platform agent, and one agent name.
+   */
+  let monitored: MonitoringSetup["monitored"] = null;
   if (goal !== "testing") {
-    const report: ExitReport = {
-      kind: "monitoring-in-the-web",
+    const setUp = await monitoringSetupStep({
+      ui,
+      platform,
+      cwd,
+      signal,
+      drivenAgent,
+      log,
+      agentPlatform,
       goal,
-      platformUrl: platform.url,
-    };
-    ui.setExit(report);
-    return report;
+      facts: found.facts,
+      ...(options.connectionFetchImpl === undefined
+        ? {}
+        : { fetchImpl: options.connectionFetchImpl }),
+      ...(options.monitoringWaitMs === undefined
+        ? {}
+        : { waitMs: options.monitoringWaitMs }),
+      ...(options.monitoringPollMs === undefined
+        ? {}
+        : { pollMs: options.monitoringPollMs }),
+    });
+    if (setUp.monitored === null) {
+      ui.setExit(setUp.report);
+      return setUp.report;
+    }
+    monitored = setUp.monitored;
+    advance({ type: "monitoring-ready" });
+
+    // Monitoring alone creates no connection, no suite and no tests, so the
+    // walk is over — the machine has already reached its terminal on the event
+    // above, and the line says what is now happening.
+    if (goal === "monitoring") {
+      ui.setExit(setUp.report);
+      return setUp.report;
+    }
   }
 
   // The binding is written inside the connect step, at the last moment before
@@ -439,6 +488,9 @@ async function runWizardWithAgent(
       // so the two prompts can be compared once Retell answers.
       repoPrompts: found.report.prompts,
       signal,
+      // One paste, one picker, one name: whatever monitoring already settled is
+      // handed over rather than asked for a second time.
+      settled: monitored,
       retell: options.retell,
     });
     connected = {
@@ -461,6 +513,16 @@ async function runWizardWithAgent(
       cwd,
       signal,
       suggestedName: found.facts.get("agent-name") ?? path.basename(cwd),
+      // The row monitoring created, when it ran: one agent row for one voice
+      // agent, so this connection attaches to it rather than starting a second.
+      existingAgent:
+        monitored === null
+          ? null
+          : {
+              id: monitored.agentId,
+              name: monitored.agentName,
+              projectId: monitored.projectId,
+            },
       fetchImpl: options.connectionFetchImpl,
     });
   }
@@ -527,6 +589,8 @@ async function runWizardWithAgent(
   const report = await runStep({
     ui,
     signedIn,
+    // The last screen names both promises when the sitting kept both.
+    ...(monitored === null ? {} : { monitoringUrl: platform.url }),
     agentId: connected.connected.registered.agent.id,
     connectionId: connected.connected.registered.connection.id,
     suiteId: written.suite.id,

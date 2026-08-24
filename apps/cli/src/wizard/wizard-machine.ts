@@ -66,23 +66,32 @@ export type WizardState =
       readonly testCount: number;
     } & OnAPlatform &
       ChosenCodingAgent)
-  | ({
-      readonly phase: "complete";
-      readonly testCount: number;
-    } & OnAPlatform &
-      ChosenCodingAgent)
   /**
-   * Monitoring, which this wizard cannot yet set up from the terminal.
+   * Setting up production monitoring, which is one phase on both platforms.
    *
-   * A terminal phase on purpose and a temporary one: the monitoring lane is
-   * built by the tickets after this one, and until then the honest ending is
-   * the web flow that can do it today. Nothing is created and nothing is
-   * half-done.
+   * The step forks by platform inside — Retell pastes a key and starts
+   * watching; LiveKit has its worker edited, mints a project key and writes
+   * the two environment lines — but the machine has one state for it, because
+   * what follows is decided by the goal and never by the platform.
    */
   | ({
-      readonly phase: "monitoring-elsewhere";
+      readonly phase: "monitoring-setup";
       readonly platform: WizardAgentPlatform;
       readonly goal: MonitoringGoal;
+    } & ChosenCodingAgent)
+  /**
+   * The end of the walk, whichever lane reached it.
+   *
+   * It carries the goal because the last screen differs by it: the testing
+   * lane points at a graded run, the monitoring lane at Monitoring, and both
+   * points at both. `testCount` is zero for a lane that wrote no tests, which
+   * is a fact about that lane rather than a gap.
+   */
+  | ({
+      readonly phase: "complete";
+      readonly platform: WizardAgentPlatform;
+      readonly goal: WizardGoal;
+      readonly testCount: number;
     } & ChosenCodingAgent)
   /** The repository has already been through the wizard once. */
   | { readonly phase: "already-onboarded" }
@@ -109,6 +118,8 @@ export type WizardEvent =
       readonly platform: UnsupportedWizardAgentPlatform;
     }
   | { readonly type: "goal-chosen"; readonly goal: WizardGoal }
+  /** Production monitoring is set up, however this platform sets it up. */
+  | { readonly type: "monitoring-ready" }
   | { readonly type: "connection-ready" }
   | { readonly type: "tests-ready"; readonly count: number }
   /** The mocked world is written, so the gate can show it beside the tests. */
@@ -187,12 +198,12 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
 
     case "goal":
       if (event.type === "goal-chosen") {
-        // Watching production traffic is not built into the terminal yet, and
-        // the both lane starts with it. Both therefore end here for now rather
-        // than running half of what they promised.
+        // Monitoring first, for both goals that want it: the historical import
+        // and the worker's own export start while the developer writes tests,
+        // so a sitting that does both ends with Monitoring already filling.
         if (event.goal !== "testing") {
           return movedTo({
-            phase: "monitoring-elsewhere",
+            phase: "monitoring-setup",
             platform: state.platform,
             goal: event.goal,
             codingAgentId: state.codingAgentId,
@@ -202,6 +213,28 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
           phase: "connection-setup",
           platform: state.platform,
           goal: event.goal,
+          codingAgentId: state.codingAgentId,
+        });
+      }
+      break;
+
+    case "monitoring-setup":
+      if (event.type === "monitoring-ready") {
+        // Monitoring alone is finished here: no connection is created and no
+        // suite, test or run exists, so there is nothing left to do.
+        if (state.goal === "monitoring") {
+          return movedTo({
+            phase: "complete",
+            platform: state.platform,
+            goal: state.goal,
+            testCount: 0,
+            codingAgentId: state.codingAgentId,
+          });
+        }
+        return movedTo({
+          phase: "connection-setup",
+          platform: state.platform,
+          goal: state.goal,
           codingAgentId: state.codingAgentId,
         });
       }
@@ -290,7 +323,6 @@ export function transitionWizard(state: WizardState, event: WizardEvent): Wizard
       break;
 
     case "complete":
-    case "monitoring-elsewhere":
     case "already-onboarded":
     case "no-agent":
     case "unsupported-platform":

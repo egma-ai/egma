@@ -479,16 +479,22 @@ function walkExitCode(report: ExitReport): number {
     // egma did everything it could here: it named what is missing and handed
     // over words that work without it. That is the run finishing, not failing.
     case "no-coding-agent":
-    // Nothing was created and nothing is half-done. Egma named the flow that
-    // can watch production traffic today and stopped, which is a run that did
-    // what it could rather than one that broke.
-    case "monitoring-in-the-web":
+    // Watching is really on, and an account with nothing to import yet is not
+    // a failure — the ending says so in words rather than in a number.
+    case "monitoring-started":
+    // The worker is wired and the two lines are on the screen. Nothing waits,
+    // because push is observed rather than declared.
+    case "monitoring-wired":
     // The repository is already set up. Refusing to onboard it twice is the
     // command working, so it answers a shell the way working commands do.
     case "already-onboarded":
       return 0;
     case "interrupted":
       return 130;
+    // The monitoring lane's deliverable is that watching is really on, so a
+    // walk that did not manage it answers a shell as the failure it is.
+    case "monitoring-refused":
+      return 1;
     case "no-agent-context":
     case "unsupported-agent-platform":
     // The coding agent stopped the work itself. Nothing was found, and the run

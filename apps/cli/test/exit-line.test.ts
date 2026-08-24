@@ -73,8 +73,42 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "unsupported-agent-platform", platform: "pipecat" },
   { kind: "unsupported-agent-platform", platform: "vapi" },
   { kind: "no-coding-agent" },
-  { kind: "monitoring-in-the-web", goal: "monitoring", platformUrl: "https://egma.example" },
-  { kind: "monitoring-in-the-web", goal: "both", platformUrl: null },
+  {
+    kind: "monitoring-started",
+    agentName: "order-line",
+    arrived: true,
+    registered: true,
+    platformUrl: "https://egma.example",
+  },
+  {
+    kind: "monitoring-started",
+    agentName: "order-line",
+    arrived: false,
+    registered: false,
+    platformUrl: null,
+  },
+  {
+    kind: "monitoring-wired",
+    agentName: "front-desk",
+    envFile: ".env",
+    envRefusal: null,
+    lines: ["export EGMA_URL=https://egma.example", "export EGMA_API_KEY=egma_sk_x"],
+    wired: true,
+    platformUrl: "https://egma.example",
+  },
+  {
+    kind: "monitoring-wired",
+    agentName: "front-desk",
+    envFile: null,
+    envRefusal: "Git does not ignore .env here.",
+    lines: ["export EGMA_URL=https://egma.example", "export EGMA_API_KEY=egma_sk_x"],
+    wired: false,
+    platformUrl: null,
+  },
+  {
+    kind: "monitoring-refused",
+    lines: ["Another Egma agent is already watching that agent.", "agent_1 is already watched."],
+  },
   { kind: "already-onboarded", folder: "egma/", hasSuites: true },
   { kind: "already-onboarded", folder: "egma/", hasSuites: false },
   {
@@ -192,32 +226,93 @@ describe("the exit line", () => {
   });
 
   /**
-   * The two endings that have no coding agent to drive still have a path to
-   * watching production traffic, and it is the same path in both — one
-   * sentence, so the two cannot drift apart.
+   * The one ending with no coding agent to drive still has a path to watching
+   * production traffic, and it names the flow that needs no terminal.
    */
-  it("points at the web Monitoring flow wherever the terminal cannot do it", () => {
+  it("points at the web Monitoring flow where the terminal cannot do it", () => {
     expect(buildExitLine({ kind: "no-coding-agent" })).toContain(WEB_MONITORING_POINTER);
+  });
 
-    expect(
-      buildExitLine({
-        kind: "monitoring-in-the-web",
-        goal: "monitoring",
-        platformUrl: "https://egma.example",
-      }),
-    ).toBe(
-      "Egma cannot yet set up production monitoring from the terminal, so it set nothing up. " +
-        "To watch production traffic, open Egma at https://egma.example and start monitoring from its Monitoring page. " +
-        "Run egma again and choose testing whenever you want tests as well.",
-    );
+  /**
+   * Watching is really on, and the line says whether Egma saw proof of it.
+   *
+   * An account with nothing to import is not a failure and must not read as
+   * one: the sentence says what is true and what happens next, and the exit
+   * code beside it is zero.
+   */
+  it("says whether a conversation arrived, and never implies a failure", () => {
+    const arrived = buildExitLine({
+      kind: "monitoring-started",
+      agentName: "order-line",
+      arrived: true,
+      registered: true,
+      platformUrl: "https://egma.example",
+    });
+    expect(arrived).toContain("watching order-line's production calls");
+    expect(arrived).toContain("first conversation has already arrived");
+    expect(arrived).toContain("https://egma.example");
 
-    // Both is monitoring first, so both stops in the same place and says so.
-    expect(
-      buildExitLine({ kind: "monitoring-in-the-web", goal: "both", platformUrl: null }),
-    ).toContain("set up testing and production monitoring together");
-    expect(
-      buildExitLine({ kind: "monitoring-in-the-web", goal: "both", platformUrl: null }),
-    ).toContain(WEB_MONITORING_POINTER);
+    const empty = buildExitLine({
+      kind: "monitoring-started",
+      agentName: "order-line",
+      arrived: false,
+      registered: false,
+      platformUrl: "https://egma.example",
+    });
+    expect(empty).toContain("Nothing has arrived yet");
+    expect(empty).toContain("Monitoring page");
+  });
+
+  /**
+   * The two lines a monitored worker exports with are the deliverable, so they
+   * survive the screen — one to a line, whether the file was written or not.
+   */
+  it("prints the two environment lines whether or not the file was written", () => {
+    const lines = [
+      "export EGMA_URL=https://egma.example",
+      "export EGMA_API_KEY=egma_sk_x",
+    ];
+    const written = exitLines({
+      kind: "monitoring-wired",
+      agentName: "front-desk",
+      envFile: ".env",
+      envRefusal: null,
+      lines,
+      wired: true,
+      platformUrl: "https://egma.example",
+    });
+    expect(written).toContain(lines[0]);
+    expect(written).toContain(lines[1]);
+    expect(written[0]).toContain("pushes its production evidence");
+
+    const refused = exitLines({
+      kind: "monitoring-wired",
+      agentName: "front-desk",
+      envFile: null,
+      envRefusal: "Git does not ignore .env here.",
+      lines,
+      wired: true,
+      platformUrl: null,
+    });
+    expect(refused).toContain(lines[1]);
+    expect(refused).toContain("Git does not ignore .env here.");
+  });
+
+  /**
+   * A refusal says two things and keeps them apart: Egma's own sentence about
+   * what to do, and the platform's own for whatever is reading rather than
+   * looking.
+   */
+  it("keeps Egma's sentence and the platform's apart on a refusal", () => {
+    const said = exitLines({
+      kind: "monitoring-refused",
+      lines: [
+        "Another Egma agent is already watching that agent on the platform.",
+        "agent_1 is already watched by “order-line”.",
+      ],
+    });
+    expect(said[0]).toContain("Another Egma agent is already watching");
+    expect(said).toContain("agent_1 is already watched by “order-line”.");
   });
 
   /**
@@ -406,9 +501,17 @@ describe("the exit line", () => {
     ).toBeNull();
   });
 
+  /**
+   * Four endings carry more than a sentence, and each carries it for a reason
+   * a developer can name: the walk's own ending has three things to copy, a
+   * wired worker has the two lines it exports with, a refusal has the
+   * platform's own sentence, and a failure may arrive with a block. Every
+   * other ending is one line, and stays one line.
+   */
   it("is one line for every ending that is one thing", () => {
+    const carriesMore = new Set(["run-started", "monitoring-wired", "monitoring-refused"]);
     for (const report of EVERY_ENDING) {
-      if (report.kind === "run-started") continue;
+      if (carriesMore.has(report.kind)) continue;
       expect(exitLines(report)).toEqual([buildExitLine(report)]);
     }
   });
