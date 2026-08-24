@@ -17,15 +17,18 @@
 import { Box, Text, useInput } from "ink";
 
 import type { SkillPlaces } from "../../../skills/install.ts";
+import type { SimulationRow } from "../../../run/view.ts";
 import { dispatchKey, hintBar, type KeyBinding } from "../keybindings.ts";
+import { GradeResult } from "./RunScreen.tsx";
 
 export type SkillsOfferScreenProps = {
   readonly places: SkillPlaces;
+  readonly result: SimulationRow | null;
   /** `project`, `global`, or `null` for skip. */
   readonly onAnswer: (choice: string | null) => void;
 };
 
-export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) {
+export function SkillsOfferScreen({ places, result, onAnswer }: SkillsOfferScreenProps) {
   const bindings: KeyBinding[] = [
     {
       match: "p",
@@ -57,6 +60,13 @@ export function SkillsOfferScreen({ places, onAnswer }: SkillsOfferScreenProps) 
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
       <Text bold>Egma</Text>
+      {result === null ? null : (
+        <>
+          <Box height={1} />
+          <Text bold>{`First result: ${result.name}`}</Text>
+          <GradeResult row={result} />
+        </>
+      )}
       <Box height={1} />
       <Text>
         {`Install the Egma skill into ${places.name}, so it can drive Egma on its own next time?`}

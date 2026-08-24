@@ -397,7 +397,6 @@ MAY_BE_ABSENT = {
     "EGMA_GRADER_HEARTBEAT_SECONDS": "per-container tuning",
     "EGMA_GRADER_LEASE_SECONDS": "per-container tuning",
     "EGMA_GRADER_SWEEP_SECONDS": "per-container tuning",
-    "EGMA_GRADER_TRACE_IDLE_SECONDS": "per-container tuning",
     # Facts about the network a container sits on rather than about the
     # deployment, and each one's empty value is a real answer.
     "EGMA_LIVEKIT_ADVERTISE_IP": "empty is right for every ordinary deployment",

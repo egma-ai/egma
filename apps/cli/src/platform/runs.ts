@@ -9,8 +9,9 @@
  * Three things happen here. A complete-suite run is started with an optional
  * exact current-set precondition. Start and detail return a bounded header;
  * simulations are read through their own pages. Changes since a point are
- * fetched in order, which is how a terminal
- * follows a run without holding a socket open: a cursor can be asked again
+ * fetched in order, which is how a terminal follows execution without holding
+ * a socket open. Grading progress is read from the bounded simulation page,
+ * because grades do not change the execution event feed. A cursor can be asked again
  * from where it was, so a follower never misses a change and never sees one
  * twice.
  *
@@ -27,10 +28,12 @@ import { randomUUID } from "node:crypto";
 import {
   createRun as createRunRequest,
   getRun as getRunRequest,
+  getSimulation as getSimulationRequest,
   listRunEvents as listRunEventsRequest,
   listRunSimulations as listRunSimulationsRequest,
   type CreateRunResponse,
   type GetRunResponse,
+  type GetSimulationResponse,
   type ListRunEventsResponse,
   type ListRunSimulationsResponse,
 } from "@egma/platform-api/client";
@@ -48,8 +51,7 @@ import type { SignedIn } from "./signed-in.ts";
 /**
  * How far one simulation got.
  *
- * Not a verdict. This says whether there was anything to judge at all; the
- * verdict says what the graders made of it.
+ * This says how far execution got. Grading starts only after a completed trace.
  */
 export type SimulationStatus =
   | "queued"
@@ -59,16 +61,25 @@ export type SimulationStatus =
   | "failed"
   | "canceled";
 
-/**
- * What the graders made of a simulation.
- *
- * Four, and never three: `skipped` and `errored` are their own answers, and a
- * test that could not run is not a test that failed. Nothing in egma folds
- * either of them into `failed`, on a screen or on a line.
- */
-export type Verdict = "passed" | "failed" | "skipped" | "errored";
+/** Operational state of all grading work for one completed trace. */
+export type GradingState =
+  | "not_requested"
+  | "pending"
+  | "running"
+  | "complete"
+  | "error";
 
 export type RunStatus = "pending" | "running" | "completed" | "canceled";
+
+/** One current grader result from the simulation detail projection. */
+export type PlatformGrade = GetSimulationResponse["grades"][number];
+
+/** Current grades and their display-only mean for one completed trace. */
+export type GradeProjection = {
+  readonly grades: readonly PlatformGrade[];
+  readonly combinedScore: number | null;
+  readonly expectedBehaviors: readonly string[] | null;
+};
 
 const SIMULATION_STATUSES: readonly string[] = [
   "queued",
@@ -79,7 +90,13 @@ const SIMULATION_STATUSES: readonly string[] = [
   "canceled",
 ];
 
-const VERDICTS: readonly string[] = ["passed", "failed", "skipped", "errored"];
+const GRADING_STATES: readonly string[] = [
+  "not_requested",
+  "pending",
+  "running",
+  "complete",
+  "error",
+];
 
 const RUN_STATUSES: readonly string[] = ["pending", "running", "completed", "canceled"];
 
@@ -91,9 +108,12 @@ export type PlatformSimulation = {
   readonly testVersionId: string;
   readonly personaName: string;
   readonly status: SimulationStatus;
-  readonly verdict: Verdict | null;
+  /** Null until a completed trace has grading work to report. */
+  readonly gradingState: GradingState | null;
   /** What the platform said about how it ended, or `null`. */
   readonly reason: string | null;
+  /** Null until the terminal simulation detail has been read. */
+  readonly gradeProjection: GradeProjection | null;
 };
 
 export type PlatformRun = {
@@ -118,7 +138,6 @@ export type RunEvent =
       readonly testName: string;
       readonly personaName: string;
       readonly status: SimulationStatus;
-      readonly verdict: Verdict | null;
       readonly reason: string | null;
     }
   | { readonly kind: "run"; readonly seq: number; readonly status: RunStatus };
@@ -127,7 +146,7 @@ export type RunEvent =
 export type RunEvents = {
   readonly events: readonly RunEvent[];
   readonly next: number;
-  /** True once execution has finished; grader verdicts can still arrive later. */
+  /** True once execution and every completed trace's grading are terminal. */
   readonly done: boolean;
 };
 
@@ -176,16 +195,16 @@ function whole(value: unknown): number {
  * A status this build does not know is not a status it may act on, and
  * guessing at it would be the one thing worse than saying so — so an unknown
  * simulation status reads as `queued` (nothing has happened that this build
- * can describe) and an unknown verdict reads as none at all.
+ * can describe) and an unknown grading state reads as none at all.
  */
 function statusOf(value: unknown): SimulationStatus {
   const said = platformText(value);
   return (SIMULATION_STATUSES.includes(said) ? said : "queued") as SimulationStatus;
 }
 
-function verdictOf(value: unknown): Verdict | null {
+function gradingStateOf(value: unknown): GradingState | null {
   const said = platformText(value);
-  return VERDICTS.includes(said) ? (said as Verdict) : null;
+  return GRADING_STATES.includes(said) ? (said as GradingState) : null;
 }
 
 function runStatusOf(value: unknown): RunStatus {
@@ -205,9 +224,12 @@ function simulationFrom(body: SimulationWire): PlatformSimulation {
     testVersionId: platformText(body.testVersionId),
     personaName: platformText(body.personaName),
     status: statusOf(body.status),
-    verdict: verdictOf(body.verdict),
+    gradingState: gradingStateOf(body.gradingState),
     reason:
       platformText(body.reason) === "" ? null : platformText(body.reason),
+    // The bounded run page carries only operational progress. The detail
+    // resource is read once grading is terminal.
+    gradeProjection: null,
   };
 }
 
@@ -283,6 +305,34 @@ export async function hydrateRun(
   };
 }
 
+/** Read current grades and the display-only combined score for one trace. */
+export async function getSimulationGradeProjection(
+  signedIn: SignedIn,
+  simulationId: string,
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<GradeProjection> {
+  const answer = await getSimulationRequest(
+    { simulationId },
+    {
+      client: platformClient(signedIn, fetchImpl),
+      ...(signal === undefined ? {} : { signal }),
+    },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
+  return {
+    grades: answer.data.grades,
+    combinedScore: answer.data.combinedScore,
+    expectedBehaviors: answer.data.test.expectedBehaviors,
+  };
+}
+
 function eventFrom(body: RunEventWire): RunEvent | null {
   const seq = whole(body.seq);
   if (body.kind === "run") {
@@ -296,7 +346,6 @@ function eventFrom(body: RunEventWire): RunEvent | null {
     testName: platformText(body.testName),
     personaName: platformText(body.personaName),
     status: statusOf(body.status),
-    verdict: verdictOf(body.verdict),
     reason:
       platformText(body.reason) === "" ? null : platformText(body.reason),
   };

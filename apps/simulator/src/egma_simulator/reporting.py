@@ -15,7 +15,7 @@ process, and it fails here, loudly, rather than at the receiver.
 Because span batches and lifecycle documents share the one ordered sender,
 the terminal report leaves only after every span batch minted before it
 landed. So when the control plane records a simulation terminal, the
-evidence a verdict will cite is already in the trace store — there is no
+evidence a grader will read is already in the trace store — there is no
 window in which a conversation is finished and its transcript is still in
 flight.
 

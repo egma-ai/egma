@@ -5,14 +5,14 @@ import {
   type Simulation,
   type TraceDetail,
   type TraceSpan,
-  type VerdictSource,
 } from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 
 /**
  * The conversation, as a grader reads it.
  *
  * **One shape for both sources**, which is the whole reason it exists as a type
- * rather than as "the simulation row". A grader judges a simulation and a
+ * rather than as "the simulation row". A grader grades a simulation and a
  * production trace with the same logic, and the difference between them is who
  * conducted the conversation rather than what a grader is looking at. Anything a
  * grader has to know about *where* it came from would be a second grading path
@@ -38,23 +38,17 @@ import {
  * module exists to make impossible.
  */
 export type Conversation = {
-  /** Which kind of conversation this is, in the verdict row's own vocabulary. */
-  readonly source: VerdictSource;
+  /** Which kind of conversation this is, in the grade row's vocabulary. */
+  readonly source: "simulation" | "production";
   /**
-   * The conversation this judgment is filed under.
+   * The conversation this grade is filed under.
    *
-   * A verdict's `trace_id` is the conversation, and for a simulation that is the
-   * simulation's own id: it is what every other row about this conversation is
-   * reachable from, and it is the same string in Postgres, in a URL and in a
-   * log. For a production trace it is the trace's own id off the wire, which is
-   * the same fact from the other direction — each source filed under the word
-   * its own world already uses for the conversation. A simulation's spans sit
-   * under a trace id derived from that id, and the derivation stays with the
-   * query rather than moving up here.
+   * The exact OpenTelemetry trace id. The same value joins a grade to its spans
+   * for simulation and production. It is never an Egma simulation id.
    */
   readonly traceId: string;
   /**
-   * **Why there is nothing here to judge**, and null when there is something.
+   * **Why there is nothing here to grade**, and null when there is something.
    *
    * Two ways to arrive at it, and one consequence. A simulation the simulator
    * reported `failed` never produced a conversation: the agent never joined,
@@ -66,7 +60,7 @@ export type Conversation = {
    * get wrong.
    *
    * It carries the sentence rather than a flag because the sentence is what
-   * lands in the verdict's rationale, and the two cases are different things
+   * lands in the grade's details, and the two cases are different things
    * for a reader to go and do. Written where the fact is known — one field, one
    * meaning, so nothing downstream has to assemble the reason a second time and
    * risk assembling a different one.
@@ -82,7 +76,7 @@ export type Conversation = {
   readonly events: unknown;
   /**
    * What was measured, from the conversation's own spans. A metric measures; a
-   * grader judges.
+   * grader grades.
    *
    * **Typed rather than `unknown`, and computed by the one shared measure
    * module rather than here.** The other two fields are shapes this file builds
@@ -90,7 +84,7 @@ export type Conversation = {
    * — it is a number, computed in exactly one place, and the same number the
    * metrics display shows for this conversation. Reading it defensively here
    * would be a second reading of one arithmetic, and two readings of one
-   * arithmetic is how a page and a verdict row come to disagree about how fast
+   * arithmetic is how a page and a grade come to disagree about how fast
    * an agent answered.
    *
    * **Assembled the same way whatever conducted the conversation.** The module
@@ -100,7 +94,7 @@ export type Conversation = {
    * two readers that could disagree about what a millisecond is.
    */
   readonly measures: readonly MeasuredFromSpans[];
-  /** Where the verdict rows file the conversation, beside the conversation. */
+  /** Correlation facts carried by the trace. */
   readonly runId: string;
   readonly agentId: string;
 };
@@ -109,35 +103,11 @@ export type Conversation = {
  * A finished simulation, read as a conversation — and the whole of the reading
  * order, in one place.
  *
- * Two answers, asked in this order, and each of them is a different fact about
- * what egma actually holds:
- *
- * 1. **The trace is complete — assemble it from the spans.** The root span is
- *    what says so: it is authored first and sent last, in the flush that leaves
- *    once the conversation is over, so a trace holding it is a trace holding
- *    everything. That is the record, and it is read by exactly the code a
- *    production trace is read by. There is no second one: the row's three jsonb
- *    columns were the interim carrier and the migration that dropped them left
- *    this branch as the only reader of a conversation.
- * 2. **Anything else — say so, and judge nothing.** A simulation with spans
- *    and no root is one egma holds part of; one whose trace overran the
- *    reader's limit is one egma holds more of than a reading returns; one with
- *    no spans at all is one no telemetry ever arrived for. None of the three is
- *    something to judge an agent against, so every grader answers `errored`
- *    with the reason, because a check egma could not make is never a check the
- *    agent failed.
- *
- * **The verdict still files under the simulation id.** The spans live under a
- * trace id derived from it, and that derivation stays where the query is: the
- * product's word for this conversation is the simulation id, in Postgres, in a
- * URL and in a log, and nothing downstream of the grader changes because the
- * evidence moved.
- *
- * `agent_version_id` is deliberately absent from what this produces and lands
- * empty on the verdict row: egma does not version agents yet, and an empty
- * string is the honest way to say "there was no version to record" — filling it
- * with the agent's own id would make a comparison of two versions answer with
- * nonsense the day versions arrive.
+ * Completion is not inferred here from a root span. A queue row exists only
+ * after the persistent simulation reached `completed` and ingestion confirmed
+ * that its evidence is query-visible. This function only shapes that evidence.
+ * A missing or truncated reading is a grading error, never a low score for the
+ * agent. The grade uses the exact OpenTelemetry trace ID, as production does.
  */
 export function conversationOfSimulation(
   simulation: Simulation,
@@ -150,9 +120,14 @@ export function conversationOfSimulation(
   const neverHappened =
     simulation.status === "completed" ? null : neverRan(simulation);
 
+  const traceId = trace?.traceId ?? traceIdOfSimulation(simulation.id);
+  if (traceId === undefined) {
+    throw new Error(`simulation ${simulation.id} has no valid trace identity`);
+  }
+
   const filedUnderTheSimulation: Conversation = {
     source: "simulation",
-    traceId: simulation.id,
+    traceId,
     nothingToJudgeBecause: neverHappened,
     endingReason: simulation.endingReason,
     transcript: [],
@@ -162,7 +137,7 @@ export function conversationOfSimulation(
     agentId: simulation.agentId,
   };
 
-  if (trace !== undefined && rootArrivedIn(trace) && !trace.truncated) {
+  if (trace !== undefined && !trace.truncated) {
     return {
       ...filedUnderTheSimulation,
       transcript: transcriptOf(trace),
@@ -189,15 +164,28 @@ export function conversationOfSimulation(
 }
 
 /**
+ * Whether the simulator's final root span is query-visible yet.
+ *
+ * This is only a short retry signal after the simulation lifecycle has already
+ * completed. It does not decide that a simulation or production trace ended.
+ */
+function rootArrivedIn(trace: TraceDetail): boolean {
+  for (const span of everySpanIn(trace)) {
+    if (span.kind === "root") return true;
+  }
+  return false;
+}
+
+/**
  * Whether this conversation's evidence is still on its way rather than absent.
  *
  * **The two are indistinguishable at a single read, and only one of them is a
  * reason to wait.** A simulation's spans reach the trace store some time after
  * the door accepted them — acceptance is a promise that evidence is safe, not
  * that it is readable — while the transaction that lands the simulation
- * terminal is what mints the work to judge it. So a conversation asked about
- * the instant it ends can legitimately have nothing under it yet, and judging
- * that would write a permanent verdict about a conversation egma is holding.
+ * terminal is what creates the grading work. So a conversation asked about the
+ * instant it ends can legitimately have nothing under it yet, and grading it
+ * then would write durable error grades about a conversation egma is holding.
  *
  * Three things say waiting cannot help, and each is a fact rather than a guess:
  *
@@ -222,7 +210,7 @@ export function evidenceIsStillArriving(
 
 /** A simulation that produced no conversation, in the simulator's own words. */
 function neverRan(simulation: Simulation): string {
-  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to judge.`;
+  return `this simulation ended ${simulation.endingReason ?? "without running"}, so there was no conversation to grade.`;
 }
 
 /**
@@ -240,11 +228,11 @@ function unreadable(
 ): string {
   const ended = `it ended ${simulation.endingReason ?? "without a recorded reason"}`;
   if (trace === undefined) {
-    return `Egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to judge.`;
+    return `Egma holds no record of this conversation — ${ended}, and no telemetry for it ever arrived — so there was nothing to grade.`;
   }
   return trace.truncated
     ? `${MORE_THAN_ONE_READING} — ${ended}, and ${OVERRAN}`
-    : `Egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was nothing complete to judge.`;
+    : `Egma holds only part of this conversation — ${ended}, and the span that closes its trace never arrived — so there was no complete conversation to grade.`;
 }
 
 /**
@@ -262,26 +250,8 @@ const MORE_THAN_ONE_READING =
   "Egma holds more of this conversation than one reading returns";
 
 const OVERRAN =
-  "its trace overran the reader's span limit — so judging the readable part " +
-  "would judge a different conversation.";
-
-/**
- * Whether the trace is the whole conversation, which the root span is the one
- * signal of.
- *
- * The simulator authors it first and sends it last, alone in the flush that
- * leaves once the conversation is over — so its arrival means every other span
- * is already stored, and its absence means the record is still open or the
- * simulator never got to the end of it. A count of turns could not answer this:
- * a conversation cut off after four turns and one recorded completely in four
- * turns hold the same rows.
- */
-function rootArrivedIn(trace: TraceDetail): boolean {
-  for (const span of everySpanIn(trace)) {
-    if (span.kind === ROOT) return true;
-  }
-  return false;
-}
+  "its trace overran the reader's span limit — so grading the readable part " +
+  "would grade a different conversation.";
 
 /**
  * A production trace, read as a conversation — the settled production read path.
@@ -295,16 +265,16 @@ function rootArrivedIn(trace: TraceDetail): boolean {
  * asked — did egma's own runtime manage to conduct this — and a production call
  * was conducted by the world rather than by egma. A span marked `error` is a
  * step that went wrong *inside* a conversation that certainly happened, and
- * scoring that as "there was nothing to judge" would hide exactly the calls a
- * team most wants judged.
+ * scoring that as "there was nothing to grade" would hide exactly the calls a
+ * team most wants graded.
  *
  * **The run and the agent are empty, honestly.** A trace arriving at the OTLP
  * door was not started by egma: there is no run and no agent row behind it, and
  * the ingest path writes both columns empty rather than guessing. So a
- * production verdict carries no run id — which is what the verdicts table
- * already documents — and the fold reads it exactly as it reads a simulation's.
+ * production grade carries no run id. The same grade reader handles both
+ * sources.
  *
- * **A trace egma holds only part of is judged by nobody, exactly as a
+ * **A trace egma holds only part of is not graded, exactly as a
  * simulation's is.** A read over the store's span limit comes back as a prefix,
  * and the moment a grader computes a number from it that number is about a
  * different conversation: the worst turn of a long call is as likely to be past
@@ -341,8 +311,8 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
     // The same call the simulation branch makes, on the same rows, with nothing
     // between the two that could tell them apart — which is the whole of "one
     // source, both worlds". A trace whose agent emits no timing spans carries no
-    // measures and a grader asked for one answers `skipped`; that is a fact
-    // about the telemetry rather than a branch taken here.
+    // measures. A compatible grader that lacks required evidence returns a
+    // null-score error; an incompatible grader never enters the frozen plan.
     measures: measuresFromSpans(trace),
   };
 }
@@ -359,13 +329,15 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * at the door.
  *
  * The keys are the simulation contract's turn event, minus the two fields only a
- * report needs, because a grader reading a transcript must not have to know
- * which source it came from. An agent turn with nothing said is kept rather than
- * dropped: the captured trace has several, and a turn that produced no words is
- * a fact about the conversation.
+ * report needs, plus the real span id that lets a grade cite its evidence. A
+ * grader still does not have to know which source the transcript came from. An
+ * agent turn with nothing said is kept rather than dropped: the captured trace
+ * has several, and a turn that produced no words is a fact about the
+ * conversation.
  */
 function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
   return trace.turns.map((turn) => ({
+    span_id: turn.spanId,
     speaker: speakerOf(turn.kind),
     text: turn.text,
     started_at: turn.startedAt,
@@ -374,6 +346,8 @@ function transcriptOf(trace: TraceDetail): readonly TranscriptTurn[] {
 }
 
 type TranscriptTurn = {
+  /** The real evidence span this turn came from. */
+  readonly span_id: string;
   readonly speaker: string;
   readonly text: string;
   /** RFC 3339 to the microsecond, exactly as the store holds it. */
@@ -431,18 +405,6 @@ type ToolCall = {
   readonly arguments: string;
   readonly result: string;
 };
-
-/**
- * The one kind this file still selects on, as the door normalised it — never the
- * provider's own span names, which is what keeps one reading working for
- * LiveKit, for the simulator and for whatever the registry learns next.
- *
- * The timing kind used to be here beside it, read into a second copy of the
- * measure arithmetic. It moved into the shared measure module with everything
- * else about a measure, so this file no longer has an opinion about what a
- * millisecond is.
- */
-const ROOT = "root";
 
 /**
  * By when it began, as the store wrote the instant — fixed-width RFC 3339 to

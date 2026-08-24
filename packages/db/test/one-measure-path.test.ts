@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * that cannot prove is that nothing *else* computes them, and a second computer
  * is the failure the module exists to prevent — two answers about one
  * conversation, with no stored number to settle the disagreement, so a page and
- * a verdict row quietly come to disagree about how fast an agent answered.
+ * a metric-based grader quietly disagree about how fast an agent responded.
  *
  * **Its own file, and it touches no store.** These are filesystem scans, and a
  * developer with no containers running should still have the alarm go off: in
@@ -118,7 +118,6 @@ describe("the scan itself", () => {
 
     expect(files.length).toBeGreaterThan(100);
     expect(files).toContain(THE_MODULE);
-    expect(files).toContain("apps/grader/src/graders/latency.ts");
     expect(files).toContain(THE_TRANSCRIPT_PAGE);
     // And nothing from a test directory, which is allowed to say anything.
     for (const file of files) {
@@ -174,7 +173,7 @@ describe("turning a measurement into milliseconds", () => {
    * `apps/web/lib/transcripts.ts` converts **a span's own duration** for
    * display — how long a step took, shown beside it on a timeline. That is not
    * a measure: it is a fact the trace read already sent as nanoseconds, it is
-   * never compared with a bound, and no verdict rests on it. It is written down
+   * never compared with a bound, and no grader uses it. It is written down
    * here so that a reader can tell the two apart, and so that a third site has
    * to be argued for rather than added.
    */
@@ -214,7 +213,6 @@ describe("reducing the measurements to one number", () => {
     [THE_MODULE]: "builds it, and reduces it",
     "apps/api/src/routes/trace-reads.ts":
       "sends it, beside the module's own reduction of it",
-    "apps/grader/src/graders/latency.ts": "counts it, for the rationale",
     "apps/grader/src/judge/input.ts": "renders it, as words a judge reads",
     [THE_TRANSCRIPT_PAGE]: "counts it, and prints the reduction it was handed",
     "packages/platform-api/src/contract/operations/trace-reads.ts":
@@ -239,13 +237,13 @@ describe("reducing the measurements to one number", () => {
     /\bsamples\s*\.\s*(reduce|sort|toSorted)\b|\bsamples\s*\[|Math\.(max|min)\s*\(\s*\.\.\.[\w.]*samples/u;
 
   /**
-   * **Nobody, and the module least of all.** `worstSampleOf` walks the series
-   * once and keeps the largest, so it matches none of these idioms either —
-   * which is why the answer is an empty list rather than the module's name. The
-   * positive half is the case below: the reduction is one exported function.
+   * **Nobody, and the module least of all.** The shared reducers walk the series
+   * once, so they match none of these idioms either — which is why the answer is
+   * an empty list rather than the module's name. The positive half is the case
+   * below: every allowed reduction is an exported function in the one module.
    *
    * The module is filtered out rather than asserted absent, so that rewriting
-   * `worstSampleOf` as a `reduce` one day is an ordinary refactor and not a
+   * a shared reducer as a `reduce` one day is an ordinary refactor and not a
    * failing build.
    */
   it("happens nowhere by hand", async () => {
@@ -255,9 +253,12 @@ describe("reducing the measurements to one number", () => {
     expect(byHand).toEqual([]);
   });
 
-  it("is one function, defined once", async () => {
+  it("keeps every allowed reduction in the one module", async () => {
     expect(
       await filesMatching(/export function worstSampleOf\b/u),
+    ).toEqual([THE_MODULE]);
+    expect(
+      await filesMatching(/export function arithmeticMeanOf\b/u),
     ).toEqual([THE_MODULE]);
   });
 

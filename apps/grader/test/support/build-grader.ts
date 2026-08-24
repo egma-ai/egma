@@ -1,12 +1,4 @@
-/**
- * Builds the grader before the test that runs it as a real container's process.
- *
- * The test that proves `docker compose up` starts something has to run what the
- * image runs — the built entry point, not the sources beside it — so the suite
- * builds it once up front. The build is incremental, so this is nearly free
- * after the first run.
- */
-
+/** Build the same entry point the grader container runs before its test lane. */
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +7,9 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 export async function setup(): Promise<void> {
-  const root = path.resolve(fileURLToPath(new URL("../../../..", import.meta.url)));
+  const root = path.resolve(
+    fileURLToPath(new URL("../../../..", import.meta.url)),
+  );
   await run(
     "node",
     [path.join(root, "node_modules/typescript/bin/tsc"), "-b", "apps/grader"],

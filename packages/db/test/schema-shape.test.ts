@@ -44,16 +44,15 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   persona_version: "prsv",
   agent: "agt",
   connection: "con",
-  grader: "grd",
+  project_grader: "grd",
   // The shelf of grader definitions. The one table below the tenancy tables
   // whose organization and project are both nullable — null means egma owns
   // the entry — so its identity is its own rather than somebody's key, and the
   // nullable pair is asserted on its own below.
-  grader_library: "grl",
-  // One immutable executable revision. Its identity is the Library id plus a
-  // revision number, so its leading id keeps the Library prefix.
-  grader_library_version: "grl",
-  grader_version: "grv",
+  grader_definition: "grl",
+  // One immutable executable revision. Its identity is the definition id plus
+  // a revision number, so its leading id keeps the definition prefix.
+  grader_definition_version: "grl",
   mock_tool: "mck",
   // The scope's junction, pinning the mock tool it narrows — the shape the
   // persona junction has, for the same reason.
@@ -65,7 +64,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run: "run",
   run_event: "run",
   simulation: "sim",
-  // One run's frozen grading plan: which versions and non-secret models judge
+  // One run's frozen grading plan: which versions and non-secret models grade
   // each pinned test version.
   grading_plan: "gpl",
   // The operations a client may safely send twice. Its identity is the whole
@@ -230,11 +229,9 @@ describe("every table", () => {
    * through many.
    */
   const REVISION_COLUMNS: Readonly<Record<string, number>> = {
-    // No `grader` here, and it used to be. A running copy carries no live
-    // revision: the effort's `grader.revision NOT NULL` rode on the same
-    // migration as the judge credentials, and the grader half of that migration
-    // went with the redesign. A copy is made by pressing **Use** and deleted
-    // whole; there is no live edit for a revision to guard.
+    // A project grader has no live revision column. Updating project policy does
+    // not create a grader-definition version, and the current product exposes no
+    // project-grader archive or delete flow for a revision to guard.
     project: 1,
     test: 1,
   };
@@ -347,9 +344,8 @@ describe("test suite ownership", () => {
 
   it("removes the retired applicability, capability-skip, retry, and archive shapes", () => {
     for (const { table, column } of [
-      // Agents own platform monitoring now: the agent's description and both
-      // live revisions went with the same pre-launch pass, and the connection
-      // answers "which platform" from its type or through its agent.
+      // Agents own platform monitoring now. These values moved to the agent or
+      // were retired by the pre-launch cutover in 0042.
       { table: "agent", column: "description" },
       { table: "agent", column: "revision" },
       { table: "connection", column: "revision" },
@@ -392,10 +388,10 @@ describe("test suite ownership", () => {
     }>(
       `select conname, pg_get_constraintdef(oid) as definition
         from pg_constraint
-        where conname in ('run_event_simulation_shape', 'run_event_verdict_agrees')
+        where conname = 'run_event_simulation_shape'
         order by conname`,
     );
-    expect(constraints).toHaveLength(2);
+    expect(constraints).toHaveLength(1);
     for (const constraint of constraints) {
       expect(constraint.definition).not.toContain("status = 'skipped'");
     }
@@ -407,28 +403,27 @@ describe("test suite ownership", () => {
  *
  * Every other table below the tenancy tables carries a `not null`
  * `organization_id`, because a row belonging to nobody is a row no permission
- * can describe. On the grader library and persona shelf, belonging to nobody
+ * can describe. On the grader definition and persona shelves, belonging to nobody
  * is a real state: **null tenancy means egma owns the definition**, which is
  * where the Owner label is derived from. It is asserted here
  * rather than only in that table's own tests because it is a structural claim
  * about the whole schema — and because an exception nothing watches is an
  * exception that spreads.
  */
-describe("the grader library's nullable tenancy", () => {
+describe("the grader definition's nullable tenancy", () => {
   const tenancy = (name: string): ColumnRow | undefined =>
     columns.find(
       (column) =>
-        column.table_name === "grader_library" && column.column_name === name,
+        column.table_name === "grader_definition" && column.column_name === name,
     );
 
-  it("is two identifier columns, both nullable, because egma owns entries too", () => {
-    for (const name of ["organization_id", "project_id"]) {
-      const live = tenancy(name);
-      expect(live, `grader_library.${name}`).toBeDefined();
-      expect(live?.type_name, `grader_library.${name} type`).toBe("text");
-      expect(live?.collation_name, `grader_library.${name} collation`).toBe("C");
-      expect(live?.not_null, `grader_library.${name} nullable`).toBe(false);
-    }
+  it("uses one nullable organization owner and no project owner", () => {
+    const organization = tenancy("organization_id");
+    expect(organization).toBeDefined();
+    expect(organization?.type_name).toBe("text");
+    expect(organization?.collation_name).toBe("C");
+    expect(organization?.not_null).toBe(false);
+    expect(tenancy("project_id")).toBeUndefined();
   });
 
   /**
@@ -448,22 +443,12 @@ describe("the grader library's nullable tenancy", () => {
     );
     expect(nullable.map((column) => column.table_name).sort()).toEqual([
       "device_code",
-      "grader_library",
+      "grader_definition",
       "persona",
     ]);
   });
 
-  it("arrives whole or not at all, held by a check rather than by convention", async () => {
-    const { rows } = await database.sql<{ definition: string }>(
-      `select pg_get_constraintdef(oid) as definition
-         from pg_constraint where conname = 'grader_library_tenancy_is_whole_or_egmas'`,
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.definition).toContain("organization_id IS NULL");
-    expect(rows[0]?.definition).toContain("project_id IS NULL");
-  });
-
-  it("closes the tenancy pairing, so no raw write can name another customer's project", async () => {
+  it("keeps organization-owned definitions inside their organization", async () => {
     const { rows } = await database.sql<{
       conname: string;
       definition: string;
@@ -472,12 +457,12 @@ describe("the grader library's nullable tenancy", () => {
       from pg_constraint con
       join pg_class c     on c.oid = con.conrelid
       join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public' and con.contype = 'f' and c.relname = 'grader_library'
+      where n.nspname = 'public' and con.contype = 'f' and c.relname = 'grader_definition'
     `);
     const byName = new Map(rows.map((row) => [row.conname, row.definition]));
 
-    expect(byName.get("grader_library_project_organization_fk")).toMatch(
-      /FOREIGN KEY \(project_id, organization_id\) REFERENCES project\(id, organization_id\)/,
+    expect(byName.get("grader_definition_organization_id_organization_id_fk")).toMatch(
+      /FOREIGN KEY \(organization_id\) REFERENCES organization\(id\)/,
     );
   });
 });
@@ -549,16 +534,42 @@ describe("a persona version is executable by itself", () => {
 });
 
 describe("grader execution ownership", () => {
-  it("stores the non-secret model only on the immutable grader version", () => {
+  it("stores type and the non-secret model only on the immutable grader version", () => {
     const model = columns.find(
       (column) =>
-        column.table_name === "grader_version" &&
+        column.table_name === "grader_definition_version" &&
         column.column_name === "judge_model",
     );
     expect(model?.type_name).toBe("jsonb");
     expect(model?.has_default).toBe(false);
+    expect(columns.some(
+      (column) =>
+        column.table_name === "grader_definition_version" &&
+        column.column_name === "type",
+    )).toBe(true);
+    expect(columns.some(
+      (column) =>
+        column.table_name === "grader_definition" &&
+        column.column_name === "type",
+    )).toBe(false);
+    expect(columns.some(
+      (column) =>
+        column.table_name === "grader_definition_version" &&
+        ["source_code", "source_code_language"].includes(column.column_name),
+    )).toBe(false);
     expect(columns.some((column) => column.table_name === "judge_configuration")).toBe(false);
     expect(columns.some((column) => column.table_name === "judge_credential")).toBe(false);
+  });
+
+  it("stores complete project settings on the project grader with no default", () => {
+    const values = columns.find(
+      (column) =>
+        column.table_name === "project_grader" &&
+        column.column_name === "parameter_values",
+    );
+    expect(values?.type_name).toBe("jsonb");
+    expect(values?.not_null).toBe(true);
+    expect(values?.has_default).toBe(false);
   });
 
   it("keeps no credential reference on a grading plan", () => {
@@ -590,23 +601,18 @@ describe("every enumerated value", () => {
       { table: "invitation", column: "role" },
       { table: "api_key", column: "scope" },
       { table: "device_code", column: "status" },
-      // The platform is the agent's, not the connection's (ADR-0015). A
-      // connection answers "which platform" from its type or through its
-      // agent, and holds no column of its own to enumerate.
       { table: "agent", column: "agent_platform" },
       { table: "connection", column: "connection_type" },
       { table: "connection", column: "access_variant" },
       { table: "connection", column: "modality" },
       { table: "connection", column: "topology" },
-      { table: "grader_library", column: "type" },
-      { table: "grader", column: "scope" },
+      { table: "grader_definition_version", column: "type" },
       { table: "run", column: "status" },
       { table: "run", column: "triggered_via" },
       { table: "simulation", column: "status" },
       { table: "simulation", column: "ending_reason" },
       { table: "simulation", column: "modality" },
       { table: "run_event", column: "kind" },
-      { table: "run_event", column: "verdict" },
       { table: "monitoring_state", column: "scan_kind" },
     ];
 

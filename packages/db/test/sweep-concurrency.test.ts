@@ -10,7 +10,6 @@ import {
   getRun,
   getSimulation,
   listSimulations,
-  listGradingJobsForSimulation,
   startRun,
   sweepOrphanedSimulations,
   type AuthContext,
@@ -74,9 +73,9 @@ beforeAll(async () => {
     { id: projectId, slug: "default" },
   ]);
   await seedUser(database, ada, "ada@acme.example");
-  // No running graders: what races here is two sweeps over one set of orphans,
-  // and the guarantee under test is Postgres's. The grading jobs the sweep
-  // leaves behind are counted, never read for what would judge them.
+  // What races here is two sweeps over one set of orphans. Failed simulations
+  // create no grading work, so the guarantee under test is only Postgres's
+  // guarded lifecycle update and run finalization.
 
   const created = await createAgent(auth, {
     name: "Front desk",
@@ -144,15 +143,6 @@ describe("two sweepers racing over one set of orphans", () => {
       const row = await getSimulation(auth, orphan.simulationId);
       expect(row?.status).toBe("failed");
       expect(row?.endingReason).toBe("orphaned");
-
-      // One landing means one piece of grading work: had both sweeps ended a
-      // row, the enqueue's unique would have thrown one of them out of this
-      // very test.
-      const jobs = await listGradingJobsForSimulation(
-        auth,
-        orphan.simulationId,
-      );
-      expect(jobs).toHaveLength(1);
 
       // And each run finalized once, its counts written by whichever sweep
       // ended its last conversation — the header's trigger refuses a second

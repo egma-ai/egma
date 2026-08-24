@@ -590,7 +590,7 @@ describe("a binary choice", () => {
    * the page would look any different.
    */
   it("gives the checkbox a coarse-pointer target without growing its box", () => {
-    render(<Checkbox id="required-grader" checked onChange={() => undefined} />);
+    render(<Checkbox id="weekly-summary" checked onChange={() => undefined} />);
 
     const box = screen.getByRole("checkbox");
     expect(box.className).toContain("size-[18px]");
@@ -604,22 +604,22 @@ describe("a binary choice", () => {
   it("connects the field hint to the native checkbox", () => {
     render(
       <Field
-        label="Required"
-        htmlFor="required-grader"
-        hint="A required grader can stop the test from passing."
+        label="Send weekly summary"
+        htmlFor="weekly-summary"
+        hint="Email the project summary every Monday."
       >
         <Checkbox
-          id="required-grader"
+          id="weekly-summary"
           checked
           onChange={() => undefined}
         />
       </Field>,
     );
 
-    const checkbox = screen.getByRole("checkbox", { name: "Required" });
-    const hint = screen.getByText(
-      "A required grader can stop the test from passing.",
-    );
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Send weekly summary",
+    });
+    const hint = screen.getByText("Email the project summary every Monday.");
     expect(checkbox.getAttribute("aria-describedby")).toBe(hint.id);
   });
 });
@@ -1000,14 +1000,14 @@ describe("a dialog", () => {
     const pressed = vi.fn();
     render(
       <>
-        <button type="button" onClick={pressed}>Judge again</button>
+        <button type="button" onClick={pressed}>Grade again</button>
         <Dialog kind="sheet" title="Transcript and audio" onClose={vi.fn()}>
           <audio aria-label="Simulation recording" />
         </Dialog>
       </>,
     );
 
-    const behind = screen.getByRole("button", { name: "Judge again" });
+    const behind = screen.getByRole("button", { name: "Grade again" });
     expect(behind.closest("[aria-hidden='true']")).toBeNull();
 
     // The panel starts listening for a press outside on the task after it

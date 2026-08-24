@@ -251,8 +251,8 @@ export interface WizardUI {
    * The run, as it stands, or `null` when none is going.
    *
    * A write and not a question, like every other pane. The flow says which
-   * simulations there are, where each has got to, and which verdict landed
-   * first; whether that is drawn as a list that moves or printed as one line
+   * simulations there are, where execution and grading have got to, and which
+   * trace result became terminal first; whether that is drawn as a list that moves or printed as one line
    * per change is the UI's business. The wizard never waits for the whole
    * suite, so this is set for as long as the wizard is open and stops mattering
    * the moment it closes — the run itself carries on either way.

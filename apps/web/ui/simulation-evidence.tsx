@@ -11,22 +11,30 @@ import {
   type RefObject,
 } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import { asSecond } from "../lib/instants.ts";
 import { graderDisplayName } from "../lib/presentation.ts";
 import { platformAnswer, platformClient } from "../lib/platform-client.ts";
-import type { VerdictWord } from "../lib/runs.ts";
 import {
   citedTurnPositions,
-  judgedAssertions,
-  type EvidenceVerdict,
-  type JudgedAssertion,
+  priorGrades,
+  type EvidenceGrade,
+  type EvidencePlanItem,
   type SimulationEvidence,
 } from "../lib/simulations.ts";
 import { humanizeIdentifier, milliseconds } from "../lib/transcripts.ts";
 import { Dialog } from "./dialog.tsx";
-import { VerdictBadge } from "./run-status.tsx";
+import { PlanItems } from "./evidence.tsx";
+import {
+  GradeDetails,
+  GradeResultBadge,
+  gradeSummary,
+  type DisplayGradeAssertion,
+} from "./grade.tsx";
+import { StateMark } from "./run-status.tsx";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
 
@@ -65,8 +73,8 @@ const REVIEW = "flex min-w-0 flex-col gap-8";
 /*
  * The shape of a sentence that says why there is nothing here.
  *
- * Four places on this surface have one: nothing was said, there was nothing to
- * judge, nobody has judged this yet, and no transcript was filed. They are four
+ * Four places on this surface have one: nothing was said, no grade was requested,
+ * no grade is available yet, and no transcript was filed. They are four
  * different facts and none of them is a failure, so they all read the same
  * quiet way rather than each inventing an appearance.
  */
@@ -98,16 +106,12 @@ const SUMMARY_VALUE =
 
 /**
  * The name of one fact, quiet, beside its value.
- *
- * It is on each label rather than on the strip as `span`, and that is the whole
- * of a small correction. The rule it replaces reached every `span` inside the
- * strip, and one of them is not a label — it is the overall verdict's chip. So
- * the chip was drawn in the muted grey meant for the three names, whatever the
- * verdict was, while every other verdict chip on the page carried its colour.
- *
- * Naming the labels removes the reach. The chip is left to be what it is.
  */
 const SUMMARY_LABEL = "text-sm text-muted-foreground";
+
+function scoreText(score: number | null): string {
+  return score === null ? "Not available" : score.toFixed(2);
+}
 
 /** The only three simulation-level facts required before reading evidence. */
 export function SimulationEvidenceSummary({
@@ -139,8 +143,10 @@ export function SimulationEvidenceSummary({
       aria-label="Simulation summary"
     >
       <div className={SUMMARY_CELL}>
-        <span className={SUMMARY_LABEL}>Overall verdict</span>
-        <VerdictBadge verdict={evidence.verdict} />
+        <span className={SUMMARY_LABEL}>Combined score</span>
+        <strong className={SUMMARY_VALUE}>
+          {scoreText(evidence.combinedScore)}
+        </strong>
       </div>
       <div className={cn(SUMMARY_CELL, SUMMARY_CELL_NEXT)}>
         <span className={SUMMARY_LABEL}>Duration</span>
@@ -456,161 +462,60 @@ export function useSimulationEvidenceRecording(
   };
 }
 
-type EvidenceAssertion = {
-  readonly key: string;
-  readonly expected: string;
-  readonly finding: string | null;
-  readonly verdict: VerdictWord | null;
-  readonly citedTurns: readonly number[];
-  readonly superseded: readonly EvidenceVerdict[];
-};
-
 type EvidenceGrader = {
   readonly key: string;
   readonly name: string;
-  readonly required: boolean;
-  readonly verdict: VerdictWord | null;
-  readonly assertions: readonly EvidenceAssertion[];
+  readonly plan: EvidencePlanItem | null;
+  readonly grade: EvidenceGrade | null;
+  readonly history: readonly EvidenceGrade[];
 };
 
-function sameWords(left: string, right: string): boolean {
-  return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
-}
-
-function behaviorPosition(assertion: string): number | null {
-  const found = /^behavior_(\d+)$/u.exec(assertion)?.[1];
+function behaviorPosition(key: string): number | null {
+  const found = /^behavior_(\d+)$/u.exec(key)?.[1];
   if (found === undefined) return null;
   const position = Number(found);
   return Number.isInteger(position) && position > 0 ? position : null;
 }
 
-function isExpectedBehaviors(
-  name: string | undefined,
-  rows: readonly JudgedAssertion[],
-): boolean {
-  return (
-    name === "expected_behaviors" ||
-    (name === undefined && rows.some((row) => behaviorPosition(row.assertion) !== null))
-  );
-}
-
-function readableAssertion(
-  row: JudgedAssertion,
+function assertionName(
+  assertion: DisplayGradeAssertion,
   expected: readonly string[],
-  fallbackPosition: number,
 ): string {
-  if (row.assertionText !== null && row.assertionText.trim() !== "") {
-    return row.assertionText;
-  }
-  const position = behaviorPosition(row.assertion);
+  const position = behaviorPosition(assertion.key);
   if (position !== null) {
     const behavior = expected[position - 1];
     if (behavior !== undefined) return behavior;
   }
-  // `row.assertion` is a durable storage key, not product copy. When display
-  // text is absent, use this local reading order instead of turning a key such
-  // as `keeps_brand_voice` into something that only looks authored.
-  return `Criterion ${String(fallbackPosition)}`;
+  return humanizeIdentifier(assertion.key);
 }
 
-function evidenceRow(
-  row: JudgedAssertion,
-  expected: readonly string[],
-  fallbackPosition: number,
-  evidence: SimulationEvidence,
-): EvidenceAssertion {
-  return {
-    key: row.key,
-    expected: readableAssertion(row, expected, fallbackPosition),
-    finding:
-      row.speaking.rationale.trim() === "" ? null : row.speaking.rationale,
-    verdict: row.speaking.verdict,
-    citedTurns: citedTurnPositions(
-      row.speaking.citedTurns,
-      evidence.transcript?.turns ?? [],
-    ),
-    superseded: row.superseded,
-  };
+function graderName(name: string): string {
+  return humanizeIdentifier(graderDisplayName(name));
 }
 
-/** Human-named grader groups, including expected behaviors awaiting judgment. */
-function evidenceGraders(
-  evidence: SimulationEvidence,
-  judged: readonly JudgedAssertion[],
-): readonly EvidenceGrader[] {
-  if (evidence.grading === "not_required") return [];
-  const expected = evidence.test.expectedBehaviors ?? [];
+/** Current grades, ordered by the frozen plan, with history kept underneath. */
+function evidenceGraders(evidence: SimulationEvidence): readonly EvidenceGrader[] {
   const planItems = evidence.gradingPlan?.items ?? [];
-  const ids = new Set<string>([
-    ...planItems.map((item) => item.graderId),
-    ...evidence.byGrader.map((item) => item.graderId),
-    ...judged.map((item) => item.graderId),
-  ]);
-  let expectedId = planItems.find(
-    (item) => item.name === "expected_behaviors",
-  )?.graderId;
-  expectedId ??= judged.find(
-    (row) => behaviorPosition(row.assertion) !== null,
-  )?.graderId;
-  if (expected.length > 0 && expectedId === undefined) {
-    expectedId = "expected-behaviors";
-    ids.add(expectedId);
-  }
+  const keys = new Set<string>();
+  for (const item of planItems) keys.add(item.projectGraderId);
+  for (const grade of evidence.grades) keys.add(grade.projectGraderId);
+  for (const grade of evidence.gradeHistory) keys.add(grade.projectGraderId);
 
-  const ordered = [...ids];
-  if (expectedId !== undefined) {
-    const withoutExpected = ordered.filter((id) => id !== expectedId);
-    ordered.splice(0, ordered.length, expectedId, ...withoutExpected);
-  }
-
-  return ordered.map((id) => {
-    const planItem = planItems.find((item) => item.graderId === id);
-    const summary = evidence.byGrader.find((item) => item.graderId === id);
-    const rows = judged.filter((item) => item.graderId === id);
-    const expectedGroup = isExpectedBehaviors(planItem?.name, rows) || id === expectedId;
-    const used = new Set<string>();
-    const assertions: EvidenceAssertion[] = expectedGroup
-      ? expected.map((behavior, at) => {
-          const position = at + 1;
-          const row = rows.find(
-            (one) =>
-              !used.has(one.key) &&
-              (behaviorPosition(one.assertion) === position ||
-                (one.assertionText !== null &&
-                  sameWords(one.assertionText, behavior))),
-          );
-          if (row === undefined) {
-            return {
-              key: `expected:${String(at)}`,
-              expected: behavior,
-              finding: null,
-              verdict: null,
-              citedTurns: [],
-              superseded: [],
-            };
-          }
-          used.add(row.key);
-          return evidenceRow(row, expected, position, evidence);
-        })
-      : [];
-    rows.forEach((row, at) => {
-      if (!used.has(row.key)) {
-        assertions.push(evidenceRow(row, expected, at + 1, evidence));
-      }
-    });
-
-    return {
-      key: id,
-      name: expectedGroup
-        ? "Expected behaviors"
-        : planItem === undefined
-          ? "Grader name unavailable"
-          : humanizeIdentifier(graderDisplayName(planItem.name)),
-      required:
-        summary?.required ?? planItem?.required ?? rows[0]?.required ?? true,
-      verdict: summary?.verdict ?? null,
-      assertions,
-    };
+  return [...keys].map((key) => {
+    const plan = planItems.find((item) => item.projectGraderId === key) ?? null;
+    const grade =
+      evidence.grades.find((item) => item.projectGraderId === key) ?? null;
+    const history =
+      grade === null
+        ? evidence.gradeHistory
+            .filter((item) => item.projectGraderId === key)
+            .sort(
+              (left, right) =>
+                Date.parse(right.gradedAt) - Date.parse(left.gradedAt),
+            )
+        : priorGrades(grade, evidence.gradeHistory);
+    const name = grade?.graderName ?? plan?.graderName ?? "Grader unavailable";
+    return { key, name: graderName(name), plan, grade, history };
   });
 }
 
@@ -906,7 +811,7 @@ function ChatTranscript({
                 human
                   ? "rounded-es-button"
                   : "rounded-ee-button bg-surface-soft",
-                /* Arrived at from a judge finding, the cited turn marks itself. */
+                /* Arrived at from a grade detail, the cited turn marks itself. */
                 "group-target:border-brand group-target:bg-selected",
               )}
             >
@@ -928,69 +833,23 @@ function ChatTranscript({
   );
 }
 
-function verdictWord(verdict: VerdictWord): string {
-  return `${verdict.slice(0, 1).toUpperCase()}${verdict.slice(1)}`;
-}
-
-function graderSummary(
-  grader: EvidenceGrader,
-  stillJudging: boolean,
-): string {
-  const passed = grader.assertions.filter(
-    (assertion) => assertion.verdict === "passed",
-  ).length;
-  const failed = grader.assertions.filter(
-    (assertion) => assertion.verdict === "failed",
-  ).length;
-  const skipped = grader.assertions.filter(
-    (assertion) => assertion.verdict === "skipped",
-  ).length;
-  const errored = grader.assertions.filter(
-    (assertion) => assertion.verdict === "errored",
-  ).length;
-  const waiting = grader.assertions.filter(
-    (assertion) => assertion.verdict === null,
-  ).length;
-  const parts = [
-    grader.required ? "Required grader" : "Reports only",
-    `${String(grader.assertions.length)} check${grader.assertions.length === 1 ? "" : "s"}`,
-  ];
-  if (passed > 0) parts.push(`${String(passed)} passed`);
-  if (failed > 0) parts.push(`${String(failed)} failed`);
-  if (skipped > 0) parts.push(`${String(skipped)} skipped`);
-  if (errored > 0) parts.push(`${String(errored)} errored`);
-  if (waiting > 0) {
-    parts.push(`${String(waiting)} ${stillJudging ? "waiting" : "not judged"}`);
-  }
-  return parts.join(" · ");
-}
-
-/**
- * The quiet mono kicker over a title: what kind of thing this block is.
- *
- * `--faint` rather than `--muted-foreground`, which is the recipe's one quiet
- * label colour: the same step a table's column heading takes, so a kicker over
- * a panel and a heading over a column are the same weight of voice.
- */
+/** The quiet mono kicker over a title: what kind of thing this block is. */
 const PANE_KIND =
   "mb-1 block font-mono text-sm tracking-(--tracking-label) text-faint uppercase";
 
-/** The name over each half of the expected-against-found comparison. */
-const COMPARISON_LABEL =
-  "m-0 mb-2 font-mono text-sm font-normal tracking-(--tracking-label) text-faint uppercase";
-
-/** Sentences inside a check. Judge findings run long, so they break anywhere. */
-const ASSERTION_TEXT = "m-0 min-w-0 text-sm wrap-anywhere text-foreground";
-
 function GraderGroup({
   grader,
-  stillJudging,
+  stillGrading,
+  evidence,
   onReadTurn,
 }: {
   readonly grader: EvidenceGrader;
-  readonly stillJudging: boolean;
+  readonly stillGrading: boolean;
+  readonly evidence: SimulationEvidence;
   readonly onReadTurn: (turn: number) => void;
 }) {
+  const grade = grader.grade;
+  const expected = evidence.test.expectedBehaviors ?? [];
   return (
     <section
       className="min-w-0 not-first:border-t not-first:border-border"
@@ -1004,104 +863,84 @@ function GraderGroup({
             {grader.name}
           </h3>
           <p className="m-0 mt-1 text-sm text-muted-foreground">
-            {graderSummary(grader, stillJudging)}
+            {gradeSummary({
+              grade,
+              ...(grader.plan?.passThreshold === undefined
+                ? {}
+                : { passThreshold: grader.plan.passThreshold }),
+              ...(grader.plan?.graderDefinitionVersion === undefined
+                ? {}
+                : {
+                    graderDefinitionVersion:
+                      grader.plan.graderDefinitionVersion,
+                  }),
+            })}
           </p>
         </div>
-        <VerdictBadge verdict={grader.verdict} compact />
+        {grade === null ? (
+          <Badge>
+            <StateMark kind={stillGrading ? "active" : "waiting"} />
+            {stillGrading ? "Grading" : "No grade"}
+          </Badge>
+        ) : (
+          <GradeResultBadge result={grade.result} />
+        )}
       </header>
-      {grader.assertions.length === 0 ? (
+      {grade === null ? (
         <p className="m-0 px-5 py-4 text-sm text-muted-foreground max-[40rem]:px-4">
-          {stillJudging
-            ? "Waiting for this grader to return its assertions."
-            : "This grader returned no assertions."}
+          {stillGrading
+            ? "Waiting for this grader to return a grade."
+            : "No grade is available for this grader."}
         </p>
       ) : (
-        <div className="@container/checks flex min-w-0 flex-col gap-4 bg-background p-5 max-[40rem]:p-4">
-          {grader.assertions.map((assertion, at) => (
-            <article
-              className="min-w-0 overflow-hidden rounded-input border border-border bg-surface"
-              key={assertion.key}
-            >
-              <header
-                className={cn(
-                  "flex min-w-0 items-center justify-between gap-3",
-                  "border-b border-border bg-surface-soft px-4 py-3",
-                  /*
-                   * A child selector, because the compact `VerdictBadge` beside
-                   * the check number is not an element this component wrote and
-                   * the two have to read as one line.
-                   */
-                  "[&>span]:font-mono [&>span]:text-sm",
-                  "[&>span]:text-faint [&>span]:uppercase [&>span]:tabular-nums",
-                )}
-              >
-                <span>Check {String(at + 1).padStart(2, "0")}</span>
-                <VerdictBadge verdict={assertion.verdict} compact />
-              </header>
-              {/*
-                Expected beside found while the card has room for both, and one
-                under the other when it does not. The card's own width decides:
-                with the reading sheet open this column is about 520px wide on
-                a 1440 screen, and two 250px halves is not two halves anybody
-                can read a judge's finding in.
-              */}
-              <div className="grid min-w-0 grid-cols-2 @max-[44rem]/checks:grid-cols-1">
-                <section className="min-w-0 p-4">
-                  <h4 className={COMPARISON_LABEL}>Expected behavior</h4>
-                  <p className={ASSERTION_TEXT}>{assertion.expected}</p>
-                </section>
-                {/*
-                 * The two halves are divided by a line: beside them while they
-                 * sit side by side, and above the second once they stack.
-                 */}
-                <section className="min-w-0 border-border border-s bg-surface-soft p-4 @max-[44rem]/checks:border-s-0 @max-[44rem]/checks:border-t">
-                  <h4 className={COMPARISON_LABEL}>Judge finding</h4>
-                  <p className={ASSERTION_TEXT}>
-                    {assertion.finding ??
-                      (stillJudging
-                        ? "Waiting for this grader."
-                        : "No judge finding was filed.")}
-                  </p>
-                  {assertion.citedTurns.length === 0 ? null : (
-                    <p className={cn(ASSERTION_TEXT, "mt-2 font-mono text-muted-foreground")}>
-                      {assertion.citedTurns.map((turn, turnAt) => (
-                        <span key={turn}>
-                          {turnAt === 0 ? "" : ", "}
-                          <button
-                            className={cn(
-                              "m-0 cursor-pointer border-0 bg-transparent p-0 text-foreground",
-                              /* An Ember underline, because this goes to the words it cites. */
-                              "underline decoration-brand underline-offset-[3px]",
-                            )}
-                            type="button"
-                            onClick={() => onReadTurn(turn)}
-                          >
-                            Read turn {turn}
-                          </button>
-                        </span>
-                      ))}
-                    </p>
-                  )}
-                  {assertion.superseded.length === 0 ? null : (
-                    <details className="mt-3 text-sm text-muted-foreground">
-                      <summary className="w-fit cursor-pointer text-foreground">
-                        {assertion.superseded.length} earlier finding
-                        {assertion.superseded.length === 1 ? "" : "s"}
-                      </summary>
-                      {assertion.superseded.map((row) => (
-                        <p
-                          className={cn(ASSERTION_TEXT, "mt-2 text-muted-foreground")}
-                          key={row.judgedAt}
-                        >
-                          {verdictWord(row.verdict)} — {row.rationale}
-                        </p>
-                      ))}
-                    </details>
-                  )}
-                </section>
+        <div className="flex min-w-0 flex-col gap-4 bg-background p-5 max-[40rem]:p-4">
+          <GradeDetails
+            grade={grade}
+            assertionName={(assertion) => assertionName(assertion, expected)}
+            renderCitations={(assertion) => {
+              const citedTurns = citedTurnPositions(
+                assertion.citedSpanIds ?? [],
+                evidence.transcript?.turns ?? [],
+              );
+              if (citedTurns.length === 0) return null;
+              return citedTurns.map((turn, turnAt) => (
+                <span key={turn}>
+                  {turnAt === 0 ? "" : ", "}
+                  <button
+                    className={cn(
+                      "m-0 cursor-pointer border-0 bg-transparent p-0 text-foreground",
+                      "underline decoration-brand underline-offset-[3px]",
+                    )}
+                    type="button"
+                    onClick={() => onReadTurn(turn)}
+                  >
+                    Read turn {turn}
+                  </button>
+                </span>
+              ));
+            }}
+          />
+          {grader.history.length === 0 ? null : (
+            <details className="text-sm text-muted-foreground">
+              <summary className="w-fit cursor-pointer text-foreground">
+                {grader.history.length} earlier grade
+                {grader.history.length === 1 ? "" : "s"}
+              </summary>
+              <div className="mt-3 flex flex-col gap-2">
+                {grader.history.map((older) => (
+                  <div
+                    className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2"
+                    key={`${older.gradedAt}:${String(older.graderDefinitionVersion)}`}
+                  >
+                    <span className="font-mono text-muted-foreground">
+                      {asSecond(older.gradedAt)} · score {scoreText(older.score)}
+                    </span>
+                    <GradeResultBadge result={older.result} />
+                  </div>
+                ))}
               </div>
-            </article>
-          ))}
+            </details>
+          )}
         </div>
       )}
     </section>
@@ -1128,42 +967,45 @@ const SHEET_BLOCK_TITLE = "m-0 text-base font-medium text-foreground";
  */
 function SimulationEvidencePanel({
   evidence,
-  assertions,
   recording,
   evidenceOpen,
   onEvidenceChange,
 }: {
   readonly evidence: SimulationEvidence;
-  readonly assertions: readonly JudgedAssertion[];
   readonly recording: SimulationEvidenceRecording;
   readonly evidenceOpen: boolean;
   readonly onEvidenceChange: (open: boolean) => void;
 }) {
-  const stillJudging =
-    evidence.grading === "pending" ||
-    evidence.gradingJobs.some((job) =>
-      ["pending", "claimed"].includes(job.status),
-    );
-  const graders = evidenceGraders(evidence, assertions);
+  const stillGrading =
+    evidence.gradingState === "pending" || evidence.gradingState === "running";
+  const graders = evidenceGraders(evidence);
   const simulationActive = ["queued", "claimed", "running"].includes(
     evidence.status,
   );
   const pendingTurn = useRef<number | null>(null);
+
+  function revealTurn(turn: number): void {
+    const target = document.getElementById(`transcript-turn-${String(turn)}`);
+    target?.scrollIntoView({ block: "center" });
+    window.history.replaceState(null, "", `#transcript-turn-${String(turn)}`);
+    pendingTurn.current = null;
+  }
 
   useEffect(() => {
     if (!evidenceOpen || pendingTurn.current === null) return undefined;
     const frame = window.requestAnimationFrame(() => {
       const turn = pendingTurn.current;
       if (turn === null) return;
-      const target = document.getElementById(`transcript-turn-${String(turn)}`);
-      target?.scrollIntoView({ block: "center" });
-      window.history.replaceState(null, "", `#transcript-turn-${String(turn)}`);
-      pendingTurn.current = null;
+      revealTurn(turn);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [evidenceOpen]);
 
   function readTurn(turn: number): void {
+    if (evidenceOpen) {
+      revealTurn(turn);
+      return;
+    }
     pendingTurn.current = turn;
     onEvidenceChange(true);
   }
@@ -1184,7 +1026,7 @@ function SimulationEvidencePanel({
               className="m-0 text-lg font-normal text-foreground"
               id="evidence-graders"
             >
-              Grader results
+              Grades
             </h2>
           </div>
           {/*
@@ -1202,29 +1044,38 @@ function SimulationEvidencePanel({
             Open transcript and audio
           </Button>
         </header>
-        {stillJudging ? (
+        {stillGrading ? (
           <p className={NOTICE_LINE} role="status">
-            Grading is still running. Findings appear here as they land.
+            Grading is still running. Grades appear here as they finish.
           </p>
         ) : null}
-        {evidence.grading === "not_required" ? (
+        {evidence.gradingState === "error" ? (
+          <p
+            className={cn(NOTICE_LINE, "border-s-failure bg-surface-soft")}
+            role="alert"
+          >
+            Egma could not complete every requested grade. Completed grades stay
+            available below.
+          </p>
+        ) : null}
+        {evidence.gradingState === "not_requested" ? (
           <div className={EMPTY_STATE}>
             <strong className={EMPTY_STATE_TITLE}>
-              There was nothing to judge
+              No grading was requested
             </strong>
             <p className={EMPTY_STATE_LEAD}>
-              Egma did not conduct this simulation, so it filed no grading work.
+              No grader was asked to grade this simulation.
             </p>
           </div>
         ) : graders.length === 0 ? (
           <div className={EMPTY_STATE}>
             <strong className={EMPTY_STATE_TITLE}>
-              {stillJudging ? "Graders are preparing" : "Nobody has judged this yet"}
+              {stillGrading ? "Graders are preparing" : "No grades are available"}
             </strong>
             <p className={EMPTY_STATE_LEAD}>
-              {stillJudging
-                ? "No grader has returned an assertion yet."
-                : "No grader has written a verdict for this simulation."}
+              {stillGrading
+                ? "No grader has returned a grade yet."
+                : "This simulation has no completed grade rows."}
             </p>
           </div>
         ) : (
@@ -1232,13 +1083,37 @@ function SimulationEvidencePanel({
             {graders.map((grader) => (
               <GraderGroup
                 grader={grader}
+                evidence={evidence}
                 key={grader.key}
-                stillJudging={stillJudging}
+                stillGrading={stillGrading}
                 onReadTurn={readTurn}
               />
             ))}
           </div>
         )}
+        <section
+          className="border-t border-border bg-background p-5 max-[40rem]:p-4"
+          aria-labelledby="frozen-grading-plan"
+        >
+          <h3
+            className="m-0 text-base font-medium text-foreground"
+            id="frozen-grading-plan"
+          >
+            Frozen grading plan
+          </h3>
+          {evidence.gradingPlan === null ? (
+            <p className="m-0 mt-1 text-sm text-muted-foreground">
+              No frozen grading plan was recorded for this simulation.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-3">
+              <p className="m-0 text-sm text-muted-foreground">
+                {`Frozen when this run started at ${asSecond(evidence.gradingPlan.capturedAt)}.`}
+              </p>
+              <PlanItems items={evidence.gradingPlan.items} />
+            </div>
+          )}
+        </section>
       </section>
 
       {evidenceOpen ? (
@@ -1300,11 +1175,9 @@ function SimulationEvidencePanel({
 export function SimulationEvidenceReview({
   evidence,
   recording,
-  assertions = judgedAssertions(evidence.verdicts),
 }: {
   readonly evidence: SimulationEvidence;
   readonly recording: SimulationEvidenceRecording;
-  readonly assertions?: readonly JudgedAssertion[];
 }) {
   const [evidenceOpen, setEvidenceOpen] = useState(true);
 
@@ -1321,7 +1194,7 @@ export function SimulationEvidenceReview({
          * this page rather than a layer over it, so the grader results stay
          * reachable while the transcript is open". The panel is `position:
          * fixed` against the viewport's right edge, so nothing under it moves
-         * on its own: at 1440 the transcript covered the judge findings it is
+         * on its own: at 1440 the transcript covered the grader findings it is
          * evidence *for*, and a reader had to close the transcript to read the
          * finding that cited it.
          *
@@ -1349,7 +1222,6 @@ export function SimulationEvidenceReview({
       <SimulationEvidenceSummary evidence={evidence} />
       <SimulationEvidencePanel
         evidence={evidence}
-        assertions={assertions}
         recording={recording}
         evidenceOpen={evidenceOpen}
         onEvidenceChange={setEvidenceOpen}

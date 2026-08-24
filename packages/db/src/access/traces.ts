@@ -167,6 +167,8 @@ export type ReadTraceOptions = {
  * JSON number would quietly lose its low digits.
  */
 export type TraceFacts = {
+  /** The project stamped on every span of this trace. */
+  readonly projectId: string;
   readonly traceId: string;
   /** The first span of this trace **inside the window**, to the microsecond. */
   readonly startedAt: string;
@@ -301,7 +303,7 @@ export type TraceDetail = TraceFacts & {
    * trace is still a trace whatever a vendor wrote in one key of one row.
    *
    * The numbers are read by the shared measure module and by nothing else: a
-   * display and a verdict both reach them through that one arithmetic rather
+   * display and any metric-based grader both reach them through that one arithmetic rather
    * than through this field, so provenance and priority are decided in one
    * place for every source.
    */
@@ -585,6 +587,7 @@ const TRACE_FACTS = `toString(${TRACE_POSITION}) as started_at_micros,
        countIf(kind = 'turn:agent') as agent_turn_count,
        countIf(kind = 'tool') as tool_span_count,
        countIf(status = 'error') as errored_span_count,
+       any(project_id) as trace_project_id,
        any(source) as source,
        any(emitter) as emitter,
        any(environment) as environment,
@@ -599,6 +602,7 @@ const TRACE_FACTS = `toString(${TRACE_POSITION}) as started_at_micros,
 
 type SummaryRow = {
   readonly trace_id: string;
+  readonly trace_project_id: string;
   readonly started_at_micros: string;
   readonly ended_at_nanos: string;
   readonly span_count: string | number;
@@ -756,6 +760,7 @@ function factsOf(traceId: string, row: SummaryRow): TraceFacts {
   const endedAtNanoseconds = BigInt(row.ended_at_nanos);
 
   return {
+    projectId: row.trace_project_id,
     traceId,
     startedAt: rfc3339(startedAt),
     endedAt: rfc3339(endedAtNanoseconds / 1000n),

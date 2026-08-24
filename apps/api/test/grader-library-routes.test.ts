@@ -1,29 +1,17 @@
-import { GRADER_LIBRARY_CATALOG } from "@egma/db";
+import {
+  MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+  PREDEFINED_GRADERS,
+} from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   colleagueOf,
+  mintKey,
   projectKeyFor,
-  request as ask,
   signUp,
   type Answer,
 } from "./support/traces.ts";
-
-/**
- * The grader library route, over real HTTP against real Postgres.
- *
- * One verb, and the shape of the answer is the whole contract: what a developer
- * sees on the Library screen is what a customer's own integration sees, because
- * the screen is drawn from this endpoint rather than from a private one built
- * for it.
- *
- * The fact worth defending here is **owner**. It is the only field on the
- * answer that nothing stores — it is derived from who the entry belongs to, and
- * an entry belonging to nobody is egma's. A door that computed it any other way
- * could show a team's own grader as egma's, or egma's as theirs, and neither
- * would fail anything else.
- */
 
 let api: TestApi;
 
@@ -31,109 +19,316 @@ afterEach(async () => {
   await api?.close();
 });
 
-function request(url: string, key: string): Promise<Answer> {
-  return ask(api.app, "GET", url, key);
+async function request(
+  method: "GET" | "POST",
+  url: string,
+  key: string,
+  body?: Record<string, unknown>,
+): Promise<Answer> {
+  const response = await api.app.inject({
+    method,
+    url,
+    headers: { authorization: `Bearer ${key}` },
+    ...(body === undefined ? {} : { payload: body }),
+  });
+  return {
+    statusCode: response.statusCode,
+    body: response.body === ""
+      ? {}
+      : response.json() as Record<string, unknown>,
+  };
 }
 
 type Listed = {
   readonly id: string;
   readonly name: string;
-  readonly type: string;
-  readonly owner: string;
-  readonly projectId: string | null;
-  readonly prompt: string | null;
-  readonly params: readonly { readonly name: string }[];
+  readonly owner: "egma" | "organization";
+  readonly type: "llm_as_judge" | "code";
+  readonly scopeEditable: boolean;
+  readonly modalities: readonly ("chat" | "voice")[];
+  readonly gradingInstructions: string | null;
+  readonly requiredEvidence: readonly string[];
+  readonly settingDefinitions: readonly Record<string, unknown>[];
+  readonly activeProjectGraderId: string | null;
 };
 
 function itemsOf(answer: Answer): readonly Listed[] {
   return answer.body.graderLibraryEntries as readonly Listed[];
 }
 
-describe("reading the grader library", () => {
-  it("answers egma's own graders, owned by egma", async () => {
+function policy(settings: Record<string, unknown> = {}) {
+  return {
+    scope: {
+      simulations: [{ kind: "all" }],
+      production: null,
+    },
+    settings,
+    passThreshold: 1,
+  };
+}
+
+describe("the grader library", () => {
+  it("shows predefined graders, their form contract, and current-project use state", async () => {
     api = await createApi("grader_library_list");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("/v1/grader-library", key);
+    const answer = await request("GET", "/v1/grader-library", key);
 
-    expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
-    expect(itemsOf(listed).map((entry) => entry.name).sort()).toEqual(
-      GRADER_LIBRARY_CATALOG.map((entry) => entry.name).sort(),
+    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
+    const expected = itemsOf(answer).find(
+      (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
     );
-    for (const entry of itemsOf(listed)) {
-      // Derived from tenancy, and the tenancy of egma's own entries is nothing
-      // at all — which is why there is no project on them either.
-      expect(entry.owner, entry.name).toBe("egma");
-      expect(entry.projectId, entry.name).toBeNull();
+    expect(expected).toMatchObject({
+      name: "expected_behaviors",
+      owner: "egma",
+      type: "llm_as_judge",
+      scopeEditable: false,
+      modalities: ["chat", "voice"],
+      gradingInstructions: null,
+      requiredEvidence: ["transcript", "test_expected_behaviors"],
+      settingDefinitions: [],
+    });
+    expect(expected?.activeProjectGraderId).toMatch(/^grd_/u);
+
+    const latency = itemsOf(answer).find(
+      (entry) => entry.id === PREDEFINED_GRADERS.responseLatency,
+    );
+    expect(latency).toMatchObject({
+      name: "Response latency",
+      owner: "egma",
+      type: "code",
+      scopeEditable: true,
+      modalities: ["chat", "voice"],
+      gradingInstructions: null,
+      requiredEvidence: ["turn_response_latency"],
+      activeProjectGraderId: null,
+      settingDefinitions: [
+        {
+          key: MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER,
+          label: "Maximum average response time",
+          valueType: "integer",
+          defaultValue: 3_000,
+          unit: "milliseconds",
+          minimum: 1,
+          maximum: null,
+        },
+      ],
+    });
+    expect(answer.body.nextPageToken).toBeNull();
+
+    const serialized = JSON.stringify(itemsOf(answer));
+    for (const executable of [
+      "prompt",
+      "params",
+      "outputDefinition",
+      "judgeModel",
+      "sourceCode",
+    ]) {
+      expect(serialized).not.toContain(executable);
     }
-    expect(listed.body.nextPageToken).toBeNull();
   });
 
-  it("hands the judge prompt and the Use form's parameters over with them", async () => {
-    api = await createApi("grader_library_shape");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
-
-    const items = itemsOf(await request("/v1/grader-library", key));
-    const behaviors = items.find((entry) => entry.name === "expected_behaviors");
-    const latency = items.find((entry) => entry.name === "latency");
-
-    // The prompt is on the answer because the whole point of the entry
-    // carrying it is that a developer can read the words their conversations
-    // are judged by.
-    expect(behaviors?.type).toBe("llm_as_judge");
-    expect(behaviors?.prompt ?? "").toContain("Decide only the criterion");
-    // And nothing is asked at Use time: its assertions are the test's own
-    // sentences.
-    expect(behaviors?.params).toEqual([]);
-
-    // Latency is computed rather than judged, and its form has two controls.
-    expect(latency?.type).toBe("code");
-    expect(latency?.prompt).toBeNull();
-    expect(latency?.params.map((one) => one.name)).toEqual(["metric", "bound"]);
-  });
-
-  it("is a read every role holds, viewers included", async () => {
+  it("lets viewers read details but refuses Use in project", async () => {
     api = await createApi("grader_library_roles");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const grace = await colleagueOf(api.app, ada, "grace@acme.example", "viewer");
+    const viewer = await colleagueOf(
+      api.app,
+      ada,
+      "grace@acme.example",
+      "viewer",
+    );
 
-    const listed = await request("/v1/grader-library", grace.secret);
+    const detail = await request(
+      "GET",
+      `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}`,
+      viewer.secret,
+    );
+    expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
+    expect(detail.body).toMatchObject({
+      id: PREDEFINED_GRADERS.responseLatency,
+      activeProjectGraderId: null,
+    });
 
-    // The shelf is what a project is judged by. Somebody who may read a run's
-    // results and not change anything still has to be able to see it.
-    expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
-    expect(itemsOf(listed)).toHaveLength(GRADER_LIBRARY_CATALOG.length);
+    const refused = await request(
+      "POST",
+      `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}/use`,
+      viewer.secret,
+      policy({ [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500 }),
+    );
+    expect(refused.statusCode).toBe(403);
+
+    const createRefused = await request(
+      "POST",
+      "/v1/grader-library/custom",
+      viewer.secret,
+      {
+        name: "Viewer grader",
+        gradingInstructions: "Give 1 when the criterion is met.",
+        modalities: ["chat"],
+        scope: { simulations: [{ kind: "all" }], production: null },
+        passThreshold: 1,
+      },
+    );
+    expect(createRefused.statusCode).toBe(403);
   });
 
-  it("refuses a cursor it never issued, and says what to send instead", async () => {
-    api = await createApi("grader_library_cursor");
+  it("uses one predefined grader once in the current project", async () => {
+    api = await createApi("grader_library_use");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const key = await projectKeyFor(api.app, ada);
+    const input = policy({
+      [MAXIMUM_AVERAGE_RESPONSE_TIME_PARAMETER]: 2_500,
+    });
+
+    const used = await request(
+      "POST",
+      `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}/use`,
+      key,
+      input,
+    );
+    expect(used.statusCode, JSON.stringify(used.body)).toBe(201);
+    expect(used.body).toMatchObject({
+      graderDefinitionId: PREDEFINED_GRADERS.responseLatency,
+      type: "code",
+      owner: "egma",
+      settings: input.settings,
+      scope: input.scope,
+      passThreshold: 1,
+      removable: true,
+    });
+
+    const library = await request("GET", "/v1/grader-library", key);
+    expect(
+      itemsOf(library).find(
+        (entry) => entry.id === PREDEFINED_GRADERS.responseLatency,
+      )?.activeProjectGraderId,
+    ).toBe(used.body.id);
+
+    const duplicate = await request(
+      "POST",
+      `/v1/grader-library/${PREDEFINED_GRADERS.responseLatency}/use`,
+      key,
+      input,
+    );
+    expect(duplicate.statusCode).toBe(422);
+  });
+
+  it("creates an organization-owned LLM grader and activates it atomically", async () => {
+    api = await createApi("grader_library_custom");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
-    const listed = await request("/v1/grader-library?pageToken=nonsense", key);
+    const created = await request(
+      "POST",
+      "/v1/grader-library/custom",
+      key,
+      {
+        name: "Polite close",
+        description: "Checks that the agent closes politely.",
+        gradingInstructions: "Give 1 only when the final reply is polite.",
+        modalities: ["chat", "voice"],
+        scope: { simulations: [{ kind: "all" }], production: null },
+        passThreshold: 0.8,
+      },
+    );
 
-    expect(listed.statusCode).toBe(400);
-    expect(String(listed.body.message)).toContain("nextPageToken");
+    expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.definition).toMatchObject({
+      name: "Polite close",
+      owner: "organization",
+      type: "llm_as_judge",
+      gradingInstructions: "Give 1 only when the final reply is polite.",
+      settingDefinitions: [],
+    });
+    expect(created.body.grader).toMatchObject({
+      owner: "organization",
+      type: "llm_as_judge",
+      settings: {},
+      passThreshold: 0.8,
+      removable: true,
+    });
+    expect(
+      (created.body.definition as Listed).activeProjectGraderId,
+    ).toBe((created.body.grader as { id: string }).id);
+
+    const typeChoice = await request(
+      "POST",
+      "/v1/grader-library/custom",
+      key,
+      {
+        name: "Customer code",
+        gradingInstructions: "return 1",
+        modalities: ["chat"],
+        scope: { simulations: [{ kind: "all" }], production: null },
+        passThreshold: 1,
+        type: "code",
+      },
+    );
+    expect(typeChoice.statusCode).toBe(400);
+    expect(
+      (await request("POST", "/v1/grader-library", key, {})).statusCode,
+    ).toBe(404);
   });
 
-  it("shows each customer the same shelf, because it is egma's", async () => {
+  it("keeps custom definitions inside their organization and activation inside one project", async () => {
     api = await createApi("grader_library_tenants");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const grace = await signUp(api.app, "grace@globex.example", "Globex");
+    const globex = await signUp(api.app, "grace@globex.example", "Globex");
+    const acmeKey = await projectKeyFor(api.app, ada);
+    const created = await request(
+      "POST",
+      "/v1/grader-library/custom",
+      acmeKey,
+      {
+        name: "Acme policy",
+        gradingInstructions: "Give 1 when Acme policy was followed.",
+        modalities: ["voice"],
+        scope: { simulations: [{ kind: "all" }], production: null },
+        passThreshold: 1,
+      },
+    );
+    expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
+    const definitionId = (created.body.definition as { id: string }).id;
 
-    const theirs = itemsOf(
-      await request("/v1/grader-library", await projectKeyFor(api.app, ada)),
-    );
-    const others = itemsOf(
-      await request("/v1/grader-library", await projectKeyFor(api.app, grace)),
-    );
+    const foreignKey = await projectKeyFor(api.app, globex);
+    expect(
+      (await request("GET", `/v1/grader-library/${definitionId}`, foreignKey))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await request(
+        "POST",
+        `/v1/grader-library/${definitionId}/use`,
+        foreignKey,
+        policy(),
+      )).statusCode,
+    ).toBe(404);
 
-    // The same identifiers on both, which is what "egma ships this" means: one
-    // row, on every customer's shelf, upgraded by one release.
-    expect(theirs.map((entry) => entry.id).sort()).toEqual(
-      others.map((entry) => entry.id).sort(),
+    const made = await api.app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: { cookie: ada.cookie },
+      payload: { name: "Second" },
+    });
+    expect(made.statusCode, made.body).toBe(201);
+    const secondProjectId = (made.json() as { id: string }).id;
+    const secondKey = await mintKey(
+      api.app,
+      ada.cookie,
+      "second project",
+      secondProjectId,
     );
+    const secondLibrary = await request("GET", "/v1/grader-library", secondKey);
+    expect(
+      itemsOf(secondLibrary).find((entry) => entry.id === definitionId)
+        ?.activeProjectGraderId,
+    ).toBeNull();
+    const secondActive = await request("GET", "/v1/graders", secondKey);
+    expect(
+      (secondActive.body.graders as { graderDefinitionId: string }[]).map(
+        (grader) => grader.graderDefinitionId,
+      ),
+    ).toEqual([PREDEFINED_GRADERS.expectedBehaviors]);
   });
 });

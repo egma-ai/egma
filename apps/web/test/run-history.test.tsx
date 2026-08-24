@@ -109,9 +109,6 @@ function runHeader(overrides: Record<string, unknown> = {}) {
     finishedCount: 1,
     gradableCount: 1,
     gradedCount: 1,
-    verdict: "passed",
-    score: 1,
-    verdictCounts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
     resultsUrl: "/projects/prj_1/runs/run_1",
     createdAt: "2026-08-21T10:00:00.000Z",
     startedAt: "2026-08-21T10:00:01.000Z",
@@ -132,7 +129,6 @@ function runDetail(overrides: Record<string, unknown> = {}) {
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
     },
-    counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
     agent: { id: "agt_1", name: "Front desk", archived: false },
     connection: {
       id: "con_1",
@@ -155,10 +151,7 @@ function simulation(overrides: Record<string, unknown> = {}) {
     personaName: "Patient caller",
     personaVersionId: "prsv_1",
     status: "completed",
-    grading: "graded",
-    verdict: "passed",
-    score: 1,
-    counts: { passed: 1, failed: 0, skipped: 0, errored: 0, total: 1 },
+    gradingState: "complete",
     reason: null,
     modality: "chat",
     hasRecording: false,
@@ -348,19 +341,16 @@ describe("one run after suites", () => {
     ).toBe(true);
   });
 
-  it("keeps execution failure separate from agent judgment without capability text", async () => {
+  it("keeps execution failure separate from grades without capability text", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(
-      detailStubs(runDetail({ verdict: null }), {
+      detailStubs(runDetail(), {
         status: 200,
         body: {
           simulations: [
             simulation({
               status: "failed",
-              grading: "pending",
-              verdict: null,
-              score: null,
-              counts: null,
+              gradingState: "not_requested",
               reason: "not_answered",
             }),
           ],
@@ -370,7 +360,7 @@ describe("one run after suites", () => {
     );
     render(<RunDetailPage />);
 
-    expect(await screen.findByText(/execution problem, not a failed grader verdict/u)).toBeTruthy();
+    expect(await screen.findByText(/execution problem, not a low grade/u)).toBeTruthy();
     expect(screen.queryByText(/capabilit/u)).toBeNull();
   });
 
@@ -381,7 +371,6 @@ describe("one run after suites", () => {
       finishedAt: null,
       gradedCount: 0,
       gradableCount: 1,
-      verdict: null,
       simulationCounts: { ...NO_SIMULATIONS, running: 1 },
     });
     answers({
@@ -389,7 +378,7 @@ describe("one run after suites", () => {
         status: 200,
         body: {
           simulations: [
-            simulation({ status: "running", grading: "waiting", verdict: null }),
+            simulation({ status: "running", gradingState: null }),
           ],
           nextPageToken: null,
         },

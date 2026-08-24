@@ -355,6 +355,39 @@ describe("the newest snapshot, against what the migrations build", () => {
     expect(disagreements).toEqual([]);
     expect(compared).toBeGreaterThan(0);
   });
+
+  it("builds the non-negative grading sequence base used by later claims", async () => {
+    const client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    try {
+      const { rows: columns } = await client.query<{
+        data_type: string;
+        is_nullable: string;
+        column_default: string | null;
+      }>(
+        `select data_type, is_nullable, column_default
+           from information_schema.columns
+          where table_schema = 'public'
+            and table_name = 'grading_job'
+            and column_name = 'sequence_base'`,
+      );
+      expect(columns).toEqual([{
+        data_type: "integer",
+        is_nullable: "NO",
+        column_default: "0",
+      }]);
+
+      const { rows: constraints } = await client.query<{ definition: string }>(
+        `select pg_get_constraintdef(oid) as definition
+           from pg_constraint
+          where conname = 'grading_job_sequence_base_is_counted'`,
+      );
+      expect(constraints).toHaveLength(1);
+      expect(constraints[0]?.definition).toMatch(/sequence_base.*>= 0/i);
+    } finally {
+      await client.end();
+    }
+  });
 });
 
 describe("applying migrations on boot", () => {
@@ -760,16 +793,6 @@ describe("the persona junction's rename (0008)", () => {
     ).rejects.toThrow(/test_persona_test_version_id_prefix/);
   });
 
-  it("gives the grader its own deferred current-version pointer, like the test's", async () => {
-    const { rows } = await client.query<{
-      condeferrable: boolean;
-      condeferred: boolean;
-    }>(
-      `select condeferrable, condeferred from pg_constraint
-        where conname = 'grader_current_version_id_grader_version_id_fk'`,
-    );
-    expect(rows).toEqual([{ condeferrable: true, condeferred: true }]);
-  });
 });
 
 describe("the simulation's test pin (0009)", () => {

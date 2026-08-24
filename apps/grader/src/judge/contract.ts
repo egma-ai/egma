@@ -39,13 +39,11 @@ export type JudgeQuestion = {
 /**
  * What a judge is allowed to say.
  *
- * **`cannot_determine` is a first-class answer**, not an error and not a
- * failure. A judge that could only say yes or no would have to guess when the
- * transcript does not settle the question, and a guess dressed as a judgment is
- * exactly the false trust this product exists to kill. It becomes `skipped` on
- * the verdict row and leaves the score's denominator — Coval's rule for the
- * same problem — so a behavior nobody could judge neither passes nor fails
- * anything.
+ * **`cannot_determine` is a first-class model answer and a grading error.** A
+ * judge that could only say yes or no would have to guess when the transcript
+ * does not settle the question. The expected-behaviors grader keeps the answer
+ * in assertion details and returns a null top-level score, so uncertainty can
+ * never make the combined score look better by disappearing from it.
  */
 export type Decision = "met" | "not_met" | "cannot_determine";
 

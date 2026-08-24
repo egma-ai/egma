@@ -142,7 +142,7 @@
   --destructive-pressed: #7e2d2d;
   --destructive-text: var(--color-paper);
 
-  /* Product state colors keep verdict meaning separate from brand meaning. */
+  /* Product state colors keep result meaning separate from brand meaning. */
   --good: #28775a;
   --warn: #9a691c;
   --bad: #b44444;
@@ -340,6 +340,7 @@
   --page-gutter: var(--space-6);
   --page-max: 1200px;
   --page-max-wide: 1440px;
+  --grade-fact-min: 150px;
 
   /*
    * Orange-brown elevation, reserved for what is raised off the page.
@@ -626,9 +627,9 @@
   --color-ring: var(--focus);
 
   /*
-   * Product state. These carry verdict meaning — passed, skipped, failed — and
+   * Product state. These carry result meaning — success, warning, failure — and
    * the brand orange above never does. Keeping them named apart is what stops
-   * a filled Deep Ember button from reading as a verdict.
+   * a filled Deep Ember button from reading as a result.
    */
   --color-success: var(--good);
   --color-warning: var(--warn);

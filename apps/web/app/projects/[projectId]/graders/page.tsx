@@ -2,38 +2,51 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
-import { listGraderLibrary } from "@egma/platform-api/client";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  listGraderLibrary,
+  listGraders,
+  removeGrader,
+} from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
 import {
-  COLUMNS,
-  LIBRARY,
-  NOTHING,
-  TYPES,
-  USE,
-} from "../../../../lib/grader-library-copy.ts";
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import type { Answer, Refusal } from "../../../../lib/api.ts";
 import {
-  GRADERS_SECTION,
-  RUNNING_GRADERS_STEP,
-  type LibraryEntry,
-  type LibraryPage,
+  graderDefinitionDisplayName,
+  graderModalitiesLabel,
+  graderOwnerLabel,
+  graderTypeLabel,
+  scopeSummary,
+  type GraderLibraryEntry,
+  type GraderLibraryPage,
+  type ProjectGrader,
+  type ProjectGradersPage,
 } from "../../../../lib/graders.ts";
 import { firstProjectOf, roleOf } from "../../../../lib/me.ts";
 import {
   platformAnswer,
   platformClient,
 } from "../../../../lib/platform-client.ts";
-import {
-  graderDisplayName,
-  ownerDisplayName,
-} from "../../../../lib/presentation.ts";
-import { projectLanding, projectPath } from "../../../../lib/project-context.ts";
+import { projectLanding } from "../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../lib/roles.ts";
 import { DataTable, type Column } from "../../../../ui/data-table.tsx";
-import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
+import { Dialog } from "../../../../ui/dialog.tsx";
+import { Refused } from "../../../../ui/form.tsx";
+import { MenuItem } from "../../../../ui/menu.tsx";
+import {
+  Empty,
+  Failure,
+  Loading,
+  NotFound,
+} from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
-import { Section } from "../../../../ui/section.tsx";
+import { RowMenu } from "../../../../ui/row-menu.tsx";
 import {
   AppShell,
   PageBody,
@@ -41,264 +54,521 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
-import { Notice } from "../../../ui.tsx";
-import { GraderTabs, VIEW_CONTENT } from "./tabs.tsx";
-import { UseForm } from "./use-form.tsx";
+import {
+  ActiveGraderSheet,
+  CreateCustomGraderSheet,
+  LibraryGraderSheet,
+} from "./grader-sheets.tsx";
 
-/**
- * The grader library, read in one project: the shelf of definitions a
- * developer picks from.
- *
- * **Nothing here is authored, and one thing here is pressed.** v0 ships a small
- * set of graders egma maintains, so there is nothing on this page to create and
- * nothing to edit — a team meets judgment logic that already works instead of
- * being asked to design some on their first day. What a developer does here is
- * press **Use**, which puts a running copy of an entry on *this* project; the
- * screen beside it lists those copies, and the strip under the heading is how
- * somebody gets between the two.
- *
- * **The shelf is the same in every project and the act is not.** An entry egma
- * owns belongs to nobody in particular, which is what makes it everybody's — so
- * this list reads the same wherever it is opened. Pressing Use is the opposite:
- * it writes one row into one project, and which project that is has to be the
- * one in the address rather than one the API resolves for itself. That is the
- * whole reason this screen lives under `/projects/:projectId/graders`; its
- * organization-wide ancestor could not name a project and quietly used the
- * first in the viewer's list.
- *
- * **The Use form is drawn from the entry it is opened on.** Every entry
- * declares what pressing Use asks for, and that declaration arrives on this
- * answer — so latency draws a measure dropdown and a bound, expected behaviors
- * draws nothing at all, and this page has no opinion about either. A form
- * written per grader would be a copy of the platform's own declaration,
- * drifting the first time one changed.
- *
- * **Owner is the entry's own answer, printed rather than worked out.** The API
- * derives it from who the entry belongs to, so a row saying `egma` and a row a
- * team wrote can never be confused by anything this page decides.
- */
-export default function GraderLibraryPage() {
+async function readAllProjectGraders(
+  projectId: string,
+): Promise<Answer<ProjectGradersPage>> {
+  const graders: ProjectGrader[] = [];
+  let pageToken: string | undefined;
+
+  for (;;) {
+    const answer = await platformAnswer(
+      listGraders(
+        {
+          projectId,
+          ...(pageToken === undefined ? {} : { pageToken }),
+        },
+        { client: platformClient },
+      ),
+    );
+    if (answer.status !== "ready") return answer;
+
+    graders.push(...answer.value.graders);
+    if (answer.value.nextPageToken === null) {
+      return {
+        status: "ready",
+        value: { graders, nextPageToken: null },
+      };
+    }
+    pageToken = answer.value.nextPageToken;
+  }
+}
+
+async function readAllGraderLibrary(
+  projectId: string,
+): Promise<Answer<GraderLibraryPage>> {
+  const graderLibraryEntries: GraderLibraryEntry[] = [];
+  let pageToken: string | undefined;
+
+  for (;;) {
+    const answer = await platformAnswer(
+      listGraderLibrary(
+        {
+          projectId,
+          ...(pageToken === undefined ? {} : { pageToken }),
+        },
+        { client: platformClient },
+      ),
+    );
+    if (answer.status !== "ready") return answer;
+
+    graderLibraryEntries.push(...answer.value.graderLibraryEntries);
+    if (answer.value.nextPageToken === null) {
+      return {
+        status: "ready",
+        value: { graderLibraryEntries, nextPageToken: null },
+      };
+    }
+    pageToken = answer.value.nextPageToken;
+  }
+}
+
+export default function GradersPage() {
   const { projectId } = useParams<{ projectId: string }>();
   return (
     <AppShell>
-      <GraderLibrary projectId={projectId} />
+      <ProjectGraders projectId={projectId} />
     </AppShell>
   );
 }
 
-function typeOf(entry: LibraryEntry): string {
-  return TYPES[entry.type] ?? entry.type;
-}
-
-/**
- * The columns, in the order they are shown, each beside what fills it.
- *
- * The order is a judgement about scanning: which grader this is, then what kind
- * of thing it does, then whose it is, then the sentence because it is the
- * widest, and the act last where a reader's eye ends up.
- *
- * A function rather than a constant because the last column presses something,
- * and what it presses belongs to the page's state rather than to this module.
- */
-function columnsFor(
-  use: (entry: LibraryEntry) => void,
-  mayUse: boolean,
-  /**
-   * Why it is not theirs — and **nothing at all while egma has not identified
-   * them yet**. A disabled control has to be able to say why, and every
-   * sentence it could say about an unsettled session would be a claim about
-   * somebody nobody has read. So the control is inert and silent for the moment
-   * the session read is in flight, and speaks once there is a role to name.
-   */
-  whyNot: string | undefined,
-): readonly Column<LibraryEntry>[] {
+function activeColumns(
+  mayAuthor: boolean,
+  open: (grader: ProjectGrader) => void,
+): readonly Column<ProjectGrader>[] {
   return [
     {
       key: "name",
-      header: COLUMNS.name,
+      header: "Grader",
       primary: true,
-      cell: (entry) => graderDisplayName(entry.name),
+      width: "240px",
+      cell: (grader) =>
+        graderDefinitionDisplayName(grader.graderDefinitionId, grader.name),
     },
-    { key: "type", header: COLUMNS.type, width: "140px", cell: typeOf },
     {
       key: "owner",
-      header: COLUMNS.owner,
-      hideOnMobile: true,
+      header: "Owner",
       width: "120px",
-      cell: (entry) => ownerDisplayName(entry.owner),
-    },
-    {
-      key: "description",
-      header: COLUMNS.description,
       hideOnMobile: true,
-      cell: (entry) => entry.description ?? NOTHING,
+      cell: (grader) => graderOwnerLabel(grader.owner),
     },
     {
-      key: "use",
-      header: COLUMNS.use,
-      /*
-       * A row control, said to the table rather than only drawn like one.
-       *
-       * The shared table keeps an `action` cell at the trailing edge and lets
-       * it out of the one-line ellipsis every other cell gets. That second
-       * half is why this is here: the ellipsis comes from `overflow: hidden`
-       * on the cell, and an outline is clipped by an ancestor's overflow, so a
-       * control in an unmarked cell had the Ember focus ring cut off on every
-       * side. Other row controls were already marked; these were the same
-       * concept drawn two ways.
-       */
+      key: "type",
+      header: "Type",
+      width: "140px",
+      hideOnMobile: true,
+      cell: (grader) => graderTypeLabel(grader.type),
+    },
+    {
+      key: "scope",
+      header: "Scope",
+      cell: (grader) => scopeSummary(grader.scope),
+    },
+    {
+      key: "threshold",
+      header: "Pass threshold",
+      width: "150px",
+      mono: true,
+      cell: (grader) => grader.passThreshold.toFixed(2),
+    },
+    {
+      key: "action",
+      header: "Actions",
       action: true,
-      width: "110px",
-      cell: (entry) => (
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={!mayUse}
-          {...(mayUse || whyNot === undefined ? {} : { why: whyNot })}
-          onClick={() => use(entry)}
+      cell: (grader) => (
+        <RowMenu
+          label={`Open the menu for ${graderDefinitionDisplayName(
+            grader.graderDefinitionId,
+            grader.name,
+          )}`}
         >
-          {USE.open}
-        </Button>
+          {(close) => (
+            <MenuItem
+              onClick={() => {
+                close();
+                open(grader);
+              }}
+            >
+              {mayAuthor ? "View and edit" : "View details"}
+            </MenuItem>
+          )}
+        </RowMenu>
       ),
     },
   ];
 }
 
-function GraderLibrary({ projectId }: { readonly projectId: string }) {
-  const { me } = useShellSession();
-  // Null until the session read answers. A page that guessed would tell an
-  // admin their role cannot do something it can, on every load.
-  const role = me === null ? null : roleOf(me);
-
-  const { answer, reload } = useProjectRead<LibraryPage>(
-    (projectId) =>
-      platformAnswer(
-        listGraderLibrary({ projectId }, { client: platformClient }),
+function libraryColumns(
+  open: (entry: GraderLibraryEntry) => void,
+): readonly Column<GraderLibraryEntry>[] {
+  return [
+    {
+      key: "name",
+      header: "Grader",
+      primary: true,
+      width: "260px",
+      cell: (entry) => graderDefinitionDisplayName(entry.id, entry.name),
+    },
+    {
+      key: "owner",
+      header: "Owner",
+      width: "120px",
+      hideOnMobile: true,
+      cell: (entry) => graderOwnerLabel(entry.owner),
+    },
+    {
+      key: "type",
+      header: "Type",
+      width: "140px",
+      hideOnMobile: true,
+      cell: (entry) => graderTypeLabel(entry.type),
+    },
+    {
+      key: "modalities",
+      header: "Modalities",
+      width: "150px",
+      hideOnMobile: true,
+      cell: (entry) => graderModalitiesLabel(entry.modalities),
+    },
+    {
+      key: "status",
+      header: "Project use",
+      cell: (entry) =>
+        entry.activeProjectGraderId === null ? "Available" : "Active",
+    },
+    {
+      key: "action",
+      header: "Actions",
+      action: true,
+      cell: (entry) => (
+        <RowMenu
+          label={`Open the menu for ${graderDefinitionDisplayName(
+            entry.id,
+            entry.name,
+          )}`}
+        >
+          {(close) => (
+            <MenuItem
+              onClick={() => {
+                close();
+                open(entry);
+              }}
+            >
+              View details
+            </MenuItem>
+          )}
+        </RowMenu>
       ),
+    },
+  ];
+}
+
+function ProjectGraders({ projectId }: { readonly projectId: string }) {
+  const { me } = useShellSession();
+  const role = me === null ? null : roleOf(me);
+  const mayAuthor = role !== null && canAuthor(role);
+  const active = useProjectRead<ProjectGradersPage>(
+    readAllProjectGraders,
     projectId,
   );
+  const library = useProjectRead<GraderLibraryPage>(
+    readAllGraderLibrary,
+    projectId,
+  );
+  const [tab, setTab] = useState("active");
+  const [creating, setCreating] = useState(false);
+  const [libraryEntry, setLibraryEntry] = useState<GraderLibraryEntry | null>(
+    null,
+  );
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [activeGrader, setActiveGrader] = useState<ProjectGrader | null>(null);
+  const [activeOpen, setActiveOpen] = useState(false);
+  const [removing, setRemoving] = useState<ProjectGrader | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
 
-  /** The entry whose form is open, and nothing while none is. */
-  const [using, setUsing] = useState<LibraryEntry | null>(null);
-  /** What the last press came to, kept after the form closes so it can be read. */
-  const [started, setStarted] = useState<string | null>(null);
-
-  const mayUse = role !== null && canAuthor(role);
-  const whyNot = role === null ? undefined : USE.notYours(role);
-
-  function body() {
-    if (answer === null || answer.status === "signed-out") {
-      return <Loading what={LIBRARY.loading} />;
+  useEffect(() => {
+    if (
+      active.answer?.status === "signed-out" ||
+      library.answer?.status === "signed-out"
+    ) {
+      window.location.replace("/sign-in");
     }
+  }, [active.answer, library.answer]);
 
+  const whyNot =
+    mayAuthor || role === null
+      ? undefined
+      : `Your ${String(role)} role can view graders but cannot change them.`;
+
+  function refreshAll(message: string): void {
+    setSaid(message);
+    active.refresh();
+    library.refresh();
+  }
+
+  function missingAction(): ReactNode {
+    const elsewhere = me === null ? undefined : firstProjectOf(me);
+    return elsewhere === undefined ? undefined : (
+      <Button asChild variant="secondary">
+        <Link href={projectLanding(elsewhere.id)}>Open {elsewhere.name}</Link>
+      </Button>
+    );
+  }
+
+  function activePanel(): ReactNode {
+    const answer = active.answer;
+    if (answer === null || answer.status === "signed-out") {
+      return <Loading what="active graders" />;
+    }
     if (answer.status === "missing") {
-      const elsewhere = me === null ? undefined : firstProjectOf(me);
       return (
-        <NotFound
-          message={answer.refusal.message}
-          action={
-            elsewhere === undefined ? undefined : (
-              <Button asChild variant="secondary">
-                <Link href={projectLanding(elsewhere.id)}>
-                  Open {elsewhere.name}
-                </Link>
-              </Button>
-            )
-          }
+        <NotFound message={answer.refusal.message} action={missingAction()} />
+      );
+    }
+    if (answer.status === "failed") {
+      return <Failure message={answer.refusal.message} onRetry={active.reload} />;
+    }
+    if (answer.value.graders.length === 0) {
+      return (
+        <Empty
+          title="No active graders"
+          lead="Use a grader from the library, or ask an administrator to check why Expected behaviors is missing."
         />
       );
     }
-
-    if (answer.status === "failed") {
-      return <Failure message={answer.refusal.message} onRetry={reload} />;
-    }
-
-    const entries = answer.value.graderLibraryEntries;
-
-    /*
-     * **It reads the first page and stops there**, which is honest for a shelf
-     * holding exactly what egma ships. The endpoint pages like every other
-     * list and hands back where it stopped; this screen ignores that, because
-     * a **Show more** button under two rows would be a control nobody could
-     * ever press. The day the shelf grows past a page — custom entries, which
-     * is the same change that gives this screen something to author — is the
-     * day it grows the button, and the answer already carries what that needs.
-     */
-    if (entries.length === 0) {
-      return <Empty title="The library is empty" lead={LIBRARY.empty} />;
-    }
-
     return (
       <DataTable
-        label="The grader library"
-        columns={columnsFor(setUsing, mayUse, whyNot)}
-        rows={entries}
-        keyOf={(entry) => entry.id}
+        label="Active graders"
+        columns={activeColumns(mayAuthor, (grader) => {
+          setSaid(null);
+          setActiveGrader(grader);
+          setActiveOpen(true);
+        })}
+        rows={answer.value.graders}
+        keyOf={(grader) => grader.id}
+        stackWhenConstrained
       />
     );
   }
 
+  function libraryPanel(): ReactNode {
+    const answer = library.answer;
+    if (answer === null || answer.status === "signed-out") {
+      return <Loading what="grader library" />;
+    }
+    if (answer.status === "missing") {
+      return (
+        <NotFound message={answer.refusal.message} action={missingAction()} />
+      );
+    }
+    if (answer.status === "failed") {
+      return <Failure message={answer.refusal.message} onRetry={library.reload} />;
+    }
+    if (answer.value.graderLibraryEntries.length === 0) {
+      return (
+        <Empty
+          title="No graders in the library"
+          lead="Create a custom grader for this organization."
+        />
+      );
+    }
+    return (
+      <DataTable
+        label="Grader library"
+        columns={libraryColumns((entry) => {
+          setSaid(null);
+          setLibraryEntry(entry);
+          setLibraryOpen(true);
+        })}
+        rows={answer.value.graderLibraryEntries}
+        keyOf={(entry) => entry.id}
+        stackWhenConstrained
+      />
+    );
+  }
+
+  function openActive(projectGraderId: string): void {
+    const answer = active.answer;
+    const grader =
+      answer?.status === "ready"
+        ? answer.value.graders.find((one) => one.id === projectGraderId)
+        : undefined;
+    setLibraryOpen(false);
+    if (grader !== undefined) {
+      setActiveGrader(grader);
+      setActiveOpen(true);
+      return;
+    }
+    setSaid("This grader is active. Refresh Active graders to open its policy.");
+    setTab("active");
+    active.reload();
+  }
+
   return (
     <ProductPage wide>
-      {/*
-        The title, and then the strip. A list screen carries no label over its
-        title and no purpose sentence under it (`71V-0`): the sidebar already
-        says which section and which project this is, and the tab strip under
-        the bar says which of the section's two screens this is.
-      */}
-      <PageHeader title={LIBRARY.title} />
-      <PageBody>
-        <GraderTabs projectId={projectId} active="library" />
-        <div className={VIEW_CONTENT}>
-          {/*
-            What the last press came to, and it stays until the next one. A copy
-            is judging from the moment it exists, so the sentence says that and
-            points at the screen where it now appears.
-          */}
-          {started === null ? null : (
-            <Notice tone="success">
-              {USE.started(started)}{" "}
-              <Link
-                href={projectPath(
-                  projectId,
-                  GRADERS_SECTION,
-                  RUNNING_GRADERS_STEP,
-                )}
-              >
-                {USE.seeRunning}
-              </Link>
-            </Notice>
-          )}
-
-          {/*
-            The form, opened on one entry at a time and drawn from that entry's
-            own declaration. Inline rather than in a dialog: the table stays
-            available, so pressing Use on another row can safely replace it.
-
-            **Keyed by the entry, which is what makes switching between two of
-            them safe.** The form's state is the answers to *this* entry's
-            questions, and React keeps a component's state across a re-render when
-            only its props change. The key makes the two forms two components, so
-            the second starts from its own defaults.
-          */}
-          {using === null ? null : (
-            <Section title={USE.title(graderDisplayName(using.name))}>
-              <UseForm
-                key={using.id}
-                entry={using}
-                projectId={projectId}
-                onCancel={() => setUsing(null)}
-                onStarted={(name) => {
-                  setUsing(null);
-                  setStarted(graderDisplayName(name));
+      <Tabs className="contents" value={tab} onValueChange={setTab}>
+        <PageHeader
+          title="Graders"
+          toolbar={
+            <TabsList variant="line" aria-label="Grader views">
+              <TabsTrigger value="active">Active graders</TabsTrigger>
+              <TabsTrigger value="library">Grader library</TabsTrigger>
+            </TabsList>
+          }
+          action={
+            role === null ? undefined : (
+              <Button
+                type="button"
+                disabled={!mayAuthor}
+                {...(whyNot === undefined ? {} : { why: whyNot })}
+                onClick={() => {
+                  setSaid(null);
+                  setCreating(true);
                 }}
-              />
-            </Section>
+              >
+                Create custom grader
+              </Button>
+            )
+          }
+        />
+        <PageBody>
+          {said === null ? null : (
+            <p className="m-0 mb-4 text-sm text-success" role="status">
+              {said}
+            </p>
           )}
+          <TabsContent value="active">{activePanel()}</TabsContent>
+          <TabsContent value="library">{libraryPanel()}</TabsContent>
+        </PageBody>
+      </Tabs>
 
-          {body()}
-        </div>
-      </PageBody>
+      <CreateCustomGraderSheet
+        projectId={projectId}
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={() => {
+          setCreating(false);
+          setTab("active");
+          refreshAll("Custom grader created and added to Active graders.");
+        }}
+      />
+      {libraryEntry === null ? null : (
+        <LibraryGraderSheet
+          key={libraryEntry.id}
+          entry={libraryEntry}
+          projectId={projectId}
+          open={libraryOpen}
+          mayAuthor={mayAuthor}
+          onClose={() => setLibraryOpen(false)}
+          onUsed={() => {
+            setLibraryOpen(false);
+            setTab("active");
+            refreshAll("Grader added to Active graders.");
+          }}
+          onEditActive={openActive}
+        />
+      )}
+      {activeGrader === null ? null : (
+        <ActiveGraderSheet
+          key={activeGrader.id}
+          grader={activeGrader}
+          projectId={projectId}
+          open={activeOpen}
+          mayAuthor={mayAuthor}
+          onClose={() => setActiveOpen(false)}
+          onSaved={() => {
+            setActiveOpen(false);
+            refreshAll("Grader changes saved.");
+          }}
+          onRemove={() => {
+            setRemoving(activeGrader);
+            setActiveOpen(false);
+          }}
+        />
+      )}
+      {removing === null ? null : (
+        <RemoveGraderDialog
+          grader={removing}
+          projectId={projectId}
+          onClose={() => setRemoving(null)}
+          onRemoved={() => {
+            setRemoving(null);
+            refreshAll("Grader removed from Active graders.");
+          }}
+        />
+      )}
     </ProductPage>
+  );
+}
+
+function RemoveGraderDialog({
+  grader,
+  projectId,
+  onClose,
+  onRemoved,
+}: {
+  readonly grader: ProjectGrader;
+  readonly projectId: string;
+  readonly onClose: () => void;
+  readonly onRemoved: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<Refusal | null>(null);
+
+  async function remove(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setRefused(null);
+    const answer = await platformAnswer(
+      removeGrader(
+        { graderId: grader.id, projectId },
+        { client: platformClient },
+      ),
+    );
+    setBusy(false);
+    if (answer.status === "signed-out") {
+      window.location.replace("/sign-in");
+      return;
+    }
+    if (answer.status !== "ready") {
+      setRefused(answer.refusal);
+      return;
+    }
+    onRemoved();
+  }
+
+  return (
+    <Dialog
+      title={`Remove ${graderDefinitionDisplayName(
+        grader.graderDefinitionId,
+        grader.name,
+      )}?`}
+      onClose={onClose}
+    >
+      {(dismiss) => (
+        <>
+          <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+            This removes the grader from Active graders. Its definition stays in
+            the Grader library, and earlier grades stay unchanged.
+          </p>
+          {refused === null ? null : <Refused message={refused.message} />}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              size="lg"
+              variant="destructive"
+              busy={busy}
+              onClick={() => void remove()}
+            >
+              {busy ? "Removing…" : "Remove grader"}
+            </Button>
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => dismiss()}
+            >
+              Cancel
+            </Button>
+          </div>
+        </>
+      )}
+    </Dialog>
   );
 }

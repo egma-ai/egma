@@ -19,11 +19,10 @@ import {
   getTestSuite,
   IdempotencyConflictError,
   listRunEvents,
-  listRunHistory,
+  listRuns,
   listSimulations,
   listTests,
   NotPermittedError,
-  readRunFold,
   RECOMMENDED_PERSONA_MODELS,
   renameTestSuite,
   RunWriteRefusedError,
@@ -50,7 +49,7 @@ import {
   seedTestFactory,
   type SeededWorld,
 } from "./support/test-factory.ts";
-import { seedGraderCopies } from "./support/tenancy.ts";
+import { seedProjectGraders } from "./support/tenancy.ts";
 
 let world: SeededWorld;
 let database: MigratedDatabase;
@@ -90,7 +89,7 @@ beforeAll(async () => {
   database = world.database;
   store = await createMigratedTraceStore("test_suites");
   connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 2 });
-  await seedGraderCopies();
+  await seedProjectGraders();
 
   const connection = await addConnection(
     actingAsAcme(),
@@ -622,11 +621,11 @@ describe("unlimited execution with bounded reads", () => {
     expect(third?.items).toHaveLength(105);
     expect(third?.nextCursor).toBeUndefined();
 
-    const detail = await readRunFold(actingAsAcme(), started.id);
-    expect(detail?.fold.simulations.queued).toBe(505);
-    const history = await listRunHistory(actingAsAcme(), { limit: 1 });
-    expect(history.items[0]?.run.id).toBe(started.id);
-    expect(history.items[0]?.fold.simulations.queued).toBe(505);
+    const detail = await getRun(actingAsAcme(), started.id);
+    expect(detail?.expectedSimulationCount).toBe(505);
+    const history = await listRuns(actingAsAcme(), { limit: 1 });
+    expect(history.items[0]?.id).toBe(started.id);
+    expect(history.items[0]?.expectedSimulationCount).toBe(505);
 
     const canceled = await cancelRun(actingAsAcme(), started.id);
     expect(canceled?.status).toBe("canceled");

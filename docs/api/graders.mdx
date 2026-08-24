@@ -1,276 +1,116 @@
 ---
-title: "Graders: Configure Judgment Criteria for Your Project"
+title: "Project graders"
 sidebarTitle: "Graders"
-description: "Create, update, and delete project graders — copies of library entries that judge your agent's conversations in simulations and production."
+description: "List a project's graders and update an individual pass threshold."
 ---
 
-Project graders are the active judgment layer for a specific project. Each grader is a copy of an entry from the [grader library](/api/grader-library) — the entry supplies the prompt and the schema, and your copy holds the filled-in parameters, the scope it operates in, and whether its verdict can block a test run. When you press **Use** on a library entry in the dashboard, Egma calls `POST /v1/graders` on your behalf. Use the API directly to automate grader configuration, provision graders during CI setup, or manage them programmatically across projects.
+A project grader connects one project to one shared grader definition. It owns
+that project's scope and individual pass threshold. It does not copy Egma's
+prompt, code, or model choice.
 
----
+Egma automatically adds one **Expected behaviors** project grader to every
+project. Its fixed scope selects all simulations and no production traces, and
+it cannot be removed. Its pass threshold starts at `1` and is editable.
 
 ## List graders
-
-Returns the running graders for a project, ordered newest first.
 
 **`GET /v1/graders`**
 
 <ParamField query="projectId" type="string">
-  The `prj_` identifier of the project to read. Omit this when your API key is already scoped to a project.
+  The `prj_` project identifier. Omit it when your API key is already scoped to
+  a project.
 </ParamField>
 
 <ParamField query="pageToken" type="string">
-  Pagination cursor. Pass the `nextPageToken` value from a previous response to fetch the next page. Omit to start from the newest grader.
+  The `nextPageToken` from the previous page.
 </ParamField>
 
 <ResponseField name="graders" type="array">
-  Array of grader objects. See the [grader object](#the-grader-object) reference below.
+  The project's active grader records.
 </ResponseField>
 
 <ResponseField name="nextPageToken" type="string | null">
-  Cursor for the next page. `null` means you have reached the last page.
+  The next page cursor, or `null` after the last page.
 </ResponseField>
 
-```bash title="List graders"
-curl https://your-egma-instance/v1/graders \
-  -H "Authorization: Bearer egma_sk_..."
-```
-
-```bash title="Filter by project"
+```bash
 curl "https://your-egma-instance/v1/graders?projectId=prj_abc123" \
   -H "Authorization: Bearer egma_sk_..."
 ```
 
----
-
-## Create a grader
-
-Activates a library entry for your project by creating a copy with the parameters you supply.
-
-**`POST /v1/graders`**
-
-<ParamField body="libraryId" type="string" required>
-  The `grl_` identifier of the library entry to copy. Read the [grader library](/api/grader-library) to see available entries and the parameters each one accepts.
-</ParamField>
-
-<ParamField body="params" type="object">
-  The library entry's form filled in. Shape varies by entry — for example, a latency grader accepts `{ "metric": "turn_response_latency", "bound": 2000 }`. Read the library entry's `params` field to see what is required. Omit entirely for entries that ask for nothing.
-</ParamField>
-
-<ParamField body="scope" type="string">
-  Where this grader judges. One of `"simulations"`, `"production"`, or `"both"`. Defaults to `"simulations"` when omitted.
-</ParamField>
-
-<ParamField body="required" type="boolean">
-  Whether a failing verdict from this grader can block a test run from passing. Set to `false` to make the grader diagnostic-only — it reports, but never fails anything. Defaults to `true`.
-</ParamField>
-
-<ParamField body="name" type="string">
-  A display name for this copy. Defaults to the library entry's own name when omitted.
-</ParamField>
-
-<ParamField body="description" type="string">
-  A note your team leaves on this grader, explaining why it is switched on.
-</ParamField>
-
-<ParamField body="productionSampleRate" type="number">
-  Percentage of live production traffic this grader judges, as a whole number between `0` and `100`. Only meaningful when `scope` includes production.
-</ParamField>
-
-<ParamField body="projectId" type="string">
-  The `prj_` identifier of the project to create the grader in. Omit when your API key is already scoped to a project.
-</ParamField>
-
-Returns `201 Created` with the new grader object.
-
-<ResponseField name="id" type="string">
-  The `grd_` identifier for this grader copy.
-</ResponseField>
-
-<ResponseField name="libraryId" type="string">
-  The library entry this copy was made from.
-</ResponseField>
-
-<ResponseField name="version" type="number">
-  The current version number. Starts at `1` and increments each time `params` are changed.
-</ResponseField>
-
-<ResponseField name="versionId" type="string">
-  The identifier of the current version. Verdicts reference this to record exactly which parameters decided them.
-</ResponseField>
-
-<ResponseField name="config" type="object">
-  The filled-in parameter values for this version.
-</ResponseField>
-
-```bash title="Create a grader"
-curl -X POST https://your-egma-instance/v1/graders \
-  -H "Authorization: Bearer egma_sk_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "libraryId": "grl_latency_01",
-    "params": { "metric": "turn_response_latency", "bound": 1500 },
-    "scope": "both",
-    "required": true,
-    "name": "Response latency (1.5 s)"
-  }'
-```
-
-<Note>
-  The `params` you send are validated against the library entry's schema. Sending a parameter the entry never asked for, or a value outside the allowed range, returns `422 Unprocessable Content` with a message naming what went wrong.
-</Note>
-
----
-
-## Update a grader
-
-Modifies a running grader. What you send determines whether Egma mints a new version or updates in place.
+## Update the pass threshold
 
 **`PATCH /v1/graders/:graderId`**
 
 <ParamField path="graderId" type="string" required>
-  The `grd_` identifier of the grader to update.
-</ParamField>
-
-<ParamField body="params" type="object">
-  New parameter values. Sending this field mints a new version — all verdicts already written remain readable under the version that decided them.
-</ParamField>
-
-<ParamField body="scope" type="string">
-  Updated scope. Written in place; does not change existing verdicts.
-</ParamField>
-
-<ParamField body="required" type="boolean">
-  Updated blocking flag. Written in place. Because the outcome fold runs at read time, changing `required` from `true` to `false` immediately re-reads runs that previously failed on this grader alone as passing.
-</ParamField>
-
-<ParamField body="name" type="string">
-  Updated display name. Written in place.
-</ParamField>
-
-<ParamField body="description" type="string | null">
-  Updated note. Send `null` or an empty string to clear the existing note. Omit to leave it unchanged.
-</ParamField>
-
-<ParamField body="productionSampleRate" type="number">
-  Updated production sample rate. Written in place.
-</ParamField>
-
-<ParamField body="projectId" type="string">
-  The `prj_` identifier of the project. Omit when your key is already scoped to a project.
-</ParamField>
-
-Returns the updated grader object.
-
-<Note>
-  Sending `params` mints a new version of the grader. Fields like `scope`, `required`, `name`, and `description` are written in place and never create a new version. Egma decides which rule applies — you send the full body and read the `version` number back.
-</Note>
-
-<Note>
-  You cannot change a grader's `libraryId`. A grader's type is set by the entry it was copied from, and every historical version was shaped by that type. To judge with a different entry, create a new grader from it and delete the old one.
-</Note>
-
-```bash title="Change parameters (mints new version)"
-curl -X PATCH https://your-egma-instance/v1/graders/grd_abc123 \
-  -H "Authorization: Bearer egma_sk_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "params": { "metric": "turn_response_latency", "bound": 2000 }
-  }'
-```
-
-```bash title="Update scope and required flag (in-place)"
-curl -X PATCH https://your-egma-instance/v1/graders/grd_abc123 \
-  -H "Authorization: Bearer egma_sk_..." \
-  -H "Content-Type: application/json" \
-  -d '{
-    "scope": "simulations",
-    "required": false
-  }'
-```
-
----
-
-## Delete a grader
-
-Switches a grader off. From the moment this returns, no new conversations are judged by this copy.
-
-**`DELETE /v1/graders/:graderId`**
-
-<ParamField path="graderId" type="string" required>
-  The `grd_` identifier of the grader to delete.
+  The `grd_` project-grader identifier.
 </ParamField>
 
 <ParamField query="projectId" type="string">
-  The `prj_` identifier of the project. Omit when your key is scoped to a project.
+  The project identifier. Omit it when your API key is project-scoped.
 </ParamField>
 
-Returns the deleted grader's `id`, `name`, and `deletedAt` timestamp.
+<ParamField body="passThreshold" type="number" required>
+  A normalized value from `0` through `1`. A grade passes this individual
+  grader when `score >= passThreshold`.
+</ParamField>
 
-```bash title="Delete a grader"
-curl -X DELETE https://your-egma-instance/v1/graders/grd_abc123 \
-  -H "Authorization: Bearer egma_sk_..."
+```bash
+curl -X PATCH \
+  "https://your-egma-instance/v1/graders/grd_abc123?projectId=prj_abc123" \
+  -H "Authorization: Bearer egma_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "passThreshold": 0.8 }'
 ```
 
-<Note>
-  Deletion is a soft delete. The grader's row is marked as deleted, and its versions are kept intact. Every verdict already written remains readable and still references the version that decided it — an old run keeps its full meaning even after the grader that produced it is switched off. The underlying library entry is also retained, because historical verdicts need it to stay interpretable.
-</Note>
-
----
+The update affects future grading work. Existing grades keep the threshold that
+was frozen when their work was selected.
 
 ## The grader object
 
 <ResponseField name="id" type="string">
-  The `grd_` identifier for this grader copy.
-</ResponseField>
-
-<ResponseField name="libraryId" type="string">
-  The `grl_` identifier of the library entry this copy was made from.
+  The stable `grd_` identifier for this project's policy.
 </ResponseField>
 
 <ResponseField name="projectId" type="string">
-  The project this grader belongs to.
+  The project that owns this policy.
+</ResponseField>
+
+<ResponseField name="graderDefinitionId" type="string">
+  The shared `grl_` grader-definition identifier.
 </ResponseField>
 
 <ResponseField name="name" type="string">
-  Display name for this copy.
+  The grader name.
 </ResponseField>
 
 <ResponseField name="description" type="string | null">
-  Optional note from your team.
+  What quality rule the grader applies and why.
 </ResponseField>
 
-<ResponseField name="type" type="string">
-  The kind of judgment this grader makes, inherited from the library entry.
+<ResponseField name="scopeEditable" type="boolean">
+  Whether customer APIs may change this project's scope. The first API does not
+  expose a scope-write operation.
 </ResponseField>
 
-<ResponseField name="required" type="boolean">
-  Whether a failing verdict from this grader blocks a run from passing.
+<ResponseField name="scope" type="object">
+  The complete project scope. `simulations` contains `all`, `test_suite`, or
+  `test` selectors. `production` is `null` or contains `samplePercent` from `1`
+  through `100`.
 </ResponseField>
 
-<ResponseField name="scope" type="string">
-  Where this grader judges — `"simulations"`, `"production"`, or `"both"`.
-</ResponseField>
-
-<ResponseField name="productionSampleRate" type="number">
-  Percentage of live production traffic this grader judges.
-</ResponseField>
-
-<ResponseField name="version" type="number">
-  Current version number, starting at `1`.
-</ResponseField>
-
-<ResponseField name="versionId" type="string">
-  Identifier of the current version. Referenced by verdicts to record which parameters decided them.
-</ResponseField>
-
-<ResponseField name="config" type="object">
-  The filled-in parameter values active for this version.
+<ResponseField name="passThreshold" type="number">
+  The editable threshold for this grader's own passed or failed result.
 </ResponseField>
 
 <ResponseField name="createdAt" type="string">
-  ISO 8601 timestamp of when this grader was created.
+  ISO 8601 creation time.
 </ResponseField>
 
 <ResponseField name="updatedAt" type="string">
-  ISO 8601 timestamp of the last update.
+  ISO 8601 last-update time.
 </ResponseField>
+
+There is no create or delete operation in the first API. Egma adds Expected
+behaviors during project creation. Optional predefined graders and customer
+grader authoring will add explicit operations only when those products ship.

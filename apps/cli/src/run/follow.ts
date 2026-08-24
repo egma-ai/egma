@@ -1,137 +1,116 @@
 /**
- * Following a run: the changes as they land, and what they add up to.
+ * Follow one run through execution and trace-level grading.
  *
- * A run is started once and then watched, so this holds the one row per
- * simulation that both the terminal screen and the plain lines are drawn from,
- * and moves those rows as the platform reports changes. It draws nothing and
- * prints nothing — what to do with a change is the caller's, which is why the
- * wizard's pane and `egma run`'s standard output can be the same facts said
- * two ways without being two accounts of them.
- *
- * **The first verdict is marked here and nowhere else.** It is the moment the
- * whole walk is timed against — the point where a developer stops taking
- * egma's word for it and reads a result — so which change it was is a fact
- * about the run, not a decision a screen makes while drawing. Whichever of the
- * four it is: a verdict is a verdict, and a wizard that held out past a
- * `skipped` for something greener would be waiting for the whole suite it
- * promised not to wait for.
- *
- * **A simulation only ever moves forward.** Changes arrive numbered and are
- * taken in that order, once each, so a page delivered twice cannot walk a
- * judged simulation back to the moment it was picked up.
- *
- * **Nothing is folded.** `skipped` and `errored` are counted as themselves all
- * the way through: a test that could not run is not a test that failed, and a
- * tally that said otherwise would be egma quietly marking a suite red on the
- * strength of its own outage.
+ * Run events report execution. Grading is asynchronous and does not add run
+ * events, so each poll also refreshes the bounded simulation page. The
+ * follower joins those two views into one row per simulation. It never turns a
+ * grade score into a run verdict.
  */
 
 import type { Fetch } from "../platform/device-flow.ts";
 import {
+  getSimulationGradeProjection,
   getRun,
   hydrateRun,
   runEvents,
+  type GradeProjection,
+  type GradingState,
   type PlatformRun,
   type PlatformSimulation,
   type RunEvent,
   type RunStatus,
   type SimulationStatus,
-  type Verdict,
 } from "../platform/runs.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 
-/** One simulation, as a line on a screen or a line on standard output. */
+const TERMINAL_EXECUTION: readonly SimulationStatus[] = [
+  "completed",
+  "failed",
+  "canceled",
+];
+
+const TERMINAL_GRADING: readonly GradingState[] = [
+  "not_requested",
+  "complete",
+  "error",
+];
+
+export function isTerminalGrading(state: GradingState | null): boolean {
+  return state !== null && TERMINAL_GRADING.includes(state);
+}
+
+/** One simulation, as a line on a screen or standard output. */
 export type SimulationRow = {
   readonly id: string;
   readonly position: number;
-  /** The test this executes. */
   readonly name: string;
-  /** The synthetic person who speaks to the agent in it. */
   readonly persona: string;
   readonly status: SimulationStatus;
-  readonly verdict: Verdict | null;
+  readonly gradingState: GradingState | null;
   readonly reason: string | null;
-  /** True for the one simulation whose verdict landed first in this run. */
-  readonly first: boolean;
+  /** Current grades and combined score, once terminal detail was read. */
+  readonly gradeProjection: GradeProjection | null;
+  /** True for the first completed trace whose whole grading became terminal. */
+  readonly firstResult: boolean;
 };
 
-/**
- * What the run adds up to, right now.
- *
- * The four verdicts, each counted as itself, plus how many have not been
- * judged yet — because a wizard that leaves before the suite finishes has to
- * be able to say "three of twelve so far" and mean it.
- */
-export type RunTally = {
-  readonly passed: number;
-  readonly failed: number;
-  readonly skipped: number;
-  readonly errored: number;
-  /** Simulations with no verdict yet. */
-  readonly pending: number;
-  /** Simulations with one. */
-  readonly graded: number;
+/** Execution and grading progress for the run. These are not quality counts. */
+export type RunProgress = {
+  readonly executionFinished: number;
+  readonly executionFailed: number;
+  readonly executionCanceled: number;
+  readonly gradingTerminal: number;
+  readonly gradingComplete: number;
+  readonly gradingNotRequested: number;
+  readonly gradingErrors: number;
+  readonly gradingPending: number;
+  readonly gradingRunning: number;
+  /** Completed traces that have grading work or an empty grading plan. */
+  readonly gradingTotal: number;
   readonly total: number;
 };
 
-/** One change worth telling somebody about. */
+/** One change worth showing. */
 export type RunChange = {
   readonly row: SimulationRow;
-  /** True when this change moved the execution state. */
   readonly statusChanged: boolean;
-  /** True when this change is a verdict arriving. */
-  readonly verdictLanded: boolean;
-  /** True when it is the first verdict of the whole run. */
-  readonly first: boolean;
+  readonly gradingChanged: boolean;
+  readonly reasonChanged: boolean;
+  readonly gradeProjectionChanged: boolean;
+  /** True when this row became the run's first terminal trace result. */
+  readonly firstResult: boolean;
 };
 
-/** How a follow ended. */
-export type FollowEnding =
-  /** Execution and grading both finished. */
-  | "finished"
-  /** What the caller was waiting for happened, and the run carries on. */
-  | "enough"
-  /** The developer stopped it. */
-  | "interrupted";
+export type FollowEnding = "finished" | "enough" | "interrupted";
 
-function verdictless(simulation: PlatformSimulation): SimulationRow {
+function rowFrom(simulation: PlatformSimulation): SimulationRow {
   return {
     id: simulation.id,
     position: simulation.position,
     name: simulation.testName,
     persona: simulation.personaName,
     status: simulation.status,
-    verdict: simulation.verdict,
+    gradingState: simulation.gradingState,
     reason: simulation.reason,
-    first: false,
+    gradeProjection: simulation.gradeProjection,
+    firstResult: false,
   };
 }
 
-/**
- * The state of one run being watched.
- *
- * Seeded from the run as it was started or as it was read back, then moved by
- * the changes the platform reports. Reading it is free and gives the same
- * answer to everybody, which is what lets a screen redraw from it as often as
- * it likes.
- */
+function hasTerminalResult(row: SimulationRow): boolean {
+  return (
+    row.status === "completed" &&
+    isTerminalGrading(row.gradingState) &&
+    row.gradeProjection !== null
+  );
+}
+
 export class RunFollower {
   private readonly order: string[] = [];
   private readonly byId = new Map<string, SimulationRow>();
   private runStatusHeld: RunStatus;
-  private firstHeld: string | null = null;
+  private firstResultHeld: string | null = null;
   private cursor = 0;
-  /**
-   * The highest change this follower has already acted on.
-   *
-   * Kept apart from the cursor because the two answer different questions. The
-   * cursor is where to ask from and the platform owns it; this is what has
-   * already happened here, and it is what makes a change arriving twice a
-   * change that is not news. Without it a page delivered again would walk a
-   * simulation backwards through its own lifecycle — a judged one would lose
-   * its verdict to the `claimed` event that came before it, land the same
-   * verdict a second time, and be drawn as though it had started over.
-   */
   private taken = 0;
 
   readonly runId: string;
@@ -143,17 +122,16 @@ export class RunFollower {
     this.runStatusHeld = run.status;
     for (const simulation of run.simulations) {
       this.order.push(simulation.id);
-      this.byId.set(simulation.id, verdictless(simulation));
-      // A run read back part way through already has verdicts on it, and the
-      // first of them is still the first of them.
-      if (simulation.verdict !== null && this.firstHeld === null) {
-        this.firstHeld = simulation.id;
-        this.byId.set(simulation.id, { ...verdictless(simulation), first: true });
+      const row = rowFrom(simulation);
+      if (this.firstResultHeld === null && hasTerminalResult(row)) {
+        this.firstResultHeld = row.id;
+        this.byId.set(row.id, { ...row, firstResult: true });
+      } else {
+        this.byId.set(row.id, row);
       }
     }
   }
 
-  /** Every simulation, in the order the run laid them out. */
   get rows(): readonly SimulationRow[] {
     return this.order.flatMap((id) => {
       const row = this.byId.get(id);
@@ -165,53 +143,71 @@ export class RunFollower {
     return this.runStatusHeld;
   }
 
-  /** Where the next page of changes is asked from. */
   get at(): number {
     return this.cursor;
   }
 
-  /** The simulation whose verdict landed first, or `null` while none has. */
-  get firstVerdict(): SimulationRow | null {
-    return this.firstHeld === null ? null : (this.byId.get(this.firstHeld) ?? null);
+  get firstResult(): SimulationRow | null {
+    return this.firstResultHeld === null
+      ? null
+      : (this.byId.get(this.firstResultHeld) ?? null);
   }
 
-  get tally(): RunTally {
+  get progress(): RunProgress {
     const rows = this.rows;
-    const count = (verdict: Verdict): number =>
-      rows.filter((row) => row.verdict === verdict).length;
-    const graded = rows.filter((row) => row.verdict !== null).length;
+    const completed = rows.filter((row) => row.status === "completed");
+    const gradingCount = (state: GradingState): number =>
+      completed.filter((row) => row.gradingState === state).length;
+    const gradingComplete = gradingCount("complete");
+    const gradingNotRequested = gradingCount("not_requested");
+    const gradingErrors = gradingCount("error");
     return {
-      passed: count("passed"),
-      failed: count("failed"),
-      skipped: count("skipped"),
-      errored: count("errored"),
-      pending: rows.length - graded,
-      graded,
+      executionFinished: rows.filter((row) => TERMINAL_EXECUTION.includes(row.status)).length,
+      executionFailed: rows.filter((row) => row.status === "failed").length,
+      executionCanceled: rows.filter((row) => row.status === "canceled").length,
+      gradingTerminal: gradingComplete + gradingNotRequested + gradingErrors,
+      gradingComplete,
+      gradingNotRequested,
+      gradingErrors,
+      gradingPending: completed.filter(
+        (row) => row.gradingState === null || row.gradingState === "pending",
+      ).length,
+      gradingRunning: gradingCount("running"),
+      gradingTotal: completed.length,
       total: rows.length,
     };
   }
 
-  /** True once every simulation has been judged. */
-  get everythingGraded(): boolean {
-    return this.tally.pending === 0 && this.tally.total > 0;
-  }
-
-  /** True while at least one finished simulation is waiting for its grader. */
-  get awaitingVerdicts(): boolean {
-    return this.rows.some(
-      (row) =>
-        ["completed", "failed", "canceled"].includes(row.status) &&
-        row.verdict === null,
+  /** All execution ended, and each completed trace has terminal grading. */
+  get everythingTerminal(): boolean {
+    return (
+      this.rows.length > 0 &&
+      this.rows.every(
+        (row) =>
+          TERMINAL_EXECUTION.includes(row.status) &&
+          (row.status !== "completed" ||
+            (isTerminalGrading(row.gradingState) && row.gradeProjection !== null)),
+      )
     );
   }
 
-  private apply(
+  private remember(
+    row: SimulationRow,
+    change: Omit<RunChange, "row" | "firstResult">,
+  ): RunChange {
+    const firstResult = hasTerminalResult(row) && this.firstResultHeld === null;
+    if (firstResult) this.firstResultHeld = row.id;
+    const held = { ...row, firstResult: row.firstResult || firstResult };
+    this.byId.set(row.id, held);
+    return { row: held, ...change, firstResult };
+  }
+
+  private applyExecution(
     simulationId: string,
-    incoming: Pick<SimulationRow, "status" | "verdict" | "reason">,
+    incoming: Pick<SimulationRow, "status" | "reason">,
   ): RunChange | null {
     const held = this.byId.get(simulationId);
     if (held === undefined) return null;
-
     const statusOrder: Readonly<Record<SimulationStatus, number>> = {
       queued: 0,
       claimed: 1,
@@ -222,36 +218,45 @@ export class RunFollower {
     };
     const statusChanged = statusOrder[incoming.status] > statusOrder[held.status];
     const status = statusChanged ? incoming.status : held.status;
-    const verdict = held.verdict ?? incoming.verdict;
-    const verdictLanded = held.verdict === null && verdict !== null;
     const reason = incoming.reason ?? held.reason;
     const reasonChanged = reason !== held.reason;
-    if (!statusChanged && !verdictLanded && !reasonChanged) return null;
-
-    const first = verdictLanded && this.firstHeld === null;
-    if (first) this.firstHeld = simulationId;
-    const row: SimulationRow = {
-      ...held,
-      status,
-      verdict,
-      reason,
-      first: held.first || first,
-    };
-    this.byId.set(simulationId, row);
-    return { row, statusChanged, verdictLanded, first };
+    if (!statusChanged && !reasonChanged) return null;
+    return this.remember(
+      { ...held, status, reason },
+      {
+        statusChanged,
+        gradingChanged: false,
+        reasonChanged,
+        gradeProjectionChanged: false,
+      },
+    );
   }
 
-  /**
-   * Take one page of changes, in order, and answer the ones a caller would
-   * want to say out loud. A change to a simulation this follower has never
-   * heard of is ignored rather than invented — the run laid its simulations
-   * out at creation and their number is stamped there.
-   *
-   * A change that has already been taken is ignored too, however it arrived
-   * again. A page can come twice — a platform that answers with a cursor it
-   * has not moved sends the same page on the next ask — and every one of those
-   * changes is old news by then, so none of them is said again.
-   */
+  private applySnapshot(incoming: PlatformSimulation): RunChange | null {
+    const held = this.byId.get(incoming.id);
+    if (held === undefined) return null;
+    const execution = this.applyExecution(incoming.id, incoming);
+    const current = execution?.row ?? held;
+    const gradingState = isTerminalGrading(current.gradingState)
+      ? current.gradingState
+      : (incoming.gradingState ?? current.gradingState);
+    const gradingChanged = gradingState !== current.gradingState;
+    const gradeProjection = current.gradeProjection ?? incoming.gradeProjection;
+    const gradeProjectionChanged =
+      current.gradeProjection === null && gradeProjection !== null;
+    if (!gradingChanged && !gradeProjectionChanged) return execution;
+    const changed = this.remember(
+      { ...current, gradingState, gradeProjection },
+      {
+        statusChanged: execution?.statusChanged ?? false,
+        gradingChanged,
+        reasonChanged: execution?.reasonChanged ?? false,
+        gradeProjectionChanged,
+      },
+    );
+    return changed;
+  }
+
   take(events: readonly RunEvent[], next: number): readonly RunChange[] {
     const changes: RunChange[] = [];
     for (const event of events) {
@@ -261,21 +266,14 @@ export class RunFollower {
         this.runStatusHeld = event.status;
         continue;
       }
-      const change = this.apply(event.simulationId, event);
+      const change = this.applyExecution(event.simulationId, event);
       if (change !== null) changes.push(change);
     }
     this.cursor = Math.max(this.cursor, next);
     return changes;
   }
 
-  /**
-   * Merge the platform's current run state.
-   *
-   * Grading is asynchronous and does not append to the execution event feed,
-   * so verdicts arrive here. The merge is monotonic: a current read or a later
-   * event can move a row forward, but neither can clear a verdict or rewind a
-   * finished simulation.
-   */
+  /** Merge the current bounded simulation page, including grading progress. */
   refresh(run: PlatformRun): readonly RunChange[] {
     if (run.id !== this.runId) return [];
     const runOrder: Readonly<Record<RunStatus, number>> = {
@@ -284,46 +282,59 @@ export class RunFollower {
       completed: 2,
       canceled: 2,
     };
-    if (runOrder[run.status] > runOrder[this.runStatusHeld]) this.runStatusHeld = run.status;
-
-    const changes: RunChange[] = [];
-    for (const simulation of run.simulations) {
-      const change = this.apply(simulation.id, simulation);
-      if (change !== null) changes.push(change);
+    if (runOrder[run.status] > runOrder[this.runStatusHeld]) {
+      this.runStatusHeld = run.status;
     }
-    return changes;
+    return run.simulations.flatMap((simulation) => {
+      const change = this.applySnapshot(simulation);
+      return change === null ? [] : [change];
+    });
   }
 }
 
 export type FollowOptions = {
   readonly signedIn: SignedIn;
   readonly follower: RunFollower;
-  /** Told about every change, in the order it happened. */
   readonly onChange: (change: RunChange) => void;
-  /**
-   * Answered after every page. `true` stops the follow with `enough` — which
-   * is how the wizard leaves as soon as the developer has seen a verdict,
-   * while the suite carries on running on the platform.
-   */
+  /** Stop after a caller-specific milestone, such as onboarding's first result. */
   readonly until?: (follower: RunFollower) => boolean;
-  /** How long between asks. */
   readonly everyMs?: number;
   readonly signal?: AbortSignal;
   readonly fetchImpl?: Fetch;
 };
 
-/**
- * How often a follower asks what has changed.
- *
- * Short enough that a verdict appears when it happened rather than a second
- * later, and long enough that watching a twelve-test suite is a handful of
- * requests a second against one small answer.
- */
 export const DEFAULT_POLL_MS = 300;
 
+async function withTerminalGradeProjections(
+  options: FollowOptions,
+  run: PlatformRun,
+): Promise<PlatformRun> {
+  const held = new Map(options.follower.rows.map((row) => [row.id, row] as const));
+  const simulations: PlatformSimulation[] = [];
+  for (const simulation of run.simulations) {
+    const known = held.get(simulation.id);
+    if (
+      simulation.status !== "completed" ||
+      !isTerminalGrading(simulation.gradingState) ||
+      (known !== undefined && known.gradeProjection !== null)
+    ) {
+      simulations.push(simulation);
+      continue;
+    }
+    simulations.push({
+      ...simulation,
+      gradeProjection: await getSimulationGradeProjection(
+        options.signedIn,
+        simulation.id,
+        options.fetchImpl,
+        options.signal,
+      ),
+    });
+  }
+  return { ...run, simulations };
+}
+
 function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  // A signal that has already aborted never fires again, so waiting on it
-  // would be waiting out the whole interval for a follow that is over.
   if (signal?.aborted === true) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
@@ -338,19 +349,10 @@ function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
-/**
- * Watch a run until it finishes, until the caller has seen enough, or until
- * the developer stops it.
- *
- * The cursor is the whole of the resumption story: every ask names where the
- * last one got to, so a page that never arrived is asked for again rather than
- * lost, and a change is never handed over twice.
- */
+/** Watch until execution and grading are terminal, a caller has enough, or Ctrl-C. */
 export async function followRun(options: FollowOptions): Promise<FollowEnding> {
   const { signedIn, follower, onChange, signal } = options;
   const everyMs = options.everyMs ?? DEFAULT_POLL_MS;
-
-  /** Asked, never remembered: a signal fires while this function is waiting. */
   const stopped = (): boolean => signal?.aborted === true;
 
   for (;;) {
@@ -363,37 +365,31 @@ export async function followRun(options: FollowOptions): Promise<FollowEnding> {
         ...(signal === undefined ? {} : { signal }),
       });
     } catch (cause) {
-      // A stop that lands mid-request tears the request down, and the error
-      // that comes back is the stop rather than anything about the run. Saying
-      // "egma stopped answering" because somebody pressed Ctrl-C would be egma
-      // blaming the platform for the developer's own decision.
       if (stopped()) return "interrupted";
       throw cause;
     }
     for (const change of follower.take(page.events, page.next)) onChange(change);
 
-    if (follower.awaitingVerdicts) {
-      let current;
-      try {
-        const header = await getRun(signedIn, follower.runId, options.fetchImpl, signal);
-        current = header === null
+    let current;
+    try {
+      const header = await getRun(signedIn, follower.runId, options.fetchImpl, signal);
+      current =
+        header === null
           ? null
           : await hydrateRun(signedIn, header, options.fetchImpl, signal);
-      } catch (cause) {
-        if (stopped()) return "interrupted";
-        throw cause;
-      }
       if (current !== null) {
-        for (const change of follower.refresh(current)) onChange(change);
+        current = await withTerminalGradeProjections(options, current);
       }
+    } catch (cause) {
+      if (stopped()) return "interrupted";
+      throw cause;
+    }
+    if (current !== null) {
+      for (const change of follower.refresh(current)) onChange(change);
     }
 
     if (options.until?.(follower) === true) return "enough";
-    if (page.done && follower.everythingGraded) return "finished";
-
-    // Stopping is checked at the top of the loop and nowhere else, so there is
-    // one place it can happen; the pause above returns at once on a signal that
-    // has already fired.
+    if (page.done && follower.everythingTerminal) return "finished";
     await pause(everyMs, signal);
   }
 }

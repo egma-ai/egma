@@ -23,7 +23,7 @@ import { judgeFor } from "../../src/judge/index.ts";
  * asserts the two things that are otherwise invisible: that each call saw one
  * criterion and no other behavior's words, and that the key resolved from the
  * deployment bundle actually reached the provider seam — without that key ever
- * being written anywhere a verdict, a log or a report could pick it up.
+ * being written anywhere a grade, a log or a report could pick it up.
  */
 
 /** An answer, or what the provider does instead of answering. */

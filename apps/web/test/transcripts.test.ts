@@ -5,10 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import * as copy from "../lib/transcript-copy.ts";
 import { SPEAKERS } from "../ui/evidence.tsx";
-import * as gradingCopy from "../lib/grading-copy.ts";
 import {
   agentPlatformLabel,
-  assertionHeading,
   everyStep,
   howFarIn,
   howLong,
@@ -29,7 +27,6 @@ import {
   windowChoiceOf,
   WINDOW_PARAMETER,
   type Facts,
-  type Judgment,
   type Step,
 } from "../lib/transcripts.ts";
 
@@ -382,16 +379,11 @@ describe("which guidance a quiet page shows", () => {
     }
   });
 
-  /**
-   * A copy scoped to `both` judges production as well as simulations, so it
-   * counts. `simulations` never does, whatever its sampling rate says — and
-   * that is the day-one trap the line exists for, because every new grader
-   * starts there.
-   */
   it("counts a grader as watching only when its scope reaches production", () => {
-    expect(watchesProduction({ scope: "production" })).toBe(true);
-    expect(watchesProduction({ scope: "both" })).toBe(true);
-    expect(watchesProduction({ scope: "simulations" })).toBe(false);
+    expect(watchesProduction({ scope: { production: { samplePercent: 10 } } })).toBe(
+      true,
+    );
+    expect(watchesProduction({ scope: { production: null } })).toBe(false);
   });
 
   it("reads a key with no project as one that names the whole organization", () => {
@@ -539,46 +531,6 @@ describe("what a stored kind is called where somebody reads it", () => {
 });
 
 /**
- * What a judgment is headed with.
- *
- * A verdict row keeps a **key**, and the read resolves the words behind it from
- * the version the conversation was executed against. So the heading is the
- * sentence somebody wrote wherever there is one — and the key itself wherever
- * there is not, because a key that could not be placed says exactly as much as
- * egma knows, and a plausible wrong sentence would say more than it knows.
- */
-describe("the heading a judgment carries", () => {
-  function judged(overrides: Partial<Judgment> = {}): Judgment {
-    return {
-      graderId: "grd_01JQZ0000000000000000000AA",
-      assertion: "behavior_3",
-      assertionText: null,
-      required: true,
-      verdict: "passed",
-      score: 1,
-      rationale: "the agent named the new time back.",
-      citedTurns: ["turn:5"],
-      judgedAt: "2026-08-14T09:00:00.000000Z",
-      ...overrides,
-    };
-  }
-
-  it("is the sentence the read resolved, word for word", () => {
-    expect(
-      assertionHeading(
-        judged({ assertionText: "confirms the new time back before finishing" }),
-      ),
-    ).toBe("confirms the new time back before finishing");
-  });
-
-  it("is the key itself where nothing could place it", () => {
-    expect(assertionHeading(judged({ assertionText: null }))).toBe("Behavior 3");
-    // A resolved sentence of nothing but spaces is nothing resolved.
-    expect(assertionHeading(judged({ assertionText: "   " }))).toBe("Behavior 3");
-  });
-});
-
-/**
  * Two different things with one word between them.
  *
  * A step on this page can carry audio the agent's **own telemetry** attached to
@@ -674,20 +626,14 @@ function everySentence(said: unknown): string[] {
 }
 
 /**
- * Everything under the discipline: the transcript pages' own words, and the
- * judgment card's.
- *
- * The card is drawn on this page and on a run's results, so its words live in a
- * file of their own rather than in either page's — and they are held to the same
- * list here, because the surface that renders them is this one.
+ * Everything under the discipline: the transcript pages' own shared words.
  */
-const EVERY_WORD = [copy, gradingCopy];
+const EVERY_WORD = [copy];
 
 describe("what the pages say out loud", () => {
   it("is gathered in one place, so it can be held against the list", () => {
     const said = everySentence(copy);
     expect(said.length).toBeGreaterThan(40);
-    expect(everySentence(gradingCopy).length).toBeGreaterThan(3);
   });
 
   /**
@@ -729,18 +675,6 @@ describe("what the pages say out loud", () => {
     ]) {
       const source = await readFile(path.join(WEB, page), "utf8");
       expect(source, page).toContain("transcript-copy.ts");
-    }
-
-    // And everything that says one of the two lanes out loud, which is words of
-    // its own and therefore a copy file of its own: the card both surfaces draw
-    // a judgment with, and the summary above it that reports the lane the
-    // outcome was folded without.
-    for (const page of [
-      "app/judgment-card.tsx",
-      DETAIL_PAGE,
-    ]) {
-      const source = await readFile(path.join(WEB, page), "utf8");
-      expect(source, page).toContain("grading-copy.ts");
     }
   });
 });
@@ -787,8 +721,8 @@ describe("the transcript pages", () => {
  * The metrics display: what this exchange measured, shown beside the exchange.
  *
  * **The page derives no number.** Every figure it shows arrived already computed
- * by the platform's one shared measure module — the same module a `latency`
- * grader is judged through — so a duration worked out in a browser would be a
+ * by the platform's one shared measure module — the same module a future
+ * metric-based grader can read — so a duration worked out in a browser would be a
  * second answer about one exchange and exactly what that module exists to
  * prevent. What the page decides is which of the samples to lead with, and it
  * says which one that is.
@@ -805,8 +739,8 @@ describe("what the exchange measured", () => {
     // With the unit the answer carried, never one this page assumed — a page
     // that said "ms" would be wrong the moment a measure is not a duration.
     expect(page).toContain("one.unit");
-    // And separate from the verdicts, because a measure measures and a grader
-    // judges: nothing here is green or red.
+    // And separate from grades, because a metric is observed and a grader gives
+    // a score: nothing here is green or red.
     expect(page).toContain("MEASURES.label");
   });
 
@@ -869,7 +803,7 @@ describe("what the exchange measured", () => {
 /**
  * Where a number came from, said on the page that shows it.
  *
- * **A verdict's provenance must never be a surprise.** Some figures on this
+ * **A grade's evidence must never be a surprise.** Some figures on this
  * page were not timed by anybody: Egma worked them out from the timings the
  * agent's own framework already records. A developer whose latency check starts
  * failing is owed that sentence beside the number, not in a document.

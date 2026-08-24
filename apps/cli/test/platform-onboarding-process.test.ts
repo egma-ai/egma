@@ -123,7 +123,7 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
     }
 
     expect(code, stderr).toBe(0);
-    expect(stdout).toMatch(/^first-verdict: /mu);
+    expect(stdout).toMatch(/^first-result: .* complete$/mu);
     expect(platform.records.some((request) => request.path === "/api/platform")).toBe(
       false,
     );

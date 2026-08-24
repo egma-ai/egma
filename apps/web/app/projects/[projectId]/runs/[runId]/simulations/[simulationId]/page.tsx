@@ -17,7 +17,6 @@ import {
 import { projectPath } from "../../../../../../../lib/project-context.ts";
 import { canAuthor } from "../../../../../../../lib/roles.ts";
 import {
-  judgedAssertions,
   REGRADE_IS_NOT_A_REPLAY,
   type RegradeAsked,
   type SimulationEvidence,
@@ -49,8 +48,8 @@ import {
 } from "../../../../../../../ui/shell.tsx";
 
 /**
- * One simulation's evidence: what happened, how it happened, how egma judged it,
- * and any later human correction.
+ * One simulation's evidence: what happened, how it happened, and the grades
+ * produced from it.
  *
  * **The page is reached from its run and is not in the navigation.** A
  * simulation is a thing inside a run, not a product area, and a sidebar entry
@@ -59,18 +58,15 @@ import {
  * pasted into a ticket and open the same simulation next month.
  *
  * **One read supplies the whole page.** `GET /v1/simulations/{id}` answers the
- * pins, the identities, the frozen plan, the measures, the verdicts and the
+ * pins, the identities, the frozen plan, the measures, the grades and the
  * transcript together, with the transcript's window worked out on the server
  * from the simulation's own stamps. The only second request this page ever
  * makes is the recording's, and only when there is one to hear — a signed link
  * is short-lived, so carrying one in the page answer would make the address
  * stale a quarter of an hour after it loaded.
  *
- * **The four facts stay apart, everywhere.** The simulation's machinery, where
- * the grading stands, what was decided, and null for *nobody has decided yet*. A
- * simulation still being judged shows a pending line beside its behaviours and
- * nothing red — turning the page into a failure while the engine is still
- * working is the single worst thing this surface could do.
+ * **The facts stay apart.** Simulation execution, grading progress, individual
+ * grade results and the display-only combined score answer different questions.
  */
 export default function SimulationEvidencePage() {
   const { projectId, runId, simulationId } = useParams<{
@@ -89,16 +85,13 @@ export default function SimulationEvidencePage() {
   );
 }
 
-/** How often the page asks again while anything is still being judged. */
+/** How often the page asks again while grading is active. */
 const AGAIN_MS = 2000;
 
 /** User-facing regrade copy never repeats storage identifiers from the API. */
 function regradeRefusalMessage(refusal: Refusal): string {
   if (refusal.error === "unprocessable") {
-    return "This simulation has no grading to ask for again. It was not conducted or did not finish, so there is nothing to judge again.";
-  }
-  if (refusal.error === "narrower_grading_in_flight") {
-    return "One grader is already judging this simulation and does not cover what you asked for. Nothing was queued. Ask again after those verdicts arrive.";
+    return "This simulation did not finish with gradeable evidence, so it cannot be regraded.";
   }
   return refusal.message
     .replace(/\bsimulation\s+sim_[a-z0-9]+\b/giu, "this simulation")
@@ -154,24 +147,16 @@ function EvidenceView({
   const evidence = answer?.status === "ready" ? answer.value : null;
   const recording = useSimulationEvidenceRecording(evidence, projectId);
 
-  /**
-   * Whether anything is still being judged.
-   *
-   * Read off the grading job rather than off the verdict rows, because those are
-   * two different questions: a simulation with rows may still have a re-grade
-   * outstanding, and a simulation with none may have nothing queued at all.
-   */
-  const stillJudging =
+  const stillGrading =
     evidence !== null &&
-    evidence.gradingJobs.some((job) =>
-      ["pending", "claimed"].includes(job.status),
-    );
+    (evidence.gradingState === "pending" ||
+      evidence.gradingState === "running");
 
   useEffect(() => {
-    if (!stillJudging) return undefined;
+    if (!stillGrading) return undefined;
     const timer = setTimeout(() => reload(), AGAIN_MS);
     return () => clearTimeout(timer);
-  }, [stillJudging, reload, evidence]);
+  }, [stillGrading, reload, evidence]);
 
   async function regrade(): Promise<void> {
     if (!mayRevisit || working) return;
@@ -205,12 +190,6 @@ function EvidenceView({
     setAsked(answered.value);
     reload();
   }
-
-  /*
-   * **There was a `correct` here, and it goes with the endpoint.** ADR-0009
-   * takes a person's disagreement out of v0; it returns as the reserved `human`
-   * grader type, writing rows of its own under a grader id of its own.
-   */
 
   if (answer === null || answer.status === "signed-out") {
     return (
@@ -270,7 +249,6 @@ function EvidenceView({
   }
 
   const read = answer.value;
-  const assertions = judgedAssertions(read.verdicts);
   return (
     <ProductPage wide>
       <PageHeader
@@ -330,36 +308,35 @@ function EvidenceView({
         {asked === null ? null : (
           <Problem>
             {asked.reopened > 0
-              ? "This simulation is queued to be judged again. Verdicts appear below as they land."
-              : "This simulation was already waiting to be judged, so nothing was asked twice. Verdicts appear below as they land."}
+              ? "This simulation is queued for a whole-simulation regrade. New grades appear below as they finish."
+              : "This simulation was already queued for grading, so no duplicate work was added."}
           </Problem>
         )}
 
         {role === null || mayRevisit ? null : (
           <Problem>
-            {`Your ${String(role)} role can read every piece of evidence here and cannot change a verdict. Ask an organization admin to change your role.`}
+            {`Your ${String(role)} role can read every grade here but cannot request a regrade. Ask an organization admin to change your role.`}
           </Problem>
         )}
 
         {read.status !== "failed" ? null : (
           <Problem>
             {read.reason ?? "Egma could not conduct this simulation."} This is
-            an execution problem, not a failed grader verdict, and it says
-            nothing about the agent.
+            an execution problem, not a failed grade, and it says nothing about
+            the agent.
           </Problem>
         )}
 
         <SimulationEvidenceReview
           evidence={read}
           recording={recording}
-          assertions={assertions}
         />
 
       </PageBody>
 
       {!confirming ? null : (
         <Dialog
-          title={`Judge “${read.test.name ?? `simulation ${String(read.position)}`}” again?`}
+          title={`Regrade “${read.test.name ?? `simulation ${String(read.position)}`}”?`}
           onClose={() => setConfirming(false)}
         >
           {(dismiss) => (
@@ -370,7 +347,7 @@ function EvidenceView({
                   Not now
                 </Button>
                 <Button type="button" busy={working} onClick={() => void regrade()}>
-                  {working ? "Asking…" : "Judge it again"}
+                  {working ? "Requesting…" : "Regrade simulation"}
                 </Button>
               </Actions>
             </>

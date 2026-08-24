@@ -18,7 +18,12 @@ Configuration lives in `docs.json`. Pages use MDX with YAML front matter.
 - A **run** executes one complete test suite against one agent connection.
 - A **simulation** is one test executed once inside a run.
 - A **persona** is the synthetic person who talks to the customer's **agent**.
-- A **grader** returns verdicts. A **metric** measures facts such as duration or latency.
+- A **metric** is an observed fact, such as duration or latency.
+- A **grader** assigns one normalized score to a trace. A **grade** keeps that
+  score, its details, the grader's frozen pass threshold, and a derived
+  individual result.
+- A **combined score** is the display-only arithmetic mean of all selected
+  grader scores. It is not an overall pass/fail verdict.
 
 Do not use `eval`, `evaluator`, `digital human`, or `session` for a simulation.
 

@@ -9,8 +9,8 @@ import { CROCKFORD_ALPHABET, isId } from "@egma/ids";
  * has to turn one into the other. That derivation is a term of the contract —
  * `span-vocabulary.md` states it, with a worked example, because the emitter
  * applies it when it authors a span and the platform applies it when it goes
- * looking for one, and the two agreeing is what lets a verdict and the spans it
- * cites find each other with nothing having stored a mapping.
+ * looking for one. Their agreement lets a simulation row find both its spans
+ * and its trace-level grades without storing another identity mapping.
  *
  * **This is the whole of the TypeScript side.** The simulator has its own, in
  * Python, at the far end of the wire; the golden fixtures are the two held to
@@ -81,18 +81,16 @@ const SIMULATION_ID_CHARACTERS = 26;
  * that is not one of egma's simulations.
  *
  * Needed because the two forms are read from opposite ends. A grader is handed
- * a **simulation** and goes looking for its spans, so it derives forwards. A
- * reader opens a **transcript** — which is filed under the trace id the spans
- * carry — and wants the verdicts, which are filed under the simulation id. That
- * reader has only the hex, and inventing a second mapping to store would be the
- * very thing the forward derivation exists to avoid.
+ * a **simulation** and goes looking for its trace, so it derives forwards. A
+ * reader can open a **trace** and needs to say which simulation produced it, so
+ * it derives backwards. Storing a second mapping would create another identity
+ * that could disagree with this one.
  *
  * The round trip is exact because it is the same 128 bits written two ways. A
  * production trace, whose id came off somebody else's wire, is not a simulation
  * — but its bits still convert to a well-formed string, so this can only ever
  * say "here is the simulation id those bits spell", never "a simulation by that
- * id exists". The caller finds that out by reading, and a production trace's
- * lookup simply returns no verdicts filed that way.
+ * id exists". The caller finds that out by reading the simulation store.
  */
 export function simulationIdOfTrace(traceId: string): string | undefined {
   if (!/^[0-9a-f]{32}$/u.test(traceId) || /^0{32}$/u.test(traceId)) {

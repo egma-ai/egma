@@ -226,7 +226,10 @@ describe("Egma's instruction content", () => {
     ];
 
     for (const [name, source] of all) {
-      const content = source.replaceAll(SCENARIO_HEADING, "");
+      const content = source
+        .replaceAll(SCENARIO_HEADING, "")
+        // `call` is an ordinary verb here, not the banned noun for a simulation.
+        .replace("Do not call it skipped.", "");
       for (const banned of BANNED) {
         expect({ name, banned: String(banned), hit: banned.exec(content)?.[0] ?? null }).toEqual({
           name,

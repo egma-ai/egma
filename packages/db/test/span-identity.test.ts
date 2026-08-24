@@ -143,8 +143,37 @@ describe("asking which spans are already committed", () => {
         traceId: one.traceId,
         spanId: one.spanId,
         contentHash: spanContentHash(one),
+        traceStartedAtMicroseconds: one.startedAtMicroseconds,
       });
     }
+  });
+
+  it("returns the whole visible trace's start when asked only about its later span", async () => {
+    const traceId = "aaaa1111aaaa1111aaaa1111aaaa1111";
+    const earlier = span({
+      traceId,
+      spanId: "2222111111111111",
+      startedAtMicroseconds:
+        BigInt(WHEN.getTime() - 30 * 60_000) * 1_000n,
+    });
+    const later = span({
+      traceId,
+      spanId: "2222222222222222",
+      startedAtMicroseconds:
+        BigInt(WHEN.getTime() + 30 * 60_000) * 1_000n,
+    });
+    await appendSpans(at(acme), [earlier, later]);
+
+    expect(
+      await committedSpans(at(acme), [identityOf(later)], { window: WINDOW }),
+    ).toEqual([
+      {
+        traceId,
+        spanId: later.spanId,
+        contentHash: spanContentHash(later),
+        traceStartedAtMicroseconds: earlier.startedAtMicroseconds,
+      },
+    ]);
   });
 
   it("says nothing at all about an identity it does not hold", async () => {
@@ -210,6 +239,7 @@ describe("asking which spans are already committed", () => {
         traceId: one.traceId,
         spanId: one.spanId,
         contentHash: spanContentHash(one),
+        traceStartedAtMicroseconds: one.startedAtMicroseconds,
       },
     ]);
   });

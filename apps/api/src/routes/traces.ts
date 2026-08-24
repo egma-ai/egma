@@ -299,7 +299,7 @@ type AttributedGroup = {
  *
  * Whatever the simulation's status. The row is looked up, never inspected: a
  * late flush for a simulation the sweep already called orphaned is evidence
- * arriving after the verdict on the messenger, and it is kept.
+ * arriving after the messenger was marked terminal, and it is kept.
  *
  * A refusal here is `google.rpc.Status`, like every refusal on this door —
  * the sender is an OTLP exporter before it is anything else — with the
@@ -377,7 +377,7 @@ async function simulatorExport(
    * A simulation id and its trace id are the same 128 bits written two ways,
    * and both directions of that derivation are load-bearing reads: a reader
    * opening a transcript converts the trace id back into a simulation id to
-   * find its verdicts, and — since ticket 03 — to resolve its recording. So a
+   * find its grades, and — since ticket 03 — to resolve its recording. So a
    * resource that named simulation A while filing its spans under B's trace
    * would hand whoever opened that transcript B's turns beside A's audio, both
    * inside one organization, with nothing anywhere saying they disagree.

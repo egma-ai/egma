@@ -8,6 +8,9 @@ const ENOUGH = {
   EGMA_AUTH_SECRET: "test-auth-secret",
   EGMA_ENCRYPTION_KEY: "00".repeat(32),
   EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_test-service-token",
+  EGMA_INGEST_ENDPOINT: "http://minio.example:9000",
+  EGMA_INGEST_ACCESS_KEY_ID: "ingestion-access-key",
+  EGMA_INGEST_SECRET_ACCESS_KEY: "ingestion-secret-key",
 } as const;
 
 describe("provider credential configuration", () => {

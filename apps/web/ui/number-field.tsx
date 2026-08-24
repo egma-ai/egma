@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils";
  * A field whose value is a number, with its bounds and its unit on it.
  *
  * The shared control set has never had one. Two places in the product needed
- * one and got a text field told to look numeric instead: a grader's numeric
- * parameter, and the share of live traffic a running grader judges. Both then
- * had to say the rest in prose — "a whole percentage from 0 to 100" is a
+ * one and got a text field told to look numeric instead: a grader's pass
+ * threshold, and the share of production traffic its project scope selects.
+ * Both then had to say the rest in prose — "a whole percentage from 0 to 100" is a
  * sentence beside a control that would happily take 900, and a bound with a
  * unit had the unit written into its hint because the field could not show it.
  *

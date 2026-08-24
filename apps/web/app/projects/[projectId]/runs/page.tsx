@@ -21,11 +21,9 @@ import { projectLanding, projectPath } from "../../../../lib/project-context.ts"
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
   RUN_STATUS_WORDS,
-  VERDICT_WORDS,
   type RunHistoryPage,
   type RunRow,
   type RunStatusWord,
-  type VerdictWord,
 } from "../../../../lib/runs.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +40,6 @@ import {
 import {
   RunStatus,
   SimulationTally,
-  VerdictBadge,
 } from "../../../../ui/run-status.tsx";
 import {
   AppShell,
@@ -56,12 +53,9 @@ import {
  * Every run this project has executed, newest first.
  *
  * **Four facts on every row, and none of them folded into another.** The run's
- * machinery, how its conversations are distributed across theirs, how far
- * grading has got, and the verdict — which is blank until every conversation has
- * one, because "nobody has finished looking" is not a result. A list that showed
- * one column called *status* would have to choose which of those four it meant,
- * and whichever it chose would be wrong for somebody: a completed run may hold
- * nothing but failures.
+ * machinery, how its conversations are distributed across theirs, and how far
+ * grading has got. Grade scores belong to each simulation trace, so this page
+ * does not invent a run-level pass or fail result.
  *
  * Every filter is the server's, in the address of the request. A filter applied
  * to what came back would answer differently depending on what had already been
@@ -132,13 +126,7 @@ function columnsFor(
       header: "Grading",
       width: "120px",
       cell: (run) =>
-        `${String(run.gradedCount)} of ${String(run.gradableCount)} judged`,
-    },
-    {
-      key: "verdict",
-      header: "Verdict",
-      width: "130px",
-      cell: (run) => <VerdictBadge verdict={run.verdict} />,
+        `${String(run.gradedCount)} of ${String(run.gradableCount)} graded`,
     },
     {
       key: "stop",
@@ -203,12 +191,11 @@ function Runs({ projectId }: { readonly projectId: string }) {
   const [agent, setAgent] = useState("");
   const [connection, setConnection] = useState("");
   const [status, setStatus] = useState<"" | RunStatusWord>("");
-  const [verdict, setVerdict] = useState<"" | VerdictWord>("");
   /** The earliest day to show, as somebody typed it and as it was asked for. */
   const [typedSince, setTypedSince] = useState("");
   const [since, setSince] = useState("");
 
-  const asked = JSON.stringify({ agent, connection, status, verdict, since });
+  const asked = JSON.stringify({ agent, connection, status, since });
   const { answer, reload } = useProjectRead<RunHistoryPage>(
     (projectId) =>
       platformAnswer(
@@ -218,7 +205,6 @@ function Runs({ projectId }: { readonly projectId: string }) {
             ...(agent === "" ? {} : { agentId: agent }),
             ...(connection === "" ? {} : { connectionId: connection }),
             ...(status === "" ? {} : { status }),
-            ...(verdict === "" ? {} : { verdict }),
             ...(since === "" ? {} : { since: `${since}T00:00:00.000Z` }),
           },
           { client: platformClient },
@@ -357,7 +343,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
 
   const agentRows = agents?.status === "ready" ? agents.value.agents : [];
   const narrowed =
-    agent !== "" || connection !== "" || status !== "" || verdict !== "" || since !== "";
+    agent !== "" || connection !== "" || status !== "" || since !== "";
 
   function plan() {
     return mayStart ? (
@@ -417,7 +403,6 @@ function Runs({ projectId }: { readonly projectId: string }) {
             ...(agent === "" ? {} : { agentId: agent }),
             ...(connection === "" ? {} : { connectionId: connection }),
             ...(status === "" ? {} : { status }),
-            ...(verdict === "" ? {} : { verdict }),
             ...(since === "" ? {} : { since: `${since}T00:00:00.000Z` }),
           },
           { client: platformClient },
@@ -457,21 +442,12 @@ function Runs({ projectId }: { readonly projectId: string }) {
             }
             lead={
               narrowed
-                ? // A short filtered page is a real answer here rather than an
-                  // oversight, and the control below says so: a verdict is
-                  // folded at read time, so the server sweeps rather than
-                  // filtering in the query.
-                  "Clear the filters to see everything this project has run. A run that is still being judged has no verdict yet and matches no verdict filter."
+                ? "Clear the filters to see everything this project has run."
                 : "A run executes one full test suite against one agent over one connection, and freezes exactly what it used."
             }
             action={
               narrowed ? (
                 cursor === null ? undefined : (
-                  // A verdict filter is applied to the fold rather than to the
-                  // query, so the server sweeps a bounded number of runs and
-                  // answers what matched. An empty page with a cursor on it
-                  // means it swept and found none *here* — not that there are
-                  // none — and the control says which.
                   <Button
                     type="button"
                     variant="secondary"
@@ -526,7 +502,7 @@ function Runs({ projectId }: { readonly projectId: string }) {
            * Once, and never squeezed into a cell. The table keeps each row to
            * one line of reading; the panel needs the full width and owns the
            * only expanded state. The Ember edge is the "open" mark — the one
-           * `DESIGN.md` reserves the brand colour for — and never a verdict.
+           * `DESIGN.md` reserves the brand colour for — and never a result.
            */
           <section
             className={cn(
@@ -662,25 +638,9 @@ function Runs({ projectId }: { readonly projectId: string }) {
           </option>
         ))}
       </Select>
-      <Select
-        id="runs-verdict"
-        className={TOOLBAR_FILTER}
-        value={verdict}
-        aria-label="Show only runs with one verdict"
-        onChange={(event) =>
-          setVerdict(event.target.value as "" | VerdictWord)
-        }
-      >
-        <option value="">Any verdict</option>
-        {VERDICT_WORDS.map((one) => (
-          <option key={one} value={one}>
-            {one}
-          </option>
-        ))}
-      </Select>
       {/*
         The field carries its own name rather than a visible label, the
-        same way the four filters beside it do. `autoComplete` is said out
+        same way the three filters beside it do. `autoComplete` is said out
         loud because the control set this replaces defaulted it to `off`,
         and a browser offering to remember a date filter is a menu over
         the toolbar every time somebody focuses it.

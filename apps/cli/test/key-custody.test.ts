@@ -137,7 +137,7 @@ describe("a whole run, swept afterwards", () => {
       answers: { "retell-key": KEY, reach: "text" },
     });
 
-    // The walk ends in a run, and a run ends when verdicts arrive. The sweep
+    // The walk ends in a run, and a result is ready when grading is terminal. The sweep
     // is worth more the further the run gets, so the fixture is given the one
     // thing a platform with a simulator attached has.
     const grading = gradeEveryRun(platform);

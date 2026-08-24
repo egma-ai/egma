@@ -190,7 +190,7 @@ describe("the key screen", () => {
     run.write("n");
 
     await showing(run, "price-question", "[enter] run", "[q] quit");
-    // The walk carries on into the run it starts, and a run ends when verdicts
+    // The walk carries on into the run it starts, and results arrive when grading
     // arrive — so the fixture is given something that judges what is queued.
     const grading = gradeEveryRun(platform);
     run.write("\r");

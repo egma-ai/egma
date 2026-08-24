@@ -25,8 +25,8 @@ import {
  *
  * **The graders a version named left with the junction.** A test names none, so
  * there is nothing here to round-trip and no array for an edit to move between;
- * which graders judge a simulation is the project's running copies and their
- * scope, tested where those live. What remains of that half is the case below
+ * which project graders grade a simulation is resolved from their scopes,
+ * tested where those live. What remains of that half is the case below
  * proving a read carries no graders at all — the removal, asserted rather than
  * assumed from a type that no longer has the field.
  *
@@ -104,10 +104,10 @@ describe("a test's expected behaviors", () => {
   });
 
   /**
-   * Order is content, and it is load-bearing rather than tidy: a verdict row
-   * names its assertion by position in the pinned version, so moving a sentence
-   * moves what every row about it meant. Minting a version is what keeps the old
-   * rows readable.
+   * Order is content, and it is load-bearing rather than tidy: nested assertion
+   * details name each behavior by position in the pinned version. Moving a
+   * sentence changes what that key means, so a new version keeps old grades
+   * readable.
    */
   it("mint a version when one is reworded, and nothing when the list is the same", async () => {
     const created = await createTest(actingAsAcme(), {
