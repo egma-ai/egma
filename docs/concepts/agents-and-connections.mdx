@@ -166,7 +166,13 @@ Retell for that agent's completed conversations. A LiveKit Agents agent needs no
 switch — its own process sends spans over OTLP.
 
 The key an agent holds for monitoring and the credentials a connection holds for
-simulations are separate on purpose, so the two jobs never share custody. If you
-chat-test and monitor the same Retell account, you enter the key twice, once for
-each job. Turning the switch on or off never creates or changes a simulation
-connection. See [Production telemetry](/concepts/telemetry).
+simulations are separate on purpose, so the two jobs never share custody: they
+are two sealed copies, and revoking or rotating one does not touch the other.
+
+What that costs you depends on where you set them up. Setting up chat testing
+and monitoring for one Retell account in separate visits to the web app means
+entering the key once in each place. The CLI wizard's **both** answer asks for
+it once and fills both, because it is doing both jobs in one sitting.
+
+Turning the switch on or off never creates or changes a simulation connection.
+See [Production telemetry](/concepts/telemetry).

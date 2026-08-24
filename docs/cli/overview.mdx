@@ -47,7 +47,14 @@ Running `npx @egma/cli` with no arguments opens the full interactive wizard. It 
     Egma starts the coding agent you already have and hands it internal notes on voice-agent architecture. Your coding agent reads your repository and reports: which framework runs the agent, where its prompts live, where its tools are defined, how it reaches production, and where its identifier is stored. Every action appears on screen as it happens. Your code and prompts never leave your machine.
   </Step>
   <Step title="Say what Egma is for">
-    Once Egma knows your agent and the platform that runs it, it asks one question: should Egma **test** the agent, **watch its production traffic**, or **both**. Testing is the lane below. Monitoring and both are set up from the Monitoring page in Egma for now, and the wizard says so and stops rather than half-running either.
+    Once Egma knows your agent and the platform that runs it, it asks one question: should Egma **test** the agent, **watch its production traffic**, or **both**. Testing is the lane below. Monitoring sets up production capture and ends there — no connection, no suite, no tests. Both sets monitoring up first, says so, and then runs the whole testing lane in the same sitting: every shared question is asked once, one agent row serves both jobs, and the last screen points at the graded run and at Monitoring.
+  </Step>
+  <Step title="Watch production traffic (monitoring and both)">
+    On **Retell**, Egma opens your account with one pasted key, shows its voice agents with what Egma already knows about each — registered here, already watched — and starts watching the one you pick, registering it if it is new. It waits briefly for the first imported conversation, and an account with nothing to import ends just as well with a sentence that says so.
+
+    On **LiveKit**, your own coding agent adds `monitor_livekit(ctx)` to your worker as an edit you watch happen. Egma then mints a project API key, writes the two environment lines the SDK reads into `.env` — with your agreement, and only when Git already ignores that file — and prints them for wherever the worker really runs. Nothing waits: a LiveKit worker pushes its own evidence, so conversations appear once real traffic starts.
+
+    A start Egma cannot make is explained in plain words — what happened and what to do — and the walk exits with a nonzero code.
   </Step>
   <Step title="Connect your agent">
     For Retell, Egma asks for your API key and lists the agents it can read. A chat agent uses the Retell Chat API. A voice agent uses one of its public phone numbers. For LiveKit, project credentials are the recommended room setup; a public HTTPS token endpoint with auth headers is the advanced option. Egma uses credentials for discovery and sends them to the platform only when the selected connection needs sealed storage. Pipecat and Vapi setup are not supported yet.
@@ -88,6 +95,9 @@ Every step the wizard takes is also available as a standalone command that print
 | `egma pull` | Writes Egma's current test versions into your local files |
 | `egma push` | Uploads your local tests to Egma |
 | `egma run <suite-directory>` | Runs one complete local suite against your connected agent |
+| `egma monitoring enable` | Starts watching this agent's production traffic |
+| `egma monitoring disable` | Turns the switch off, keeping everything stored |
+| `egma monitoring status` | Prints the switch, the binding, the key hint, and the last arrival |
 | `egma self-host up` | Starts a full local Egma instance |
 | `egma self-host setup` | Configures a running local instance |
 

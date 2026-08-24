@@ -55,9 +55,14 @@ import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 import type { WizardAgentPlatform } from "./wizard-machine.ts";
 
-/** What the both lane says before it does anything, because order is a promise. */
+/**
+ * What the both lane says before it does anything, because order is a promise.
+ *
+ * The word on screen is *conversations*: `trace` is a storage word and never
+ * reaches a developer, however natural it feels to whoever wrote the poller.
+ */
 export const MONITORING_FIRST_LINE =
-  "Setting monitoring up first, so your production traces start coming in while you write tests.";
+  "Setting monitoring up first, so your production conversations start coming in while you write tests.";
 
 export type MonitoringSetupOptions = {
   readonly ui: WizardUI;
