@@ -2142,7 +2142,9 @@ describe("the project grader library", () => {
 
       const details = page.getByRole("dialog", { name: "Response latency" });
       await details.waitFor();
-      expect(await details.innerText()).toContain("turn response latency");
+      await expect
+        .poll(() => details.innerText(), { timeout: 30_000 })
+        .toContain("turn response latency");
       expect(await details.innerText()).toContain(
         "Maximum average response time: 3 seconds by default",
       );
