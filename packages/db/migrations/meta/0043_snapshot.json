@@ -1,5 +1,5 @@
 {
-  "id": "9d492c2d-8351-4e5e-88b5-7de96991182f",
+  "id": "82cf2aa3-91c2-484b-8a36-ca896c34098e",
   "prevId": "5c97cfca-9954-4a6e-bcbb-c482935af621",
   "version": "7",
   "dialect": "postgresql",
@@ -2660,12 +2660,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "project_id": {
-          "name": "project_id",
-          "type": "text COLLATE \"C\"",
-          "primaryKey": false,
-          "notNull": false
-        },
         "name": {
           "name": "name",
           "type": "text",
@@ -2677,12 +2671,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "type": {
-          "name": "type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
         },
         "scope_editable": {
           "name": "scope_editable",
@@ -2729,17 +2717,11 @@
           "method": "btree",
           "with": {}
         },
-        "grader_definition_organization_id_project_id_idx": {
-          "name": "grader_definition_organization_id_project_id_idx",
+        "grader_definition_organization_id_idx": {
+          "name": "grader_definition_organization_id_idx",
           "columns": [
             {
               "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "project_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2761,21 +2743,6 @@
           ],
           "columnsTo": [
             "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "grader_definition_project_organization_fk": {
-          "name": "grader_definition_project_organization_fk",
-          "tableFrom": "grader_definition",
-          "tableTo": "project",
-          "columnsFrom": [
-            "project_id",
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id",
-            "organization_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -2803,14 +2770,6 @@
         "grader_definition_id_prefix": {
           "name": "grader_definition_id_prefix",
           "value": "\"grader_definition\".\"id\" ~ '^grl_[0-9A-HJKMNP-TV-Z]{26}$'"
-        },
-        "grader_definition_type_allowed": {
-          "name": "grader_definition_type_allowed",
-          "value": "\"grader_definition\".\"type\" in ('llm_as_judge', 'code')"
-        },
-        "grader_definition_tenancy_is_whole_or_egmas": {
-          "name": "grader_definition_tenancy_is_whole_or_egmas",
-          "value": "(\"grader_definition\".\"organization_id\" is null) = (\"grader_definition\".\"project_id\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -2831,6 +2790,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "prompt": {
           "name": "prompt",
           "type": "text",
@@ -2846,18 +2811,6 @@
         "output_contract": {
           "name": "output_contract",
           "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_code": {
-          "name": "source_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_code_language": {
-          "name": "source_code_language",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -2917,13 +2870,13 @@
           "name": "grader_definition_version_version_is_positive",
           "value": "\"grader_definition_version\".\"version\" >= 1"
         },
+        "grader_definition_version_type_allowed": {
+          "name": "grader_definition_version_type_allowed",
+          "value": "\"grader_definition_version\".\"type\" in ('llm_as_judge', 'code')"
+        },
         "grader_definition_version_modalities_allowed": {
           "name": "grader_definition_version_modalities_allowed",
           "value": "\"grader_definition_version\".\"modalities\" in (\n        '[\"chat\"]'::jsonb,\n        '[\"voice\"]'::jsonb,\n        '[\"chat\", \"voice\"]'::jsonb,\n        '[\"voice\", \"chat\"]'::jsonb\n      )"
-        },
-        "grader_definition_version_source_code_columns_agree": {
-          "name": "grader_definition_version_source_code_columns_agree",
-          "value": "(\"grader_definition_version\".\"source_code\" is null) = (\"grader_definition_version\".\"source_code_language\" is null)"
         }
       },
       "isRLSEnabled": false
@@ -2958,6 +2911,12 @@
         },
         "scope": {
           "name": "scope",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parameter_values": {
+          "name": "parameter_values",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
