@@ -334,6 +334,15 @@ async function enableRetell(
     platform,
     signal: options.signal,
     say: (line) => options.out(`note: ${line}`),
+    /*
+     * The wizard waits briefly for the first conversation because a person is
+     * sitting in front of it and proof beats a promise. Nobody is sitting in
+     * front of this, and a verb that held a script for twenty seconds to
+     * report a fact the script can ask for whenever it likes would be paying
+     * that cost on every call. So it asks once and says what it found;
+     * `egma monitoring status` is where arrivals are read afterwards.
+     */
+    waitMs: 0,
     ...(agent === null ? {} : { agentId: agent.agentId }),
     agentName: options.name ?? agent?.agentName ?? null,
     askForKey: () => {

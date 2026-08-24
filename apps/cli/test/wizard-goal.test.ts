@@ -1,11 +1,15 @@
 /**
- * The one question the wizard asks about itself, through the whole wizard.
+ * The one question the wizard asks about itself, and the testing lane it opens.
  *
  * No model, no terminal, no human — a scripted coding-agent peer, a fixture
  * platform, and a fake Retell. What is asserted is what a developer could check
  * afterwards: which files landed, what the platform was asked to create, how
  * many times the coding agent was dispatched, and the line left behind. Never
  * the order of internal steps.
+ *
+ * The other two answers have their own file beside this one, because what they
+ * need standing up is different: `wizard-monitoring.test.ts` runs the
+ * monitoring and both lanes per platform.
  */
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -221,40 +225,6 @@ describe("the goal question", () => {
     expect(report.kind).toBe("run-started");
     expect(platform.running.runs).toHaveLength(1);
   });
-});
-
-describe("choosing monitoring, before the monitoring lane exists", () => {
-  it.each(["monitoring", "both"] as const)(
-    "creates nothing at all for %s, and says where to go instead",
-    async (goal) => {
-      const { report, ui } = await walk(goal);
-
-      expect(report).toEqual({
-        kind: "monitoring-in-the-web",
-        goal,
-        platformUrl: platform.url,
-      });
-
-      // Nothing was created: no connection, no suite, no tests, no run.
-      expect(platform.registered.agents).toHaveLength(0);
-      expect(platform.registered.connections).toHaveLength(0);
-      expect(platform.registered.sealed).toHaveLength(0);
-      expect(platform.tests.tests).toHaveLength(0);
-      expect(platform.running.runs).toHaveLength(0);
-
-      // And no Retell key was ever asked for, because nothing needed one.
-      expect(ui.record.asked).not.toContain("retell-key");
-
-      // The repository is exactly as the walk found it.
-      await expect(
-        readFile(folderPathsIn(workspace.dir).config, "utf8"),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-
-      // The last line points at the one flow that can do this today.
-      expect(buildExitLine(report)).toContain(platform.url);
-      expect(buildExitLine(report)).toContain("Monitoring page");
-    },
-  );
 });
 
 describe("a repository that has already been through the wizard", () => {
