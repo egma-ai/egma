@@ -11,6 +11,7 @@ COPY apps/web/package.json apps/web/
 COPY packages/db/package.json packages/db/
 COPY packages/ids/package.json packages/ids/
 COPY packages/lint/package.json packages/lint/
+COPY packages/metrics/package.json packages/metrics/
 COPY packages/platform-api/package.json packages/platform-api/
 COPY packages/provider-credentials/package.json packages/provider-credentials/
 COPY packages/retell/package.json packages/retell/
@@ -18,6 +19,7 @@ COPY packages/simulation-contract/package.json packages/simulation-contract/
 RUN pnpm install --frozen-lockfile --filter "egma" --filter "@egma/api..."
 
 COPY packages/ids packages/ids
+COPY packages/metrics packages/metrics
 COPY packages/platform-api packages/platform-api
 COPY packages/provider-credentials packages/provider-credentials
 COPY packages/retell packages/retell
