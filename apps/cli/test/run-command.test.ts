@@ -129,7 +129,7 @@ function runHeader(status = "pending"): Record<string, unknown> {
     productLabel: "Fixture",
     modality: "chat",
     expectedSimulationCount: 1,
-    resultsUrl: `${URL}/runs/run_one`,
+    resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_one`,
   };
 }
 

@@ -74,9 +74,6 @@ const SKILLS_CLI_AGENTS: Readonly<Record<string, string>> = {
   codex: "codex",
   cursor: "cursor",
   opencode: "opencode",
-  // Accepted by older release scripts and saved invocations.
-  "claude-acp": "claude-code",
-  "codex-acp": "codex",
 };
 
 /** What each coding agent is called in the sentence that offers this. */
@@ -85,8 +82,6 @@ const DRIVEN_AGENT_NAMES: Readonly<Record<string, string>> = {
   codex: "Codex",
   cursor: "Cursor",
   opencode: "OpenCode",
-  "claude-acp": "Claude Code",
-  "codex-acp": "Codex",
 };
 
 /** What the offer would do, at either scope. */
@@ -344,4 +339,3 @@ export function installedLine(
 export function skippedLine(drivenAgentName: string): string {
   return `Nothing was installed. ${drivenAgentName} can still drive Egma — tell it to run egma --help.`;
 }
-

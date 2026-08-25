@@ -159,7 +159,9 @@ it("uses an explicitly selected platform and commits its URL on first onboarding
     // repository just bound itself to, with no key in it.
     const runId = platform.running.runs[0]?.id ?? "";
     expect(runId).not.toBe("");
-    expect(stdout).toContain(`${platform.url}/runs/${runId}`);
+    expect(stdout).toContain(
+      `${platform.url}/projects/${platform.projectId}/runs/${runId}`,
+    );
   } finally {
     await Promise.all([platform.close(), retell.close(), workspace.remove()]);
   }

@@ -282,20 +282,14 @@ export async function discoverCodingAgents(
   return found;
 }
 
-const LEGACY_IDS: Readonly<Record<string, SupportedCodingAgentId>> = {
-  "claude-acp": "claude",
-  "codex-acp": "codex",
-};
-
-/** A supported public id, including the two values accepted by older CLIs. */
+/** A supported public id. */
 export function supportedCodingAgentId(id: string): SupportedCodingAgentId | null {
-  const canonical = LEGACY_IDS[id] ?? id;
-  return (SUPPORTED_CODING_AGENT_IDS as readonly string[]).includes(canonical)
-    ? (canonical as SupportedCodingAgentId)
+  return (SUPPORTED_CODING_AGENT_IDS as readonly string[]).includes(id)
+    ? (id as SupportedCodingAgentId)
     : null;
 }
 
-/** Select an installed agent by public id, with two old flag values retained. */
+/** Select an installed agent by public id. */
 export function installedCodingAgent(
   installed: readonly InstalledCodingAgent[],
   id: string,

@@ -192,7 +192,7 @@ configures no media backend to place a call through.
 next heartbeat; `POST /workbench/specs` queues another spec while
 everything runs.
 
-Model and speech choices are not container settings. Every contract-v2 work
+Model and speech choices are not container settings. Every simulation work
 order carries one complete `models` block from the pinned persona version.
 Chat requires the direct LLM key. Voice also requires the direct STT and TTS
 keys. The TTS selection owns `voice_id` and `speed`; persona traits contain

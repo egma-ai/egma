@@ -384,7 +384,7 @@ describe("LiveKit in the wizard", () => {
     try {
       report = await runWizard({
         ui,
-        launch: { ...workspace.launch(script), id: "codex-acp", name: "Codex" },
+        launch: { ...workspace.launch(script), id: "codex", name: "Codex" },
         cwd: workspace.dir,
         signal: new AbortController().signal,
         platform: selectedPlatform({
@@ -489,7 +489,7 @@ describe("LiveKit in the wizard", () => {
     try {
       const report = await runWizard({
         ui,
-        launch: { ...workspace.launch(script), id: "codex-acp", name: "Codex" },
+        launch: { ...workspace.launch(script), id: "codex", name: "Codex" },
         cwd: workspace.dir,
         signal: new AbortController().signal,
         platform: selectedPlatform({

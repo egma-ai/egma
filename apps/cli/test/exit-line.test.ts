@@ -19,7 +19,8 @@ const PLACES: SkillPlaces = skillPlacesFor("claude", {
   home: "/home/you",
 }) as SkillPlaces;
 
-const RESULTS_URL = "http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J";
+const RESULTS_URL =
+  "http://localhost:3101/projects/prj_01K7QXV2M8ZB4C6D8E0F2G4H6J/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J";
 
 const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "found-agent", framework: "retell-sdk", prompts: "prompts/order-line.md" },
@@ -410,7 +411,9 @@ describe("the exit line", () => {
     expect(new URL(address).search).toBe("");
     expect(new URL(address).hash).toBe("");
     expect(new URL(address).username).toBe("");
-    expect(new URL(address).pathname).toMatch(/^\/runs\/run_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(new URL(address).pathname).toMatch(
+      /^\/projects\/prj_[0-9A-HJKMNP-TV-Z]{26}\/runs\/run_[0-9A-HJKMNP-TV-Z]{26}$/u,
+    );
   });
 
   it("counts terminal trace results honestly, however far the suite got", () => {

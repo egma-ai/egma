@@ -7,6 +7,7 @@ import { runStep } from "../src/wizard/run-step.ts";
 import { waitUntil } from "./support/workspace.ts";
 
 const URL = "https://egma.example";
+const PROJECT_ID = "prj_01K3XQ7M4E8YB2FVN0H9TZQWER";
 
 class JsonResponse extends Response {
   constructor(body?: string | null, init: ResponseInit = {}) {
@@ -52,7 +53,7 @@ describe("the first trace result", () => {
             productLabel: "Fixture",
             modality: "chat",
             expectedSimulationCount: 3,
-            resultsUrl: `${URL}/runs/run_one`,
+            resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_one`,
           }),
           { status: 201 },
         );
@@ -79,7 +80,7 @@ describe("the first trace result", () => {
             productLabel: "Fixture",
             modality: "chat",
             expectedSimulationCount: 3,
-            resultsUrl: `${URL}/runs/run_one`,
+            resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_one`,
           }),
         );
       }

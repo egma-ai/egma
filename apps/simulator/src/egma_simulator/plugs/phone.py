@@ -25,9 +25,10 @@ Its config keys, like every plug's, are its own:
 
 Which media backend places the call is the deployment's and is checked at
 startup. The complete carrier route arrives on each phone simulation's work
-order. The v2 contract has already checked its two-value source-IP or four-value
-SIP-credential shape before this plug receives it. A spec that names a number
-on a simulator configured to place no calls is refused with the variable to set.
+order. The simulation contract has already checked its two-value source-IP or
+four-value SIP-credential shape before this plug receives it. A spec that names
+a number on a simulator configured to place no calls is refused with the
+variable to set.
 
 Credentials are refused outright. A phone connection carries no secret of
 its own.

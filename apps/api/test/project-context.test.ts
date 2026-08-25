@@ -522,15 +522,13 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
-   * **What an unnamed read still means, pinned rather than fixed.**
+   * **What an unnamed API read still means, pinned rather than fixed.**
    *
-   * `/runs/{runId}` is the address a terminal prints, it carries no project,
-   * and it forwards by reading the run's own `projectId` — a read rather than
-   * a guess, which is the right design. What the design needs and does not have
-   * is a read that spans the organization: a request naming no project acts in
-   * the session's own, which is the organization's first, and `getRun` narrows
-   * by it. So a `results_url` for a run in any other project is answered as an
-   * absence.
+   * `GET /v1/runs/{runId}` permits a caller to leave out `projectId`. For a
+   * signed-in session, that unnamed request acts in the session's own project
+   * and `getRun` narrows by it. A run in another project is therefore answered
+   * as an absence. Browser result addresses are project-scoped and do not use
+   * this path without project context; this is the public API rule itself.
    *
    * It is pinned here rather than changed because widening it is a decision
    * about what an unnamed read means for **every** caller of that route. An API
@@ -875,8 +873,8 @@ describe("a key for the whole organization, where the organization holds two pro
    *
    * The status codes are asserted rather than only the bodies, because the
    * regression this holds is a **400**: not a narrower answer, not an absence,
-   * but a refusal telling a terminal to name a project it has no reason to
-   * know. `egma run` prints a `results_url` and nothing else.
+   * but a refusal telling a CLI or API client to name a project it has no reason
+   * to know after the run has already been identified by id.
    */
   it("reads, follows and cancels a run in the second project without naming one", async () => {
     const { ada, runId } = await aRunInTheSecondProject(

@@ -144,7 +144,7 @@ describe("complete repository suite commands", () => {
       productLabel: "Retell",
       modality: "chat",
       expectedSimulationCount: 1,
-      resultsUrl: `${URL}/runs/run_one`,
+      resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_one`,
       simulations: [
         {
           id: "sim_one",
@@ -176,7 +176,7 @@ describe("complete repository suite commands", () => {
             productLabel: "Retell",
             modality: "chat",
             expectedSimulationCount: 1,
-            resultsUrl: `${URL}/runs/run_one`,
+            resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_one`,
           }),
         );
       }
@@ -862,7 +862,7 @@ describe("complete repository suite commands", () => {
             productLabel: "Retell",
             modality: "chat",
             expectedSimulationCount: 1,
-            resultsUrl: `${URL}/runs/run_one`,
+            resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_one`,
           }),
           { status: 201 },
         );
@@ -1026,7 +1026,7 @@ describe("complete repository suite commands", () => {
             productLabel: "Retell",
             modality: "chat",
             expectedSimulationCount: 1,
-            resultsUrl: `${URL}/runs/run_started`,
+            resultsUrl: `${URL}/projects/${PROJECT_ID}/runs/run_started`,
           }),
           { status: 201 },
         );

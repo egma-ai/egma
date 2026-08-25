@@ -556,11 +556,16 @@ async function runAndFollow(
 
   check(runId.startsWith("run_"), "a run was created");
   check(pins === TESTS.length, `it pinned ${pins} versions, and said which (${TESTS.length} tests)`);
+  const resultsAddress = new URL(results);
   check(
-    results.startsWith(`${instance.origin}/runs/`) && results.endsWith(runId),
+    resultsAddress.origin === instance.origin &&
+      /^\/projects\/prj_[0-9A-HJKMNP-TV-Z]{26}\/runs\/run_[0-9A-HJKMNP-TV-Z]{26}$/u.test(
+        resultsAddress.pathname,
+      ) &&
+      resultsAddress.pathname.endsWith(`/runs/${runId}`),
     "the run came back with a results address on this instance",
   );
-  check(new URL(results).search === "", "no token rides the results address");
+  check(resultsAddress.search === "", "no token rides the results address");
 
   const created = await ask(instance.origin, key, `/v1/runs/${runId}`);
   const simulationPage = await ask(
@@ -689,8 +694,8 @@ function proven(): void {
   say("      bridge are what land that. When they do, the first trace result");
   say("      arrives through this same feed and nothing in this check");
   say("      changes — it already follows the way any follower follows.");
-  say("    · the page the results address opens is still being built. The");
-  say("      address itself is real, token-free, and on this instance.");
+  say("    · this smoke check does not open the results page. The address");
+  say("      itself is real, token-free, and on this instance.");
   say("");
   say("  So a green run of this is NOT the whole ten-minute walk. It is");
   say("  everything up to the moment terminal grading would arrive — and the one");

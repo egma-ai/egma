@@ -201,7 +201,7 @@ export function runRoutes(options: {
     name: run.name,
     status: run.status,
     expectedSimulationCount: run.expectedSimulationCount,
-    resultsUrl: `${options.origin()}/runs/${run.id}`,
+    resultsUrl: `${options.origin()}/projects/${options.projectId}/runs/${run.id}`,
   });
   const simulationOut = (simulation: StoredSimulation): Record<string, unknown> => {
     const run = runById(simulation.runId);

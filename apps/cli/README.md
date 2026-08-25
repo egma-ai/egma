@@ -449,7 +449,7 @@ pin: lost-the-order-number tstv_01K…
 run: run_01K…
 tests: 2
 simulations: 2
-results: http://localhost:3101/runs/run_01K…
+results: http://localhost:3101/projects/prj_01K…/runs/run_01K…
 simulation: quoted-a-price default-persona running
 simulation: quoted-a-price default-persona completed
 grading: quoted-a-price default-persona pending
@@ -519,7 +519,7 @@ text, each item alone on its line so a triple-click takes it whole:
 ```
 ✓ Your first run is live — 3 of 12 simulation results ready.
 
-http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
+http://localhost:3101/projects/prj_01K7QXV2M8ZB4C6D8E0F2G4H6J/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J
 
 Tests are code now: egma/tests/ (committed). Edit them, then egma push.
 Hand your coding agent this: "Read egma/config.yaml, then egma --help — you can pull, push, and trigger runs from here."

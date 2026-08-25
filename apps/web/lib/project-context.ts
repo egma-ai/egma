@@ -37,18 +37,15 @@ type Address = {
   readonly projectId: string;
   /** The product area, which every project has its own copy of. */
   readonly section: string;
-  /** Whatever named one thing inside that area. */
-  readonly rest: readonly string[];
 };
 
 function addressIn(pathname: string): Address | null {
-  const [, segment, projectId, section, ...rest] = pathname.split("/");
+  const [, segment, projectId, section] = pathname.split("/");
   if (segment !== PROJECT_SEGMENT) return null;
   if (projectId === undefined || projectId === "") return null;
   return {
     projectId,
     section: section === undefined || section === "" ? LANDING_SECTION : section,
-    rest,
   };
 }
 
@@ -72,38 +69,15 @@ export function sectionIn(pathname: string): string | null {
  * section is kept and everything under it is dropped.
  *
  * An address with no project in it at all becomes the new project's landing
- * page, because there is no area to carry across. **Three addresses carry no
- * project, and every one of them can reach this function**, because the only
+ * page, because there is no area to carry across. `/new-project` carries no
+ * project and can reach this function, because the only
  * caller is the selector's click handler and `AppShell` draws the selector on
  * every page it wraps, unconditionally, whatever the address says:
  *
  * - `/new-project`, which an organization holding none has to be able to reach.
- * - `/runs/{runId}`, the address a terminal prints, which reads the run's own
- *   project and forwards into it.
- * - `/members`, the kept legacy Settings address, which chooses the caller's
- *   first project on purpose because People is the organization's and any
- *   project serves as its frame.
  *
- * **`/runs/{runId}` and `/members` forward, and forwarding is not the same as
- * never being here.**
- * Both draw `ProductStatePage`, which is this shell around a page, so the
- * selector is on screen for as long as the read takes — and longer than that
- * when the read does not end in a forward at all. Open a `resultsUrl` for a
- * run in a project the session cannot reach and `/runs/{runId}` settles into
- * its `missing` state and stays there, shell and selector included, with one
- * click on the selector calling straight into this function. So the two that
- * were once written down as unreachable are in fact the two most likely to
- * arrive, because they are the two that can get stuck.
- *
- * All three land on the same answer, which is the right one for each: there is
- * no area on any of these addresses to carry into the project just picked.
- *
- * **The two transcript addresses used to be a fourth and a fifth on that list**,
- * at `/traces` and `/traces/{traceId}`. They are inside the project now —
- * `/projects/{projectId}/monitoring/transcripts` and one exchange beneath it —
- * so they go through the ordinary path above instead: the area is kept, the
- * exchange is dropped, and switching project from Monitoring lands on the other
- * project's Monitoring rather than throwing somebody out to Agents.
+ * It lands on the new project's landing page because there is no area on the
+ * address to carry into the project just picked.
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);

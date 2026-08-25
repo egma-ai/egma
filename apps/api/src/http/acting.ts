@@ -246,9 +246,9 @@ export async function actingIn(
  * **Why not `actingIn`.** It resolves an absent project by *choosing* one, and
  * refuses with `NAME_THE_PROJECT` where an organization holds more than one.
  * On a route addressed by a run id or a simulation id there is nothing to
- * choose: the id is unique inside the organization, and the caller — `egma run`
- * following a `results_url`, a terminal holding an id egma printed — has no
- * reason to know which project it belongs to. Sending it there turns an
+ * choose: the id is unique inside the organization, and a CLI or API client
+ * following a run it already identified has no reason to know which project it
+ * belongs to. Sending it there turns an
  * organization-wide read into a 400. This function exists so that the two
  * meanings of "no project named" cannot be swapped by picking the shorter name.
  */
