@@ -114,7 +114,7 @@ const EVERY_ENDING: readonly ExitReport[] = [
   {
     kind: "run-started",
     resultsUrl: RESULTS_URL,
-    graded: 1,
+    resultsReady: 1,
     total: 12,
     skill: { kind: "install-failed", reason: "The skills installer stopped: no such agent." },
   },
@@ -472,7 +472,7 @@ describe("the exit line", () => {
       buildExitNotice({
         kind: "run-started",
         resultsUrl: RESULTS_URL,
-        graded: 1,
+        resultsReady: 1,
         total: 12,
         skill: { kind: "install-failed", reason: "The skills installer stopped: no agent." },
       }),

@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { walkExitCode } from "../src/wizard/exit-code.ts";
 import { ENV_FILE_NAME, writeEnvFile } from "../src/monitoring/env-file.ts";
+import { MintedSecret } from "../src/platform/api-keys.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, exitLines } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
@@ -740,7 +741,7 @@ describe("choosing both", () => {
 });
 
 describe("the .env writer's own guarantees", () => {
-  const values = { url: "https://egma.test", key: { reveal: () => "egma_sk_writer_check" } };
+  const values = { url: "https://egma.test", key: new MintedSecret("egma_sk_writer_check") };
 
   it("refuses a symlinked .env and leaves the link exactly as it was", async () => {
     await gitRepository(workspace.dir, [ENV_FILE_NAME]);
