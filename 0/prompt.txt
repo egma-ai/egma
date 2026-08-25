@@ -1,0 +1,3 @@
+we have one persona that we are shipping by default For every egma customer right now what exactly is the prompt that goes inside the simulator when the persona is kind of speaking with the customer's agent? What exactly goes inside? Can you explain the whole thing to me through a flowchart or something like that?&#x20;
+
+Also what is the llm that is being used and stuff like that for that default persona? I want to exactly understand how a persona works&#x20;
