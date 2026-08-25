@@ -670,6 +670,62 @@ describe("the LiveKit half", () => {
   });
 
   /**
+   * **The head tells the truth about *this* agent.**
+   *
+   * Push is ungated, so this half is drawn for every LiveKit agent the picker
+   * lists — and nothing sorts out the one whose evidence has already arrived.
+   * Greeting that agent's owner with "waiting for the first trace" would be
+   * egma being wrong about the one thing this panel reports, so the roster's
+   * own `lastReceivedAt` decides the chip and the two lines under it.
+   */
+  it("says it is waiting only while nothing has arrived", async () => {
+    withThePicker();
+    stub({
+      agents: [
+        agent({ id: "agt_lk", name: "Livekit agent", agentPlatform: "livekit" }),
+      ],
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    expect(screen.getByText("Waiting for the first trace")).toBeDefined();
+    expect(screen.getByText("Time to log the first trace")).toBeDefined();
+    expect(screen.queryByText("Receiving traces")).toBeNull();
+  });
+
+  it("says it is receiving once evidence has arrived, and keeps the steps", async () => {
+    withThePicker();
+    stub({
+      agents: [
+        agent({
+          id: "agt_lk",
+          name: "Livekit agent",
+          agentPlatform: "livekit",
+          lastReceivedAt: "2026-08-25T09:14:02.000Z",
+        }),
+      ],
+    });
+    render(<MonitoringTranscriptsPage />);
+
+    await screen.findByLabelText("Agent");
+    expect(screen.getByText("Receiving traces")).toBeDefined();
+    expect(
+      screen.getByText("Egma is already receiving from this agent"),
+    ).toBeDefined();
+    expect(screen.queryByText("Waiting for the first trace")).toBeNull();
+    expect(screen.queryByText("Time to log the first trace")).toBeNull();
+
+    // The steps stay under it, as reference rather than as an instruction.
+    for (const step of [
+      "Install the Egma SDK",
+      "Add one line to your agent",
+      "Run your agent",
+    ]) {
+      expect(screen.getByText(step), step).toBeDefined();
+    }
+  });
+
+  /**
    * **The one line is copyable, and the copy touches nothing but the
    * clipboard.** A person reading these steps is in their own editor, and a
    * line they have to retype by eye is a line they retype wrong.

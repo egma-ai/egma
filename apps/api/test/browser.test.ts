@@ -736,7 +736,15 @@ async function send(secret: string, resourceSpans: unknown[]): Promise<void> {
  * `apps/web/test/transcripts.test.ts`, where every string they can render lives
  * in one file. Both are worth having: that one catches a word before it can
  * reach a screen, and this one catches a word that reached one anyway.
+ *
+ * **The screen's own name is the second carve-out**, and it is one word wide —
+ * the same one `transcripts.test.ts` makes, for the same reason. The developer
+ * renamed the surface to Traces on 2026-08-25, so the sidebar row and the list
+ * heading both say it on every page this helper reads. `trace` stays banned in
+ * every sentence around them: the artifact a person opens is a **transcript**,
+ * and this rule is what keeps it one.
  */
+const SURFACE_NAME = /\bTraces\b/gu;
 const NEVER_SHOWN = [
   "trace",
   "span",
@@ -750,9 +758,10 @@ const NEVER_SHOWN = [
 ];
 
 function saysNothingBanned(shown: string): void {
+  const said = shown.replaceAll(SURFACE_NAME, "");
   for (const banned of NEVER_SHOWN) {
     expect(
-      new RegExp(`\\b${banned}`, "iu").test(shown),
+      new RegExp(`\\b${banned}`, "iu").test(said),
       `the page says "${banned}"`,
     ).toBe(false);
   }

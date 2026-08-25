@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listAgents, startMonitoring } from "@egma/platform-api/client";
 
 import { Badge } from "@/components/ui/badge";
@@ -163,16 +163,27 @@ const COPY = {
    * The head of the LiveKit half, in the shape of Langfuse's first-trace
    * onboarding (developer decision, 2026-08-25).
    *
-   * **The chip is honest rather than decorative.** This half is only ever
-   * drawn for an agent nothing has arrived from — the picker lists agents that
-   * are not yet monitored — so *waiting* is a fact about this agent, not a
-   * mood. It is the warning family because nothing is wrong yet and nothing is
-   * working yet either, and the word carries that without the colour.
+   * **The chip is a fact about this agent rather than decoration, so there are
+   * two of them.** Push is ungated, and this half is drawn for every LiveKit
+   * agent the picker lists — including one whose evidence has *already*
+   * arrived, because there is no pull switch to sort them by. Telling that
+   * agent's owner they are waiting for a first trace would be egma being wrong
+   * about the one thing this panel exists to report, so `lastReceivedAt`
+   * decides which pair of words is said.
+   *
+   * Waiting is the warning family: nothing is broken and nothing is working
+   * yet either. Receiving is the success family. Either way the steps stay
+   * below — for the second agent, and for anybody checking what they did.
    */
   livekitWaiting: "Waiting for the first trace",
   livekitTitle: "Time to log the first trace",
   livekitLead:
     "It takes about a minute, and there is nothing to switch on afterwards.",
+  livekitReceiving: "Receiving traces",
+  livekitReceivingTitle: "Egma is already receiving from this agent",
+  livekitReceivingLead:
+    "Setup is done, and the steps below stay as reference for the next agent " +
+    "you point at Egma.",
   copy: "Copy",
   copied: "Copied",
   copyFailed:
@@ -447,7 +458,7 @@ function Picker({
   }
 
   if (pickerPlatformOf(agent) === "livekit") {
-    return <LiveKitSteps chooser={chooser} onClose={onClose} />;
+    return <LiveKitSteps agent={agent} chooser={chooser} onClose={onClose} />;
   }
 
   return (
@@ -680,16 +691,26 @@ function RetellStart({
 function Snippet(): ReactNode {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
 
-  /*
-   * *Copied* is a receipt rather than a new label, so it goes away on its own.
-   * The timer is cleared on unmount and whenever the state moves again, so a
-   * sheet closed straight after a press sets nothing on a gone component.
+  /**
+   * The receipt's own timer, held rather than derived from the state.
+   *
+   * **A second press has to start the two seconds over.** Keying the timeout
+   * off `state` looked tidier and was wrong: pressing Copy again while the
+   * receipt is still up sets `copied` on top of `copied`, which is no change
+   * at all — so the first press's timer ran on and took the receipt away part
+   * way through the second one. One timer, cleared before the next is started,
+   * and cleared again on unmount so a sheet closed straight after a press sets
+   * nothing on a gone component.
    */
-  useEffect(() => {
-    if (state !== "copied") return undefined;
-    const timer = setTimeout(() => setState("idle"), 2000);
-    return () => clearTimeout(timer);
-  }, [state]);
+  const receipt = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function stopReceipt(): void {
+    if (receipt.current === null) return;
+    clearTimeout(receipt.current);
+    receipt.current = null;
+  }
+
+  useEffect(() => stopReceipt, []);
 
   async function copy(): Promise<void> {
     try {
@@ -697,8 +718,11 @@ function Snippet(): ReactNode {
         throw new Error("clipboard unavailable");
       }
       await navigator.clipboard.writeText(SNIPPET);
+      stopReceipt();
       setState("copied");
+      receipt.current = setTimeout(() => setState("idle"), 2000);
     } catch {
+      stopReceipt();
       setState("failed");
     }
   }
@@ -758,13 +782,23 @@ function Snippet(): ReactNode {
  * things and gave a person no sense of being partway through anything.
  */
 function LiveKitSteps({
+  agent,
   chooser,
   onClose,
 }: {
+  readonly agent: ListedAgentWithConnections;
   readonly chooser: ReactNode;
   readonly onClose: () => void;
 }) {
   const last = STEPS.length - 1;
+  /*
+   * **Read, not stored.** This is the one fact the list read already carries
+   * about a pushing agent, and looking at it writes nothing and asks nothing
+   * extra — the stores-nothing ruling is about what this half *records*, and
+   * it still records nothing. A field that is already in the roster answer is
+   * not a LiveKit monitored-state; it is the evidence's own arrival time.
+   */
+  const receiving = agent.lastReceivedAt !== null;
 
   return (
     <>
@@ -773,17 +807,19 @@ function LiveKitSteps({
 
         <div className={`flex flex-col gap-4 ${ARRIVES}`}>
           <div className="flex flex-col gap-2">
-            <Badge variant="warning">{COPY.livekitWaiting}</Badge>
+            <Badge variant={receiving ? "success" : "warning"}>
+              {receiving ? COPY.livekitReceiving : COPY.livekitWaiting}
+            </Badge>
             {/*
               A heading inside the panel rather than a second title bar: the
               sheet's own title says which panel this is, and this says what
               the panel is asking for right now.
             */}
             <h3 className="m-0 text-base leading-(--line-tight) font-medium text-foreground">
-              {COPY.livekitTitle}
+              {receiving ? COPY.livekitReceivingTitle : COPY.livekitTitle}
             </h3>
             <p className="m-0 text-sm leading-(--line-normal) text-faint">
-              {COPY.livekitLead}
+              {receiving ? COPY.livekitReceivingLead : COPY.livekitLead}
             </p>
           </div>
 
