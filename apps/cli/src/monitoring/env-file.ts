@@ -30,7 +30,8 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { MintedSecret } from "../platform/api-keys.ts";
@@ -167,6 +168,37 @@ export async function writeEnvFile(
   }
 
   const file = path.join(repository, ENV_FILE_NAME);
+
+  /*
+   * Only an ordinary file, or no file, takes a live key. A symlink is the
+   * developer pointing the name somewhere else, and following it would put the
+   * key wherever that is — outside the repository the ignore check was asked
+   * about. The link is not replaced either: it is theirs, and the printed lines
+   * are the working answer.
+   */
+  try {
+    const standing = await lstat(file);
+    if (!standing.isFile()) {
+      return {
+        kind: "refused",
+        reason:
+          `${ENV_FILE_NAME} here is ${standing.isSymbolicLink() ? "a symbolic link" : "not an ordinary file"}, ` +
+          "so Egma did not write the key into it. Put the two lines below " +
+          "wherever this worker gets its environment.",
+      };
+    }
+  } catch (cause) {
+    if ((cause as { code?: string }).code !== "ENOENT") {
+      return {
+        kind: "refused",
+        reason:
+          `Egma could not look at ${ENV_FILE_NAME}: ` +
+          `${cause instanceof Error ? cause.message : String(cause)}. ` +
+          "Put the two lines below wherever this worker gets its environment.",
+      };
+    }
+  }
+
   let held = "";
   try {
     held = await readFile(file, "utf8");
@@ -214,16 +246,22 @@ export async function writeEnvFile(
     kept.push(line);
   }
 
+  /*
+   * Written beside the file and renamed over it, never truncated in place: an
+   * interruption leaves the developer's own `.env` exactly as it was, and the
+   * swap is one motion. The temporary file is born private, and the rename
+   * carries that with it — a live key was just written into this file, so it
+   * lands readable by the developer alone whatever mode the old one had.
+   */
+  const staged = path.join(
+    repository,
+    `.${ENV_FILE_NAME}.egma-${randomBytes(6).toString("hex")}`,
+  );
   try {
-    /*
-     * Readable only by the developer, and only when Egma is the one creating
-     * the file. `mode` applies to a file this call brings into existence and is
-     * ignored for one that is already there — which is the whole of what is
-     * wanted: a live key Egma writes down lands private, and a `.env` the
-     * repository already had keeps whatever mode its owner gave it.
-     */
-    await writeFile(file, `${kept.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+    await writeFile(staged, `${kept.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(staged, file);
   } catch (cause) {
+    await rm(staged, { force: true }).catch(() => undefined);
     return {
       kind: "refused",
       reason:

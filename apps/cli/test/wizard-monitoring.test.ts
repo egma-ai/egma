@@ -13,14 +13,14 @@
  */
 
 import { execFile } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { walkExitCode } from "../src/wizard/exit-code.ts";
-import { ENV_FILE_NAME } from "../src/monitoring/env-file.ts";
+import { ENV_FILE_NAME, writeEnvFile } from "../src/monitoring/env-file.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import { buildExitLine, exitLines } from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
@@ -736,5 +736,47 @@ describe("choosing both", () => {
     );
 
     expect(exitLines(report).join("\n")).toContain("Monitoring page");
+  });
+});
+
+describe("the .env writer's own guarantees", () => {
+  const values = { url: "https://egma.test", key: { reveal: () => "egma_sk_writer_check" } };
+
+  it("refuses a symlinked .env and leaves the link exactly as it was", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const elsewhere = path.join(workspace.dir, "elsewhere.txt");
+    await writeFile(elsewhere, "not an env file\n", "utf8");
+    await symlink("elsewhere.txt", path.join(workspace.dir, ENV_FILE_NAME));
+
+    const wrote = await writeEnvFile(workspace.dir, values);
+
+    expect(wrote.kind).toBe("refused");
+    if (wrote.kind === "refused") expect(wrote.reason).toContain("symbolic link");
+    // The link still points where the developer pointed it, and its target is
+    // untouched — the key went nowhere.
+    expect(await readFile(path.join(workspace.dir, ENV_FILE_NAME), "utf8")).toBe(
+      "not an env file\n",
+    );
+    expect(await readFile(elsewhere, "utf8")).not.toContain("egma_sk_writer_check");
+  });
+
+  it("replaces an existing .env in one motion, keeps its other lines, and lands it private", async () => {
+    await gitRepository(workspace.dir, [ENV_FILE_NAME]);
+    const file = path.join(workspace.dir, ENV_FILE_NAME);
+    await writeFile(file, "OTHER=kept\nEGMA_API_KEY=old\n", { encoding: "utf8", mode: 0o644 });
+
+    const wrote = await writeEnvFile(workspace.dir, values);
+
+    expect(wrote).toEqual({ kind: "written", file: ENV_FILE_NAME, replaced: true });
+    const held = await readFile(file, "utf8");
+    expect(held).toContain("OTHER=kept");
+    expect(held).toContain("EGMA_API_KEY=egma_sk_writer_check");
+    expect(held).not.toContain("EGMA_API_KEY=old");
+    // A live key was just written into it, so whatever mode the old file had,
+    // the one standing now is the developer's alone.
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    // The one-motion swap leaves no staging file behind.
+    const around = await filesUnder(workspace.dir);
+    expect(around.filter((one) => one.includes(".egma-"))).toEqual([]);
   });
 });
