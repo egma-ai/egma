@@ -1640,7 +1640,8 @@ describe("the role the shell shows", () => {
     expect(mark?.getAttribute("height")).toBe("32");
     expect(organization.querySelector("img")).toBeNull();
     expect(organization.textContent).toContain("Acme");
-    expect(organization.textContent).toContain("Free");
+    /* The bar says the organization, and no plan chip beside it. */
+    expect(organization.textContent).not.toContain("Free");
     expect(
       organization.querySelector('[data-slot="organization-name"]')?.className,
     ).toContain("text-sm");
@@ -1659,8 +1660,14 @@ describe("the role the shell shows", () => {
     const summary = within(
       screen.getByRole("dialog", { name: "Open organization menu for Acme" }),
     );
-    expect(summary.getByText("Free Plan")).toBeTruthy();
-    expect(summary.getByText("Admin")).toBeTruthy();
+    /*
+     * The panel is the mark and the name. The plan was hard-written copy for a
+     * fact `/api/me` does not carry, and the role is already said by the
+     * account control at the foot of this same sidebar.
+     */
+    expect(summary.getByText("Acme")).toBeTruthy();
+    expect(summary.queryByText("Free Plan")).toBeNull();
+    expect(summary.queryByText("Admin")).toBeNull();
     expect(summary.queryByText("Organization settings")).toBeNull();
   });
 

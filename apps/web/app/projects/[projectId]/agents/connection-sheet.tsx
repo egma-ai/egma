@@ -399,24 +399,29 @@ export function ConnectionSheet({
               * nobody had asked to change yet, which made every read of a
               * connection look like a form.
               */}
-            <SheetHeader>
+            <SheetHeader
+              {...(connection === null || role === null || editing !== null
+                ? {}
+                : {
+                    actions: (
+                      <RowMenu label={`Actions for ${connection.name}`}>
+                        <RowMenuItem
+                          onSelect={startEditing}
+                          {...(whyNotRead === undefined ? {} : { why: whyNotRead })}
+                        >
+                          Edit connection
+                        </RowMenuItem>
+                        <RowMenuDestructive
+                          onSelect={() => setArchiving(true)}
+                          {...(mayAuthor ? {} : { why: whyNotMine })}
+                        >
+                          Delete connection
+                        </RowMenuDestructive>
+                      </RowMenu>
+                    ),
+                  })}
+            >
               <SheetTitle>{title}</SheetTitle>
-              {connection === null || role === null || editing !== null ? null : (
-                <RowMenu label={`Actions for ${connection.name}`}>
-                  <RowMenuItem
-                    onSelect={startEditing}
-                    {...(whyNotRead === undefined ? {} : { why: whyNotRead })}
-                  >
-                    Edit connection
-                  </RowMenuItem>
-                  <RowMenuDestructive
-                    onSelect={() => setArchiving(true)}
-                    {...(mayAuthor ? {} : { why: whyNotMine })}
-                  >
-                    Delete connection
-                  </RowMenuDestructive>
-                </RowMenu>
-              )}
             </SheetHeader>
             <SheetBody>{body()}</SheetBody>
             {connection === null || role === null || editing === null ? null : (
