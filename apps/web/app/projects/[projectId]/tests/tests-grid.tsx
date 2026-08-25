@@ -115,12 +115,20 @@ const COLUMNS: readonly {
 const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
 /*
  * **The row's own ⋮ lane, and it is not a fifth column.** The four columns are
- * the test's content; this is the house table's fixed `--table-action-width`
- * slot, which every row of every list in the product carries so the triggers
- * line up in one lane. The boards are silent on it, so the current screen's
- * verb stays: a test is deleted from its row.
+ * the test's content; this is the house table's trailing slot, which every row
+ * of every list in the product carries so the triggers line up in one lane.
+ * The boards are silent on it, so the current screen's verb stays: a test is
+ * deleted from its row.
+ *
+ * **It is the labelled width, because this grid says Actions over it.** The
+ * unlabelled `--table-action-width` is sized for a ⋮ and nothing else, so the
+ * word ran out through the table's own right hairline. Header and body cells
+ * read the one token — and so does the `<col>` this table's fixed layout
+ * actually measures — so the lane stays one straight edge from the heading to
+ * the last row.
  */
-const ACTION = "w-(--table-action-width) border-b border-border p-0 text-center align-top";
+const ACTION =
+  "w-(--table-action-labelled-width) border-b border-border p-0 text-center align-top";
 const PAD = "px-2.5 py-2";
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
 /*
@@ -1348,7 +1356,7 @@ export function TestsGrid(props: GridProps) {
           {COLUMNS.map((column) => (
             <col key={column.field} style={{ width: column.width }} />
           ))}
-          <col style={{ width: "var(--table-action-width)" }} />
+          <col style={{ width: "var(--table-action-labelled-width)" }} />
         </colgroup>
         <thead>
           <tr className="bg-surface-soft">
@@ -1368,7 +1376,7 @@ export function TestsGrid(props: GridProps) {
               is what it holds, and every reader gets the same word now.
             */}
             <th
-              className="w-(--table-action-width) border-b border-border px-2.5 py-2 text-center text-sm font-normal text-faint"
+              className="w-(--table-action-labelled-width) border-b border-border px-4 py-2 text-center text-sm font-normal whitespace-nowrap text-faint"
               scope="col"
             >
               Actions
