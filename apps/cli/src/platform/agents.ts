@@ -109,7 +109,15 @@ function signedIn(options: RegisterOptions): { readonly url: string; readonly ke
   return { url: options.url.replace(/\/+$/u, ""), key: options.key };
 }
 
-function requestOptions(options: RegisterOptions) {
+/**
+ * The generated client and the signal, built the one way.
+ *
+ * Exported to the package because monitoring is the agent's own half
+ * (ADR-0015) and its wrapper beside this one speaks to the same platform with
+ * the same credential — a second copy of this would be a second place the
+ * base URL is trimmed and the signal is attached.
+ */
+export function requestOptions(options: RegisterOptions) {
   return {
     client: platformClient(signedIn(options), options.fetchImpl),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -179,12 +187,13 @@ function connectionParameters(connection: NewConnection): ConnectionInput {
   };
 }
 
-type CommonFailure =
+export type CommonFailure =
   | { readonly kind: "not-authenticated" }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "unreachable"; readonly reason: string };
 
-function commonFailure(
+/** The three ways any platform request fails, told apart, or `null` for a 200. */
+export function commonFailure(
   answer: { readonly error?: unknown; readonly response?: Response },
   options: RegisterOptions,
 ): CommonFailure | null {
@@ -306,6 +315,64 @@ export async function addConnection(
   }
   return { kind: "added", connection: cleanConnection(answer.data.connection) };
 }
+
+/**
+ * Write an agent's identity alone, bound to the platform that runs it.
+ *
+ * The other registration writes an agent and the first way of reaching it,
+ * because an agent nothing can reach is not worth having — on the path it
+ * serves. This one is for the path where there is genuinely nothing to reach:
+ * a LiveKit worker that pushes its own production evidence is a real agent in
+ * the roster, and Egma's simulator dials nothing to see it. The binding is the
+ * agent's own fact (ADR-0015), which is why it can be written without one.
+ */
+export async function registerBoundAgent(
+  registration: {
+    readonly name: string;
+    readonly agentPlatform: "retell" | "livekit";
+    readonly project?: string | undefined;
+  },
+  options: RegisterOptions,
+): Promise<RegisterIdentityResult> {
+  const answer = await registerAgentRequest(
+    {
+      name: registration.name,
+      agentPlatform: registration.agentPlatform,
+      ...(registration.project === undefined
+        ? {}
+        : { projectId: registration.project }),
+    },
+    requestOptions(options),
+  );
+
+  if (answer.response?.status === 409 && errorCode(answer.error) === "name_taken") {
+    return { kind: "name-taken", name: registration.name };
+  }
+  const failed = commonFailure(answer, options);
+  if (failed !== null) return failed;
+
+  const body = answer.data;
+  if (body === undefined) {
+    return {
+      kind: "refused",
+      reason: "Egma answered without saying what it wrote. Check that this Egma platform is up to date.",
+    };
+  }
+  return {
+    kind: "registered",
+    result: body.result,
+    agent: cleanAgent(body.agent),
+  };
+}
+
+export type RegisterIdentityResult =
+  | {
+      readonly kind: "registered";
+      readonly result: RegisterOutcome;
+      readonly agent: RegisteredAgent;
+    }
+  | { readonly kind: "name-taken"; readonly name: string }
+  | CommonFailure;
 
 /** Atomically write an agent and its first connection. */
 export async function registerAgent(

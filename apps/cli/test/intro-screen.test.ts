@@ -70,11 +70,11 @@ function bareWizard(): TerminalRun {
 }
 
 /**
- * The same bare command, in a repository that has committed its platform.
+ * The same bare command, in a repository that already has an egma folder.
  *
  * The stand-in for egma's own address is left as the closed port every
- * workspace hands over, so the address this screen names can only have come out
- * of the committed file.
+ * workspace hands over, so nothing in this run can reach a platform at all —
+ * which is the point: the wizard refuses before it starts anything.
  */
 async function wizardInBoundRepository(): Promise<TerminalRun> {
   await createEgmaFolder({
@@ -136,31 +136,26 @@ describe("the wizard's first screen", () => {
   });
 
   /**
-   * A bound repository is offered the change it can actually make.
+   * A repository that already has an egma folder never reaches this screen.
    *
-   * `--url <address>` naming another platform is refused, with the whole move
-   * block under it, once a repository has committed one. Offering it here would
-   * be egma sending a developer to a command egma turns away — and offering it
-   * from the screen that takes the keystroke of consent is the worst place in
-   * the product to be wrong about what happens next.
+   * The wizard onboards new repositories in v1. A committed folder is a
+   * repository somebody has already set up, so the refusal comes before the
+   * first screen is drawn rather than after a second setup has half-run into
+   * their files — and it says the one thing that redoes setup on purpose.
    */
-  it("offers a bound repository the edit it can make, not a flag egma refuses", async () => {
+  it("refuses a repository that already has an egma folder, before drawing anything", async () => {
     const terminal = await wizardInBoundRepository();
     try {
-      const screen = await showingIn(terminal, asOneLine, platform.url, "[enter] begin");
-      const said = asOneLine(screen);
+      expect(await terminal.exited).toBe(0);
 
-      // The address came out of the committed file: the built-in address is
-      // stood aside by a closed port for this run, so nothing else could
-      // have named it.
-      expect(said).toContain(platform.url);
+      // Read as one run of words: it is one line, and a 100-column terminal
+      // wraps it. That it is one line is checked where the line is built.
+      const left = asOneLine(terminal.scrollback());
+      expect(left).toContain("Egma is already set up here: egma/ exists");
+      expect(left).toContain("only works with new repositories");
+      expect(left).toContain("Delete or rename egma/");
 
-      // The change a bound repository can make is an edit to the file it
-      // already commits, and that is what is offered.
-      expect(said).toContain("egma/config.yaml");
-      expect(said).not.toContain("--url <address>");
-
-      // Still before anything is asked of that address, exactly as above.
+      // Nothing was drawn and nothing was asked of any platform.
       expect(platform.records).toEqual([]);
     } finally {
       await terminal.kill();

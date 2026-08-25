@@ -10,13 +10,16 @@ import { useApp, useInput, useStdout } from "ink";
 
 import { copyLink } from "../../platform/clipboard.ts";
 import { openInEditor } from "./editor.ts";
+import { EnvConsentScreen } from "./screens/EnvConsentScreen.tsx";
 import { ExistingTestsScreen } from "./screens/ExistingTestsScreen.tsx";
 import { ConnectionFieldScreen } from "./screens/ConnectionFieldScreen.tsx";
 import { CodingAgentScreen } from "./screens/CodingAgentScreen.tsx";
 import { GateScreen } from "./screens/GateScreen.tsx";
 import { GeneratingScreen } from "./screens/GeneratingScreen.tsx";
+import { GoalScreen } from "./screens/GoalScreen.tsx";
 import { IntroScreen } from "./screens/IntroScreen.tsx";
 import { LoginScreen } from "./screens/LoginScreen.tsx";
+import { MonitoringAgentScreen } from "./screens/MonitoringAgentScreen.tsx";
 import { PhoneNumberScreen } from "./screens/PhoneNumberScreen.tsx";
 import { ReachScreen } from "./screens/ReachScreen.tsx";
 import { RetellAgentScreen } from "./screens/RetellAgentScreen.tsx";
@@ -75,6 +78,15 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
       />
     );
   }
+  if (screen === "goal" && state.goalAsk !== null) {
+    return (
+      <GoalScreen
+        ask={state.goalAsk}
+        onAnswer={(goal) => store.answer("goal", goal)}
+        onQuit={onQuit}
+      />
+    );
+  }
   if (screen === "retell-key") {
     return (
       <RetellKeyScreen state={state} onAnswer={(key) => store.answer("retell-key", key)} />
@@ -92,6 +104,23 @@ export function App({ store, onQuit, onInterrupt }: AppProps) {
   if (screen === "retell-agent") {
     return (
       <RetellAgentScreen state={state} onAnswer={(id) => store.answer("retell-agent", id)} />
+    );
+  }
+  if (screen === "monitoring-agent") {
+    return (
+      <MonitoringAgentScreen
+        state={state}
+        onAnswer={(id) => store.answer("monitoring-agent", id)}
+      />
+    );
+  }
+  if (screen === "env-consent" && state.envConsent !== null) {
+    return (
+      <EnvConsentScreen
+        line={state.envConsent}
+        onAgree={() => store.writeEnv()}
+        onQuit={onQuit}
+      />
     );
   }
   if (screen === "reach") {

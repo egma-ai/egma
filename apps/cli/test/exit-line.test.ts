@@ -4,12 +4,20 @@ import {
   MOVE_TO_ANOTHER_PLATFORM,
   teachingTheMove,
 } from "../src/folder/egma-folder.ts";
+import { skillPlacesFor, type SkillPlaces } from "../src/skills/install.ts";
 import {
   buildExitLine,
   buildExitNotice,
   exitLines,
+  WEB_MONITORING_POINTER,
   type ExitReport,
 } from "../src/wizard/exit-line.ts";
+
+/** Where an offer would have gone, from the same code the wizard asks. */
+const PLACES: SkillPlaces = skillPlacesFor("claude", {
+  repository: "/repo",
+  home: "/home/you",
+}) as SkillPlaces;
 
 const RESULTS_URL = "http://localhost:3101/runs/run_01K7QXV2M8ZB4C6D8E0F2G4H6J";
 
@@ -31,9 +39,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
     skill: {
       kind: "installed",
       scope: "project",
-      file: "/repo/.claude/skills/egma/SKILL.md",
-      drivenAgentName: "Claude Code",
-      replaced: false,
+      places: PLACES,
+      landed: ["/repo/.claude/skills/egma"],
     },
   },
   {
@@ -44,9 +51,8 @@ const EVERY_ENDING: readonly ExitReport[] = [
     skill: {
       kind: "installed",
       scope: "global",
-      file: "/home/you/.claude/skills/egma/SKILL.md",
-      drivenAgentName: "Claude Code",
-      replaced: true,
+      places: PLACES,
+      landed: [],
     },
   },
   {
@@ -67,6 +73,51 @@ const EVERY_ENDING: readonly ExitReport[] = [
   { kind: "unsupported-agent-platform", platform: "pipecat" },
   { kind: "unsupported-agent-platform", platform: "vapi" },
   { kind: "no-coding-agent" },
+  {
+    kind: "monitoring-started",
+    agentName: "order-line",
+    arrived: true,
+    registered: true,
+    platformUrl: "https://egma.example",
+  },
+  {
+    kind: "monitoring-started",
+    agentName: "order-line",
+    arrived: false,
+    registered: false,
+    platformUrl: null,
+  },
+  {
+    kind: "monitoring-wired",
+    agentName: "front-desk",
+    envFile: ".env",
+    envRefusal: null,
+    lines: ["export EGMA_URL=https://egma.example", "export EGMA_API_KEY=egma_sk_x"],
+    wired: true,
+    platformUrl: "https://egma.example",
+  },
+  {
+    kind: "monitoring-wired",
+    agentName: "front-desk",
+    envFile: null,
+    envRefusal: "Git does not ignore .env here.",
+    lines: ["export EGMA_URL=https://egma.example", "export EGMA_API_KEY=egma_sk_x"],
+    wired: false,
+    platformUrl: null,
+  },
+  {
+    kind: "monitoring-refused",
+    lines: ["Another Egma agent is already watching that agent.", "agent_1 is already watched."],
+  },
+  { kind: "already-onboarded", folder: "egma/", hasSuites: true },
+  { kind: "already-onboarded", folder: "egma/", hasSuites: false },
+  {
+    kind: "run-started",
+    resultsUrl: RESULTS_URL,
+    resultsReady: 1,
+    total: 12,
+    skill: { kind: "install-failed", reason: "The skills installer stopped: no such agent." },
+  },
   {
     kind: "coding-agent-stopped",
     drivenAgentName: "Claude Agent",
@@ -174,6 +225,126 @@ describe("the exit line", () => {
     ).toBe("Claude Agent stopped before it found your voice agent, and did not say why.");
   });
 
+  /**
+   * The one ending with no coding agent to drive still has a path to watching
+   * production traffic, and it names the flow that needs no terminal.
+   */
+  it("points at the web Monitoring flow where the terminal cannot do it", () => {
+    expect(buildExitLine({ kind: "no-coding-agent" })).toContain(WEB_MONITORING_POINTER);
+  });
+
+  /**
+   * Watching is really on, and the line says whether Egma saw proof of it.
+   *
+   * An account with nothing to import is not a failure and must not read as
+   * one: the sentence says what is true and what happens next, and the exit
+   * code beside it is zero.
+   */
+  it("says whether a conversation arrived, and never implies a failure", () => {
+    const arrived = buildExitLine({
+      kind: "monitoring-started",
+      agentName: "order-line",
+      arrived: true,
+      registered: true,
+      platformUrl: "https://egma.example",
+    });
+    expect(arrived).toContain("watching order-line's production calls");
+    expect(arrived).toContain("first conversation has already arrived");
+    expect(arrived).toContain("https://egma.example");
+
+    const empty = buildExitLine({
+      kind: "monitoring-started",
+      agentName: "order-line",
+      arrived: false,
+      registered: false,
+      platformUrl: "https://egma.example",
+    });
+    expect(empty).toContain("Nothing has arrived yet");
+    expect(empty).toContain("Monitoring page");
+  });
+
+  /**
+   * The two lines a monitored worker exports with are the deliverable, so they
+   * survive the screen — one to a line, whether the file was written or not.
+   */
+  it("prints the two environment lines whether or not the file was written", () => {
+    const lines = [
+      "export EGMA_URL=https://egma.example",
+      "export EGMA_API_KEY=egma_sk_x",
+    ];
+    const written = exitLines({
+      kind: "monitoring-wired",
+      agentName: "front-desk",
+      envFile: ".env",
+      envRefusal: null,
+      lines,
+      wired: true,
+      platformUrl: "https://egma.example",
+    });
+    expect(written).toContain(lines[0]);
+    expect(written).toContain(lines[1]);
+    expect(written[0]).toContain("pushes its production evidence");
+
+    const refused = exitLines({
+      kind: "monitoring-wired",
+      agentName: "front-desk",
+      envFile: null,
+      envRefusal: "Git does not ignore .env here.",
+      lines,
+      wired: true,
+      platformUrl: null,
+    });
+    expect(refused).toContain(lines[1]);
+    expect(refused).toContain("Git does not ignore .env here.");
+  });
+
+  /**
+   * A refusal says two things and keeps them apart: Egma's own sentence about
+   * what to do, and the platform's own for whatever is reading rather than
+   * looking.
+   */
+  it("keeps Egma's sentence and the platform's apart on a refusal", () => {
+    const said = exitLines({
+      kind: "monitoring-refused",
+      lines: [
+        "Another Egma agent is already watching that agent on the platform.",
+        "agent_1 is already watched by “order-line”.",
+      ],
+    });
+    expect(said[0]).toContain("Another Egma agent is already watching");
+    expect(said).toContain("agent_1 is already watched by “order-line”.");
+  });
+
+  /**
+   * A repository that has been through the wizard is refused politely, and the
+   * refusal has to carry the one thing that redoes setup on purpose.
+   *
+   * The second way forward is only a way forward when there is something to
+   * push. A folder holding a binding and no suite — which is what a walk that
+   * stopped between binding and registering leaves behind — is refused by
+   * `egma push` for the contract it does not have yet, so the line does not
+   * send anybody there.
+   */
+  it("says how to redo setup, and names push and run only when there is a suite", () => {
+    const withTests = buildExitLine({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: true,
+    });
+    expect(withTests).toContain("already set up");
+    expect(withTests).toContain("only works with new repositories");
+    expect(withTests).toContain("Delete or rename egma/");
+    expect(withTests).toContain("egma push and egma run on the tests that are already there");
+
+    const empty = buildExitLine({
+      kind: "already-onboarded",
+      folder: "egma/",
+      hasSuites: false,
+    });
+    expect(empty).toContain("Delete or rename egma/ and run egma again to redo setup.");
+    expect(empty).not.toContain("egma push");
+  });
+
   it("prints something to copy when the developer has to copy something", () => {
     for (const report of EVERY_ENDING) {
       const notice = buildExitNotice(report);
@@ -269,17 +440,16 @@ describe("the exit line", () => {
         skill: {
           kind: "installed",
           scope: "global",
-          file: "/home/you/.claude/skills/egma/SKILL.md",
-          drivenAgentName: "Claude Code",
-          replaced: false,
+          places: PLACES,
+          landed: ["~/.agents/skills/egma"],
         },
       }),
     ).toBe(
-      "The Egma skill is in /home/you/.claude/skills/egma/SKILL.md. Every repository you open Claude Code in has it.",
+      "1 Egma skill is beside Claude Code. ~/.agents/skills/egma. Every repository you open Claude Code in has them.",
     );
 
-    // A file that was already there is gone, and this is the only place the
-    // developer will ever be told so.
+    // Where they went, in the installer's own words, because that is the only
+    // account of it that cannot be wrong.
     expect(
       buildExitNotice({
         kind: "run-started",
@@ -289,14 +459,24 @@ describe("the exit line", () => {
         skill: {
           kind: "installed",
           scope: "project",
-          file: "/repo/.claude/skills/egma/SKILL.md",
-          drivenAgentName: "Claude Code",
-          replaced: true,
+          places: PLACES,
+          landed: ["./.claude/skills/egma", "./.claude/skills/write-egma-tests"],
         },
       }),
     ).toBe(
-      "The Egma skill in /repo/.claude/skills/egma/SKILL.md was replaced with this version's. Commit it, and everybody on this repository has it.",
+      "2 Egma skills are in this repository. ./.claude/skills/egma, ./.claude/skills/write-egma-tests. It also wrote skills-lock.json at the repository root. Commit all of it, and everybody on this repository has these skills.",
     );
+
+    // An offer accepted and not kept is never silent either.
+    expect(
+      buildExitNotice({
+        kind: "run-started",
+        resultsUrl: RESULTS_URL,
+        resultsReady: 1,
+        total: 12,
+        skill: { kind: "install-failed", reason: "The skills installer stopped: no agent." },
+      }),
+    ).toBe("The skills installer stopped: no agent.");
 
     expect(
       buildExitNotice({
@@ -321,9 +501,17 @@ describe("the exit line", () => {
     ).toBeNull();
   });
 
+  /**
+   * Four endings carry more than a sentence, and each carries it for a reason
+   * a developer can name: the walk's own ending has three things to copy, a
+   * wired worker has the two lines it exports with, a refusal has the
+   * platform's own sentence, and a failure may arrive with a block. Every
+   * other ending is one line, and stays one line.
+   */
   it("is one line for every ending that is one thing", () => {
+    const carriesMore = new Set(["run-started", "monitoring-wired", "monitoring-refused"]);
     for (const report of EVERY_ENDING) {
-      if (report.kind === "run-started") continue;
+      if (carriesMore.has(report.kind)) continue;
       expect(exitLines(report)).toEqual([buildExitLine(report)]);
     }
   });

@@ -42,7 +42,9 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
 
 <AccordionGroup>
   <Accordion title="egma — interactive wizard">
-    Opens the full interactive wizard. It signs you in, discovers your voice agent using your coding agent, connects the agent to Egma, generates a first test suite, and starts a run — all in one guided flow.
+    Opens the full interactive wizard. It signs you in and discovers your voice agent using your coding agent, then asks the one question it exists to ask: should Egma **test** the agent, **watch its production traffic**, or **both**.
+
+    Testing connects the agent, generates a first test suite, and starts a run. Monitoring sets production capture up and ends there — no connection, no suite, no tests. Both sets monitoring up first and says so, then runs the whole testing lane in the same sitting: every shared question is asked once, one agent row serves both jobs, and the last screen points at the graded run and at Monitoring.
 
     The wizard draws on your terminal's alternate screen. When it closes it leaves a single results URL and a plain summary in your normal terminal buffer, each item on its own line so a triple-click selects it whole.
 
@@ -401,6 +403,87 @@ Set these in your shell or CI environment to avoid repeating flags on every comm
       terminal execution and every completed trace has terminal grading. A low
       score never makes the command exit with a non-zero code. Execution and
       grading system errors do.
+    </Note>
+  </Accordion>
+
+  <Accordion title="egma monitoring — watch production traffic">
+    Starts, stops, and reports Egma's capture of an agent's real production
+    conversations. It runs the same work the wizard's monitoring lane runs, with
+    no questions and one fact per line.
+
+    Which agent this is about comes from `egma/config.yaml`, so an onboarded
+    repository needs no arguments. Which platform runs it is read from the
+    agent's own binding, or from the connections that reach it — and refused in
+    plain words when Egma cannot tell.
+
+    **Usage**
+
+    ```bash
+    # Retell: the account key on standard input, never as an argument
+    cat retell-key.txt | egma monitoring enable --platform retell
+
+    # LiveKit: mints a project key and writes the two SDK environment lines
+    egma monitoring enable --platform livekit
+
+    egma monitoring status
+    egma monitoring disable
+    ```
+
+    **Key flags**
+
+    | Flag | Description |
+    |---|---|
+    | `--platform <retell\|livekit>` | Which platform runs this agent. Left out, Egma reads it from the repository's own binding |
+    | `--platform-agent <id>` | Which agent on the Retell account to watch, when it holds more than one |
+    | `--name <name>` | What to call the agent Egma writes, when it writes one |
+
+    On **Retell**, one commit registers the agent if Egma does not have it yet,
+    seals the key onto that agent's row, and turns the switch on. `enable` asks
+    once whether anything has arrived and does not wait; `status` is where
+    arrivals are read afterwards.
+
+    On **LiveKit** there is no switch — a worker pushes its own evidence. The
+    command mints a project API key, writes the two environment lines the Egma
+    SDK reads into `.env` when Git already ignores that file, and prints them
+    either way for wherever the worker really runs. Running it again replaces
+    those lines in place rather than adding a second copy. The code edit itself
+    belongs to your coding agent: see the `integrate-egma-sdk` skill.
+
+    `disable` turns the switch off and keeps everything stored — the
+    conversations, the platform binding, and the sealed key.
+
+    **Example output**
+
+    ```
+    url: http://localhost:3101
+    platform: retell
+    agent_id: agt_01K…
+    agent_name: order-line
+    platform_agent_id: agent_…
+    agent_registration: created
+    pull_production_calls: on
+    first_conversation: none-yet
+    status: watching
+    ```
+
+    **Exit codes**
+
+    | Code | Meaning |
+    |---|---|
+    | `0` | Done |
+    | `1` | Nothing here to act on: this repository names no agent |
+    | `2` | The Retell key was refused |
+    | `3` | No voice agents on that Retell account |
+    | `4` | Egma did not answer, or refused |
+    | `5` | A required choice was not made: which platform, or which agent |
+    | `6` | No API key was provided |
+    | `7` | Not signed in to Egma |
+    | `8` | Egma would not start watching, and said which rule refused it |
+    | `130` | Stopped partway through |
+
+    <Note>
+      A refusal prints two `reason:` lines: Egma's own sentence about what to do,
+      and the platform's own for whatever is reading rather than looking.
     </Note>
   </Accordion>
 

@@ -105,6 +105,9 @@ importers:
       react:
         specifier: ^19.2.8
         version: 19.2.8
+      skills:
+        specifier: 1.5.22
+        version: 1.5.22
     devDependencies:
       '@agentclientprotocol/claude-agent-acp':
         specifier: ^0.65.0

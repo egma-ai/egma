@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NO_NUMBERS_LINE } from "../src/retell/connect.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
-import { connectStep } from "../src/wizard/connect-step.ts";
+import { connectionSetupStep } from "../src/wizard/connection-setup-step.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { filesUnder, makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -121,7 +121,7 @@ class ScriptedUI extends HeadlessUI {
 async function run(answers: Answers, fetchImpl?: typeof fetch) {
   const lines: string[] = [];
   const ui = new ScriptedUI(answers, (line) => lines.push(line));
-  const { report, connected } = await connectStep({
+  const { report, connected } = await connectionSetupStep({
     ui,
     platform: {
       url: platform.url,

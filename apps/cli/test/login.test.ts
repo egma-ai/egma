@@ -488,10 +488,10 @@ describe("which egma a command talks to", () => {
   });
 
   /**
-   * One explicit way, and the second one really gone.
+   * One explicit way to name a platform, and the second one really gone.
    *
-   * `EGMA_URL` was a whole-shell name for `--url`, and taking the rung out of
-   * resolution is only half of taking it out: a `--help` line, a README
+   * `EGMA_URL` was once a whole-shell name for `--url`, and taking the rung out
+   * of resolution is only half of taking it out: a `--help` line, a README
    * paragraph or a refusal that still tells somebody to set it is a setting
    * egma no longer has, offered by egma. The one that would have survived a
    * careful edit is the refusal — "Remove --url or EGMA_URL" is the sentence a
@@ -502,8 +502,20 @@ describe("which egma a command talks to", () => {
    * remembered — the help text and every refusal are inside `src/`, so both are
    * covered by reading it. The checks themselves are not scanned: proving the
    * variable is inert means naming it.
+   *
+   * **Two files name it on purpose, and the list below is exhaustive** (founder
+   * decision, monitoring audit round, 2026-08-24). The variable has a second
+   * life that has nothing to do with choosing a platform: it is one of the two
+   * the Egma Python SDK reads inside the *customer's own* worker process, and
+   * egma both writes it into their `.env` and teaches a coding agent to name it
+   * when the entrypoint has to be wired by hand. A by-hand fallback that would
+   * not say what the two variables are called produces a worker that crashes on
+   * start, which is the defect this carve-out fixes.
+   *
+   * The carve is by exact path rather than by a pattern, so a new file naming
+   * the variable fails here and has to be argued for.
    */
-  it("offers one way to name a platform, and names the old one nowhere", async () => {
+  it("offers one way to name a platform, and names the old one only where the SDK does", async () => {
     // Everything `package.json` puts in the published package, plus the
     // repository's own front page. `dist` is left out because it is `src`
     // compiled, and a scan of both would go red twice for one mention.
@@ -517,13 +529,22 @@ describe("which egma a command talks to", () => {
     ];
     expect(written.length).toBeGreaterThan(20);
 
+    /** The worker's environment contract, and nothing else. */
+    const THE_SDK_CONTRACT = [
+      // Egma's own code writes the two lines into the customer's `.env`.
+      "src/monitoring/env-file.ts",
+      // The coding-agent skill names them in its by-hand fallback, and still
+      // never reads or writes an environment file.
+      "skills/integrate-egma-sdk/SKILL.md",
+    ];
+
     const naming: string[] = [];
     for (const file of written) {
       if ((await readFile(file, "utf8")).includes("EGMA_URL")) {
-        naming.push(path.relative(CLI_PACKAGE, file));
+        naming.push(path.relative(CLI_PACKAGE, file).replaceAll(path.sep, "/"));
       }
     }
-    expect(naming).toEqual([]);
+    expect(naming.sort()).toEqual([...THE_SDK_CONTRACT].sort());
   });
 });
 

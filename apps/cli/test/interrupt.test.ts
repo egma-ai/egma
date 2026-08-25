@@ -31,7 +31,7 @@ import process from "node:process";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runInTerminal, showing } from "./support/pty.ts";
+import { chooseTesting, runInTerminal, showing } from "./support/pty.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
@@ -255,6 +255,7 @@ describe("Ctrl-C at the gate, with the files already written", () => {
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
+      await chooseTesting(terminal);
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 
@@ -344,6 +345,7 @@ describe("Ctrl-C at the run screen, with the suite already going", () => {
       await showing(terminal, "Egma is about to find", "[enter] begin");
       terminal.write("\r");
 
+      await chooseTesting(terminal);
       await showing(terminal, "Paste your Retell API key");
       terminal.write(`${KEY}\r`);
 

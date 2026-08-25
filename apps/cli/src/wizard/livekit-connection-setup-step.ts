@@ -1,15 +1,28 @@
-/** LiveKit connection setup for the wizard, drawn from the platform catalog. */
+/**
+ * LiveKit connection setup for the wizard, drawn from the platform catalog.
+ *
+ * A connection is how Egma's simulator reaches the agent — on LiveKit that is
+ * the customer's server URL and their key pair or token endpoint. The Egma SDK
+ * inside the customer's own worker is a separate thing, wired by the mock
+ * authoring step after the tests are written.
+ */
 
 import { bindRepositoryPlatform } from "../folder/egma-folder.ts";
 import {
   connectLiveKit,
   LIVEKIT_KEY_PAIR_VARIANT,
   LIVEKIT_TOKEN_ENDPOINT_VARIANT,
+  liveKitConnection,
   liveKitKeyPair,
   liveKitTokenHeaders,
   type LiveKitRegistration,
 } from "../livekit/connect.ts";
-import type { Registered, RegisterOptions } from "../platform/agents.ts";
+import {
+  addConnection,
+  type Registered,
+  type RegisterOptions,
+  type RegisterResult,
+} from "../platform/agents.ts";
 import {
   connectionOptionsForPlatform,
   readConnectionOptions,
@@ -24,13 +37,24 @@ import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
-export type LiveKitConnectStepOptions = {
+export type LiveKitConnectionSetupStepOptions = {
   readonly ui: WizardUI;
   readonly platform: PlatformAccess;
   readonly cwd: string;
   readonly signal: AbortSignal;
   /** A name reported by discovery. The developer still confirms it. */
   readonly suggestedName: string;
+  /**
+   * The agent this sitting is already about, when monitoring created it.
+   *
+   * One agent row for one voice agent: the both lane sets monitoring up first
+   * and the row it wrote is the row this connection attaches to, so the name is
+   * settled and its screen is never drawn.
+   */
+  readonly existingAgent?:
+    | { readonly id: string; readonly name: string; readonly projectId: string }
+    | null
+    | undefined;
   readonly fetchImpl?: RegisterOptions["fetchImpl"];
 };
 
@@ -152,9 +176,54 @@ function providerReason(
   }
 }
 
+/**
+ * Another way of reaching an agent that already exists, in the shape the whole
+ * step reads its answers in.
+ *
+ * `connectLiveKit` builds the connection payload and registers an agent under
+ * it. Here the agent is settled, so the same payload is added to it — and the
+ * answer is dressed as a registration so the caller has one shape to read
+ * rather than two.
+ */
+async function attachTo(
+  existing: {
+    readonly id: string;
+    readonly name: string;
+    readonly projectId: string;
+  },
+  input: LiveKitRegistration,
+  options: RegisterOptions,
+): Promise<RegisterResult> {
+  const added = await addConnection(existing.id, liveKitConnection(input), options);
+  switch (added.kind) {
+    case "added":
+      return {
+        kind: "registered",
+        registered: {
+          result: "connection_added",
+          agent: existing,
+          connection: added.connection,
+        },
+      };
+    case "not-found":
+      return {
+        kind: "refused",
+        reason:
+          `Egma no longer has the agent ${existing.name} this walk created. ` +
+          "Run egma again to start over.",
+      };
+    case "name-taken":
+      return { kind: "name-taken", name: added.name };
+    case "not-authenticated":
+    case "refused":
+    case "unreachable":
+      return added;
+  }
+}
+
 /** Ask from server-owned metadata, then register through the platform API. */
-export async function connectLiveKitStep(
-  options: LiveKitConnectStepOptions,
+export async function liveKitConnectionSetupStep(
+  options: LiveKitConnectionSetupStepOptions,
 ): Promise<LiveKitConnected> {
   const held = await readCredentials(options.platform.credentialsFile, options.platform.url);
   if (held === null) {
@@ -191,22 +260,27 @@ export async function connectLiveKitStep(
   let problem: string | null = null;
   let suggestedName = options.suggestedName.trim() || "voice-agent";
   let bound = false;
+  const existing = options.existingAgent ?? null;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const name = await ask(options.ui, options.signal, {
-      id: askId("agent-name"),
-      label: "Agent name on Egma",
-      help: "The name people will see for this voice agent in Egma.",
-      kind: "text",
-      required: true,
-      defaultValue: suggestedName,
-      problem,
-    });
-    if (options.signal.aborted) {
-      return { report: stopReport(options.signal, null), connected: null };
+    if (existing === null) {
+      const name = await ask(options.ui, options.signal, {
+        id: askId("agent-name"),
+        label: "Agent name on Egma",
+        help: "The name people will see for this voice agent in Egma.",
+        kind: "text",
+        required: true,
+        defaultValue: suggestedName,
+        problem,
+      });
+      if (options.signal.aborted) {
+        return { report: stopReport(options.signal, null), connected: null };
+      }
+      if (name === null || name.trim() === "") return ending("No agent name was given.");
+      suggestedName = name.trim();
+    } else {
+      suggestedName = existing.name;
     }
-    if (name === null || name.trim() === "") return ending("No agent name was given.");
-    suggestedName = name.trim();
 
     const selected = await ask(options.ui, options.signal, {
       id: askId("variant"),
@@ -296,7 +370,18 @@ export async function connectLiveKitStep(
       );
     }
 
-    const result = await connectLiveKit(input, registerOptions);
+    /*
+     * An agent that already exists gains a connection; one that does not is
+     * written with its first connection in the same request. Registering under
+     * a name a living agent already holds would be refused, and answering that
+     * refusal by trying the next name would put a second row in the roster for
+     * one voice agent — which is the one thing threading the name exists to
+     * prevent.
+     */
+    const result =
+      existing === null
+        ? await connectLiveKit(input, registerOptions)
+        : await attachTo(existing, input, registerOptions);
     if (result.kind === "registered") {
       options.ui.pushStatus(`${ACTION_MARK} LiveKit agent ${result.registered.agent.name}`);
       options.ui.pushStatus(

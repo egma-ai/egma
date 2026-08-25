@@ -30,7 +30,12 @@ const SOURCE_ROOT = path.join(CODE_ROOT, "skills");
 const PACKAGE_SKILLS = path.join(PACKAGE_ROOT, "skills");
 const SKILLS_CLI = require.resolve("skills/bin/cli.mjs");
 
-const PUBLIC_SKILLS = ["egma", "find-voice-agent", "write-egma-tests"] as const;
+const PUBLIC_SKILLS = [
+  "egma",
+  "find-voice-agent",
+  "integrate-egma-sdk",
+  "write-egma-tests",
+] as const;
 const CLI_MARKER = /\begma:(?:found|note|none|abort|plan|writing|wrote)\b/u;
 
 const temporary: string[] = [];
@@ -132,7 +137,7 @@ describe("the public skill source", () => {
 });
 
 describe("npx skills compatibility", () => {
-  it("discovers only the three customer skills from the repository root", async () => {
+  it("discovers only the customer skills from the repository root", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "egma-public-skills-"));
     temporary.push(home);
 
@@ -146,7 +151,7 @@ describe("npx skills compatibility", () => {
     );
     const output = stripVTControlCharacters(`${stdout}\n${stderr}`);
 
-    expect(output).toContain("Found 3 skills");
+    expect(output).toContain(`Found ${PUBLIC_SKILLS.length} skills`);
     for (const name of PUBLIC_SKILLS) expect(output).toContain(`  ${name}\n`);
     expect(output).not.toContain("coordinate-implementation");
     expect(output).not.toContain("finding-the-voice-agent");

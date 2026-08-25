@@ -11,6 +11,7 @@
  */
 
 import type { LoginPrompt } from "../platform/login.ts";
+import type { DiscoveredAgent } from "../platform/monitoring.ts";
 import type { RetellAgent, RetellNumber } from "../retell/client.ts";
 import type { KeyAsk, Reach } from "../retell/connect.ts";
 import type { RunView } from "../run/view.ts";
@@ -19,7 +20,11 @@ import type { Detection } from "../wizard/detection.ts";
 import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
-import type { WizardPhase } from "../wizard/wizard-machine.ts";
+import type {
+  WizardAgentPlatform,
+  WizardGoal,
+  WizardPhase,
+} from "../wizard/wizard-machine.ts";
 
 /**
  * A point the flow waits at until the developer has moved past it.
@@ -28,7 +33,7 @@ import type { WizardPhase } from "../wizard/wizard-machine.ts";
  * question for the same reason `begin` is: what is being given is agreement,
  * and a developer who does not agree closes the wizard instead of answering.
  */
-export type GateId = "begin" | "run-tests";
+export type GateId = "begin" | "run-tests" | "write-env";
 
 export type ConnectionAskId = `connection:${string}`;
 
@@ -71,8 +76,28 @@ export type ConnectionAsk = {
 export type AskId =
   | ConnectionAskId
   | "coding-agent"
+  /**
+   * What Egma is here to do for the agent it just found: test it, watch its
+   * production traffic, or both.
+   *
+   * A question rather than a gate because there are three answers and none of
+   * them is agreement to the other two. It is asked after discovery so the
+   * choices can speak about this repository's own agent rather than about
+   * voice agents in general. No answer means testing, which is the lane every
+   * `npx egma` has run until now.
+   */
+  | "goal"
   | "retell-key"
   | "retell-agent"
+  /**
+   * Which agent on the account Egma should watch.
+   *
+   * A different question from `retell-agent`, which asks which agent to
+   * *test*: this list carries what Egma already knows about each of them —
+   * whether it is registered here, and whether something already watches it —
+   * and picking an unregistered one registers it.
+   */
+  | "monitoring-agent"
   /**
    * Text or phone: the one question whose answer decides what egma creates.
    *
@@ -98,20 +123,48 @@ export type AskId =
 /** The coding agent egma is driving. */
 export type DrivenAgent = { readonly id: string; readonly name: string };
 
+/** What the goal question knows about the agent it is asking about. */
+export type GoalAsk = {
+  readonly platform: WizardAgentPlatform;
+  /** What a developer calls that agent platform, e.g. `LiveKit Agents`. */
+  readonly platformLabel: string;
+  /** What the repository calls the agent, when discovery reported a name. */
+  readonly agentName: string | null;
+  /** The answers on offer, in the order they are shown. */
+  readonly goals: readonly WizardGoal[];
+};
+
 /**
- * Which egma a walk will use, and how a developer would change it.
+ * The account's agents, as the monitoring picker offers them.
  *
- * The address alone is not enough for the screen that shows it. An unbound
- * repository changes egma by naming another one on the command; a bound one
- * cannot — a different `--url` is refused, with the whole move under it — and
- * changes egma by editing the file it already commits. Offering the wrong one
- * of those sends somebody to a command egma turns away, so the fact that
- * decides which is carried here rather than guessed at the screen.
+ * `registeredAgentName` and `pullProductionCalls` are the whole reason this is
+ * a picker rather than a list: a developer choosing which agent to watch is
+ * choosing among agents Egma may already know, and one that is already watched
+ * is a choice they want to see coming.
+ */
+export type MonitoringAgentOffer = DiscoveredAgent;
+
+/** What each answer to the goal question means, in one line each. */
+export const GOAL_LINES: Readonly<Record<WizardGoal, string>> = {
+  testing: "Test it — write tests, run them, and grade what the agent did.",
+  monitoring: "Watch its production traffic — bring real transcripts into Egma.",
+  both: "Both — watch production traffic and test the agent.",
+};
+
+/** The question itself, said the same way on a screen and in plain lines. */
+export const GOAL_ASK_LINE = "What should Egma do for this voice agent?";
+
+/**
+ * Which egma a walk will use.
+ *
+ * Only the address, because only one kind of repository ever reads this screen.
+ * A repository that has committed a platform has an `egma/` folder, and the
+ * wizard refuses one of those before it draws anything — so every walk that
+ * gets here is unbound, and naming another egma on the command really is the
+ * way to change it.
  */
 export type PlatformNotice = {
   readonly url: string;
-  /** True when `egma/config.yaml` names it. */
-  readonly bound: boolean;
 };
 
 export interface WizardUI {
@@ -168,6 +221,15 @@ export interface WizardUI {
   takeLoginPaste(): string | null;
 
   /**
+   * The one question about what Egma is here to do, while it is open, or
+   * `null` when it is closed.
+   *
+   * A write and not a question, exactly as every other offer is: the flow says
+   * the choice is open and what it is about, and the screen collects the word.
+   */
+  setGoalAsk(ask: GoalAsk | null): void;
+
+  /**
    * What egma needs handed to it before it can reach the developer's provider,
    * or `null` once it no longer needs it.
    *
@@ -176,6 +238,26 @@ export interface WizardUI {
    * characters hidden or printed as two plain lines is the UI's business.
    */
   setKeyAsk(ask: KeyAsk | null): void;
+
+  /**
+   * The account's agents Egma could watch, while a choice among them is open,
+   * or `null` when there is no choice to make.
+   *
+   * Set only when there is more than one, exactly as the testing picker is.
+   * The list is Egma's own server-side discovery, which is the only one that
+   * knows which of these this project already registers.
+   */
+  setMonitoringAgentChoices(agents: readonly MonitoringAgentOffer[] | null): void;
+
+  /**
+   * What Egma is about to write into the repository, while it is waiting to be
+   * allowed to, or `null` when it is not waiting.
+   *
+   * A gate and not a question, because what is being given is agreement: a
+   * developer who does not want a live credential written into their working
+   * tree closes the wizard, and the lines are printed for them either way.
+   */
+  setEnvConsent(line: string | null): void;
 
   /**
    * The agents found on the provider's account, while a choice among them is

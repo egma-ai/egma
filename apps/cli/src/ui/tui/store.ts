@@ -32,6 +32,8 @@ import type {
   CodingAgentChoice,
   DrivenAgent,
   GateId,
+  GoalAsk,
+  MonitoringAgentOffer,
   PlatformNotice,
 } from "../wizard-ui.ts";
 import type { ConnectionAsk } from "../wizard-ui.ts";
@@ -44,32 +46,54 @@ export const WIZARD_SCREENS: Sequence = [
   // moment there is not — which is the router working the flow out from state
   // rather than the flow navigating anywhere.
   { id: "login", show: (state) => state.phase === "login" && state.login !== null },
+  // The one question about what Egma is here to do, asked once discovery knows
+  // the agent and its platform.
+  { id: "goal", show: (state) => state.phase === "goal" && state.goalAsk !== null },
+  // The key box, in both places a key is asked for. On the both lane it is
+  // drawn once, in monitoring setup, and the testing half is handed what was
+  // typed there rather than asking again.
   {
     id: "retell-key",
-    show: (state) => state.phase === "provider-setup" && state.asking === "retell-key",
+    show: (state) =>
+      (state.phase === "connection-setup" || state.phase === "monitoring-setup") &&
+      state.asking === "retell-key",
+  },
+  // Which agent on the account to watch. Never reached with one agent on it,
+  // because the flow only opens this question when there is a choice to make.
+  {
+    id: "monitoring-agent",
+    show: (state) =>
+      state.phase === "monitoring-setup" && state.asking === "monitoring-agent",
+  },
+  // The one keystroke before Egma writes a live credential into the working
+  // tree. A gate rather than a question: what is given is agreement.
+  {
+    id: "env-consent",
+    show: (state) => state.phase === "monitoring-setup" && state.envConsent !== null,
+    isComplete: (state) => state.envAgreed,
   },
   {
     id: "connection-field",
     show: (state) =>
-      state.phase === "provider-setup" && state.asking?.startsWith("connection:") === true,
+      state.phase === "connection-setup" && state.asking?.startsWith("connection:") === true,
   },
   // Never reached with one agent on the account, because the flow only opens
   // this question when there is a choice to make.
   {
     id: "retell-agent",
-    show: (state) => state.phase === "provider-setup" && state.asking === "retell-agent",
+    show: (state) => state.phase === "connection-setup" && state.asking === "retell-agent",
   },
   // The one question that decides what egma creates. Never skipped and never
   // answered for the developer.
   {
     id: "reach",
-    show: (state) => state.phase === "provider-setup" && state.asking === "reach",
+    show: (state) => state.phase === "connection-setup" && state.asking === "reach",
   },
   // Never reached when Retell routes one number to the agent, because the flow
   // only opens this question when there is a choice to make.
   {
     id: "phone-number",
-    show: (state) => state.phase === "provider-setup" && state.asking === "phone-number",
+    show: (state) => state.phase === "connection-setup" && state.asking === "phone-number",
   },
   {
     id: "existing-tests",
@@ -83,10 +107,13 @@ export const WIZARD_SCREENS: Sequence = [
   },
   // The list, while it is waiting on the one keystroke it exists for.
   { id: "gate", show: (state) => state.phase === "review" && state.gate !== null },
-  // The files arriving, one at a time, while they arrive.
+  // The files arriving, one at a time, while they arrive. The mocked world is
+  // written by the same kind of dispatch, so it fills the same pane.
   {
     id: "generating",
-    show: (state) => state.phase === "test-writing" && state.generation !== null,
+    show: (state) =>
+      (state.phase === "test-writing" || state.phase === "mock-authoring") &&
+      state.generation !== null,
   },
   // The run, from the moment it is created until the wizard closes. It never
   // completes on this screen: the wizard leaves and the suite carries on.
@@ -101,6 +128,7 @@ export const WIZARD_SCREENS: Sequence = [
 const GATE_CONDITIONS: Readonly<Record<GateId, (state: WizardState) => boolean>> = {
   begin: (state) => state.begun,
   "run-tests": (state) => state.agreedToRun,
+  "write-env": (state) => state.envAgreed,
 };
 
 type Gate = {
@@ -231,6 +259,10 @@ export class WizardStore {
     this.change({ detection });
   }
 
+  setGoalAsk(goalAsk: GoalAsk | null): void {
+    this.change({ goalAsk });
+  }
+
   setLogin(login: LoginPrompt | null): void {
     this.change(
       login === null
@@ -245,6 +277,25 @@ export class WizardStore {
 
   setAgentChoices(agentChoices: readonly RetellAgent[] | null): void {
     this.change({ agentChoices });
+  }
+
+  setMonitoringAgentChoices(
+    monitoringAgentChoices: readonly MonitoringAgentOffer[] | null,
+  ): void {
+    this.change({ monitoringAgentChoices });
+  }
+
+  /**
+   * Put the consent line up, or take it down.
+   *
+   * Putting one up forgets the last answer, exactly as the test gate does: a
+   * second ask is about a second thing, and agreement given to the first is not
+   * agreement to it.
+   */
+  setEnvConsent(envConsent: string | null): void {
+    this.change(
+      envConsent === null ? { envConsent } : { envConsent, envAgreed: false },
+    );
   }
 
   setReachOffer(reachOptions: readonly Reach[] | null): void {
@@ -326,6 +377,12 @@ export class WizardStore {
   runTests(): void {
     if (this.state.agreedToRun) return;
     this.change({ agreedToRun: true });
+  }
+
+  /** The keystroke over the consent line. Opens the `write-env` gate. */
+  writeEnv(): void {
+    if (this.state.envAgreed) return;
+    this.change({ envAgreed: true });
   }
 
   /**

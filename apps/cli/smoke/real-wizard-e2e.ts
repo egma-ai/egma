@@ -937,7 +937,11 @@ async function main(): Promise<void> {
   });
   const stamp = async (file: string): Promise<string> =>
     stat(file).then((found) => `${found.mtimeMs}:${found.size}`, () => "absent");
-  const skillBefore = places === null ? "absent" : await stamp(places.global);
+  // The installer decides where a skill lands, so what is watched here is the
+  // one place every agent's global install goes through: the canonical skills
+  // store under the home of whoever ran this.
+  const globalSkills = (at: string): string => path.join(at, ".agents", "skills");
+  const skillBefore = places === null ? "absent" : await stamp(globalSkills(places.home));
 
   // The API writes a line per request, and one walk makes a great many.
   process.env.LOG_LEVEL ??= "silent";
@@ -1037,14 +1041,17 @@ async function main(): Promise<void> {
     const after = await stat(real).then((found) => `${found.mtimeMs}`, () => "absent");
     check(before === after, "nothing touched the credentials of whoever ran this");
 
-    const skillAfter = places === null ? "absent" : await stamp(places.global);
+    const skillAfter = places === null ? "absent" : await stamp(globalSkills(places.home));
     check(skillBefore === skillAfter, "nothing was written into the home of whoever ran this");
     for (const outcome of walked) {
       const here = skillPlacesFor(drivenAgentId, {
         repository: outcome.repository,
         home: process.env.HOME ?? "",
       });
-      const written = here === null ? false : (await stamp(here.project)) !== "absent";
+      const written =
+        here === null
+          ? false
+          : (await stamp(path.join(here.repository, "skills-lock.json"))) !== "absent";
       check(!written, "and nothing was written into the repository either");
     }
   } finally {

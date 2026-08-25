@@ -36,14 +36,18 @@ import type { ExitReport } from "../wizard/exit-line.ts";
 import type { TestGate } from "../wizard/gate.ts";
 import type { GenerationProgress } from "../wizard/test-generation.ts";
 import type { WizardPhase } from "../wizard/wizard-machine.ts";
-import type {
-  AskId,
-  CodingAgentChoice,
-  ConnectionAsk,
-  DrivenAgent,
-  GateId,
-  PlatformNotice,
-  WizardUI,
+import {
+  GOAL_ASK_LINE,
+  GOAL_LINES,
+  type AskId,
+  type CodingAgentChoice,
+  type ConnectionAsk,
+  type DrivenAgent,
+  type GateId,
+  type GoalAsk,
+  type MonitoringAgentOffer,
+  type PlatformNotice,
+  type WizardUI,
 } from "./wizard-ui.ts";
 
 export type HeadlessRecord = {
@@ -56,10 +60,16 @@ export type HeadlessRecord = {
   /** What egma worked out for itself before it asked anybody anything. */
   detection: Detection | null;
   logins: LoginPrompt[];
+  /** The goal question, as it was put, when it was put at all. */
+  goalAsk: GoalAsk | null;
   /** Every time a key was asked for, and what was said about it. */
   keyAsks: KeyAsk[];
   /** The agents a choice was offered between, when one was. */
   agentChoices: RetellAgent[];
+  /** The account's agents a monitoring choice was offered between. */
+  monitoringAgentChoices: MonitoringAgentOffer[];
+  /** Every consent line the flow put up before writing a credential down. */
+  envConsents: string[];
   /** Whether the choice between text and phone was ever put to anybody. */
   reachOffered: boolean;
   /** The provider-safe options shown at that choice. */
@@ -99,8 +109,11 @@ export class HeadlessUI implements WizardUI {
     platform: null,
     detection: null,
     logins: [],
+    goalAsk: null,
     keyAsks: [],
     agentChoices: [],
+    monitoringAgentChoices: [],
+    envConsents: [],
     reachOffered: false,
     reachOptions: [],
     numberChoices: [],
@@ -186,6 +199,19 @@ export class HeadlessUI implements WizardUI {
     for (const line of loginLines(prompt)) this.write(line);
   }
 
+  /**
+   * The offer, printed the same way the screen draws it.
+   *
+   * Printed even though nobody is here to answer it, so the output says which
+   * lanes were on offer and what each of them meant.
+   */
+  setGoalAsk(ask: GoalAsk | null): void {
+    if (ask === null) return;
+    this.record.goalAsk = ask;
+    this.write(GOAL_ASK_LINE);
+    for (const goal of ask.goals) this.write(`goal_option: ${goal} ${GOAL_LINES[goal]}`);
+  }
+
   setKeyAsk(ask: KeyAsk | null): void {
     if (ask === null) return;
     this.record.keyAsks.push(ask);
@@ -201,6 +227,37 @@ export class HeadlessUI implements WizardUI {
     for (const agent of agents) {
       this.write(`retell_agent: ${agent.id} ${agent.name}`.trimEnd());
     }
+  }
+
+  /**
+   * The account's agents, printed with what Egma already knows about each.
+   *
+   * Printed even though nobody is here to answer, so the output says which
+   * agents were on offer and which of them Egma was already watching.
+   */
+  setMonitoringAgentChoices(agents: readonly MonitoringAgentOffer[] | null): void {
+    if (agents === null) return;
+    this.record.monitoringAgentChoices = [...agents];
+    for (const agent of agents) {
+      this.write(
+        `monitoring_agent: ${agent.platformAgentId} ${agent.name} ` +
+          `${agent.registeredAgentName ?? "unregistered"} ` +
+          `${agent.pullProductionCalls ? "watched" : "unwatched"}`,
+      );
+    }
+  }
+
+  /**
+   * The consent line, printed and then agreed to.
+   *
+   * Consent can be given in advance, and a run with nobody watching was given
+   * it in the command — so the line is on the record and the gate opens, which
+   * is what every other gate here does.
+   */
+  setEnvConsent(line: string | null): void {
+    if (line === null) return;
+    this.record.envConsents.push(line);
+    this.write(line);
   }
 
   /**
@@ -291,9 +348,17 @@ export class HeadlessUI implements WizardUI {
   setGate(gate: TestGate | null): void {
     if (gate === null) return;
     this.record.gate = gate;
-    for (const row of gate.rows) this.write(`test: ${row.name} ${row.persona}`);
+    for (const row of gate.rows) {
+      this.write(`test: ${row.name} ${row.persona}`);
+      for (const tool of row.overrides) this.write(`override: ${row.name} ${tool}`);
+    }
     for (const held of gate.heldBack) this.write(`held-back: ${held.shown} ${held.reason}`);
     this.write(`tests: ${gate.rows.length}`);
+    // The mocked world the suite runs in, said beside the suite it serves:
+    // approving the tests is approving the answers, so both are on the record.
+    for (const mock of gate.mocks) this.write(`mock-tool: ${mock.tool} ${mock.says}`);
+    this.write(`mock-tools: ${gate.mocks.length}`);
+    for (const file of gate.changed) this.write(`changed: ${file}`);
     this.write(
       `connection: ${gate.connectionName} ${gate.productLabel} ${gate.modality}`,
     );
@@ -353,8 +418,10 @@ export class HeadlessUI implements WizardUI {
   setSkillPlaces(places: SkillPlaces | null): void {
     if (places === null) return;
     this.record.skillPlaces = places;
-    this.write(`skill_project: ${places.project}`);
-    this.write(`skill_global: ${places.global}`);
+    this.write(`skill_project: ${places.repository}`);
+    this.write(`skill_global: ${places.home}`);
+    this.write(`skill_agent: ${places.skillsAgentId}`);
+    for (const skill of places.skills) this.write(`skill: ${skill}`);
   }
 
   pushStatus(line: string): void {

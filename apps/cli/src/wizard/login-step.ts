@@ -33,15 +33,6 @@ export type PlatformAccess = ResolvedPlatform & {
 export type WizardPlatform = {
   readonly url: string;
   readonly credentialsFile: string;
-  /**
-   * True when this address came out of `egma/config.yaml` rather than a flag.
-   *
-   * It decides one sentence on the first screen and nothing else: a bound
-   * repository is refused a different `--url`, so the wizard must not offer one
-   * there. It is passed in rather than read here, because which egma this is
-   * has one answer and one place that works it out.
-   */
-  readonly bound: boolean;
 };
 
 /**
@@ -53,11 +44,7 @@ export type WizardPlatform = {
  * that asks nobody anything.
  */
 export function selectedPlatform(access: PlatformAccess): WizardPlatform {
-  // Not bound: whoever hands a platform over this way resolved it for their own
-  // reasons rather than reading it out of a committed file. The one path where
-  // a binding really chose the address builds its own, in `main.ts`, from the
-  // resolution that read that file.
-  return { ...access, bound: false };
+  return { ...access };
 }
 
 /**

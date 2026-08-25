@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PUBLIC_SKILL_NAMES,
-  installableSkill,
+  drivingSkill,
   instructionsWith,
   publicSkill,
   publicSkillDirectory,
@@ -28,7 +28,8 @@ import { discoveryInstructions } from "../src/wizard/discovery.ts";
 import { FACTS } from "../src/wizard/facts.ts";
 import { pasteFallbackMessage } from "../src/wizard/no-coding-agent.ts";
 import { generateInstructions } from "../src/wizard/test-generation.ts";
-import { BANNED, SCENARIO_HEADING } from "./support/glossary.ts";
+import { mockAuthoringInstructions } from "../src/wizard/mock-authoring-step.ts";
+import { BANNED, LIVEKIT_SESSION_OBJECT, SCENARIO_HEADING } from "./support/glossary.ts";
 
 const run = promisify(execFile);
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -128,7 +129,7 @@ describe("Egma's instruction content", () => {
       "      *.md        zero or more tests in this suite",
     ].join("\n");
 
-    expect(installableSkill()).toContain(layout);
+    expect(drivingSkill()).toContain(layout);
     expect(readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8")).toContain(layout);
   });
 
@@ -150,7 +151,7 @@ describe("Egma's instruction content", () => {
     };
 
     const held: readonly (readonly [string, string, string])[] = [
-      ["skills/egma/SKILL.md", installableSkill(), "## Keep the folder and Egma in step"],
+      ["skills/egma/SKILL.md", drivingSkill(), "## Keep the folder and Egma in step"],
       [
         "skills/find-voice-agent/SKILL.md",
         publicSkill("find-voice-agent"),
@@ -178,13 +179,93 @@ describe("Egma's instruction content", () => {
   });
 
   it("says where each kind of mock-tool answer belongs", () => {
-    const driving = installableSkill().replace(/\s+/gu, " ");
+    const driving = drivingSkill().replace(/\s+/gu, " ");
     expect(driving).toContain("Project-wide answers live in `egma/mock-tools.md`");
     expect(driving).toContain("inside that test file under `## Mock tools`");
 
     const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
-    expect(writing).toContain("Add `## Mock tools` only when this test needs an answer different");
     expect(writing).toContain("Put either `answer` or `error` in its JSON block");
+  });
+
+  /**
+   * The rule has to stand on its own where the project's mocked world is
+   * empty, which is every Retell repository: mock tools are not served there
+   * yet, so "different from the project-wide mocked world" pointed at nothing
+   * and a coding agent reading it had no rule at all.
+   */
+  it("decides a test's mock tools from the test, not from a world that may be empty", () => {
+    const writing = publicSkill("write-egma-tests").replace(/\s+/gu, " ");
+
+    expect(writing).toContain(
+      "Add `## Mock tools` when this test depends on a specific backend state",
+    );
+    expect(writing).toContain("Otherwise leave the section out.");
+    expect(writing).toContain(
+      "Where the project has no mocked world, a block here is the only answer Egma will serve",
+    );
+    expect(writing).not.toContain("only when this test needs an answer different");
+  });
+
+  /**
+   * The SDK skill is authored for a customer's own coding agent, so it has to
+   * carry the three things that make an unsupervised edit safe: where each
+   * public entry goes, the rule that keeps it out of `.env`, and what to do
+   * when it cannot find the worker at all.
+   */
+  it("teaches both SDK entries, the .env rule, and the printed fallback", () => {
+    const sdk = publicSkill("integrate-egma-sdk");
+
+    // The testing entry, where it goes and why the wait is structural.
+    expect(sdk).toContain("await mockable(agent, ctx, session)");
+    expect(sdk).toContain("AgentSession.start");
+    // The monitoring entry, which ticket 02 reuses and this lane never adds.
+    expect(sdk).toContain("monitor_livekit(ctx)");
+    expect(sdk).toContain("ctx.connect()");
+    // The two environment variables are named, and writing them is still
+    // Egma's own command's job. Naming is teaching: a by-hand fallback that
+    // never said what to export would produce a worker that crashes on start,
+    // and knowing a variable's name is not the same as being allowed to put a
+    // live key in a file (founder decision, 2026-08-24).
+    expect(sdk).toContain("EGMA_URL");
+    expect(sdk).toContain("EGMA_API_KEY");
+    expect(sdk.replace(/\s+/gu, " ")).toContain(
+      "Naming them is teaching; setting them is not yours to do",
+    );
+    expect(sdk.replace(/\s+/gu, " ")).toContain(
+      "do not add them to `.env` or to any other file",
+    );
+    // The rule that keeps a live credential away from a driven coding agent.
+    expect(sdk.replace(/\s+/gu, " ")).toContain("Never touch `.env`");
+    expect(sdk.replace(/\s+/gu, " ")).toContain("Never read");
+    expect(sdk.replace(/\s+/gu, " ")).toContain("Never write");
+    // And the fallback, so a worker nobody can identify is never guessed at.
+    expect(sdk).toContain("When the entrypoint cannot be found");
+    expect(sdk).toContain("Do not guess");
+  });
+
+  /**
+   * The mock-authoring dispatch is the wizard's, and the marker protocol stays
+   * in it: the public skill has to make sense installed on its own.
+   */
+  it("keeps the mock-authoring markers in the task, not in the SDK skill", () => {
+    const sdk = publicSkill("integrate-egma-sdk");
+    const authoring = mockAuthoringInstructions({
+      cwd: "/repo",
+      suiteDirectory: "generated",
+      facts: new Map(),
+      agentName: "front-desk",
+      tests: ["greets-a-new-customer"],
+    });
+
+    expect(authoring.indexOf(sdk)).toBe(0);
+    expect(authoring).toContain(publicSkill("write-egma-tests"));
+    expect(authoring).toContain("egma/mock-tools.md");
+    expect(authoring).toContain("egma:found sdk-entry");
+    for (const marker of ["egma:plan", "egma:wrote", "egma:note", "egma:abort"]) {
+      expect(authoring).toContain(marker);
+    }
+    // And the monitoring entry is never asked for in the testing lane.
+    expect(authoring).toContain("add **only the testing entry**");
   });
 
   it("recognizes both repository-managed and dashboard-managed Retell agents", () => {
@@ -228,6 +309,7 @@ describe("Egma's instruction content", () => {
     for (const [name, source] of all) {
       const content = source
         .replaceAll(SCENARIO_HEADING, "")
+        .replaceAll(LIVEKIT_SESSION_OBJECT, "")
         // `call` is an ordinary verb here, not the banned noun for a simulation.
         .replace("Do not call it skipped.", "");
       for (const banned of BANNED) {

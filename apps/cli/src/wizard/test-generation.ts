@@ -299,10 +299,13 @@ export type WritingTest = {
   readonly state: WritingState;
 };
 
+/** Which kind of writing the pane is drawing. */
+export type GenerationKind = "converting" | "generating" | "mocking";
+
 /** What the pane shows while the coding agent works. */
 export type GenerationProgress = {
-  /** What the developer is watching happen: converting, or generating. */
-  readonly what: "converting" | "generating";
+  /** What the developer is watching happen. */
+  readonly what: GenerationKind;
   readonly tests: readonly WritingTest[];
   /** The denominator of "2 of 12" — never fewer than the tests already named. */
   readonly total: number;
@@ -318,12 +321,12 @@ export type GenerationProgress = {
  * to happen.
  */
 export class GenerationTally {
-  private readonly what: "converting" | "generating";
+  private readonly what: GenerationKind;
   private readonly goal: number;
   private readonly order: string[] = [];
   private readonly states = new Map<string, WritingState>();
 
-  constructor(what: "converting" | "generating", goal: number) {
+  constructor(what: GenerationKind, goal: number) {
     this.what = what;
     this.goal = goal;
   }

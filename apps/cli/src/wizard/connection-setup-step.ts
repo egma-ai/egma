@@ -1,5 +1,10 @@
 /**
- * The wizard's connect step: the same flow the headless verb runs, on a screen.
+ * The wizard's connection setup on Retell: the same flow the headless verb
+ * runs, on a screen.
+ *
+ * A connection is how Egma's simulator reaches the agent, and nothing else. It
+ * is not the Egma SDK inside the customer's own process, which the mocked world
+ * needs and which a later step wires in.
  *
  * Everything the developer sees is pushed at the UI and everything they type
  * comes back through a gate carrying a value, so this step owns no drawing and
@@ -34,7 +39,26 @@ import type { PlatformAccess } from "./login-step.ts";
 import { ACTION_MARK, DETAIL_MARK } from "./status.ts";
 import { stopReport, untilAborted } from "./stop.ts";
 
-export type ConnectStepOptions = {
+/**
+ * What an earlier step in this sitting has already settled.
+ *
+ * The both lane sets monitoring up first, and by the time it reaches here the
+ * developer has already pasted their key and already said which agent on the
+ * account this is about. Asking either question again would be asking one
+ * person the same thing twice in one sitting — so what is already known is
+ * handed in, the screens for it are never drawn, and the one name threads
+ * through so the testing half reuses the row monitoring created.
+ */
+export type SettledAlready = {
+  /** The account key, already pasted and held in memory for this sitting. */
+  readonly retellKey: RetellKey | null;
+  /** The platform agent already chosen, so no second picker is drawn. */
+  readonly platformAgentId: string | null;
+  /** The name the agent row already carries on Egma. */
+  readonly agentName: string | null;
+};
+
+export type ConnectionSetupStepOptions = {
   readonly ui: WizardUI;
   readonly platform: PlatformAccess;
   /** The folder the repository's prompt is looked for in. */
@@ -42,6 +66,8 @@ export type ConnectStepOptions = {
   /** Where the find-the-agent step said the prompts live. */
   readonly repoPrompts: string | null;
   readonly signal: AbortSignal;
+  /** What monitoring setup already settled, when it ran before this. */
+  readonly settled?: SettledAlready | null | undefined;
   /** Where Retell is. Retell's own address when omitted. */
   readonly retell?: ConnectOptions["retell"];
   readonly fetchImpl?: ConnectOptions["fetchImpl"];
@@ -115,7 +141,7 @@ export type Connected = {
  * Unlike login, every ending here is an ending: past this point egma has no
  * agent to test, so there is nothing for the walk to carry on into.
  */
-export async function connectStep(options: ConnectStepOptions): Promise<Connected> {
+export async function connectionSetupStep(options: ConnectionSetupStepOptions): Promise<Connected> {
   const { ui, signal } = options;
 
   const held = await readCredentials(
@@ -140,6 +166,15 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
   // below because the flow has no ending of its own for it.
   const binding: { refused: Error | null } = { refused: null };
 
+  /**
+   * The key from earlier in this sitting, handed over once.
+   *
+   * Once, because the flow asks twice when the first key is refused, and the
+   * second ask has to reach a screen — a key Retell would not take is not a key
+   * worth handing over again.
+   */
+  const alreadyPasted = { key: options.settled?.retellKey ?? null };
+
   const outcome = await connect({
     platform: { url: held.url, key: held.key },
     cwd: options.cwd,
@@ -147,6 +182,9 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     signal,
     retell: options.retell,
     fetchImpl: options.fetchImpl,
+    ...(options.settled?.agentName == null
+      ? {}
+      : { agentName: options.settled.agentName }),
     say: (line, kind) => {
       if (kind !== "action") problem = line;
       ui.pushStatus(kind === "action" ? `${ACTION_MARK} ${line}` : line);
@@ -156,6 +194,11 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
     // wizard can hang forever, and Ctrl-C at the key box is exactly where a
     // developer who has decided not to hand a key over presses it.
     askForKey: async () => {
+      const already = alreadyPasted.key;
+      if (already !== null) {
+        alreadyPasted.key = null;
+        return already;
+      }
       ui.setKeyAsk({ asking: KEY_ASK_LINE, custody: CUSTODY_LINE, problem });
       const typed = await untilAborted(ui.waitForAnswer("retell-key"), signal);
       ui.setKeyAsk(null);
@@ -163,6 +206,9 @@ export async function connectStep(options: ConnectStepOptions): Promise<Connecte
       return RetellKey.from(typed);
     },
     chooseAgent: async (agents) => {
+      // Settled earlier in this sitting, so the account is not listed twice.
+      const already = options.settled?.platformAgentId ?? null;
+      if (already !== null) return already;
       ui.setAgentChoices(agents);
       const chosen = await untilAborted(ui.waitForAnswer("retell-agent"), signal);
       ui.setAgentChoices(null);

@@ -63,6 +63,28 @@ export const BANNED = [
  */
 export const SCENARIO_HEADING = /`?#{1,6}[ \t]*scenario(?!\w)`?/gi;
 
+/**
+ * The LiveKit SDK's own object, in the shapes a skill writes it as code.
+ *
+ * The glossary bans `session` for an exchange and carves it out twice already,
+ * both times for the same reason: **a `session` is standing machinery you
+ * connect to, never the exchange a persona has with an agent.** The auth
+ * provider owns one, the Agent Client Protocol owns one, and LiveKit Agents
+ * owns a third — `AgentSession`, the object a worker builds and starts, and
+ * the third argument of the Egma SDK's own public line.
+ *
+ * A skill that teaches where that line goes has to write the line, exactly as
+ * the SDK publishes it: a skill that renamed somebody's variable to dodge a
+ * word would teach a customer's coding agent to write code the SDK's own
+ * documentation contradicts. So the SDK's three code shapes come out before
+ * the bans are run, and every other use of the word still fails — "the
+ * session", "one session", `## Sessions` and the rest are all still caught.
+ *
+ * It is a carve-out for someone else's identifier, not for prose.
+ */
+export const LIVEKIT_SESSION_OBJECT =
+  /(?:await )?mockable\(agent, ctx, session\)|session = AgentSession|session\.start\(/g;
+
 /** Every ban this text breaks, in the words it broke them with. */
 export function bannedWordsIn(text: string): readonly string[] {
   return BANNED.flatMap((banned) => banned.exec(text)?.[0] ?? []);

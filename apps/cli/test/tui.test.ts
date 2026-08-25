@@ -142,6 +142,18 @@ describe("the wizard on a real terminal", () => {
       // screen while it works.
       await showing(terminal, "Read package.json", "┊ Framework  retell-sdk");
 
+      // The one question about what Egma is here to do, drawn on the same
+      // alternate screen, once the agent and its platform are known.
+      const goal = await showing(
+        terminal,
+        "What should Egma do for this voice agent?",
+        "[t] Test it",
+        "[m] Watch its production traffic",
+        "[b] Both",
+      );
+      expect(goal.indexOf("[t] Test it")).toBeLessThan(goal.indexOf("[b] Both"));
+      terminal.write("t");
+
       // The walk goes on to the one secret it needs. This check is about the
       // screens before it, so the key is declined here and the ending is the
       // honest one that follows.

@@ -25,28 +25,53 @@
 import {
   installedLine,
   skippedLine,
+  type SkillPlaces,
   type SkillScope,
 } from "../skills/install.ts";
 import { pasteFallbackMessage } from "./no-coding-agent.ts";
+import type { WizardGoal } from "./wizard-machine.ts";
 
 /**
  * What the developer said to the skill offer, and what egma did about it.
  *
- * `not-offered` is a real answer: egma knows where two coding agents keep
- * their skills, and it will not write a file into a directory an agent it does
- * not know may never read.
+ * `not-offered` is a real answer: the installer knows a long list of coding
+ * agents and egma will not aim an install at one that is not on it.
+ * `install-failed` is a real answer too — an offer accepted and not kept has to
+ * say so, or a developer walks away believing their agent learned something.
  */
 export type SkillOutcome =
   | {
       readonly kind: "installed";
       readonly scope: SkillScope;
-      readonly file: string;
-      readonly drivenAgentName: string;
-      /** A file was already there, and the line has to say it is gone. */
-      readonly replaced: boolean;
+      readonly places: SkillPlaces;
+      /** Where the installer said each skill went, in its own words. */
+      readonly landed: readonly string[];
     }
   | { readonly kind: "skipped"; readonly drivenAgentName: string }
+  | { readonly kind: "install-failed"; readonly reason: string }
   | { readonly kind: "not-offered" };
+
+/**
+ * The path to watching production traffic that needs no terminal, said once.
+ *
+ * The machine with no coding agent on it is told this, because the wizard's own
+ * monitoring lane needs a coding agent on LiveKit and a terminal on both.
+ */
+export const WEB_MONITORING_POINTER =
+  "To watch production traffic, open Egma in your browser and start monitoring from its Monitoring page.";
+
+/**
+ * Where the conversations show up, said the one way.
+ *
+ * The web is iterating, so the pointer names Egma and its Monitoring page and
+ * never a screen's address — a line naming a path is a line that goes stale
+ * without anybody editing it.
+ */
+export function monitoringPointer(platformUrl: string | null): string {
+  return platformUrl === null
+    ? "Open Egma in your browser and watch them arrive on its Monitoring page."
+    : `Open Egma at ${platformUrl} and watch them arrive on its Monitoring page.`;
+}
 
 /** Why the wizard stopped, and what it can honestly say about it. */
 export type ExitReport =
@@ -80,6 +105,64 @@ export type ExitReport =
       readonly total: number;
       /** What became of the skill offer, so skipping is never silent. */
       readonly skill: SkillOutcome;
+      /**
+       * Which Egma to open for the production traffic this sitting also set up,
+       * or `null` when it set none up.
+       *
+       * The both lane ends with two promises kept, and a last screen that named
+       * only one of them would leave the developer to remember the other.
+       */
+      readonly monitoringUrl?: string | null | undefined;
+    }
+  /**
+   * Egma is watching a platform agent's production calls.
+   *
+   * `arrived` is proof rather than a promise: the flow waits briefly for the
+   * first imported conversation, and an account with nothing to import ends
+   * exactly as well — with a sentence that says so rather than one that implies
+   * something went wrong.
+   */
+  | {
+      readonly kind: "monitoring-started";
+      readonly agentName: string;
+      readonly arrived: boolean;
+      /** Whether this walk also wrote the agent's row into the roster. */
+      readonly registered: boolean;
+      readonly platformUrl: string | null;
+    }
+  /**
+   * A LiveKit worker is wired to push its production evidence.
+   *
+   * Nothing here waits: push is observed, never declared, so there is no switch
+   * to read back and no arrival to prove. The two lines are the deliverable and
+   * they are printed whether the `.env` write happened or not — a deployment
+   * needs them either way.
+   */
+  | {
+      readonly kind: "monitoring-wired";
+      readonly agentName: string;
+      /** The file the lines landed in, or `null` when Egma would not write it. */
+      readonly envFile: string | null;
+      /** Why Egma did not write it, when it did not. */
+      readonly envRefusal: string | null;
+      /** The two lines, for wherever this worker really runs. */
+      readonly lines: readonly string[];
+      /** Whether the coding agent's edit was found in the worker. */
+      readonly wired: boolean;
+      readonly platformUrl: string | null;
+    }
+  /**
+   * The platform refused to start watching, and said which rule refused it.
+   *
+   * A nonzero ending on purpose: the monitoring lane's deliverable is that
+   * watching is really on, so a walk that did not manage it must not answer a
+   * shell the way a walk that did answers. Two sentences survive — Egma's own
+   * about what to do, and the platform's own for whatever is reading.
+   */
+  | {
+      readonly kind: "monitoring-refused";
+      /** Egma's own sentence, then the platform's. */
+      readonly lines: readonly string[];
     }
   /**
    * The developer read the list and did not run them. Nothing was uploaded and
@@ -103,6 +186,26 @@ export type ExitReport =
     }
   /** There is no coding agent on this machine for egma to drive. */
   | { readonly kind: "no-coding-agent" }
+  /**
+   * The repository has an egma folder already, so it is not a new one.
+   *
+   * v1 of the wizard onboards new repositories. A second run over a folder
+   * somebody already committed would half-write another suite into it, so it
+   * refuses before it starts anything and says the one thing that redoes setup.
+   *
+   * `hasSuites` is why the refusal is two sentences and not one. A folder
+   * holding tests can be pushed and run as it stands, and saying so is the
+   * useful half of this line. A folder holding only a binding — which is what
+   * an earlier walk that stopped between binding and registering leaves behind
+   * — cannot: `egma push` refuses it for the contract it does not yet have, and
+   * sending somebody to that command would be egma naming a command egma turns
+   * away.
+   */
+  | {
+      readonly kind: "already-onboarded";
+      readonly folder: string;
+      readonly hasSuites: boolean;
+    }
   /**
    * The coding agent stopped the work itself and said why. It is not the same
    * as finding nothing, and saying it was would put words in the agent's mouth.
@@ -223,7 +326,38 @@ export function buildExitLine(report: ExitReport): string {
       );
     }
     case "no-coding-agent":
-      return "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.";
+      return (
+        "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead. " +
+        WEB_MONITORING_POINTER
+      );
+    case "monitoring-started": {
+      const watching = `✓ Egma is watching ${report.agentName}'s production calls.`;
+      const what = report.arrived
+        ? "The first conversation has already arrived."
+        : "Nothing has arrived yet — Egma keeps asking, and conversations appear as they finish.";
+      return `${watching} ${what} ${monitoringPointer(report.platformUrl)}`;
+    }
+    case "monitoring-wired": {
+      const wired = report.wired
+        ? `✓ ${report.agentName} pushes its production evidence to Egma.`
+        : `${report.agentName} is on Egma, and its worker still needs the monitoring line added by hand.`;
+      const where =
+        report.envFile === null
+          ? "Egma wrote no environment file, so put the lines below wherever this worker gets its environment."
+          : `Egma put the two lines in ${report.envFile}, and they are below for wherever this worker really runs.`;
+      return `${wired} ${where} ${monitoringPointer(report.platformUrl)}`;
+    }
+    case "monitoring-refused":
+      return `Egma did not start watching: ${oneLine(report.lines[0] ?? "")}`;
+    case "already-onboarded": {
+      const redo = `Delete or rename ${report.folder} and run egma again to redo setup`;
+      return (
+        `Egma is already set up here: ${report.folder} exists, and the wizard only works with new repositories for now. ` +
+        (report.hasSuites
+          ? `${redo}, or use egma push and egma run on the tests that are already there.`
+          : `${redo}.`)
+      );
+    }
     case "coding-agent-stopped":
       return oneLine(report.reason) === ""
         ? `${report.drivenAgentName} stopped before it found your voice agent, and did not say why.`
@@ -270,6 +404,30 @@ export function exitLines(report: ExitReport): readonly string[] {
       ? [buildExitLine(report)]
       : [buildExitLine(report), "", ...block];
   }
+  /*
+   * The two lines a monitored worker exports with, each alone on its own line.
+   *
+   * They carry a live credential and a developer copies them into a deployment
+   * environment, so they are printed after the screen comes down — where a
+   * terminal's triple-click takes one whole — rather than only on a screen the
+   * terminal throws away.
+   */
+  if (report.kind === "monitoring-wired") {
+    return [
+      buildExitLine(report),
+      "",
+      ...report.lines,
+      ...(report.envRefusal === null ? [] : ["", report.envRefusal]),
+    ];
+  }
+  // Egma's own sentence is the line; the platform's own rides under it, whole,
+  // for whatever is reading rather than looking.
+  if (report.kind === "monitoring-refused") {
+    const relayed = report.lines.slice(1);
+    return relayed.length === 0
+      ? [buildExitLine(report)]
+      : [buildExitLine(report), "", ...relayed];
+  }
   if (report.kind !== "run-started") return [buildExitLine(report)];
   return [
     buildExitLine(report),
@@ -278,6 +436,9 @@ export function exitLines(report: ExitReport): readonly string[] {
     // browser they approved this machine in is already signed in — which is
     // exactly why no token has to ride the address, and none ever does.
     report.resultsUrl,
+    ...(report.monitoringUrl == null
+      ? []
+      : ["", monitoringPointer(report.monitoringUrl)]),
     "",
     TESTS_ARE_CODE,
     HAND_YOUR_AGENT,
@@ -300,14 +461,11 @@ export function buildExitNotice(report: ExitReport): string | null {
 
   switch (report.skill.kind) {
     case "installed":
-      return installedLine(
-        report.skill.scope,
-        report.skill.file,
-        report.skill.drivenAgentName,
-        report.skill.replaced,
-      );
+      return installedLine(report.skill.scope, report.skill.places, report.skill.landed);
     case "skipped":
       return skippedLine(report.skill.drivenAgentName);
+    case "install-failed":
+      return report.skill.reason;
     case "not-offered":
       return null;
   }

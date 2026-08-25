@@ -758,14 +758,71 @@ type StoredConnection = {
   updatedAt: string;
 };
 
-type StoredAgent = {
+/**
+ * An agent, and the monitoring half it owns on its own row (ADR-0015).
+ *
+ * The binding, the sealed monitoring key and the pull switch live here rather
+ * than on a connection. Every agent is bound to its platform at registration;
+ * the monitoring half may still be absent: a LiveKit agent that only pushes is
+ * bound and never pulls.
+ */
+export type StoredAgent = {
   readonly id: string;
   readonly projectId: string;
   name: string;
-  readonly agentPlatform: "retell" | "livekit";
+  // Written at registration, and by start-monitoring exactly as the real
+  // access layer writes it: binding an agent Egma is told to watch.
+  agentPlatform: BoundPlatform;
+  platformAgentId: string | null;
+  /** Sealed. Only its hint ever leaves this file through a route. */
+  monitoringApiKey: string | null;
+  monitoringApiKeyHint: string | null;
+  pullProductionCalls: boolean;
+  /** When a production call last arrived, as the drainer would stamp it. */
+  lastReceivedAt: string | null;
   readonly createdAt: string;
   updatedAt: string;
 };
+
+/** The platforms an agent may be bound to, refused by name like every enum. */
+const AGENT_PLATFORMS = ["retell", "livekit"] as const;
+
+type BoundPlatform = (typeof AGENT_PLATFORMS)[number];
+
+/** The binding a registration asked for — required, in the real thing's words. */
+function agentPlatformIn(value: unknown): BoundPlatform {
+  if (
+    typeof value !== "string" ||
+    !(AGENT_PLATFORMS as readonly string[]).includes(value)
+  ) {
+    throw new Refusal(
+      "an agent platform is required and must be retell or livekit",
+    );
+  }
+  return value as BoundPlatform;
+}
+
+/** A brand-new roster row: named, in a project, and bound to its platform. */
+export function blankAgent(
+  projectId: string,
+  name: string,
+  agentPlatform: BoundPlatform,
+): StoredAgent {
+  const now = new Date().toISOString();
+  return {
+    id: newId("agt"),
+    projectId,
+    name,
+    agentPlatform,
+    platformAgentId: null,
+    monitoringApiKey: null,
+    monitoringApiKeyHint: null,
+    pullProductionCalls: false,
+    lastReceivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 /** An agent, as every read of one describes it. */
 function agentOut(agent: StoredAgent): Record<string, unknown> {
@@ -774,10 +831,13 @@ function agentOut(agent: StoredAgent): Record<string, unknown> {
     projectId: agent.projectId,
     name: agent.name,
     agentPlatform: agent.agentPlatform,
-    platformAgentId: null,
-    monitoringKeyPresent: false,
-    monitoringApiKeyHint: null,
-    pullProductionCalls: false,
+    platformAgentId: agent.platformAgentId,
+    monitoringKeyPresent: agent.monitoringApiKeyHint !== null,
+    monitoringApiKeyHint: agent.monitoringApiKeyHint,
+    pullProductionCalls: agent.pullProductionCalls,
+    lastReceivedAt: agent.lastReceivedAt,
+    archived: false,
+    archivedAt: null,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   };
@@ -813,6 +873,14 @@ function connectionOut(connection: StoredConnection): Record<string, unknown> {
 export type AgentControls = {
   /** Every agent written, oldest first. */
   readonly agents: readonly StoredAgent[];
+  /**
+   * Say a production call has arrived for one agent, as the drainer stamps it.
+   *
+   * The poller is not part of this fixture, so the one fact a terminal waits on
+   * — when this agent last received — is put there directly by whatever is
+   * standing in for production traffic.
+   */
+  received(agentId: string, at?: Date): void;
   /** Every connection written, oldest first. */
   readonly connections: readonly StoredConnection[];
   /**
@@ -878,6 +946,15 @@ export function agentRoutes(options: {
   readonly controls: AgentControls;
   /** How a run resolves the connection it will execute over. */
   readonly connectionById: ConnectionLookup;
+  /**
+   * The roster itself, for the monitoring group beside this one.
+   *
+   * Monitoring writes to agent rows — the binding, the sealed key, the switch
+   * — so it is handed the same array this group answers reads from rather than
+   * a copy. A second list would let a start-monitoring commit and an agent read
+   * disagree about what this project holds.
+   */
+  readonly roster: readonly StoredAgent[];
 } {
   const agents: StoredAgent[] = [];
   const connections: StoredConnection[] = [];
@@ -1140,12 +1217,11 @@ export function agentRoutes(options: {
             const projectId = projectNamed(given(named), "writes into");
 
             const name = validName(body["name"], "an agent");
-            const agentPlatform = body["agentPlatform"];
-            if (agentPlatform !== "retell" && agentPlatform !== "livekit") {
-              throw new Refusal(
-                "an agent platform is required and must be retell or livekit",
-              );
-            }
+            // The agent's own platform binding: required on every
+            // registration, and settable without a connection — an agent that
+            // only pushes its production evidence belongs in the roster and
+            // has nothing for Egma's simulator to dial.
+            const boundTo = agentPlatformIn(body["agentPlatform"]);
             const inline = envelope === undefined ? undefined : admitConnection(envelope);
 
             if (inline !== undefined) {
@@ -1199,14 +1275,7 @@ export function agentRoutes(options: {
 
             // Both rows or neither: a connection payload the registry turns
             // away leaves no agent behind, so nothing is kept until both are.
-            const agent: StoredAgent = {
-              id: newId("agt"),
-              projectId,
-              name,
-              agentPlatform,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
+            const agent: StoredAgent = blankAgent(projectId, name, boundTo);
 
             if (inline === undefined) {
               agents.push(agent);
@@ -1342,7 +1411,18 @@ export function agentRoutes(options: {
 
   return {
     group,
-    controls: { agents, connections, sealed, projectsNamed },
+    controls: {
+      agents,
+      connections,
+      sealed,
+      projectsNamed,
+      received(agentId, at = new Date()) {
+        const held = agents.find((one) => one.id === agentId);
+        if (held === undefined) return;
+        held.lastReceivedAt = at.toISOString();
+      },
+    },
     connectionById,
+    roster: agents,
   };
 }

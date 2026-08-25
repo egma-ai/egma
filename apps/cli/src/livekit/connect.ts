@@ -9,6 +9,7 @@
 
 import {
   registerAgent,
+  type NewConnection,
   type RegisterOptions,
   type RegisterResult,
   type Registration,
@@ -73,6 +74,40 @@ function optionalText(value: string | undefined): string | undefined {
 }
 
 /**
+ * The connection payload one LiveKit registration means.
+ *
+ * Pulled out because it is wanted twice: written under a new agent, and added
+ * to an agent this sitting already created. Two copies of it would be two
+ * shapes for one connection, and the second one would drift.
+ */
+export function liveKitConnection(input: LiveKitRegistration): NewConnection {
+  const config: Record<string, string> = { url: input.url.trim() };
+  if (input.variant === LIVEKIT_KEY_PAIR_VARIANT) {
+    const agentName = optionalText(input.agentName);
+    const metadata = optionalText(input.metadata);
+    if (agentName !== undefined) config.agentName = agentName;
+    if (metadata !== undefined) config.metadata = metadata;
+  } else {
+    config.tokenEndpoint = input.tokenEndpoint.trim();
+  }
+
+  return {
+    ...(input.connectionName === undefined
+      ? {}
+      : { name: input.connectionName.trim() }),
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: input.variant,
+    modality: "voice",
+    ...(input.environment === undefined
+      ? {}
+      : { environment: input.environment.trim() }),
+    config,
+    credentials: input.credentials,
+  };
+}
+
+/**
  * Register one LiveKit agent and its first connection.
  *
  * All ordinary platform endings remain values. In particular, `name-taken`
@@ -84,34 +119,11 @@ export function connectLiveKit(
   input: LiveKitRegistration,
   options: RegisterOptions,
 ): Promise<RegisterResult> {
-  const config: Record<string, string> = { url: input.url.trim() };
-  if (input.variant === LIVEKIT_KEY_PAIR_VARIANT) {
-    const agentName = optionalText(input.agentName);
-    const metadata = optionalText(input.metadata);
-    if (agentName !== undefined) config.agentName = agentName;
-    if (metadata !== undefined) config.metadata = metadata;
-  } else {
-    config.tokenEndpoint = input.tokenEndpoint.trim();
-  }
-
   const registration: Registration = {
     name: input.name.trim(),
     agentPlatform: "livekit",
     ...(input.project === undefined ? {} : { project: input.project }),
-    connection: {
-      ...(input.connectionName === undefined
-        ? {}
-        : { name: input.connectionName.trim() }),
-      agentPlatform: "livekit",
-      connectionType: "livekit_room",
-      accessVariant: input.variant,
-      modality: "voice",
-      ...(input.environment === undefined
-        ? {}
-        : { environment: input.environment.trim() }),
-      config,
-      credentials: input.credentials,
-    },
+    connection: liveKitConnection(input),
   };
 
   return registerAgent(registration, options);

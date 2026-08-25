@@ -20,7 +20,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { INVALID_KEY_LINE } from "../src/retell/connect.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
-import { buildExitLine, buildExitNotice } from "../src/wizard/exit-line.ts";
+import {
+  buildExitLine,
+  buildExitNotice,
+  WEB_MONITORING_POINTER,
+} from "../src/wizard/exit-line.ts";
 import { selectedPlatform } from "../src/wizard/login-step.ts";
 import { runWizard } from "../src/wizard/wizard-flow.ts";
 import type { FakeStep } from "./support/fake-agent.ts";
@@ -174,7 +178,8 @@ describe("no coding agent on this machine", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Open the coding agent you use, and paste this into it:");
     expect(result.stdout.trimEnd().split("\n").at(-1)).toBe(
-      "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead.",
+      "Egma found no coding agent on this machine that it can drive, so it printed what to paste into yours instead. " +
+        WEB_MONITORING_POINTER,
     );
   });
 
@@ -182,6 +187,9 @@ describe("no coding agent on this machine", () => {
     const report = { kind: "no-coding-agent" } as const;
     expect(buildExitNotice(report)).toContain("paste this into it:");
     expect(buildExitLine(report)).toContain("printed what to paste into yours instead");
+    // A machine with no coding agent still has a path to watching production
+    // traffic, and the line says where it is.
+    expect(buildExitLine(report)).toContain(WEB_MONITORING_POINTER);
   });
 });
 

@@ -28,6 +28,69 @@ describe("which screen is on", () => {
     await expect(answer).resolves.toBe("codex");
   });
 
+  /**
+   * The monitoring lane's two screens, both reached the way every other screen
+   * is reached: by the flow writing state, never by navigating.
+   *
+   * The key box is the load-bearing one. It is drawn in two phases now — the
+   * testing lane's connection setup and the monitoring lane — and a screen list
+   * that had pinned it to one of them would leave the monitoring lane parked on
+   * a question with nothing on screen to answer it.
+   */
+  it("draws the monitoring lane's screens from the phase and the open question", () => {
+    const store = new WizardStore();
+    store.begin();
+    store.setPhase("monitoring-setup");
+
+    expect(store.activeScreen).toBe("task");
+
+    void store.ask("retell-key");
+    expect(store.activeScreen).toBe("retell-key");
+    store.answer("retell-key", "key_0000000000000000");
+
+    store.setMonitoringAgentChoices([
+      {
+        platformAgentId: "agent_0001",
+        name: "order-line",
+        registeredAgentId: null,
+        registeredAgentName: null,
+        pullProductionCalls: false,
+      },
+    ]);
+    void store.ask("monitoring-agent");
+    expect(store.activeScreen).toBe("monitoring-agent");
+    store.answer("monitoring-agent", "agent_0001");
+    store.setMonitoringAgentChoices(null);
+    expect(store.activeScreen).toBe("task");
+  });
+
+  /**
+   * The one keystroke before Egma writes a live credential into a working tree.
+   *
+   * A gate rather than a question: the screen stays up until the developer
+   * agrees, and agreeing is what lets the flow past.
+   */
+  it("parks on the environment consent until the developer agrees", async () => {
+    const store = new WizardStore();
+    store.begin();
+    store.setPhase("monitoring-setup");
+    store.setEnvConsent("Egma will write two lines into .env.");
+
+    expect(store.activeScreen).toBe("env-consent");
+
+    let opened = false;
+    const gate = store.getGate("write-env").then(() => {
+      opened = true;
+    });
+    await Promise.resolve();
+    expect(opened).toBe(false);
+
+    store.writeEnv();
+    await gate;
+    expect(opened).toBe(true);
+    expect(store.activeScreen).toBe("task");
+  });
+
   it("is worked out from state, so nothing has to navigate", () => {
     const store = new WizardStore();
 
@@ -50,9 +113,12 @@ describe("which screen is on", () => {
           persona: "default persona",
           shown: "egma/tests/release/price-question.md",
           file: "/tmp/egma/tests/release/price-question.md",
+          overrides: [],
         },
       ],
       heldBack: [],
+      mocks: [],
+      changed: [],
       agentName: "order-line",
       connectionName: "retell-1",
       productLabel: "Retell chat",
@@ -110,10 +176,13 @@ describe("which screen is on", () => {
       persona: "default persona",
       shown: `egma/tests/release/${name}.md`,
       file: `/tmp/egma/tests/release/${name}.md`,
+      overrides: [],
     });
     store.setGate({
       rows: [row("one"), row("two")],
       heldBack: [],
+      mocks: [],
+      changed: [],
       agentName: "order-line",
       connectionName: "retell-1",
       productLabel: "Retell chat",

@@ -26,7 +26,7 @@ import {
 import { DRIFT_LINE } from "../src/retell/prompt-drift.ts";
 import { HeadlessUI } from "../src/ui/headless-ui.ts";
 import type { AskId } from "../src/ui/wizard-ui.ts";
-import { connectStep } from "../src/wizard/connect-step.ts";
+import { connectionSetupStep } from "../src/wizard/connection-setup-step.ts";
 import { startFakeRetell, type FakeRetell, type FakeRetellScript } from "./support/fake-retell.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
@@ -161,7 +161,7 @@ class ScriptedUI extends HeadlessUI {
 async function run(options: RunOptions) {
   const ui = new ScriptedUI(options);
 
-  const { report, connected } = await connectStep({
+  const { report, connected } = await connectionSetupStep({
     ui,
     platform: {
       url: platform.url,
@@ -385,18 +385,32 @@ describe("what lands on the platform", () => {
     expect(connected?.reach).toBe("phone");
     expect(platform.registered.connections[0]?.modality).toBe("voice");
 
-    // None of it went to egma. The agent it just registered holds no trace of
-    // what the provider is running.
+    // None of it went to egma. The agent it just registered holds its identity
+    // — with the platform binding every registration now writes — and the
+    // monitoring half it owns (ADR-0015), a sealed key and a switch both empty
+    // here; and nothing at all about what the provider is running: no prompt,
+    // no voice, no tools.
     const [agent] = platform.registered.agents;
     expect(agent).not.toHaveProperty("pulled");
     expect(Object.keys(agent ?? {}).sort()).toEqual([
       "agentPlatform",
       "createdAt",
       "id",
+      "lastReceivedAt",
+      "monitoringApiKey",
+      "monitoringApiKeyHint",
       "name",
+      "platformAgentId",
       "projectId",
+      "pullProductionCalls",
       "updatedAt",
     ]);
+    expect(agent).toMatchObject({
+      agentPlatform: "retell",
+      platformAgentId: null,
+      monitoringApiKey: null,
+      pullProductionCalls: false,
+    });
   });
 
   /**
