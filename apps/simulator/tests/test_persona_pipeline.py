@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import TTSSettings
 from pipecat.services.tts_service import TextAggregationMode, TTSService
@@ -34,7 +35,13 @@ from egma_simulator.conductor import (
     _PersonaLLMService,
     _PersonaReplyGate,
 )
-from egma_simulator.model import ModelFailure, OpenAICompatibleModel, PersonaReply
+from egma_simulator.model import (
+    PERSONA_TOOLS,
+    ModelFailure,
+    OpenAICompatibleModel,
+    PersonaReply,
+    PersonaToolCall,
+)
 from egma_simulator.persona import OPENING_NUDGE, Persona, Turn
 from egma_simulator.spans import SpanEmitter, trace_id_for
 from egma_simulator.speech import (
@@ -55,14 +62,26 @@ class SecretModel:
 
     def __init__(self) -> None:
         self.api_key = SECRET
+        self.contexts: list[LLMContext] = []
         self.messages: list[list[dict[str, str]]] = []
         self.replies = [
             PersonaReply("First response.", concluded=False),
-            PersonaReply("Goodbye.", concluded=True),
+            PersonaReply(
+                "Goodbye.",
+                concluded=False,
+                tool_calls=(
+                    PersonaToolCall(
+                        tool_call_id="call_end",
+                        name="end_call",
+                        arguments={},
+                    ),
+                ),
+            ),
         ]
 
-    async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
-        self.messages.append(messages)
+    async def reply(self, context: LLMContext) -> PersonaReply:
+        self.contexts.append(context)
+        self.messages.append(context.get_messages())
         return self.replies.pop(0)
 
     async def close(self) -> None:
@@ -254,7 +273,7 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
 ):
     model = SecretModel()
     persona = Persona(
-        traits={"temperament": "patient"},
+        traits={"personality": "Patient.", "language": "en-US"},
         scenario_instructions="Ask one safe question.",
         model=model,
     )
@@ -332,6 +351,8 @@ async def test_the_final_persona_pipeline_uses_pipecats_native_service_spans(
     evidence.sealed()
 
     assert model.messages[0][1] == {"role": "user", "content": OPENING_NUDGE}
+    assert all(context.tools is PERSONA_TOOLS for context in model.contexts)
+    assert all(context.tool_choice == "auto" for context in model.contexts)
     assert model.messages[1][-2:] == [
         {"role": "assistant", "content": "First response."},
         {"role": "user", "content": "Anything else?"},
@@ -382,7 +403,11 @@ async def test_a_provider_cannot_echo_its_key_into_the_native_model_span():
         model_name="safe-test-model",
     )
     model._session = EchoSession()  # type: ignore[assignment]
-    persona = Persona(traits={}, scenario_instructions="Ask safely.", model=model)
+    persona = Persona(
+        traits={"personality": "Patient.", "language": "en-US"},
+        scenario_instructions="Ask safely.",
+        model=model,
+    )
     conductor = ConductorProbe()
     service = _PersonaLLMService(persona=persona)
     gate = _PersonaReplyGate(service=service, conductor=conductor)
@@ -428,7 +453,11 @@ async def test_a_successful_provider_cannot_echo_its_key_to_voice_or_evidence():
         model_name="safe-test-model",
     )
     model._session = SuccessfulEchoSession()  # type: ignore[assignment]
-    persona = Persona(traits={}, scenario_instructions="Ask safely.", model=model)
+    persona = Persona(
+        traits={"personality": "Patient.", "language": "en-US"},
+        scenario_instructions="Ask safely.",
+        model=model,
+    )
     conductor = ConductorProbe()
     service = _PersonaLLMService(persona=persona)
     gate = _PersonaReplyGate(service=service, conductor=conductor)

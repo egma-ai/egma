@@ -51,10 +51,10 @@ def read_json(path: Path) -> dict:
 EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
     "spec/chat-carrying-speech-key.json": ("/models/stt", "not", None),
     "spec/limits-missing.json": ("", "required", "limits"),
-    "spec/model-provider-mismatch.json": (
-        "/models/stt/model",
-        "const",
-        None,
+    "spec/adapter-missing.json": (
+        "/models/stt",
+        "required",
+        "adapter",
     ),
     "spec/models-missing.json": ("", "required", "models"),
     "spec/mock-tool-answering-two-ways.json": (
@@ -123,9 +123,9 @@ def place_of(error: ValidationError) -> str:
 
 
 def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 3
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 4
     assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v3"
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v4"
     assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
 
 

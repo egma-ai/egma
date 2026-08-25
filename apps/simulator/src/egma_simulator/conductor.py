@@ -8,7 +8,7 @@ import logging
 import math
 import time
 from collections.abc import Awaitable, Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from typing import Any, cast
 
@@ -20,6 +20,8 @@ from pipecat.frames.frames import (
     ControlFrame,
     EndFrame,
     Frame,
+    FunctionCallFromLLM,
+    FunctionCallResultProperties,
     InputAudioRawFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -40,7 +42,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.settings import LLMSettings
 from pipecat.turns.user_start import VADUserTurnStartStrategy
 from pipecat.turns.user_turn_processor import UserTurnProcessor
@@ -50,7 +52,7 @@ from pipecat.workers.runner import WorkerRunner
 
 from .blob import BlobStore
 from .media import RemoteParticipantLeftFrame, VoiceMedia
-from .model import PersonaReply
+from .model import END_CALL_TOOL_NAME, ModelFailure, PersonaReply
 from .persona import Persona, Turn
 from .platform_logging import log_event
 from .plugs import PlugError, VoiceConnection
@@ -460,15 +462,85 @@ class _PersonaLLMService(LLMService):
         self._persona = persona
         self._reply: PersonaReply | None = None
         self._failure: Exception | None = None
+        self._function_call_done: asyncio.Event | None = None
+        self._function_call_failure: Exception | None = None
+        self._end_call_executed = False
+        self.register_function(END_CALL_TOOL_NAME, self._end_call)
+
+    async def _end_call(self, params: FunctionCallParams) -> None:
+        """Execute the persona's conclusion through Pipecat's tool lifecycle."""
+        done = self._function_call_done
+        if done is None:
+            raise RuntimeError("Pipecat executed end_call outside a persona reply")
+        try:
+            if params.arguments:
+                raise ModelFailure(
+                    "the persona model's end_call tool takes no arguments"
+                )
+            self._end_call_executed = True
+            await params.result_callback(
+                {"ended": True},
+                properties=FunctionCallResultProperties(run_llm=False),
+            )
+        except Exception as fault:
+            self._function_call_failure = fault
+            raise
+        finally:
+            done.set()
+
+    async def _execute_tool_calls(
+        self, reply: PersonaReply, context: LLMContext
+    ) -> PersonaReply:
+        if not reply.tool_calls:
+            return reply
+        if len(reply.tool_calls) != 1:
+            raise ModelFailure(
+                "the persona model called more than one tool in one turn"
+            )
+
+        call = reply.tool_calls[0]
+        if call.name != END_CALL_TOOL_NAME:
+            raise ModelFailure(
+                f"the persona model called an unavailable tool: {call.name!r}"
+            )
+        done = asyncio.Event()
+        self._function_call_done = done
+        self._function_call_failure = None
+        self._end_call_executed = False
+        try:
+            await self.run_function_calls(
+                [
+                    FunctionCallFromLLM(
+                        function_name=call.name,
+                        tool_call_id=call.tool_call_id,
+                        arguments=call.arguments,
+                        context=context,
+                    )
+                ]
+            )
+            await asyncio.wait_for(done.wait(), timeout=2.0)
+            if self._function_call_failure is not None:
+                raise self._function_call_failure
+            if not self._end_call_executed:
+                raise ModelFailure(
+                    "the persona model called a tool that did not execute end_call"
+                )
+            return replace(reply, concluded=True)
+        except TimeoutError as fault:
+            raise ModelFailure(
+                "Pipecat did not finish the persona's end_call tool"
+            ) from fault
+        finally:
+            self._function_call_done = None
 
     @traced_llm
     async def _process_context(self, context: LLMContext) -> None:
         self._reply = None
         self._failure = None
-        messages = cast(list[dict[str, str]], context.get_messages())
-        reply = await self._persona.reply_to(messages)
-        self._reply = reply
+        reply = await self._persona.reply_to(context)
         await self.push_frame(LLMTextFrame(reply.text))
+        reply = await self._execute_tool_calls(reply, context)
+        self._reply = reply
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -513,7 +585,7 @@ class _PersonaReplyGate(FrameProcessor):
 
     async def request(
         self,
-        messages: list[dict[str, str]],
+        context: LLMContext,
         due: MediaPosition,
         push: Callable[[Frame], Awaitable[None]],
     ) -> None:
@@ -523,7 +595,6 @@ class _PersonaReplyGate(FrameProcessor):
         self._waiting = waiting
         self._due = due
         try:
-            context = LLMContext(messages=cast(Any, messages))
             await push(LLMContextFrame(context=context))
             await waiting
         except BaseException:
@@ -618,7 +689,7 @@ class _PersonaBrain(FrameProcessor):
             if due is None:
                 return
             await self._replies.request(
-                self._persona.messages(self._conductor.history),
+                self._persona.context(self._conductor.history),
                 due,
                 self.push_frame,
             )

@@ -33,15 +33,21 @@ export {
   type SeededPersona,
 } from "./persona-library/seed.ts";
 export {
+  MODEL_ADAPTERS,
   MODEL_JOBS,
   MODEL_PROVIDERS,
   PROVIDER_CATALOG,
   PROVIDERS_BY_JOB,
+  REASONING_EFFORTS,
   RECOMMENDED_ENTRY,
+  catalogEntry,
   isModelProvider,
+  type ModelAdapter,
+  type ModelAdapterByJob,
   type ModelJob,
   type ModelProvider,
   type ProviderCatalogEntry,
+  type ReasoningEffort,
 } from "./models/catalog.ts";
 export {
   RECOMMENDED_GRADER_MODEL,
@@ -54,6 +60,7 @@ export {
   validGraderModel,
   validPersonaModels,
   type GraderModel,
+  type LlmSelection,
   type ModelSelection,
   type PersonaModels,
   type SpeechSelection,

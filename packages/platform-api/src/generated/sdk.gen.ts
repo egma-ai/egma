@@ -1153,16 +1153,14 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
     traits: {
         personality: string;
         language: string;
-        manner?: string;
-        patience?: string;
         accent?: string;
         backgroundNoise?: string;
-        underFriction?: string;
     };
     models: {
         llm: {
             provider: string;
             model: string;
+            reasoningEffort?: string;
         };
         stt: {
             provider: string;
@@ -1250,16 +1248,14 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
     traits?: {
         personality: string;
         language: string;
-        manner?: string;
-        patience?: string;
         accent?: string;
         backgroundNoise?: string;
-        underFriction?: string;
     };
     models?: {
         llm: {
             provider: string;
             model: string;
+            reasoningEffort?: string;
         };
         stt: {
             provider: string;

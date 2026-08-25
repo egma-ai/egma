@@ -214,7 +214,7 @@ async def conduct(
                 return limit_by_turns()
             reply = await controls.guard(persona.next_turn(history))
             await record("human", reply.text)
-            if reply.concluded:
+            if reply.concluded or reply.requests_end_call:
                 return ended(PERSONA_CONCLUDED)
 
             # The agent's move — not asked for when its answer could not

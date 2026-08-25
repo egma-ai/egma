@@ -590,7 +590,7 @@ def a_spec(
     really sends for a project that mocks nothing, and a spec that said
     ``[]`` would be exercising a shape nothing produces."""
     spec = {
-        "contract_version": 3,
+        "contract_version": 4,
         "simulation_id": simulation_id,
         "modality": modality,
         "connection": connection,
@@ -640,10 +640,18 @@ def direct_models(
         "deepgram": "nova-3-general",
         "openai": "gpt-live-transcribe",
     }[stt_provider]
-    stt = {"provider": stt_provider, "model": stt_model}
+    stt_adapter = {"deepgram": "deepgram", "openai": "openai_realtime"}[
+        stt_provider
+    ]
+    stt = {
+        "provider": stt_provider,
+        "model": stt_model,
+        "adapter": stt_adapter,
+    }
     tts = {
         "provider": tts_provider,
         "model": tts_model,
+        "adapter": tts_provider,
         "voice_id": voice.get("voice_id", voice.get("voiceId", "warm-alto-2")),
         "speed": voice.get("speed", 1.0),
     }
@@ -654,6 +662,7 @@ def direct_models(
         "llm": {
             "provider": "openai",
             "model": "gpt-4o-mini",
+            "adapter": "openai_chat_completions",
             "key": llm_key,
         },
         "stt": stt,

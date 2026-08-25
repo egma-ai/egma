@@ -89,6 +89,14 @@ const PERSONA_FORM: PersonaForm = {
     { provider: "openai", job: "llm", model: "gpt-4o-mini", label: "OpenAI" },
     {
       provider: "openai",
+      job: "llm",
+      model: "gpt-5.6-terra",
+      label: "OpenAI",
+      reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+      recommendedReasoningEffort: "none",
+    },
+    {
+      provider: "openai",
       job: "stt",
       model: "gpt-live-transcribe",
       label: "OpenAI",
@@ -205,11 +213,8 @@ const RITA: Persona = {
   traits: {
     personality: "Seventy, hard of hearing, and gets louder when she mishears.",
     language: "en-US",
-    manner: "Warm and direct.",
-    patience: "Waits once before asking again.",
     accent: "Neutral American English.",
     backgroundNoise: "A quiet kitchen.",
-    underFriction: "Gets louder when the agent mishears her.",
   },
   models: RECOMMENDED_MODELS,
   revision: "revision-one",
@@ -230,12 +235,16 @@ const DEFAULT_PERSONA: Persona = {
     personality:
       "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
     language: "en-US",
-    manner: "Clear, natural, and conversational.",
-    patience: "Starts patient and gives the agent time to explain.",
     accent: "Neutral American English.",
     backgroundNoise: "None.",
-    underFriction:
-      "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
+  },
+  models: {
+    ...RECOMMENDED_MODELS,
+    llm: {
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      reasoningEffort: "none",
+    },
   },
   revision: "revision-default-persona",
   isDefault: true,
@@ -596,15 +605,11 @@ describe("authoring a persona", () => {
     });
     render(<NewPersonaPage />);
 
-    for (const humanTrait of [
-      "Manner",
-      "Patience",
-      "Under friction",
-      "Accent",
-      "Background noise",
-      "Language",
-    ]) {
+    for (const humanTrait of ["Accent", "Background noise", "Language"]) {
       expect(await screen.findByLabelText(humanTrait), humanTrait).toBeDefined();
+    }
+    for (const retiredTrait of ["Manner", "Patience", "Under friction"]) {
+      expect(screen.queryByLabelText(retiredTrait), retiredTrait).toBeNull();
     }
     expect(screen.queryByLabelText("Voice provider")).toBeNull();
 
@@ -640,22 +645,16 @@ describe("authoring a persona", () => {
       traits: {
         personality: "Seventy, and gets louder when she mishears.",
         language: "en-US",
-        manner: "",
-        patience: "",
         accent: "",
         backgroundNoise: "",
-        underFriction: "",
       },
       models: RECOMMENDED_MODELS,
     });
     expect(Object.keys((written?.body as { traits: object }).traits)).toEqual([
       "personality",
       "language",
-      "manner",
-      "patience",
       "accent",
       "backgroundNoise",
-      "underFriction",
     ]);
     expect(asked.map((one) => one.path)).toContain(
       "/v1/persona-form?projectId=prj_1",
@@ -828,6 +827,11 @@ describe("one persona's sheet", () => {
   it("selects exact model pairs and sends one complete models value", async () => {
     const changedModels: PersonaModels = {
       ...RECOMMENDED_MODELS,
+      llm: {
+        provider: "openai",
+        model: "gpt-5.6-terra",
+        reasoningEffort: "high",
+      },
       stt: { provider: "deepgram", model: "nova-3-general" },
       tts: {
         provider: "openai",
@@ -851,6 +855,12 @@ describe("one persona's sheet", () => {
     render(<PersonaPage />);
 
     await openEditor();
+    fireEvent.change(screen.getByLabelText("Language model"), {
+      target: { value: JSON.stringify(["openai", "gpt-5.6-terra"]) },
+    });
+    const reasoning = screen.getByLabelText("Reasoning effort");
+    expect((reasoning as HTMLSelectElement).value).toBe("none");
+    fireEvent.change(reasoning, { target: { value: "high" } });
     const stt = screen.getByLabelText("Speech-to-text model");
     fireEvent.change(stt, {
       target: { value: JSON.stringify(["deepgram", "nova-3-general"]) },
@@ -1376,7 +1386,7 @@ describe("one persona's sheet", () => {
 
     // The catalog's own word for a provider, rather than the id a persona
     // stores. It arrives with the authoring choices, so it is waited for.
-    await within(panel).findByText("OpenAI · gpt-4o-mini");
+    await within(panel).findByText("OpenAI · gpt-5.6-terra");
 
     expect(
       Array.from(panel.querySelectorAll("dt"), (term) => term.textContent),
@@ -1384,12 +1394,10 @@ describe("one persona's sheet", () => {
       "Description",
       "Personality",
       "Language",
-      "Manner",
-      "Patience",
       "Accent",
       "Background noise",
-      "Under friction",
       "Language model",
+      "Reasoning effort",
       "Speech-to-text model",
       "Text-to-speech model",
       "Speech rate",
@@ -1404,12 +1412,10 @@ describe("one persona's sheet", () => {
       "Regular conversationalist persona",
       "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
       "en-US",
-      "Clear, natural, and conversational.",
-      "Starts patient and gives the agent time to explain.",
       "Neutral American English.",
       "None.",
-      "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
-      "OpenAI · gpt-4o-mini",
+      "OpenAI · gpt-5.6-terra",
+      "none",
       "OpenAI · gpt-live-transcribe",
       "Cartesia · sonic-3.5",
       "1×",

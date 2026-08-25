@@ -113,7 +113,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: { contract_versions: [3], ...body },
+    payload: { contract_versions: [4], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -210,7 +210,11 @@ async function aRealtimeVoiceCustomerReadyToRun(
     name: "Realtime Rita",
     traits: NEUTRAL_TRAITS,
     models: {
-      llm: { provider: "openai", model: "gpt-4o-mini" },
+      llm: {
+        provider: "openai",
+        model: "gpt-5.6-terra",
+        reasoningEffort: "none",
+      },
       stt: { provider: "openai", model: "gpt-live-transcribe" },
       tts: {
         provider: "cartesia",
@@ -352,7 +356,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(3);
+    expect(spec.contract_version).toBe(4);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -380,12 +384,18 @@ describe("claiming work", () => {
       llm: {
         provider: "openai",
         model: "gpt-4o-mini",
+        adapter: "openai_chat_completions",
         key: "openai-key-held-by-this-test-suite",
       },
-      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      stt: {
+        provider: "openai",
+        model: "gpt-live-transcribe",
+        adapter: "openai_realtime",
+      },
       tts: {
         provider: "cartesia",
         model: "sonic-3.5",
+        adapter: "cartesia",
         voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
         speed: 1,
       },
@@ -1061,17 +1071,21 @@ describe("one source of execution truth", () => {
     expect(spec?.models).toEqual({
       llm: {
         provider: "openai",
-        model: "gpt-4o-mini",
+        model: "gpt-5.6-terra",
+        adapter: "openai_chat_completions",
+        reasoning_effort: "none",
         key: "one-openai-account-key",
       },
       stt: {
         provider: "openai",
         model: "gpt-live-transcribe",
+        adapter: "openai_realtime",
         key: "one-openai-account-key",
       },
       tts: {
         provider: "cartesia",
         model: "sonic-3.5",
+        adapter: "cartesia",
         voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
         speed: SPEED_RANGE.slowest,
         key: "one-cartesia-account-key",
@@ -1247,7 +1261,7 @@ describe("one source of execution truth", () => {
     expect(row?.endingReason).toBe("dispatch_failed");
   });
 
-  it("does not claim work for a worker that cannot read contract version 3", async () => {
+  it("does not claim work for a worker that cannot read contract version 4", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_contract_cutover",
     );
@@ -1260,7 +1274,7 @@ describe("one source of execution truth", () => {
       contract_versions: [1],
     });
     expect(refused.statusCode).toBe(400);
-    expect(String(refused.body.message)).toContain("version 3");
+    expect(String(refused.body.message)).toContain("version 4");
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
   });

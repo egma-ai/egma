@@ -203,14 +203,8 @@ function traitReads(traits: PersonaTraits): readonly Read[] {
   return [
     { label: "Personality", value: traits.personality, wide: true },
     { label: "Language", value: traits.language, wide: true },
-    ...pair("Manner", traits.manner),
-    ...pair("Patience", traits.patience),
     ...pair("Accent", traits.accent),
     ...pair("Background noise", traits.backgroundNoise),
-    ...pair("Under friction", traits.underFriction).map((one) => ({
-      ...one,
-      wide: true,
-    })),
   ];
 }
 
@@ -224,6 +218,15 @@ function modelReads(
       label: "Language model",
       value: modelSaid(form?.modelCatalog, "llm", models.llm),
     },
+    ...(models.llm.reasoningEffort === undefined
+      ? []
+      : [
+          {
+            label: "Reasoning effort",
+            value: models.llm.reasoningEffort,
+            mono: true,
+          } satisfies Read,
+        ]),
     {
       label: "Speech-to-text model",
       value: modelSaid(form?.modelCatalog, "stt", models.stt),

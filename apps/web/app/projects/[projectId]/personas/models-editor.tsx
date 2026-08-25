@@ -65,6 +65,11 @@ export function ModelFields({
   ): PersonaModelCatalogEntry | undefined =>
     entries(job).find((entry) => choice(entry.provider, entry.model) === value);
 
+  const selectedLlm = selected(
+    "llm",
+    choice(draft.llmProvider, draft.llmModel),
+  );
+
   /** The options of one job, drawn as the browser's own. */
   const optionsOf = (job: PersonaModelCatalogEntry["job"]) =>
     options(job).map((option) => (
@@ -92,6 +97,10 @@ export function ModelFields({
                 ...draft,
                 llmProvider: entry.provider,
                 llmModel: entry.model,
+                llmReasoningEffort:
+                  entry.recommendedReasoningEffort ??
+                  entry.reasoningEfforts?.[0] ??
+                  "",
               });
             }}
           >
@@ -122,6 +131,32 @@ export function ModelFields({
           </Select>
         </Field>
       </FormRow>
+
+      {selectedLlm?.reasoningEfforts === undefined ? null : (
+        <Field
+          label="Reasoning effort"
+          htmlFor="persona-llm-reasoning-effort"
+          hint="How much reasoning the language model uses before it answers. None turns reasoning off."
+        >
+          <Select
+            id="persona-llm-reasoning-effort"
+            value={draft.llmReasoningEffort}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                llmReasoningEffort: event.target.value,
+              })
+            }
+          >
+            {selectedLlm.reasoningEfforts.map((effort) => (
+              <option key={effort} value={effort}>
+                {effort}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
 
       <Field
         label="Text-to-speech model"

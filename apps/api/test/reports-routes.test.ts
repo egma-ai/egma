@@ -282,7 +282,7 @@ async function aClaimedSimulation(
       claimant: CONDUCTOR,
       capacity: 50,
       wait_seconds: 0,
-      contract_versions: [3],
+      contract_versions: [4],
     },
   });
   expect(claimed.statusCode).toBe(200);

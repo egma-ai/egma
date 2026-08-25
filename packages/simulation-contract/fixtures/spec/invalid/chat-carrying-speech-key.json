@@ -1,5 +1,5 @@
 {
-  "contract_version": 3,
+  "contract_version": 4,
   "simulation_id": "sim_fixture_chat_carrying_speech_key",
   "modality": "chat",
   "connection": {
@@ -16,16 +16,19 @@
     "llm": {
       "provider": "openai",
       "model": "gpt-4o-mini",
+      "adapter": "openai_chat_completions",
       "key": "fixture-not-a-real-secret-llm"
     },
     "stt": {
       "provider": "deepgram",
       "model": "nova-3-general",
+      "adapter": "deepgram",
       "key": "fixture-not-a-real-secret-unused-stt"
     },
     "tts": {
       "provider": "cartesia",
       "model": "sonic-3.5",
+      "adapter": "cartesia",
       "voice_id": "fixture-voice",
       "speed": 1
     }

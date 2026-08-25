@@ -66,7 +66,7 @@ async function fixturesUnder(
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
-const specSchema = await readJson("schemas", "simulation-spec.v3.schema.json");
+const specSchema = await readJson("schemas", "simulation-spec.v4.schema.json");
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -107,13 +107,12 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     property: "limits",
   },
   "spec/modality-unknown.json": { at: "/modality", keyword: "enum" },
-  // A model id belongs to the provider that owns it. This is the production
-  // failure shape: a field-by-field merge made a Deepgram provider and an
-  // OpenAI realtime model look configured until the first request. The
-  // contract refuses the pair before a simulator can claim it.
-  "spec/model-provider-mismatch.json": {
-    at: "/models/stt/model",
-    keyword: "const",
+  // Catalog membership is checked before claim assembly. On the wire, every
+  // selection still has to name the adapter that the catalog resolved.
+  "spec/adapter-missing.json": {
+    at: "/models/stt",
+    keyword: "required",
+    property: "adapter",
   },
   "spec/models-missing.json": {
     at: "",
@@ -218,12 +217,12 @@ describe("the two schemas, as one contract", () => {
         (schema.properties as Record<string, Record<string, unknown>>)
           .contract_version as Record<string, unknown>
       ).const;
-    expect(versionOf(specSchema)).toBe(3);
+    expect(versionOf(specSchema)).toBe(4);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v3");
+    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v4");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 
@@ -272,6 +271,118 @@ describe("the two schemas, as one contract", () => {
         }),
       );
     }
+  });
+
+  it("keeps catalog membership out of the wire contract", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-loopback.json",
+    );
+    const candidate = structuredClone(base);
+    const models = candidate.models as Record<
+      "llm" | "stt" | "tts",
+      Record<string, unknown>
+    >;
+    models.llm.provider = "future-llm-provider";
+    models.llm.model = "future-llm-model";
+    models.llm.adapter = "future_llm_adapter";
+    models.stt.provider = "future-stt-provider";
+    models.stt.model = "future-stt-model";
+    models.stt.adapter = "future_stt_adapter";
+    models.tts.provider = "future-tts-provider";
+    models.tts.model = "future-tts-model";
+    models.tts.adapter = "future_tts_adapter";
+
+    expect(
+      validators.spec(candidate),
+      ajv.errorsText(validators.spec.errors),
+    ).toBe(true);
+
+    const definitions = specSchema.$defs as Record<
+      string,
+      { properties: Record<string, Record<string, unknown>> }
+    >;
+    for (const job of ["llm", "stt", "tts"] as const) {
+      const selection = definitions[`${job}_selection`];
+      if (selection === undefined) {
+        throw new Error(`the contract has no ${job} selection`);
+      }
+      for (const name of ["provider", "model", "adapter"] as const) {
+        expect(selection.properties[name]).toEqual({
+          type: "string",
+          minLength: 1,
+        });
+      }
+    }
+  });
+
+  it("keeps only the authored persona traits that still cross the wire", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-loopback.json",
+    );
+    const withTrait = (name: string, value: string): Record<string, unknown> => {
+      const spec = structuredClone(base);
+      const persona = spec.persona as Record<string, Record<string, unknown>>;
+      const traits = persona.traits;
+      if (traits === undefined) throw new Error("the fixture has no traits");
+      traits[name] = value;
+      return spec;
+    };
+
+    for (const retained of ["accent", "backgroundNoise"]) {
+      expect(
+        validators.spec(withTrait(retained, "authored detail")),
+        `${retained}: ${ajv.errorsText(validators.spec.errors)}`,
+      ).toBe(true);
+    }
+
+    for (const removed of ["manner", "patience", "underFriction"]) {
+      expect(validators.spec(withTrait(removed, "retired detail"))).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/persona/traits",
+          keyword: "additionalProperties",
+          params: { additionalProperty: removed },
+        }),
+      );
+    }
+  });
+
+  it("keeps reasoning effort structural, not catalog-owned", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-loopback.json",
+    );
+    const withReasoning = (reasoningEffort: string): Record<string, unknown> => {
+      const spec = structuredClone(base);
+      const models = spec.models as Record<string, Record<string, unknown>>;
+      const llm = models.llm;
+      if (llm === undefined) throw new Error("the fixture has no LLM selection");
+      llm.reasoning_effort = reasoningEffort;
+      return spec;
+    };
+
+    for (const effort of ["none", "future-effort"]) {
+      expect(
+        validators.spec(withReasoning(effort)),
+        `${effort}: ${ajv.errorsText(validators.spec.errors)}`,
+      ).toBe(true);
+    }
+
+    expect(validators.spec(withReasoning(""))).toBe(false);
+    expect(validators.spec.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "/models/llm/reasoning_effort",
+        keyword: "minLength",
+      }),
+    );
   });
 
   it("accepts only complete carrier routes", async () => {

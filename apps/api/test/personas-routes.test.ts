@@ -46,11 +46,8 @@ afterEach(async () => {
 const TRAITS: PersonaTraits = {
   personality: "Calls about a bill and wants it settled today.",
   language: "en-US",
-  manner: "Clear and direct.",
-  patience: "Waits once before asking again.",
   accent: "Neutral American English.",
   backgroundNoise: "A quiet room.",
-  underFriction: "Asks for a manager without becoming rude.",
 };
 
 /** One browser request: a session cookie, and the project in the address. */
@@ -142,6 +139,13 @@ describe("creating and reading a persona", () => {
           job: "stt",
           provider: "deepgram",
           model: "nova-3-general",
+        }),
+        expect.objectContaining({
+          job: "llm",
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+          recommendedReasoningEffort: "none",
         }),
       ]),
     );
@@ -242,6 +246,26 @@ describe("creating and reading a persona", () => {
         "persona traits have unsupported fields background_noise. " +
         "Provider, model, voice id, and speed belong in models.",
     });
+
+    for (const [field, value] of Object.entries({
+      manner: "Clear and direct.",
+      patience: "Waits once before asking again.",
+      underFriction: "Asks for a manager without becoming rude.",
+    })) {
+      const removedTrait = await browse("POST", "/v1/personas", ada, {
+        projectId: ada.projectId,
+        name: `No retired ${field}`,
+        traits: { ...TRAITS, [field]: value },
+        models: RECOMMENDED_PERSONA_MODELS,
+      });
+      expect(removedTrait.statusCode, field).toBe(422);
+      expect(removedTrait.body, field).toEqual({
+        error: "unprocessable",
+        message:
+          `persona traits have unsupported fields ${field}. ` +
+          "Provider, model, voice id, and speed belong in models.",
+      });
+    }
 
     const missingModels = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
@@ -367,24 +391,24 @@ describe("creating and reading a persona", () => {
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        manner: "Clear, natural, and conversational.",
-        patience: "Starts patient and gives the agent time to explain.",
         accent: "Neutral American English.",
         backgroundNoise: "None.",
-        underFriction:
-          "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
       },
-      models: RECOMMENDED_PERSONA_MODELS,
+      models: {
+        ...RECOMMENDED_PERSONA_MODELS,
+        llm: {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "none",
+        },
+      },
     });
     expect(Object.keys(found?.traits ?? {}).sort()).toEqual(
       [
         "accent",
         "backgroundNoise",
         "language",
-        "manner",
-        "patience",
         "personality",
-        "underFriction",
       ].sort(),
     );
     expect(items.filter((one) => one.isDefault)).toHaveLength(1);

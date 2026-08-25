@@ -1,4 +1,4 @@
-"""The simulator resolves every model and technical voice from one block."""
+"""The simulator dispatches catalog selections by their claimed adapters."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from typing import cast
 import pytest
 
 from egma_simulator.config import STT_PROVIDERS, TTS_PROVIDERS
-from egma_simulator.contract import spec_validator
-from egma_simulator.model import OpenAICompatibleModel, build_model_client
+from egma_simulator.model import ModelFailure, OpenAICompatibleModel, build_model_client
 from egma_simulator.spec import (
     ModelSelection,
     SelectedModels,
@@ -18,84 +17,19 @@ from egma_simulator.spec import (
 )
 from egma_simulator.speech import SpeechProviders, _ears, _mouth, voice_from_models
 
-ModelPair = tuple[str, str]
-
-LLM_ADAPTER_BY_PROVIDER = {"openai": OpenAICompatibleModel}
-STT_ADAPTER_BY_PROVIDER = {
-    "deepgram": ("deepgram", "DeepgramSTTService"),
-    "openai": ("openai_realtime", "OpenAIRealtimeSTTService"),
-}
-TTS_ADAPTER_BY_PROVIDER = {
-    "cartesia": ("cartesia", "CartesiaTTSService"),
-    "openai": ("openai", "OpenAITTSService"),
-}
-
-
-def selection_schema(kind: str) -> dict:
-    return spec_validator().schema["$defs"][f"{kind}_selection"]
-
-
-def property_constants(node: object, property_name: str) -> set[str]:
-    if isinstance(node, list):
-        constants: set[str] = set()
-        for child in node:
-            constants.update(property_constants(child, property_name))
-        return constants
-    if not isinstance(node, dict):
-        return set()
-
-    constants: set[str] = set()
-    properties = node.get("properties")
-    if isinstance(properties, dict):
-        property_schema = properties.get(property_name)
-        if isinstance(property_schema, dict):
-            constant = property_schema.get("const")
-            if isinstance(constant, str):
-                constants.add(constant)
-
-    for child in node.values():
-        constants.update(property_constants(child, property_name))
-    return constants
-
-
-def example_selection(schema: dict, *, provider: str, model: str) -> dict:
-    example: dict[str, object] = {"provider": provider, "model": model}
-    properties = schema["properties"]
-    for field_name in schema["required"]:
-        if field_name in example:
-            continue
-        field_schema = properties[field_name]
-        if field_schema["type"] == "string":
-            example[field_name] = "contract-test-value"
-        elif field_schema["type"] == "number":
-            example[field_name] = field_schema.get("minimum", 1)
-        else:
-            raise AssertionError(f"no contract-test value for {field_name}")
-    return example
-
-
-def contract_pairs(kind: str) -> tuple[ModelPair, ...]:
-    schema = selection_schema(kind)
-    provider_schema = schema["properties"]["provider"]
-    if "const" in provider_schema:
-        providers = (provider_schema["const"],)
-    else:
-        providers = tuple(provider_schema["enum"])
-
-    models = property_constants(schema, "model")
-    validator = spec_validator().evolve(schema=schema)
-    pairs = tuple(
-        (provider, model)
-        for provider in providers
-        for model in sorted(models)
-        if validator.is_valid(example_selection(schema, provider=provider, model=model))
-    )
-    assert {provider for provider, _model in pairs} == set(providers)
-    assert len(pairs) == len(providers)
-    return pairs
-
-
-CONTRACT_PAIRS = {kind: contract_pairs(kind) for kind in ("llm", "stt", "tts")}
+STT_ADAPTERS = (
+    ("deepgram", "deepgram", "nova-3-general", "DeepgramSTTService"),
+    (
+        "openai",
+        "openai_realtime",
+        "gpt-live-transcribe",
+        "OpenAIRealtimeSTTService",
+    ),
+)
+TTS_ADAPTERS = (
+    ("cartesia", "cartesia", "sonic-3.5", "CartesiaTTSService"),
+    ("openai", "openai", "gpt-4o-mini-tts", "OpenAITTSService"),
+)
 
 
 def direct_key(provider: str) -> str:
@@ -104,106 +38,134 @@ def direct_key(provider: str) -> str:
 
 def selected(
     *,
-    llm: ModelPair | None = None,
-    stt: ModelPair | None = None,
-    tts: ModelPair | None = None,
+    llm_provider: str = "openai",
+    llm_model: str = "gpt-5.6-terra",
+    llm_adapter: str = "openai_chat_completions",
+    stt_provider: str = "deepgram",
+    stt_model: str = "nova-3-general",
+    stt_adapter: str = "deepgram",
+    tts_provider: str = "cartesia",
+    tts_model: str = "sonic-3.5",
+    tts_adapter: str = "cartesia",
 ) -> SelectedModels:
-    llm_provider, llm_model = llm or CONTRACT_PAIRS["llm"][0]
-    stt_provider, stt_model = stt or CONTRACT_PAIRS["stt"][0]
-    tts_provider, tts_model = tts or CONTRACT_PAIRS["tts"][0]
-    speed_schema = selection_schema("tts")["properties"]["speed"]
     return SelectedModels(
         llm=ModelSelection(
             provider=llm_provider,
             model=llm_model,
+            adapter=llm_adapter,
+            reasoning_effort="none",
             key=direct_key(llm_provider),
         ),
         stt=ModelSelection(
             provider=stt_provider,
             model=stt_model,
+            adapter=stt_adapter,
             key=direct_key(stt_provider),
         ),
         tts=SpeechSelection(
             provider=tts_provider,
             model=tts_model,
+            adapter=tts_adapter,
             key=direct_key(tts_provider),
             voice_id=f"{tts_provider}-voice",
-            speed=speed_schema["minimum"],
+            speed=1.0,
         ),
     )
 
 
-def test_every_contract_provider_has_one_shipped_route_and_a_direct_key_shape():
-    assert set(LLM_ADAPTER_BY_PROVIDER) == {
-        provider for provider, _model in CONTRACT_PAIRS["llm"]
-    }
-    assert set(STT_ADAPTER_BY_PROVIDER) == {
-        provider for provider, _model in CONTRACT_PAIRS["stt"]
-    }
-    assert set(TTS_ADAPTER_BY_PROVIDER) == {
-        provider for provider, _model in CONTRACT_PAIRS["tts"]
-    }
-    assert {adapter for adapter, _service in STT_ADAPTER_BY_PROVIDER.values()} == (
+def test_speech_adapter_names_match_the_runtime_builders():
+    assert {adapter for _provider, adapter, _model, _service in STT_ADAPTERS} == (
         set(STT_PROVIDERS) - {"scripted"}
     )
-    assert {adapter for adapter, _service in TTS_ADAPTER_BY_PROVIDER.values()} == (
+    assert {adapter for _provider, adapter, _model, _service in TTS_ADAPTERS} == (
         set(TTS_PROVIDERS) - {"scripted"}
     )
 
-    for kind in CONTRACT_PAIRS:
-        key_schema = selection_schema(kind)["properties"]["key"]
-        assert key_schema["type"] == "string"
-        assert key_schema["minLength"] > 0
 
-
-@pytest.mark.parametrize(("provider", "model"), CONTRACT_PAIRS["llm"])
-async def test_every_contract_llm_pair_builds_its_shipped_client(
-    provider: str, model: str
-):
-    models = selected(llm=(provider, model))
+async def test_llm_dispatch_uses_adapter_and_accepts_any_catalog_model_name():
+    models = selected(
+        llm_provider="catalog-provider-label",
+        llm_model="future-catalog-model",
+        llm_adapter="openai_chat_completions",
+    )
     spec = cast(SimulationSpec, SimpleNamespace(models=models))
 
     client = build_model_client(spec)
     try:
-        assert type(client) is LLM_ADAPTER_BY_PROVIDER[provider]
-        assert client.model_name == model
-        assert models.llm.key == direct_key(provider)
-        assert direct_key(provider) in models.secrets
+        assert type(client) is OpenAICompatibleModel
+        assert client.model_name == "future-catalog-model"
+        assert models.llm.key == direct_key("catalog-provider-label")
     finally:
         await client.close()
 
 
-@pytest.mark.parametrize(("provider", "model"), CONTRACT_PAIRS["stt"])
-def test_every_contract_stt_pair_builds_its_shipped_listening_leg(
-    provider: str, model: str
+def test_llm_dispatch_does_not_fall_back_from_provider_name():
+    models = selected(llm_provider="openai", llm_adapter="not-shipped")
+    spec = cast(SimulationSpec, SimpleNamespace(models=models))
+
+    with pytest.raises(ModelFailure, match="not-shipped"):
+        build_model_client(spec)
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter", "model", "expected_service"), STT_ADAPTERS
+)
+def test_each_stt_adapter_builds_its_listening_leg(
+    provider: str, adapter: str, model: str, expected_service: str
 ):
-    models = selected(stt=(provider, model))
-    resolved_adapter, expected_service = STT_ADAPTER_BY_PROVIDER[provider]
+    models = selected(
+        stt_provider=provider,
+        stt_model=model,
+        stt_adapter=adapter,
+    )
 
     providers = SpeechProviders.from_models(models, vad="silero").checked()
     leg, _connected = _ears(providers)
 
-    assert providers.stt == resolved_adapter
+    assert providers.stt == adapter
     assert providers.stt_model == model
     assert providers.stt_key == direct_key(provider)
     assert type(leg).__name__ == expected_service
     assert direct_key(provider) in models.secrets
 
 
-@pytest.mark.parametrize(("provider", "model"), CONTRACT_PAIRS["tts"])
-def test_every_contract_tts_pair_builds_its_shipped_speaking_leg(
-    provider: str, model: str
+def test_stt_dispatch_uses_adapter_not_provider():
+    models = selected(stt_provider="openai", stt_adapter="deepgram")
+
+    providers = SpeechProviders.from_models(models, vad="silero").checked()
+    leg, _connected = _ears(providers)
+
+    assert providers.stt == "deepgram"
+    assert type(leg).__name__ == "DeepgramSTTService"
+
+
+@pytest.mark.parametrize(
+    ("provider", "adapter", "model", "expected_service"), TTS_ADAPTERS
+)
+def test_each_tts_adapter_builds_its_speaking_leg(
+    provider: str, adapter: str, model: str, expected_service: str
 ):
-    models = selected(tts=(provider, model))
-    resolved_adapter, expected_service = TTS_ADAPTER_BY_PROVIDER[provider]
+    models = selected(
+        tts_provider=provider,
+        tts_model=model,
+        tts_adapter=adapter,
+    )
     voice = voice_from_models(models)
 
     providers = SpeechProviders.from_models(models, vad="silero").checked()
     leg, spoken_with, _closers = _mouth(providers, voice)
 
-    assert providers.tts == resolved_adapter
+    assert providers.tts == adapter
     assert providers.tts_model == model
     assert providers.tts_key == direct_key(provider)
     assert type(leg).__name__ == expected_service
     assert spoken_with == voice
     assert direct_key(provider) in models.secrets
+
+
+def test_tts_dispatch_uses_adapter_not_provider():
+    models = selected(tts_provider="cartesia", tts_adapter="openai")
+
+    providers = SpeechProviders.from_models(models, vad="silero").checked()
+
+    assert providers.tts == "openai"

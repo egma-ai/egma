@@ -101,10 +101,16 @@ class PlatformSettings:
 
 @dataclass(frozen=True)
 class ModelSelection:
-    """One pinned provider/model pair and its direct credential, when used."""
+    """One pinned catalog selection and its direct credential, when used."""
 
     provider: str
     model: str
+    adapter: str
+    """The simulator implementation named by the catalog entry."""
+
+    reasoning_effort: str | None = None
+    """The selected LLM reasoning primitive, absent where it does not apply."""
+
     key: str | None = field(default=None, repr=False)
 
 
@@ -139,6 +145,7 @@ class SelectedModels:
             tts=SpeechSelection(
                 provider=tts["provider"],
                 model=tts["model"],
+                adapter=tts["adapter"],
                 key=tts.get("key"),
                 voice_id=tts["voice_id"],
                 speed=float(tts["speed"]),
@@ -150,6 +157,8 @@ def _selection(written: Any) -> ModelSelection:
     return ModelSelection(
         provider=written["provider"],
         model=written["model"],
+        adapter=written["adapter"],
+        reasoning_effort=written.get("reasoning_effort"),
         key=written.get("key"),
     )
 

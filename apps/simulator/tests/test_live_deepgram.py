@@ -177,7 +177,7 @@ async def test_a_real_transcriber_reads_a_real_sentence(tmp_path: Path):
 
     await conductor.conduct(
         persona=Persona(
-            traits={},
+            traits={"personality": "Patient.", "language": "en-US"},
             scenario_instructions="Anything; the line does not listen.",
             model=ScriptedModel("Anything; the line does not listen."),
         ),

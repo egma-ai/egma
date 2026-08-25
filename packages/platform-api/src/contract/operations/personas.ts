@@ -29,11 +29,8 @@ const traits = {
   properties: {
     personality: { type: "string" },
     language: { type: "string" },
-    manner: { type: "string" },
-    patience: { type: "string" },
     accent: { type: "string" },
     backgroundNoise: { type: "string" },
-    underFriction: { type: "string" },
   },
   required: ["personality", "language"],
   additionalProperties: false,
@@ -49,6 +46,18 @@ const modelSelection = {
   additionalProperties: false,
 } as const;
 
+const reasoningEffort = {
+  type: "string",
+} as const;
+
+const llmSelection = {
+  ...modelSelection,
+  properties: {
+    ...modelSelection.properties,
+    reasoningEffort,
+  },
+} as const;
+
 const speechSelection = {
   ...modelSelection,
   properties: {
@@ -62,7 +71,7 @@ const speechSelection = {
 const personaModels = {
   type: "object",
   properties: {
-    llm: modelSelection,
+    llm: llmSelection,
     stt: modelSelection,
     tts: speechSelection,
   },
@@ -148,6 +157,8 @@ const modelCatalogEntry = {
     job: { type: "string", enum: ["llm", "stt", "tts"] },
     model: { type: "string" },
     label: { type: "string" },
+    reasoningEfforts: arrayOf(reasoningEffort),
+    recommendedReasoningEffort: reasoningEffort,
     recommendedVoiceId: { type: "string" },
   },
   required: ["provider", "job", "model", "label"],

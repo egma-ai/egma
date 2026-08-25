@@ -20,7 +20,7 @@ from egma_simulator.plugs import AgentReply
 from egma_simulator.plugs.scripted import ScriptedCounterpart
 from egma_simulator.walk import Conducted, WalkControls, conduct
 
-TRAITS = {"personality": "Terse test person."}
+TRAITS = {"personality": "Terse test person.", "language": "en-US"}
 
 
 def persona_for(scenario: str) -> Persona:

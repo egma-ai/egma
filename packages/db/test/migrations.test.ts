@@ -16,14 +16,7 @@ import {
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
-import {
-  PROVIDER_CATALOG,
-  PROVIDERS_BY_JOB,
-} from "../src/models/catalog.ts";
-import {
-  RECOMMENDED_PERSONA_MODELS,
-  SPEED_RANGE,
-} from "../src/models/selections.ts";
+import { SPEED_RANGE } from "../src/models/selections.ts";
 import * as schema from "../src/schema/index.ts";
 import {
   createEmptyDatabase,
@@ -32,6 +25,41 @@ import {
   type EmptyDatabase,
 } from "./support/database.ts";
 import { repeatedMigrationNumbers } from "./support/migration-numbers.ts";
+
+/** The exact executable catalog migration 0037 installed. Historical migration
+ * proofs must not change meaning when a later release adds another model. */
+const PROVIDER_CATALOG_AT_0037 = [
+  { job: "llm", provider: "openai", model: "gpt-4o-mini" },
+  { job: "stt", provider: "openai", model: "gpt-live-transcribe" },
+  { job: "stt", provider: "deepgram", model: "nova-3-general" },
+  {
+    job: "tts",
+    provider: "cartesia",
+    model: "sonic-3.5",
+    recommendedVoiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+  },
+  {
+    job: "tts",
+    provider: "openai",
+    model: "gpt-4o-mini-tts",
+    recommendedVoiceId: "alloy",
+  },
+] as const;
+
+const RECOMMENDED_PERSONA_MODELS_AT_0037 = {
+  llm: { provider: "openai", model: "gpt-4o-mini" },
+  stt: { provider: "openai", model: "gpt-live-transcribe" },
+  tts: {
+    provider: "cartesia",
+    model: "sonic-3.5",
+    voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+    speed: 1,
+  },
+} as const;
+
+const GRADER_MODELS_AT_0037 = [
+  { provider: "openai", model: "gpt-4o-mini" },
+] as const;
 
 function idBits(id: string): bigint {
   const body = id.slice(id.indexOf("_") + 1);
@@ -3379,9 +3407,9 @@ describe("persona availability over installed references (0037)", () => {
         constraint: "platform_setting_name_allowed",
       });
 
-      const validModels = RECOMMENDED_PERSONA_MODELS;
+      const validModels = RECOMMENDED_PERSONA_MODELS_AT_0037;
 
-      for (const [offset, entry] of PROVIDER_CATALOG.entries()) {
+      for (const [offset, entry] of PROVIDER_CATALOG_AT_0037.entries()) {
         const models =
           entry.job === "llm"
             ? {
@@ -3807,10 +3835,9 @@ describe("persona availability over installed references (0037)", () => {
         [codeLibraryId]: null,
       });
 
-      // The database accepts every LLM pair from the executable catalog. If a
-      // catalog entry is added without changing the migration constraint, this
-      // upgrade proof fails instead of allowing authoring and storage to drift.
-      for (const [offset, entry] of PROVIDERS_BY_JOB.llm.entries()) {
+      // This proves the exact LLM set migration 0037 installed. Later catalog
+      // additions belong to later migrations and must not rewrite this history.
+      for (const [offset, entry] of GRADER_MODELS_AT_0037.entries()) {
         await prepared.client.query(
           `insert into grader_version
              (id, grader_id, version, library_id, library_version, config, judge_model)
@@ -4505,7 +4532,7 @@ describe("the clean test-suite cutover (0040)", () => {
         personaVersionId,
         personaId,
         JSON.stringify({ personality: "calm", language: "English" }),
-        JSON.stringify(RECOMMENDED_PERSONA_MODELS),
+        JSON.stringify(RECOMMENDED_PERSONA_MODELS_AT_0037),
       ],
     );
     await client.query("commit");
@@ -5334,7 +5361,12 @@ describe("the required agent platform cutover (0044)", () => {
       [retellAgent, liveKitAgent, organizationId, projectId],
     );
 
-    const result = await runMigrations(database.url);
+    const upgrade = (await readMigrations()).find(
+      (migration) => migration.name === "0044_require_agent_platform.sql",
+    );
+    if (upgrade === undefined) throw new Error("missing migration 0044");
+    await writeFile(path.join(before, upgrade.name), upgrade.sql);
+    const result = await runMigrations(database.url, before);
     expect(result.applied).toEqual(["0044_require_agent_platform.sql"]);
 
     const agents = await client.query<{
@@ -5353,5 +5385,164 @@ describe("the required agent platform cutover (0044)", () => {
           and column_name = 'agent_platform'`,
     );
     expect(columns.rows).toEqual([{ is_nullable: "NO" }]);
+  });
+});
+
+describe("the persona catalog ownership cutover (0045)", () => {
+  let database: EmptyDatabase;
+  let before: string;
+  let client: pg.Client;
+  const organizationId = newId("org");
+  const projectId = newId("prj");
+  const customPersonaId = newId("prs");
+  const customVersionId = newId("prsv");
+
+  beforeAll(async () => {
+    database = await createEmptyDatabase("persona_catalog_ownership");
+    before = await mkdtemp(path.join(os.tmpdir(), "egma-before-0045-"));
+    const migrations = await readMigrations();
+    for (const migration of migrations) {
+      if (migration.name < "0045") {
+        await writeFile(path.join(before, migration.name), migration.sql);
+      }
+    }
+    await runMigrations(database.url, before);
+
+    client = new pg.Client({ connectionString: database.url });
+    await client.connect();
+    await client.query(
+      "insert into organization (id, name, slug) values ($1, 'Acme', $2)",
+      [organizationId, `acme-${organizationId}`],
+    );
+    await client.query(
+      `insert into project (id, organization_id, name, slug, revision)
+       values ($1, $2, 'Default', 'default', $3)`,
+      [projectId, organizationId, newId("rev")],
+    );
+
+    await client.query("begin");
+    await client.query(
+      `insert into persona
+         (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $2, $3, 'Installed custom persona', $4, $5)`,
+      [
+        customPersonaId,
+        organizationId,
+        projectId,
+        customVersionId,
+        newId("rev"),
+      ],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits, models)
+       values (
+         $1,
+         $2,
+         1,
+         '{"personality":"Plain","language":"en-US","manner":"Warm","patience":"Waits once","accent":"Glaswegian","backgroundNoise":"A busy kitchen","underFriction":"Asks to escalate"}'::jsonb,
+         '{"llm":{"provider":"openai","model":"gpt-4o-mini"},"stt":{"provider":"deepgram","model":"nova-3-general"},"tts":{"provider":"cartesia","model":"sonic-3.5","voiceId":"5ee9feff-1265-424a-9d7f-8e4d431a12c7","speed":1}}'::jsonb
+       )`,
+      [customVersionId, customPersonaId],
+    );
+    await client.query("commit");
+
+    const cutover = migrations.find(
+      (migration) =>
+        migration.name === "0045_persona_catalog_owns_models.sql",
+    );
+    if (cutover === undefined) throw new Error("missing migration 0045");
+    await writeFile(path.join(before, cutover.name), cutover.sql);
+    await runMigrations(database.url, before);
+  });
+
+  afterAll(async () => {
+    await client.end();
+    await rm(before, { recursive: true, force: true });
+    await database.drop();
+  });
+
+  it("rewrites Default Persona v1 in place to Terra with reasoning off", async () => {
+    const { rows } = await client.query<{ models: unknown; traits: unknown }>(
+      `select models, traits from persona_version
+        where id = 'prsv_01M0E4J0BBE1FVDVTZ1BSS5C97'`,
+    );
+    expect(rows[0]).toMatchObject({
+      models: {
+        llm: {
+          provider: "openai",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "none",
+        },
+      },
+      traits: {
+        personality:
+          "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        language: "en-US",
+        accent: "Neutral American English.",
+        backgroundNoise: "None.",
+      },
+    });
+    expect(rows[0]?.traits).not.toMatchObject({
+      manner: expect.anything(),
+      patience: expect.anything(),
+      underFriction: expect.anything(),
+    });
+  });
+
+  it("folds redundant customer traits into personality before removing their keys", async () => {
+    const { rows } = await client.query<{ traits: unknown }>(
+      "select traits from persona_version where id = $1",
+      [customVersionId],
+    );
+    expect(rows[0]?.traits).toEqual({
+      personality:
+        "Plain\n\nManner: Warm\n\nPatience: Waits once\n\nUnder friction: Asks to escalate",
+      language: "en-US",
+      accent: "Glaswegian",
+      backgroundNoise: "A busy kitchen",
+    });
+  });
+
+  it("keeps model support out of the database constraint", async () => {
+    const { rows: definitions } = await client.query<{ definition: string }>(
+      `select pg_get_constraintdef(oid) as definition
+         from pg_constraint
+        where conname = 'persona_version_models_valid'`,
+    );
+    expect(definitions[0]?.definition).not.toContain("gpt-4o-mini");
+    expect(definitions[0]?.definition).not.toContain("gpt-5.6-terra");
+
+    const personaId = newId("prs");
+    const versionId = newId("prsv");
+    await client.query("begin");
+    await client.query(
+      `insert into persona
+         (id, organization_id, project_id, name, current_version_id, revision)
+       values ($1, $2, $3, 'Future catalog entry', $4, $5)`,
+      [personaId, organizationId, projectId, versionId, newId("rev")],
+    );
+    await client.query(
+      `insert into persona_version (id, persona_id, version, traits, models)
+       values (
+         $1,
+         $2,
+         1,
+         '{"personality":"Tests a future adapter.","language":"en-US"}'::jsonb,
+         '{"llm":{"provider":"future-provider","model":"future-llm","reasoningEffort":"future-effort"},"stt":{"provider":"future-provider","model":"future-stt"},"tts":{"provider":"future-provider","model":"future-tts","voiceId":"future-voice","speed":1}}'::jsonb
+       )`,
+      [versionId, personaId],
+    );
+    await client.query("commit");
+  });
+
+  it("restores immutable persona versions after the bounded rewrite", async () => {
+    await expect(
+      client.query(
+        `update persona_version
+            set models = jsonb_set(models, '{llm,model}', '"changed"')
+          where id = $1`,
+        [customVersionId],
+      ),
+    ).rejects.toThrow(/persona version.*authored content cannot change/u);
   });
 });

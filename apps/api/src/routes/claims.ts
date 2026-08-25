@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import {
   claimSimulations,
+  catalogEntry,
   connectionTypeUsesPlatformCarrier,
   failSimulationDispatch,
   getPersonaVersion,
@@ -129,7 +130,7 @@ const SIMULATION_LIMITS = {
 } as const;
 
 /** The one clean-cut contract this control plane and simulator speak. */
-const CONTRACT_VERSION = 3;
+const CONTRACT_VERSION = 4;
 
 type Body = Record<string, unknown>;
 
@@ -168,6 +169,24 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
 ): Promise<Record<string, unknown>> {
+  const adapterFor = (
+    job: "llm" | "stt" | "tts",
+    selection: { readonly provider: string; readonly model: string },
+  ): string => {
+    const entry = catalogEntry(job, selection.provider, selection.model);
+    if (entry === undefined) {
+      throw new Error(
+        `the pinned persona selected ${selection.provider}/${selection.model} ` +
+          `for ${job}, but that entry is absent from the model catalog`,
+      );
+    }
+    return entry.adapter;
+  };
+  const adapters = {
+    llm: adapterFor("llm", models.llm),
+    stt: adapterFor("stt", models.stt),
+    tts: adapterFor("tts", models.tts),
+  };
   const credentials = await source.load();
   const keyFor = (
     provider: PersonaModels["llm"]["provider"],
@@ -181,16 +200,22 @@ async function modelsBlock(
     llm: {
       provider: models.llm.provider,
       model: models.llm.model,
+      adapter: adapters.llm,
+      ...(models.llm.reasoningEffort === undefined
+        ? {}
+        : { reasoning_effort: models.llm.reasoningEffort }),
       key: keyFor(models.llm.provider),
     },
     stt: {
       provider: models.stt.provider,
       model: models.stt.model,
+      adapter: adapters.stt,
       ...speechKey(models.stt.provider),
     },
     tts: {
       provider: models.tts.provider,
       model: models.tts.model,
+      adapter: adapters.tts,
       voice_id: models.tts.voiceId,
       speed: models.tts.speed,
       ...speechKey(models.tts.provider),

@@ -414,13 +414,13 @@ class SpeechProviders:
     def from_models(cls, models: SelectedModels, *, vad: str) -> SpeechProviders:
         """Resolve the direct adapters from the required models block.
 
-        OpenAI STT means its realtime socket. The segmented transcription
-        endpoint is not a second interpretation of the same selection.
+        The catalog already resolved provider/model into one implementation.
+        This boundary reads that decision; it does not infer an endpoint from
+        the provider name.
         """
-        stt = "openai_realtime" if models.stt.provider == "openai" else "deepgram"
         return cls(
-            stt=stt,
-            tts=models.tts.provider,
+            stt=models.stt.adapter,
+            tts=models.tts.adapter,
             vad=vad,
             stt_key=models.stt.key,
             tts_key=models.tts.key,

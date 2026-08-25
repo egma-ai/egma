@@ -12,18 +12,23 @@ turns the composed messages into the persona's next words.
   selects it, and the claim carries the direct provider key.
 
 Both answer one question — "given this conversation so far, what does the
-persona say next, and are they done?" — expressed as ``PersonaReply``.
-A model signals *done* by ending its reply with the conclude marker, which
-the client strips before anyone else sees the text.
+persona say next, and are they done?" — expressed as ``PersonaReply``. The
+shipped adapter learns that second fact only from the structured ``end_call``
+tool. No string in the persona's spoken text has control meaning.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import aiohttp
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, is_given
+from pipecat.processors.aggregators.llm_context import LLMContext
 
 from .client import UNREACHABLE
 from .redaction import REDACTED
@@ -31,12 +36,20 @@ from .redaction import REDACTED
 if TYPE_CHECKING:
     from .spec import SimulationSpec
 
-CONCLUDE_MARKER = "[CONCLUDED]"
-"""How a model says the persona is done, per the system prompt's instruction.
+END_CALL_TOOL_NAME = "end_call"
+END_CALL_TOOL = FunctionSchema(
+    name=END_CALL_TOOL_NAME,
+    description=(
+        "use to end the call once you have determined that the objective of "
+        "the current simulation has been met."
+    ),
+    properties={},
+    required=[],
+)
+PERSONA_TOOLS = ToolsSchema(standard_tools=[END_CALL_TOOL])
+"""The control primitive every persona model receives, in Pipecat's schema."""
 
-Stripped from the reported text: the marker is seam machinery, never part
-of the transcript.
-"""
+_OPENAI_ADAPTER = OpenAILLMAdapter()
 
 GOODBYE = "That covers everything I needed. Thank you, goodbye."
 """The scripted persona's concluding turn, once its scenario runs dry."""
@@ -52,12 +65,31 @@ _SHORT_SECRET_CHARS = r"A-Za-z0-9_-"
 
 
 @dataclass(frozen=True)
+class PersonaToolCall:
+    """One provider tool call, decoded at the adapter boundary.
+
+    The adapter validates provider JSON. The Pipecat LLM service owns executing
+    the resulting call; this type carries no control decision by itself.
+    """
+
+    tool_call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class PersonaReply:
     """One answer from the model: the persona's next words, and whether
     the persona has decided the exchange is concluded."""
 
     text: str
     concluded: bool
+    tool_calls: tuple[PersonaToolCall, ...] = ()
+
+    @property
+    def requests_end_call(self) -> bool:
+        """Whether a non-Pipecat modality must honor the structured request."""
+        return any(call.name == END_CALL_TOOL_NAME for call in self.tool_calls)
 
 
 class ModelFailure(Exception):
@@ -74,7 +106,7 @@ class ModelClient(Protocol):
     @property
     def model_name(self) -> str: ...
 
-    async def reply(self, messages: list[dict[str, str]]) -> PersonaReply: ...
+    async def reply(self, context: LLMContext) -> PersonaReply: ...
 
     async def close(self) -> None: ...
 
@@ -105,7 +137,8 @@ class ScriptedModel:
     def model_name(self) -> str:
         return "scripted"
 
-    async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
+    async def reply(self, context: LLMContext) -> PersonaReply:
+        messages = cast(list[dict[str, str]], context.get_messages())
         spoken = sum(1 for message in messages if message["role"] == "assistant")
         if spoken < len(self._script):
             return PersonaReply(text=self._script[spoken], concluded=False)
@@ -128,11 +161,13 @@ class OpenAICompatibleModel:
         base_url: str,
         api_key: str,
         model_name: str,
+        reasoning_effort: str | None = None,
         timeout_seconds: float = MODEL_TIMEOUT_SECONDS,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._model_name = model_name
+        self._reasoning_effort = reasoning_effort
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self._session: aiohttp.ClientSession | None = None
 
@@ -176,8 +211,20 @@ class OpenAICompatibleModel:
             text,
         )
 
-    async def reply(self, messages: list[dict[str, str]]) -> PersonaReply:
-        asked = {"model": self._model_name, "messages": messages}
+    async def reply(self, context: LLMContext) -> PersonaReply:
+        invocation = _OPENAI_ADAPTER.get_llm_invocation_params(
+            context,
+            system_instruction=None,
+            convert_developer_to_user=False,
+        )
+        asked: dict[str, Any] = {"model": self._model_name}
+        asked.update(
+            (name, value)
+            for name, value in invocation.items()
+            if is_given(value)
+        )
+        if self._reasoning_effort is not None:
+            asked["reasoning_effort"] = self._reasoning_effort
         try:
             async with self._live_session().post(
                 f"{self._base_url}/chat/completions",
@@ -197,23 +244,86 @@ class OpenAICompatibleModel:
             ) from None
 
         try:
-            content = body["choices"][0]["message"]["content"]
+            message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as unexpected:
             raise ModelFailure(
-                "the model's answer had no message content: "
+                "the model's answer had no assistant message: "
                 f"{self._provider_detail(body)}"
             ) from unexpected
+        if not isinstance(message, dict):
+            raise ModelFailure(
+                "the model's assistant message was not an object: "
+                f"{self._provider_detail(message)}"
+            )
+
+        tool_calls = self._tool_calls_from(message.get("tool_calls"))
+        content = message.get("content")
+        if content is None and tool_calls:
+            # Chat-completions providers commonly return null content for a
+            # function call. The call must still have audible words before the
+            # pipeline ends, so use the same bounded goodbye as the scripted
+            # model when the provider omits them.
+            content = GOODBYE
         if not isinstance(content, str):
             raise ModelFailure(
                 f"the model's content was not text: {self._provider_detail(content)}"
             )
 
         content = self._without_api_key(content)
-        concluded = CONCLUDE_MARKER in content
-        text = content.replace(CONCLUDE_MARKER, "").strip()
+        text = content.strip()
+        if not text and tool_calls:
+            text = GOODBYE
         if not text:
             raise ModelFailure("the model's answer had no words to speak")
-        return PersonaReply(text=text, concluded=concluded)
+        return PersonaReply(text=text, concluded=False, tool_calls=tool_calls)
+
+    def _tool_calls_from(self, written: object) -> tuple[PersonaToolCall, ...]:
+        """Decode provider tool JSON; Pipecat executes the typed call later."""
+        if written is None:
+            return ()
+        if not isinstance(written, list):
+            raise ModelFailure("the model's tool_calls value was not a list")
+        if len(written) > 1:
+            raise ModelFailure(
+                "the persona model called more than one tool in one turn"
+            )
+        if not written:
+            return ()
+
+        call = written[0]
+        if (
+            not isinstance(call, dict)
+            or call.get("type") != "function"
+            or not isinstance(call.get("id"), str)
+            or not call["id"].strip()
+            or not isinstance(call.get("function"), dict)
+        ):
+            raise ModelFailure("the persona model returned a malformed tool call")
+        function = call["function"]
+        name = function.get("name")
+        if name != END_CALL_TOOL_NAME:
+            raise ModelFailure(
+                f"the persona model called an unavailable tool: {name!r}"
+            )
+
+        arguments = function.get("arguments")
+        if not isinstance(arguments, str):
+            raise ModelFailure("the persona model's end_call arguments were not JSON")
+        try:
+            decoded = json.loads(arguments)
+        except json.JSONDecodeError as unexpected:
+            raise ModelFailure(
+                "the persona model's end_call arguments were not valid JSON"
+            ) from unexpected
+        if decoded != {}:
+            raise ModelFailure("the persona model's end_call tool takes no arguments")
+        return (
+            PersonaToolCall(
+                tool_call_id=call["id"],
+                name=END_CALL_TOOL_NAME,
+                arguments=decoded,
+            ),
+        )
 
     async def close(self) -> None:
         if self._session is not None:
@@ -233,10 +343,10 @@ def build_model_client(
     test seam; no deployment input reaches it.
     """
     selected = spec.models.llm
-    if selected.provider != "openai" or selected.model != "gpt-4o-mini":
+    if selected.adapter != "openai_chat_completions":
         raise ModelFailure(
-            "the claimed persona selected an LLM this simulator does not ship: "
-            f"{selected.provider}/{selected.model}"
+            "the claimed persona selected an LLM adapter this simulator does not "
+            f"ship: {selected.adapter!r}"
         )
     if selected.key is None:
         raise ModelFailure("the claimed persona's LLM selection has no direct key")
@@ -244,4 +354,5 @@ def build_model_client(
         base_url=_base_url,
         api_key=selected.key,
         model_name=selected.model,
+        reasoning_effort=selected.reasoning_effort,
     )

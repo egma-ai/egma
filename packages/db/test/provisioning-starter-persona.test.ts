@@ -16,6 +16,7 @@ import {
   seedPersonaLibrary,
   setDefaultPersona,
   type AuthContext,
+  type PersonaModels,
   type PersonaTraits,
 } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -28,6 +29,15 @@ import {
 import { seedOrganization, seedUser } from "./support/tenancy.ts";
 
 let database: MigratedDatabase;
+
+const DEFAULT_PERSONA_MODELS: PersonaModels = {
+  ...RECOMMENDED_PERSONA_MODELS,
+  llm: {
+    provider: "openai",
+    model: "gpt-5.6-terra",
+    reasoningEffort: "none",
+  },
+};
 
 type Provisioned = {
   readonly auth: AuthContext;
@@ -148,14 +158,10 @@ describe("the shared default persona", () => {
         personality:
           "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
         language: "en-US",
-        manner: "Clear, natural, and conversational.",
-        patience: "Starts patient and gives the agent time to explain.",
         accent: "Neutral American English.",
         backgroundNoise: "None.",
-        underFriction:
-          "Becomes firmer if the agent is confusing or repetitive, without becoming rude.",
       },
-      models: RECOMMENDED_PERSONA_MODELS,
+      models: DEFAULT_PERSONA_MODELS,
     });
   });
 
@@ -240,9 +246,8 @@ describe("forking a persona", () => {
     });
     const nextVersionId = newId("prsv");
     const nextTraits = {
-      personality: "Is the committed current version.",
+      personality: "Is the committed current version and waits for a complete answer.",
       language: "en-US",
-      patience: "Waits for a complete answer.",
     } as const;
     const holder = await openSingleConnection(database.url);
     let forking: ReturnType<typeof forkPersona> | undefined;
@@ -321,7 +326,7 @@ describe("catalog integrity", () => {
     expect(version).toMatchObject({
       id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
       version: 1,
-      models: RECOMMENDED_PERSONA_MODELS,
+      models: DEFAULT_PERSONA_MODELS,
     });
   });
 

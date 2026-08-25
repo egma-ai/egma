@@ -3,7 +3,7 @@
 The scripted client is what CI runs on — same messages in, same reply out,
 every time, derived from nothing but the spec. The OpenAI-compatible client
 is the real-provider side of the seam, proven here against a local stub so
-its request shape, reply parsing, marker handling, and failure translation
+its request shape, reply parsing, tool-call handling, and failure translation
 are pinned without a live model anywhere.
 """
 
@@ -14,13 +14,16 @@ import json
 
 import pytest
 from aiohttp import web
+from pipecat.processors.aggregators.llm_context import LLMContext
 
 from egma_simulator.model import (
-    CONCLUDE_MARKER,
+    END_CALL_TOOL,
     GOODBYE,
+    PERSONA_TOOLS,
     ModelFailure,
     OpenAICompatibleModel,
     PersonaReply,
+    PersonaToolCall,
     ScriptedModel,
     build_model_client,
     split_sentences,
@@ -39,12 +42,12 @@ def test_sentences_split_deterministically():
     assert split_sentences("no punctuation at all") == ["no punctuation at all"]
 
 
-def system_and_history(*speakers_and_texts: tuple[str, str]) -> list[dict]:
+def system_and_history(*speakers_and_texts: tuple[str, str]) -> LLMContext:
     messages = [{"role": "system", "content": "the composed prompt"}]
     messages.extend(
         {"role": role, "content": text} for role, text in speakers_and_texts
     )
-    return messages
+    return LLMContext(messages=messages, tools=PERSONA_TOOLS, tool_choice="auto")
 
 
 async def test_the_scripted_model_walks_the_scenario_sentence_by_sentence():
@@ -103,11 +106,14 @@ class ModelStub:
         self.answers: list[web.Response | str] = []
         self.hold_seconds = 0.0
 
-    def answer_with(self, content: str) -> None:
+    def answer_with(
+        self, content: str | None, *, tool_calls: list[dict] | None = None
+    ) -> None:
+        message: dict = {"role": "assistant", "content": content}
+        if tool_calls is not None:
+            message["tool_calls"] = tool_calls
         self.answers.append(
-            web.json_response(
-                {"choices": [{"message": {"role": "assistant", "content": content}}]}
-            )
+            web.json_response({"choices": [{"message": message}]})
         )
 
     async def handle(self, request: web.Request) -> web.Response:
@@ -150,8 +156,8 @@ async def test_the_openai_client_sends_the_messages_and_returns_the_reply(
         model_name="model-under-test",
     )
     try:
-        messages = system_and_history(("user", "Hello, how can I help?"))
-        reply = await client.reply(messages)
+        context = system_and_history(("user", "Hello, how can I help?"))
+        reply = await client.reply(context)
     finally:
         await client.close()
 
@@ -160,12 +166,25 @@ async def test_the_openai_client_sends_the_messages_and_returns_the_reply(
     )
     sent = model_stub.requests[0]
     assert sent["model"] == "model-under-test"
-    assert sent["messages"] == messages
+    assert sent["messages"] == context.get_messages()
+    assert sent["tools"] == [
+        {"type": "function", "function": END_CALL_TOOL.to_default_dict()}
+    ]
+    assert sent["tool_choice"] == "auto"
     assert model_stub.headers[0]["Authorization"] == "Bearer key-under-test"
 
 
-async def test_the_conclude_marker_is_read_and_stripped(model_stub):
-    model_stub.answer_with(f"Thank you, that is everything. {CONCLUDE_MARKER}")
+async def test_the_structured_end_call_is_returned_for_pipecat_to_execute(model_stub):
+    model_stub.answer_with(
+        "Thank you, that is everything. Goodbye.",
+        tool_calls=[
+            {
+                "id": "call_end",
+                "type": "function",
+                "function": {"name": "end_call", "arguments": "{}"},
+            }
+        ],
+    )
     client = OpenAICompatibleModel(
         base_url=model_stub.base_url, api_key="k", model_name="m"
     )
@@ -173,21 +192,69 @@ async def test_the_conclude_marker_is_read_and_stripped(model_stub):
         reply = await client.reply(system_and_history())
     finally:
         await client.close()
-    assert reply.concluded is True
-    assert reply.text == "Thank you, that is everything."
-    assert CONCLUDE_MARKER not in reply.text
+    assert reply == PersonaReply(
+        text="Thank you, that is everything. Goodbye.",
+        concluded=False,
+        tool_calls=(
+            PersonaToolCall(
+                tool_call_id="call_end", name="end_call", arguments={}
+            ),
+        ),
+    )
 
 
-async def test_a_conclude_marker_without_words_is_a_model_failure(model_stub):
-    model_stub.answer_with(CONCLUDE_MARKER)
+@pytest.mark.parametrize("content", [None, ""])
+async def test_end_call_without_provider_words_gets_an_audible_goodbye(
+    model_stub, content
+):
+    model_stub.answer_with(
+        content,
+        tool_calls=[
+            {
+                "id": "call_end",
+                "type": "function",
+                "function": {"name": "end_call", "arguments": "{}"},
+            }
+        ],
+    )
     client = OpenAICompatibleModel(
         base_url=model_stub.base_url, api_key="k", model_name="m"
     )
     try:
-        with pytest.raises(ModelFailure, match="no words"):
-            await client.reply(system_and_history())
+        reply = await client.reply(system_and_history())
     finally:
         await client.close()
+    assert reply.text == GOODBYE
+    assert reply.requests_end_call is True
+
+
+async def test_a_literal_old_marker_has_no_control_meaning(model_stub):
+    model_stub.answer_with("I am not done. [CONCLUDED]")
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="m"
+    )
+    try:
+        reply = await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+    assert reply == PersonaReply(text="I am not done. [CONCLUDED]", concluded=False)
+
+
+async def test_the_selected_reasoning_effort_is_sent_to_openai(model_stub):
+    model_stub.answer_with("I need an appointment.")
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url,
+        api_key="k",
+        model_name="gpt-5.6-terra",
+        reasoning_effort="none",
+    )
+    try:
+        await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+    assert model_stub.requests[0]["reasoning_effort"] == "none"
 
 
 async def test_a_provider_cannot_echo_its_key_in_a_successful_reply(model_stub):
@@ -268,7 +335,7 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
     """The work order supplies provider, model, and current direct key."""
     model_stub.answer_with("I need the next available appointment.")
     document = {
-        "contract_version": 3,
+        "contract_version": 4,
         "simulation_id": "sim_direct_model_selection",
         "modality": "chat",
         "connection": {
@@ -289,13 +356,20 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
         "models": {
             "llm": {
                 "provider": "openai",
-                "model": "gpt-4o-mini",
+                "model": "gpt-5.6-terra",
+                "adapter": "openai_chat_completions",
+                "reasoning_effort": "none",
                 "key": "claim-key-under-test",
             },
-            "stt": {"provider": "deepgram", "model": "nova-3-general"},
+            "stt": {
+                "provider": "deepgram",
+                "model": "nova-3-general",
+                "adapter": "deepgram",
+            },
             "tts": {
                 "provider": "cartesia",
                 "model": "sonic-3.5",
+                "adapter": "cartesia",
                 "voice_id": "fixture-voice",
                 "speed": 1,
             },
@@ -308,5 +382,6 @@ async def test_runtime_model_uses_only_the_claimed_persona_selection(model_stub)
     finally:
         await client.close()
 
-    assert model_stub.requests[0]["model"] == "gpt-4o-mini"
+    assert model_stub.requests[0]["model"] == "gpt-5.6-terra"
+    assert model_stub.requests[0]["reasoning_effort"] == "none"
     assert model_stub.headers[0]["Authorization"] == "Bearer claim-key-under-test"

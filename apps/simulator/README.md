@@ -192,15 +192,18 @@ configures no media backend to place a call through.
 next heartbeat; `POST /workbench/specs` queues another spec while
 everything runs.
 
-Model and speech choices are not container settings. Every simulation work
-order carries one complete `models` block from the pinned persona version.
-Chat requires the direct LLM key. Voice also requires the direct STT and TTS
-keys. The TTS selection owns `voice_id` and `speed`; persona traits contain
-behavior only.
+Model and speech choices are not container settings. Every contract-v4 work
+order carries one complete `models` block from the pinned persona version. The
+API resolves each catalog selection to an explicit adapter before it creates
+that work order. Chat requires the direct LLM key. Voice also requires the
+direct STT and TTS keys. The TTS selection owns `voice_id` and `speed`; persona
+traits contain behavior only.
 
-The simulator accepts only the proved provider/model pairs. OpenAI STT always
-means its realtime adapter. There is no container or traits fallback. The
-scripted model and speech pair exist only as explicit test injections.
+The model catalog owns which provider/model pairs the product accepts. The
+simulation contract checks only the work-order shape. The simulator dispatches
+the named adapter and rejects an adapter it does not ship; it does not keep a
+second model allowlist. There is no container or traits fallback. The scripted
+model and speech pair exist only as explicit test injections.
 
 Voice activity detection is still deployment configuration. Real speech uses
 `EGMA_SIMULATOR_VAD_PROVIDER=silero`; it needs no key and downloads nothing.

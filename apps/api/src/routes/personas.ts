@@ -235,11 +235,8 @@ type WrittenTraits =
 const HUMAN_TRAIT_FIELDS = [
   "personality",
   "language",
-  "manner",
-  "patience",
   "accent",
   "backgroundNoise",
-  "underFriction",
 ] as const;
 
 function traitsIn(value: unknown): WrittenTraits {
@@ -365,6 +362,12 @@ export async function personaRoutes(
         job: entry.job,
         model: entry.model,
         label: entry.label,
+        ...("reasoningEfforts" in entry
+          ? { reasoningEfforts: entry.reasoningEfforts }
+          : {}),
+        ...("recommendedReasoningEffort" in entry
+          ? { recommendedReasoningEffort: entry.recommendedReasoningEffort }
+          : {}),
         ...("recommendedVoiceId" in entry
           ? { recommendedVoiceId: entry.recommendedVoiceId }
           : {}),

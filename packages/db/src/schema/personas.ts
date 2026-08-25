@@ -123,36 +123,21 @@ export const personaVersion = pgTable(
   },
   (table) => [
     prefixCheck("persona_version_id_prefix", table.id, "prsv"),
-    // A version is a complete executable value at the database boundary, not
-    // only after the TypeScript reader has interpreted its jsonb. Exact keys
-    // keep technical voice out of traits and prevent a stale writer from
-    // putting a second model owner back beside `models`.
+    // These checks protect the stored wire shape. The provider catalog, not
+    // Postgres, decides which provider/model/adapter combinations this release
+    // can execute. Exact keys still keep technical voice out of traits and
+    // prevent a stale writer from putting a second model owner beside models.
     check(
       "persona_version_traits_valid",
       sql`
         jsonb_typeof(${table.traits}) is not distinct from 'object'
         and (${table.traits} - array[
-          'personality', 'language', 'manner', 'patience', 'accent',
-          'backgroundNoise', 'underFriction'
+          'personality', 'language', 'accent', 'backgroundNoise'
         ]::text[]) is not distinct from '{}'::jsonb
         and jsonb_typeof(${table.traits}->'personality') is not distinct from 'string'
         and nullif(btrim(${table.traits}->>'personality'), '') is not null
         and jsonb_typeof(${table.traits}->'language') is not distinct from 'string'
         and nullif(btrim(${table.traits}->>'language'), '') is not null
-        and (
-          not (${table.traits} ? 'manner')
-          or (
-            jsonb_typeof(${table.traits}->'manner') is not distinct from 'string'
-            and nullif(btrim(${table.traits}->>'manner'), '') is not null
-          )
-        )
-        and (
-          not (${table.traits} ? 'patience')
-          or (
-            jsonb_typeof(${table.traits}->'patience') is not distinct from 'string'
-            and nullif(btrim(${table.traits}->>'patience'), '') is not null
-          )
-        )
         and (
           not (${table.traits} ? 'accent')
           or (
@@ -167,13 +152,6 @@ export const personaVersion = pgTable(
             and nullif(btrim(${table.traits}->>'backgroundNoise'), '') is not null
           )
         )
-        and (
-          not (${table.traits} ? 'underFriction')
-          or (
-            jsonb_typeof(${table.traits}->'underFriction') is not distinct from 'string'
-            and nullif(btrim(${table.traits}->>'underFriction'), '') is not null
-          )
-        )
       `,
     ),
     check(
@@ -182,28 +160,38 @@ export const personaVersion = pgTable(
         jsonb_typeof(${table.models}) is not distinct from 'object'
         and (${table.models} - array['llm', 'stt', 'tts']::text[])
           is not distinct from '{}'::jsonb
-        and (${table.models}->'llm') is not distinct from
-          jsonb_build_object('provider', 'openai', 'model', 'gpt-4o-mini')
+        and jsonb_typeof(${table.models}->'llm') is not distinct from 'object'
+        and ((${table.models}->'llm') - array[
+          'provider', 'model', 'reasoningEffort'
+        ]::text[]) is not distinct from '{}'::jsonb
+        and jsonb_typeof(${table.models}->'llm'->'provider') is not distinct from 'string'
+        and nullif(btrim(${table.models}->'llm'->>'provider'), '') is not null
+        and jsonb_typeof(${table.models}->'llm'->'model') is not distinct from 'string'
+        and nullif(btrim(${table.models}->'llm'->>'model'), '') is not null
         and (
-          (${table.models}->'stt') is not distinct from
-            jsonb_build_object('provider', 'openai', 'model', 'gpt-live-transcribe')
-          or (${table.models}->'stt') is not distinct from
-            jsonb_build_object('provider', 'deepgram', 'model', 'nova-3-general')
+          not (${table.models}->'llm' ? 'reasoningEffort')
+          or (
+            jsonb_typeof(${table.models}->'llm'->'reasoningEffort')
+              is not distinct from 'string'
+            and nullif(btrim(${table.models}->'llm'->>'reasoningEffort'), '')
+              is not null
+          )
         )
+        and jsonb_typeof(${table.models}->'stt') is not distinct from 'object'
+        and ((${table.models}->'stt') - array['provider', 'model']::text[])
+          is not distinct from '{}'::jsonb
+        and jsonb_typeof(${table.models}->'stt'->'provider') is not distinct from 'string'
+        and nullif(btrim(${table.models}->'stt'->>'provider'), '') is not null
+        and jsonb_typeof(${table.models}->'stt'->'model') is not distinct from 'string'
+        and nullif(btrim(${table.models}->'stt'->>'model'), '') is not null
         and jsonb_typeof(${table.models}->'tts') is not distinct from 'object'
         and ((${table.models}->'tts') - array[
           'provider', 'model', 'voiceId', 'speed'
         ]::text[]) is not distinct from '{}'::jsonb
-        and (
-          (
-            ${table.models}->'tts'->>'provider' is not distinct from 'cartesia'
-            and ${table.models}->'tts'->>'model' is not distinct from 'sonic-3.5'
-          )
-          or (
-            ${table.models}->'tts'->>'provider' is not distinct from 'openai'
-            and ${table.models}->'tts'->>'model' is not distinct from 'gpt-4o-mini-tts'
-          )
-        )
+        and jsonb_typeof(${table.models}->'tts'->'provider') is not distinct from 'string'
+        and nullif(btrim(${table.models}->'tts'->>'provider'), '') is not null
+        and jsonb_typeof(${table.models}->'tts'->'model') is not distinct from 'string'
+        and nullif(btrim(${table.models}->'tts'->>'model'), '') is not null
         and jsonb_typeof(${table.models}->'tts'->'voiceId') is not distinct from 'string'
         and nullif(btrim(${table.models}->'tts'->>'voiceId'), '') is not null
         and jsonb_path_exists(

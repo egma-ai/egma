@@ -267,7 +267,7 @@ class MediaSettings:
         has no media backend. A work order cannot create one.
 
         **It never refuses.** This runs for every simulation, and most
-        simulations never dial. Contract v3 gives a phone simulation one
+        simulations never dial. Contract v4 gives a phone simulation one
         complete carrier and gives every non-phone simulation none. A missing
         deployment media backend is still checked by the phone plug, because
         failing chat work over a phone path it never uses would be wrong.
