@@ -1,319 +1,237 @@
 ---
 title: "Self-Hosting Egma: Deploy on Your Own Infrastructure"
 sidebarTitle: "Self-Hosting"
-description: "Run Egma with Docker Compose — set deployment secrets and provider keys, configure phone simulation, and invite your team."
+description: "Run Egma with Docker Compose, add model-provider keys, and configure optional phone simulations."
 ---
 
-Egma is fully self-hostable. A single `npx @egma/cli self-host up` command starts the entire stack — API, web application, simulator, grader, databases, object store, and media server — on your own machine or server. This guide walks you through the prerequisites, required secrets, provider configuration, and day-two operations so you can run a production-ready instance without surprises.
-
-## Prerequisites
-
-Before you start, make sure you have:
-
-- **Node 22 or newer** — the Egma CLI requires it
-- **Docker with Compose** — the only runtime dependency for the platform itself
-- A clone of the Egma repository, or a dedicated workspace directory where you will store platform credentials and configuration
-
-<Note>
-  The platform workspace (where you run `self-host up`) is deliberately separate from your agent repository. Platform credentials belong to whoever operates the platform; an agent repository holds only tests and the address of the platform it points at. On one laptop both are often yours, and they are still two directories — one platform serves many agent repositories.
-</Note>
-
-## Step 1 — Copy and fill in the environment file
-
-Clone the Egma repository, then copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Open `.env` in an editor. Most values have working defaults and you can leave them alone. **Twelve variables have no default and the platform refuses to start without them.** They are marked `REQUIRED` in `.env.example`. The sections below explain each one and how to generate it.
-
-## Step 2 — Set the required secrets
-
-Nine of the twelve required values are secrets you generate yourself. The remaining three — the LiveKit API key and secret, and `EGMA_BASE_URL` — are set automatically when you run `self-host up`.
-
-### `EGMA_ENCRYPTION_KEY`
-
-Seals connection credentials and the carrier SIP password stored in Postgres. Generate a 32-byte hex string:
-
-```bash
-openssl rand -hex 32
-```
-
-<Warning>
-  Back up this key alongside your database. The stored credentials and settings are unrecoverable without it. A database backup without the encryption key is half a backup.
-</Warning>
-
-### `EGMA_AUTH_SECRET`
-
-Signs session cookies. Any session minted without this secret will be invalid after a restart, so keep it stable.
-
-```bash
-openssl rand -base64 32
-```
-
-### `EGMA_SIMULATOR_SERVICE_TOKEN`
-
-The token the simulator shows the API to claim simulation work. The API checks it on every claim request because the answers carry your live provider credentials.
-
-```bash
-echo "egma_st_$(openssl rand -hex 32)"
-```
-
-The value must start with `egma_st_` so that secret scanners can recognise a leak. Set it in `.env` once and both the API container and the simulator container read it — they always match.
-
-### S3 credentials (four values)
-
-Egma ships with a MinIO object store for voice simulation recordings. You need two credential pairs: one with write access (for the simulator to upload recordings) and one that is read-only (for the API to sign playback links).
-
-```bash
-# Write pair — admin access to the object store
-EGMA_S3_ACCESS_KEY_ID=your-chosen-access-key-id
-EGMA_S3_SECRET_ACCESS_KEY=your-chosen-secret-key    # minimum 8 characters
-
-# Read-only pair — the API uses this to sign playback links
-EGMA_S3_READ_ACCESS_KEY_ID=your-chosen-read-key-id
-EGMA_S3_READ_SECRET_ACCESS_KEY=your-chosen-read-secret
-```
-
-Choose strong random values for all four. The write credential is the store's root credential and can list, replace, and delete every recording you hold — treat it accordingly.
-
-<Warning>
-  The object store port (`9000` by default) is bound to loopback by default. That is a security decision: what answers on that port is the store's admin surface. If you need browsers on other machines to play recordings, set `EGMA_S3_BIND=0.0.0.0` and update `EGMA_BLOB_PUBLIC_URL` to the address those browsers reach — but change `EGMA_S3_SECRET_ACCESS_KEY` first.
-</Warning>
-
-### The ingestion bucket, and one limit to know about
-
-The same MinIO service holds a second bucket for production evidence. Egma
-answers a customer's trace request successfully only after the evidence is in
-that bucket, so this is the point at which Egma promises the evidence is safe.
-It is a spool rather than an archive: Egma writes the evidence to ClickHouse
-soon afterwards and then deletes the object.
-
-```bash
-# The ingestion pair — the API writes accepted evidence with it
-EGMA_S3_INGEST_ACCESS_KEY_ID=your-chosen-ingest-key-id
-EGMA_S3_INGEST_SECRET_ACCESS_KEY=your-chosen-ingest-secret
-```
-
-A separate bucket and a separate credential from recordings, on purpose: this
-pair can only write, list, read and delete inside the ingestion bucket's
-`pending/` prefix, so it can never touch a recording.
-
-<Warning>
-  **The bundled MinIO runs on one node, so its durability is your host's.** The
-  volume survives a container replacement and a restart. It does not survive the
-  loss of that host or that disk. If your production evidence must survive
-  either, point `EGMA_INGEST_ENDPOINT` at a store that is remote from the
-  machine Egma runs on — AWS S3 or any S3-compatible service with its own
-  durability promise.
-
-  `docker compose down -v` deletes the volumes, which deletes the ingestion
-  bucket and the local write-ahead log with them. Any evidence Egma had accepted
-  and not yet written to ClickHouse goes with them.
-</Warning>
-
-### Summary of all twelve required variables
-
-| Variable | What it is | How to supply |
-|----------|-----------|---------------|
-| `EGMA_ENCRYPTION_KEY` | Seals stored credentials and settings | `openssl rand -hex 32` |
-| `EGMA_AUTH_SECRET` | Signs session cookies | `openssl rand -base64 32` |
-| `EGMA_SIMULATOR_SERVICE_TOKEN` | Authenticates the simulator to the API | `echo "egma_st_$(openssl rand -hex 32)"` |
-| `EGMA_S3_ACCESS_KEY_ID` | Object store root credential (write) | Choose a strong random string |
-| `EGMA_S3_SECRET_ACCESS_KEY` | Object store root secret (write, min 8 chars) | Choose a strong random string |
-| `EGMA_S3_READ_ACCESS_KEY_ID` | Object store read-only credential | Choose a strong random string |
-| `EGMA_S3_READ_SECRET_ACCESS_KEY` | Object store read-only secret | Choose a strong random string |
-| `EGMA_S3_INGEST_ACCESS_KEY_ID` | Ingestion bucket credential (write, `pending/` only) | Choose a strong random string |
-| `EGMA_S3_INGEST_SECRET_ACCESS_KEY` | Ingestion bucket secret (min 8 chars) | Choose a strong random string |
-| `EGMA_BASE_URL` | The address people reach this instance at | Set automatically by `egma self-host up` |
-| `EGMA_LIVEKIT_API_KEY` | Media server authentication key | Set automatically by `egma self-host up` |
-| `EGMA_LIVEKIT_API_SECRET` | Media server authentication secret | Set automatically by `egma self-host up` |
-
-## Step 3 — Start the platform
-
-Run the CLI's `self-host up` command from your platform workspace:
+Egma is fully self-hostable. One command starts the API, web application,
+simulator, grader, Postgres, ClickHouse, MinIO, LiveKit, SIP gateway, and Redis:
 
 ```bash
 npx @egma/cli self-host up
 ```
 
-This command:
-1. Generates the LiveKit API key and secret for your workspace, writes them to `.egma-platform/platform.env`, and sets `EGMA_BASE_URL` to the printed address
-2. Starts all containers and waits for the platform to answer
-3. Prints the URL when the health check succeeds
+## Prerequisites
 
+You need:
+
+- Node 22 or newer
+- Docker with Compose
+- A clone of the Egma repository
+
+Run self-host commands from this **platform workspace**. Do not run them from
+an agent repository. One platform can serve many agent repositories.
+
+## Step 1 — Create the operator environment
+
+Copy the short example:
+
+```bash
+cp .env.example .env
+chmod 600 .env
 ```
-url: http://localhost:3101
-status: ready
-```
 
-The platform is ready. Open `http://localhost:3101`, sign up, and claim the instance. You become
-the organization admin. **The first person to sign up claims it — open signup
-closes behind them.** Everyone after that arrives by invitation.
+The normal `.env` file contains only values that Egma cannot create:
 
-<Note>
-  `egma self-host up` is not the same as `docker compose up`. The CLI version generates the media server credentials, waits for the platform to be healthy, and handles first-boot initialization automatically. Use `egma self-host up` every time you start the platform.
-</Note>
+- model-provider keys selected by your persona or grader versions
+- an optional phone carrier route
 
-## Step 4 — Set provider keys and the carrier route
-
-Put one current key for each model provider you use in `.env`:
+The shipped default persona uses OpenAI and Cartesia. Add Deepgram only when a
+persona version selects Deepgram speech-to-text.
 
 ```bash
 EGMA_OPENAI_API_KEY=...
-EGMA_DEEPGRAM_API_KEY=...
 EGMA_CARTESIA_API_KEY=...
+
+# Optional
+EGMA_DEEPGRAM_API_KEY=...
 ```
 
-Persona versions choose the LLM, speech-to-text provider, text-to-speech
-provider, and voice. LLM grader versions choose the model they use. The
-deployment keys above supply credentials only. They are not copied into
-Postgres.
+Provider credentials stay in the deployment environment. They are not stored
+in Postgres. If you add or rotate a key, run `self-host up` again so the
+containers receive it.
 
-Then log in as the organization owner and configure the optional shared phone
-route with the interactive setup wizard:
+## Step 2 — Add the optional phone route
+
+Skip this step when you do not need phone simulations.
+
+For a credential-authenticated carrier route, add all four values to `.env`:
 
 ```bash
-npx @egma/cli login --url http://localhost:3101
-npx @egma/cli self-host setup
+EGMA_PHONE_TRUNK_ADDRESS=example.pstn.twilio.com
+EGMA_PHONE_SOURCE_NUMBER=+15551234567
+EGMA_PHONE_TRUNK_USERNAME=egma-local
+EGMA_PHONE_TRUNK_PASSWORD=...
 ```
 
-The wizard asks only for a trunk address and source number. If the carrier uses
-SIP credentials, it also asks for a SIP username and password. The complete
-two-value or four-value route is written through the platform API. A complete
-route is never asked for again.
+Wrap a credential containing `$` in single quotes so Docker Compose keeps it
+literal, for example `EGMA_PHONE_TRUNK_PASSWORD='alpha$beta'`.
 
-<Tip>
-  To see what the wizard would ask without writing anything, run:
+For source-IP authentication, add only the trunk address and source number.
+Egma refuses a partial route.
 
-  ```bash
-  npx @egma/cli self-host setup --plan
-  ```
+For Twilio:
 
-  For automated deployments, the carrier route can come from the four
-  `EGMA_PHONE_*` variables in `.env.example`:
+- `EGMA_PHONE_TRUNK_ADDRESS` is the termination SIP URI hostname. Do not add
+  `sip://` or a path.
+- `EGMA_PHONE_SOURCE_NUMBER` is the Twilio number attached to the trunk, in
+  E.164 format.
+- `EGMA_PHONE_TRUNK_USERNAME` and `EGMA_PHONE_TRUNK_PASSWORD` come from the SIP
+  credential list attached to that trunk.
 
-  ```bash
-  npx @egma/cli self-host setup --json
-  ```
-</Tip>
+<Warning>
+  The SIP username and password are not the Twilio Account SID and Auth Token.
+  Egma does not need account-wide Twilio credentials and does not create or
+  change Twilio resources.
+</Warning>
 
-### Phone configuration (Twilio)
+One Twilio account can serve local development and production. Keep one shared
+trunk and source number. Give each developer and production its own SIP
+username and password in the trunk's credential list.
 
-Use one Twilio account, trunk, source number, and attached credential list. A Twilio administrator creates one SIP username and password in that list for each developer, plus one for production. Twilio shows the username later but does not return the password, so save it when the credential is created.
+## Step 3 — Start the platform
 
-`egma self-host setup` asks for the trunk address, source number, SIP username, and SIP password. It writes those four values to the platform's sealed store as one bundle. It never asks for the Twilio Account SID or Auth Token and never reads or changes Twilio. Keep the same four values in an ignored local `.env` or password manager so a fresh database can use them again.
+```bash
+npx @egma/cli self-host up
+```
 
-To replace one developer credential safely, a carrier administrator first adds the new credential beside the old one. Export the trunk address, source number, new SIP username, and new SIP password, then run `egma self-host setup --replace-carrier --yes`. Run one phone simulation with the new bundle, then revoke the old credential. This recovery path changes only the platform store; it still does not contact Twilio.
+The command:
+
+1. reads the operator-owned values from `.env`
+2. generates missing internal credentials once
+3. preserves existing internal credentials
+4. starts every container and waits for health
+5. prints the web address
+
+Internal credentials include the encryption key, session secret, simulator
+service token, bundled-MinIO credentials, and LiveKit credentials. Egma writes
+them to `.egma-platform/platform.env`. Keep that file private and back it up
+with Postgres. The encryption key is required to open credentials stored in the
+database.
+
+Docker Compose supplies safe defaults for local ports, local databases, bundled
+MinIO, and service tuning. Use the [full environment variable
+reference](/configuration/environment-variables) only when you need an
+advanced override such as external S3, SMTP, telemetry, or different ports.
 
 <Note>
-  Phone simulation requires the SIP gateway to be reachable from your carrier. On a server with a public IP or 1:1 NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to your public address and open UDP port 5060 plus the RTP range (default `10000–10020`) to your carrier's IP ranges. On a laptop behind a home router, try it — Twilio supports symmetric RTP latching and many home routers work fine.
+  Use `egma self-host up` for normal starts. A direct `docker compose up` does
+  not load `.egma-platform/platform.env` for you and does not perform the full
+  preparation and health workflow.
 </Note>
 
-## Service URLs
+Open `http://localhost:3101` and sign up. The first person claims the
+single-organization instance and becomes its admin. Open signup then closes.
 
-After startup, the following services are available:
+## How phone settings are applied
+
+On startup, the API copies a complete `EGMA_PHONE_*` route into its sealed
+runtime store. This lets a simulator receive the route on a claimed phone work
+order without reading the API container's environment.
+
+- A complete route in `.env` replaces the stored route on startup.
+- No route in `.env` preserves a complete route already stored by an older
+  Egma version.
+- No route in `.env` and no stored route leaves phone simulations disabled.
+- `EGMA_PHONE_DISABLED=true` removes a route retained from an older version.
+
+The preservation rule makes upgrades safe. An older sealed SIP password cannot
+be read back into `.env`, so an upgrade with no phone variables must not delete
+it. To rotate a SIP credential, replace the four values in `.env`, run
+`self-host up`, test one phone simulation, and then revoke the old credential
+in Twilio.
+
+## Phone networking
+
+The simulator and grader publish no ports. The SIP gateway is different: your
+carrier must reach its SIP port and RTP range.
+
+On a server with a public IP or 1:1 NAT, set
+`EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the public address and allow UDP port 5060
+plus the RTP range, `10000–10020` by default, from your carrier.
+
+On a laptop behind a home router, support depends on the carrier and the NAT.
+Twilio supports symmetric RTP latching, so many local setups work without port
+forwarding. If yours does not, use a public server or LiveKit Cloud.
+
+## Service addresses
 
 | Service | Address | Notes |
-|---------|---------|-------|
-| Web application | `http://localhost:3101` | Sign in, view runs, manage the organization |
-| API | `http://localhost:3100` | REST API and OTLP ingest endpoint |
-| Object store | `http://localhost:9000` | Loopback only by default; browser playback address |
-| LiveKit server | `127.0.0.1:7880` | Local machine only |
+|---|---|---|
+| Web application | `http://localhost:3101` | Sign in and use the product |
+| API | `http://localhost:3100` | REST API and OTLP ingest |
+| Postgres | `postgres://egma:egma@localhost:5433/egma` | Loopback by default |
+| ClickHouse | `http://egma:egma@localhost:8124/egma` | Loopback by default |
+| Object store | `http://localhost:9000` | Loopback by default |
+| LiveKit server | `127.0.0.1:7880` | Local machine only by default |
 
-The simulator and grader publish no ports — they claim work outbound and need no inbound networking.
+## Production Monitoring
 
-### Start production Monitoring
+Open **Monitoring → Start monitoring** inside a project. The required steps
+depend on the agent platform.
 
-Open **Monitoring → Start monitoring** inside the project. Which steps you take
-depends on the agent platform.
-
-- **Retell:** enter one Retell API key, choose which Retell agent your Egma
-  agent is, and start. The API service seals the key on that agent, imports the
-  previous 30 days, and then polls for completed conversations.
-- **LiveKit:** install the Egma Python SDK in the agent process. Set
-  `EGMA_URL` to the published API address and `EGMA_API_KEY` to an existing
-  project key, then call `monitor_livekit(ctx)` before `AgentSession.start`.
+- **Retell:** enter a Retell API key, select the matching Retell agent, and
+  start monitoring.
+- **LiveKit:** install the Egma Python SDK in the agent process. Set `EGMA_URL`
+  to the API address and `EGMA_API_KEY` to a project key, then call
+  `monitor_livekit(ctx)` before `AgentSession.start`.
 
 ```bash
 export EGMA_URL=http://localhost:3100
 export EGMA_API_KEY=egma_sk_...
 ```
 
-If another agent process already creates and registers an OpenTelemetry
-exporter, it can use the standard OTLP settings directly:
+These are agent-process settings. They do not belong in the platform `.env`.
 
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3100
-export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20egma_sk_..."
-```
+## Adding another user
 
-These OTLP variables configure an exporter that already exists. They do not
-create one. The API (`3100`) is the direct ingest address. The web application
-(`3101`) also forwards `/v1/traces` to it. Leave `/v1/traces` off the base
-endpoint when the exporter appends its signal path.
+Open **Settings → People**, enter an email address, choose a role, and send the
+invitation. Without SMTP, the platform returns the invitation link to the
+admin. You can send it through another channel.
 
-Use a project-scoped Egma key for LiveKit or direct OTLP Monitoring. An
-organization-scoped key is rejected before Egma decodes or stores the export.
-
-## Single-organization mode
-
-By default, Egma runs in single-organization mode:
-
-```bash
-EGMA_SINGLE_ORGANIZATION=true
-```
-
-The first person to sign up claims the organization and becomes its admin. After that, signup is closed and new users arrive by invitation only — admins send invitations from **Settings → People**. If you are building a multi-tenant deployment, set this to `false`.
-
-## Adding a second user
-
-Open a project in the web application, choose **Settings → People**, enter an email address, select a role, and send. If no SMTP server is configured, the invitation link comes back to you directly in the response — paste it to your colleague however you like (Slack, email, a text message).
-
-To enable email delivery:
-
-```bash
-EGMA_SMTP_URL=smtp://user:password@smtp.example.com:587
-EGMA_MAIL_FROM='Egma <noreply@example.com>'
-```
-
-Setting `EGMA_SMTP_URL` automatically enables email verification on signup and password-reset emails. There is no second setting to keep in step.
+For email delivery, use the advanced settings `EGMA_SMTP_URL` and
+`EGMA_MAIL_FROM`. Configure SMTP before giving another person access to the
+platform logs because password-reset links are written there when email is not
+configured.
 
 ## Upgrading
 
-Run `egma self-host up` again from your platform workspace after pulling the latest code. The API applies database migrations on boot. No manual migration step is required.
+Pull the new code, then run:
+
+```bash
+npx @egma/cli self-host up
+```
+
+The API applies database migrations during boot. Internal credentials and
+Docker volumes are preserved. A stored carrier route is also preserved when
+the upgraded `.env` does not supply one.
 
 ## Troubleshooting
 
-<Accordion title="Platform refuses to start and names a missing variable">
-  Every required variable is named in `.env.example`. Make sure you have filled in all nine secrets listed in the table above. `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET`, and `EGMA_BASE_URL` are set automatically by `egma self-host up` — if they are missing, run `egma self-host up` instead of `docker compose up`.
+<Accordion title="A model-backed run does not start">
+  Check the pinned persona and grader versions. Add the key for each selected
+  provider to `.env`, then run `egma self-host up` again.
 </Accordion>
 
-<Accordion title="Recordings play nothing or return SignatureDoesNotMatch">
-  This means `EGMA_BLOB_PUBLIC_URL` names a different host than the browser uses to reach the object store. Set it to the address a browser on your network actually reaches — for example, `http://192.168.1.10:9000` if that is your server's LAN address. Also verify that `EGMA_BASE_URL` and `EGMA_BLOB_PUBLIC_URL` both use the same scheme (`http:` or `https:`): a mixed-content mismatch silently blocks every recording.
+<Accordion title="A phone run says the carrier route is missing">
+  Add a complete two-value or four-value `EGMA_PHONE_*` route to `.env`, then
+  run `egma self-host up`. For Twilio credential authentication, use the SIP
+  credential-list username and password, not the Account SID and Auth Token.
 </Accordion>
 
-<Accordion title="egma self-host up works but the run never starts">
-  Check that the persona version has complete model selections and that `.env`
-  contains the key for every selected provider. Recreate the API and grader
-  containers after changing direct provider keys. For a phone run, also run
-  `npx @egma/cli self-host setup --plan` to check the carrier route.
+<Accordion title="Recordings return SignatureDoesNotMatch">
+  `EGMA_BLOB_PUBLIC_URL` must name the address the browser uses to reach the
+  object store. It must also use the same scheme as `EGMA_BASE_URL`.
 </Accordion>
 
-<Accordion title="ClickHouse logs 'Too many open files'">
-  ClickHouse requires a higher file descriptor limit than a login shell grants. Copy the override file and restart:
-
-  ```bash
-  cp docker-compose.override.yml.example docker-compose.override.yml
-  npx @egma/cli self-host up
-  ```
+<Accordion title="ClickHouse logs Too many open files">
+  Copy `docker-compose.override.yml.example` to
+  `docker-compose.override.yml`, then run `egma self-host up` again.
 </Accordion>
 
-<Accordion title="Simulator waits forever and never claims work">
-  Verify that `EGMA_SIMULATOR_SERVICE_TOKEN` is set to the same value in `.env` that the API reads. If the token is missing or mismatched, the API rejects every claim request. Also confirm that `EGMA_LIVEKIT_API_KEY` and `EGMA_LIVEKIT_API_SECRET` are set — an empty value is refused at startup.
-</Accordion>
-
-<Accordion title="Running the stack on a remote server (others need to reach it)">
-  Set `EGMA_BASE_URL` to the address people reach the web application at — for example, `http://192.168.1.10:3101`. Set `EGMA_BLOB_PUBLIC_URL` to the address browsers reach the object store at — for example, `http://192.168.1.10:9000`. Set `EGMA_S3_BIND=0.0.0.0` to publish the object store port. Both addresses must use the same scheme.
+<Accordion title="Other people need to reach this instance">
+  Set `EGMA_BASE_URL` to the web address they use. If their browsers also fetch
+  recordings from bundled MinIO, set `EGMA_BLOB_PUBLIC_URL` to its reachable
+  address and set `EGMA_S3_BIND=0.0.0.0`. Protect both services with TLS on an
+  untrusted network.
 </Accordion>

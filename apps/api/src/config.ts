@@ -136,25 +136,27 @@ export type Config = {
   /**
    * Which source owns the carrier route.
    *
-   * `platform` is the default. Environment values seed a missing route, and a
-   * complete route already in the platform store stays unchanged.
+   * `platform` is the API default for deployments that do not state an owner.
+   * Environment values seed a missing route, and a complete route already in
+   * the platform store stays unchanged.
    *
    * `environment` makes the deployment environment the source of truth.
-   * Startup reconciles the carrier route after seeding on every start. A
-   * changed complete route replaces the stored route, and no carrier values
-   * removes it.
+   * Startup reconciles a supplied carrier route after seeding on every start.
+   * A changed complete route replaces the stored route. No carrier values
+   * preserve a legacy sealed route because its password cannot be exported.
    *
    * This decision is independent of whether the deployment serves one or
    * several organizations. Tenancy does not say who owns a carrier route.
    */
   readonly carrierSettingsSource: CarrierSettingsSource;
+  /** Explicitly remove a route retained from an older sealed deployment. */
+  readonly carrierSettingsDisabled: boolean;
   /**
    * The carrier route this environment offers the platform on start.
    *
-   * A self-host operator can write the route through `egma self-host setup`.
-   * An automated deployment can provide the same complete route through its
-   * environment. Model, speech, voice, VAD and media choices are not platform
-   * settings and cannot enter through this value.
+   * A self-host operator supplies the complete route in the workspace `.env`.
+   * Model, speech, voice, VAD and media choices are not platform settings and
+   * cannot enter through this value.
    *
    * Empty is ordinary and means this deployment has no shared phone route.
    *
@@ -588,6 +590,33 @@ export function loadConfig(
   }
   const baseUrl = parsedBaseUrl.origin;
 
+  const selectedCarrierSettingsSource = carrierSettingsSource(environment);
+  const carrierSettingsDisabled = flag(
+    environment,
+    "EGMA_PHONE_DISABLED",
+    false,
+  );
+  const selectedPlatformSettings = platformSettings(environment);
+  if (
+    carrierSettingsDisabled &&
+    selectedCarrierSettingsSource !== "environment"
+  ) {
+    throw new Error(
+      "EGMA_PHONE_DISABLED is supported only when " +
+        "EGMA_CARRIER_SETTINGS_SOURCE=environment",
+    );
+  }
+  if (
+    carrierSettingsDisabled &&
+    Object.keys(selectedPlatformSettings).length > 0
+  ) {
+    throw new Error(
+      "EGMA_PHONE_DISABLED cannot be true while any EGMA_PHONE_TRUNK_* or " +
+        "EGMA_PHONE_SOURCE_NUMBER value is set. Remove the route values or " +
+        "set EGMA_PHONE_DISABLED=false.",
+    );
+  }
+
   return {
     smtp: smtpSettings(environment, baseUrl),
     databaseUrl,
@@ -598,12 +627,13 @@ export function loadConfig(
     authSecret,
     encryptionKey,
     singleOrganization: flag(environment, "EGMA_SINGLE_ORGANIZATION", true),
-    carrierSettingsSource: carrierSettingsSource(environment),
+    carrierSettingsSource: selectedCarrierSettingsSource,
+    carrierSettingsDisabled,
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
-    platformSettings: platformSettings(environment),
+    platformSettings: selectedPlatformSettings,
     blob: blobStore(environment, parsedBaseUrl),
     ingestion: ingestionSettings(environment),
   };
@@ -663,6 +693,15 @@ function platformSettings(
         "Set EGMA_PHONE_TRUNK_ADDRESS and EGMA_PHONE_SOURCE_NUMBER together, " +
         "and if this carrier uses credentials, also set both " +
         "EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD.",
+    );
+  }
+  if (
+    /^AC[0-9a-f]{32}$/iu.test(offered.carrier_trunk_username ?? "")
+  ) {
+    throw new Error(
+      "EGMA_PHONE_TRUNK_USERNAME looks like a Twilio Account SID. Use the " +
+        "username and password from the Credential List attached to the trunk, " +
+        "not the Twilio Account SID and Auth Token.",
     );
   }
 

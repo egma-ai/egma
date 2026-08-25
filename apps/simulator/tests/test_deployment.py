@@ -1,10 +1,7 @@
 """The deployment story, checked against the code that reads it.
 
-Two files tell a self-hoster how to run this: `docker-compose.yml` — which
-carries the phone stack too, since there is no overlay to ask for any more —
-and `.env.example`. A third, this app's README, is the table they are all
-summarised in. Every one of
-them names environment variables, and every one of them can fall behind
+The normal operator inputs stay in `.env.example`. The full environment
+reference documents advanced variables. Both can fall behind
 the module that reads them — silently, because nothing fails when a
 variable is documented and unread, or read and undocumented. The second
 one is the expensive kind: a self-hoster cannot set a variable nobody
@@ -74,6 +71,7 @@ def repository_root() -> Path:
 
 ROOT = repository_root()
 COMPOSE_FILES = sorted(ROOT.glob("docker-compose*.yml"))
+ENVIRONMENT_REFERENCE = ROOT / "docs/configuration/environment-variables.mdx"
 
 
 def variables_read_by_the_code() -> set[str]:
@@ -85,9 +83,9 @@ def variables_read_by_the_code() -> set[str]:
     return found
 
 
-def test_every_variable_the_code_reads_is_in_the_env_example():
+def test_every_variable_the_code_reads_is_in_the_environment_reference():
     documented = set(
-        VARIABLE.findall((ROOT / ".env.example").read_text(encoding="utf-8"))
+        VARIABLE.findall(ENVIRONMENT_REFERENCE.read_text(encoding="utf-8"))
     )
     missing = (
         variables_read_by_the_code()
@@ -96,8 +94,8 @@ def test_every_variable_the_code_reads_is_in_the_env_example():
         - FIXED_BY_SHIPPED_DEPLOYMENT
     )
     assert not missing, (
-        f".env.example does not name {sorted(missing)}, which the simulator "
-        "reads — a self-hoster cannot set a variable nobody told them about"
+        f"the full environment reference does not name {sorted(missing)}, "
+        "which the simulator reads"
     )
 
 
@@ -116,7 +114,7 @@ def test_every_variable_the_code_reads_is_passed_through_by_compose():
 
 
 def test_the_capacity_default_lives_in_the_simulator_once():
-    """Compose and a copied environment file pass through absence.
+    """Compose passes through absence and the operator example omits tuning.
 
     The simulator owns the default. If either deployment file writes its own
     number, a bare process and a self-host can drift again even though both
@@ -124,9 +122,11 @@ def test_the_capacity_default_lives_in_the_simulator_once():
     """
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    reference = ENVIRONMENT_REFERENCE.read_text(encoding="utf-8")
 
     assert "EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}" in compose
-    assert re.search(r"^EGMA_SIMULATOR_CAPACITY=$", env_example, re.MULTILINE)
+    assert "EGMA_SIMULATOR_CAPACITY" not in env_example
+    assert "EGMA_SIMULATOR_CAPACITY" in reference
 
 
 def test_every_variable_the_code_reads_is_in_the_readme_table():
@@ -149,12 +149,18 @@ def test_nothing_is_documented_that_nothing_reads():
     read = variables_read_by_the_code() | DOCUMENTED_ELSEWHERE
     named_files = (
         ROOT / ".env.example",
+        ENVIRONMENT_REFERENCE,
         ROOT / "README.md",
         Path(config_module.__file__).parents[2] / "README.md",
         *COMPOSE_FILES,
     )
     for named in named_files:
-        stale = set(VARIABLE.findall(named.read_text(encoding="utf-8"))) - read
+        mentioned = {
+            name
+            for name in VARIABLE.findall(named.read_text(encoding="utf-8"))
+            if not name.endswith("_")  # A documented `EGMA_SIMULATOR_S3_*` family.
+        }
+        stale = mentioned - read
         assert not stale, f"{named} names {sorted(stale)}, which nothing reads"
 
 
@@ -200,10 +206,9 @@ def test_a_plain_compose_up_starts_the_whole_phone_stack():
     point rather than an accident: a platform that cannot place a phone
     call is not the product, so `egma self-host up` — and a plain
     `docker compose up`, which is the same containers — brings all three
-    up. What stays off until `egma self-host setup` has run is the
-    simulator's *media backend*, because a simulator told to dial with no
-    trunk refuses to start and platform health must never wait on carrier
-    setup. That is asserted below.
+    up. Phone calls remain unavailable until `.env` contains a complete
+    carrier route and `egma self-host up` starts the API with it. That is
+    separate from the media stack being present and healthy.
     """
     default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     for service in ("livekit", "livekit-sip", "livekit-redis"):
@@ -325,10 +330,10 @@ REQUIRED_IN_THE_ENVIRONMENT = {
         "binds to what it says"
     ),
 }
-"""The bootstrap set: what a deployment must state before it may start.
+"""The bootstrap set: what the CLI must supply before Compose may start.
 
-Each of these is a secret the deployment cannot invent, or the address it
-announces itself as. **Not one of them may have a default**, because a
+Each credential is generated once per platform workspace; the address is
+selected by the normal start command. **Not one may have a public default**, because a
 default here is a value every reader of this repository already holds — the
 finding that took the media pair's default away, one file wider.
 
@@ -380,7 +385,7 @@ MAY_BE_ABSENT = {
     # nothing anywhere. The moment the flag says on, the two required values
     # stop being optional — the api and grader refuse to boot without them,
     # by name — so an empty one can never be a quietly-off feature, which is
-    # this guard's whole subject. See .env.example's telemetry section.
+    # this guard's whole subject. See the full environment reference.
     "EGMA_TELEMETRY": "off is the default, and the public repo's promise",
     "EGMA_TELEMETRY_OTLP_ENDPOINT": "required by name at boot once the flag is on",
     "EGMA_POSTHOG_KEY": "required by name at boot once the flag is on",
@@ -597,17 +602,11 @@ def test_a_bootstrap_variable_refuses_to_start_the_platform_when_absent(name):
         "that names nothing about configuration"
     )
     for found in read:
-        # What Compose prints after the variable's name, and the only sentence
-        # a self-hoster meeting this refusal gets. Two things are checked
-        # because two things are needed to act: where the value belongs, and
-        # how to come by one. A name alone sends somebody to read this file.
-        assert ".env" in found.tail, (
-            f"{name} is required without saying where the value goes. Name the "
-            f"file it belongs in; this one says {found.tail.strip()!r}"
-        )
-        assert "openssl" in found.tail or "egma self-host" in found.tail, (
-            f"{name} is required without saying how to come by a value. Name "
-            "the command that makes one, or the egma command that generates it; "
+        # A direct Compose refusal must point back to the normal command that
+        # prepares the closed bootstrap set. It must not ask the operator to
+        # invent an internal credential in `.env`.
+        assert "egma self-host up" in found.tail, (
+            f"{name} is required without naming the command that supplies it; "
             f"this one says {found.tail.strip()!r}"
         )
 
@@ -659,43 +658,33 @@ def test_nothing_is_excused_that_no_longer_needs_excusing():
 
 @pytest.mark.parametrize("name", sorted(REQUIRED_IN_THE_ENVIRONMENT))
 def test_env_example_supplies_no_value_for_a_variable_that_must_be_stated(name):
-    """The file the README tells everybody to copy may not answer for them.
-
-    A required variable with a value in `.env.example` is a required variable
-    in name only: the copy supplies it, the deployment starts, and nobody is
-    ever asked. `EGMA_BASE_URL` is the one that showed why this needs a guard
-    rather than care — a copied `http://localhost:3101` is correct on a laptop
-    and wrong on every deployment anybody else reaches, and wrong in the quiet
-    way, because the platform runs perfectly while every agent repository is
-    refused a directory away from the cause.
-    """
-    for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
-        if not line.startswith(f"{name}="):
-            continue
-        assert line.strip() == f"{name}=", (
-            f".env.example answers {name} for the reader — the line is "
-            f"{line.strip()!r}. It has no default anywhere else on purpose, so "
-            "a value here is the default arriving by the one route nobody "
-            "checks: the file the README says to copy. Leave it empty and say "
-            "in the comment above it what to put there."
-        )
+    """Generated bootstrap values are not operator inputs."""
+    assignments = {
+        line.split("=", 1)[0]
+        for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+        if re.match(r"^[A-Z][A-Z0-9_]*=", line)
+    }
+    assert name not in assignments, (
+        f".env.example asks the operator for {name}; egma self-host up owns "
+        "the bootstrap set and records it in .egma-platform/platform.env"
+    )
 
 
 OVERLAY_VARIABLE = re.compile(r"\$\{(EGMA_(?:LIVEKIT|WORKBENCH)_[A-Z0-9_]+)")
 
 
 @pytest.mark.parametrize("compose", COMPOSE_FILES, ids=lambda path: path.name)
-def test_every_variable_an_overlay_reads_is_in_the_env_example(compose):
+def test_every_variable_an_overlay_reads_is_in_the_environment_reference(compose):
     """The overlays' own variables drift the same way the simulator's do.
 
     These are not read by any Python — the compose file is the code that
     reads them — so nothing else in this suite would notice one being
     added, renamed, or left behind.
     """
-    documented = (ROOT / ".env.example").read_text(encoding="utf-8")
+    documented = ENVIRONMENT_REFERENCE.read_text(encoding="utf-8")
     named = set(OVERLAY_VARIABLE.findall(compose.read_text(encoding="utf-8")))
     missing = sorted(name for name in named if name not in documented)
-    assert not missing, f"{compose.name} reads {missing}; .env.example does not"
+    assert not missing, f"{compose.name} reads {missing}; the full reference does not"
 
 
 def test_the_gateway_and_its_published_ports_agree_on_the_rtp_range():

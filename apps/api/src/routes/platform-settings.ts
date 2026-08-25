@@ -10,6 +10,7 @@ import {
 import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
+import type { CarrierSettingsSource } from "../config.ts";
 import { credentialed, requesterOf } from "../http/credentialed.ts";
 import { notPermitted, unprocessable } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
@@ -55,6 +56,8 @@ export type PlatformSettingsRoutesOptions = {
    * flag lives in this process's configuration rather than in the store.
    */
   readonly singleOrganization: boolean;
+  /** Which operator surface is allowed to change the carrier route. */
+  readonly carrierSettingsSource: CarrierSettingsSource;
 };
 
 export const PLATFORM_SETTINGS_PATH = "/api/platform/settings";
@@ -122,6 +125,15 @@ export async function platformSettingsRoutes(
       organizationId: auth.organizationId,
       projectId: auth.projectId,
     });
+
+    if (options.carrierSettingsSource === "environment") {
+      throw new UnprocessableInputError(
+        "this deployment's carrier route is owned by the EGMA_PHONE_* values " +
+          "in its environment. Change the complete route there and restart " +
+          "the deployment; the settings API is read-only while the environment " +
+          "owns the route.",
+      );
+    }
 
     const written = await writePlatformSettings(
       auth,

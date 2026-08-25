@@ -13,13 +13,10 @@ import {
  * brings that platform up ready, and this says only whether it can place a
  * phone call.
  *
- * **It is read from the platform's own store rather than from this process's
- * environment**, and that move is what makes the answer recoverable. The route
- * used to arrive as environment variables of this container, so a
- * platform started any other way than through the CLI reported `setup required`
- * with the carrier paperwork already done — and the only way back was to find
- * the file and restart. They are ordinary settings now: an operator who supplies
- * a missing one is ready on the next request, with nothing restarted.
+ * The API reads the sealed runtime copy. On self-host, the operator's `.env`
+ * file owns that copy and `egma self-host up` reconciles a complete supplied
+ * route when the API starts. This keeps the SIP password out of responses and
+ * still gives the operator one configuration surface.
  *
  * This is an internal run-start precondition, not a public readiness response.
  * Everything returned here is non-secret: the carrier hostname and the number
@@ -99,18 +96,17 @@ export function phoneReadiness(held: PlatformFacts): PhoneReadiness {
 
 /**
  * What a developer is told when they ask this platform for a phone run before
- * its phone half exists.
- *
- * Written for whoever is holding the terminal, which on a self-host is the same
- * person who runs the platform and on a hosted one is not: it names the command
- * and it names what that command still needs.
+ * its phone half exists. It names the operator-owned variables and the normal
+ * start command rather than a second setup workflow.
  */
 export function phoneSetupRequiredMessage(readiness: PhoneReadiness): string {
   return (
-    "this Egma instance has not been set up to place phone calls, so nothing was " +
+    "this Egma instance has not been configured to place phone calls, so nothing was " +
     `dialled and nothing was charged. It is missing ${readiness.missing.join(
       " and ",
-    )}. Whoever runs this platform makes it ready with one command in the ` +
-    "platform workspace: egma self-host setup."
+    )}. Add EGMA_PHONE_TRUNK_ADDRESS and EGMA_PHONE_SOURCE_NUMBER to the ` +
+    "platform workspace's .env file. When the carrier uses SIP credentials, " +
+    "also add EGMA_PHONE_TRUNK_USERNAME and EGMA_PHONE_TRUNK_PASSWORD. Then run " +
+    "egma self-host up."
   );
 }

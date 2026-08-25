@@ -71,6 +71,8 @@ export type TestApi = {
 
 export type TestApiOptions = {
   readonly singleOrganization?: boolean;
+  /** Which deployment surface owns carrier-route writes. */
+  readonly carrierSettingsSource?: Config["carrierSettingsSource"];
   /**
    * Settings this instance starts holding, seeded exactly as a deployment's own
    * environment seeds them — through `seedPlatformSettings`, sealed, into the
@@ -251,6 +253,7 @@ export async function createApi(
     databaseUrl: database.url,
     ...(traceStore === undefined ? {} : { clickhouseUrl: traceStore.url }),
     singleOrganization: options.singleOrganization ?? false,
+    carrierSettingsSource: options.carrierSettingsSource ?? "platform",
     trustProxy: options.trustProxy ?? false,
     ...(options.blob === undefined ? {} : { blob: options.blob }),
     ...(options.baseUrl === undefined ? {} : { baseUrl: options.baseUrl }),

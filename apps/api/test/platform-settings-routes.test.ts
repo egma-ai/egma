@@ -173,6 +173,32 @@ describe("the platform carrier route", () => {
 });
 
 describe("carrier-route refusals", () => {
+  it("keeps the settings API read-only when the deployment environment owns the route", async () => {
+    api = await createApi("platform_carrier_environment_owned", {
+      singleOrganization: true,
+      carrierSettingsSource: "environment",
+      platformSettings: CARRIER,
+    });
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+
+    const read = await request("GET", ada.secret);
+    expect(read.statusCode).toBe(200);
+    expect(settingsIn(read.body).carrier_trunk_address?.hint).toBe(
+      CARRIER.carrier_trunk_address,
+    );
+
+    const refused = await request("PATCH", ada.secret, REPLACEMENT);
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body.message).toContain(
+      "carrier route is owned by the EGMA_PHONE_* values",
+    );
+
+    const unchanged = await request("GET", ada.secret);
+    expect(settingsIn(unchanged.body).carrier_trunk_address?.hint).toBe(
+      CARRIER.carrier_trunk_address,
+    );
+  });
+
   it("refuses model settings because they have another owner", async () => {
     const ada = await owner("platform_carrier_unknown");
 

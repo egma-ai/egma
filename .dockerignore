@@ -12,6 +12,7 @@ node_modules
 **/.pytest_cache
 **/.ruff_cache
 **/.egma-simulator
+.egma-platform
 .env
 .env.*
 !.env.example

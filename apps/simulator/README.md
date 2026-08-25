@@ -214,10 +214,12 @@ configure only the media bridge. They do not select a carrier route.
 
 For Twilio, an administrator creates one shared trunk, source number, and
 attached credential list. Each developer and production gets one SIP
-username/password in that list. `egma self-host setup`, in the platform
-workspace, copies that deployment's trunk address, source number, and SIP
-pair into the **platform's own store**, sealed. It never receives the
-Twilio Account SID or Auth Token and never changes the Twilio account.
+username/password in that list. The operator puts that deployment's trunk
+address, source number, and SIP pair in the platform workspace's `.env`, then
+runs `egma self-host up`. The API copies the complete route into the
+**platform's own store**, sealed. The pair comes from the trunk's SIP
+credential list, never from the Twilio Account SID and Auth Token. Egma never
+changes the Twilio account.
 Every simulator receives the stored carrier route on the work order it claims.
 There is no simulator trunk environment fallback and no stored LiveKit trunk
 ID. See the root README.
@@ -264,7 +266,7 @@ transport and process settings only.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
-| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN` — under compose one variable reaches both sides and neither has a default, so a deployment states it once in `.env` and Compose refuses by name until it does; the claim answers carry live provider credentials. The workbench asks for none. |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN`. `egma self-host up` generates one private workspace value and gives the same value to both containers; an advanced deployment must supply the matching value to both processes. The claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `2` | Most simulations conducted at once. Compose passes an unset value through, so this process owns the default in every deployment. A voice simulation costs a channel on the deployment's carrier trunk, so raise it only as far as the trunk allows. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
@@ -432,9 +434,10 @@ which is what makes the rest of this app testable with no container at
 all.
 
 Carrier provisioning is not this app's. A carrier administrator creates the
-trunk and SIP credential. `egma self-host setup` copies only the four runtime
-values into the platform store and never contacts Twilio. Its tests use a local
-server shaped like the Twilio APIs as a tripwire and require zero requests.
+trunk and SIP credential. The platform's `.env` holds the four runtime values,
+and `egma self-host up` starts the API which copies the complete route into its
+sealed store. Egma never contacts Twilio. Its tests use a local server shaped
+like the Twilio APIs as a tripwire and require zero requests.
 
 `tests/test_deployment.py` compares the deployment story against the code that
 reads it. Every operator-controlled simulator variable is documented; the

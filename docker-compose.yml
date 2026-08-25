@@ -109,8 +109,8 @@ services:
       # `up` with the variable's name rather than started on a password every
       # reader of this repository holds. MinIO refuses a root password under
       # eight characters, so a short one fails at `up` too.
-      MINIO_ROOT_USER: ${EGMA_S3_ACCESS_KEY_ID:?no default — the recording store's own credential. openssl rand -hex 8 makes one, set it in .env}
-      MINIO_ROOT_PASSWORD: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, at least 8 characters, set it in .env}
+      MINIO_ROOT_USER: ${EGMA_S3_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
+      MINIO_ROOT_PASSWORD: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
     volumes:
       - minio-data:/data
     ports:
@@ -218,16 +218,16 @@ services:
   minio-bucket:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
-      EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:?no default — the recording store's own credential. openssl rand -hex 8 makes one, set it in .env}
-      EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, at least 8 characters, set it in .env}
+      EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
+      EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
       EGMA_S3_BUCKET: ${EGMA_S3_BUCKET:-egma-recordings}
       # The read-only half, interpolated into the api service below from the
       # same pair so the two can never disagree. It has no default for the
       # reason the root pair above has none: a credential written in a public
       # repository is a credential every reader of it holds, and this one
       # reads every recording a deployment has.
-      EGMA_S3_READ_ACCESS_KEY_ID: ${EGMA_S3_READ_ACCESS_KEY_ID:?no default — the read-only credential playback links are signed with. openssl rand -hex 8 makes one, set it in .env}
-      EGMA_S3_READ_SECRET_ACCESS_KEY: ${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, set it in .env beside EGMA_S3_READ_ACCESS_KEY_ID}
+      EGMA_S3_READ_ACCESS_KEY_ID: ${EGMA_S3_READ_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled read credential in .egma-platform/platform.env}
+      EGMA_S3_READ_SECRET_ACCESS_KEY: ${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled read credential in .egma-platform/platform.env}
       # The second bucket on this same store: the pending ingestion spool.
       # Separate from the recordings bucket and reached by a separate
       # credential, because one workload must not be able to read, delete or
@@ -302,25 +302,23 @@ services:
       CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://${CLICKHOUSE_USER:-egma}:${CLICKHOUSE_PASSWORD:-egma}@clickhouse:8123/${CLICKHOUSE_DB:-egma}}
       HOST: 0.0.0.0
       PORT: "3100"
-      # Signs session cookies. No default — one written here is one every
-      # reader of this repository can mint a session with. `openssl rand
-      # -base64 32` makes one; see .env.example.
-      EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:?no default — openssl rand -base64 32 makes one, set it in .env}
+      # Signs session cookies. No public default: `egma self-host up` creates
+      # one private value for this workspace.
+      EGMA_AUTH_SECRET: ${EGMA_AUTH_SECRET:?no default — egma self-host up generates it in .egma-platform/platform.env}
       # Seals connection credentials and the carrier route before they reach
       # the database. No default, and this is the sharpest of the three:
       # a deployment sealed with a key printed in a public repository is not
       # sealed, and a database copy carries the credentials needed to reach
       # customer agents plus the platform's carrier route.
-      # `openssl rand -hex 32` makes one. Back it up alongside the database;
+      # `egma self-host up` creates it. Back it up alongside the database;
       # losing it loses every stored credential and every stored setting.
-      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — openssl rand -hex 32 makes one, set it in .env and back it up beside the database}
+      EGMA_ENCRYPTION_KEY: ${EGMA_ENCRYPTION_KEY:?no default — egma self-host up generates it in .egma-platform/platform.env; back it up with Postgres}
       # What the simulator must show to claim work. Claim answers carry
       # customers' live connection credentials and port 3100 is published on
       # this machine, so the check is always on and there is no default: it is
-      # interpolated identically into the simulator below, so one line in .env
-      # sets both halves and they always match. egma_st_ then `openssl rand
-      # -hex 32` makes one.
-      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma_st_ then openssl rand -hex 32, set it in .env for both containers}
+      # interpolated identically into the simulator below. `egma self-host up`
+      # creates one value and hands the same value to both containers.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma self-host up generates it in .egma-platform/platform.env}
       # Where a browser reaches this instance. The pages and the API answer on
       # one origin, and that origin is the self-hoster's own — which is why
       # there is no default for it to quietly be wrong about. Every agent
@@ -377,8 +375,8 @@ services:
       # cannot delete and cannot list, so a leak of it reads a recording rather
       # than replacing one. A deployment pointed at somebody else's S3 sets
       # these two directly and gives that credential the same shape.
-      EGMA_BLOB_ACCESS_KEY_ID: ${EGMA_BLOB_ACCESS_KEY_ID:-${EGMA_S3_READ_ACCESS_KEY_ID:?no default — the read-only credential playback links are signed with. openssl rand -hex 8 makes one, set it in .env}}
-      EGMA_BLOB_SECRET_ACCESS_KEY: ${EGMA_BLOB_SECRET_ACCESS_KEY:-${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, set it in .env beside EGMA_S3_READ_ACCESS_KEY_ID}}
+      EGMA_BLOB_ACCESS_KEY_ID: ${EGMA_BLOB_ACCESS_KEY_ID:-${EGMA_S3_READ_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled read credential in .egma-platform/platform.env}}
+      EGMA_BLOB_SECRET_ACCESS_KEY: ${EGMA_BLOB_SECRET_ACCESS_KEY:-${EGMA_S3_READ_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled read credential in .egma-platform/platform.env}}
       EGMA_SINGLE_ORGANIZATION: ${EGMA_SINGLE_ORGANIZATION:-true}
       EGMA_TRUST_PROXY: ${EGMA_TRUST_PROXY:-false}
       # The budget belongs to the organization rather than to a key, so
@@ -399,18 +397,21 @@ services:
       EGMA_CARTESIA_API_KEY: ${EGMA_CARTESIA_API_KEY:-}
       EGMA_PROVIDER_CREDENTIALS_SECRET_ID: ${EGMA_PROVIDER_CREDENTIALS_SECRET_ID:-}
       EGMA_PROVIDER_CREDENTIALS_REGION: ${EGMA_PROVIDER_CREDENTIALS_REGION:-}
-      # The optional shared carrier route. The API seals the SIP password in
-      # the platform store; provider credentials use the variables above and
-      # never enter platform settings.
+      # The optional shared carrier route. In self-hosted deployments the
+      # operator's environment is the source of truth. The API copies a
+      # complete route into its sealed runtime store so a simulation claim can
+      # receive it without reading this container's environment directly.
       EGMA_PHONE_TRUNK_ADDRESS: ${EGMA_PHONE_TRUNK_ADDRESS:-}
       EGMA_PHONE_SOURCE_NUMBER: ${EGMA_PHONE_SOURCE_NUMBER:-}
       EGMA_PHONE_TRUNK_USERNAME: ${EGMA_PHONE_TRUNK_USERNAME:-}
       EGMA_PHONE_TRUNK_PASSWORD: ${EGMA_PHONE_TRUNK_PASSWORD:-}
-      # An explicit ownership choice, separate from tenancy. `platform` seeds
-      # a missing carrier route and then leaves the stored route alone.
-      # `environment` makes the two-value source-IP route or four-value
-      # credential route above authoritative on every start.
-      EGMA_CARRIER_SETTINGS_SOURCE: ${EGMA_CARRIER_SETTINGS_SOURCE:-platform}
+      # Empty phone variables preserve a sealed route from an older release,
+      # because its password cannot be exported back into `.env`. This explicit
+      # flag is how an operator intentionally removes that retained route.
+      EGMA_PHONE_DISABLED: ${EGMA_PHONE_DISABLED:-false}
+      # Self-host has one operator interface: the four variables above in
+      # `.env`. A complete route replaces the sealed runtime copy on start.
+      EGMA_CARRIER_SETTINGS_SOURCE: environment
       # Egma platform telemetry, behind one flag that defaults to off — see
       # .env.example. Deliberately not the trace store: what customers send
       # through the OTLP door is their data in ClickHouse. This process sends
@@ -559,9 +560,9 @@ services:
       # What it shows the control plane to be allowed to claim, as a bearer
       # — the same header an Egma key uses everywhere else. The API checks it
       # on every claim, so this reads the same variable as the api service
-      # above and the two halves always match. It has no default there and
-      # none here: one line in .env sets both.
-      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma_st_ then openssl rand -hex 32, set it in .env for both containers}
+      # above and the two halves always match. It has no public default;
+      # `egma self-host up` supplies the private workspace value.
+      EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma self-host up generates it in .egma-platform/platform.env}
       # How many simulations one simulator conducts at once. It claims only
       # what it has room for, so a big run degrades to a queue rather than
       # to overload — raise this, or start a second simulator, and they
@@ -627,8 +628,8 @@ services:
       # above is stood up with so the two halves always match. A
       # deployment pointed at somebody else's S3 sets these two directly
       # and leaves the store above unused.
-      EGMA_SIMULATOR_S3_ACCESS_KEY_ID: ${EGMA_SIMULATOR_S3_ACCESS_KEY_ID:-${EGMA_S3_ACCESS_KEY_ID:?no default — the recording store's own credential. openssl rand -hex 8 makes one, set it in .env}}
-      EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY: ${EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY:-${EGMA_S3_SECRET_ACCESS_KEY:?no default — openssl rand -base64 24 makes one, at least 8 characters, set it in .env}}
+      EGMA_SIMULATOR_S3_ACCESS_KEY_ID: ${EGMA_SIMULATOR_S3_ACCESS_KEY_ID:-${EGMA_S3_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}}
+      EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY: ${EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY:-${EGMA_S3_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}}
       # The volume below, and the one thing kept on it. The write-ahead
       # log is the only record of a report that never got through, so
       # losing it to a container being replaced would lose a simulation's
@@ -758,10 +759,10 @@ services:
   # Three containers: the LiveKit server (the room a call becomes), its SIP
   # gateway (the thing that speaks to your carrier), and the Redis those two
   # find each other through. They start with everything else, because a
-  # platform that cannot place a phone call is not the product — `egma
-  # self-host up` brings up one deployment and `egma self-host setup`
-  # makes it able to dial. They were an opt-in overlay until the self-hosted
-  # release; that overlay is gone and nothing needs to be asked for by name.
+  # `egma self-host up` always brings up the full deployment. It can dial when
+  # the operator's `.env` supplies a complete EGMA_PHONE_* carrier route. The
+  # phone stack was an opt-in overlay until the self-hosted release; that
+  # overlay is gone and nothing needs to be asked for by name.
   #
   # ## The network truth, container by container
   #

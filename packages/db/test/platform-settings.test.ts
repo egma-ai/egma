@@ -57,6 +57,14 @@ const IP_ROUTE = {
   carrier_trunk_number: "+15550100300",
 } as const;
 
+// Built at runtime so a validator sees the real SID shape without publishing
+// a token-shaped literal that GitHub push protection must treat as a secret.
+const TWILIO_ACCOUNT_SID = [
+  "AC",
+  "0123456789abcdef",
+  "0123456789abcdef",
+].join("");
+
 function owner(): AuthContext {
   return {
     userId: ada,
@@ -257,6 +265,18 @@ describe("carrier write validation", () => {
       }),
     ).rejects.toThrow(/shorter than a valid SIP credential/u);
   });
+
+  it("refuses a Twilio Account SID where a SIP username belongs", async () => {
+    await expect(
+      writePlatformSettings(owner(), ONE_TEAM, {
+        ...FIRST_ROUTE,
+        carrier_trunk_username: TWILIO_ACCOUNT_SID,
+      }),
+    ).rejects.toThrow(
+      /Account SID.*Credential List.*not.*Account SID.*Auth Token/iu,
+    );
+    expect(await platformFacts()).toEqual({});
+  });
 });
 
 describe("who may manage the route", () => {
@@ -398,10 +418,20 @@ describe("environment-owned carrier reconciliation", () => {
     );
   });
 
-  it("removes the route when the authoritative environment offers none", async () => {
+  it("preserves a legacy stored route when the environment offers none", async () => {
+    await writePlatformSettings(owner(), ONE_TEAM, FIRST_ROUTE);
+    expect(await reconcileDeploymentCarrierSettings({})).toEqual([]);
+    expect(await resolvePlatformSettings(claimedBySimulator())).toEqual(
+      FIRST_ROUTE,
+    );
+  });
+
+  it("clears a retained route only when the deployment says so explicitly", async () => {
     await writePlatformSettings(owner(), ONE_TEAM, FIRST_ROUTE);
     expect(
-      [...(await reconcileDeploymentCarrierSettings({}))].sort(),
+      [...(
+        await reconcileDeploymentCarrierSettings({}, { clear: true })
+      )].sort(),
     ).toEqual(Object.keys(FIRST_ROUTE).sort());
     expect(await resolvePlatformSettings(claimedBySimulator())).toEqual({});
   });

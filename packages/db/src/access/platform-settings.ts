@@ -47,6 +47,9 @@ const HINT_CHARACTERS = 4;
 /** E.164: a plus, then no more than fifteen digits and no leading zero. */
 const E164 = /^\+[1-9]\d{1,14}$/;
 
+/** Twilio account authority is not a trunk Credential List username. */
+const TWILIO_ACCOUNT_SID = /^AC[0-9a-f]{32}$/iu;
+
 /** The phone values supplied at boot, in the order their bundle is named. */
 const CARRIER_BUNDLE = [
   "carrier_trunk_address",
@@ -192,6 +195,16 @@ function validValue(
           "with no scheme, credentials or path",
       );
     }
+  }
+  if (
+    definition.name === "carrier_trunk_username" &&
+    TWILIO_ACCOUNT_SID.test(trimmed)
+  ) {
+    throw new UnprocessableInputError(
+      "the SIP username looks like a Twilio Account SID. Use the username and " +
+        "password from the Credential List attached to the trunk, not the " +
+        "Twilio Account SID and Auth Token",
+    );
   }
   return trimmed;
 }
@@ -448,8 +461,9 @@ export async function platformFacts(): Promise<PlatformFacts> {
 /**
  * Give the platform the complete carrier route its environment names.
  *
- * **This is the second way in.** `egma self-host setup` writes a route through
- * the API. An automated deployment supplies the same route in its environment.
+ * A deployment supplies a complete route through its environment. This seed
+ * path writes it only when no route exists; environment-owned deployments use
+ * reconciliation below to apply later changes.
  *
  * **It never overwrites a configuration.** A setting somebody has changed has
  * been changed, and a restart is not an occasion to put a script's old copy
@@ -515,10 +529,12 @@ export async function seedPlatformSettings(
  * **This is not ordinary boot seeding.** `seedPlatformSettings` preserves a
  * complete route because a restart must not undo a choice an operator made.
  * A deployment can choose a different, explicit contract: its environment is
- * the source of truth, so a rollout must copy that complete route into the
- * platform store when the two differ. No carrier values means the deployment
- * has explicitly disabled its phone route, so a stored route is removed rather
- * than kept as hidden configuration.
+ * the source of truth, so a rollout must copy a supplied complete route into
+ * the platform store when the two differ. No carrier values leaves a stored
+ * route unchanged. The explicit `clear` option removes that retained route.
+ * This compatibility rule prevents an upgrade from deleting a SIP password
+ * which the sealed store cannot export; fresh self-hosted deployments still
+ * have no route until `.env` supplies one.
  *
  * The four carrier names are still one route. Validation finishes before the
  * transaction starts. Inside the transaction, the small settings table is
@@ -532,6 +548,7 @@ export async function seedPlatformSettings(
  */
 export async function reconcileDeploymentCarrierSettings(
   values: PlatformSettingValues,
+  options: { readonly clear?: boolean } = {},
 ): Promise<readonly PlatformSettingName[]> {
   const offered: Partial<Record<PlatformSettingName, string>> = {};
   for (const name of CARRIER_BUNDLE) {
@@ -543,6 +560,29 @@ export async function reconcileDeploymentCarrierSettings(
     (name) => offered[name] !== undefined,
   );
   requireWholeCarrier(offered, "reconciliation");
+  if (options.clear === true) {
+    if (offeredNames.length > 0) {
+      throw new UnprocessableInputError(
+        "a carrier reconciliation cannot supply a route and clear it at the " +
+          "same time",
+      );
+    }
+    return db().transaction(async (tx) => {
+      await tx.execute(
+        sql`lock table ${platformSetting} in share row exclusive mode`,
+      );
+      const held = await tx
+        .select({ name: platformSetting.name })
+        .from(platformSetting)
+        .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+      if (held.length === 0) return [];
+      await tx
+        .delete(platformSetting)
+        .where(inArray(platformSetting.name, CARRIER_BUNDLE));
+      return held.map((row) => row.name as PlatformSettingName);
+    });
+  }
+  if (offeredNames.length === 0) return [];
 
   // Settle every value before a transaction can remove the working route.
   // `rowsFor` repeats these cheap checks when it seals the insert rows; doing
@@ -551,8 +591,7 @@ export async function reconcileDeploymentCarrierSettings(
   for (const name of offeredNames) {
     settled[name] = validValue(definitionOf(name), offered[name]);
   }
-  const rows =
-    offeredNames.length === 0 ? [] : rowsFor(settled, new Date());
+  const rows = rowsFor(settled, new Date());
 
   return db().transaction(async (tx) => {
     await tx.execute(
@@ -578,7 +617,7 @@ export async function reconcileDeploymentCarrierSettings(
     await tx
       .delete(platformSetting)
       .where(inArray(platformSetting.name, CARRIER_BUNDLE));
-    if (rows.length > 0) await tx.insert(platformSetting).values(rows);
+    await tx.insert(platformSetting).values(rows);
 
     return changed;
   });

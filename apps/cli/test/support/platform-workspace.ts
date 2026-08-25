@@ -21,6 +21,7 @@ import path from "node:path";
 
 import { PLATFORM_SETTINGS } from "@egma/db";
 
+import { BOOTSTRAP_VARIABLES } from "../../src/self-host/workspace.ts";
 import { CLI_ENTRY } from "./workspace.ts";
 
 /** The key this stand-in accepts, and the only one it accepts. */
@@ -155,12 +156,14 @@ export async function startPlatform(
  * set.
  */
 const RECORDED_VARIABLES = [
-  "EGMA_BASE_URL",
-  "EGMA_LIVEKIT_API_KEY",
-  "EGMA_LIVEKIT_API_SECRET",
-  // Recorded so a check can prove the carrier route does not enter the
-  // bootstrap file or a media-container recreation.
+  ...BOOTSTRAP_VARIABLES,
+  // Recorded so checks can prove the carrier route reaches Compose literally
+  // but does not enter the bootstrap file.
+  "EGMA_PHONE_TRUNK_ADDRESS",
   "EGMA_PHONE_SOURCE_NUMBER",
+  "EGMA_PHONE_TRUNK_USERNAME",
+  "EGMA_PHONE_TRUNK_PASSWORD",
+  "EGMA_PHONE_DISABLED",
 ] as const;
 
 export type PlatformWorkspace = {
@@ -202,6 +205,14 @@ export async function makePlatformWorkspace(prefix: string): Promise<PlatformWor
   await writeFile(
     dockerShim,
     `#!/bin/sh\necho "ARGS $@" >> "${callsFile}"\n` +
+      `case "$*" in *"config --environment"*)\n` +
+      `  if [ -f .env ]; then\n` +
+      `    node -e 'const fs=require("node:fs"); const u=require("node:util"); for (const [n,v] of Object.entries(u.parseEnv(fs.readFileSync(".env","utf8")))) process.stdout.write(n+"="+v+"\\n")'\n` +
+      `  fi\n` +
+      `  env\n` +
+      `  exit 0\n` +
+      `;; esac\n` +
+      `case "$*" in *"volume ls"*) exit 0 ;; esac\n` +
       RECORDED_VARIABLES.map(
         (name) => `echo "${name}=\${${name}}" >> "${callsFile}"\n`,
       ).join("") +

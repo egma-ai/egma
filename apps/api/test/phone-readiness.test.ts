@@ -22,6 +22,14 @@ const BASE = {
   EGMA_INGEST_SECRET_ACCESS_KEY: "ingestion-secret-key",
 } as const;
 
+// Built at runtime so a validator sees the real SID shape without publishing
+// a token-shaped literal that GitHub push protection must treat as a secret.
+const TWILIO_ACCOUNT_SID = [
+  "AC",
+  "0123456789abcdef",
+  "0123456789abcdef",
+].join("");
+
 describe("phone readiness", () => {
   it("derives its required route from the platform catalog", () => {
     expect(
@@ -37,7 +45,9 @@ describe("phone readiness", () => {
     expect(readiness.state).toBe("setup_required");
     expect(readiness.missing).toEqual(["the carrier trunk", "the source number"]);
     expect(phoneSetupRequiredMessage(readiness)).toContain("nothing was charged");
-    expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host setup");
+    expect(phoneSetupRequiredMessage(readiness)).toContain("workspace's .env file");
+    expect(phoneSetupRequiredMessage(readiness)).toContain("egma self-host up");
+    expect(phoneSetupRequiredMessage(readiness)).not.toContain("self-host setup");
   });
 
   it("is ready for a complete source-IP route", () => {
@@ -113,6 +123,29 @@ describe("phone readiness", () => {
     );
   });
 
+  it("uses an explicit flag to clear a route retained from an older release", () => {
+    const disabled = loadConfig({
+      ...BASE,
+      EGMA_CARRIER_SETTINGS_SOURCE: "environment",
+      EGMA_PHONE_DISABLED: "true",
+    });
+    expect(disabled.carrierSettingsDisabled).toBe(true);
+    expect(disabled.platformSettings).toEqual({});
+
+    expect(() =>
+      loadConfig({ ...BASE, EGMA_PHONE_DISABLED: "true" }),
+    ).toThrow("EGMA_CARRIER_SETTINGS_SOURCE=environment");
+    expect(() =>
+      loadConfig({
+        ...BASE,
+        EGMA_CARRIER_SETTINGS_SOURCE: "environment",
+        EGMA_PHONE_DISABLED: "true",
+        EGMA_PHONE_TRUNK_ADDRESS: "carrier.example.com",
+        EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
+      }),
+    ).toThrow("cannot be true while any EGMA_PHONE_TRUNK_*");
+  });
+
   it("refuses every partial credential route", () => {
     const complete = {
       EGMA_PHONE_TRUNK_ADDRESS: "egma-simulator-abc.pstn.twilio.com",
@@ -139,5 +172,17 @@ describe("phone readiness", () => {
       carrier_trunk_address: "carrier.example.com",
       carrier_trunk_number: "+15550100100",
     });
+  });
+
+  it("refuses a Twilio Account SID where a SIP username belongs", () => {
+    expect(() =>
+      loadConfig({
+        ...BASE,
+        EGMA_PHONE_TRUNK_ADDRESS: "carrier.example.com",
+        EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
+        EGMA_PHONE_TRUNK_USERNAME: TWILIO_ACCOUNT_SID,
+        EGMA_PHONE_TRUNK_PASSWORD: "the-carrier-issued-this-one",
+      }),
+    ).toThrow(/Account SID.*Credential List.*not.*Account SID.*Auth Token/iu);
   });
 });

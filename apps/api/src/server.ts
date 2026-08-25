@@ -437,6 +437,7 @@ export function buildApi(options: ServerOptions): Api {
     // customers the carrier route belongs to none of them, and the question of
     // whose it is is not answered yet.
     singleOrganization: config.singleOrganization,
+    carrierSettingsSource: config.carrierSettingsSource,
   });
 
   // The simulator's claim door. Outside the credentialed scope and the

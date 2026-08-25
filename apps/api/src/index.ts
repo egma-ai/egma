@@ -72,15 +72,19 @@ let traceSchema: TraceStoreSchema =
 // not already hold one. This is how an automated deployment configures phone
 // routing with no interview. In the default `platform` mode, a restart never
 // replaces a complete route somebody changed.
-const seeded = await seedPlatformSettings(config.platformSettings);
+const seeded = config.carrierSettingsDisabled
+  ? []
+  : await seedPlatformSettings(config.platformSettings);
 
-// An operator can instead say that the deployment environment owns the carrier
-// route. Reconcile it on every start in that mode, after seeding. A changed
-// route replaces the stored route, and an absent route removes it. This choice
-// is explicit and independent of how many organizations the platform serves.
+// A deployment can instead say that its environment owns the carrier route.
+// Reconcile a complete supplied route on every start in that mode, after
+// seeding. An absent route leaves an older sealed route unchanged so an upgrade
+// cannot destroy a SIP password which the platform never returns.
 const reconciled =
   config.carrierSettingsSource === "environment"
-    ? await reconcileDeploymentCarrierSettings(config.platformSettings)
+    ? await reconcileDeploymentCarrierSettings(config.platformSettings, {
+        clear: config.carrierSettingsDisabled,
+      })
     : [];
 
 // Egma-provided personas, written from the fixed-id catalog before any
