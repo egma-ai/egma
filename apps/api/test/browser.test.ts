@@ -2987,7 +2987,14 @@ describe("the complete product, walked in order in a second project", () => {
       const written = await writeResponse;
       expect(written.status(), await written.text()).toBe(201);
       const body = (await written.json()) as { id: string };
-      testAddress = `${origin}${at("tests", body.id)}`;
+      /*
+       * `at` already carries the origin — it is the address builder every
+       * sibling row in the copied-link table composes with. Prefixing it a
+       * second time made a URL with the origin in it twice, which no browser
+       * can navigate to, and the row that holds it is one the journey only
+       * reaches after every step above it has passed.
+       */
+      testAddress = at("tests", body.id);
 
       // One click, one create, and the row is an ordinary grid row on the same
       // address — writing a test never navigated anywhere.
@@ -3314,10 +3321,15 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Save test",
       },
       {
-        // The retired test address, kept as a deep link: it resolves the
-        // test's suite and lands on that suite's grid.
+        /*
+         * The retired test address, kept as a deep link: it resolves the
+         * test's suite and lands on that suite's grid — so, like the retired
+         * agent address above, it says where it lands. The test page went with
+         * the 2026-08-24 rework; a test is a row of its suite's grid now.
+         */
         what: "one test",
         address: testAddress,
+        lands: suiteAddress,
         says: "Reschedules a booked appointment",
       },
       { what: "Personas", address: at("personas"), says: "Impatient Rita" },
