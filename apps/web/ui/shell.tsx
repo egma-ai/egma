@@ -258,12 +258,19 @@ function Navigation({
     <SidebarProvider onNavigate={onNavigate}>
       {/*
        * The 16px gutter is the bar's, and it is on every block in the column
-       * rather than on the column itself. The organization bar's hairline has to
-       * run the full 224px, so the `<aside>` can carry no side padding — and
-       * the rows are 192px wide with their Ember mark exactly on the gutter,
-       * which is what the boards draw (`725-0`, `72Z-0`).
+       * rather than on the column itself. The organization bar's hairline has
+       * to run the full 224px, so the `<aside>` can carry no side padding.
+       *
+       * **8px here, because the gutter belongs to the row's icon and not to the
+       * row's plate.** The Egma mark, the word `Project`, the project name and
+       * every group label all start at 16px; a row whose own padding is 8 puts
+       * its icon on that same line, so the bar reads as one lane top to bottom
+       * instead of a project block and a navigation block 12px apart. The plate
+       * is 8px in from both edges as a result, 208px wide, and the Ember mark
+       * rides its leading edge — absolutely placed, so the icon lane is the same
+       * on the lit row and on every quiet one.
        */}
-      <SidebarContent className="px-4" asChild>
+      <SidebarContent className="px-2" asChild>
         <nav aria-label="Product navigation">
           {groups.map((group) => (
             <SidebarGroup key={group.id} labelled={group.label !== null}>
@@ -484,7 +491,19 @@ function AccountMenu({
       label={`Account ${standing}. Open the account menu`}
       triggerClassName={cn(
         "grid w-full min-w-0 items-center gap-3",
-        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) px-2 py-1",
+        /*
+         * **7px, and the missing pixel is the plate's own hairline.** This
+         * trigger reserves its hover border as a transparent one so hovering
+         * shifts nothing, and `box-sizing: border-box` means that border spends
+         * a pixel of the inset before the padding starts. Written as 8px it put
+         * the avatar on 17 while every nav icon stood on 16 — the one thing
+         * still out of the bar's lane. Written as 8 minus the hairline it lands
+         * on 16 exactly, and the gap from the plate's visible edge to the
+         * avatar is a true 8px, which is what a borderless nav row already
+         * draws between its plate and its icon.
+         */
+        "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
+        "px-[calc(var(--space-2)-1px)]",
         "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
         "transition-transform duration-(--duration-press) ease-out",
         "pointer-coarse:min-h-(--tap-target)",
@@ -724,9 +743,21 @@ function ShellFrame({
         </SidebarBrand>
         <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
-        <SidebarFooter className="px-4">
+        {/*
+         * 8px, the navigation column's inset, so the account plate is the same
+         * 208px block as a nav row and stands 8px off both edges of the bar.
+         * The avatar rides the 16px lane from inside it — see `AccountMenu`,
+         * which pays for its own hairline.
+         */}
+        <SidebarFooter className="px-2">
           {role !== null && !canAuthor(role) ? (
-            <Badge title="Your role can read, not author">{VIEW_ONLY}</Badge>
+            /*
+             * The chip has no plate to sit inside, so it takes the 8px back as
+             * a margin and starts on the lane with everything else.
+             */
+            <Badge className="mx-2" title="Your role can read, not author">
+              {VIEW_ONLY}
+            </Badge>
           ) : null}
           <AccountMenu
             me={me}
