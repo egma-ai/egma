@@ -40,9 +40,14 @@ import { TestsGrid } from "./tests-grid.tsx";
  *
  * **Suite management is not here.** Rename, Run suite and Delete suite live on
  * the suites list's row menu, where one screen owns every verb a suite has
- * (founder's ruling, 2026-08-24). What this screen carries is one action —
- * Write a test — and it puts the caret in the grid's entry row rather than
- * opening anything.
+ * (founder's ruling, 2026-08-24).
+ *
+ * **Writing a test is the grid's own verb, and the toolbar has none.** The
+ * ghost row at the foot of the grid says "+ Write a test" where the row it
+ * opens will stand, so a second button in the title bar said the same word
+ * twice and pointed away from the place the caret lands. It went on
+ * 2026-08-25. The two ways in are the ghost row and the `/tests/new?suite=`
+ * address, which both open the entry row in place.
  */
 export function SuiteScreen({
   projectId,
@@ -123,25 +128,6 @@ export function SuiteScreen({
     mayAuthor || role === null
       ? undefined
       : `Your ${String(role)} role cannot write tests. Ask an organization admin to change your role.`;
-
-  /**
-   * "Write a test" focuses the grid's entry row; it opens nothing.
-   *
-   * The address stays where it is when the row opens from this button. The
-   * `/tests/new?suite=` address still lands with the row open, which is what
-   * keeps a copied link honest — but pressing the button is not a navigation.
-   */
-  const writeAction =
-    role === null ? undefined : (
-      <Button
-        type="button"
-        disabled={!mayAuthor}
-        {...(whyNotWrite === undefined ? {} : { why: whyNotWrite })}
-        onClick={() => setEntryOpen(true)}
-      >
-        Write a test
-      </Button>
-    );
 
   function body() {
     if (
@@ -267,7 +253,6 @@ export function SuiteScreen({
             onChange={(event) => setSearch(event.target.value)}
           />
         }
-        action={currentSuite === null ? undefined : writeAction}
       />
       <PageBody>{body()}</PageBody>
     </ProductPage>

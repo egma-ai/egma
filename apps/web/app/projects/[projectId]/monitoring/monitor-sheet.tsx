@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { listAgents, startMonitoring } from "@egma/platform-api/client";
 
@@ -27,6 +28,7 @@ import {
   platformAnswer,
   platformClient,
 } from "../../../../lib/platform-client.ts";
+import { projectPath } from "../../../../lib/project-context.ts";
 import { Field, Problem, Refused } from "../../../../ui/form.tsx";
 import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
@@ -101,6 +103,16 @@ const COPY = {
     "Add another agent, or come back when there is one Egma is not watching.",
   noAgents: "No agents in this project yet",
   noAgentsLead: "Connect the agent you want Egma to watch, then monitor it here.",
+  /**
+   * The one thing left to do when the list is empty, and it is a real move to
+   * another screen.
+   *
+   * Both empty sentences promise it — *add another agent*, *connect the agent
+   * you want Egma to watch* — and both used to offer nothing but Close, so the
+   * promise was a dead end. The word is the agents screen's own, because it
+   * lands on that screen with that screen's sheet already open.
+   */
+  connect: "Connect an agent",
   missingKey: "Enter this agent's Retell API key.",
   missingPlatformAgentId: "Enter Retell's own id for this agent.",
   notYours: (role: string) =>
@@ -305,7 +317,21 @@ function Picker({
             lead={none ? COPY.noAgentsLead : COPY.nothingLeftLead}
           />
         </SheetBody>
+        {/*
+          **The verb the sentence promises, and it leaves this screen.** There
+          is no agent left to monitor, so the only move is to connect one — and
+          connecting is the agents screen's own job. The address carries that
+          screen's connect sheet with it, so one press lands on the open panel
+          rather than on a list somebody has to find the button on again. This
+          is a real navigation, which the no-redirect ruling allows: the ruling
+          is about sheets that draw over the screen they belong to.
+        */}
         <SheetFooter>
+          <Button asChild size="lg">
+            <Link href={`${projectPath(projectId, "agents")}?sheet=connect`}>
+              {COPY.connect}
+            </Link>
+          </Button>
           <Button type="button" size="lg" variant="secondary" onClick={onClose}>
             {COPY.close}
           </Button>

@@ -288,6 +288,38 @@ function PersonaPicker({
   const [refused, setRefused] = useState<string | null>(null);
   /** Whether egma holds more than this picker read. Said out loud if so. */
   const [truncated, setTruncated] = useState(false);
+  /** The newest way out, so the listener below never closes over a stale one. */
+  const done = useRef(onDone);
+  useEffect(() => {
+    done.current = onDone;
+  });
+
+  /*
+   * **A click anywhere else closes this picker, and it closes it the way Done
+   * does** — the choices ticked so far are kept, because ticking a checkbox has
+   * already changed the draft. A picker that stayed open under a click that
+   * plainly meant "elsewhere" left the only way out a button somebody had to
+   * find, which is the defect the founder named on 2026-08-25.
+   *
+   * `mousedown` rather than `click`, so the close happens before focus moves —
+   * the same instant Done would have. The lane marked `data-persona-picker` is
+   * this surface *and* the "+ Add a persona" trigger, so pressing the trigger
+   * to shut the picker is not read as an outside click and then re-opened.
+   */
+  useEffect(() => {
+    function elsewhere(event: MouseEvent): void {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("[data-persona-picker]") !== null
+      ) {
+        return;
+      }
+      done.current();
+    }
+    document.addEventListener("mousedown", elsewhere);
+    return () => document.removeEventListener("mousedown", elsewhere);
+  }, []);
 
   /*
    * **Every persona the project holds, not the first page of them.**
@@ -360,6 +392,7 @@ function PersonaPicker({
       className="absolute top-full left-0 z-20 mt-1 w-[300px] origin-top border border-border bg-surface shadow-popover"
       role="dialog"
       aria-label="Choose personas"
+      data-persona-picker=""
     >
       <div className="border-b border-border">
         <input
@@ -422,6 +455,19 @@ function PersonaPicker({
   );
 }
 
+/**
+ * The lines a cell keeps once nobody is typing into them.
+ *
+ * A numbered line with nothing on it is scaffolding, not a behavior, so it
+ * never survives a commit: the platform is sent the trimmed list either way,
+ * and the cell must not go on drawing a line 3 that says nothing.
+ */
+function withoutTrailingBlanks(behaviors: readonly string[]): readonly string[] {
+  let end = behaviors.length;
+  while (end > 1 && (behaviors[end - 1] ?? "").trim() === "") end -= 1;
+  return behaviors.slice(0, end);
+}
+
 /** The behaviors of one cell, as numbered lines with one caret at a time. */
 function BehaviorLines({
   behaviors,
@@ -434,12 +480,26 @@ function BehaviorLines({
   readonly onCommit: () => void;
   readonly onCancel: () => void;
 }) {
-  const last = useRef<HTMLInputElement | null>(null);
-  const [adding, setAdding] = useState(false);
+  const lines = useRef<(HTMLInputElement | null)[]>([]);
+  /**
+   * Which line the caret is owed, and it is always a line that just moved.
+   *
+   * Adding a line and deleting one are the same problem seen twice: the caret
+   * has to land on a line the render after this one draws. Holding the index
+   * rather than a ref to "the last one" is what lets Backspace put the caret
+   * at the end of the line *above* the one it removed.
+   */
+  const [caretAt, setCaretAt] = useState<number | null>(null);
 
   useEffect(() => {
-    if (adding) last.current?.focus();
-  }, [adding, behaviors.length]);
+    if (caretAt === null) return;
+    const line = lines.current[caretAt];
+    setCaretAt(null);
+    if (line === null || line === undefined) return;
+    line.focus();
+    const end = line.value.length;
+    line.setSelectionRange(end, end);
+  }, [caretAt, behaviors]);
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -453,7 +513,9 @@ function BehaviorLines({
             aria-label={`Expected behavior ${String(at + 1)}`}
             value={behavior}
             autoComplete="off"
-            ref={at === behaviors.length - 1 ? last : undefined}
+            ref={(node) => {
+              lines.current[at] = node;
+            }}
             onChange={(event) => {
               const next = [...behaviors];
               next[at] = event.target.value;
@@ -463,11 +525,29 @@ function BehaviorLines({
               if (event.key === "Enter") {
                 event.preventDefault();
                 if (behavior.trim() === "") {
+                  // Enter on a blank line means "I am done", so the blank
+                  // lines under it go with it rather than lingering.
+                  const kept = withoutTrailingBlanks(behaviors);
+                  if (kept.length !== behaviors.length) onChange(kept);
                   onCommit();
                   return;
                 }
-                setAdding(true);
+                setCaretAt(at + 1);
                 onChange([...behaviors.slice(0, at + 1), "", ...behaviors.slice(at + 1)]);
+                return;
+              }
+              /*
+               * **Backspace on an empty line removes it.** A line added by
+               * mistake had no way out: it holds nothing, so there is nothing
+               * to delete character by character, and it sat there numbered.
+               * The caret goes to the end of the line above, which is where
+               * Backspace means it to go. The last line standing is the cell's
+               * only writing surface, so it stays.
+               */
+              if (event.key === "Backspace" && behavior === "" && behaviors.length > 1) {
+                event.preventDefault();
+                setCaretAt(at === 0 ? 0 : at - 1);
+                onChange(behaviors.filter((_, index) => index !== at));
                 return;
               }
               if (event.key === "Escape") {
@@ -484,7 +564,7 @@ function BehaviorLines({
         type="button"
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
-          setAdding(true);
+          setCaretAt(behaviors.length);
           onChange([...behaviors, ""]);
         }}
       >
@@ -628,6 +708,7 @@ function CellBody({
         <button
           className={ADD_LINE}
           type="button"
+          data-persona-picker=""
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => onPick(!picking)}
         >
@@ -766,6 +847,16 @@ export function TestsGrid(props: GridProps) {
   const [picking, setPicking] = useState<string | null>(null);
   const [known, setKnown] = useState<ReadonlyMap<string, Named>>(new Map());
   const [entry, setEntry] = useState<Draft | null>(null);
+  /**
+   * Which entry cell the caret is in, and it is the only one that may wake.
+   *
+   * **The whole entry row used to wear the 2px ink edge at once** — four heavy
+   * boxes shouting together the moment somebody asked to write a test. The
+   * wake means "this is the cell you are in", so it follows the caret, and a
+   * row nobody has touched yet rests on the grid's own hairlines like every
+   * other row (founder, 2026-08-25).
+   */
+  const [entryFocus, setEntryFocus] = useState<Field | null>(null);
   const [entryRefused, setEntryRefused] = useState<string | null>(null);
   const [entrySaving, setEntrySaving] = useState(false);
   const [discarding, setDiscarding] = useState(false);
@@ -798,6 +889,8 @@ export function TestsGrid(props: GridProps) {
   const openEntry = useCallback(() => {
     setEntry((held) => held ?? EMPTY_DRAFT);
     setEntryRefused(null);
+    // A fresh row is at rest until the caret lands, which it does below.
+    setEntryFocus(null);
     onWriting(true);
     window.requestAnimationFrame(() => entryName.current?.focus());
   }, [onWriting]);
@@ -1155,7 +1248,17 @@ export function TestsGrid(props: GridProps) {
   function entryCell(field: Field): ReactNode {
     if (entry === null) return null;
     return (
-      <td className={cn(CELL, WOKEN)} key={field}>
+      <td
+        className={cn(CELL, entryFocus === field && WOKEN)}
+        key={field}
+        onFocus={() => setEntryFocus(field)}
+        onBlur={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            return;
+          }
+          setEntryFocus((held) => (held === field ? null : held));
+        }}
+      >
         <div className={PAD}>
           {field === "name" ? (
             <input
@@ -1192,6 +1295,7 @@ export function TestsGrid(props: GridProps) {
               <button
                 className={ADD_LINE}
                 type="button"
+                data-persona-picker=""
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() =>
                   setPicking(picking === "entry" ? null : "entry")
@@ -1258,15 +1362,16 @@ export function TestsGrid(props: GridProps) {
               </th>
             ))}
             {/*
-              The trailing slot is empty in the header and still present: it is
-              what holds the lane open above the first ⋮, exactly as the house
-              table draws it.
+              The trailing lane is named out loud. It was a blank cell with the
+              words hidden for screen readers only, so on screen the ⋮ column
+              was the one column of the grid with no header over it. "Actions"
+              is what it holds, and every reader gets the same word now.
             */}
             <th
-              className="w-(--table-action-width) border-b border-border p-0"
+              className="w-(--table-action-width) border-b border-border px-2.5 py-2 text-center text-sm font-normal text-faint"
               scope="col"
             >
-              <span className="sr-only">Test actions</span>
+              Actions
             </th>
           </tr>
         </thead>
@@ -1293,8 +1398,13 @@ export function TestsGrid(props: GridProps) {
           {entry === null ? null : (
             <tr data-entry-row="">
               {COLUMNS.map((column) => entryCell(column.field))}
-              {/* Nothing to delete yet: the entry row holds the lane and no ⋮. */}
-              <td className={cn(ACTION, WOKEN)} />
+              {/*
+                Nothing to delete yet, so this cell holds the lane open and
+                says nothing: no wake, no edge, nothing to click. A row that is
+                not written has no action to offer, and dressing the lane like
+                an editable cell promised one.
+              */}
+              <td className={ACTION} />
             </tr>
           )}
           {mayAuthor && entry === null ? (
