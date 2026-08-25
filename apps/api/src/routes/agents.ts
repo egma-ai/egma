@@ -1552,7 +1552,22 @@ export async function agentRoutes(
 
     if (confirmed.custody !== undefined) {
       const stopped = await takeCustody(acting, agentId, confirmed.custody, pull);
-      if (stopped !== undefined) return refused(reply, stopped);
+      if (stopped !== undefined) {
+        /*
+         * **A refused save leaves nothing live behind**, the same backstop the
+         * register path carries. `boundElsewhere` above catches the ordinary
+         * case before a row exists; this is the raced one — two requests both
+         * read an unbound agent, both write, and custody serializes them, so
+         * the loser is holding a connection on an agent it was not allowed to
+         * bind. For Retell chat that connection carries its own sealed key,
+         * which makes leaving it a live way in rather than only a stray row.
+         *
+         * The agent is never archived here: this path is only ever given one
+         * that already existed, so it was not this request's to remove.
+         */
+        await archiveConnection(acting, agentId, added.id);
+        return refused(reply, stopped);
+      }
     }
 
     return reply.code(201).send({ connection: describedConnection(added) });

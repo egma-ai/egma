@@ -1,6 +1,7 @@
 import {
   createAgent,
   createProject,
+  sealAgentMonitoringKey,
   type AuthContext,
   type Role,
 } from "@egma/db";
@@ -700,6 +701,106 @@ describe("discovering simulation agents", () => {
     // Nothing was bound and no key was sealed by a save that did not land.
     expect(agentOf(read).platformAgentId).toBeNull();
     expect(agentOf(read).monitoringKeyPresent).toBe(false);
+  });
+
+  /**
+   * The raced second binding, and the connection it must not leave behind.
+   *
+   * **The pre-check and the rule are two different moments.** The route reads
+   * the agent and finds it unbound, then confirms the candidate with Retell,
+   * then writes the connection, and only then does custody meet the binding
+   * rule inside its own transaction. Two requests arriving together both pass
+   * the read; one of them meets the rule after it has already written.
+   *
+   * The race is seeded honestly rather than described: the agent is bound
+   * through the access layer *from inside the Retell call*, which is the exact
+   * window between the pre-check and the write. What is asserted is that the
+   * loser leaves nothing live — for a chat connection that row would carry its
+   * own sealed key, so leaving it is leaving a way in, not a stray record.
+   */
+  it("puts back the connection it wrote when the binding rule refuses it", async () => {
+    api = await createApi("retell_raced_binding_undone");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    const acting = contextFor(ada, "admin");
+
+    let bound = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/v2/list-agents") {
+          /*
+           * The other request wins here: between this request's pre-check,
+           * which read an unbound agent, and the write it is about to make.
+           */
+          if (!bound) {
+            bound = true;
+            await sealAgentMonitoringKey(acting, {
+              agentId,
+              agentPlatform: "retell",
+              platformAgentId: "agent_voice_1",
+              apiKey: "retell-secret-the-winner-ABCD",
+            });
+          }
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  agent_id: "agent_chat_9",
+                  agent_name: "Web chat",
+                  channel: "chat",
+                },
+              ],
+              has_more: false,
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`unexpected Retell request ${path}`);
+      }),
+    );
+
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        credentials: { apiKey: "retell-secret-the-loser-WXYZ" },
+      },
+    );
+
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "Front desk is Retell agent agent_voice_1. Register agent_chat_9 as its own agent.",
+    });
+
+    /*
+     * Nothing live is left: no way into the agent through the connection this
+     * request wrote, and the winner's binding and key stand untouched.
+     */
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toEqual([]);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(after).monitoringApiKeyHint).toBe("ABCD");
+
+    // It was put back rather than never written, which is the honest record.
+    const { rows } = await api.database.sql<{
+      archived_at: string | null;
+    }>("select archived_at from connection where agent_id = $1", [agentId]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.archived_at).not.toBeNull();
   });
 
   /** The ordinary second connection: the same Retell agent, another way in. */
