@@ -227,6 +227,7 @@ The measurements, all of them theme values:
 | Part | Value |
 | --- | ---: |
 | Sidebar width | 224px |
+| Sidebar Egma mark | 32px |
 | Sidebar organization bar | 56px |
 | Page title bar | 56px |
 | Sidebar gutter, page gutter | 16px, 24px |
