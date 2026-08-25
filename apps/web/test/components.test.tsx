@@ -1822,7 +1822,7 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
     // No link into a project the address never named — not Agents, not Tests,
-    // not Runs, not Transcripts, and no href under /projects at all.
+    // not Runs, not Traces, and no href under /projects at all.
     for (const item of NAVIGATION_ITEMS) {
       expect(screen.queryByRole("link", { name: item })).toBeNull();
     }
@@ -1864,10 +1864,10 @@ describe("the role the shell shows", () => {
    * it goes.
    *
    * The words are the ones the groups left behind: the Monitoring group's item
-   * says `Transcripts`, and the Simulations group's says `Runs`. Both addresses
+   * says `Traces`, and the Simulations group's says `Runs`. Both addresses
    * are the ones they always were.
    */
-  it("puts Transcripts in the sidebar, opening this project's transcript list", async () => {
+  it("puts Traces in the sidebar, opening this project's transcript list", async () => {
     routed.pathname = "/projects/prj_2/agents";
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -1881,7 +1881,7 @@ describe("the role the shell shows", () => {
 
     expect(await screen.findByText("page")).toBeDefined();
 
-    const transcripts = screen.getAllByRole("link", { name: "Transcripts" })[0];
+    const transcripts = screen.getAllByRole("link", { name: "Traces" })[0];
     expect(transcripts?.getAttribute("href")).toBe(
       "/projects/prj_2/monitoring/transcripts",
     );

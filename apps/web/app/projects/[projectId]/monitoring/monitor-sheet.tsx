@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { listAgents, startMonitoring } from "@egma/platform-api/client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -76,11 +77,51 @@ import { useProjectRead } from "../../../../ui/resource.ts";
  * `monitor_livekit(ctx)` and `AgentSession.start` are identifiers a person
  * types into their editor rather than product vocabulary.
  */
-const STEPS = [
-  "Install the Egma SDK.",
-  "Call monitor_livekit(ctx) before AgentSession.start.",
-  "Set EGMA_URL and EGMA_API_KEY in the agent's environment.",
-] as const;
+
+/**
+ * The one line a person adds to their agent, on its own contained surface so
+ * that it can be copied whole. It is the SDK's own name and is never reworded.
+ */
+const SNIPPET = "monitor_livekit(ctx)";
+
+/**
+ * The identifier the line has to come before, shown as code inside the
+ * sentence for the same reason: it is what a person searches their own file
+ * for, not a phrase egma chose.
+ */
+const BEFORE = "AgentSession.start";
+
+/**
+ * The three numbered steps, in the shape the developer asked for on
+ * 2026-08-25: a short bold heading and one muted sentence each, the way
+ * Langfuse heads its first-trace onboarding.
+ *
+ * **The technical content is the same three steps it has always been**, folded
+ * from three flat sentences into three headed ones: the SDK, the one line with
+ * both SDK identifiers verbatim, and the two environment variables — with the
+ * last step now the one that says what happens next, because a person who has
+ * done the work is owed the answer to "and then?".
+ */
+const STEPS: readonly {
+  readonly title: string;
+  readonly body: string;
+  /** Whether this is the step the snippet and its Copy button belong to. */
+  readonly snippet?: true;
+}[] = [
+  {
+    title: "Install the Egma SDK",
+    body: "Add it to the environment your agent runs in, then set EGMA_URL and EGMA_API_KEY there.",
+  },
+  {
+    title: "Add one line to your agent",
+    body: "One line, and it goes ahead of",
+    snippet: true,
+  },
+  {
+    title: "Run your agent",
+    body: "Its traces appear in Traces within seconds of finishing.",
+  },
+];
 
 const COPY = {
   title: "Monitor an agent",
@@ -118,9 +159,40 @@ const COPY = {
   notYours: (role: string) =>
     `Your ${role} role cannot start monitoring. Ask an organization admin to ` +
     "change your role, then try again.",
+  /**
+   * The head of the LiveKit half, in the shape of Langfuse's first-trace
+   * onboarding (developer decision, 2026-08-25).
+   *
+   * **The chip says only what egma can check.**
+   *
+   * It used to read *Waiting for the first trace*, which is a claim about this
+   * agent's history — and egma cannot make that claim for a LiveKit agent.
+   * `lastReceivedAt` is a subselect from `monitoring_state`
+   * (`packages/db/src/access/agents.ts`), and only a *pull* agent ever gets a
+   * row there, so a push agent reads `null` whether nothing has arrived or a
+   * thousand traces have. A chip that said *waiting* to somebody whose agent
+   * had been reporting all week would be egma being wrong about the one thing
+   * this panel exists to report.
+   *
+   * *Listening for traces* is true unconditionally, because it describes
+   * egma's own posture rather than the agent's past: the door is open and the
+   * project key is the whole of what it wants. It stays the warning family —
+   * nothing is broken and nothing is working yet either — and the steps stay
+   * below it either way.
+   */
+  livekitWaiting: "Listening for traces",
+  livekitTitle: "Time to log the first trace",
   livekitLead:
-    "From then on, this agent's production transcripts appear in Transcripts " +
-    "as they finish. Nothing is stored on the agent, and there is no switch.",
+    "It takes about a minute, and there is nothing to switch on afterwards.",
+  livekitReceiving: "Receiving traces",
+  livekitReceivingTitle: "Egma is already receiving from this agent",
+  livekitReceivingLead:
+    "Setup is done, and the steps below stay as reference for the next agent " +
+    "you point at Egma.",
+  copy: "Copy",
+  copied: "Copied",
+  copyFailed:
+    "Egma could not reach the clipboard. Select the line above and copy it.",
 } as const;
 
 /** How many agents one roster read asks for. The contract's own ceiling. */
@@ -391,7 +463,7 @@ function Picker({
   }
 
   if (pickerPlatformOf(agent) === "livekit") {
-    return <LiveKitSteps chooser={chooser} onClose={onClose} />;
+    return <LiveKitSteps agent={agent} chooser={chooser} onClose={onClose} />;
   }
 
   return (
@@ -613,47 +685,203 @@ function RetellStart({
 }
 
 /**
- * The LiveKit half: three steps, and nothing else.
+ * The one line, on its own surface, with the way to take it.
+ *
+ * The copy behaviour is the API-keys screen's, kept the same on purpose: try
+ * the clipboard, say *Copied* when it worked, and — when the browser refuses
+ * or has no clipboard at all — say so and point at the text, which is still on
+ * screen and still selectable. A button that silently did nothing is the one
+ * outcome a copy control must never have.
+ */
+function Snippet(): ReactNode {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+
+  /**
+   * The receipt's own timer, held rather than derived from the state.
+   *
+   * **A second press has to start the two seconds over.** Keying the timeout
+   * off `state` looked tidier and was wrong: pressing Copy again while the
+   * receipt is still up sets `copied` on top of `copied`, which is no change
+   * at all — so the first press's timer ran on and took the receipt away part
+   * way through the second one. One timer, cleared before the next is started,
+   * and cleared again on unmount so a sheet closed straight after a press sets
+   * nothing on a gone component.
+   */
+  const receipt = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function stopReceipt(): void {
+    if (receipt.current === null) return;
+    clearTimeout(receipt.current);
+    receipt.current = null;
+  }
+
+  useEffect(() => stopReceipt, []);
+
+  async function copy(): Promise<void> {
+    try {
+      if (navigator.clipboard === undefined) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(SNIPPET);
+      stopReceipt();
+      setState("copied");
+      receipt.current = setTimeout(() => setState("idle"), 2000);
+    } catch {
+      stopReceipt();
+      setState("failed");
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/*
+        The bordered code surface `DESIGN.md` gives identifiers: the mono
+        stack, the quiet neutral fill, and the product's one radius, which is
+        none. It scrolls sideways rather than wrapping, because a line broken
+        mid-identifier is a line somebody types back wrong.
+      */}
+      <div className="flex items-start gap-2">
+        <pre className="m-0 min-w-0 flex-1 overflow-x-auto rounded-input border border-border bg-surface-soft p-3 font-mono text-xs leading-(--line-normal) text-foreground">
+          <code>{SNIPPET}</code>
+        </pre>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          className="flex-none"
+          onClick={() => void copy()}
+        >
+          {state === "copied" ? COPY.copied : COPY.copy}
+        </Button>
+      </div>
+      {/*
+        Said out loud when it happens, for a reader who is not watching the
+        button — and never as colour alone, which is what `DESIGN.md` asks.
+      */}
+      <p aria-live="polite" className="sr-only">
+        {state === "copied" ? COPY.copied : ""}
+      </p>
+      {state === "failed" ? (
+        <p className="m-0 text-sm leading-(--line-normal) text-faint">
+          {COPY.copyFailed}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The LiveKit half: what to do first, in three numbered steps.
  *
  * **It reads no server state and writes none.** Push is ungated by design —
  * the door authenticates with the project key, tenancy comes from the key, and
  * the stored evidence is the whole record of an agent pushing. So there is no
  * row to write here and no switch to flip, and re-opening these steps for the
- * same agent is idempotent rather than a second act.
+ * same agent is idempotent rather than a second act. The Copy button touches
+ * the clipboard and nothing else.
+ *
+ * **The shape is Langfuse's first-trace onboarding, in this product's system**
+ * (developer decision, 2026-08-25): a state chip, a heading with one sentence
+ * under it, and then the steps down a connected spine. What it replaced was
+ * three flat sentences with a faint number beside each, which said the same
+ * things and gave a person no sense of being partway through anything.
  */
 function LiveKitSteps({
+  agent,
   chooser,
   onClose,
 }: {
+  readonly agent: ListedAgentWithConnections;
   readonly chooser: ReactNode;
   readonly onClose: () => void;
 }) {
+  const last = STEPS.length - 1;
+  /*
+   * **Read, not stored.** This is the one fact the list read already carries
+   * about a pushing agent, and looking at it writes nothing and asks nothing
+   * extra — the stores-nothing ruling is about what this half *records*, and
+   * it still records nothing. A field that is already in the roster answer is
+   * not a LiveKit monitored-state; it is the evidence's own arrival time.
+   *
+   * **This branch is dormant on purpose**: `lastReceivedAt` is a subselect
+   * from `monitoring_state` (`packages/db/src/access/agents.ts`) and only a
+   * pull agent has a row there, so it reads `null` for every push agent until
+   * somebody decides — at founder level, against the stores-nothing ruling —
+   * that ingestion should stamp one. The words are written and tested so that
+   * the day the signal exists this half already tells the truth about it.
+   */
+  const receiving = agent.lastReceivedAt !== null;
+
   return (
     <>
       <SheetBody>
         {chooser}
 
         <div className={`flex flex-col gap-4 ${ARRIVES}`}>
-          <ol className="m-0 flex list-none flex-col gap-4 p-0">
+          <div className="flex flex-col gap-2">
+            <Badge variant={receiving ? "success" : "warning"}>
+              {receiving ? COPY.livekitReceiving : COPY.livekitWaiting}
+            </Badge>
+            {/*
+              A heading inside the panel rather than a second title bar: the
+              sheet's own title says which panel this is, and this says what
+              the panel is asking for right now.
+            */}
+            <h3 className="m-0 text-base leading-(--line-tight) font-medium text-foreground">
+              {receiving ? COPY.livekitReceivingTitle : COPY.livekitTitle}
+            </h3>
+            <p className="m-0 text-sm leading-(--line-normal) text-faint">
+              {receiving ? COPY.livekitReceivingLead : COPY.livekitLead}
+            </p>
+          </div>
+
+          <ol className="m-0 flex list-none flex-col p-0">
             {STEPS.map((step, at) => (
-              <li key={step} className="flex gap-3">
+              <li
+                key={step.title}
+                className={`relative flex gap-3 ${at === last ? "" : "pb-5"}`}
+              >
                 {/*
-                  A fixed-width slot, so the three sentences start on one lane
-                  however wide the numbers get. `DESIGN.md` asks for tabular
-                  numerals wherever figures line up.
+                  The spine, which is the thing that makes three steps read as
+                  one sequence. It runs from under one number to the next and
+                  stops at the last, so the list ends rather than trailing off.
                 */}
-                <span className="w-4 flex-none text-sm text-faint tabular-nums">
+                {at === last ? null : (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-6 bottom-0 left-3 w-px -translate-x-1/2 bg-border"
+                  />
+                )}
+                {/*
+                  A square, filled with the ink and lettered in the paper —
+                  `DESIGN.md` has one radius and it is none, so the number chip
+                  is a square like every other mark in the product. Tabular
+                  numerals keep the three on one lane.
+                */}
+                <span className="z-1 flex size-6 flex-none items-center justify-center bg-foreground text-xs font-medium text-background tabular-nums">
                   {at + 1}
                 </span>
-                <span className="text-sm leading-(--line-normal) text-foreground">
-                  {step}
-                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
+                    {step.title}
+                  </p>
+                  <p className="m-0 text-sm leading-(--line-normal) text-faint">
+                    {step.body}
+                    {step.snippet === undefined ? null : (
+                      <>
+                        {" "}
+                        <code className="font-mono text-xs text-foreground">
+                          {BEFORE}
+                        </code>
+                        .
+                      </>
+                    )}
+                  </p>
+                  {step.snippet === undefined ? null : <Snippet />}
+                </div>
               </li>
             ))}
           </ol>
-          <p className="m-0 text-sm leading-(--line-normal) text-faint">
-            {COPY.livekitLead}
-          </p>
         </div>
       </SheetBody>
 

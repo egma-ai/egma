@@ -319,17 +319,17 @@ describe("what the Monitoring list asks egma for", () => {
   });
 
   /**
-   * **Transcripts, not Monitoring.** Monitoring is the sidebar group; this is
+   * **Traces, not Monitoring.** OBSERVABILITY is the sidebar group; this is
    * the one page under it, and since the separate monitoring screen retired it
    * is where the one monitoring verb lives too (board `JGS-0`). A title bar
    * repeating the group's word said the section's name twice over.
    */
-  it("heads the page Transcripts", async () => {
+  it("heads the page Traces", async () => {
     stub({ rows: [ONE_ROW] });
     render(<MonitoringTranscriptsPage />);
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Transcripts" }),
+      await screen.findByRole("heading", { level: 1, name: "Traces" }),
     ).toBeDefined();
   });
 });

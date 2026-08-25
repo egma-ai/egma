@@ -126,7 +126,7 @@ describe("the product navigation", () => {
     expect(NAVIGATION_GROUPS.map((group) => group.label)).toEqual([
       null,
       "Simulations",
-      "Monitoring",
+      "OBSERVABILITY",
     ]);
   });
 
@@ -180,15 +180,15 @@ describe("the product navigation", () => {
    * address — the transcript list, reached without a redirect and without a
    * reserved neighbour under the area being able to become the landing.
    */
-  it("puts one Transcripts item under Monitoring, opening the transcript list", () => {
+  it("puts one Traces item under OBSERVABILITY, opening the transcript list", () => {
     const monitoring = NAVIGATION_GROUPS[2];
     expect(monitoring?.id).toBe("monitoring");
-    expect(monitoring?.items.map((item) => item.label)).toEqual(["Transcripts"]);
+    expect(monitoring?.items.map((item) => item.label)).toEqual(["Traces"]);
 
     const transcripts = everyLink("prj_2").find(
       (link) => link.id === "monitoring",
     );
-    expect(transcripts?.label).toBe("Transcripts");
+    expect(transcripts?.label).toBe("Traces");
     expect(transcripts?.href).toBe("/projects/prj_2/monitoring/transcripts");
   });
 

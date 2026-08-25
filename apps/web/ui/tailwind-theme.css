@@ -301,6 +301,22 @@
   --table-action-width: 48px;
 
   /*
+   * The same lane, on a table that says **Actions** over it.
+   *
+   * A ⋮ needs 48px and a word does not: "Actions" at `--text-sm` is about
+   * 54px, and the header padding either side of it is `--row-padding-x`, so
+   * the lane a labelled trailing column needs is a little over 86px. The
+   * tests grid names its lane out loud and was drawing it at the unlabelled
+   * width, which put the word through the table's own right hairline.
+   *
+   * It is a second token rather than a wider first one because the two are
+   * different facts: a lane holding only a ⋮ is 48px in every list in the
+   * product, and widening all of them to suit one heading would move a lane
+   * a person's eye follows down every table.
+   */
+  --table-action-labelled-width: 96px;
+
+  /*
    * How wide each surface is. Every one of these lived in a class list as a
    * bare number until 2026-08-23; a size is a design value like a colour is,
    * and `DESIGN.md` says a component holds neither.
