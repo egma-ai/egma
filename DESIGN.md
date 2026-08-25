@@ -145,7 +145,7 @@ Use `system-ui` first, then Helvetica, Arial, and the system sans-serif fallback
 Rules:
 
 - Hierarchy comes from size, space, and restrained use of weight 500.
-- The micro label is for the two letter-spaced uppercase labels the sidebar carries — the organization over the project name, and the role under the account's email. Nothing else uses it. The scale still starts at 14px. (Developer decision, 2026-08-23.)
+- The micro label is for the two letter-spaced uppercase labels the sidebar carries — `Project` over the project name, and the role under the account's email. Nothing else uses it. The scale still starts at 14px.
 - Do not use weights 600 or 700.
 - Product tables, forms, and navigation use the 14px and 16px steps.
 - Headings carry no size of their own. Every heading takes its size from a class, because the browser's own heading sizes are not on this scale.
@@ -243,7 +243,7 @@ The measurements, all of them theme values:
 - Keep organization and project as two clear controls. The organization bar shows the Egma mark, organization name, the fixed `Free` release-plan chip and paired arrows. The project control below shows the explicit `Project` label, project name and paired arrows. (Developer decision, 2026-08-24.)
 - The organization menu is informational in the current one-organization model. It shows the organization name, `Free Plan`, and the person's real `Admin`, `Member`, or `Viewer` role. It does not offer organization switching or Organization settings yet.
 - `Free` is fixed release copy because billing data does not exist in the session yet. Show it only after a real organization has loaded; do not make a plan claim while loading or when the organization is absent.
-- The project selector continues to support search, keyboard use, Escape, focus return, URL-based selection, and unsaved-work protection.
+- The project selector is a direct list with no search field. It keeps the project name neutral when open and continues to support keyboard use, Escape, focus return, URL-based selection, and unsaved-work protection. (Developer decision, 2026-08-24.)
 - Open each menu from its trigger with an origin-aware transition.
 - Do not add fake teams, sample projects, or a second navigation model.
 

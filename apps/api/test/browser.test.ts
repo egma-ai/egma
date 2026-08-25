@@ -985,13 +985,13 @@ describe("what a project recorded in production", () => {
       // returning to the current project must keep the same settled context.
       await selector.click();
       await page
-        .getByRole("dialog")
+        .getByRole("menu")
         .getByText("New project", { exact: true })
         .click();
       await page.waitForURL(new RegExp(`/new-project$`));
       await selector.click();
       await page
-        .getByRole("dialog")
+        .getByRole("menu")
         .locator("button[data-menu-item]")
         .first()
         .click();

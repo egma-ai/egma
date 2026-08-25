@@ -6,7 +6,6 @@ import { answerFor, PROJECT_OUTSIDE_ORGANIZATION, unreachable } from "../lib/api
 import {
   firstProjectOf,
   organizationOf,
-  projectsMatching,
   roleOf,
   type Me,
 } from "../lib/me.ts";
@@ -326,34 +325,6 @@ describe("the organization and project control", () => {
   it("has an organization to name, and the projects to choose between", () => {
     expect(organizationOf(ADA)?.name).toBe("Acme");
     expect(firstProjectOf(ADA)?.id).toBe("prj_1");
-  });
-
-  /**
-   * One project is still a place somebody is working, so the control still has
-   * something to say — and the list it opens is that one project rather than
-   * nothing.
-   */
-  it("still has one project to show when there is only one", () => {
-    const alone = { ...ADA, projects: ADA.projects.slice(0, 1) };
-    expect(projectsMatching(alone.projects, "")).toHaveLength(1);
-  });
-
-  it("finds a project by its name or by the word in its address", () => {
-    expect(projectsMatching(ADA.projects, "out").map((one) => one.id)).toEqual([
-      "prj_2",
-    ]);
-    expect(projectsMatching(ADA.projects, "DEFAULT").map((one) => one.id)).toEqual([
-      "prj_1",
-    ]);
-    expect(projectsMatching(ADA.projects, "  ")).toEqual(ADA.projects);
-    expect(projectsMatching(ADA.projects, "zzz")).toEqual([]);
-  });
-
-  it("never reorders the list under the keyboard", () => {
-    expect(projectsMatching(ADA.projects, "").map((one) => one.id)).toEqual([
-      "prj_1",
-      "prj_2",
-    ]);
   });
 });
 

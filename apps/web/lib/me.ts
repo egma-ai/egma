@@ -68,24 +68,3 @@ export function roleOf(me: Me): Role {
 export function firstProjectOf(me: Me): Project | undefined {
   return me.projects[0];
 }
-
-/**
- * The projects a typed query leaves. Name and slug both, because a person who
- * knows a project by the word in its address should not have to know its
- * display name to find it.
- *
- * Order is never rearranged by relevance: the list is in stable creation order
- * and a menu whose items move under the keyboard is a menu that mis-selects.
- */
-export function projectsMatching(
-  projects: readonly Project[],
-  query: string,
-): readonly Project[] {
-  const wanted = query.trim().toLowerCase();
-  if (wanted === "") return projects;
-  return projects.filter(
-    (project) =>
-      project.name.toLowerCase().includes(wanted) ||
-      project.slug.toLowerCase().includes(wanted),
-  );
-}

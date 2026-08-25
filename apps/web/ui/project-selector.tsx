@@ -2,12 +2,10 @@
 
 import { ChevronDownIcon, ChevronsUpDownIcon } from "lucide-react";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
 
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-import { projectsMatching, type Organization, type Project } from "../lib/me.ts";
+import { type Organization, type Project } from "../lib/me.ts";
 import { inProject } from "../lib/project-context.ts";
 import { NEW_PROJECT_PATH } from "../lib/settings.ts";
 import { useDraftNavigation } from "./draft-navigation.tsx";
@@ -41,10 +39,10 @@ import { Menu, MenuDivider, MenuItem, MenuLabel } from "./menu.tsx";
  * copy that prevents the current project's name from being mistaken for an
  * organization. The organization sits in the bar above it.
  *
- * **This is a restyle of the trigger and nothing else.** Search, the keyboard
- * path, Escape, focus return, the unsaved-work guard and the origin-aware open
- * are the menu's, and none of them is touched below. Its accessible name still
- * names both, so nothing that reaches this control by name has moved.
+ * The project name stays neutral while the menu is open. Opening a chooser is
+ * not a brand state, and changing its text colour made the current context look
+ * like an action. The menu is a direct list: no search field stands between a
+ * person and the projects they can choose.
  *
  * The compact form is the mobile top bar's, where the control shares a 56px row
  * with a drawer button and the account, so it stays held to a width of its own.
@@ -84,10 +82,8 @@ export function ProjectSelector({
 }) {
   const draftNavigation = useDraftNavigation();
   const pathname = usePathname();
-  const [query, setQuery] = useState("");
 
   const current = projects.find((project) => project.id === projectId);
-  const shown = projectsMatching(projects, query);
   const organizationName = organization?.name ?? "No organization";
 
   /**
@@ -108,7 +104,6 @@ export function ProjectSelector({
   function choose(project: Project, close: () => void): void {
     if (project.id === projectId) {
       close();
-      setQuery("");
       return;
     }
     /*
@@ -119,7 +114,6 @@ export function ProjectSelector({
      * navigation untouched.
      */
     close();
-    setQuery("");
     draftNavigation.push(inProject(pathname, project.id), null);
   }
 
@@ -127,10 +121,7 @@ export function ProjectSelector({
     <Menu
       label={`Organization ${organizationName}, project ${projectName}. Choose a project`}
       triggerClassName={cn(TRIGGER, compact && TRIGGER_COMPACT)}
-      openClassName="[&_[data-slot=project-name]]:text-brand"
       placement={compact ? "below-start" : "right-start"}
-      // A panel with a field to type in, so a dialog rather than a menu.
-      panelRole="dialog"
       trigger={
         <>
           {/* The mobile row has no room for a second line. */}
@@ -172,36 +163,15 @@ export function ProjectSelector({
       {(close) => (
         <>
           <MenuLabel>{organizationName}</MenuLabel>
-          {projects.length > 1 ? (
-            <div className="px-1 pt-1 pb-2">
-              <Input
-                id="project-search"
-                aria-label="Search projects"
-                placeholder="Search projects"
-                value={query}
-                autoComplete="off"
-                spellCheck={false}
-                /* The field an opening menu puts focus in. */
-                data-menu-focus-first=""
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  const only = shown[0];
-                  if (only !== undefined) choose(only, close);
-                }}
-              />
-            </div>
-          ) : null}
           <div className="max-h-60 overflow-y-auto">
-            {shown.length === 0 ? (
+            {projects.length === 0 ? (
               <p className="m-0 p-3 text-sm text-muted-foreground">
-                No project matches that.
+                No projects available.
               </p>
             ) : (
-              shown.map((project) => (
+              projects.map((project) => (
                 <MenuItem
                   key={project.id}
-                  role="none"
                   selected={project.id === projectId}
                   onClick={() => choose(project, close)}
                 >
@@ -218,14 +188,7 @@ export function ProjectSelector({
           {mayCreateProject ? (
             <>
               <MenuDivider />
-              <MenuItem
-                href={NEW_PROJECT_PATH}
-                role="none"
-                onClick={() => {
-                  close();
-                  setQuery("");
-                }}
-              >
+              <MenuItem href={NEW_PROJECT_PATH} onClick={close}>
                 New project
               </MenuItem>
             </>
