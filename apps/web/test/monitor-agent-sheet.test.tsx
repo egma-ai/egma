@@ -672,13 +672,17 @@ describe("the LiveKit half", () => {
   /**
    * **The head tells the truth about *this* agent.**
    *
-   * Push is ungated, so this half is drawn for every LiveKit agent the picker
-   * lists — and nothing sorts out the one whose evidence has already arrived.
-   * Greeting that agent's owner with "waiting for the first trace" would be
-   * egma being wrong about the one thing this panel reports, so the roster's
-   * own `lastReceivedAt` decides the chip and the two lines under it.
+   * The chip claims only what egma can check. *Waiting for the first trace*
+   * was a claim about this agent's history, and egma cannot make it for a
+   * LiveKit agent: `lastReceivedAt` is a subselect from `monitoring_state`
+   * and only a pull agent has a row there, so a push agent reads `null`
+   * however much it has reported. *Listening for traces* describes egma's own
+   * posture instead, which is true whatever has arrived.
+   *
+   * The receiving half below is dormant for the same reason, and is kept and
+   * tested so that it is already right the day that signal exists.
    */
-  it("says it is waiting only while nothing has arrived", async () => {
+  it("says it is listening, and claims nothing about what has arrived", async () => {
     withThePicker();
     stub({
       agents: [
@@ -688,7 +692,7 @@ describe("the LiveKit half", () => {
     render(<MonitoringTranscriptsPage />);
 
     await screen.findByLabelText("Agent");
-    expect(screen.getByText("Waiting for the first trace")).toBeDefined();
+    expect(screen.getByText("Listening for traces")).toBeDefined();
     expect(screen.getByText("Time to log the first trace")).toBeDefined();
     expect(screen.queryByText("Receiving traces")).toBeNull();
   });
@@ -712,7 +716,7 @@ describe("the LiveKit half", () => {
     expect(
       screen.getByText("Egma is already receiving from this agent"),
     ).toBeDefined();
-    expect(screen.queryByText("Waiting for the first trace")).toBeNull();
+    expect(screen.queryByText("Listening for traces")).toBeNull();
     expect(screen.queryByText("Time to log the first trace")).toBeNull();
 
     // The steps stay under it, as reference rather than as an instruction.

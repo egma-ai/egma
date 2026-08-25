@@ -163,19 +163,24 @@ const COPY = {
    * The head of the LiveKit half, in the shape of Langfuse's first-trace
    * onboarding (developer decision, 2026-08-25).
    *
-   * **The chip is a fact about this agent rather than decoration, so there are
-   * two of them.** Push is ungated, and this half is drawn for every LiveKit
-   * agent the picker lists — including one whose evidence has *already*
-   * arrived, because there is no pull switch to sort them by. Telling that
-   * agent's owner they are waiting for a first trace would be egma being wrong
-   * about the one thing this panel exists to report, so `lastReceivedAt`
-   * decides which pair of words is said.
+   * **The chip says only what egma can check.**
    *
-   * Waiting is the warning family: nothing is broken and nothing is working
-   * yet either. Receiving is the success family. Either way the steps stay
-   * below — for the second agent, and for anybody checking what they did.
+   * It used to read *Waiting for the first trace*, which is a claim about this
+   * agent's history — and egma cannot make that claim for a LiveKit agent.
+   * `lastReceivedAt` is a subselect from `monitoring_state`
+   * (`packages/db/src/access/agents.ts`), and only a *pull* agent ever gets a
+   * row there, so a push agent reads `null` whether nothing has arrived or a
+   * thousand traces have. A chip that said *waiting* to somebody whose agent
+   * had been reporting all week would be egma being wrong about the one thing
+   * this panel exists to report.
+   *
+   * *Listening for traces* is true unconditionally, because it describes
+   * egma's own posture rather than the agent's past: the door is open and the
+   * project key is the whole of what it wants. It stays the warning family —
+   * nothing is broken and nothing is working yet either — and the steps stay
+   * below it either way.
    */
-  livekitWaiting: "Waiting for the first trace",
+  livekitWaiting: "Listening for traces",
   livekitTitle: "Time to log the first trace",
   livekitLead:
     "It takes about a minute, and there is nothing to switch on afterwards.",
@@ -797,6 +802,13 @@ function LiveKitSteps({
    * extra — the stores-nothing ruling is about what this half *records*, and
    * it still records nothing. A field that is already in the roster answer is
    * not a LiveKit monitored-state; it is the evidence's own arrival time.
+   *
+   * **This branch is dormant on purpose**: `lastReceivedAt` is a subselect
+   * from `monitoring_state` (`packages/db/src/access/agents.ts`) and only a
+   * pull agent has a row there, so it reads `null` for every push agent until
+   * somebody decides — at founder level, against the stores-nothing ruling —
+   * that ingestion should stamp one. The words are written and tested so that
+   * the day the signal exists this half already tells the truth about it.
    */
   const receiving = agent.lastReceivedAt !== null;
 
