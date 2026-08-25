@@ -93,12 +93,18 @@ export function workedOutMetric(one: Measured): boolean {
  * so instead of the count, because the p90 of the part Egma holds is not the
  * p90 of the call.
  *
+ * **The figure is printed to the whole unit.** A derived sample carries
+ * nanosecond truth ("1994.917806"), and a person reads none of it: the page
+ * says 1995, and the exact sample stays on the wire beside it for anything
+ * that needs the last digits. Rounded here, in the one formatter, so no two
+ * surfaces can differ in the last digit.
+ *
  * Written once and imported by the transcript page and the simulation
  * evidence, so the two surfaces that show one conversation's metrics cannot
  * come to word the same figure two ways.
  */
 export function metricLine(one: Measured): string {
-  const shown = `${String(one.p90)} ${one.unit}`;
+  const shown = `${String(Math.round(one.p90))} ${one.unit}`;
   const from = workedOutMetric(one) ? ` · ${MEASURES.derivedOne}` : "";
   if (one.partial === true) {
     return `${shown} · ${MEASURES.partialP90}${from}`;

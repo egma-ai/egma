@@ -834,6 +834,9 @@ describe("what the exchange measured", () => {
     );
 
     expect(shared).toContain("one.p90");
+    // Printed to the whole unit — a person reads "1995", never "1994.917806";
+    // the exact sample stays on the wire beside it.
+    expect(shared).toContain("Math.round(one.p90)");
     // The series is used for one thing, which is saying how many there were.
     expect(shared).toContain("one.samples.length");
     expect(shared).not.toContain("samples.reduce");
