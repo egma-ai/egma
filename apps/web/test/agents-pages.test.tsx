@@ -703,7 +703,64 @@ describe("registering an agent", () => {
     });
   }
 
-  it("sends the name and the first way in, and nothing about the provider", async () => {
+  it("sends the required platform for a first Retell agent", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        { status: 201, body: { result: "created", agent: AGENT } },
+      ],
+      "/v1/agents:discover": {
+        status: 200,
+        body: {
+          agents: [
+            {
+              platformAgentId: "agent_voice_1",
+              name: "Appointment line",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550100" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    render(<RegisterAgentPage />);
+
+    fireEvent.change(await screen.findByLabelText("Name"), {
+      target: { value: "Front desk" },
+    });
+    fireEvent.click(await screen.findByRole("radio", { name: "Voice" }));
+    fireEvent.change(await screen.findByLabelText("Retell API key"), {
+      target: { value: "retell-secret-A1B2C3D4WXYZ" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load Retell agents" }));
+    await screen.findByLabelText("Retell agent");
+    fireEvent.click(screen.getByRole("button", { name: "Connect agent" }));
+
+    await waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]?.url).toBe("/v1/agents?projectId=prj_1");
+    expect(sent[1]?.body).toMatchObject({
+      name: "Front desk",
+      agentPlatform: "retell",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+      },
+    });
+  });
+
+  it("sends the required platform for a first LiveKit agent", async () => {
     sheetAnswers(
       { status: 201, body: { result: "created", agent: AGENT } },
       { status: 200, body: { agents: [LISTED_AGENT], nextPageToken: null } },
