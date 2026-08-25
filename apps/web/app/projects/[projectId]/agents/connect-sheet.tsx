@@ -276,6 +276,8 @@ export function ConnectAgentSheet({
   const sealedKeyHint = known?.monitoringKeyPresent === true
     ? known.monitoringApiKeyHint
     : null;
+  /** The platform agent this egma agent is already bound to, or nothing. */
+  const boundPlatformAgentId = known?.platformAgentId ?? null;
   const asksForKey = usesAgentDiscovery && sealedKeyHint === null;
   const pasted = discoveryKey.trim();
   /** Long enough to be a key at all, which is when the account is read. */
@@ -421,7 +423,15 @@ export function ConnectAgentSheet({
   }, [usesAgentDiscovery, asksForKey, keyLooksReal, pasted, chosenAgent, projectId]);
 
   /**
-   * The picked agent, kept true to the list under it.
+   * The picked agent, kept true to the list under it — and pre-selected on the
+   * one this egma agent is already bound to.
+   *
+   * **One egma agent binds to one platform agent.** An agent Egma already
+   * knows as `agent_voice_1` is offered that agent, so the ordinary second
+   * connection is right without anybody choosing again. Picking another one is
+   * still allowed to be attempted: the server holds the rule and answers in
+   * place, and a control that refused locally would be a second opinion able
+   * to disagree with it.
    *
    * Changing modality changes which of the account's agents can be reached at
    * all, so a pick that is no longer in the list is dropped rather than
@@ -433,9 +443,14 @@ export function ConnectAgentSheet({
       return;
     }
     if (!matchingAgents.some((one) => one.platformAgentId === discoveredAgentId)) {
-      setDiscoveredAgentId(matchingAgents[0]?.platformAgentId ?? "");
+      const bound = matchingAgents.find(
+        (one) => one.platformAgentId === boundPlatformAgentId,
+      );
+      setDiscoveredAgentId(
+        bound?.platformAgentId ?? matchingAgents[0]?.platformAgentId ?? "",
+      );
     }
-  }, [matchingAgents, discoveredAgentId]);
+  }, [matchingAgents, discoveredAgentId, boundPlatformAgentId]);
 
   /** Everything the connection half of this panel is about to send. */
   function connectionBody(chosen: ConnectionOption): ConnectionBody {

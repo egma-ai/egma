@@ -1283,6 +1283,85 @@ describe("adding a connection", () => {
     expect(sent[1]?.body).not.toHaveProperty("credentials");
   });
 
+  /**
+   * **One egma agent binds to one platform agent**, so the picker opens on the
+   * one this agent is already bound to rather than on whichever the account
+   * listed first. Picking another is still allowed to be attempted — the
+   * server holds the rule and answers in place — so there is no lock here
+   * beyond the pre-selection.
+   */
+  it("pre-selects the Retell agent this agent is already bound to", async () => {
+    apiAnswers({
+      "/api/me": { status: 200, body: meWith("member") },
+      "/v1/agents": { status: 200, body: { agents: [], nextPageToken: null } },
+      "/v1/agents/agt_1": {
+        status: 200,
+        body: {
+          agent: {
+            ...AGENT,
+            monitoringKeyPresent: true,
+            monitoringApiKeyHint: "90c4",
+            platformAgentId: "agent_voice_2",
+          },
+          connections: [],
+        },
+      },
+      "/v1/connection-options": { status: 200, body: TYPES },
+      "/v1/agents:discover": {
+        status: 200,
+        body: {
+          agents: [
+            {
+              // Listed first, and deliberately not the bound one: an
+              // assertion that passed on list order would prove nothing.
+              platformAgentId: "agent_voice_1",
+              name: "Appointment line",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550100" },
+                },
+              ],
+            },
+            {
+              platformAgentId: "agent_voice_2",
+              name: "Out of hours",
+              connectionCandidates: [
+                {
+                  agentPlatform: "retell",
+                  connectionType: "phone_number",
+                  accessVariant: "phone_number.public_e164",
+                  modality: "voice",
+                  productLabel: "Retell phone",
+                  config: { phoneNumber: "+14155550199" },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Voice" }));
+    const picked = (await screen.findByLabelText(
+      "Retell voice agent*",
+    )) as HTMLSelectElement;
+    expect(picked.value).toBe("agent_voice_2");
+    expect(picked.selectedOptions[0]?.textContent).toBe("Out of hours");
+
+    // Both are still offered: the rule is the server's, not the control's.
+    expect([...picked.options].map((one) => one.value)).toEqual([
+      "agent_voice_1",
+      "agent_voice_2",
+    ]);
+    expect(picked.disabled).toBe(false);
+  });
+
   it("uses either honest LiveKit access method and defaults its channel to voice", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("member") },

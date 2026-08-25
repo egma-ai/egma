@@ -1,5 +1,6 @@
 import {
   addConnection,
+  AgentAlreadyBoundError,
   agentMonitoringKey,
   AgentWriteRefusedError,
   authorize,
@@ -19,6 +20,7 @@ import {
   restoreAgent,
   restoreConnection,
   sealAgentMonitoringKey,
+  UnprocessableInputError,
   updateAgent,
   updateConnection,
   type Agent,
@@ -709,30 +711,75 @@ async function confirmRetellAgent(
  * nobody asked for monitoring yet; that is what lets the next connect flow for
  * the same agent ask for no key at all.
  *
- * **A refusal here never unwrites the connection.** The connection is what the
- * person asked for and it is written; monitoring is the other half, and if
- * Retell or the uniqueness rule refuses it, the sentence is relayed rather
- * than the whole save being thrown away.
+ * **A refusal here is relayed, never thrown.** The binding rule and the pull
+ * switch both answer in sentences a person reads, so they come back as
+ * refusals rather than as a fault. `boundElsewhere` below is checked before
+ * the connection is written wherever the agent is known in advance, so the
+ * ordinary way to meet this rule is a save that wrote nothing at all.
  */
 async function takeCustody(
   acting: AuthContext,
   agentId: string,
   custody: { readonly platformAgentId: string; readonly apiKey: string },
   pull: boolean,
-): Promise<void> {
-  await sealAgentMonitoringKey(acting, {
-    agentId,
-    agentPlatform: "retell",
-    platformAgentId: custody.platformAgentId,
-    apiKey: custody.apiKey,
-  });
-  if (!pull) return;
-  await enablePullProductionCalls(acting, {
-    agentId,
-    agentPlatform: "retell",
-    platformAgentId: custody.platformAgentId,
-    apiKey: custody.apiKey,
-  });
+): Promise<Refusal | undefined> {
+  try {
+    await sealAgentMonitoringKey(acting, {
+      agentId,
+      agentPlatform: "retell",
+      platformAgentId: custody.platformAgentId,
+      apiKey: custody.apiKey,
+    });
+    if (pull) {
+      await enablePullProductionCalls(acting, {
+        agentId,
+        agentPlatform: "retell",
+        platformAgentId: custody.platformAgentId,
+        apiKey: custody.apiKey,
+      });
+    }
+    return undefined;
+  } catch (error) {
+    if (error instanceof UnprocessableInputError) {
+      return { refused: true, error: "unprocessable", message: error.message };
+    }
+    throw error;
+  }
+}
+
+/**
+ * The binding rule, asked *before* anything is written.
+ *
+ * **One egma agent binds to one platform agent.** The access layer refuses the
+ * second binding inside the transaction that would replace the first, which is
+ * where the rule has to live to be race-free. This asks the same question one
+ * step earlier, so the ordinary refusal leaves no connection behind on an
+ * agent the save was never allowed to touch.
+ *
+ * It is not a substitute for the guard underneath and is not written as one:
+ * two saves arriving together both read `null` here and one of them still
+ * meets the real rule in the transaction.
+ */
+function boundElsewhere(
+  known: Agent,
+  choice: RetellChoice | undefined,
+): Refusal | undefined {
+  if (choice === undefined) return undefined;
+  if (
+    known.platformAgentId === null ||
+    known.platformAgentId === choice.platformAgentId
+  ) {
+    return undefined;
+  }
+  return {
+    refused: true,
+    error: "unprocessable",
+    message: new AgentAlreadyBoundError(
+      known.name,
+      known.platformAgentId,
+      choice.platformAgentId,
+    ).message,
+  };
 }
 
 /**
@@ -1209,12 +1256,18 @@ export async function agentRoutes(
      * to the request that happened to carry the paste.
      */
     if (confirmedInline?.custody !== undefined) {
-      await takeCustody(
+      /*
+       * A registration can reuse an agent that already exists, so this is the
+       * path where the binding rule can be met without the request ever naming
+       * an agent id. The refusal is the access layer's own sentence.
+       */
+      const stopped = await takeCustody(
         acting,
         registered.agent.id,
         confirmedInline.custody,
         pull,
       );
+      if (stopped !== undefined) return refused(reply, stopped);
     }
 
     // Created and extended each wrote a row; reused wrote none, and saying 201
@@ -1350,9 +1403,19 @@ export async function agentRoutes(
       organizationId: acting.organizationId,
       projectId: acting.projectId,
     });
-    if (choice !== undefined && (await getAgent(acting, agentId)) === undefined) {
+    /*
+     * **The agent is read before the write when a Retell agent was picked**,
+     * because two questions depend on it: whether it exists at all, and
+     * whether it is already bound to a different platform agent. Asking after
+     * the connection was written would leave a connection on an agent this
+     * save was never allowed to bind.
+     */
+    const known = choice === undefined ? undefined : await getAgent(acting, agentId);
+    if (choice !== undefined && known === undefined) {
       return refused(reply, NO_SUCH_AGENT);
     }
+    const bound = known === undefined ? undefined : boundElsewhere(known, choice);
+    if (bound !== undefined) return refused(reply, bound);
     /*
      * **The key this agent already holds is lent to the confirmation.** One
      * paste per agent, ever: a second connection onto the same agent asks for
@@ -1375,7 +1438,8 @@ export async function agentRoutes(
     if (added === undefined) return refused(reply, NO_SUCH_AGENT);
 
     if (confirmed.custody !== undefined) {
-      await takeCustody(acting, agentId, confirmed.custody, pull);
+      const stopped = await takeCustody(acting, agentId, confirmed.custody, pull);
+      if (stopped !== undefined) return refused(reply, stopped);
     }
 
     return reply.code(201).send({ connection: describedConnection(added) });

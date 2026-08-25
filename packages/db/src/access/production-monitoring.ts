@@ -26,7 +26,7 @@ import {
 import { openCredentials, sealCredentials } from "../sealing.ts";
 import { insertAgentWithin } from "./agents.ts";
 import type { AuthContext } from "./context.ts";
-import { UnprocessableInputError } from "./errors.ts";
+import { AgentAlreadyBoundError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
@@ -427,6 +427,21 @@ export async function disablePullProductionCalls(
  * of starting an observation; this one only records custody. A save that asks
  * for both calls both, in that order, and the switch alone decides what the
  * poller does.
+ *
+ * **One egma agent binds to one platform agent, and a second one is refused
+ * here.** Retell gives a voice agent and a chat agent different ids, so
+ * somebody who adds a phone connection for `agent_voice_1` and then a chat
+ * connection for `agent_chat_9` under one egma agent is asking for two
+ * bindings. Overwriting quietly is the dangerous half: monitoring would go on
+ * running under the same name while reading a different Retell agent, and the
+ * transcripts of one agent would accumulate against the results history of
+ * another. So the binding is read and compared **inside the transaction that
+ * would replace it**, with the row held — a check before the write would be a
+ * race with the very next request. An unset binding binds as before.
+ *
+ * Fronting two platform agents from one egma agent is a schema change (two
+ * binding columns, or a binding table) and a separate ticket. This refusal is
+ * what says so out loud instead of pretending it already works.
  */
 export async function sealAgentMonitoringKey(
   auth: AuthContext,
@@ -444,22 +459,48 @@ export async function sealAgentMonitoringKey(
   const platformAgentId = boundPlatformAgentId(input.platformAgentId);
   const now = input.now ?? new Date();
 
-  await db()
-    .update(agent)
-    .set({
-      agentPlatform: input.agentPlatform,
-      platformAgentId,
-      monitoringApiKey: sealCredentials({ apiKey }),
-      monitoringApiKeyHint: apiKey.slice(-HINT_CHARACTERS),
-      updatedAt: now,
-    })
-    .where(
-      and(
-        within(auth, agent, eq(agent.projectId, projectId)),
-        eq(agent.id, input.agentId),
-        isNull(agent.archivedAt),
-      ),
-    );
+  await db().transaction(async (tx) => {
+    const [held] = await tx
+      .select({
+        name: agent.name,
+        platformAgentId: agent.platformAgentId,
+      })
+      .from(agent)
+      .where(
+        and(
+          within(auth, agent, eq(agent.projectId, projectId)),
+          eq(agent.id, input.agentId),
+          isNull(agent.archivedAt),
+        ),
+      )
+      .for("update");
+    if (held === undefined) {
+      throw new UnprocessableInputError(
+        "That agent is not in this project, or has been archived.",
+      );
+    }
+    if (
+      held.platformAgentId !== null &&
+      held.platformAgentId !== platformAgentId
+    ) {
+      throw new AgentAlreadyBoundError(
+        held.name,
+        held.platformAgentId,
+        platformAgentId,
+      );
+    }
+
+    await tx
+      .update(agent)
+      .set({
+        agentPlatform: input.agentPlatform,
+        platformAgentId,
+        monitoringApiKey: sealCredentials({ apiKey }),
+        monitoringApiKeyHint: apiKey.slice(-HINT_CHARACTERS),
+        updatedAt: now,
+      })
+      .where(eq(agent.id, input.agentId));
+  });
 }
 
 /**

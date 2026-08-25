@@ -477,6 +477,160 @@ describe("discovering simulation agents", () => {
     expect(connectionOf(connected).agentPlatform).toBe("retell");
   });
 
+  /**
+   * **One egma agent binds to one platform agent** (the rule the connect
+   * ticket confirmed while building). Retell gives a voice agent and a chat
+   * agent different ids, so a second connection picking a *different* Retell
+   * agent under one egma agent is asking for a second binding.
+   *
+   * Overwriting quietly is the dangerous half: monitoring would go on running
+   * under the same name while reading a different Retell agent, and one
+   * agent's production calls would accumulate against another's results
+   * history. So it is refused, in a sentence that names both and says where
+   * the second one belongs.
+   */
+  /** A Retell account holding one voice agent, one chat agent and one number. */
+  function retellAccountAnswering(): typeof fetch {
+    return vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/v2/list-agents") {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                agent_id: "agent_voice_1",
+                agent_name: "Front desk",
+                channel: "voice",
+              },
+              {
+                agent_id: "agent_chat_9",
+                agent_name: "Web chat",
+                channel: "chat",
+              },
+            ],
+            has_more: false,
+          }),
+          { status: 200 },
+        );
+      }
+      if (path.startsWith("/get-phone-number/")) {
+        return new Response(
+          JSON.stringify({
+            phone_number: "+14155550100",
+            nickname: "Main",
+            inbound_agents: [{ agent_id: "agent_voice_1" }],
+          }),
+          { status: 200 },
+        );
+      }
+      throw new Error(`unexpected Retell request ${path}`);
+    }) as unknown as typeof fetch;
+  }
+
+  it("refuses a second Retell agent under one egma agent, and writes nothing", async () => {
+    api = await createApi("retell_second_binding_refused");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    // The first connection binds the agent, exactly as it does today.
+    const first = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const bound = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(agentOf(bound).platformAgentId).toBe("agent_voice_1");
+
+    // And the second one, for another Retell agent, is refused by name.
+    const refused = await post(
+      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+      withKey(ada.secret),
+      {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: {},
+        platformAgentId: "agent_chat_9",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    );
+    expect(refused.status).toBe(422);
+    expect(refused.body).toEqual({
+      error: "unprocessable",
+      message:
+        "Front desk is Retell agent agent_voice_1. Register agent_chat_9 as its own agent.",
+    });
+
+    /*
+     * Nothing was written: not a second connection, and — the half that
+     * matters — not the binding or the sealed key underneath it.
+     */
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toHaveLength(1);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+    expect(agentOf(after).monitoringApiKeyHint).toBe("WXYZ");
+  });
+
+  /** The ordinary second connection: the same Retell agent, another way in. */
+  it("adds a second way into the Retell agent it is already bound to", async () => {
+    api = await createApi("retell_same_binding_reconnect");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const created = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+    });
+    const agentId = String(agentOf(created).id);
+    vi.stubGlobal("fetch", retellAccountAnswering());
+
+    for (const body of [
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+      {
+        agentPlatform: "retell",
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        name: "second line",
+        config: { phoneNumber: "+14155550100" },
+        platformAgentId: "agent_voice_1",
+        credentials: { apiKey: "retell-secret-confirm-WXYZ" },
+      },
+    ]) {
+      const added = await post(
+        `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
+        withKey(ada.secret),
+        body,
+      );
+      expect(added.status, JSON.stringify(added.body)).toBe(201);
+    }
+
+    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
+    expect(after.body.connections).toHaveLength(2);
+    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
+  });
+
   it("writes nothing when Retell rerouted a discovered phone candidate", async () => {
     api = await createApi("retell_discovery_rerouted_connection");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
