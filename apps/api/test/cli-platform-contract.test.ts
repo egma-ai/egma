@@ -105,7 +105,15 @@ describe("the CLI and API suite contract", () => {
             description: "The ordinary booking path.",
             scenario: "The caller asks for Tuesday.",
             expectedBehaviors: ["The agent books Tuesday."],
-            personas: [],
+            // The CLI names its callers by name and the platform resolves
+            // them, which is the path a real repository file takes. A test
+            // names at least one persona from birth, so a push that named
+            // none is refused rather than given the project's default.
+            // A repository file that has only ever carried names carries an
+            // empty id, and the CLI sends the name for the platform to
+            // resolve. A test names at least one persona from birth, so a push
+            // naming none is refused rather than given the project's default.
+            personas: [{ id: "", name: "Default Persona" }],
             mockTools: [],
           },
           expectedVersionId: null,

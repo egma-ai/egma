@@ -125,22 +125,21 @@ function promptBlock(prompt: string | null): readonly string[] {
  * egma has never heard of is a test the platform turns away at its door. The
  * notes teach the field because the format has it and `pull` writes it; what
  * may go in it today is a run-specific fact, so it is said in the task.
+ *
+ * **Every file must name one.** This used to say the line could be left out
+ * and the project's default persona would apply. That stopped being true on
+ * 2026-08-24: a test naming no persona is refused, so a file without the line
+ * is a file the push turns away. The list is never empty by the time it gets
+ * here — the generate step stops before writing if egma answers with none.
  */
 function personaBlock(personas: readonly string[]): readonly string[] {
-  if (personas.length === 0) {
-    return [
-      "## Personas",
-      "",
-      "Egma has no personas of its own on this project yet, only the default one",
-      "every project is given. So **leave the `personas` line out of every file**.",
-      "Say what kind of person is on the other end under `## Scenario` instead.",
-    ];
-  }
   return [
     "## Personas",
     "",
-      "These are the only personas Egma has. A file may name one of them and must",
-    "name no other; leave the `personas` line out and the default one applies.",
+    "**Every file must name at least one persona** under `personas:`, because a",
+    "test says who calls and Egma refuses one that does not. These are the only",
+    "personas Egma has; a file may name one or more of them and must name no",
+    `other. Use \`${personas[0] ?? ""}\` unless another fits the scenario better.`,
     "",
     ...personas.map((persona) => `- ${persona}`),
   ];

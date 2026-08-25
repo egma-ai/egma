@@ -26,7 +26,7 @@ import {
 import { openCredentials, sealCredentials } from "../sealing.ts";
 import { insertAgentWithin } from "./agents.ts";
 import type { AuthContext } from "./context.ts";
-import { UnprocessableInputError } from "./errors.ts";
+import { AgentAlreadyBoundError, UnprocessableInputError } from "./errors.ts";
 import { authorize, here } from "./permissions.ts";
 import { within } from "./within.ts";
 
@@ -281,9 +281,13 @@ function boundPlatformAgentId(value: string): string {
  * Turn pull on for one agent: bind it to its platform, seal its monitoring
  * key, and open its notebook.
  *
- * The key is asked for even when a connection already holds one for the same
- * account. Simulation custody and monitoring custody are two jobs with two
- * secrets on purpose.
+ * **The key reaches this from wherever the person last gave it.** Connecting
+ * an agent seals it here first (`sealAgentMonitoringKey`), so a switch-on that
+ * follows a connect spends the copy the agent already holds rather than asking
+ * again — one paste per agent, ever (founder ruling, 2026-08-24). A Retell
+ * chat connection still keeps its own copy on the connection, because
+ * simulation custody and monitoring custody are two jobs; what changed is that
+ * a person is no longer asked twice to supply them.
  */
 export async function enablePullProductionCalls(
   auth: AuthContext,
@@ -410,6 +414,131 @@ export async function disablePullProductionCalls(
     )
     .returning({ id: agent.id });
   return stopped.length > 0;
+}
+
+/**
+ * Bind an agent to its platform agent and seal its key, without turning the
+ * pull switch on.
+ *
+ * **This exists because the key is pasted once per agent, ever** (the
+ * founder's ruling of 2026-08-24), and connecting an agent is where a person
+ * pastes it — whether or not they also tick "Pull production calls". Sealing
+ * it there is what lets every later connect flow for the same agent list the
+ * account without asking for the secret a second time.
+ *
+ * It is deliberately *not* `enablePullProductionCalls` with a flag. That
+ * function flips the switch and opens the machine notebook, which is the act
+ * of starting an observation; this one only records custody. A save that asks
+ * for both calls both, in that order, and the switch alone decides what the
+ * poller does.
+ *
+ * **One egma agent binds to one platform agent, and a second one is refused
+ * here.** Retell gives a voice agent and a chat agent different ids, so
+ * somebody who adds a phone connection for `agent_voice_1` and then a chat
+ * connection for `agent_chat_9` under one egma agent is asking for two
+ * bindings. Overwriting quietly is the dangerous half: monitoring would go on
+ * running under the same name while reading a different Retell agent, and the
+ * transcripts of one agent would accumulate against the results history of
+ * another. So the binding is read and compared **inside the transaction that
+ * would replace it**, with the row held — a check before the write would be a
+ * race with the very next request. An unset binding binds as before.
+ *
+ * Fronting two platform agents from one egma agent is a schema change (two
+ * binding columns, or a binding table) and a separate ticket. This refusal is
+ * what says so out loud instead of pretending it already works.
+ */
+export async function sealAgentMonitoringKey(
+  auth: AuthContext,
+  input: {
+    readonly agentId: string;
+    readonly agentPlatform: AgentPlatform;
+    readonly platformAgentId: string;
+    readonly apiKey: unknown;
+    readonly now?: Date | undefined;
+  },
+): Promise<void> {
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const apiKey = monitoringKey(input.apiKey);
+  const platformAgentId = boundPlatformAgentId(input.platformAgentId);
+  const now = input.now ?? new Date();
+
+  await db().transaction(async (tx) => {
+    const [held] = await tx
+      .select({
+        name: agent.name,
+        platformAgentId: agent.platformAgentId,
+      })
+      .from(agent)
+      .where(
+        and(
+          within(auth, agent, eq(agent.projectId, projectId)),
+          eq(agent.id, input.agentId),
+          isNull(agent.archivedAt),
+        ),
+      )
+      .for("update");
+    if (held === undefined) {
+      throw new UnprocessableInputError(
+        "That agent is not in this project, or has been archived.",
+      );
+    }
+    if (
+      held.platformAgentId !== null &&
+      held.platformAgentId !== platformAgentId
+    ) {
+      throw new AgentAlreadyBoundError(
+        held.name,
+        held.platformAgentId,
+        platformAgentId,
+      );
+    }
+
+    await tx
+      .update(agent)
+      .set({
+        agentPlatform: input.agentPlatform,
+        platformAgentId,
+        monitoringApiKey: sealCredentials({ apiKey }),
+        monitoringApiKeyHint: apiKey.slice(-HINT_CHARACTERS),
+        updatedAt: now,
+      })
+      .where(eq(agent.id, input.agentId));
+  });
+}
+
+/**
+ * The plaintext monitoring key one agent holds, or nothing when it holds none.
+ *
+ * **It never leaves the server.** The one caller is the API listing a Retell
+ * account for an agent that has already been given its key: the browser asks
+ * by agent id, and the answer is a list of agents rather than the secret that
+ * read it.
+ */
+export async function agentMonitoringKey(
+  auth: AuthContext,
+  agentId: string,
+): Promise<string | undefined> {
+  authorize(auth, "configure_monitoring", here(auth));
+  const projectId = projectOf(auth);
+  const [row] = await db()
+    .select({ monitoringApiKey: agent.monitoringApiKey })
+    .from(agent)
+    .where(
+      and(
+        within(auth, agent, eq(agent.projectId, projectId)),
+        eq(agent.id, agentId),
+        // An agent somebody deleted keeps its sealed key, because Restore has
+        // to bring back a working agent — but nothing may *spend* it. Without
+        // this, naming a deleted agent in a discovery would still read its
+        // account with the secret it holds.
+        isNull(agent.archivedAt),
+      ),
+    )
+    .limit(1);
+  const sealed = row?.monitoringApiKey ?? null;
+  if (sealed === null) return undefined;
+  return openedMonitoringKey(sealed);
 }
 
 /** Read one agent's pull state. No credential column is selected. */

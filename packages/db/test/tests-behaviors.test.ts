@@ -35,9 +35,11 @@ import {
  */
 
 let database: MigratedDatabase;
+/** The caller every authored fixture names, because a test says who calls. */
+let rita: string;
 
 beforeAll(async () => {
-  ({ database } = await seedTestFactory("tests_behaviors"));
+  ({ database, rita } = await seedTestFactory("tests_behaviors"));
 });
 
 afterAll(async () => {
@@ -52,7 +54,7 @@ describe("a test version's content", () => {
    * still deciding grading from test content.
    */
   it("names no graders, at every grain a test is read at", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const fetched = await getTest(actingAsAcme(), created.id);
     const frozen = await getTestVersion(actingAsAcme(), created.versionId);
@@ -76,7 +78,7 @@ describe("a test version's content", () => {
    * stored for it: the version's content is the three fields it says it is.
    */
   it("stores the scenario, the behaviors, and the overrides, and nothing else", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const { rows } = await database.sql<{ keys: string[] }>(
       `select array(select jsonb_object_keys(content) order by 1) as keys
@@ -94,7 +96,7 @@ describe("a test version's content", () => {
 
 describe("a test's expected behaviors", () => {
   it("round-trip as the plain sentences they were written as", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
@@ -112,6 +114,7 @@ describe("a test's expected behaviors", () => {
   it("mint a version when one is reworded, and nothing when the list is the same", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
+      personaIds: [rita],
       expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
     });
 
@@ -143,6 +146,7 @@ describe("a test's expected behaviors", () => {
   it("mint a version when two of them swap places", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
+      personaIds: [rita],
       expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
     });
 
@@ -168,7 +172,7 @@ describe("a test's expected behaviors", () => {
 
     expect(await rowCounts()).toEqual(before);
 
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
     const written = await rowCounts();
 
     await expect(
@@ -186,6 +190,7 @@ describe("a test's expected behaviors", () => {
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
+        personaIds: [rita],
         expectedBehaviors: ["   "],
       }),
     ).rejects.toThrow(/needs to say something/);
@@ -200,6 +205,7 @@ describe("a test's expected behaviors", () => {
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
+        personaIds: [rita],
         expectedBehaviors: [
           { behavior: "confirms the new time back", priority: "P0" },
         ] as unknown as readonly string[],
@@ -214,7 +220,7 @@ describe("a test's expected behaviors", () => {
    * pin versions.
    */
   it("read a version stored with priorities as the sentences it holds", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     // Raw SQL on purpose: this is the shape every version held between the
     // grading effort and the redesign, and no seam can write it any more.
@@ -240,7 +246,7 @@ describe("a test's expected behaviors", () => {
 
   /** And the pre-priority shape, which is the shape again, still reads. */
   it("read a version stored as bare strings, which is the shape once more", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     await database.sql(
       `update test_version

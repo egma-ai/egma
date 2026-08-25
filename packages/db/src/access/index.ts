@@ -21,6 +21,7 @@ export type { AuthContext, Role, Via } from "./context.ts";
 export { ROLES, VIA } from "./context.ts";
 export {
   AgentWriteRefusedError,
+  AgentAlreadyBoundError,
   AlreadyBelongsToAnOrganizationError,
   ConnectionRestoreRefusedError,
   DefaultPersonaReplacementError,
@@ -231,6 +232,7 @@ export type {
 } from "../schema/agents.ts";
 
 export {
+  agentMonitoringKey,
   checkpointMonitoringPage,
   claimDueMonitoringPull,
   deleteRetellCallRetry,
@@ -246,6 +248,7 @@ export {
   registerAgentPullingProductionCalls,
   releaseMonitoringLease,
   renewMonitoringLease,
+  sealAgentMonitoringKey,
   sweepExpiredRetellCallMarkers,
   transientRetellCallState,
   yieldMonitoringLease,

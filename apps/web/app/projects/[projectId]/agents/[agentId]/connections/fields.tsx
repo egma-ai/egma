@@ -47,7 +47,13 @@ function ConfigControl({
 
   return (
     <Field
-      label={field.required ? field.label : `${field.label} (optional)`}
+      /*
+       * One label grammar everywhere (`DESIGN.md`, 2026-08-24): `*` on a
+       * mandatory field, `[optional]` in square brackets on the rest. The
+       * round-bracket spelling this used to draw was the only place in the
+       * product still saying it the old way.
+       */
+      label={field.required ? `${field.label}*` : `${field.label} [optional]`}
       htmlFor={id}
     >
       {field.kind === "json" ? (
@@ -56,6 +62,7 @@ function ConfigControl({
           value={value}
           rows={3}
           aria-describedby={helpId}
+          aria-required={field.required ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
@@ -63,6 +70,7 @@ function ConfigControl({
           id={id}
           value={value}
           aria-describedby={helpId}
+          aria-required={field.required ? true : undefined}
           autoComplete="off"
           spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
@@ -86,7 +94,10 @@ function CredentialControl({
   const helpId = `${id}-help`;
 
   return (
-    <Field label={field.label} htmlFor={id}>
+    <Field
+      label={field.required ? `${field.label}*` : `${field.label} [optional]`}
+      htmlFor={id}
+    >
       {field.kind === "json" ? (
         // A set of headers is secret in its values and ordinary in its names,
         // and it is too long for one line — so it gets room rather than a
@@ -96,6 +107,7 @@ function CredentialControl({
           value={value}
           rows={3}
           aria-describedby={helpId}
+          aria-required={field.required ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
@@ -105,6 +117,7 @@ function CredentialControl({
           type="password"
           autoComplete="new-password"
           aria-describedby={helpId}
+          aria-required={field.required ? true : undefined}
           spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
         />

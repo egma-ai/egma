@@ -1,16 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import {
-  deleteTest,
-  deleteTestSuite,
-  getTestSuite,
-  listTests,
-} from "@egma/platform-api/client";
+import { useEffect, useRef, useState } from "react";
+import { getTestSuite, listTests } from "@egma/platform-api/client";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { Refusal } from "../../../../lib/api.ts";
 import { roleOf } from "../../../../lib/me.ts";
@@ -21,23 +14,12 @@ import {
 import { canAuthor } from "../../../../lib/roles.ts";
 import {
   matchesSearch,
-  newTestInSuitePath,
-  runSuitePath,
   suitePagePath,
   testsPagePath,
   type TestSuite,
 } from "../../../../lib/test-suites.ts";
-import {
-  personaCell,
-  personaPagePath,
-  testPagePath,
-  type ListedTest,
-  type TestPage,
-} from "../../../../lib/tests.ts";
-import { DataTable, type Column } from "../../../../ui/data-table.tsx";
-import { MenuDivider, MenuItem } from "../../../../ui/menu.tsx";
-import { Empty, Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { ListInstant } from "../../../../ui/relative-time.tsx";
+import type { ListedTest, TestPage } from "../../../../lib/tests.ts";
+import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { SearchField } from "../../../../ui/section.tsx";
 import {
@@ -46,23 +28,21 @@ import {
   ProductPage,
   useShellSession,
 } from "../../../../ui/shell.tsx";
-import {
-  DestructiveItem,
-  MenuReason,
-  RowMenu,
-} from "../../../../ui/row-menu.tsx";
-import { ConfirmDialog, ToolbarMenu } from "./parts.tsx";
-import { RenameSuiteSheet } from "./suite-sheets.tsx";
-import { WriteTestSheet } from "./write-test-sheet.tsx";
+import { TestsGrid } from "./tests-grid.tsx";
 
 /**
- * One suite, and the tests inside it.
+ * One suite, and the tests inside it, as a spreadsheet grid.
  *
  * **Two addresses draw this screen.** `/tests/suites/:suiteId` is the suite
- * itself, and `/tests/new?suite=:suiteId` is the same suite with the
- * write-a-test panel open over it — which is what `ATG-0` draws. Writing a test
- * is a panel rather than a page now, and the address stays a real address so
- * the link, the Back button and the browser walk all keep working.
+ * itself, and `/tests/new?suite=:suiteId` is the same suite with the entry row
+ * already open — the old write-a-test address, kept as a deep link now that the
+ * side sheet it used to open is retired.
+ *
+ * **Suite management is not here.** Rename, Run suite and Delete suite live on
+ * the suites list's row menu, where one screen owns every verb a suite has
+ * (founder's ruling, 2026-08-24). What this screen carries is one action —
+ * Write a test — and it puts the caret in the grid's entry row rather than
+ * opening anything.
  */
 export function SuiteScreen({
   projectId,
@@ -71,7 +51,7 @@ export function SuiteScreen({
 }: {
   readonly projectId: string;
   readonly suiteId: string;
-  /** The write-a-test panel is open, because the address says so. */
+  /** The entry row is open, because the address says so. */
   readonly writing?: boolean;
 }) {
   const router = useRouter();
@@ -95,14 +75,13 @@ export function SuiteScreen({
     suiteId,
   );
   const [after, setAfter] = useState<TestPage | null>(null);
+  const [written, setWritten] = useState<readonly ListedTest[]>([]);
+  const [edited, setEdited] = useState<ReadonlyMap<string, ListedTest>>(new Map());
+  /** Rows that left, so a delete does not wait on a re-read of the page. */
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [shownSuite, setShownSuite] = useState<TestSuite | null>(null);
   const [search, setSearch] = useState("");
-  const [renaming, setRenaming] = useState(false);
-  const [deletingSuite, setDeletingSuite] = useState(false);
-  const [deletingTest, setDeletingTest] = useState<ListedTest | null>(null);
-  const [removing, setRemoving] = useState(false);
-  const [removeRefused, setRemoveRefused] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [entryOpen, setEntryOpen] = useState(writing);
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreRefused, setMoreRefused] = useState<Refusal | null>(null);
   const showing = useRef(`${projectId}:${suiteId}`);
@@ -110,14 +89,17 @@ export function SuiteScreen({
   useEffect(() => {
     showing.current = `${projectId}:${suiteId}`;
     setAfter(null);
+    setWritten([]);
+    setEdited(new Map());
+    setRemoved(new Set());
     setMoreRefused(null);
     setShownSuite(null);
     setSearch("");
-    setRenaming(false);
-    setDeletingSuite(false);
-    setDeletingTest(null);
-    setCopied(false);
   }, [projectId, suiteId]);
+
+  useEffect(() => {
+    if (writing) setEntryOpen(true);
+  }, [writing]);
 
   useEffect(() => {
     if (suite?.status === "ready") setShownSuite(suite.value);
@@ -128,12 +110,6 @@ export function SuiteScreen({
       window.location.replace("/sign-in");
     }
   }, [suite, tests]);
-
-  useEffect(() => {
-    if (!copied) return undefined;
-    const timer = window.setTimeout(() => setCopied(false), 2_000);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
 
   const currentSuite =
     shownSuite !== null && shownSuite.id === suiteId
@@ -147,160 +123,25 @@ export function SuiteScreen({
     mayAuthor || role === null
       ? undefined
       : `Your ${String(role)} role cannot write tests. Ask an organization admin to change your role.`;
-  const whyNotChange =
-    mayAuthor || role === null
-      ? undefined
-      : `Your ${String(role)} role cannot change test suites. Ask an organization admin to change your role.`;
 
+  /**
+   * "Write a test" focuses the grid's entry row; it opens nothing.
+   *
+   * The address stays where it is when the row opens from this button. The
+   * `/tests/new?suite=` address still lands with the row open, which is what
+   * keeps a copied link honest — but pressing the button is not a navigation.
+   */
   const writeAction =
     role === null ? undefined : (
       <Button
-        asChild={mayAuthor}
+        type="button"
         disabled={!mayAuthor}
         {...(whyNotWrite === undefined ? {} : { why: whyNotWrite })}
+        onClick={() => setEntryOpen(true)}
       >
-        {mayAuthor ? (
-          <Link href={newTestInSuitePath(projectId, suiteId)}>Write a test</Link>
-        ) : (
-          <span>Write a test</span>
-        )}
+        Write a test
       </Button>
     );
-
-  async function removeSuite(): Promise<void> {
-    setRemoving(true);
-    setRemoveRefused(null);
-    const answer = await platformAnswer(
-      deleteTestSuite({ suiteId, projectId }, { client: platformClient }),
-    );
-    setRemoving(false);
-    if (answer.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    if (answer.status !== "ready") {
-      setRemoveRefused(answer.refusal.message);
-      return;
-    }
-    setDeletingSuite(false);
-    router.push(testsPagePath(projectId));
-  }
-
-  async function removeTest(test: ListedTest): Promise<void> {
-    setRemoving(true);
-    setRemoveRefused(null);
-    const answer = await platformAnswer(
-      deleteTest({ testId: test.id, projectId }, { client: platformClient }),
-    );
-    setRemoving(false);
-    if (answer.status === "signed-out") {
-      window.location.replace("/sign-in");
-      return;
-    }
-    if (answer.status !== "ready") {
-      setRemoveRefused(answer.refusal.message);
-      return;
-    }
-    setDeletingTest(null);
-    setAfter(null);
-    reloadTests();
-  }
-
-  function testMenu(test: ListedTest): ReactNode {
-    return (
-      <RowMenu label={`Open the menu for ${test.name}`}>
-        {(close) => (
-          <>
-            <MenuItem href={testPagePath(projectId, test.id)} onClick={close}>
-              Open
-            </MenuItem>
-            <MenuDivider />
-            <DestructiveItem
-              disabled={!mayAuthor}
-              onClick={() => {
-                close();
-                setRemoveRefused(null);
-                setDeletingTest(test);
-              }}
-            >
-              Delete test
-            </DestructiveItem>
-            {whyNotWrite === undefined ? null : <MenuReason>{whyNotWrite}</MenuReason>}
-          </>
-        )}
-      </RowMenu>
-    );
-  }
-
-  const columns: readonly Column<ListedTest>[] = [
-    {
-      key: "name",
-      header: "Name",
-      primary: true,
-      width: "480px",
-      /*
-       * **The row's name is plain text until a pointer is on it**, which is
-       * what the boards draw and what the Agents and Personas lists already
-       * do: only the secondary links in a row — a persona, a connection —
-       * carry an underline, because the row itself is the way in and the
-       * underline is what tells the two kinds apart. The shared table
-       * underlines every cell link, so this is said here rather than there.
-       */
-      cell: (test) => (
-        <Link
-          className="text-foreground no-underline pointer-hover:underline"
-          href={testPagePath(projectId, test.id)}
-        >
-          {test.name}
-        </Link>
-      ),
-    },
-    {
-      key: "personas",
-      header: "Personas",
-      width: "340px",
-      hideOnMobile: true,
-      cell: (test) => {
-        if (test.personas.length === 0) {
-          return <span className="text-faint">The project default</span>;
-        }
-        const { shown, more } = personaCell(test.personas);
-        return (
-          <span className="flex min-w-0 items-baseline gap-3">
-            {shown.map((persona) => (
-              <Link
-                className={
-                  persona.archivedAt === null
-                    ? "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap"
-                    : "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-faint line-through"
-                }
-                href={personaPagePath(projectId, persona.id)}
-                key={persona.id}
-              >
-                {persona.name}
-              </Link>
-            ))}
-            {more === 0 ? null : (
-              <Badge shape="count" title={`${String(more)} more`}>
-                +{more}
-              </Badge>
-            )}
-          </span>
-        );
-      },
-    },
-    {
-      key: "changed",
-      header: "Changed",
-      cell: (test) => <ListInstant instant={test.updatedAt} />,
-    },
-    {
-      key: "menu",
-      header: "Test actions",
-      action: true,
-      cell: testMenu,
-    },
-  ];
 
   function body() {
     if (
@@ -320,7 +161,13 @@ export function SuiteScreen({
       return <Failure message={tests.refusal.message} onRetry={reloadTests} />;
     }
 
-    const loaded = [...tests.value.tests, ...(after?.tests ?? [])];
+    const loaded = [
+      ...tests.value.tests,
+      ...(after?.tests ?? []),
+      ...written,
+    ]
+      .filter((test) => !removed.has(test.id))
+      .map((test) => edited.get(test.id) ?? test);
     const cursor = after?.nextPageToken ?? tests.value.nextPageToken;
     const items = loaded.filter((test) => matchesSearch(test.name, search));
 
@@ -350,41 +197,48 @@ export function SuiteScreen({
       });
     }
 
-    if (items.length === 0) {
-      if (search.trim() !== "") {
-        return (
-          <Empty
-            title={`No tests match “${search.trim()}”`}
-            lead="Try part of another name, or clear the search."
-          />
-        );
-      }
-      return (
-        <Empty
-          title="No tests in this suite"
-          lead="A test is one situation to put the agent in, what should happen, and which personas call about it. Write the first one and this suite can run."
-          action={writeAction}
-        />
-      );
-    }
-
     return (
       <>
-        <DataTable
-          label={`Tests in ${title}`}
-          columns={columns}
-          rows={items}
-          keyOf={(test) => test.id}
-          stretchPrimaryLink
-          {...(cursor === null
-            ? {}
-            : {
-                more: {
-                  onMore: () => void showMore(),
-                  loading: loadingMore,
-                  note: `${String(items.length)} tests so far`,
-                },
-              })}
+        <TestsGrid
+          projectId={projectId}
+          suiteId={suiteId}
+          tests={items}
+          mayAuthor={mayAuthor}
+          {...(whyNotWrite === undefined ? {} : { why: whyNotWrite })}
+          writing={entryOpen}
+          onWriting={(open) => {
+            setEntryOpen(open);
+            /*
+             * Closing the entry row that the `/tests/new?suite=` address opened
+             * puts the address back on the suite, so Back and a copied link
+             * keep saying the same thing the screen does.
+             */
+            if (!open && writing) router.push(suitePagePath(projectId, suiteId));
+          }}
+          onCreated={(test) => setWritten((held) => [...held, test])}
+          onSaved={(test) =>
+            setEdited((held) => new Map(held).set(test.id, test))
+          }
+          onDeleted={(test) =>
+            setRemoved((held) => new Set(held).add(test.id))
+          }
+          more={
+            cursor === null ? undefined : (
+              <div className="mt-3 flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  busy={loadingMore}
+                  onClick={() => void showMore()}
+                >
+                  {loadingMore ? "Loading…" : "Show more"}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {String(items.length)} tests so far
+                </span>
+              </div>
+            )
+          }
         />
         {moreRefused === null ? null : (
           <Failure
@@ -396,50 +250,6 @@ export function SuiteScreen({
       </>
     );
   }
-
-  const suiteMenu =
-    role === null || currentSuite === null ? null : (
-      <ToolbarMenu label="Open the suite menu">
-        {(close) => (
-          <>
-            <MenuItem
-              disabled={!mayAuthor}
-              onClick={() => {
-                close();
-                setRenaming(true);
-              }}
-            >
-              Rename suite
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                close();
-                void navigator.clipboard?.writeText(suiteId).then(
-                  () => setCopied(true),
-                  () => setCopied(false),
-                );
-              }}
-            >
-              Copy suite id
-            </MenuItem>
-            <MenuDivider />
-            <DestructiveItem
-              disabled={!mayAuthor}
-              onClick={() => {
-                close();
-                setRemoveRefused(null);
-                setDeletingSuite(true);
-              }}
-            >
-              Delete suite
-            </DestructiveItem>
-            {whyNotChange === undefined ? null : (
-              <MenuReason>{whyNotChange}</MenuReason>
-            )}
-          </>
-        )}
-      </ToolbarMenu>
-    );
 
   return (
     <ProductPage>
@@ -457,83 +267,9 @@ export function SuiteScreen({
             onChange={(event) => setSearch(event.target.value)}
           />
         }
-        action={
-          currentSuite === null ? undefined : (
-            <>
-              {copied ? (
-                <span className="text-sm text-success" role="status">
-                  Copied
-                </span>
-              ) : null}
-              {writeAction}
-              <Button asChild variant="secondary">
-                <Link href={runSuitePath(projectId, suiteId)}>Run suite</Link>
-              </Button>
-              {suiteMenu}
-            </>
-          )
-        }
+        action={currentSuite === null ? undefined : writeAction}
       />
       <PageBody>{body()}</PageBody>
-
-      {currentSuite === null ? null : (
-        <RenameSuiteSheet
-          projectId={projectId}
-          suite={currentSuite}
-          open={renaming}
-          mayAuthor={mayAuthor}
-          {...(whyNotChange === undefined ? {} : { why: whyNotChange })}
-          onRenamed={setShownSuite}
-          onDelete={() => {
-            setRenaming(false);
-            setRemoveRefused(null);
-            setDeletingSuite(true);
-          }}
-          onClose={() => setRenaming(false)}
-        />
-      )}
-
-      {currentSuite === null ? null : (
-        <WriteTestSheet
-          projectId={projectId}
-          suite={currentSuite}
-          open={writing}
-          mayAuthor={mayAuthor}
-          {...(whyNotWrite === undefined ? {} : { why: whyNotWrite })}
-          onWritten={(test) => router.push(testPagePath(projectId, test.id))}
-          onClose={() => router.push(suitePagePath(projectId, suiteId))}
-        />
-      )}
-
-      {deletingSuite && currentSuite !== null ? (
-        <ConfirmDialog
-          title={`Delete ${currentSuite.name}?`}
-          lines={[
-            "This deletes the suite and its tests. Nobody can author or run them after this.",
-            "Runs that already happened keep their results and transcripts.",
-          ]}
-          confirmLabel="Delete suite"
-          busy={removing}
-          refusal={removeRefused}
-          onConfirm={() => void removeSuite()}
-          onClose={() => setDeletingSuite(false)}
-        />
-      ) : null}
-
-      {deletingTest === null ? null : (
-        <ConfirmDialog
-          title="Delete this test?"
-          lines={[
-            `“${deletingTest.name}” leaves the ${title} suite. Nobody can author or run it after this.`,
-            "Runs that already ran it keep their results and transcripts.",
-          ]}
-          confirmLabel="Delete test"
-          busy={removing}
-          refusal={removeRefused}
-          onConfirm={() => void removeTest(deletingTest)}
-          onClose={() => setDeletingTest(null)}
-        />
-      )}
     </ProductPage>
   );
 }

@@ -1136,19 +1136,26 @@ describe("what a project recorded in production", () => {
       await page.waitForSelector("table");
       const shown = await page.innerText("main");
 
-      // The heading is the product's word for this area.
+      // The heading is this page's own word. **Monitoring is the sidebar
+      // group** — and since the separate monitoring screen retired, this page
+      // is the whole of the area, so the title bar names the page rather than
+      // saying the group's word a second time (board `JGS-0`).
       //
-      // **And it is the whole of what stands above the list now.** The boards
-      // draw a list screen as a title bar, one strip of controls and the table
-      // (`71V-0`, `71N-0`) — no label over the title and no purpose sentence
-      // under it. The sidebar already says which section this is and which
-      // project it belongs to, and the table says what it holds; the sentence
-      // that used to sit here is kept for the screens that ask somebody to
-      // fill something in. Updated with the ui-refresh restyle of this screen.
-      expect(shown).toContain("Monitoring");
+      // **And it is the whole of what stands above the list**, beside the
+      // window control and the one action. The boards draw a list screen as a
+      // title bar, one strip of controls and the table (`71V-0`, `71N-0`) — no
+      // label over the title and no purpose sentence under it. The sidebar
+      // already says which section this is and which project it belongs to,
+      // and the table says what it holds.
+      expect(shown).toContain("Transcripts");
       expect(shown).not.toContain(
         "What your agents did in production, newest first.",
       );
+
+      // The one monitoring verb, on the screen its results land on. It opens a
+      // picker over this page; the full Start-monitoring page is retired.
+      expect(shown).toContain("Monitor an agent");
+      expect(shown).not.toContain("Start monitoring");
 
       // The window control is on the default nobody chose, and the capture is
       // inside it — the browser's clock is pinned to the evening of the day the
@@ -2550,14 +2557,22 @@ describe("the complete product, walked in order in a second project", () => {
       await saysWithin(walk, "No agents in this project yet");
 
       /*
-       * **One panel does both halves.** The agent and its first way in used to
-       * be two pages with a forward between them, and an agent that never
-       * reached the second one sat in the list unreachable. `/agents/new` is
-       * still the address — the CLI and the documentation print it — and what
-       * it opens is the side sheet over this list.
+       * **One panel does both halves, and opening it is not a navigation.**
+       * The agent and its first way in used to be two pages with a forward
+       * between them, and an agent that never reached the second one sat in
+       * the list unreachable. Now the control changes query state on the
+       * address the person is already at (founder ruling, 2026-08-24) — it no
+       * longer sends the browser to `/agents/new`, which is why this used to
+       * wait for that address and time out.
+       *
+       * `/agents/new` is still an address and still opens this panel; the
+       * copied-link table below is where that promise is checked, because that
+       * is what a link in the CLI or the documentation actually does.
        */
       await walk.getByRole("link", { name: "Connect an agent" }).first().click();
-      await walk.waitForURL(new RegExp(`/projects/${second}/agents/new$`));
+      await walk.waitForURL(
+        new RegExp(`/projects/${second}/agents\\?sheet=connect$`),
+      );
       await reactHasTakenOver(walk, "form");
 
       // One field for the agent, and the shortness is the product's decision:
@@ -2576,24 +2591,30 @@ describe("the complete product, walked in order in a second project", () => {
        */
       await walk.getByRole("radio", { name: "Voice" }).click();
       await walk.fill("#connection-name", "Retell staging");
-      await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
+      /*
+       * **The key reads the account by itself.** There is no "Load Retell
+       * agents" button any more (founder ruling, 2026-08-24): pasting a key is
+       * the person saying "this is my account", and asking them to confirm it
+       * by pressing something asked the same question twice.
+       */
       const discoveryResponse = walk.waitForResponse(
         (response) =>
           response.request().method() === "POST" &&
           new URL(response.url()).pathname === "/v1/agents:discover",
       );
-      await walk.getByRole("button", { name: "Load Retell agents" }).click();
+      await walk.fill("#retell-api-key", BROWSER_RETELL_KEY);
       const discovered = await discoveryResponse;
       expect(discovered.status(), await discovered.text()).toBe(200);
+      expect(
+        await walk.getByRole("button", { name: "Load Retell agents" }).count(),
+        "the account loads itself, so there is no button to press",
+      ).toBe(0);
+      // The pick is by name, and the number Egma dials is typed.
       await walk.waitForSelector("#retell-agent");
       await expect.poll(() => walk.inputValue("#retell-agent")).toBe(
         BROWSER_RETELL_AGENT,
       );
-      await expect.poll(() =>
-        walk
-          .locator("#discovered-connection option:checked")
-          .textContent(),
-      ).toContain(BROWSER_RETELL_NUMBER);
+      await walk.fill("#retell-phone-number", BROWSER_RETELL_NUMBER);
       /*
        * **One write, both halves.** `registerAgent` carries the connection, so
        * there is no window in which the agent exists and nothing can reach it.
@@ -2608,15 +2629,23 @@ describe("the complete product, walked in order in a second project", () => {
       expect(connected.status(), await connected.text()).toBe(201);
 
       /*
-       * **The panel closes onto the agent it just made**, which is the record
-       * the person created rather than the list of everything that holds it.
-       * The address is read from the product — the browser is standing on it —
-       * rather than reconstructed from a database id.
+       * **The panel closes onto the list, because the row is the agent.** The
+       * agent page is retired (founder ruling, 2026-08-24): everything it held
+       * is on the row behind the panel, so a save that navigated would be
+       * taking somebody away from what they just made.
+       *
+       * **What is waited for is the outcome, not a navigation.** Closing is a
+       * query-state change on the address the panel was opened over, so there
+       * is no load to wait for: the panel goes, the row arrives, and the
+       * address settles back to the bare list. Waiting on any one of the three
+       * alone would pass while the other two had not happened.
        */
-      await walk.waitForURL(
-        new RegExp(`/projects/${second}/agents/agt_[^/?#]+$`),
-      );
-      agentAddress = walk.url();
+      await expect
+        .poll(() => walk.getByRole("dialog").count(), { timeout: 30_000 })
+        .toBe(0);
+      await expect
+        .poll(() => walk.url(), { timeout: 30_000 })
+        .toMatch(new RegExp(`/projects/${second}/agents$`));
       await saysWithin(walk, "The Support line");
       await saysWithin(walk, "Retell staging");
 
@@ -2648,28 +2677,58 @@ describe("the complete product, walked in order in a second project", () => {
       // The connection's own address still exists and still opens the same
       // panel; the row's link, read off the list below, is the query form of it.
       const storedConnectionId = stored.rows[0]?.id ?? "";
+      const storedAgentId = (
+        await instance.database.sql<{ id: string }>(
+          `select id from agent where name = 'The Support line'`,
+        )
+      ).rows[0]?.id ?? "";
+      /*
+       * **The agent's own address, which is now a retired one.** It is kept
+       * because the two connection addresses hang off it and because a link to
+       * it has to keep working; what it does when it is opened is asserted
+       * below, on its own.
+       */
+      agentAddress = `${origin}/projects/${second}/agents/${storedAgentId}`;
       connectionAddress = `${agentAddress}/connections/${storedConnectionId}`;
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_KEY);
       expect(JSON.stringify(stored.rows)).not.toContain(BROWSER_RETELL_AGENT);
 
       /*
-       * The agent's page is its identity, whether Egma pulls its production
-       * calls, and its connections. Nothing else.
-       *
-       * The absences are asserted only after the connection's own name has
-       * landed. A page still loading says none of these words either, so
-       * checking them first would pass for the wrong reason — and go on
-       * passing after the connections it is meant to guard stopped being drawn.
+       * **The agents screen carries nothing about testing or monitoring**, and
+       * the agent page that carried both is gone. The absences are asserted
+       * only after the connection's own name has landed: a page still loading
+       * says none of these words either, so checking them first would pass for
+       * the wrong reason.
        */
-      const agentPage = await walk.innerText("main");
-      expect(agentPage).toContain("Connections");
-      // The pull switch, which is the only stored monitoring choice in the
-      // product and lives on the agent that owns it (ADR-0015). Nothing binds
-      // this agent to a platform yet, so it reads off and says so.
-      expect(agentPage).toContain("Production calls");
-      expect(agentPage).toContain("Not bound");
-      expect(agentPage).not.toContain("Recent runs");
-      expect(agentPage).not.toContain("Attached tests");
+      const agentsScreen = await walk.innerText("main");
+      expect(agentsScreen).toContain("Connections");
+      expect(agentsScreen).not.toContain("Production calls");
+      expect(agentsScreen).not.toContain("Recent runs");
+      expect(agentsScreen).not.toContain("Attached tests");
+
+      /*
+       * **The retired agent address lands on the list.** The agent page is
+       * gone (founder ruling, 2026-08-24) and its address is one every CLI
+       * message, every piece of documentation and somebody's notes still
+       * hold — so it has to arrive somewhere honest rather than at a 404. The
+       * address is asserted as well as the words, because "it says the agent's
+       * name" would also be true of the page that used to be here.
+       */
+      /*
+       * `commit` rather than `load`: this address answers with a redirect, so
+       * what is being waited for is where it lands, not the paint of a page
+       * that was never going to be drawn. The two assertions under it are the
+       * arrival, and they are the ones worth failing on.
+       */
+      await walk.goto(agentAddress, { waitUntil: "commit", timeout: 60_000 });
+      await walk.waitForURL(new RegExp(`/projects/${second}/agents$`), {
+        timeout: 60_000,
+      });
+      await saysWithin(walk, "The Support line");
+      expect(
+        await walk.getByRole("table", { name: "Agents in this project" }).count(),
+        "the retired agent address lands on the agents list",
+      ).toBe(1);
 
       /*
        * And the list says egma can reach it, without anybody opening it. This
@@ -2683,8 +2742,7 @@ describe("the complete product, walked in order in a second project", () => {
        * **The row names the agent as plain text, and its ⋮ is the way in.**
        * This list is the one agent screen (`6ZJ-0`), so the name is a name
        * rather than a link, and the underline on this row belongs to the
-       * connections alone. Open agent still carries the address the panel
-       * landed on.
+       * connections alone — there is no page behind the name to promise.
        */
       const named = walk
         .locator('table[aria-label="Agents in this project"] tbody tr')
@@ -2700,15 +2758,19 @@ describe("the complete product, walked in order in a second project", () => {
       await named
         .getByRole("button", { name: "Actions for The Support line" })
         .click();
-      const openAgent = walk.getByRole("menuitem", {
-        name: "Open agent",
-        exact: true,
+      /*
+       * **Two items, and they are the two things the row is.** There is no
+       * agent page to open and no second place to connect from, so the menu is
+       * exactly Rename agent and Delete agent (`I2Z-0`).
+       */
+      const menu = walk.getByRole("menu", {
+        name: "Actions for The Support line",
       });
-      await openAgent.waitFor();
+      await menu.waitFor();
       expect(
-        new URL((await openAgent.getAttribute("href")) ?? "/", origin).toString(),
-        "the registered agent has a row whose menu opens it",
-      ).toBe(agentAddress);
+        await menu.getByRole("menuitem").allInnerTexts(),
+        "the row menu is rename and delete, and nothing that used to lead away",
+      ).toEqual(["Rename agent", "Delete agent"]);
       await walk.keyboard.press("Escape");
       // And the way in is named on the row, as a link that opens it over the
       // list rather than as four facts nobody can press.
@@ -2873,7 +2935,8 @@ describe("the complete product, walked in order in a second project", () => {
         ),
       );
       suiteAddress = walk.url();
-      await saysWithin(walk, "No tests in this suite");
+      // An empty suite is the grid and its one teaching row.
+      await saysWithin(walk, "One situation to put the agent in…");
       expect(await walk.innerText("main")).toContain("Support reception");
     },
     SETTLE,
@@ -2883,23 +2946,25 @@ describe("the complete product, walked in order in a second project", () => {
     "writes a test inside that suite, with the persona who calls about it",
     async () => {
       await walk.goto(suiteAddress);
-      await walk.getByRole("link", { name: "Write a test" }).first().click();
-      await walk.waitForURL(testWriterAddress());
-      // The writer is the side sheet the boards draw, over the suite it writes
-      // into: the block label is what the page says, and the panel's own
-      // sub-line is which suite this test will belong to.
-      await saysWithin(walk, "EXPECTED BEHAVIORS");
-      expect(await walk.innerText("main")).toContain("In suite Support reception");
-
-      await walk.fill("#test-name", "Reschedules a booked appointment");
-      await walk.fill(
-        "#test-scenario",
-        "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+      // The grid's ghost row is where a test is written now: the side sheet and
+      // the test full page retired on 2026-08-24, and the entry row opens in
+      // place on the suite's own address.
+      const writeResponse = walk.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/v1/tests",
       );
+      await walk.getByRole("button", { name: "+ Write a test" }).click();
+      await walk
+        .getByRole("textbox", { name: "Name" })
+        .fill("Reschedules a booked appointment");
+      await walk
+        .getByRole("textbox", { name: "Scenario" })
+        .fill(
+          "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+        );
       for (let at = 1; at < expectedBehaviors.length; at += 1) {
-        await walk
-          .getByRole("button", { name: "Add a behavior" })
-          .click();
+        await walk.getByRole("button", { name: "+ Add a behavior" }).click();
       }
       for (const [at, behavior] of expectedBehaviors.entries()) {
         await walk
@@ -2912,27 +2977,35 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.getByRole("button", { name: "Choose agents" }).count(),
         "a test has no agent assignment",
       ).toBe(0);
-      await walk.getByRole("button", { name: "Choose personas" }).click();
+
+      // Save cannot fire early, and the disabled button says exactly what is
+      // still missing — here, the persona nobody has named yet.
+      await saysWithin(walk, "Needs one persona.");
+      await walk.getByRole("button", { name: "+ Add a persona" }).click();
       await walk.getByRole("checkbox", { name: "Impatient Rita" }).click();
       await walk.getByRole("button", { name: "Done" }).click();
-      await walk.getByRole("button", { name: "Write the test" }).click();
+      await walk.getByRole("button", { name: "Save test" }).click();
 
-      await walk.waitForURL(new RegExp(`/projects/${second}/tests/tst_[^/]+$`));
-      testAddress = walk.url();
+      const written = await writeResponse;
+      expect(written.status(), await written.text()).toBe(201);
+      const body = (await written.json()) as { id: string };
+      /*
+       * `at` already carries the origin — it is the address builder every
+       * sibling row in the copied-link table composes with. Prefixing it a
+       * second time made a URL with the origin in it twice, which no browser
+       * can navigate to, and the row that holds it is one the journey only
+       * reaches after every step above it has passed.
+       */
+      testAddress = at("tests", body.id);
+
+      // One click, one create, and the row is an ordinary grid row on the same
+      // address — writing a test never navigated anywhere.
+      expect(walk.url()).toBe(suiteAddress);
       await saysWithin(walk, "Reschedules a booked appointment");
-      // Read off the control rather than the page's text: the behavior is in a
-      // box somebody can edit, and a textarea's value is not part of what a
-      // page says.
       expect(
-        await walk
-          .getByRole("textbox", { name: "Expected behavior 1" })
-          .inputValue(),
-      ).toBe(expectedBehaviors[0]);
-      expect(
-        await walk
-          .getByRole("textbox", { name: "Expected behavior 7" })
-          .inputValue(),
-      ).toBe(expectedBehaviors[6]);
+        await walk.getByRole("button", { name: "Save test" }).count(),
+        "the entry row closed when its one save landed",
+      ).toBe(0);
     },
     SETTLE,
   );
@@ -3157,6 +3230,17 @@ describe("the complete product, walked in order in a second project", () => {
      * arriving is proved rather than assumed.
      */
     readonly says: string;
+    /**
+     * Where this address ends up, when that is not itself.
+     *
+     * **Only a retired address carries one.** A page that still exists lands
+     * on its own address, and saying so is half of what this table checks — so
+     * the equality below reads this field rather than being loosened, and a
+     * row that quietly stopped arriving cannot pass by having its expectation
+     * relaxed. A redirect is a promise of its own: the address goes on
+     * working, and it is honest about where it took you.
+     */
+    readonly lands?: string;
   };
 
   /**
@@ -3192,7 +3276,21 @@ describe("the complete product, walked in order in a second project", () => {
         // sentence is the form itself rather than the address of it.
         says: "Its name in Egma",
       },
-      { what: "one agent", address: agentAddress, says: "The Support line" },
+      /*
+       * **A retired address, kept in the table on purpose.** The agent page is
+       * gone and this address redirects to the agents list, so it lands
+       * somewhere other than itself — which is what `lands` is for. The phrase
+       * is the agent's name, which the list says on its row.
+       *
+       * It stays listed because a copied link to it must keep arriving
+       * somewhere, and this table is where that promise is checked.
+       */
+      {
+        what: "one agent",
+        address: agentAddress,
+        lands: at("agents"),
+        says: "The Support line",
+      },
       {
         what: "Add a connection",
         address: `${agentAddress}/connections/new`,
@@ -3216,13 +3314,24 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Reschedules a booked appointment",
       },
       {
+        // The retired write-a-test address, kept as a deep link: it lands on
+        // the suite's grid with the entry row already OPEN. The suite's name
+        // would be there either way, so the proof reads the commit bar, which
+        // only an open entry row draws.
         what: "Write a test",
         address: testWriterAddress(),
-        says: "In suite Support reception",
+        says: "Save test",
       },
       {
+        /*
+         * The retired test address, kept as a deep link: it resolves the
+         * test's suite and lands on that suite's grid — so, like the retired
+         * agent address above, it says where it lands. The test page went with
+         * the 2026-08-24 rework; a test is a row of its suite's grid now.
+         */
         what: "one test",
         address: testAddress,
+        lands: suiteAddress,
         says: "Reschedules a booked appointment",
       },
       { what: "Personas", address: at("personas"), says: "Impatient Rita" },
@@ -3271,18 +3380,23 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Reschedules a booked appointment",
       },
       {
-        what: "Start monitoring",
+        what: "Monitor an agent",
         address: at("monitoring", "start"),
         /*
-         * The start-monitoring flow, which replaced the monitoring-setup page
-         * when the setup object was dropped (ADR-0015). The header's lead is
-         * drawn while the roster read is still in flight, so the phrase is the
-         * picker's own section heading, which only the settled page draws.
+         * **The retired Start-monitoring address, now a deep link.** The full
+         * page is gone: monitoring is one verb on the Transcripts screen, and
+         * this address renders that screen with the picker already open —
+         * rendered rather than redirected, so a saved link costs one load.
          *
-         * The Monitoring list itself is not here: this walk opens it many
+         * The phrase is the picker's own, and only the open sheet draws it, so
+         * the walk cannot pass on the screen behind it. The sheet is portaled
+         * inside `<main>` (see `components/ui/sheet.tsx`), which is what makes
+         * a whole-screen text read find it at all.
+         *
+         * The Transcripts list itself is not here: this walk opens it many
          * times already, under `monitoringAt`, and against its own states.
          */
-        says: "What Egma should watch",
+        says: "Only agents not yet monitored are listed.",
       },
       {
         what: "Settings",
@@ -3469,7 +3583,7 @@ describe("the complete product, walked in order in a second project", () => {
             await opened.setViewportSize({ width: 1280, height: 900 });
             await opened.goto(route.address);
             await landedOn(opened, route);
-            expect(opened.url(), route.what).toBe(route.address);
+            expect(opened.url(), route.what).toBe(route.lands ?? route.address);
 
             if (index === 0) {
               const sidebar = opened.locator("aside");
@@ -4089,9 +4203,12 @@ describe("the complete product, walked in order in a second project", () => {
         const field = Math.round(await heightOf(walk, "#agent-name"));
         expect(field).toBe(tokens.control);
 
-        await walk.goto(testWriterAddress());
-        await reactHasTakenOver(walk, "form");
-        expect(Math.round(await heightOf(walk, "#test-name"))).toBe(field);
+        // The tests grid draws no form of its own — its cells are the form —
+        // so the paired reading is the suite sheet's own field.
+        await walk.goto(at("tests"));
+        await reactHasTakenOver(walk, "main");
+        await walk.getByRole("button", { name: "Create suite" }).click();
+        expect(Math.round(await heightOf(walk, "#suite-name"))).toBe(field);
 
         // And a transcript is dense: its turns are lines rather than cards.
         await walk.goto(`${origin}${conversation}`);
@@ -4382,15 +4499,14 @@ describe("the complete product, walked in order in a second project", () => {
         expect(trail.filter((name) => name === "Active")).toEqual([]);
         expect(trail.filter((name) => name === "Archived")).toEqual([]);
 
-        // Enter opens the row's menu on its first item, and Enter again
-        // follows it to the agent this row is a row for.
+        // Enter opens the row's menu on its first item, which is renaming the
+        // agent this row is a row for.
         await walk.keyboard.press("Enter");
         await walk
-          .getByRole("menuitem", { name: "Open agent", exact: true })
+          .getByRole("menuitem", { name: "Rename agent", exact: true })
           .waitFor();
-        expect(await focused()).toBe("Open agent");
-        await walk.keyboard.press("Enter");
-        await walk.waitForURL(agentAddress);
+        expect(await focused()).toBe("Rename agent");
+        await walk.keyboard.press("Escape");
         await saysWithin(walk, "The Support line");
       },
       SETTLE,
@@ -4573,10 +4689,19 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(suiteAddress);
       await saysWithin(walk, "Reschedules a booked appointment");
 
-      // Renaming and deleting a suite live in the suite's own ⋮ menu now, and
-      // the rename surface is a side sheet named by the suite it is about.
-      await walk.getByRole("button", { name: "Open the suite menu" }).click();
-      await walk.getByRole("menuitem", { name: "Rename suite" }).click();
+      /*
+       * **Managing a suite lives on the suites list, not inside the suite.**
+       * The suite screen's toolbar ⋮ went with the 2026-08-24 rework: that
+       * screen is the tests grid now, and its toolbar carries only "Write a
+       * test". Rename and Delete are on the row, where the suite is a thing
+       * among other things rather than the page you are standing in.
+       */
+      await walk.goto(at("tests"));
+      await saysWithin(walk, "Support reception");
+      await walk
+        .getByRole("button", { name: "Open the menu for Support reception" })
+        .click();
+      await walk.getByRole("menuitem", { name: "Rename", exact: true }).click();
       const rename = walk.getByRole("dialog", {
         name: "Support reception",
       });
@@ -4591,6 +4716,7 @@ describe("the complete product, walked in order in a second project", () => {
       await rename.getByRole("button", { name: "Save name" }).click();
       const renamed = await renameResponse;
       expect(renamed.status(), await renamed.text()).toBe(200);
+      // The row carries the new name, on the list the rename was made from.
       await saysWithin(walk, "Northside Ford");
 
       // A run reads the suite's current name. Renaming does not create a suite
@@ -4601,9 +4727,12 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await summary.innerText()).not.toContain("Support reception");
       expect(await summary.innerText()).not.toContain("(deleted)");
 
-      await walk.goto(suiteAddress);
+      // And deleting is the same row's menu, under the same hairline.
+      await walk.goto(at("tests"));
       await saysWithin(walk, "Northside Ford");
-      await walk.getByRole("button", { name: "Open the suite menu" }).click();
+      await walk
+        .getByRole("button", { name: "Open the menu for Northside Ford" })
+        .click();
       await walk.getByRole("menuitem", { name: "Delete suite" }).click();
       const deletion = walk.getByRole("dialog", {
         name: "Delete Northside Ford?",

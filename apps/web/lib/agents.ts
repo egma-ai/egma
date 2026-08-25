@@ -61,15 +61,6 @@ export type AgentDetail = GetAgentResponse;
 export type ArchiveFilter = "active" | "archived";
 
 /**
- * How a connection's environment reads when it has none.
- *
- * An empty label is a fact — this connection is not marked staging or
- * production — and it is written out rather than left blank so that a row with
- * no label reads as deliberate rather than as a cell that failed to render.
- */
-export const NO_ENVIRONMENT = "Unlabelled";
-
-/**
  * Which platforms an agent is on, in the words a person reads, as this
  * application can honestly answer it.
  *

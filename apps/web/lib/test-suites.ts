@@ -27,6 +27,18 @@ export function newTestInSuitePath(projectId: string, suiteId: string): string {
 }
 
 /**
+ * Where "Run a suite" goes, which is the run builder with no suite picked yet.
+ *
+ * The suites screen leads with running because running a suite is the product's
+ * point, and the builder is already the screen that picks one. Nothing here
+ * reaches into that form: a builder handed no suite draws its ordinary picker,
+ * and its existing refusals stand when no suite can run.
+ */
+export function runBuilderPath(projectId: string): string {
+  return `/projects/${encodeURIComponent(projectId)}/runs/new`;
+}
+
+/**
  * Where "Run suite" goes.
  *
  * The run builder is another ticket's screen, so this only carries the suite in

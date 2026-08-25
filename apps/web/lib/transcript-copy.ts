@@ -25,10 +25,16 @@ export const LIST = {
   /**
    * The heading, and deliberately not the navigation label: the sidebar reads
    * its words from `lib/navigation.ts`, which is where a navigation item is
-   * decided. Two copies of "Monitoring" that could disagree would be one too
-   * many, and this is the one the page renders.
+   * decided. Two copies of the word that could disagree would be one too many,
+   * and this is the one the page renders.
+   *
+   * **It says Transcripts rather than Monitoring** (board `JGS-0`). Monitoring
+   * is the sidebar *group*, and it is no longer a screen: the one monitoring
+   * verb lives here now, on the screen where its results land. A title bar
+   * repeating the group's word said the section's name twice and the page's
+   * name nowhere.
    */
-  title: "Monitoring",
+  title: "Transcripts",
   /** What the table is called where somebody hears it rather than sees it. */
   tableLabel: "Production transcripts in this project",
   loadingWhat: "this project's production transcripts",
@@ -41,8 +47,12 @@ export const LIST = {
    * than a noun about an object: there is no monitoring setup to fill in any
    * more. A per-agent switch turns pull on, and push needs nothing at all
    * (ADR-0015).
+   *
+   * **It opens a picker over this page rather than leading anywhere** — the
+   * full Start-monitoring page is retired, and the same words head the sheet
+   * that replaced it (boards `JGS-0`, `JN2-0`).
    */
-  startMonitoring: "Start monitoring",
+  monitorAgent: "Monitor an agent",
   back: "Back",
   unreachable: "Egma could not be reached. Is the API running?",
   window: "Window",
@@ -116,16 +126,18 @@ export const QUIET = {
     lead: "Widen the window above to look further back.",
   },
   setUp: {
-    title: "Nothing has been recorded here yet",
     /*
-     * **No storage word, and none of the banned ones.** These two pages read
-     * the product's own vocabulary, so what a Retell agent did in production
-     * is what Egma pulls, and a LiveKit agent reports its own work.
+     * **The board's card, in this file's vocabulary.** `JGS-0` heads it "No
+     * production calls yet" over "…and its calls appear here as they finish",
+     * and *call* is on the banned list these two pages are held to: what a
+     * person reads here is a transcript, and the word is checked rather than
+     * merely intended. The shape, the measure and the action under it are the
+     * board's; two nouns are the product's own.
      */
+    title: "No production transcripts yet",
     lead:
-      "Start monitoring an agent. Egma pulls what a Retell agent did in " +
-      "production, using that agent's own key; a LiveKit agent " +
-      "reports its own work and needs no switch at all.",
+      "Monitor an agent you have already added, and what it does in " +
+      "production appears here as it finishes.",
   },
   organizationKey: {
     title: "A key here names the whole organization",

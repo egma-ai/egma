@@ -771,6 +771,20 @@
   to { opacity: 0; transform: scale(0.97); }
 }
 
+/*
+ * A section that was not on the panel a moment ago, arriving.
+ *
+ * The Retell account block appears when a pasted key answers, which is a piece
+ * of the form that a person did not put there — so it travels a few pixels
+ * while it fades, on the popover pair, the shortest tokens that still explain
+ * an arrival (`DESIGN.md`, Motion). `transform` and `opacity` only, so it is
+ * composited, and it is gone under reduced motion.
+ */
+@keyframes egma-section-arrive {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes egma-state-mark-spin {
   to { transform: rotate(360deg); }
 }
@@ -1188,6 +1202,21 @@
     [data-slot="table-cell"] a {
       transition: none;
     }
+  }
+
+  /* The arriving section, and the still form of it. */
+  [data-slot="retell-account"] {
+    animation: egma-section-arrive var(--duration-popover-in) var(--ease-out);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="retell-account"] {
+      animation: egma-fade-in var(--duration-hover) linear;
+    }
+  }
+
+  [data-preview="reduced-motion"] [data-slot="retell-account"] {
+    animation: egma-fade-in var(--duration-hover) linear;
   }
 
   /*

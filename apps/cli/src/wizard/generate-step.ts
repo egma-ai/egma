@@ -39,7 +39,16 @@ import {
 } from "../folder/egma-folder.ts";
 import type { DrivenAgent } from "../acp/driven-agent.ts";
 import type { Registered } from "../platform/agents.ts";
+import { listPersonas as listPersonasRequest } from "@egma/platform-api/client";
+
+import {
+  platformClient,
+  platformRefusalMessage,
+  platformResponse,
+  platformText,
+} from "../platform/client.ts";
 import { readProject } from "../platform/projects.ts";
+import { PlatformRefusedError } from "../platform/refused.ts";
 import type { SignedIn } from "../platform/signed-in.ts";
 import { createTestSuite } from "../platform/test-suites.ts";
 import { pushTests } from "../sync/push.ts";
@@ -311,16 +320,42 @@ async function namesInFolder(suiteRoot: string): Promise<readonly string[]> {
 }
 
 /**
- * The personas a generated file may name.
+ * The personas a generated file may name, read from the project it will push to.
  *
  * A file names them by name and egma resolves the name when the file is
  * uploaded, so a name egma does not hold is a test egma turns away at its own
- * door. Nothing lists a project's personas over the public API yet, so the
- * honest answer today is none of them, and both tasks say so plainly: leave the
- * line out, and the project's default persona applies. The day the listing
- * exists, this is where the list comes from and neither task changes.
+ * door. **This used to answer none of them**, on the reasoning that nothing
+ * listed a project's personas over the public API and that a file leaving the
+ * line out received the project's default persona. Both halves were wrong by
+ * 2026-08-24: `listPersonas` is a public operation, and a test naming no
+ * persona is refused rather than given the default. A wizard that kept writing
+ * personas-less files would be a wizard whose folder cannot be pushed.
+ *
+ * The default comes first, because it is the one every project is guaranteed to
+ * hold and the one a first suite should lean on.
  */
-const PERSONAS_EGMA_HOLDS: readonly string[] = [];
+async function personasEgmaHolds(
+  signedIn: SignedIn,
+  projectId: string,
+): Promise<readonly string[]> {
+  const answer = await listPersonasRequest(
+    { projectId },
+    { client: platformClient(signedIn) },
+  );
+  const response = platformResponse(answer, signedIn.url);
+  if (!response.ok || answer.data === undefined) {
+    throw new PlatformRefusedError(
+      response.status,
+      platformRefusalMessage(answer.error, response.status),
+    );
+  }
+  const held = answer.data.personas
+    .map((one) => ({ name: platformText(one.name), isDefault: one.isDefault }))
+    .filter((one) => one.name !== "");
+  const first = held.filter((one) => one.isDefault);
+  const rest = held.filter((one) => !one.isDefault);
+  return [...first, ...rest].map((one) => one.name);
+}
 
 /**
  * The folder this repository's tests live in, made or recognised, pointing at
@@ -334,6 +369,8 @@ type GeneratedSuite = {
   readonly paths: FolderPaths;
   readonly suite: { readonly id: string; readonly name: string; readonly directory: string };
   readonly root: string;
+  /** Who can call, read from the project these tests will be pushed to. */
+  readonly personas: readonly string[];
 };
 
 async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> {
@@ -352,6 +389,16 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
   if (project === null) {
     throw new Error(`Egma could not read project ${options.registered.agent.projectId}.`);
   }
+
+  /*
+   * Who can call, read before a single file is written.
+   *
+   * Every test names at least one persona from birth, so this is read here and
+   * not at push time: a folder written against an empty list is a folder that
+   * cannot be pushed, and a refusal after a coding agent has written twelve
+   * files is a far worse place to learn it.
+   */
+  const personas = await personasEgmaHolds(options.signedIn, project.id);
 
   const folder = await createEgmaFolder({
     repository: options.cwd,
@@ -402,6 +449,7 @@ async function folderFor(options: GenerateStepOptions): Promise<GeneratedSuite> 
     paths: folder.paths,
     root,
     suite: { id: remote.id, name: remote.name, directory },
+    personas,
   };
 }
 
@@ -488,6 +536,26 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
   /** Any ending that pushed nothing, which is every ending but the last one. */
   const ending = (report: ExitReport): GenerateOutcome => ({ report, pushed: [], suite });
 
+  /*
+   * **Honest insurance, and it should never fire.** Every project is created
+   * pointing at Egma's shared default persona, that column cannot be null, and
+   * an Egma-provided persona is readable from every project — so a project
+   * holding none is a project the platform cannot make. If one ever answers
+   * that way, stopping here is the kind ending: a test names at least one
+   * persona from birth, so the alternative is a coding agent writing a folder
+   * that is refused, file by file, at push time.
+   */
+  if (generated.personas.length === 0) {
+    ui.pushStatus(
+      `${FAILURE_MARK} Egma answered with no personas for this project.`,
+    );
+    return ending({
+      kind: "failed",
+      reason:
+        "Every test names at least one persona, and Egma listed none for this project. Add a persona in Egma, then run egma again.",
+    });
+  }
+
   // The one question this step asks, and it is asked once. A developer who
   // closes the wizard instead of answering has answered too, so the wait ends
   // with the signal and not only with a keystroke.
@@ -516,7 +584,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
         shown: existing.shown,
         content: existing.content,
         taken: namesOf((await contentsFor(paths, suite.id)).found),
-        personas: PERSONAS_EGMA_HOLDS,
+        personas: generated.personas,
       }),
       // Nobody knows how many rows are in there, least of all egma, so the
       // pane counts what turns up rather than promising a number.
@@ -540,7 +608,7 @@ export async function generateStep(options: GenerateStepOptions): Promise<Genera
       toolCount: options.source.toolCount,
       agentName: options.registered.agent.name,
       taken: namesOf(converted),
-      personas: PERSONAS_EGMA_HOLDS,
+      personas: generated.personas,
     };
     const halted = await writeFiles(
       options,

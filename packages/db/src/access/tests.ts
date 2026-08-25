@@ -12,7 +12,6 @@ import {
 
 import { db, type Queryable, type Transaction } from "../client.ts";
 import { persona } from "../schema/personas.ts";
-import { project } from "../schema/tenancy.ts";
 import {
   test,
   testPersona,
@@ -40,7 +39,7 @@ import { personaAvailableToProject } from "./persona-availability.ts";
 import { authorize, here } from "./permissions.ts";
 import { lockRepositoryProject } from "./repository-lock.ts";
 import { isProjectOfOrganization } from "./projects.ts";
-import { theProject, within } from "./within.ts";
+import { within } from "./within.ts";
 
 /**
  * Reading and writing tests — what they are is the schema file's story
@@ -410,13 +409,23 @@ function validOverrides(
 }
 
 /**
- * Everything about the named ids that is answerable without the database: every
- * one is an identifier of a persona, and each one is named once. Naming the
- * same persona twice would ask for the same simulation twice, which is a run's
- * business and not a test's, so it is refused here rather than left to a
- * constraint.
+ * Everything about the named ids that is answerable without the database: there
+ * is at least one, every one is an identifier of a persona, and each one is
+ * named once. Naming the same persona twice would ask for the same simulation
+ * twice, which is a run's business and not a test's, so it is refused here
+ * rather than left to a constraint.
+ *
+ * **Naming none is refused here too**, so a create that sent no list and an
+ * edit that sent an empty one are answered before either costs a read.
+ * `personaIdsFor` says the same thing at the write itself, where the set an
+ * edit carried forward also passes.
  */
 function validatePersonaIds(ids: readonly string[]): void {
+  if (ids.length === 0) {
+    throw new UnprocessableInputError(
+      "a test needs at least one persona, because a test says who calls",
+    );
+  }
   const seen = new Set<string>();
   for (const id of ids) {
     if (!isId("prs", id)) {
@@ -670,67 +679,18 @@ async function validateNamedPersonas(
 }
 
 /**
- * The one persona the project points at, for a write that named none.
- *
- * The database requires this pointer to name one active Custom persona in this
- * project or one active Egma-provided persona. It also refuses archiving the
- * pointed-at row before the pointer moves. This read therefore has one normal
- * answer and one corruption answer; it carries no nullable, missing, or
- * archived compatibility path.
- */
-async function projectDefaultPersona(
-  on: Queryable,
-  auth: AuthContext,
-  projectId: string,
-): Promise<string> {
-  const [row] = await on
-    .select({ defaultPersonaId: project.defaultPersonaId })
-    .from(project)
-    .where(theProject(auth, projectId))
-    .limit(1);
-
-  if (row === undefined) {
-    throw new Error(
-      `this test names no persona and project ${projectId} is not available to this credential`,
-    );
-  }
-  const id = row.defaultPersonaId;
-
-  // The shared lock a named persona is read under, for the same reason and on
-  // the same terms: the pointer resolves to a persona this write is about to
-  // name, so an Archive of that row must either land before this read and
-  // refuse the write, or wait behind it and be refused itself. A default
-  // resolved without the lock would be the one way past the rule.
-  const [pointed] = await on
-    .select({ id: persona.id })
-    .from(persona)
-    .where(
-      personaAvailableToProject(
-        auth,
-        projectId,
-        and(eq(persona.id, id), isNull(persona.archivedAt)),
-      ),
-    )
-    .limit(1)
-    .for("share");
-
-  if (pointed === undefined) {
-    throw new Error(
-      `project ${projectId} violates its active default-persona invariant`,
-    );
-  }
-
-  return id;
-}
-
-/**
  * Which personas a write should name, from what it was handed.
  *
  * One function for both write verbs, so the two can never come to disagree
- * about the same input. Naming none — an empty list — takes the project's
- * default on a create and on an edit alike; a developer who learns the meaning
- * once has learned it everywhere. Naming some checks them, and the ids come
- * back in the order they were given, because that order is content.
+ * about the same input. Naming some checks them, and the ids come back in the
+ * order they were given, because that order is content.
+ *
+ * **Naming none is refused, on a create and on an edit alike.** Until
+ * 2026-08-24 an empty list quietly took the project's default persona, so a
+ * test could exist that nobody had ever said who calls about — the substitution
+ * answered for the author, and the answer read as authored. A test says who
+ * calls because its author said so, and every other way of saying nothing is
+ * refused here too.
  *
  * Every set a version is about to name comes through here, including the one an
  * edit carried forward from the version before it. A version names personas
@@ -747,7 +707,9 @@ async function personaIdsFor(
   named: readonly string[],
 ): Promise<readonly string[]> {
   if (named.length === 0) {
-    return [await projectDefaultPersona(on, auth, projectId)];
+    throw new UnprocessableInputError(
+      "a test needs at least one persona, because a test says who calls",
+    );
   }
   await validateNamedPersonas(on, auth, projectId, named);
   return named;

@@ -1156,6 +1156,7 @@ async function aQueuedRunFor(who: Customer): Promise<{
     name: "Books an appointment",
     scenario: "The caller wants an appointment next week.",
     expectedBehaviors: ["The agent offers a time"],
+    personas: ["Default Persona"],
   });
   expect(written.status, JSON.stringify(written.body)).toBe(201);
 

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useId, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -74,27 +73,40 @@ export function RowMenu({
 }
 
 /**
- * A place to go, drawn as a menu item so the panel reads as one list.
+ * Something the row does to itself, drawn as a menu item.
  *
- * **It is not underlined.** `globals.css` underlines a bare link, which is
- * right in a sentence and wrong in a menu: the row *is* the control, and an
- * underline under two of four items would say those two are a different kind
- * of thing. The shell's own `MENU_ITEM` says `no-underline` for the same
- * reason; the kit's dropdown item does not, so it is said here.
+ * `why` is shown rather than hinted, for the reason above the file: a disabled
+ * item takes no focus and answers no hover, so a tooltip on one would be a
+ * reason nobody can reach.
  */
-export function RowMenuLink({
-  href,
+export function RowMenuItem({
+  onSelect,
+  why,
   children,
 }: {
-  readonly href: string;
+  readonly onSelect: () => void;
+  /** Why this is not available, when it is not. Its presence disables the item. */
+  readonly why?: string;
   readonly children: ReactNode;
 }) {
+  const said = useId();
+  const stopped = why !== undefined;
+
   return (
-    <DropdownMenuItem asChild>
-      <Link className="no-underline" href={href}>
+    <>
+      <DropdownMenuItem
+        aria-describedby={stopped ? said : undefined}
+        disabled={stopped}
+        onSelect={onSelect}
+      >
         {children}
-      </Link>
-    </DropdownMenuItem>
+      </DropdownMenuItem>
+      {stopped ? (
+        <p className="m-0 px-3 py-1 text-sm leading-(--line-normal) text-faint" id={said}>
+          {why}
+        </p>
+      ) : null}
+    </>
   );
 }
 

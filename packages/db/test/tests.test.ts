@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createTest,
   archivePersona,
+  editTest,
   getTest,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -102,17 +103,17 @@ describe("creating a test", () => {
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
     await expect(
-      createTest(actingAsAcme("viewer"), rescheduling),
+      createTest(actingAsAcme("viewer"), { ...rescheduling, personaIds: [rita] }),
     ).rejects.toThrow(NotPermittedError);
 
-    const created = await createTest(actingAsAcme("member"), rescheduling);
+    const created = await createTest(actingAsAcme("member"), { ...rescheduling, personaIds: [rita] });
     const fetchedByViewer = await getTest(actingAsAcme("viewer"), created.id);
     expect(fetchedByViewer?.name).toBe(rescheduling.name);
   });
 
   it("is refused to a credential acting in no project", async () => {
     await expect(
-      createTest({ ...actingAsAcme(), projectId: undefined }, rescheduling),
+      createTest({ ...actingAsAcme(), projectId: undefined }, { ...rescheduling, personaIds: [rita] }),
     ).rejects.toThrow(/project/);
   });
 
@@ -189,6 +190,7 @@ describe("a test that fails validation", () => {
     await expect(
       createTest(actingAsAcme(), {
         ...rescheduling,
+        personaIds: [rita],
         expectedBehaviors: [...rescheduling.expectedBehaviors, "   "],
       }),
     ).rejects.toThrow(/expected behavior/);
@@ -206,6 +208,7 @@ describe("a test that fails validation", () => {
   it("stores the name, scenario and behaviors trimmed", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
+      personaIds: [rita],
       name: "  Padded  ",
       scenario: "  They want a refund and have no receipt.  ",
       expectedBehaviors: ["  states the refund policy  "],
@@ -283,9 +286,40 @@ describe("a test naming a persona it may not have", () => {
   });
 });
 
+/**
+ * **A test naming no persona is refused, and it used to be answered for.**
+ *
+ * Until 2026-08-24 an empty list quietly took the project's default persona, on
+ * a create and on an edit alike, so a test could exist that nobody had ever
+ * said who calls about — and read back as though its author had. The
+ * substitution is a refusal now. These are the same cases the substitution was
+ * proven with, asserting the other answer.
+ */
 describe("a test naming no persona", () => {
-  it("receives the project's default", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+  it("is refused rather than given the project's default", async () => {
+    await expect(createTest(actingAsAcme(), rescheduling)).rejects.toThrow(
+      /at least one persona/,
+    );
+  });
+
+  it("is refused for an empty list too", async () => {
+    await expect(
+      createTest(actingAsAcme(), { ...rescheduling, personaIds: [] }),
+    ).rejects.toThrow(/at least one persona/);
+  });
+
+  it("is refused when an edit empties the personas a test already names", async () => {
+    const created = await createTest(actingAsAcme(), {
+      ...rescheduling,
+      personaIds: [rita],
+    });
+
+    await expect(
+      editTest(actingAsAcme(), created.id, {
+        personaIds: [],
+        expectedVersionId: created.versionId,
+      }),
+    ).rejects.toThrow(/at least one persona/);
 
     const fetched = await getTest(actingAsAcme(), created.id);
     expect(fetched?.personas).toEqual([
@@ -293,34 +327,11 @@ describe("a test naming no persona", () => {
     ]);
   });
 
-  it("receives the project's default for an empty list too", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [],
-    });
-
-    expect(created.personas.map((named) => named.id)).toEqual([rita]);
-  });
-
   it("cannot clear the project's required default at the database boundary", async () => {
-    const { rows: before } = await database.sql<{
-      default_persona_id: string;
-    }>("select default_persona_id from project where id = $1", [globex.project]);
-    const defaultPersonaId = before[0]?.default_persona_id;
-    if (defaultPersonaId === undefined) throw new Error("Globex has no project");
-
     await expect(pointProjectAt(globex.project, null)).rejects.toMatchObject({
       code: "23502",
       column: "default_persona_id",
     });
-
-    const created = await createTest(actingAsGlobex(), {
-      ...rescheduling,
-      suiteId: globex.suite,
-    });
-    expect(created.personas.map((named) => named.id)).toEqual([
-      defaultPersonaId,
-    ]);
   });
 
   it("refuses a default owned by another project at the stored pointer", async () => {
@@ -333,7 +344,7 @@ describe("a test naming no persona", () => {
 
 describe("a credential for the whole organization", () => {
   it("reads a project's tests without acting in the project", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
     const fetched = await getTest(wholeCustomer, created.id);
@@ -348,20 +359,20 @@ describe("tenancy", () => {
     const before = await rowCounts();
 
     await expect(
-      createTest({ ...actingAsAcme(), projectId: globex.project }, rescheduling),
+      createTest({ ...actingAsAcme(), projectId: globex.project }, { ...rescheduling, personaIds: [rita] }),
     ).rejects.toThrow(ProjectOutsideOrganizationError);
 
     expect(await rowCounts()).toEqual(before);
   });
 
   it("returns nothing when another organization asks for my test", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     expect(await getTest(actingAsGlobex(), created.id)).toBeUndefined();
   });
 
   it("returns nothing to the same customer acting in a sibling project", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     // Same organization, same person, same role — only the project differs,
     // which is the whole of what a project is: a filter, not a wall.
@@ -402,7 +413,7 @@ describe("tenancy", () => {
 
 describe("a version row somebody hand-corrupted", () => {
   it("fails loudly on the read, naming the version, rather than leaking", async () => {
-    const created = await createTest(actingAsAcme(), rescheduling);
+    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
     // Raw SQL on purpose: the factory can never write this, so the guard is the
     // only thing standing between the row and the caller.

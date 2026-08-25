@@ -125,15 +125,19 @@ const listedAgent = {
 } as const;
 
 /**
- * The external agent chosen through `agents:discover`.
+ * The external agent chosen through `agents:discover`, in the older envelope.
  *
- * It exists only on the create request. The API rechecks it against the agent
- * platform immediately before the connection is written, then discards it.
+ * **Superseded by `platformAgentId` beside `credentials`** (the founder's
+ * ruling of 2026-08-24): a connect request names the picked agent directly,
+ * and Egma confirms it with the key it was given or with the key already
+ * sealed on the agent. The envelope stays accepted so existing API and CLI
+ * callers keep working; it is read as exactly those two fields and nothing
+ * else, so there is one path underneath and not two.
  */
 const agentPlatformSelection = {
   type: "object",
   description:
-    "Required for a Retell phone connection. Egma revalidates the selected provider agent and route during creation, then discards this object.",
+    "Superseded by platformAgentId beside credentials, and still accepted. Egma revalidates the selected provider agent and route during creation, then discards this object.",
   properties: {
     platformAgentId: { type: "string" },
     credentials: {
@@ -172,6 +176,24 @@ const connectionInput = {
     environment: { type: "string" },
     config: { type: "object", additionalProperties: true },
     credentials: { type: "object", additionalProperties: true },
+    platformAgentId: {
+      type: "string",
+      description:
+        "The platform's own id for the agent this connection reaches, as " +
+        "agents:discover listed it. Required for a Retell phone connection. " +
+        "Egma confirms it against Retell with the key in credentials, or with " +
+        "the key already sealed on the agent, immediately before the " +
+        "connection is written, so a number that has stopped answering for " +
+        "that agent is refused rather than stored. One Egma agent binds to " +
+        "one platform agent: a second, different one is refused by name.",
+    },
+    pullProductionCalls: {
+      type: "boolean",
+      description:
+        "Start pulling this agent's production calls with the same save. Off " +
+        "unless the request says otherwise; the first switch-on imports the " +
+        "fixed 30-day history.",
+    },
     agentPlatformSelection,
   },
   required: ["agentPlatform", "connectionType", "accessVariant", "modality"],
@@ -241,8 +263,15 @@ export const agentOperations = {
             required: ["apiKey"],
             additionalProperties: false,
           },
+          /**
+           * Read the account with the key already sealed on this agent,
+           * rather than a pasted one. A key is asked for once per agent,
+           * ever, so every later listing for the same agent spends the copy
+           * Egma holds — plaintext that never leaves the server.
+           */
+          agentId: stringIdSchema,
         },
-        required: ["agentPlatform", "credentials"],
+        required: ["agentPlatform"],
         additionalProperties: false,
       },
     },
